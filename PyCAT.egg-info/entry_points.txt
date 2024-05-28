@@ -1,2 +1,0 @@
-[console_scripts]
-run-pycat = pycat.run_pycat:main
