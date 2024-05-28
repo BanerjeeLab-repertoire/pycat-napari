@@ -1,0 +1,72 @@
+THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
+
+PyCAT relies on third-party software for many functionalities. Their respective 
+licence terms can be found at the links below:
+
+1. **aicsimageio**
+   - License: MIT License
+   - License text: https://github.com/AllenCellModeling/aicsimageio/blob/main/LICENSE
+
+2. **cellpose**
+   - License: BSD-3-Clause License
+   - License text: https://github.com/MouseLand/cellpose/blob/master/LICENSE
+
+3. **matplotlib**
+   - License: PSF License (Python Software Foundation License)
+   - License text: https://github.com/matplotlib/matplotlib/blob/main/LICENSE
+
+4. **napari**
+   - License: BSD-3-Clause License
+   - License text: https://github.com/napari/napari/blob/main/LICENSE
+
+5. **numpy**
+   - License: BSD-3-Clause License
+   - License text: https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+6. **opencv-python-headless**
+   - License: MIT License
+   - License text: https://github.com/skvark/opencv-python/blob/master/LICENSE
+
+7. **pandas**
+   - License: BSD-3-Clause License
+   - License text: https://github.com/pandas-dev/pandas/blob/main/LICENSE
+
+8. **pydantic**
+   - License: MIT License
+   - License text: https://github.com/samuelcolvin/pydantic/blob/master/LICENSE
+
+9. **pyqt5**
+   - License: GPL License
+   - License text: https://www.riverbankcomputing.com/static/Docs/PyQt5/license.html
+
+10. **torch**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/pytorch/pytorch/blob/master/LICENSE
+
+11. **pywavelets**
+    - License: MIT License
+    - License text: https://github.com/PyWavelets/pywt/blob/master/LICENSE.txt
+
+12. **scikit-image**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/scikit-image/scikit-image/blob/main/LICENSE.txt
+
+13. **scikit-learn**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/scikit-learn/scikit-learn/blob/main/COPYING
+
+14. **scipy**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/scipy/scipy/blob/main/LICENSE.txt
+
+15. **seaborn**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/mwaskom/seaborn/blob/main/LICENSE
+
+16. **simpleitk**
+    - License: Apache 2.0 License
+    - License text: https://github.com/SimpleITK/SimpleITK/blob/master/LICENSE
+
+17. **devbio-napari**
+    - License: BSD-3-Clause License
+    - License text: https://github.com/haesleinhuepf/devbio-napari/blob/master/LICENSE

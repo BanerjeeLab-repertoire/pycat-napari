@@ -1,0 +1,2 @@
+-r requirements-devbio-napari.txt
+pytorch==2.1.2=cpu_generic_py39hef92293_4

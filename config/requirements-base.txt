@@ -1,0 +1,16 @@
+aicsimageio
+cellpose
+matplotlib
+napari
+numpy
+opencv-python-headless
+pandas
+pydantic
+pyqt5
+torch
+pywavelets
+scikit-image
+scikit-learn
+scipy
+seaborn
+simpleitk

@@ -1,0 +1,139 @@
+Metadata-Version: 2.1
+Name: PyCAT
+Version: 1.0.0
+Summary: Python Condensate Analysis Toolbox
+Author-email: Christian Neureuter <christian.neureuter@icloud.com>
+License: License
+        -------
+        Copyright (c) 2024, Christian Neureuter, Banerjee Lab, State University of New York at Buffalo
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without modification, are permitted provided that the 
+        following conditions are met:
+        
+        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following 
+        disclaimer.
+        
+        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following 
+        disclaimer in the documentation and/or other materials provided with the distribution.
+        
+        3. Neither the name of the University at Buffalo, the author, nor the names of its contributors may be used to endorse 
+        or promote products derived from this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, 
+        INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR 
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, 
+        WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE 
+        USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+        
+        
+        Third-Party Software Notice
+        ---------------------------
+        This project includes third-party software components licensed under various open-source licenses. For more information 
+        regarding these licenses, please refer to the THIRD_PARTY_LICENSES.txt file located in the root directory of this project.
+Keywords: condensate,image analysis,fluorescence image analysis,napari,PyCAT
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: aicsimageio
+Requires-Dist: aicspylibczi>=3.0.5
+Requires-Dist: cellpose
+Requires-Dist: matplotlib
+Requires-Dist: napari
+Requires-Dist: numpy
+Requires-Dist: opencv-python-headless
+Requires-Dist: pandas
+Requires-Dist: pydantic
+Requires-Dist: pyqt5
+Requires-Dist: torch
+Requires-Dist: pywavelets
+Requires-Dist: scikit-image
+Requires-Dist: scikit-learn
+Requires-Dist: scipy
+Requires-Dist: seaborn
+Requires-Dist: simpleitk
+Provides-Extra: devbio
+Requires-Dist: napari-plugin-engine>=0.1.4; extra == "devbio"
+Requires-Dist: npe2<0.7.0; extra == "devbio"
+Requires-Dist: aicsimageio; extra == "devbio"
+Requires-Dist: aicspylibczi>=3.0.5; extra == "devbio"
+Requires-Dist: numpy>=1.21.4; extra == "devbio"
+Requires-Dist: napari-pyclesperanto-assistant; extra == "devbio"
+Requires-Dist: napari-skimage-regionprops; extra == "devbio"
+Requires-Dist: napari-animation; extra == "devbio"
+Requires-Dist: PlatyMatch; extra == "devbio"
+Requires-Dist: napari-plot-profile; extra == "devbio"
+Requires-Dist: napari-accelerated-pixel-and-object-classification; extra == "devbio"
+Requires-Dist: napari-brightness-contrast; extra == "devbio"
+Requires-Dist: napari-plugin-search; extra == "devbio"
+Requires-Dist: napari-segment-blobs-and-things-with-membranes; extra == "devbio"
+Requires-Dist: napari-simpleitk-image-processing; extra == "devbio"
+Requires-Dist: napari-folder-browser; extra == "devbio"
+Requires-Dist: napari-crop; extra == "devbio"
+Requires-Dist: napari-clusters-plotter>=0.7.1; extra == "devbio"
+Requires-Dist: napari-stl-exporter; extra == "devbio"
+Requires-Dist: napari-tabu; extra == "devbio"
+Requires-Dist: napari-workflow-optimizer; extra == "devbio"
+Requires-Dist: napari-workflow-inspector; extra == "devbio"
+Requires-Dist: napari-curtain; extra == "devbio"
+Requires-Dist: napari-layer-details-display; extra == "devbio"
+Requires-Dist: napari; extra == "devbio"
+Requires-Dist: vispy; extra == "devbio"
+Requires-Dist: napari-mouse-controls; extra == "devbio"
+Requires-Dist: the-segmentation-game; extra == "devbio"
+Requires-Dist: napari-process-points-and-surfaces; extra == "devbio"
+Requires-Dist: napari-blob-detection; extra == "devbio"
+Requires-Dist: jupyterlab; extra == "devbio"
+Requires-Dist: napari-czifile2; extra == "devbio"
+Requires-Dist: napari-roi; extra == "devbio"
+Requires-Dist: pydantic!=1.10.0; extra == "devbio"
+Requires-Dist: napari-pystackreg; extra == "devbio"
+Requires-Dist: imageio!=2.22.1; extra == "devbio"
+Requires-Dist: redlionfish; extra == "devbio"
+Requires-Dist: jupyter_server<2.0.0; extra == "devbio"
+Requires-Dist: seaborn; extra == "devbio"
+Provides-Extra: arm-mac
+Requires-Dist: torchvision; (platform_system == "Darwin" and platform_machine == "arm64") and extra == "arm-mac"
+Requires-Dist: torch==2.1.2; (platform_system == "Darwin" and platform_machine == "arm64") and extra == "arm-mac"
+
+## Installation
+
+### Using Pip
+
+For minimal installation:
+
+```bash
+pip install -r requirements-base.txt
+pip install .
+```
+
+For full installation with plugins:
+
+```bash
+pip install -r requirements-devbio-napari.txt
+pip install .
+```
+
+For Mac-specific dependencies (ARM/Apple Silicon/M1, M2 etc.):
+
+```bash
+pip install -r requirements-arm-mac.txt
+# or
+pip install -r requirements-devbio-napari-arm-mac.txt
+```
+
+Unfortunately, I do not have access to an Intel based Mac and therefore cannot provide specific requirements for that platform. 
+
+For Mac (Apple Silicon) and Windows, you can create an environment using the provided YAML files:
+
+```bash
+conda env create -f pycat-devbio-napari-env-arm-mac.yml  # For Mac (Apple Silicon)
+conda env create -f pycat-devbio-napari-env-x86-windows.yml  # For Windows
+```
+
+
