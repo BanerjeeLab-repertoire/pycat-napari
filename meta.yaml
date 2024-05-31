@@ -3,40 +3,49 @@ package:
   version: "1.0.0"
 
 
-source:
+#source:
   # Assuming the source is from a git repository; replace with your actual source.
-  git_url: https://github.com/yourusername/pycat.git
-  git_rev: v1.0.0
+#  git_url: https://github.com/yourusername/pycat.git
+#  git_rev: v1.0.0
 
 # replace this with the updated version of the above
 source:
-  path: ..
-
-  
+  path: .
+  #git_url: https://github.com/ilanschnell/bsdiff4.git
 
 
 build:
-  noarch: python
-  script: python -m pip install .
+  number: 0
+  script: "{{ PYTHON }} -m pip install . --no-deps -vv"
+  entry_points:
+    - run-pycat = pycat.run_pycat:main
+
+  
+
+#build:
+#  noarch: python
+#  script: python -m pip install .
 
 requirements:
   build:
     - python >=3.9
     - setuptools >=42
+    - pip
     - wheel
   run:
     - python >=3.9
     - aicsimageio
-    - aicspylibczi >=3.0.5
     - cellpose
     - matplotlib
     - napari
-    - numpy
-    - opencv-python-headless
+    - numpy >=1.22
+    - opencv
     - pandas
     - pydantic
-    - pyqt5
-    - torch
+    - pyqt
+    - pytorch                      # [not arm64]
+    - pytorch ==2.1.2              # [arm64]
+    - torchvision                  # [arm64]
     - pywavelets
     - scikit-image
     - scikit-learn
@@ -44,27 +53,20 @@ requirements:
     - seaborn
     - simpleitk
 
+test:
+  imports:
+    - pycat
+
 about:
-  home: https://github.com/myusername/pycat
+  home: https://github.com/cneureuter/pycat
   license: BSD-3-Clause
   license_file: LICENSE
   summary: "Python Condensate Analysis Toolbox"
   description: "PyCAT is a Python Condensate Analysis Toolbox designed for fluorescence image analysis and bio-image analysis, particularly for biomolecular condensates."
   author: "Christian Neureuter"
   author_email: "christian.neureuter@icloud.com"
-  keywords:
-    - condensate
-    - image analysis
-    - fluorescence image analysis
-    - napari
-    - PyCAT
-  classifiers:
-    - Programming Language :: Python :: 3
-    - License :: OSI Approved :: BSD License
-    - Operating System :: OS Independent
-
-
-
+  #doc_url: "http://myhomepage.com/docs"  # Update with actual URL
+  #dev_url: "http://myhomepage.com/dev"  # Update with actual URL
   keywords:
     - condensate
     - image analysis
@@ -77,4 +79,4 @@ about:
 
 extra:
   recipe-maintainers:
-    - yourusername
+    - cyberdyne_systems
