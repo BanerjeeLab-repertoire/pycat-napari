@@ -89,7 +89,7 @@ def run_pycat_func():
         print(f"An unexpected error occurred: {e}")
 
     print("Running PyCAT")  # Print message to console
-    CentralManager(napari.Viewer())  # Initialize CentralManager and Napari Viewer
+    CentralManager(napari.Viewer(title="PyCAT-Napari"))  # Initialize CentralManager and Napari Viewer
     napari.run()
 
 
