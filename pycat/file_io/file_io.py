@@ -319,6 +319,10 @@ class FileIOClass:
             self.filePath = file_path  
             self.base_file_name = os.path.splitext(os.path.basename(file_path))[0] 
 
+            # Clear previous metadata values
+            data_instance.data_repository['microns_per_pixel_sq'] = 1
+            data_instance.data_repository['metadata'] = {}
+
             # Open the image using AICSImage package
             image = AICSImage(file_path) 
 
@@ -326,12 +330,21 @@ class FileIOClass:
             try:
                 x_resolution = image.physical_pixel_sizes.X
                 y_resolution = image.physical_pixel_sizes.Y
+                print(x_resolution, y_resolution)
                 if x_resolution is None or y_resolution is None:
                     raise AttributeError("Resolution data not available, using default value of 1 um/px.")
-                data_instance.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
+                else: 
+                    print("ID before update:", id(data_instance.data_repository))
+                    data_instance.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
+                    print("ID after update:", id(data_instance.data_repository))
+                    
+                    #data_instance.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
+                    print(x_resolution * y_resolution)
+                    print(data_instance.data_repository['microns_per_pixel_sq'])
             except AttributeError:
                 # In case physical_pixel_sizes or its attributes don't exist
                 napari_show_warning("Resolution data not available, using default value of 1 um/px.")
+                print("Resolution data not available, using default value of 1 um/px.")
 
             try:
                 # Store the metadata in the data_instance, Use xml.etree.ElementTree if we need to display or manipulate
@@ -638,8 +651,8 @@ class FileIOClass:
         and TIFF or PNG for images depending on their dimensional properties. This ensures that data is saved in the most 
         appropriate format to maintain quality and usability.
         """
-        if layer_type in ['Labels', 'Shapes']:  # Label layers dont require much resolution so we can save them as 8 bit PNG
-            return ".png", dtype_conversion_func(data, 'uint8')  
+        if layer_type in ['Labels', 'Shapes']:  # Label layers are 16-bit int in Napari so we convert to uint16 and save as PNG
+            return ".png", dtype_conversion_func(data, 'uint16')  
         elif layer_type == 'Image':
             if data.ndim == 3:  # RGB images are usually overlays and therefore dont need very high resolution
                 return ".png", dtype_conversion_func(data, 'uint8')

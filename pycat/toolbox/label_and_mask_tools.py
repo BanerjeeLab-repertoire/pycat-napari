@@ -265,6 +265,9 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
         napari_show_warning("No active layer selected.")
         return 
     
+    # Store the data type of the input mask for later use.
+    input_dtype = binary_mask.dtype
+    
     # Check if the mask is labeled (contains more than binary values).
     labeled_mask_flag = np.max(binary_mask) > 1  
     if labeled_mask_flag:
@@ -285,6 +288,9 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
 
     if labeled_mask_flag:
         processed_mask = sk.measure.label(processed_mask)
+
+    # Convert the processed mask back to the original data type.
+    processed_mask = processed_mask.astype(input_dtype)
 
     # Refresh the viewer
     refresh_viewer_with_new_data(viewer, active_layer, new_data=processed_mask.copy())
