@@ -60,12 +60,13 @@ class CentralManager:
             The napari viewer instance to be used by the application.
         """
         self.viewer = viewer
-        
-        # Initialize the component responsible for file input/output operations
-        self.file_io = FileIOClass(self.viewer)
-        
+                
         # Set up the default data class for managing application data
         self.active_data_class = BaseDataClass()
+        #print("CentralManager initial data class id:", id(self.active_data_class))
+
+        # Initialize the component responsible for file input/output operations
+        self.file_io = FileIOClass(self.viewer, self)
         
         # Initialize UI components to provide functionality and interactivity
         self.toolbox_functions_ui = ToolboxFunctionsUI(self.viewer, self)
@@ -85,4 +86,6 @@ class CentralManager:
         data_class : BaseDataClass or derived class instance
             An instance of BaseDataClass or a subclass thereof to be used as the new active data class.
         """
-        self.active_data_class = data_class
+        #print("CentralManager setting data class id:", id(data_class))
+        if isinstance(data_class, BaseDataClass):
+            self.active_data_class = data_class

@@ -20,6 +20,7 @@ Date
 
 # Standard library imports
 import math
+import copy
 
 # Third party imports
 import pandas as pd
@@ -75,21 +76,36 @@ class BaseDataClass:
         Resets specified DataFrames or all data within the class to their default initialization values.
     """
 
-    def __init__(self):
+    def __init__(self, base_data_repository=None):
         """
         Initializes the BaseDataClass with a default data repository containing empty pandas DataFrames
-        for storing analysis results, default analysis parameters, and an empty metadata dictionary.
+        for storing analysis results, default analysis parameters, and an empty metadata dictionary. It 
+        can be with initialized with optional existing repository data. 
+        """
+        if base_data_repository:
+            # Create a deep copy of the provided repository
+            self.data_repository = copy.deepcopy(base_data_repository)
+        else:
+            self._initialize_repository()
+        
+    def _initialize_repository(self):
+        """
+        Initialize or reset the data repository with default values.
+        Includes all necessary dataframes and parameters for analysis.
         """
         self.data_repository = {
+            # Original BaseDataClass attributes
             'region_props_df': pd.DataFrame(),
             'generic_df': pd.DataFrame(),
             'object_size': 50,
             'cell_diameter': 100,
             'ball_radius': 75,
             'microns_per_pixel_sq': 1,
-            'metadata': {}
+            'metadata': {},
+            # Former AnalysisDataClass attributes
+            'cell_df': pd.DataFrame(),
+            'puncta_df': pd.DataFrame()
         }
-
 
     def set_data(self, key, data):
         """
@@ -110,8 +126,15 @@ class BaseDataClass:
         numpy arrays, dictionaries, and other objects. The key should be a string that uniquely
         identifies the data being stored.
         """
-        # Validation can be added here to ensure that the key exists and the data is of the correct type
-        self.data_repository[key] = data
+        # Validation to ensure that the key exists and the data is of the correct type
+        if self.data_repository[key].__class__ != data.__class__:
+            napari_show_warning(f"Data type mismatch for key {key}.")
+        # if self.data_repository[key] doesnt exist yet, create it
+        elif key not in self.data_repository:
+            self.data_repository[key] = data
+        else:
+            self.data_repository[key] = copy.deepcopy(data)
+
         #self._notify(f"Data {key} in data class has been set!")
 
     def get_data(self, key, default_value=None):
@@ -206,6 +229,122 @@ class BaseDataClass:
     #    if self._data_manager:
     #        self._data_manager.notify_observers(message)
 
+    def get_dataframes(self):
+        """
+        Retrieves and returns a dictionary of all pandas DataFrames currently stored in the data repository.
+        """
+        dataframes = {} # Create an empty dictionary to store DataFrames
+
+        for attr_name, attr_value in self.data_repository.items(): # Iterate over all items in the data repository
+            if isinstance(attr_value, pd.DataFrame): # Check if the attribute is a DataFrame
+                dataframes[attr_name] = attr_value
+                
+        return dataframes
+    
+    def get_all_variables(self):
+        """
+        Returns a list of all keys representing the data currently stored in the data repository.
+        """
+        return list(self.data_repository.keys())
+    
+
+    def reset_values(self, df_names_to_reset=None, clear_all=False):
+        """
+        Resets specific DataFrames to empty DataFrames or clears all data within the class back to 
+        default initialization values. This method can target specific DataFrames for resetting, 
+        or reinitialize the class data repository entirely based on the parameters provided.
+
+        Parameters
+        ----------
+        df_names_to_reset : list of str, optional
+            A list of keys (string) identifying which DataFrames within the data repository should be 
+            reset to their default empty state. This parameter is ignored if `clear_all` is True.
+
+        clear_all : bool, optional
+            A flag indicating whether to reset all data within the class to their default values. If True, 
+            it overrides `df_names_to_reset` and reinitializes the entire data repository to default 
+            values specified in the class constructor.
+
+        Note
+        ----
+        This method selectively resets data based on provided parameters, allowing for flexible data 
+        management within the class instance. 
+        """
+
+        # Reinitialize the entire data repository to default values if clear_all is True
+        if clear_all:
+            self.data_repository = None  # Force break any existing references
+            self._initialize_repository() # Calls the class constructor to simply reinitialize to reset all values
+        elif df_names_to_reset:
+            # Loop through the list of DataFrame names provided for resetting
+            for df_name in df_names_to_reset:
+                if df_name in self.data_repository and isinstance(self.data_repository[df_name], pd.DataFrame):
+                    # Reset the specified DataFrame to an empty DataFrame
+                    self.data_repository[df_name] = pd.DataFrame()
+                # Optionally, handle resetting other types of data based on key
+                elif df_name in self.data_repository:
+                    # Resetting non-DataFrame data to None or a default value
+                    self.data_repository[df_name] = None
+                else:
+                    # Raise an error if a provided key does not exist in the data repository
+                    napari_show_warning(f"Key '{df_name}' does not exist in the data repository.")
+
+    def update_metadata(self, image):
+        """
+        Update metadata while preserving other state.
+
+        Parameters
+        ----------
+        image : AICSImage
+            Image object containing metadata to extract
+        """
+        #print("Update_metadata called on instance:", id(self))
+        try:
+            # Check if the image has multiple scenes (e.g., z-stack)
+            num_scenes = len(image.scenes) 
+            if num_scenes > 1:
+                # Optionally, handle multiple scenes. Here, we'll use the first scene.
+                scene = image.get_scene(0)
+                physical_pixel_sizes = scene.physical_pixel_sizes
+                metadata = scene.metadata
+            else:
+                physical_pixel_sizes = image.physical_pixel_sizes
+                metadata = image.metadata
+
+            # Safely extract X and Y resolutions
+            x_resolution = getattr(physical_pixel_sizes, 'X', None)
+            y_resolution = getattr(physical_pixel_sizes, 'Y', None)
+
+            if x_resolution is not None and y_resolution is not None:
+                self.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
+            else:
+                napari_show_warning(
+                    "Resolution data incomplete, using default value of 1 (um/px)^2."
+                )
+                self.data_repository['microns_per_pixel_sq'] = 1
+
+            # Safely assign metadata
+            if metadata:
+                self.data_repository['metadata'] = metadata
+            else:
+                napari_show_warning(
+                    "Metadata is empty or unavailable, using empty dictionary."
+                )
+                self.data_repository['metadata'] = {}
+
+        except AttributeError as e:
+            napari_show_warning(
+                f"Attribute error encountered: {e}. Using default values."
+            )
+            self.data_repository['microns_per_pixel_sq'] = 1
+            self.data_repository['metadata'] = {}
+        except Exception as e:
+            napari_show_warning(
+                f"Unexpected error while updating metadata: {e}. Using default values."
+            )
+            self.data_repository['microns_per_pixel_sq'] = 1
+            self.data_repository['metadata'] = {}
+
 
     def calculate_length(self, viewer):
         """
@@ -263,111 +402,3 @@ class BaseDataClass:
               f"{round(self.data_repository['object_size']*microns_per_pixel, 2)}um ({round(self.data_repository['object_size'], 2)}px)"
               )
         #napari_show_info("This is a message for Napari users!")
-
-
-    def get_dataframes(self):
-        """
-        Retrieves and returns a dictionary of all pandas DataFrames currently stored in the data repository.
-        """
-        dataframes = {} # Create an empty dictionary to store DataFrames
-
-        for attr_name, attr_value in self.data_repository.items(): # Iterate over all items in the data repository
-            if isinstance(attr_value, pd.DataFrame): # Check if the attribute is a DataFrame
-                dataframes[attr_name] = attr_value
-                
-        return dataframes
-    
-    def get_all_variables(self):
-        """
-        Returns a list of all keys representing the data currently stored in the data repository.
-        """
-        return self.data_repository.keys()
-    
-
-    def reset_values(self, df_names_to_reset=None, clear_all=False):
-        """
-        Resets specific DataFrames to empty DataFrames or clears all data within the class back to 
-        default initialization values. This method can target specific DataFrames for resetting, 
-        or reinitialize the class data repository entirely based on the parameters provided.
-
-        Parameters
-        ----------
-        df_names_to_reset : list of str, optional
-            A list of keys (string) identifying which DataFrames within the data repository should be 
-            reset to their default empty state. This parameter is ignored if `clear_all` is True.
-
-        clear_all : bool, optional
-            A flag indicating whether to reset all data within the class to their default values. If True, 
-            it overrides `df_names_to_reset` and reinitializes the entire data repository to default 
-            values specified in the class constructor.
-
-        Note
-        ----
-        This method selectively resets data based on provided parameters, allowing for flexible data 
-        management within the class instance. 
-        """
-
-        # Reinitialize the entire data repository to default values if clear_all is True
-        if clear_all:
-            self.__init__()  # Calls the class constructor to simply reinitialize to reset all values
-        elif df_names_to_reset:
-            # Loop through the list of DataFrame names provided for resetting
-            for df_name in df_names_to_reset:
-                if df_name in self.data_repository and isinstance(self.data_repository[df_name], pd.DataFrame):
-                    # Reset the specified DataFrame to an empty DataFrame
-                    self.data_repository[df_name] = pd.DataFrame()
-                # Optionally, handle resetting other types of data based on key
-                elif df_name in self.data_repository:
-                    # Resetting non-DataFrame data to None or a default value
-                    self.data_repository[df_name] = None
-                else:
-                    # Raise an error if a provided key does not exist in the data repository
-                    napari_show_warning(f"Key '{df_name}' does not exist in the data repository.")
-
-
-
-class AnalysisDataClass(BaseDataClass):
-    """
-    A specialized data management class derived from BaseDataClass, intended for storing,
-    retrieving, and managing data related to analysis results, such as puncta and cell data frames.
-    
-    This class extends the BaseDataClass by initializing specific data repositories for puncta and cell
-    data, facilitating easy access and manipulation of these datasets within an analytical application.
-    
-    Attributes inherited from BaseDataClass are also available, including other general-purpose data 
-    storage and management functionalities.
-
-    Parameters
-    ----------
-    base_data_repository : dict, optional
-        An optional dictionary passed to initialize the data repository with pre-existing data. This
-        can be useful for extending or integrating with an existing dataset.
-    """
-
-    def __init__(self, base_data_repository=None):
-        """
-        Initializes the AnalysisDataClass, optionally using an existing data repository.
-
-        If a base data repository is provided, it's used as the initial data store; otherwise,
-        a new data repository is created. The class specifically initializes empty data frames
-        for storing puncta and cell analysis results.
-
-        Parameters
-        ----------
-        base_data_repository : dict, optional
-            An optional dictionary containing pre-existing data to initialize the data repository.
-        """
-        super().__init__()  # Initialize the base class
-
-        # If an existing data repository is provided, use it; otherwise, continue with the newly created one
-        if base_data_repository:
-            self.data_repository = base_data_repository
-
-        # Initialize data frames for puncta and cell analysis results within the data repository
-        self.data_repository['cell_df'] = pd.DataFrame()
-        self.data_repository['puncta_df'] = pd.DataFrame()
-
-        # Placeholder for other attributes as needed
-        # ...
-        # This can include additional data frames, configuration settings, or analysis parameters
-        # that are relevant to the subclass's specific purposes

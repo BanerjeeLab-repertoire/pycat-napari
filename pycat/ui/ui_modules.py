@@ -51,7 +51,7 @@ from pycat.toolbox.label_and_mask_tools import (
     run_measure_binary_mask, run_binary_morph_operation) 
 from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_layer_merge
 from pycat.toolbox.data_viz_tools import PlottingWidget
-from pycat.data.data_modules import AnalysisDataClass
+from pycat.data.data_modules import BaseDataClass
 
 
 class BaseUIClass:
@@ -277,7 +277,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         open_file_layout = QVBoxLayout() # Create a vertical layout widget
         open_file_button = QPushButton("Open File") # Create a button widget
         open_file_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            self.central_manager.file_io.open_2d_image, None, self.central_manager.active_data_class)) # function, viewer, *args
+            self.central_manager.file_io.open_2d_image, None)) # function, viewer, *args
         open_file_layout.addWidget(open_file_button) # Add the button to the layout
         open_file_widget = QWidget() # Create a main widget to contain the input widget
         open_file_widget.setLayout(open_file_layout) # Set the layout for the widget
@@ -289,7 +289,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         save_and_clear_layout = QVBoxLayout()
         save_and_clear_button = QPushButton("Save and Clear") # Create a button widget
         save_and_clear_button.clicked.connect(lambda: self.on_general_button_clicked(
-            self.central_manager.file_io.save_and_clear_all, None, self.central_manager.active_data_class, self.viewer))
+            self.central_manager.file_io.save_and_clear_all, None, self.viewer))
         save_and_clear_layout.addWidget(save_and_clear_button) # Add the button to the layout
         save_and_clear_widget = QWidget()
         save_and_clear_widget.setLayout(save_and_clear_layout)
@@ -1132,9 +1132,14 @@ class AnalysisMethodsUI(BaseUIClass):
         # Clear current dock to prepare for the new analysis UI
         self.clear_dock()
 
-        # Initialize the data/project class with provided arguments and keyword arguments
-        self.central_manager.set_active_data_class(data_class(*data_class_args, **data_class_kwargs))
+        # Create new BaseDataClass instance with existing repository
+        new_data_class = BaseDataClass(
+            base_data_repository=self.central_manager.active_data_class.data_repository
+        )
 
+        # Initialize the data/project class with provided arguments and keyword arguments
+        #self.central_manager.set_active_data_class(data_class(*data_class_args, **data_class_kwargs))
+        self.central_manager.set_active_data_class(new_data_class)
         # Instantiate the analysis UI class and set up its UI components
         self.current_analysis_ui = ui_class(self.viewer, self.central_manager)
         self.current_analysis_ui.setup_ui()
@@ -1154,7 +1159,7 @@ class AnalysisMethodsUI(BaseUIClass):
         **kwargs :
             Keyword arguments to pass to the `AnalysisDataClass`.
         """
-        self._switch_analysis(AnalysisDataClass, CondensateAnalysisUI, *args, **kwargs)
+        self._switch_analysis(BaseDataClass, CondensateAnalysisUI, *args, **kwargs)
 
     def _switch_to_object_coloc_analysis(self, *args, **kwargs):
         """
@@ -1167,7 +1172,7 @@ class AnalysisMethodsUI(BaseUIClass):
         **kwargs :
             Keyword arguments to pass to the `AnalysisDataClass`.
         """
-        self._switch_analysis(AnalysisDataClass, ObjectColocAnalysisUI, *args, **kwargs)
+        self._switch_analysis(BaseDataClass, ObjectColocAnalysisUI, *args, **kwargs)
 
     def _switch_to_pixel_coloc_analysis(self, *args, **kwargs):
         """
@@ -1180,7 +1185,7 @@ class AnalysisMethodsUI(BaseUIClass):
         **kwargs :
             Keyword arguments to pass to the `AnalysisDataClass`.
         """
-        self._switch_analysis(AnalysisDataClass, PixelColocAnalysisUI, *args, **kwargs)
+        self._switch_analysis(BaseDataClass, PixelColocAnalysisUI, *args, **kwargs)
 
     def _switch_to_general_analysis(self, *args, **kwargs):
         """
@@ -1193,7 +1198,7 @@ class AnalysisMethodsUI(BaseUIClass):
         **kwargs :
             Keyword arguments to pass to the `AnalysisDataClass`.
         """
-        self._switch_analysis(AnalysisDataClass, GeneralAnalysisUI, *args, **kwargs)
+        self._switch_analysis(BaseDataClass, GeneralAnalysisUI, *args, **kwargs)
 
     def _switch_to_fibril_analysis(self, *args, **kwargs):
         """
@@ -1206,7 +1211,7 @@ class AnalysisMethodsUI(BaseUIClass):
         **kwargs :
             Keyword arguments to pass to the `AnalysisDataClass`.
         """
-        self._switch_analysis(AnalysisDataClass, FibrilAnalysisUI, *args, **kwargs)
+        self._switch_analysis(BaseDataClass, FibrilAnalysisUI, *args, **kwargs)
 
 
 
@@ -1756,9 +1761,9 @@ class MenuManager:
             Add specific file I/O methods as actions to the file I/O menu.
             """
             file_io_methods_dict = {
-                'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {'data_instance': self.central_manager.active_data_class}),
-                'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {'data_instance': self.central_manager.active_data_class}),
-                'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'data_instance': self.central_manager.active_data_class, 'viewer': self.viewer})
+                'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
+                'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
+                'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
             self._add_actions_to_menu(file_io_methods_dict, self.file_menu)
 

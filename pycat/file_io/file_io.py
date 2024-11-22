@@ -257,47 +257,34 @@ class FileIOClass:
 
     Methods
     -------
-    set_analysis_data(self, analysis_data_instance):
-        Sets the analysis data instance for storing results and metadata.
-    open_2d_image(self, data_instance):
+    open_2d_image(self):
         Opens one or more 2D images for analysis, handles channel assignment and loading into the viewer.
-    open_2d_mask(self, data_instance):
+    open_2d_mask(self):
         Opens one or more 2D masks associated with images, for segmentation or analysis purposes.
     assign_channels_in_dialog(self, all_channels, is_mask=False):
         Displays a dialog for assigning names to the channels of the opened image or mask.
     load_into_viewer(self, data, name, is_mask=False):
         Loads image or mask data into the napari viewer with appropriate settings.
-    save_and_clear_all(self, data_instance, viewer):
+    save_and_clear_all(self, viewer):
         Saves selected layers and dataframes to files and optionally clears them from the viewer and analysis data.
     determine_file_format_and_process_data(self, layer_type, data):
         Determines the appropriate file format for saving and processes the data accordingly.
     """
-    def __init__(self, viewer):
+    def __init__(self, viewer, central_manager):
         """
         Initializes the FileIOClass with a reference to a napari viewer instance.
         """
         self.viewer = viewer
         self.analysis_data = None
+        self.central_manager = central_manager
         self.filePath = ""
         self.base_file_name = ""
 
-
-    def set_analysis_data(self, analysis_data_instance):
-        """
-        Sets the reference to an analysis data instance for accessing and storing analysis results.
-        """
-        self.analysis_data = analysis_data_instance
-
-    def open_2d_image(self, data_instance):
+    def open_2d_image(self):
         """
         Opens a dialog for selecting and opening 2D image files. Supports multiple file formats and handles multichannel 
         images by assigning channels through a dialog. The method updates the Napari viewer with the opened images and 
         integrates image metadata into the provided data instance for subsequent analysis.
-
-        Parameters
-        ----------
-        data_instance : object
-            An object representing the data repository where image metadata will be stored.
 
         Notes
         -----
@@ -305,6 +292,7 @@ class FileIOClass:
         to multichannel images and prompts the user to confirm or adjust the assignments. Metadata and resolution 
         information are extracted and stored, which can be crucial for accurate image analysis tasks.
         """
+        #print("FileIO data_instance id:", id(self.central_manager.active_data_class))
         options = QFileDialog.Options()
         file_paths, _ = QFileDialog.getOpenFileNames(None, "Open File(s)", "", "Image Files (*.tiff *.tif *.czi *.png);;All Files (*)", options=options)
 
@@ -317,40 +305,12 @@ class FileIOClass:
         for file_path in file_paths:
             # Setting the filePath variable and base file name
             self.filePath = file_path  
-            self.base_file_name = os.path.splitext(os.path.basename(file_path))[0] 
-
-            # Clear previous metadata values
-            data_instance.data_repository['microns_per_pixel_sq'] = 1
-            data_instance.data_repository['metadata'] = {}
+            self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
 
             # Open the image using AICSImage package
             image = AICSImage(file_path) 
 
-            # Attempt to retrieve and store the resolution
-            try:
-                x_resolution = image.physical_pixel_sizes.X
-                y_resolution = image.physical_pixel_sizes.Y
-                print(x_resolution, y_resolution)
-                if x_resolution is None or y_resolution is None:
-                    raise AttributeError("Resolution data not available, using default value of 1 um/px.")
-                else: 
-                    print("ID before update:", id(data_instance.data_repository))
-                    data_instance.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
-                    print("ID after update:", id(data_instance.data_repository))
-                    
-                    #data_instance.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
-                    print(x_resolution * y_resolution)
-                    print(data_instance.data_repository['microns_per_pixel_sq'])
-            except AttributeError:
-                # In case physical_pixel_sizes or its attributes don't exist
-                napari_show_warning("Resolution data not available, using default value of 1 um/px.")
-                print("Resolution data not available, using default value of 1 um/px.")
-
-            try:
-                # Store the metadata in the data_instance, Use xml.etree.ElementTree if we need to display or manipulate
-                data_instance.data_repository['metadata'] = image.metadata
-            except Exception as e:
-                napari_show_warning("Metadata missing or incompatible with AICSImage IO.")
+            self.central_manager.active_data_class.update_metadata(image)
             
             # Get the number of pages and channels in the image
             num_pages = getattr(image.dims, 'S', 1)
@@ -387,22 +347,17 @@ class FileIOClass:
         self.viewer.add_shapes(name='Cell Diameter', shape_type='line', edge_color='white', edge_width=5)
 
         # Update the data instance with default sizes for object and cell diameters
-        data_instance.data_repository['object_size'] = channel_data.shape[0] // 20
-        data_instance.data_repository['cell_diameter'] = channel_data.shape[0] // 8
+        self.central_manager.active_data_class.data_repository['object_size'] = channel_data.shape[0] // 20
+        self.central_manager.active_data_class.data_repository['cell_diameter'] = channel_data.shape[0] // 8
 
 
 
 
-    def open_2d_mask(self, data_instance):
+    def open_2d_mask(self):
         """
         Opens a dialog for selecting and opening mask files. This method is similar to `open_2d_image` but is specifically 
         tailored for mask files, supporting operations such as assigning channels to masks if the mask file contains 
         multiple channels.
-
-        Parameters
-        ----------
-        data_instance : object
-            An object representing the data repository where mask data will be stored.
 
         Notes
         -----
@@ -541,15 +496,13 @@ class FileIOClass:
 
 
 
-    def save_and_clear_all(self, data_instance, viewer):
+    def save_and_clear_all(self, viewer):
         """
         Provides options for saving selected layers and dataframes based on user input from a dialog, with additional 
         options for naming files and deciding whether to clear saved data from both the viewer and the repository.
 
         Parameters
         ----------
-        data_instance : object
-            The data repository object where analysis results are stored.
         viewer : object
             The Napari viewer object containing the layers and data to be managed.
 
@@ -560,9 +513,8 @@ class FileIOClass:
         data is preserved in a user-specified manner.
         """
         self.viewer = viewer
-        self.analysis_data = data_instance
         # Get layer names and dataframe names from the viewer and analysis data abd present them to the user
-        dataframe_names = self.analysis_data.get_dataframes().keys()
+        dataframe_names = self.central_manager.active_data_class.get_dataframes().keys()
         dialog = LayerDataframeSelectionDialog(self.viewer.layers, dataframe_names)
         result = dialog.exec_()
 
@@ -609,7 +561,7 @@ class FileIOClass:
                     sk.io.imsave(f"{save_name}_{layer_name.replace(' ', '_').lower()}{file_extension}", processed_data)
             
             # Save only the selected dataframes
-            dataframes_to_save = self.analysis_data.get_dataframes()
+            dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
             clear_dfs_list = []
             for df_name, df_value in dataframes_to_save.items():
                 clear_dfs_list.append(df_name)
@@ -620,13 +572,13 @@ class FileIOClass:
         if clear_all:
             self.viewer.layers.select_all()
             self.viewer.layers.remove_selected()
-            self.analysis_data.reset_values(clear_all=True, df_names_to_reset=clear_dfs_list)
+            self.central_manager.active_data_class.reset_values(clear_all=True, df_names_to_reset=clear_dfs_list)
         # Clear only the saved layers and dataframes
         else:
             for layer_name in selected_layers:
                 if layer_name in layer_names:
                     self.viewer.layers.remove(layer_name)
-            self.analysis_data.reset_values(df_names_to_reset=selected_dataframes)
+            self.central_manager.active_data_class.reset_values(df_names_to_reset=selected_dataframes)
 
     def determine_file_format_and_process_data(self, layer_type, data):
         """
