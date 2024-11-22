@@ -1,0 +1,45 @@
+# Inlcude the PyCAT logo for app icon
+include pycat/docs/logos/*.png
+
+# Include license and project info
+include LICENSE
+include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include THIRD_PARTY_LICENSES.txt
+include pyproject.toml
+
+# Include package data
+recursive-include src/pycat/docs/logos *.png
+
+# Include test files
+recursive-include tests *.py
+
+# Include configuration files
+recursive-include config *.txt
+recursive-include config *.yml
+recursive-include config *.yaml
+
+# Include Jupyter Notebooks
+recursive-include notebooks *.ipynb
+
+# Include YAML files in the root directory
+include *.yaml
+
+# Documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+recursive-include docs *.txt
+
+# Exclude development files
+global-exclude *.py[cod] __pycache__
+global-exclude *.so *.dylib *.dll
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude *.swp *.swo
+global-exclude .vscode/
+global-exclude venv/
+global-exclude .env
+global-exclude .mypy_cache/
+global-exclude .pytest_cache/
+global-exclude .ipynb_checkpoints/
