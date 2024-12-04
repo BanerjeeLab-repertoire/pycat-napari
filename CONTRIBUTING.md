@@ -24,7 +24,7 @@ By participating in this project, you agree to maintain a respectful and constru
 3. Create a virtual environment and install dependencies
 
 ```bash
-git clone https://github.com/your-username/pycat-napari.git
+git clone https://github.com/BanerjeeLab-repertoire/pycat-napari.git
 cd pycat-napari
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -99,7 +99,7 @@ pip install -e ".[test]"
    - Any special notes for reviewers
 
 ## Questions or Problems?
-- Open an issue for bugs or feature requests
+- Open an issue for bugs or feature requests at: https://github.com/BanerjeeLab-repertoire/pycat-napari/issues
 - Contact the maintainers for other questions
 
 Thank you for contributing to PyCAT-Napari!

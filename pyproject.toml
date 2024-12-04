@@ -91,11 +91,9 @@ devbio-napari = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/organization/pycat-napari"
-Documentation = "https://pycat-napari.readthedocs.io"
-Repository = "https://github.com/organization/pycat-napari"
-Issues = "https://github.com/organization/pycat-napari/issues"
-Changelog = "https://github.com/organization/pycat-napari/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/BanerjeeLab-repertoire/pycat-napari"
+Repository = "https://github.com/BanerjeeLab-repertoire/pycat-napari"
+Issues = "https://github.com/BanerjeeLab-repertoire/pycat-napari/issues"
 
 [project.scripts]
 run-pycat = "pycat.run_pycat:main"

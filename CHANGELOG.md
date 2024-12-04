@@ -42,4 +42,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 - (List any features that are deprecated and will be removed in future releases here)
 
-[1.0.0]: https://github.com/YOUR-LAB-NAME/pycat-napari/releases/tag/v1.0.0
+[1.0.0]: https://github.com/BanerjeeLab-repertoire/pycat-napari/releases/tag/v1.0.0
