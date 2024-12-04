@@ -1,7 +1,28 @@
 # PyCAT-Napari
 
-PyCAT (Python Condensate Analysis Toolbox) is an open-source application built on napari for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization.
+PyCAT (Python Condensate Analysis Toolbox) is an open-source application built on [napari](https://napari.org/) for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization.
 
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Using Pip](#using-pip)
+  - [Platform-Specific Installations](#platform-specific-installations)
+  - [Optional Features](#optional-features)
+- [Quick Start](#quick-start)
+  - [Launch the GUI](#launch-the-gui)
+  - [Basic Python Usage](#basic-python-usage)
+- [Documentation](#documentation)
+- [Examples](#examples)
+- [Notebooks](#notebooks)
+- [Contributing](#contributing)
+- [License](#license)
+  - [Third-Party Libraries](#third-party-libraries)
+- [Citation](#citation)
+- [Support](#support)
+- [Project Status](#project-status)
+- [Acknowledgments](#acknowledgments)
 
 ### Documentation is in progress, please return soon for the completed docs. 
 
@@ -14,7 +35,6 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
   - Fluorescence intensity analysis
   - Feature extraction and measurement
   - Multi-channel analysis capabilities
-  - Batch processing support
 - **Flexible Data Handling**:
   - Support for common microscopy file formats
   - Data export in standard formats
@@ -26,13 +46,18 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 
 ## Installation
 
-PyCAT-Napari requires Python 3.9 or later. Installation is straightforward using pip:
+PyCAT-Napari requires Python 3.9 or later.
+
+
+### Using Pip
+Install the package using `pip`:
 
 ```bash
 pip install pycat-napari
 ```
 
-For platform-specific installations:
+### Platform-Specific Installations
+To ensure functionality on different platforms, install as follows:
 
 ### Windows
 ```bash
@@ -60,11 +85,13 @@ pip install pycat-napari[devbio]   # Additional bio-image analysis tools
 ## Quick Start
 
 ### Launch the GUI
+After installation, launch the PyCAT-Napari GUI with:
 ```bash
 run-pycat
 ```
 
 ### Basic Python Usage
+Import PyCAT and utilize its analysis tools programmatically:
 ```python
 import pycat
 
@@ -78,20 +105,49 @@ results = analyze_condensates(image_data)
 ```
 
 ## Documentation
+### Full documentation is in progress please check back later for the updated docs...
 
-Detailed documentation is available at [documentation link]. This includes:
-- Tutorial guides
-- API reference
-- Example workflows
-- Advanced usage scenarios
+Comprehensive documentation is available [here](https://github.com/BanerjeeLab-repertoire/pycat-napari/wiki). It includes:
+- **Tutorial Guides**: Step-by-step instructions to get started.- API reference
+- **API Reference**: Detailed descriptions of all available functions and classes.
+- **Example Workflows**: Practical examples to demonstrate usage.
+- **Advanced Usage Scenarios**: In-depth guides for specialized tasks.
+
+## Examples
+Example workflows to be updated soon...
+
+## Notebooks
+Interactive Jupyter notebooks are available in the `notebooks` directory:
+
+### Analysis Notebooks
+- **pycat_plotting.ipynb**: Comprehensive notebook for:
+  - Reading and combining output dataframes
+  - Generating various plots
+  - Estimating saturation concentrations (C-sat) using our generalized ReLU function and custom fitting
+  - Visualizing intensity-concentration relationships
+  - Statistical analysis of condensate properties
+
+### Data Processing Notebooks
+- **int_truncated_dfs.ipynb**: Tools for:
+  - Selecting specific intensity ranges
+  - Filtering data based on custom parameters
+  - Batch processing of multiple datasets
+
+These notebooks provide examples that can be used as templates for your own analysi and data visualization workflows.
+
+To use the notebooks:
+- Install any other required packages imported in them, then test them on your own pycat-analyzed data. 
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome and encourage community contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
 
 ## License
 
 PyCAT-Napari is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.
+
+### Third-Party Libraries
+PyCAT-Napari builds upon several open-source libraries. See [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) for details.
 
 ## Citation
 
@@ -107,9 +163,13 @@ If you use PyCAT-Napari in your research, please cite:
 }
 ```
 
-## Third-Party Libraries
+## Support
+For support, please check our [GitHub Issues](https://github.com/BanerjeeLab-repertoire/pycat-napari/issues) page. You can:
 
-PyCAT-Napari builds upon several open-source libraries. See [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) for details.
+- Search existing issues to see if your question has already been answered
+- Open a new issue to report bugs or request features
+- Ask questions about usage and implementation
+
 
 ## Project Status
 
@@ -117,15 +177,6 @@ Current version: 1.0.0
 
 For version history and updates, see [CHANGELOG.md](CHANGELOG.md).
 
-## Support
-
-- GitHub Issues: Report bugs and request features
-- Discussion Forum: [Link to forum/discussions]
-- Email: [Your lab's contact email]
-
-## Contributing
-
-We welcome and ecourage community contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
 
 ## Acknowledgments
 
