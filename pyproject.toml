@@ -1,17 +1,50 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.18.0"]
+build-backend = "hatchling.build"
 
 [project]
-name = "PyCAT"
+name = "pycat-napari"
 version = "1.0.0"
+description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Christian Neureuter", email = "cneureuter8@yahoo.com"}
+]
+
+keywords = [
+    "condensate",
+    "image analysis",
+    "fluorescence",
+    "microscopy",
+    "napari",
+    "bio-image",
+    "scientific", 
+    "pycat"
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
 dependencies = [
     "aicsimageio",
     "aicspylibczi>=3.0.5",
     "cellpose",
     "matplotlib",
     "napari",
-    "numpy",
+    "numpy>=1.22",
     "opencv-python-headless",
     "pandas",
     "pydantic",
@@ -22,77 +55,73 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "seaborn",
-    "simpleitk"
-]
-
-requires-python = ">=3.9"
-
-authors = [
-    { name = "Christian Neureuter", email = "christian.neureuter@icloud.com" }
-]
-
-description = "Python Condensate Analysis Toolbox"
-readme = "README.md"
-license = {file = "LICENSE"}
-keywords = ["condensate", "image analysis", "fluorescence image analysis", "napari", "PyCAT"]
-
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: BSD License",
-    "Operating System :: OS Independent"
+    "simpleitk",
 ]
 
 [project.optional-dependencies]
-devbio = [
-    "napari-plugin-engine>=0.1.4",
-    "npe2<0.7.0",
-    "aicsimageio",
-    "aicspylibczi>=3.0.5",
-    "numpy>=1.21.4",
-    "napari-pyclesperanto-assistant",
-    "napari-skimage-regionprops",
-    "napari-animation",
-    "PlatyMatch",
-    "napari-plot-profile",
-    "napari-accelerated-pixel-and-object-classification",
-    "napari-brightness-contrast",
-    "napari-plugin-search",
-    "napari-segment-blobs-and-things-with-membranes",
-    "napari-simpleitk-image-processing",
-    "napari-folder-browser",
-    "napari-crop",
-    "napari-clusters-plotter>=0.7.1",
-    "napari-stl-exporter",
-    "napari-tabu",
-    "napari-workflow-optimizer",
-    "napari-workflow-inspector",
-    "napari-curtain",
-    "napari-layer-details-display",
-    "napari",
-    "vispy",
-    "napari-mouse-controls",
-    "the-segmentation-game",
-    "napari-process-points-and-surfaces",
-    "napari-blob-detection",
-    "jupyterlab",
-    "napari-czifile2",
-    "napari-roi",
-    "pydantic!=1.10.0",
-    "napari-pystackreg",
-    "imageio!=2.22.1",
-    "redlionfish",
-    "jupyter_server<2.0.0",
-    "seaborn"
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "black",
+    "ruff",
+    "build",
+    "twine",
+    "pre-commit",
 ]
 
-arm-mac = ["torchvision; platform_system=='Darwin' and platform_machine=='arm64'", "torch==2.1.2; platform_system=='Darwin' and platform_machine=='arm64'"]
+test = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "pytest-qt",
+]
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["build", "dist", "*.egg-info", "tests"]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+]
 
-[tool.setuptools.package-data]
-pycat = ["docs/logos/*.png"]
+arm-mac = [
+    "torchvision; platform_system=='Darwin' and platform_machine=='arm64'",
+    "torch==2.1.2; platform_system=='Darwin' and platform_machine=='arm64'"
+]
+
+devbio-napari = [
+    "devbio-napari"
+]
+
+[project.urls]
+Homepage = "https://github.com/organization/pycat-napari"
+Documentation = "https://pycat-napari.readthedocs.io"
+Repository = "https://github.com/organization/pycat-napari"
+Issues = "https://github.com/organization/pycat-napari/issues"
+Changelog = "https://github.com/organization/pycat-napari/blob/main/CHANGELOG.md"
 
 [project.scripts]
 run-pycat = "pycat.run_pycat:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pycat"]
+exclude = ["build", "dist", "*.egg-info", "tests"]
+
+[tool.hatch.build.targets.wheel.package-data]
+pycat = ["src/pycat/icons/*.png"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+addopts = "-v --cov=pycat --cov-report=term-missing"
+testpaths = ["tests"]
+qt_api = "pyqt5"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+include = '\.pyi?$'
+
+[tool.ruff]
+select = ["E", "F", "B", "I"]
+ignore = ["E501"]
+line-length = 88
+target-version = "py39"

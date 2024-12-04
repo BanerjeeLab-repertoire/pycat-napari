@@ -77,7 +77,7 @@ def run_pycat_func():
 
     try:
         # Use importlib.resources to get the path to the PyCAT logo
-        logo_path = resources.files('pycat') / 'docs' / 'logos' / 'pycat_logo_512.png'
+        logo_path = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
         with resources.as_file(logo_path) as icon_path:
             icon_path_str = str(icon_path)
         app.setWindowIcon(QIcon(icon_path_str))  # Set PyCAT logo as window icon

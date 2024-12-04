@@ -1,5 +1,5 @@
 # Inlcude the PyCAT logo for app icon
-include pycat/docs/logos/*.png
+include src/pycat/icons/*.png
 
 # Include license and project info
 include LICENSE
@@ -10,7 +10,7 @@ include THIRD_PARTY_LICENSES.txt
 include pyproject.toml
 
 # Include package data
-recursive-include src/pycat/docs/logos *.png
+recursive-include src/pycat/icons/*.png
 
 # Include test files
 recursive-include tests *.py
