@@ -6,7 +6,6 @@
 ![GitHub Stars](https://img.shields.io/github/stars/BanerjeeLab-repertoire/pycat-napari)
 ![GitHub Forks](https://img.shields.io/github/forks/BanerjeeLab-repertoire/pycat-napari)
 
-
 ![PyCAT Logo](src/pycat/icons/pycat_logo_512.png)
 
 PyCAT (Python Condensate Analysis Toolbox) is an open-source application built on [napari](https://napari.org/) for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization.
