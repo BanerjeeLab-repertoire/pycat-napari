@@ -1,0 +1,26 @@
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-background: #202020;
+        --color-foreground: #e2e2e2;
+        --color-link: #8ab4f8;
+        --color-link-hover: #539bf5;
+    }
+
+    body {
+        background-color: var(--color-background);
+        color: var(--color-foreground);
+    }
+
+    a {
+        color: var(--color-link);
+    }
+
+    a:hover {
+        color: var(--color-link-hover);
+    }
+
+    .wy-nav-content {
+        background-color: var(--color-background);
+        color: var(--color-foreground);
+    }
+}

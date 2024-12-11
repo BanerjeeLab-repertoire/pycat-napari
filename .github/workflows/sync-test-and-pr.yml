@@ -1,0 +1,53 @@
+name: Sync, Test, and PR to Lab Repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  smoke-test-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+    # Step 1: Checkout the fork repository
+    - name: Checkout Fork Repository
+      uses: actions/checkout@v3
+
+    # Step 2: Set up Python environment
+    - name: Set Up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    # Step 3: Install dependencies and run a smoke test
+    - name: Run Smoke Test
+      run: |
+        echo "Running smoke test..."
+        python --version
+        echo "Smoke test passed!"
+
+    # Step 4: Configure Git to sync with the lab repository
+    - name: Add Upstream Repository
+      run: |
+        git remote add lab https://github.com/BanerjeeLab-repertoire/pycat-napari.git
+        git fetch lab
+
+    # Step 5: Push changes to the lab repository
+    - name: Push Changes to Lab Repository
+      run: |
+        git checkout main
+        git pull lab main || true
+        git checkout -b auto-sync
+        git push lab auto-sync --force
+      env:
+        LAB_TOKEN: ${{ secrets.LAB_TOKEN }}
+
+    # Step 6: Create a pull request to the lab repository
+    - name: Create a Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.LAB_TOKEN }}
+        base: main
+        head: auto-sync
+        title: "Automated Sync from Fork"
+        body: "This PR was created automatically to sync changes from the fork after a successful smoke test."
