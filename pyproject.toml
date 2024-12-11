@@ -7,10 +7,11 @@ name = "pycat-napari"
 version = "1.0.0"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = "==3.9.*"
 license = {file = "LICENSE"}
+include-package-data = true
 authors = [
-    {name = "Christian Neureuter", email = "cneureuter8@yahoo.com"}
+    {name = "Christian Neureuter", email = "cneureut@buffalo.edu"}
 ]
 
 keywords = [
@@ -31,8 +32,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Visualization",
@@ -103,7 +102,15 @@ packages = ["src/pycat"]
 exclude = ["build", "dist", "*.egg-info", "tests"]
 
 [tool.hatch.build.targets.wheel.package-data]
-pycat = ["src/pycat/icons/*.png"]
+pycat = [
+    "src/pycat/icons/*.png",
+    "LICENSE",
+    "README.md", 
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "THIRD_PARTY_LICENSES.txt",
+    "MANIFEST.in"
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true
