@@ -1,11 +1,10 @@
 # PyCAT-Napari
-![License](https://img.shields.io/github/license/yourusername/your-repo)
+![License](https://img.shields.io/github/license/BanerjeeLab-repertoire/pycat-napari)
 ![PyPI](https://img.shields.io/pypi/v/pycat-napari)
 ![Python Version](https://img.shields.io/pypi/pyversions/pycat-napari)
-![Build Status](https://github.com/yourusername/your-repo/actions/workflows/ci.yml/badge.svg)
 ![Downloads](https://img.shields.io/pypi/dm/pycat-napari)
-![GitHub Stars](https://img.shields.io/github/stars/yourusername/your-repo)
-![GitHub Forks](https://img.shields.io/github/forks/yourusername/your-repo)
+![GitHub Stars](https://img.shields.io/github/stars/BanerjeeLab-repertoire/pycat-napari)
+![GitHub Forks](https://img.shields.io/github/forks/BanerjeeLab-repertoire/pycat-napari)
 
 
 ![PyCAT Logo](src/pycat/icons/pycat_logo_512.png)
