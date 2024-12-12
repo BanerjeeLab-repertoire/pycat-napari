@@ -10,7 +10,7 @@ Welcome to the documentation for PyCAT-Napari, a Python Condensate Analysis Tool
 
 
 Documentation-Note
--------------
+------------------
 
 > 🚧 **Full documentation is in progress. Please check back soon for complete docs!**
 
