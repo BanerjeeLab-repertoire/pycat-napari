@@ -746,18 +746,15 @@ def run_ccf_analysis(image_layer1, image_layer2, roi_mask_layer, data_instance):
     ValueError
         If the input images do not have the same shape, or if the ROI mask does not match the dimensions of the images.
 
-    Modifies
-    --------
-    data_instance : object
-        Updates the 'data_repository' attribute within this instance with keys 'CCF_fitted_params_df' and
-        'CCF_raw_params_df', containing the DataFrames of the fitted Gaussian parameters and raw CCF parameters,
-        respectively.
-
     Notes
     -----
     The function processes labeled masks by isolating each label into its own binary mask and performs CCF analysis
     separately for each. The results are then aggregated. For binary masks or the absence of a mask, analysis is done
     directly. Results are displayed in a custom dialog and stored in the provided data instance.
+
+    The function updates the data_instance.data_repository with two key DataFrames:
+    - CCF_fitted_params_df: Contains the fitted Gaussian parameters
+    - CCF_raw_params_df: Contains the raw CCF parameters
     """
 
     # Get the image data
