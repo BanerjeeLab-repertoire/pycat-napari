@@ -1,4 +1,3 @@
-# features.rst
 Features
 ========
 
