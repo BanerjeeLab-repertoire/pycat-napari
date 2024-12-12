@@ -382,10 +382,10 @@ def cell_analysis_func(image, cell_masks, omission_mask, data_instance):
     - Enhances cell contours using morphological operations to improve segmentation accuracy.
     - Optionally applies an omission mask to exclude certain areas from analysis.
     - Calculates statistical metrics such as intensity mean, standard deviation, median, and total intensity,
-      along with additional features for each segmented cell.
+    along with additional features for each segmented cell.
     - Utilizes background noise estimations to compute signal-to-noise ratios (SNRs) for the cells.
     - Aggregates all computed data into a comprehensive DataFrame that includes intensity statistics and additional
-      calculated features, enhancing insights into cell characteristics within the analyzed image.
+    calculated features, enhancing insights into cell characteristics within the analyzed image.
     """
 
     unique_labels = np.unique(cell_masks)[1:] # Skip the background label (0)

@@ -726,7 +726,7 @@ def ccf_analysis(image1, image2, roi_mask, label_flag=False):
 def run_ccf_analysis(image_layer1, image_layer2, roi_mask_layer, data_instance):
     """
     Orchestrates the cross-correlation function (CCF) analysis for pairs of image layers, handling different types of
-    ROI masks (binary or labeled) and integrating results into a specified data management object. It supports handling 
+    ROI masks (binary or labeled) and integrating results into a specified data management object. It supports handling
     multiple ROI labels and aggregates results in a consistent format for analysis and visualization.
 
     Parameters
@@ -738,7 +738,7 @@ def run_ccf_analysis(image_layer1, image_layer2, roi_mask_layer, data_instance):
     roi_mask_layer : napari.layers.Labels or None
         The image layer containing the ROI mask data. Can be None if no ROI is to be applied.
     data_instance : object
-        An object that stores and manages the results of the CCF analysis, typically having a 'data_repository' attribute 
+        An object that stores and manages the results of the CCF analysis, typically having a 'data_repository' attribute
         for storing results data.
 
     Raises
@@ -747,16 +747,16 @@ def run_ccf_analysis(image_layer1, image_layer2, roi_mask_layer, data_instance):
         If the input images do not have the same shape, or if the ROI mask does not match the dimensions of the images.
 
     Modifies
-    -------
+    --------
     data_instance : object
-        Updates the 'data_repository' attribute within this instance with keys 'CCF_fitted_params_df' and 
-        'CCF_raw_params_df', containing the DataFrames of the fitted Gaussian parameters and raw CCF parameters, 
+        Updates the 'data_repository' attribute within this instance with keys 'CCF_fitted_params_df' and
+        'CCF_raw_params_df', containing the DataFrames of the fitted Gaussian parameters and raw CCF parameters,
         respectively.
 
     Notes
     -----
-    The function processes labeled masks by isolating each label into its own binary mask and performs CCF analysis 
-    separately for each. The results are then aggregated. For binary masks or the absence of a mask, analysis is done 
+    The function processes labeled masks by isolating each label into its own binary mask and performs CCF analysis
+    separately for each. The results are then aggregated. For binary masks or the absence of a mask, analysis is done
     directly. Results are displayed in a custom dialog and stored in the provided data instance.
     """
 

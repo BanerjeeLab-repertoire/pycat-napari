@@ -5,7 +5,7 @@ Installation
 To install PyCAT-Napari, follow the instructions below.
 
 Basic Installation
-----------------
+------------------
 
 1. **Create and activate a new environment**:
 
@@ -21,7 +21,7 @@ Basic Installation
        pip install pycat-napari
 
 Platform-Specific Installations
------------------------------
+-------------------------------
 
 Windows
 ~~~~~~~
@@ -38,7 +38,7 @@ Mac M1/ARM
     pip install "pycat-napari[arm-mac]"
 
 Optional Features
----------------
+-----------------
 
 To install additional features, you can use the following commands:
 
@@ -52,7 +52,7 @@ To install additional features, you can use the following commands:
 The ``devbio-napari`` package adds numerous additional image analysis tools. Learn more at the `devbio-napari documentation <https://github.com/haesleinhuepf/devbio-napari>`_.
 
 Alternative Installation Methods
-------------------------------
+--------------------------------
 
 If you encounter issues with the standard installation, use our tested environment files:
 
@@ -64,7 +64,7 @@ If you encounter issues with the standard installation, use our tested environme
     mamba env create -f pycat-devbio-napari-env-arm-mac.yml
 
 Verifying Installation & Optional Testing
---------------------------------------
+-----------------------------------------
 
 After installation, verify PyCAT-Napari is working correctly:
 
@@ -101,7 +101,7 @@ The test suite checks:
 .. note:: GUI-interactive tests are skipped as they require manual interaction.
 
 What Success Looks Like
-----------------------
+-----------------------
 
 * All import tests pass
 * Basic GUI launches without errors

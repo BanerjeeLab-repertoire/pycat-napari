@@ -281,7 +281,7 @@ def weighted_tau_calculation(image1, image2, roi_mask):
 
 def li_intensity_correlation(image1, image2, roi_mask):
     """
-    Calculates Li's Intensity Correlation Analysis (ICA) coefficient [1]_, which quantifies the pixel intensity relationship between two images,
+    Calculates Li's Intensity Correlation Analysis (ICA) coefficient [li_ica_1]_, which quantifies the pixel intensity relationship between two images,
     particularly useful for co-localization studies in bioimaging, optionally within a region of interest (ROI).
 
     Parameters
@@ -309,7 +309,7 @@ def li_intensity_correlation(image1, image2, roi_mask):
 
     References
     ----------
-    .. [1] Li, Q., Lau, A., Morris, T. J., Guo, L., Fordyce, C. B., & Stanley, E. F. (2004). 
+    .. [li_ica_1] Li, Q., Lau, A., Morris, T. J., Guo, L., Fordyce, C. B., & Stanley, E. F. (2004). 
         A syntaxin 1, Galpha(o), and N-type calcium channel complex at a presynaptic nerve terminal: analysis by quantitative immunocolocalization. 
         Journal of Neuroscience, 24(16), 4070-4081. doi: 10.1523/JNEUROSCI.0346-04.2004
         https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6729428/
@@ -401,12 +401,12 @@ def li_ica_plot(ica_product, image1, image2):
     and the other against image2's intensities. This visual representation can be pivotal for assessing the degree
     of co-localization or interaction between the two images.
 
-    Please see figure 2 in the reference for an example of how this histogram can be used to interpret the results [1]_:
+    Please see figure 2 in the reference for an example of how this histogram can be used to interpret the results [ica_plot_1]_:
     https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6729428/
 
     References
     ----------
-    .. [1] Li, Q., Lau, A., Morris, T. J., Guo, L., Fordyce, C. B., & Stanley, E. F. (2004). 
+    .. [ica_plot_1] Li, Q., Lau, A., Morris, T. J., Guo, L., Fordyce, C. B., & Stanley, E. F. (2004). 
         A syntaxin 1, Galpha(o), and N-type calcium channel complex at a presynaptic nerve terminal: analysis by quantitative immunocolocalization. 
         Journal of Neuroscience, 24(16), 4070-4081. doi: 10.1523/JNEUROSCI.0346-04.2004
     """

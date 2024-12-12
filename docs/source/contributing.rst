@@ -1,10 +1,10 @@
 Contributing
-===========
+============
 
 Thank you for considering contributing to PyCAT-Napari!
 
 Getting Started
---------------
+---------------
 
 1. Fork the repository
 2. Create a new branch

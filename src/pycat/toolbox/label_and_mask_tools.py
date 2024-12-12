@@ -823,25 +823,25 @@ def split_touching_objects(binary_mask, sigma=3.5):
 
     Notes
     -----
-    This function is adapted from an original implementation by Robert Haase. The 3D processing
+    This function is adapted from an original implementation by Robert Haase [split_objects_1]_. The 3D processing
     capabilities have been removed, as they were deemed unnecessary at the time of writing. Simple
     morphological opening and closing operations were introduced to refine the mask. For potential
     re-addition of 3D functionality, referring to the original source code is advised. Other changes
     include syntactical and style improvements and enhanced documentation.
 
-    References
-    ----------
-    .. [1] Original python code: https://github.com/haesleinhuepf/napari-segment-blobs-and-things-with-membranes/blob/main/napari_segment_blobs_and_things_with_membranes/__init__.py
-           BSD-3 License open source. Copyright (c) 2021, Robert Haase. All rights reserved.
-    .. [2] ImageJ Watershed Algorithm: https://imagej.nih.gov/ij/docs/menus/process.html#watershed
-    .. [3] Stardist Plugin for Napari: https://www.napari-hub.org/plugins/stardist-napari
-    .. [4] Cellpose Plugin for Napari: https://www.napari-hub.org/plugins/cellpose-napari
-
     See Also
     --------
     The function is similar to the ImageJ watershed algorithm, and it is suitable for images
-    where nuclei or other objects are not overly dense. For denser object configurations,
-    considering alternatives such as Stardist or Cellpose, referenced above, may be beneficial.
+    where nuclei or other objects are not overly dense [split_objects_2]_. For denser object configurations,
+    considering alternatives such as Stardist or Cellpose, may be beneficial [split_objects_3]_, [split_objects_4]_.
+
+    References
+    ----------
+    .. [split_objects_1] Original python code: https://github.com/haesleinhuepf/napari-segment-blobs-and-things-with-membranes/blob/main/napari_segment_blobs_and_things_with_membranes/__init__.py
+           BSD-3 License open source. Copyright (c) 2021, Robert Haase. All rights reserved.
+    .. [split_objects_2] ImageJ Watershed Algorithm: https://imagej.nih.gov/ij/docs/menus/process.html#watershed
+    .. [split_objects_3] Stardist Plugin for Napari: https://www.napari-hub.org/plugins/stardist-napari
+    .. [split_objects_4] Cellpose Plugin for Napari: https://www.napari-hub.org/plugins/cellpose-napari
     """
     
     binary_mask = np.asarray(binary_mask).astype(bool)
