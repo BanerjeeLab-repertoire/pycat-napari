@@ -1,4 +1,3 @@
-# installation.rst
 ============
 Installation
 ============
