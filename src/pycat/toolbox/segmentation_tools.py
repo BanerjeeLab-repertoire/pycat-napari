@@ -540,7 +540,7 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
     thresholding to highlight distinct objects within a specified region of interest. Additionally, external 
     contours are detected and filled to ensure solid object representation in the binary mask.
 
-    Parameters:
+    Parameters
     ----------
     image : numpy.ndarray
         The input grayscale image for segmentation.
@@ -549,12 +549,12 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
     ball_radius : int
         The radius influencing the segmentation sensitivity and scale, particularly used in local thresholding.
 
-    Returns:
+    Returns
     -------
     boolean_mask : numpy.ndarray
         A binary mask refined from the segmented image, highlighting detected objects within the region defined by the input mask.
 
-    Notes:
+    Notes
     -----
     - The process dynamically adjusts to the 'ball_radius' to ensure appropriate scale processing for different image details.
     - A correct 'ball_radius' is crucial for optimal segmentation and post-processing results.
@@ -1044,10 +1044,10 @@ def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_ma
     - Applying binary opening to the initial puncta mask to remove single-pixel noise.
     - Labeling the puncta mask for individual puncta identification.
     - Refining the labeled puncta mask through custom filtering criteria (primarily based on 
-        the local intensity distribution aroud the object).
+    the local intensity distribution aroud the object).
     - Separating closely positioned objects using watershed segmentation.
     - Further refining the segmentation to ensure accurate and distinct object detection, providing 
-        an iterative refinement approach.
+    an iterative refinement approach.
     - Final morphological opening to clean up the segmentation result.
     """
     # Convert image data types for processing

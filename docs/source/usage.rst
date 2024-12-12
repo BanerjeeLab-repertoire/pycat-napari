@@ -5,7 +5,7 @@ Usage
 PyCAT-Napari offers two primary ways to analyze your data: through a user-friendly GUI or programmatically via Python code.
 
 Getting Started with the GUI
---------------------------
+----------------------------
 
 To launch the graphical interface, use the following command in your terminal:
 
@@ -14,7 +14,7 @@ To launch the graphical interface, use the following command in your terminal:
     run-pycat
 
 Basic GUI Workflow
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 1. **Load Data**
 
@@ -41,7 +41,7 @@ Basic GUI Workflow
    * Generate analysis reports
 
 Using the Programmatic API
-------------------------
+--------------------------
 
 For automated analysis or integration into existing workflows, you can use the PyCAT-Napari API:
 
@@ -75,12 +75,12 @@ For automated analysis or integration into existing workflows, you can use the P
 For detailed API documentation, see our `API Reference <link-to-docs>`_.
 
 Example Workflows
----------------
+-----------------
 
 PyCAT includes several pre-configured workflows for common analysis scenarios:
 
 In-Cellulo Condensate Analysis
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -93,7 +93,7 @@ In-Cellulo Condensate Analysis
     )
 
 Multi-Channel Colocalization
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -106,7 +106,7 @@ Multi-Channel Colocalization
     )
 
 Example Datasets
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 Download sample data to try these workflows:
 

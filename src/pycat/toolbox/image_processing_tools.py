@@ -52,9 +52,11 @@ def apply_rescale_intensity(image, out_min=None, out_max=None):
     ----------
     image : numpy.ndarray
         The input image whose intensities are to be rescaled.
+
     out_min : float, optional
         The minimum intensity value for the output image. If not provided, defaults to the minimum value
         supported by the input image's data type.
+
     out_max : float, optional
         The maximum intensity value for the output image. If not provided, defaults to the maximum value
         supported by the input image's data type.
@@ -70,6 +72,7 @@ def apply_rescale_intensity(image, out_min=None, out_max=None):
     Also, ensure that the output range does not exceed the input image's data type range; for example,
     scaling an 8-bit image to values outside 0-255 will lead to clipping and potential data loss.
     """
+
 
     input_dtype = str(image.dtype)  # Store the input image data type
 
@@ -121,13 +124,17 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     -----
     It is assumed that `out_min_input` and `out_max_input` are components of a graphical user interface and can retrieve
     textual input from the user, which is then converted to floating point values for the rescaling function. 
-    
-    -Error handling for digit inputs should be added. Like the below example code.
-    # Ensure the input is valid and convert to an integer
-    if new_label_input.text() == "" or not new_label_input.text().isdigit():
-        print("Please enter a valid label value.")
-        return
+
+    Error handling for digit inputs should be added. For example:
+
+    .. code-block:: python
+
+        # Ensure the input is valid and convert to an integer
+        if new_label_input.text() == "" or not new_label_input.text().isdigit():
+            print("Please enter a valid label value.")
+            return
     """
+
 
     active_layer = viewer.layers.selection.active
     # Check if their is an active layer, and that it is a Napari image layer
@@ -771,7 +778,7 @@ def run_clahe(clip_input, k_size_input, viewer):
 def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
     """
     Performs Deblurring by Pixel Reassignment, adapted from MATLAB code, enhancing microscopy image quality by reducing
-    blurriness and improving visualization of microscopic entities [1]_.
+    blurriness and improving visualization of microscopic entities [dpr_1]_.
 
     Parameters
     ----------
@@ -799,7 +806,7 @@ def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
 
     References
     ----------
-    .. [1] MATLAB code source: [DPR Project](https://github.com/biomicroscopy/DPR-Project)
+    .. [dpr_1] MATLAB code source: [DPR Project](https://github.com/biomicroscopy/DPR-Project)
         - Related paper: "Advanced Photonics, Vol. 5, Issue 6, 066004 (October 2023)", available at https://doi.org/10.1117/1.AP.5.6.066004
     """
 
@@ -1300,7 +1307,7 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
 
 def wbns_func(img, psf_px_resolution, noise_lvl):
     """
-    Wrapper function for wavelet-based background and noise subtraction (WBNS), adapted from [1]_. 
+    Wrapper function for wavelet-based background and noise subtraction (WBNS), adapted from [wbns_1]_. 
     It adjusts image dimensions for compatibility, performs background and noise subtraction using 
     wavelet transforms, and restores original dimensions, improving image clarity.
 
@@ -1332,7 +1339,7 @@ def wbns_func(img, psf_px_resolution, noise_lvl):
     
     References
     ----------
-    .. [1]  Original Python code: [HuepfelM WBNS](https://github.com/NienhausLabKIT/HuepfelM/blob/master/WBNS/python_script/WBNS.py)
+    .. [wbns_1]  Original Python code: [HuepfelM WBNS](https://github.com/NienhausLabKIT/HuepfelM/blob/master/WBNS/python_script/WBNS.py)
         - Related paper: Biomed. Opt. Express 12, 969-980 (2021), [DOI](https://doi.org/10.1364/BOE.413181)
     """   
 
