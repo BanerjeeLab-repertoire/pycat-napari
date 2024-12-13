@@ -8,7 +8,7 @@
 
 ![PyCAT Logo](src/pycat/icons/pycat_logo_512.png)
 
-PyCAT (Python Condensate Analysis Toolbox) is an open-source application built on [napari](https://napari.org/) for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization.
+PyCAT (Python Condensate Analysis Toolbox) is an open-source application built on [napari](https://napari.org/) for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization. PyCAT aims to provide a low/no-code solution, accessible to researchers with varying levels of programming experience.
 
 ## Table of Contents
 
@@ -27,12 +27,14 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 
 PyCAT-Napari provides comprehensive tools for biological image analysis:
 
-| Feature Category | Capabilities | Requirements |
-|-----------------|--------------|--------------|
-| Image Processing | - Condensate detection and segmentation<br>- Fluorescence intensity analysis<br>- Multi-channel analysis | Basic |
-| Data Analysis | - Feature extraction<br>- Measurement tools<br>- Statistical analysis | Basic |
-| Data Export | - CSV export<br>- Excel compatibility<br>- Figure generation | Basic |
-| Advanced Tools | - Additional bio-image analysis tools<br>- Extended functionality | [devbio] extra |
+| Feature Category | Capabilities                                       | Requirements        |
+|------------------|----------------------------------------------------|---------------------|
+| Image Processing | - Condensate detection and segmentation<br>- Fluorescence intensity analysis<br>- Multi-channel analysis | Basic               |
+| Data Analysis    | - Feature extraction<br>- Measurement tools<br>- Statistical analysis | Basic               |
+| Data Export      | - Dataframe CSV export<br>- Excel compatibility<br>- Figure generation | Basic               |
+| Advanced Tools   | - Additional bio-image analysis tools<br>- Extended functionality | `[devbio-napari]` extra |
+
+*`[devbio-napari] extra` refers to optional dependencies installed with `pip install "pycat-napari[devbio-napari]"` for enhanced functionality.*
 
 ## System Requirements
 
@@ -54,7 +56,7 @@ PyCAT-Napari provides comprehensive tools for biological image analysis:
 - Disk Space: ~2GB (including dependencies)
 - GPU: Not required (CPU-only processing)
 
-## Quick Start
+## Getting Started
 
 PyCAT requires Python 3.9 and a package/environment manager. We recommend using Mambaforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
 
@@ -103,11 +105,12 @@ Python environments help you:
 - Ensure reproducibility
 
 Package Manager Choice
-> 💡 **Why Mambaforge?** While Anaconda is popular, Mambaforge offers:
-> - Faster package installation and dependency resolution
-> - Lighter initial installation (no bloat)
-> - Same conda commands you may already know
-> - Everything you need, nothing you don't
+> 💡 **Why Mambaforge?**  
+> Mambaforge is a lightweight distribution of Conda, offering faster package installation and fewer pre-installed packages.  
+> **Key Advantages:**  
+> - Quicker dependency resolution  
+> - Minimal initial install (no unnecessary extras)  
+> - Fully compatible with conda commands (just use `mamba` in place of `conda`)
 
 Already have Anaconda? That's fine! You can skip the Mambaforge installation and use your existing setup.
 
@@ -127,7 +130,7 @@ python --version  # Should show Python 3.9.x
 
 ### Basic Installation
 
-1. Create and activate a new environment:
+Create and activate a new environment:
 ```bash
 # Create environment
 conda create -n pycat-env python=3.9
@@ -136,18 +139,11 @@ conda create -n pycat-env python=3.9
 conda activate pycat-env
 ```
 
-2. Install PyCAT-Napari:
-```bash
-pip install pycat-napari
-```
-
-### Platform-Specific Installations
-
 #### Windows
 ```bash
 pip install pycat-napari
 ```
-Note: The application logo may not display correctly on Windows.
+Note: On Windows, due to some platform-specific rendering quirks, the application logo may not display correctly. This is purely cosmetic and does not affect functionality.
 
 #### Mac M1/ARM
 ```bash
@@ -156,6 +152,8 @@ pip install "pycat-napari[arm-mac]"
 
 ### Optional Features
 
+You can install PyCAt with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
+
 ```bash
 # Development tools
 pip install "pycat-napari[dev]"
@@ -163,12 +161,16 @@ pip install "pycat-napari[dev]"
 # Additional bio-image analysis tools (recommended)
 pip install "pycat-napari[devbio-napari]"
 ```
+> 💡 **Tip**: You can designate multiple optional dependencies by separating them with a comma
+   ```bash
+   # Install dev tools on an ARM Mac
+   pip install "pycat-napari[arm-mac, dev]"
+   ```
 
-The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
 
 ### Alternative Installation Methods
 
-💡 If you encounter issues with the standard installation, use our tested environment files. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request):
+If you encounter issues with the standard installation, use our tested environment files located in the config/ folder. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request) to provide you with the same environment we developed and ran in. 
 
 ```bash
 # Windows
@@ -197,33 +199,6 @@ python -c "import pycat; print('PyCAT import successful!')"
 run-pycat  # Should open the GUI window
 ```
 
-#### 2. Optional Test Suite
-
-PyCAT comes with a basic test suite covering core functionality:
-```bash
-# Install test dependencies if you haven't
-pip install "pycat-napari[test]"
-
-# Run all tests with coverage report
-pytest
-```
-
-The test suite checks:
-
-- Package imports and resource accessibility
-- GUI initialization (non-interactive tests only)
-- Core image processing functions
-- Data management and file I/O
-- Feature analysis tools
-
-💡 Note: GUI-interactive tests are skipped as they require manual interaction.
-
-3. What Success Looks Like
- >- All import tests pass
- >- Basic GUI launches without errors
- >- Image processing tests complete successfully
- >- No failures in core functionality tests
-
 If you encounter any failures, check:
 
 1. Python version (must be 3.9.x)
@@ -234,45 +209,136 @@ If you encounter any failures, check:
 
 Still having problems installing or running the program? Open a github issue. If you need urgent help, reach out to us and we will try to get back to you as soon as possible. 
 
-
-## Getting Started
-
 ## 🛠️ Usage
 
-PyCAT-Napari offers two ways to analyze your data: through a user-friendly GUI or programmatically via Python code.
+PyCAT-Napari offers two ways to analyze your data: through a user-friendly GUI or programmatically via Python code. PyCAT was developed as a low/no-code solution to image analysis so usage of the GUI is recommedned. API usage has not been thoroughly tested however many core functions are modular and should work via API. 
 
 ### GUI Application
 
-[Screenshot: PyCAT main interface with key areas labeled]
+![PyCAT main interface with key areas labeled](./assets/screenshots/Viewer_and_menu_highlights.png)
 
 Launch PyCAT's graphical interface with:
 ```bash
 run-pycat
 ```
 
-#### Basic GUI Workflow
+A blank Napari viewer with added menu items on the right will open up for you. In the image above the added menus have been expanded and color coded.
+- 🟦 **Analysis Methods** - provides pre-made pipelines offering tools and outputs depending on the given method that you choose.
+- 🟩 **Toolbox** - is a menu full of all of the individual functions and tools in PyCAT, for novel algorithm experimentation and analysis workflow customization.
+- 🟥 **Open/Save File(s)** - handles image and data input/output for PyCAT, using AICSImageIO to read various microscope and metadata formats, and storing the information in PyCAT’s internal data structure.
+   - Note: you must use this and not the integrated Napari IO under the typical file open file save or the integrated drag and drop feature since they are not integrated with PyCATs internal data structure. 
 
-1. **Load Data**
-   - Click `File > Open` or drag-and-drop files
-   - Supported formats: TIFF, CZI, PNG, JPG
-   - Multiple files can be loaded simultaneously
+PyCAT-Napari integrates seamlessly with the Napari interface, providing users with a powerful and intuitive environment for image analysis. Napari's interface is designed to be user-friendly, resembling popular pixel or raster photo editors like MSPaint or Photoshop. So, if you've ever used a photo editor, the tools should be simple enough to acclimate to. 
 
-2. **View and Process**
-   - Use the layer list to manage loaded images
-   - Access tools through the left sidebar
-   - Adjust parameters in the right panel
+- 🟨 **Layer Tools** - where users can easily add or remove various layers such as images, shapes, and labels from the viewer. This feature allows for quick management of the visual elements, including the ability to hide or show layers using the eye icon.
+- 🟪 **Shape and Label Tools** - which include node tools for manipulating shape layers, as well as paint brush, eraser, and bucket tools for label layers. Users can also apply colormaps to images and change opacity to view overlapping images. 
 
-3. **Analyze**
-   - Select analysis methods from the Analysis menu
-   - Configure analysis parameters
-   - Results appear in new layers
 
-4. **Export**
-   - Save processed images via `File > Save`
-   - Export measurements as CSV/Excel
-   - Generate analysis reports
 
-[Screenshot: Annotated workflow example]
+
+
+
+#### Basic GUI Workflow 
+
+Once you have the application open, choose your analysis method from the menu. This populates the dock with a pre made analysis pipeline, even if you're doing your own algorithmic exploration, it is recomended to use general analysis for more robust integration with the internal PyCAT data strcutre. 
+
+PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of images is included in the folder assets/example analysis images/. The following is a basic example of a `Condensate Analysis` with this data. For a more comprehensive walkthrough of this example, please see our [API Documentation](https://pycat-napari.readthedocs.io/en/latest/). 
+
+**Load Data**
+
+   Open/Save File(s)
+   - Click `Open/Save File(s) > Open 2D Image(s)`
+      - Note: you must use this and not the integrated Napari IO under the typical file open file save or the integrated drag and drop feature since they are not integrated with PyCATs internal data structure. 
+      - Supported formats: TIFF, CZI, PNG, JPG
+   - Multiple files can be loaded simultaneously, multi-channel images or multiple selected files will be added the the viewer as separate layers
+   - Assign names to each channel in a dialog box for easier layer tracking
+   - In addition to the images, 2 shapes layers will be added for measuring object sizes
+
+![PyCAT main interface with image loaded](./assets/screenshots/opened_image_in_viewer.png)
+
+**View, Process, and analyze images** 
+
+1. **Draw Measurement Lines**
+   - Draw lines across characteristic objects on the shapes layers:
+     - **Cell Diameter**: For cell or nuclei diameters (or if in-vitro ~size of background features)
+     - **Object Diameter**: For condensate or subcellular object diameters
+   - Click "Measure Lines" to calculate diameters in both pixels and microns (if metadata is available).
+
+![PyCAT object measurement layers](./assets/screenshots/measuring_lines.png)
+
+   **Upscale Images (Optional)**
+   - If you are upscaling your images, you can multi-select the layers in the viewer and then click `Run Upscaling` button
+      - Upscaling can be useful for segmentation and pre-processing algorithms, however, it can also introduce noise artifcats, and should be considered appropriately and applied consistently. 
+
+2. **Preprocess Images**
+- Preprocessing operates on the active image layer (blue highlighted layer in layers panel on the left side)
+   - In the example, we do this on the GFP image
+   - Preprocessing steps include:
+     - White top-hat filtering
+     - Laplacian of Gaussian enhancement
+     - Wavelet-based noise reduction
+     - Gaussian smoothing
+     - Contrast-limited adaptive histogram equalization (CLAHE)
+
+4. **Background Removal**
+- Background removal operates on the active image layer (blue highlighted layer in layers panel on the left side)
+- In the example, we do this on the GFP image
+   - Background removal consists of:
+     - Rolling ball background removal
+     - Gaussian background subtraction and division
+     - Gabor filtering
+
+![PyCAT preprocessed and bacground removed image](./assets/screenshots/preprocessed_images.png)
+
+5. **Primary Mask Generation**
+   - Use Cellpose or Random Forest for cell/nuclei segmentation:
+     - Select the primary object image (DAPI, Hoechst, etc.) for segmentation in the respective dropdown.
+     - Click `Run Cellpose`
+     - See full walkthrough for example of RF classifier
+
+6. **Cell/Nuclei Analysis**
+   - Measure various properties of the primary object mask
+      - In the example, we do this on the GFP image (we always measure off of the unaltered image or in the case of this example the unaltered, upscaled, image)
+   - **Optional Mask to exclude**
+      - Create a blank labels layer to mark structures to omit (e.g., nucleoli, cytoplasm, etc.).
+   - Select the primary mask, objects to omit (optionally), and the image to measure on.
+   - Click "Run Cell Analyzer."
+
+![PyCAT cell segmentation and analysis](./assets/screenshots/cell_analyzer.png)
+
+7. **Condensate Segmentation**
+   - Choose the most processed image for segmentation and the unaltered image (in this examplke, the upscaled gfp image) to measure from, in the respective dropdowns
+   - Click "Run Condensate Segmentation."
+   - Two masks are generated:
+     - **Total Puncta Mask**: Over-segmented, unfiltered result.
+     - **Total Refined Puncta Mask**: Object-filtered for balanced accuracy.
+
+8. **Condensate Analysis**
+   - Choose a mask and make any final manual tweaks.
+   - Select the measurement image (in this examplke, the upscaled gfp image) and click "Run Condensate Analyzer."
+   - Outputs include:
+     - **Cell Data Frame**: Individual cell/nuclei/primary mask metrics
+     - **Puncta Data Frame**: Metrics for individual condensates or subcellular objects
+   - Visualization layers:
+     - Labeled puncta mask for each cell (where the objects share the same label as their parent cell)
+     - Side-by-side image with raw and segmentation overlay for domstrative purposes
+
+![PyCAT condensate segmentation](./assets/screenshots/condensate_segmentation.png)
+
+
+**Exporting Data**
+
+   Save Results and Clear the Viewer
+   - To export analyzed images, data, and masks, navigate to `Open/Save File(s) > Save and Clear`
+   - Select from all active layers, and internal dataframes to export:
+     - Images as .tiff
+     - Masks as .png
+     - Data Frames (cell and/or puncta) as .csv
+   - Choose between "Clear Only Saved" or "Clear All" to reset PyCAT for the next analysis.
+
+![PyCAT condensate segmentation](./assets/screenshots/save_and_clear_popup.png)
+
+
 
 ### Programmatic API
 
@@ -283,126 +349,60 @@ For automated analysis or integration into existing workflows:
 from pycat import run_pycat_func
 run_pycat_func()
 
-#or 
+# or 
 
-# Use analysis tools programmatically
-import pycat
-from pycat.analysis import process_image  # Example import
+# Use processing tools programmatically
+import numpy as np
+from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 
-# Load and process an image
-image_path = "my_image.tif"
-results = process_image(
-    image_path,
-    method="condensate_detection",
-    parameters={"threshold": 0.5}
-)
+# Load your image (using your preferred method)
+image = np.array([...])  # Your image data
 
-# Access results
-measurements = results.measurements
-processed_image = results.image
+# Process the image
+# Rescale intensity to full range of image's data type
+processed_image = apply_rescale_intensity(image)
 
-# Save results
-results.save("output_directory")
-```
-
-> 💡 **Tip**: While both interfaces offer the same capabilities, the GUI is recommended for exploratory analysis and parameter optimization, while the API is ideal for batch processing and reproducible workflows.
-
-For detailed API documentation, see our [API Reference](link-to-docs).
-
-
-
-
-
-## 📊 Example Workflows
-
-PyCAT includes several pre-configured workflows for common analysis scenarios. Here are some typical use cases:
-
-### In-Cellulo Condensate Analysis
-
-[Screenshot: Single condensate analysis workflow showing input → processing → results]
-
-```python
-# Example code snippet
-from pycat import analyze_single_condensate
-
-results = analyze_single_condensate(
-    image_path="sample.tif",
-    channel=0,  # First channel
-    roi_size=50  # pixels
+# Or specify custom intensity range
+processed_image = apply_rescale_intensity(
+    image,
+    out_min=0,      # Minimum intensity value
+    out_max=65535   # Maximum intensity value (e.g., for 16-bit image)
 )
 ```
 
-#### Typical Steps:
-1. Load fluorescence microscopy image
-2. Select region of interest (ROI)
-3. Run intensity analysis
-4. Extract measurements
-5. Generate visualizations
-
-### Multi-Channel Colocalization
-
-[Screenshot: Multi-channel analysis showing overlay and correlation plots]
-
-```python
-# Example code snippet
-from pycat import analyze_colocalization
-
-results = analyze_colocalization(
-    image_path="multi_channel.tif",
-    channels=[0, 1],  # Analyze first two channels
-    method="pearson"  # Correlation method
-)
-```
-
-#### Key Features:
-- Automatic channel alignment
-- Multiple correlation metrics
-- Statistical significance testing
-- Publication-ready figures
-
-### Example Datasets
-
-Download sample data to try these workflows:
-- `example_single.tif`: Single condensate example
-- `example_multi.tif`: Multi-channel example
-- `example_batch/`: Batch processing example set
-
-> 💡 **Note**: Example datasets include both raw data and expected results for validation.
-
-[Link to example data repository]
-
+> 💡 **Tip**: PyCAT is designed primarily as a low/no-code solution for image analysis, making the GUI the recommended interface for most users. While the API offers modular access to core functions, it hasn't been extensively tested, so users should proceed with caution when integrating it into programmatic workflows. Running the PyCAT GUI should not be done in jupyter notebooks as there are PyQT and UI related issues that can cause downstream bugs. 
 
 
 ## 📘 Documentation
 
 > 🚧 Full documentation is in progress. Please check back soon for complete docs!
 
+For detailed API documentation, see our - [API Documentation](https://pycat-napari.readthedocs.io/en/latest/).
+
 Current documentation includes:
 
 ### Reference Materials
-- [API Documentation](link-to-api)
+
 
 ## 📓 Notebooks
 
-Interactive Jupyter notebooks demonstrate advanced analysis workflows:
+These notebooks included are exeamples of how to read, combine, and compare data output by PyCAT. They are for coding and methodology examples and are not as structured, documented, or tested as the main PyCAt application, but we thought they would be more useful than not.
 
 ### Analysis Examples
 - **pycat_plotting.ipynb**
-  - Combine and visualize results
-  - Generate publication-ready plots
-  - Estimate saturation concentrations (C-sat)
-  - Perform statistical analysis
+  - Loading and combining of output dataframes from multiple subfolders
+  - Generate scatter plots for multiple datasets
+  - Estimate saturation concentrations (C-sat) by boud, constrained, fitting of a generalized ReLU function parameterized by the x_0 intercept
+  - Add interactive data cursors identifying plot points to files and cells
+  - Create plots with customizable parameters
 
 ### Data Processing
 - **int_truncated_dfs.ipynb**
-  - Filter intensity ranges
-  - Batch process datasets
-  - Custom parameter selection
-
-> 💡 **Tip**: Install additional packages required by notebooks with:
-> ```bash
-> pip install pycat-napari[notebooks]
-> ```
+  - Filter datasets by intensity ranges
+  - Process cell and puncta dataframes
+  - Combine CSV files from multiple directories
+  - Generate truncated datasets based on custom parameters
+  - Export filtered results for further analysis
 
 ## 💻 Development
 
@@ -501,10 +501,11 @@ Current Version: 1.0.0
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ### Roadmap
-- Extended file format support
-- GPU acceleration
-- Advanced visualization tools
-- Expanded analysis methods
+- Extended file format support (including migration to BioIO) and integration with native napari IO
+- GPU acceleration/parallelization, and multi-threading, e.g. performance optimizations
+- 3D, Z-stack, time series support
+- Expanded analysis methods and more individual tools
+- ML classifiers and segmentation models trained on annotated data output by PyCAT
 
 ## 🙏 Acknowledgments
 
@@ -520,3 +521,5 @@ This project was developed by Christian Neureuter in the Condensate Biophysics L
 - Banerjee Lab members for testing and feedback
 - napari community for viewer framework
 - Open source community for supporting libraries
+
+For additional details, troubleshooting, and advanced features, see our [full documentation](https://pycat-napari.readthedocs.io/en/latest/).
