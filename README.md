@@ -1,8 +1,6 @@
 # PyCAT-Napari
-![License](https://img.shields.io/github/license/BanerjeeLab-repertoire/pycat-napari)
 ![PyPI](https://img.shields.io/pypi/v/pycat-napari)
 ![Python Version](https://img.shields.io/pypi/pyversions/pycat-napari)
-![Downloads](https://img.shields.io/pypi/dm/pycat-napari)
 ![GitHub Stars](https://img.shields.io/github/stars/BanerjeeLab-repertoire/pycat-napari)
 ![GitHub Forks](https://img.shields.io/github/forks/BanerjeeLab-repertoire/pycat-napari)
 
@@ -160,7 +158,7 @@ You can install PyCAT with additional tools, features, and packages. For example
 # Development tools
 pip install "pycat-napari[dev]"
 
-# Additional bio-image analysis tools (recommended)
+# Additional bio-image analysis tools
 pip install "pycat-napari[devbio-napari]"
 ```
 > 💡 **Tip**: You can designate multiple optional dependencies by separating them with a comma
@@ -471,6 +469,8 @@ PyCAT-Napari is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) 
 See [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) for details about dependencies.
 
 ## Citation
+
+This program was developed by Christian Neureuter as part of the Condensate Biophysics Lab (Banerjee Lab) at SUNY at Buffalo. This is just a placeholder citation until it is submitted for publication.
 
 If you use PyCAT-Napari in your research, please cite:
 
