@@ -827,13 +827,9 @@ def split_touching_objects(binary_mask, sigma=3.5):
     capabilities have been removed, as they were deemed unnecessary at the time of writing. Simple
     morphological opening and closing operations were introduced to refine the mask. For potential
     re-addition of 3D functionality, referring to the original source code is advised. Other changes
-    include syntactical and style improvements and enhanced documentation.
-
-    See Also
-    --------
-    The function is similar to the ImageJ watershed algorithm, and it is suitable for images
-    where nuclei or other objects are not overly dense [split_objects_2]_. For denser object configurations,
-    considering alternatives such as Stardist or Cellpose, may be beneficial [split_objects_3]_, [split_objects_4]_.
+    include syntactical and style improvements and enhanced documentation.The function is similar to the ImageJ watershed 
+    algorithm, and it is suitable for images where nuclei or other objects are not overly dense [split_objects_2]_. For 
+    denser object configurations, considering alternatives such as Stardist or Cellpose, may be beneficial [split_objects_3]_, [split_objects_4]_.
 
     References
     ----------

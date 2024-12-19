@@ -13,28 +13,30 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 ## Table of Contents
 
 - [Features](#features)
-- [Quick Start](#quick-start)
 - [System Requirements](#system-requirements)
-- [Installation](#installation)
 - [Getting Started](#getting-started)
-- [Examples](#examples)
+- [Installation](#installation)
+- [Usage](#usage)
 - [Documentation](#documentation)
+- [Notebooks](#notebooks)
+- [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
-- [Support](#support)
+- [Citation](#citation)
+- [Support & Troubleshooting](#support--troubleshooting)
+- [Project Status & Roadmap](#project-status--roadmap)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
-PyCAT-Napari provides comprehensive tools for biological image analysis:
+PyCAT-Napari provides a comprehensive suite of tools for biological image analysis, with a focus on in-cellulo and per-cell analyses.
 
-| Feature Category | Capabilities                                       | Requirements        |
-|------------------|----------------------------------------------------|---------------------|
-| Image Processing | - Condensate detection and segmentation<br>- Fluorescence intensity analysis<br>- Multi-channel analysis | Basic               |
-| Data Analysis    | - Feature extraction<br>- Measurement tools<br>- Statistical analysis | Basic               |
-| Data Export      | - Dataframe CSV export<br>- Excel compatibility<br>- Figure generation | Basic               |
-| Advanced Tools   | - Additional bio-image analysis tools<br>- Extended functionality | `[devbio-napari]` extra |
+| Category                     | Capabilities                                                                                              |
+|------------------------------|----------------------------------------------------------------------------------------------------------|
+| **Image Processing and Segmentation** | - Versatile toolbox with common image processing and analysis functions.<br>- Specialized condensate segmentation and object filtering algorithms.<br>- Optimized for in-cellulo analysis in challenging biological datasets. |
+| **Quantitative Region Analysis**      | - Simple and intuitive layer and ROI mask design.<br>- Extensive ROI feature analysis, including area, intensity, shape, texture, and more.<br>- Advanced colocalization analysis:<br>&nbsp;&nbsp;&nbsp;- Object-based metrics: Jaccard Index, Dice Coefficient, Mander’s coefficients, and distance analysis.<br>&nbsp;&nbsp;&nbsp;- Pixel-wise metrics: Pearson’s R, Spearman’s R, Li’s ICQ, and more.<br>&nbsp;&nbsp;&nbsp;- Modified Costes analysis: Automated thresholds and statistical significance testing.<br>- Correlation function analysis: Auto- and cross-correlation functions with Gaussian fitting. |
+| **Integrated Analysis Pipelines**     | - **Condensate Analysis Pipeline**: Tailored for in-cellulo biomolecular condensates.<br>- **Colocalization Analysis Pipeline**: Combines object-based and pixel-wise methods for robust colocalization studies.<br>- **General ROI Analysis Pipeline**: Flexible pipeline for exploratory measurements.<br>- **Fibril Analysis Pipeline**: Specialized for analyzing beta-amyloid fibers and fibril structures. |
 
-*`[devbio-napari] extra` refers to optional dependencies installed with `pip install "pycat-napari[devbio-napari]"` for enhanced functionality.*
 
 ## System Requirements
 
@@ -53,12 +55,12 @@ PyCAT-Napari provides comprehensive tools for biological image analysis:
 - **Python Version**: 3.9.x (Required)
   > ⚠️ **Important**: PyCAT-Napari is currently only compatible with Python 3.9. Other versions are not supported in this release. Future releases may aim to expand to more versions. 
 - RAM: 8GB (16GB recommended)
-- Disk Space: ~2GB (including dependencies)
+- Disk Space: ~100MB (including dependencies)
 - GPU: Not required (CPU-only processing)
 
 ## Getting Started
 
-PyCAT requires Python 3.9 and a package/environment manager. We recommend using Mambaforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
+PyCAT requires Python 3.9 and a package/environment manager. We recommend using Mambaforge/Miniforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
 
 ### Initial Setup Check
 
@@ -85,7 +87,7 @@ conda --version
 mamba --version
 ```
 
-If you get a version number: ✅ Proceed to installation
+If you get a version number: ✅ You have conda/mamba installed 
 
 If you get an error: ❌ See [Package Manager Installation](#package-manager-installation)
 
@@ -105,22 +107,22 @@ Python environments help you:
 - Ensure reproducibility
 
 Package Manager Choice
-> 💡 **Why Mambaforge?**  
-> Mambaforge is a lightweight distribution of Conda, offering faster package installation and fewer pre-installed packages.  
+> 💡 **Why Miniforge?**  
+> Miniforge is a lightweight distribution of Conda, offering faster package installation and fewer pre-installed packages Mambaforge is being deprecated in favor of Miniforge. 
 > **Key Advantages:**  
 > - Quicker dependency resolution  
 > - Minimal initial install (no unnecessary extras)  
 > - Fully compatible with conda commands (just use `mamba` in place of `conda`)
 
-Already have Anaconda? That's fine! You can skip the Mambaforge installation and use your existing setup.
+Already have Anaconda? That's fine! You can skip the Miniforge installation and use your existing setup.
 
 Basic environment commands:
 ```bash
 # Create new environment with Python 3.9
-conda create -n pycat-env python=3.9
+mamba create -n pycat-env python=3.9
 
 # Activate the environment
-conda activate pycat-env
+mamba activate pycat-env
 
 # Verify you're in the right environment
 python --version  # Should show Python 3.9.x
@@ -133,10 +135,10 @@ python --version  # Should show Python 3.9.x
 Create and activate a new environment:
 ```bash
 # Create environment
-conda create -n pycat-env python=3.9
+mamba create -n pycat-env python=3.9
 
 # Activate environment
-conda activate pycat-env
+mamba activate pycat-env
 ```
 
 #### Windows
@@ -152,7 +154,7 @@ pip install "pycat-napari[arm-mac]"
 
 ### Optional Features
 
-You can install PyCAt with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
+You can install PyCAT with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
 
 ```bash
 # Development tools
@@ -170,7 +172,7 @@ pip install "pycat-napari[devbio-napari]"
 
 ### Alternative Installation Methods
 
-If you encounter issues with the standard installation, use our tested environment files located in the config/ folder. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request) to provide you with the same environment we developed and ran in. 
+If you encounter issues with the standard installation, use our tested environment files located in the config/ folder. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request) to provide you with the same environment we developed and ran in. To use these environment files, just download the yaml file from the config folder on the github repo, then cd to the location of the downloaded file in your terminal, then run:
 
 ```bash
 # Windows
@@ -187,7 +189,7 @@ After installation, verify PyCAT-Napari is working correctly:
 #### 1. Basic Checks
 ```bash
 # Activate your environment
-conda activate pycat-env
+mamba activate pycat-env
 
 # Verify Python version
 python --version  # Should show 3.9.x
@@ -204,12 +206,12 @@ If you encounter any failures, check:
 1. Python version (must be 3.9.x)
 2. Environment activation
 3. Complete installation of dependencies
-4. Troubleshooting Guide
+4. [Troubleshooting Tips](#support--troubleshooting)
 5. Check the issues 
 
 Still having problems installing or running the program? Open a github issue. If you need urgent help, reach out to us and we will try to get back to you as soon as possible. 
 
-## 🛠️ Usage
+## Usage
 
 PyCAT-Napari offers two ways to analyze your data: through a user-friendly GUI or programmatically via Python code. PyCAT was developed as a low/no-code solution to image analysis so usage of the GUI is recommedned. API usage has not been thoroughly tested however many core functions are modular and should work via API. 
 
@@ -240,9 +242,9 @@ PyCAT-Napari integrates seamlessly with the Napari interface, providing users wi
 
 #### Basic GUI Workflow 
 
-Once you have the application open, choose your analysis method from the menu. This populates the dock with a pre made analysis pipeline, even if you're doing your own algorithmic exploration, it is recomended to use general analysis for more robust integration with the internal PyCAT data strcutre. 
+Once you have the application open, choose your analysis method from the menu. This populates the dock with a pre-made analysis pipeline, even if you're doing your own algorithmic exploration, it is recomended to use `General Analysis` for more robust integration with the internal PyCAT data strcutre. 
 
-PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of images is included in the folder assets/example analysis images/. The following is a basic example of a `Condensate Analysis` with this data. For a more comprehensive walkthrough of this example, please see our [API Documentation](https://pycat-napari.readthedocs.io/en/latest/). 
+PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of images are included in the folder assets/example analysis images/. The following is a basic example of a `Condensate Analysis` with this data. For a more comprehensive walkthrough of this example, please see our tutorial, under usage, in our full [API Documentation](https://pycat-napari.readthedocs.io/en/latest/). 
 
 **Load Data**
 
@@ -308,14 +310,14 @@ PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of image
 
 7. **Condensate Segmentation**
    - Choose the most processed image for segmentation and the unaltered image (in this examplke, the upscaled gfp image) to measure from, in the respective dropdowns
-   - Click "Run Condensate Segmentation."
+   - Click `Run Condensate Segmentation`
    - Two masks are generated:
      - **Total Puncta Mask**: Over-segmented, unfiltered result.
      - **Total Refined Puncta Mask**: Object-filtered for balanced accuracy.
 
 8. **Condensate Analysis**
    - Choose a mask and make any final manual tweaks.
-   - Select the measurement image (in this examplke, the upscaled gfp image) and click "Run Condensate Analyzer."
+   - Select the measurement image (in this examplke, the upscaled gfp image) and click `Run Condensate Analyzer`
    - Outputs include:
      - **Cell Data Frame**: Individual cell/nuclei/primary mask metrics
      - **Puncta Data Frame**: Metrics for individual condensates or subcellular objects
@@ -334,7 +336,7 @@ PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of image
      - Images as .tiff
      - Masks as .png
      - Data Frames (cell and/or puncta) as .csv
-   - Choose between "Clear Only Saved" or "Clear All" to reset PyCAT for the next analysis.
+   - Choose between `Clear Only Saved` or `Clear All` to reset PyCAT for the next analysis.
 
 ![PyCAT condensate segmentation](./assets/screenshots/save_and_clear_popup.png)
 
@@ -373,7 +375,7 @@ processed_image = apply_rescale_intensity(
 > 💡 **Tip**: PyCAT is designed primarily as a low/no-code solution for image analysis, making the GUI the recommended interface for most users. While the API offers modular access to core functions, it hasn't been extensively tested, so users should proceed with caution when integrating it into programmatic workflows. Running the PyCAT GUI should not be done in jupyter notebooks as there are PyQT and UI related issues that can cause downstream bugs. 
 
 
-## 📘 Documentation
+## Documentation
 
 > 🚧 Full documentation is in progress. Please check back soon for complete docs!
 
@@ -384,9 +386,9 @@ Current documentation includes:
 ### Reference Materials
 
 
-## 📓 Notebooks
+## Notebooks
 
-These notebooks included are exeamples of how to read, combine, and compare data output by PyCAT. They are for coding and methodology examples and are not as structured, documented, or tested as the main PyCAt application, but we thought they would be more useful than not.
+The notebooks included are examples of how to read, combine, and compare data output by PyCAT. They are for coding and methodology examples and are not as structured, documented, or tested as the main PyCAT application, but we thought they would be more useful than not.
 
 ### Analysis Examples
 - **pycat_plotting.ipynb**
@@ -404,7 +406,15 @@ These notebooks included are exeamples of how to read, combine, and compare data
   - Generate truncated datasets based on custom parameters
   - Export filtered results for further analysis
 
-## 💻 Development
+### Synthetic Data Generation Notebook
+- **Synthetic Data Generation NB.ipynb**
+  - Load cell mask
+  - Generate a ground truth object mask 
+  - Generate a Perlin noise, background flourescence image
+  - Apply the cell mask to the noise and object mask
+  - Combine the background and objects where object intensity is determined by object size and local background intensity
+
+## Development
 
 ### Setting Up Development Environment
 
@@ -417,10 +427,12 @@ cd pycat-napari
 2. Create development environment:
 ```bash
 # Windows
-conda env create -f pycat-devbio-napari-env-x86-windows.yml
+mamba env create -f pycat-devbio-napari-env-x86-windows.yml
 
 # Mac M1/ARM
-conda env create -f pycat-devbio-napari-env-arm-mac.yml
+mamba env create -f pycat-devbio-napari-env-arm-mac.yml
+
+mamba activate pycat-napari-env
 ```
 
 3. Install development dependencies:
@@ -434,10 +446,10 @@ pip install -e ".[dev]"
 pip install -e ".[test]"
 
 # Run tests with coverage
-pytest
+pytest --cov=pycat_napari tests/
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -447,14 +459,14 @@ Key areas for contribution:
 - Test coverage expansion
 - Platform compatibility testing
 
-## 📄 License
+## License
 
 PyCAT-Napari is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 
 ### Third-Party Libraries
 See [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) for details about dependencies.
 
-## 📚 Citation
+## Citation
 
 If you use PyCAT-Napari in your research, please cite:
 
@@ -468,7 +480,7 @@ If you use PyCAT-Napari in your research, please cite:
 }
 ```
 
-## 🆘 Support & Troubleshooting
+## Support & Troubleshooting
 
 ### Common Issues
 
@@ -478,22 +490,24 @@ If you use PyCAT-Napari in your research, please cite:
    - Use provided environment files
 
 2. **GUI Issues**
-   - Update graphics drivers
    - Check PyQt5 installation
-   - Verify napari compatibility
+   - Update graphics drivers
+   - Verify you're not running the program from jupyter notebook
 
 3. **Analysis Errors**
    - Confirm input file format
    - Check memory availability
-   - Verify parameter ranges
+   - View traceback in napari or check your terminal for console errors
+
+If the above suggestions did not help, you can use the info below to open an issue or contact the maintainers. Modern AIs (ChatGPT, Claude, etc) are very good at troubleshooting installtion issues and error messages, and may be your best option for a fast solution to any non-critical issues. 
 
 ### Getting Help
 
 - Search [existing issues](https://github.com/BanerjeeLab-repertoire/pycat-napari/issues)
 - Open a [new issue](https://github.com/BanerjeeLab-repertoire/pycat-napari/issues/new)
-- Join our [discussion forum](link-to-forum)
+- Contact us at [banerjeelab.org](banerjeelab.org)
 
-## 🔄 Project Status & Roadmap
+## Project Status & Roadmap
 
 Current Version: 1.0.0
 
@@ -507,7 +521,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 - Expanded analysis methods and more individual tools
 - ML classifiers and segmentation models trained on annotated data output by PyCAT
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 This project was developed by Christian Neureuter in the Condensate Biophysics Lab (Banerjee Lab) at SUNY Buffalo.
 

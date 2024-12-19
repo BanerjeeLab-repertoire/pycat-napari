@@ -1,0 +1,128 @@
+.
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── MANIFEST.in
+├── README.md
+├── THIRD_PARTY_LICENSES.txt
+├── assets
+│   ├── example analysis images
+│   │   ├── Image 1 dapi.tif
+│   │   ├── Image 1.tif
+│   │   └── example analysis outputs
+│   │       ├── Image 1 dapi_cell_df.csv
+│   │       ├── Image 1 dapi_cell_labeled_puncta_mask.png
+│   │       ├── Image 1 dapi_labeled_cell_mask.png
+│   │       ├── Image 1 dapi_overlay_image.png
+│   │       ├── Image 1 dapi_puncta_df.csv
+│   │       ├── Image 1 dapi_total_puncta_mask.png
+│   │       └── Image 1 dapi_total_refined_puncta_mask.png
+│   └── screenshots
+│       ├── Viewer_and_menu_highlights.png
+│       ├── cell_analyzer.png
+│       ├── condensate_segmentation.png
+│       ├── measuring_lines.png
+│       ├── opened_image_in_viewer.png
+│       ├── preprocessed_images.png
+│       └── save_and_clear_popup.png
+├── config
+│   ├── pycat-devbio-napari-env-arm-mac.yaml
+│   ├── pycat-devbio-napari-env-x86-windows.yaml
+│   ├── pycat-napari-env-arm-mac.yaml
+│   ├── pycat-napari-env-x86-windows.yaml
+│   ├── requirements-arm-mac.txt
+│   ├── requirements-base.txt
+│   ├── requirements-devbio-napari-arm-mac.txt
+│   └── requirements-devbio-napari.txt
+├── docs
+│   ├── Makefile
+│   ├── logos
+│   │   ├── pycat_logo-2.png
+│   │   ├── pycat_logo.png
+│   │   ├── pycat_logo_1024.png
+│   │   ├── pycat_logo_256.png
+│   │   └── pycat_logo_512.png
+│   ├── make.bat
+│   ├── requirements.txt
+│   ├── source
+│   │   ├── _static
+│   │   │   ├── dark_mode.css
+│   │   │   └── pycat_logo_512.png
+│   │   ├── _templates
+│   │   │   └── autosummary
+│   │   │       └── module.rst
+│   │   ├── api
+│   │   │   ├── index.rst
+│   │   │   ├── pycat.central_manager.rst
+│   │   │   ├── pycat.data.rst
+│   │   │   ├── pycat.file_io.rst
+│   │   │   ├── pycat.run_pycat.rst
+│   │   │   ├── pycat.toolbox.rst
+│   │   │   ├── pycat.ui.rst
+│   │   │   └── pycat.utils.rst
+│   │   ├── conf.py
+│   │   ├── contributing.rst
+│   │   ├── examples.rst
+│   │   ├── features.rst
+│   │   ├── index.rst
+│   │   ├── installation.rst
+│   │   ├── pycat.rst
+│   │   ├── support.rst
+│   │   └── usage.rst
+│   └── test.txt
+├── meta.yaml
+├── notebooks
+│   ├── int_truncated_dfs.ipynb
+│   ├── pycat_conversion_factor_nb.ipynb
+│   └── pycat_plotting.ipynb
+├── pycat_napari-1.0.0-py3-none-any.whl
+├── pyproject.toml
+├── src
+│   └── pycat
+│       ├── __init__.py
+│       ├── central_manager.py
+│       ├── data
+│       │   ├── __init__.py
+│       │   └── data_modules.py
+│       ├── file_io
+│       │   ├── __init__.py
+│       │   └── file_io.py
+│       ├── icons
+│       │   ├── pycat_logo-2.png
+│       │   ├── pycat_logo.png
+│       │   ├── pycat_logo_1024.png
+│       │   ├── pycat_logo_256.png
+│       │   └── pycat_logo_512.png
+│       ├── run_pycat.py
+│       ├── toolbox
+│       │   ├── __init__.py
+│       │   ├── correlation_func_analysis_tools.py
+│       │   ├── data_viz_tools.py
+│       │   ├── feature_analysis_tools.py
+│       │   ├── image_processing_tools.py
+│       │   ├── label_and_mask_tools.py
+│       │   ├── layer_tools.py
+│       │   ├── obj_based_coloc_analysis_tools.py
+│       │   ├── pixel_wise_corr_analysis_tools.py
+│       │   └── segmentation_tools.py
+│       ├── ui
+│       │   ├── __init__.py
+│       │   ├── ui_modules.py
+│       │   └── ui_utils.py
+│       └── utils
+│           ├── __init__.py
+│           ├── general_utils.py
+│           └── math_utils.py
+├── structure.txt
+└── tests
+    ├── __init__.py
+    ├── test_central_manager.py
+    ├── test_data_management.py
+    ├── test_feature_analysis.py
+    ├── test_file_io.py
+    ├── test_general_utils.py
+    ├── test_image_processing.py
+    ├── test_import.py
+    └── test_run_pycat.py
+
+23 directories, 103 files
