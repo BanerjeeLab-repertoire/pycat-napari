@@ -1,70 +1,78 @@
-.. PyCAT-Napari documentation master file, created by
-   sphinx-quickstart on Wed Dec 11 13:34:54 2024.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. PyCAT-Napari documentation master file
 
+============================
 PyCAT-Napari Documentation
-===========================
-
-Welcome to the documentation for PyCAT-Napari, a Python Condensate Analysis Toolbox designed for bio-image analysis.
+============================
 
 
-Documentation-Note
-------------------
+.. image:: _static/pycat_logo_512.png
+   :alt: PyCAT Logo
+   :width: 250px
 
-> 🚧 **Full documentation is in progress. Please check back soon for complete docs!**
+**PyCAT (Python Condensate Analysis Toolbox)** is an open-source application built on `napari <https://napari.org/>`_ for analyzing biomolecular condensates in biological images. It provides a comprehensive suite of tools for fluorescence image analysis, particularly focused on condensate detection, measurement, and characterization. PyCAT aims to provide a low/no-code solution, accessible to researchers with varying levels of programming experience.
 
-
-Contents
---------
+Table of Contents
+-----------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Table of Contents:
 
-   modules
-   usage
    installation
+   usage/index
    features
-   examples
-   contributing
-   support
+   api/index
+   development/index
+   development/contributing
+   development/support
+   development/roadmap
+
 
 Features
 --------
 
-PyCAT-Napari provides comprehensive tools for biological image analysis, including:
+PyCAT-Napari offers a wide range of tools for biological image analysis, including but not limited to:
 
-- Condensate detection and segmentation
-- Fluorescence intensity analysis
-- Multi-channel analysis
-- Feature extraction and measurement tools
-- Data export to CSV and Excel
+* **Image Processing and Segmentation**: Versatile toolbox with common image processing and analysis functions. Specialized condensate segmentation and object filtering algorithms. Optimized for in-cellulo analysis in challenging biological datasets.
+* **Quantitative Region Analysis**: Simple and intuitive layer and ROI mask design. Extensive ROI feature analysis, including area, intensity, shape, texture, and more. Advanced colocalization analysis with object-based and pixel-wise methods.
+* **Integrated Analysis Pipelines**: 
+
+  * **Condensate Analysis Pipeline**: Tailored for in-cellulo biomolecular condensates.
+  * **Colocalization Analysis Pipeline**: Combines object-based and pixel-wise methods for robust colocalization studies.
+  * **General ROI Analysis Pipeline**: Flexible pipeline for various region of interest analyses.
+
+For a complete overview, see the :doc:`features` page.
 
 Installation
 ------------
 
-To install PyCAT-Napari, follow the instructions in the [Installation](installation) section of the documentation.
+Follow the :doc:`installation` guide to set up PyCAT-Napari on your system. It covers system requirements, installation methods, and verification steps.
 
-Getting Started
----------------
+Usage
+-----
 
-For a quick start, refer to the [Quick Start](usage) guide to set up your environment and run the application.
+PyCAT-Napari provides both a graphical user interface (GUI) and programmatic API access. The GUI is recommended for most users for an intuitive experience.
 
-Examples
---------
+Explore our tutorials and usage guides in the :doc:`usage/index` section.
 
-Explore various example workflows for common analysis scenarios in the [Examples](examples) section.
+Development
+-----------
+
+Interested in contributing or developing PyCAT-Napari further? Visit the :doc:`development/index` for information on setting up your development environment, guidelines, and more.
 
 Contributing
 ------------
 
-We welcome contributions! See the [Contributing](contributing) section for guidelines on how to get involved.
+We welcome contributions! Please see our :doc:`development/contributing` for details on how to contribute to PyCAT-Napari.
 
 Support
 -------
 
-For troubleshooting and support, please refer to the [Support](support) section.
+Need help or have questions? Check our :doc:`development/support` page for resources and troubleshooting assistance.
+
+Roadmap
+-------
+
+Interested in the future of PyCAT-Napari? View our :doc:`development/roadmap` to see planned features and improvements.
 
 Indices and Tables
 ------------------

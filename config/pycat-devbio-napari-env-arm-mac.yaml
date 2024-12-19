@@ -1,4 +1,4 @@
-name: pycat-napari-env-4
+name: pycat-napari-env
 channels:
   - conda-forge
 dependencies:
@@ -524,4 +524,4 @@ dependencies:
   - zstd=1.5.6=hb46c0d2_0
   - pip:
       - lxml-html-clean==0.1.1
-prefix: /Users/christian.neureuter/mambaforge/envs/pycat-napari-env-4
+prefix: /Users/christian.neureuter/mambaforge/envs/pycat-napari-env

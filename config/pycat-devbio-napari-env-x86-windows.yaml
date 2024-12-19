@@ -1,4 +1,4 @@
-name: pycat-napari-env-2
+name: pycat-napari-env
 channels:
   - pytorch
   - conda-forge
@@ -479,4 +479,4 @@ dependencies:
   - zlib=1.2.13
   - zlib-ng=2.0.7
   - zstd=1.5.6
-prefix: C:\Users\chris\anaconda3\envs\pycat-napari-env-2
+prefix: C:\Users\chris\anaconda3\envs\pycat-napari-env

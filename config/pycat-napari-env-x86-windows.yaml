@@ -1,4 +1,4 @@
-name: pycat_test
+name: pycat-env
 channels:
   - conda-forge
   - defaults
@@ -196,4 +196,4 @@ dependencies:
       - zarr==2.15.0
       - zict==3.0.0
       - zipp==3.18.2
-prefix: C:\Users\chris\anaconda3\envs\pycat_test
+prefix: C:\Users\chris\anaconda3\envs\pycat-env
