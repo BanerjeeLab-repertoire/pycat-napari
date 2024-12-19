@@ -75,7 +75,7 @@ python --version
 
 If you get a version number: ✅ You have Python installed
 
-If you get an error: ❌ See [Python Installation Guide](#python-installation)
+If you get an error: ❌ See [Python and Package Manager Installation Guide](https://pycat-napari.readthedocs.io/en/latest/installation.html#python-and-package-manager-installation) 
 
 #### 2. Do you have Conda or Mamba installed?
 
@@ -89,7 +89,7 @@ mamba --version
 
 If you get a version number: ✅ You have conda/mamba installed 
 
-If you get an error: ❌ See [Package Manager Installation](#package-manager-installation)
+If you get an error: ❌ See [Python and Package Manager Installation Guide](https://pycat-napari.readthedocs.io/en/latest/installation.html#python-and-package-manager-installation) 
 
 #### 3. Are you familiar with Python environments?
 
@@ -244,7 +244,7 @@ PyCAT-Napari integrates seamlessly with the Napari interface, providing users wi
 
 Once you have the application open, choose your analysis method from the menu. This populates the dock with a pre-made analysis pipeline, even if you're doing your own algorithmic exploration, it is recomended to use `General Analysis` for more robust integration with the internal PyCAT data strcutre. 
 
-PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of images are included in the folder assets/example analysis images/. The following is a basic example of a `Condensate Analysis` with this data. For a more comprehensive walkthrough of this example, please see our tutorial, under usage, in our full [API Documentation](https://pycat-napari.readthedocs.io/en/latest/). 
+PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of images are included in the folder assets/example analysis images/. The following is a basic example of a `Condensate Analysis` with this data. For a more comprehensive walkthrough of this example, please see our expanded [tutorial](https://pycat-napari.readthedocs.io/en/latest/usage/tutorials/nuclear_condensate_analysis_gui_tutorial.html) in our full [API Documentation](https://pycat-napari.readthedocs.io/en/latest/)
 
 **Load Data**
 
@@ -377,14 +377,18 @@ processed_image = apply_rescale_intensity(
 
 ## Documentation
 
-> 🚧 Full documentation is in progress. Please check back soon for complete docs!
-
-For detailed API documentation, see our - [API Documentation](https://pycat-napari.readthedocs.io/en/latest/).
+For more detailed and comprehehnsive documentation on everything from installation, to contributing, to our API documentation, see our full [Read the Docs Documentation](https://pycat-napari.readthedocs.io/en/latest/).
 
 Current documentation includes:
-
-### Reference Materials
-
+- Installation Guide
+- Usage Guide 
+   - Full tutorial for the included analysis walkthrough
+- Full feature descriptions 
+- API reference 
+- Development Guide
+   - Contributing Guide
+   - Support Information
+   - Roadmap/Future Improvement plans 
 
 ## Notebooks
 
@@ -499,7 +503,13 @@ If you use PyCAT-Napari in your research, please cite:
    - Check memory availability
    - View traceback in napari or check your terminal for console errors
 
+4. **Performance Issues**
+   - Slow processing, or spinnning wheel in Windows/Mac is normal for condensate segmentation
+      - Unfortunately, PyCAT 1.0 was not able to have much performance optimization due to timeline constraints of the project
+   - Check the terminal for the progress printouts of the analysis
+
 If the above suggestions did not help, you can use the info below to open an issue or contact the maintainers. Modern AIs (ChatGPT, Claude, etc) are very good at troubleshooting installtion issues and error messages, and may be your best option for a fast solution to any non-critical issues. 
+
 
 ### Getting Help
 
@@ -519,7 +529,8 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 - GPU acceleration/parallelization, and multi-threading, e.g. performance optimizations
 - 3D, Z-stack, time series support
 - Expanded analysis methods and more individual tools
-- ML classifiers and segmentation models trained on annotated data output by PyCAT
+- ML classifiers and segmentation models trained on annotated data output by PyCAT 
+- See our full [Roadmap Page](https://pycat-napari.readthedocs.io/en/latest/development/roadmap.html) for more detailed information and wish list
 
 ## Acknowledgments
 
