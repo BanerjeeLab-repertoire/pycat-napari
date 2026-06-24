@@ -638,10 +638,10 @@ def cellpose_segmentation(image, object_diameter):
     """
     
     # Initialize Cellpose with the preferred model for cell and nucleus segmentation.
-    model = models.Cellpose(model_type='cyto2') 
-    #model = models.Cellpose(model_type='nuclei') # Placeholders for future users to specify model type
-    #model = models.Cellpose(gpu=True, model_type='nuclei') # This just shows how to use GPU acceleration
-
+    model = models.CellposeModel(model_type='cyto2')
+    #model = models.CellposeModel(model_type='nuclei')
+    #model = models.CellposeModel(gpu=True, model_type='nuclei')
+    
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing
     img = sk.exposure.equalize_adapthist(img, kernel_size=object_diameter//2, clip_limit=0.0025)
@@ -650,7 +650,7 @@ def cellpose_segmentation(image, object_diameter):
 
     image_preprocessed = dtype_conversion_func(img, 'uint16') # Convert the image to uint16 for Cellpose
     # Apply Cellpose model to segment cells/nuclei.
-    masks, flows, styles, diams = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0], resample=True)
+    masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0])
 
     # Post-process segmentation masks to improve results.
     mask = masks > 0 # Ensure the mask is binary
