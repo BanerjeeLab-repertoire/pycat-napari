@@ -638,9 +638,9 @@ def cellpose_segmentation(image, object_diameter):
     """
     
     # Initialize Cellpose with the preferred model for cell and nucleus segmentation.
-    model = models.CellposeModel(model_type='cyto2')
-    #model = models.CellposeModel(model_type='nuclei')
-    #model = models.CellposeModel(gpu=True, model_type='nuclei')
+    model = models.CellposeModel(pretrained_model='cyto2')
+    #model = models.CellposeModel(pretrained_model='nuclei')
+    #model = models.CellposeModel(gpu=True, pretrained_model='nuclei')
     
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing
