@@ -1687,7 +1687,6 @@ class MenuManager:
         This method initializes and configures menus for analysis methods, toolbox functions,
         and file I/O operations, populating them with the relevant actions.
         """
-
         # Setup and populate the "Analysis Methods" menu
         self.analysis_methods_menu = self.viewer.window._qt_window.menuBar().addMenu('Analysis Methods')
         self._add_analysis_methods_to_menu()
@@ -1695,9 +1694,9 @@ class MenuManager:
         # Setup and populate the "Toolbox" menu with various tools and utilities
         self.toolbox_menu = self.viewer.window._qt_window.menuBar().addMenu('Toolbox')
         self._add_toolbox_to_menu()
-
+    
         # Setup and populate the "Open File(s)" menu with file I/O actions
-        self.file_menu = self.viewer.window._qt_window.menuBar().addMenu('Open/Save File(s)')
+        self.file_menu = self.viewer.window._qt_window.menuBar().addMenu('★ Open/Save File(s)')
         self._add_file_io_methods_to_menu()
 
     def make_lambda(self, action_method, kwargs):

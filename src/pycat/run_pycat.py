@@ -69,10 +69,33 @@ from pycat.central_manager import CentralManager
 
 
 
+def _prewarm_cellpose_model():
+    """
+    Pre-downloads and caches the Cellpose model on first launch so users don't experience
+    a silent hang the first time they click 'Run Cellpose' inside the GUI.
+    Progress output is printed to the terminal where run-pycat was invoked.
+    """
+    try:
+        from pathlib import Path
+        model_cache = Path.home() / '.cellpose' / 'models' / 'cyto2'
+        if model_cache.exists():
+            print("Cellpose model already cached, skipping download.")
+            return
+        print("Cellpose model not found in cache — downloading now (one-time setup, may take a minute)...")
+        from cellpose import models
+        models.CellposeModel(pretrained_model='cyto2')
+        print("Cellpose model downloaded and cached successfully.")
+    except Exception as e:
+        print(f"Warning: Could not pre-cache Cellpose model: {e}")
+        print("Cellpose will attempt to download the model on first use instead.")
+
+
 def run_pycat_func():
     """
     Function to run the PyCAT application by creating a napari viewer instance and initializing the CentralManager.
     """
+    _prewarm_cellpose_model()  # Cache Cellpose model before GUI opens to avoid silent hang on first use
+
     app = QApplication(sys.argv)  # sys.argv is necessary for proper app initialization
 
     try:
@@ -101,7 +124,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
