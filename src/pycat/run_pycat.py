@@ -114,14 +114,13 @@ def run_pycat_func():
     print("Running PyCAT")  # Print message to console
     viewer = napari.Viewer(title="PyCAT-Napari")
     cm = CentralManager(viewer)
-    viewer._pycat_central_manager = cm  # allows batch processor to find file_io.filePath
 
-    # Batch processing setup
+    # Batch processing setup — stored on cm (plain object) not viewer (pydantic model)
     from pycat.batch_processor import BatchProcessor, add_batch_toolbar_button
     from pycat.batch_step_registry import register_all_steps
     bp = BatchProcessor(viewer)
     register_all_steps(bp)
-    viewer._pycat_batch_processor = bp
+    cm._pycat_batch_processor = bp   # readable via central_manager in widgets
     add_batch_toolbar_button(viewer, bp)
 
     napari.run()

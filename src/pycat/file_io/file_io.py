@@ -350,7 +350,7 @@ class FileIOClass:
         self.central_manager.active_data_class.data_repository['object_size'] = channel_data.shape[0] // 20
         self.central_manager.active_data_class.data_repository['cell_diameter'] = channel_data.shape[0] // 8
 
-        bp = getattr(self.viewer, '_pycat_batch_processor', None)
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
             bp.record('open_image', {
                 'file_path': self.filePath,
@@ -518,7 +518,7 @@ class FileIOClass:
         these items from the viewer and repository after saving. It supports flexible file naming and formats, ensuring 
         data is preserved in a user-specified manner.
         """
-        bp = getattr(viewer, '_pycat_batch_processor', None)
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
             bp.record('save_and_clear', {})
         self.viewer = viewer

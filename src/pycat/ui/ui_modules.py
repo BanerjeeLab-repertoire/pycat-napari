@@ -247,7 +247,7 @@ class BaseUIClass:
 
     def _record(self, step_name, params):
         """Record a pipeline step to the BatchProcessor if one is attached."""
-        bp = getattr(self.viewer, '_pycat_batch_processor', None)
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
             bp.record(step_name, params)
 
