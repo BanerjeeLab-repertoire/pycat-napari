@@ -52,6 +52,7 @@ from pycat.toolbox.label_and_mask_tools import (
 from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_layer_merge
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.data.data_modules import BaseDataClass
+from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
 
 
 class BaseUIClass:
@@ -244,6 +245,12 @@ class BaseUIClass:
             layout.setContentsMargins(1, 1, 1, 1)
 
 
+    def _record(self, step_name, params):
+        """Record a pipeline step to the BatchProcessor if one is attached."""
+        bp = getattr(self.viewer, '_pycat_batch_processor', None)
+        if bp:
+            bp.record(step_name, params)
+
 class ToolboxFunctionsUI(BaseUIClass):
     """
     Provides a user interface for various toolbox functions within a Napari viewer.
@@ -270,7 +277,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         super().__init__(viewer)
         self.central_manager = central_manager
         #self.central_manager.add_observer(self) # placeholder for possible future implementation of observer pattern
-
+        self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -317,8 +324,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         pre_process_layout = QVBoxLayout()
         self.add_text_label(pre_process_layout, 'Image Pre-processing', bold=True) # Add a widget title label
         pre_process_button = QPushButton("Pre-process Image") # Create a button widget
-        pre_process_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_pre_process_image, None, self.central_manager.active_data_class, self.viewer))
+        def _on_preprocess():
+            self.on_general_button_clicked(
+                run_pre_process_image, None, self.central_manager.active_data_class, self.viewer)
+            self._record('preprocessing', {})
+        pre_process_button.clicked.connect(_on_preprocess)
         pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
         pre_process_widget = QWidget()
         pre_process_widget.setLayout(pre_process_layout)
@@ -589,8 +599,16 @@ class ToolboxFunctionsUI(BaseUIClass):
         cellpose_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         cellpose_layout.addWidget(cellpose_dropdown) # Add the dropdown to the layout
         cellpose_button = QPushButton("Run Cellpose") # Create a button widget
-        cellpose_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_cellpose_segmentation, self.viewer, cellpose_dropdown, self.central_manager.active_data_class, self.viewer))
+        def _on_cellpose():
+            self.on_general_button_clicked(
+                run_cellpose_segmentation, self.viewer, cellpose_dropdown,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('cellpose_segmentation', {
+                'image_layer': cellpose_dropdown.currentText(),
+                'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
+                'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
+            })
+        cellpose_button.clicked.connect(_on_cellpose)
         cellpose_layout.addWidget(cellpose_button) # Add the button to the layout
         cellpose_widget = QWidget()
         cellpose_widget.setLayout(cellpose_layout)
@@ -674,8 +692,16 @@ class ToolboxFunctionsUI(BaseUIClass):
         process_cells_image2_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         process_cells_layout.addWidget(process_cells_image2_dropdown) # Add the dropdown to the layout
         process_cells_button = QPushButton("Run Condensate Segmentation") # Create a button widget
-        process_cells_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_segment_subcellular_objects, self.viewer, process_cells_image1_dropdown, process_cells_image2_dropdown, self.central_manager.active_data_class, self.viewer))
+        def _on_condensate_seg():
+            self.on_general_button_clicked(
+                run_segment_subcellular_objects, self.viewer,
+                process_cells_image1_dropdown, process_cells_image2_dropdown,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('condensate_segmentation', {
+                'seg_image_layer': process_cells_image1_dropdown.currentText(),
+                'measure_image_layer': process_cells_image2_dropdown.currentText(),
+            })
+        process_cells_button.clicked.connect(_on_condensate_seg)
         process_cells_layout.addWidget(process_cells_button) # Add the button to the layout
         process_cells_widget = QWidget()
         process_cells_widget.setLayout(process_cells_layout)
@@ -700,8 +726,18 @@ class ToolboxFunctionsUI(BaseUIClass):
         cell_segmentation_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         cell_segmentation_layout.addWidget(cell_segmentation_dropdown_images) # Add the dropdown to the layout
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
-        cell_analysis_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_cell_analysis_func, self.viewer, cell_segmentation_dropdown_labels, cell_segmentation_dropdown_omit, cell_segmentation_dropdown_images, self.central_manager.active_data_class, self.viewer))
+        def _on_cell_analysis():
+            self.on_general_button_clicked(
+                run_cell_analysis_func, self.viewer,
+                cell_segmentation_dropdown_labels, cell_segmentation_dropdown_omit,
+                cell_segmentation_dropdown_images,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('cell_analysis', {
+                'labels_layer': cell_segmentation_dropdown_labels.currentText(),
+                'omit_layer': cell_segmentation_dropdown_omit.currentText(),
+                'image_layer': cell_segmentation_dropdown_images.currentText(),
+            })
+        cell_analysis_button.clicked.connect(_on_cell_analysis)
         cell_segmentation_layout.addWidget(cell_analysis_button) # Add the button to the layout
         cell_segmentation_widget = QWidget()
         cell_segmentation_widget.setLayout(cell_segmentation_layout)
@@ -719,8 +755,16 @@ class ToolboxFunctionsUI(BaseUIClass):
         puncta_measure_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         measure_puncta_layout.addWidget(puncta_measure_dropdown_images) # Add the dropdown to the layout
         puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
-        puncta_measure_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_puncta_analysis_func, self.viewer, puncta_measure_dropdown_labels, puncta_measure_dropdown_images, self.central_manager.active_data_class, self.viewer))
+        def _on_puncta_analysis():
+            self.on_general_button_clicked(
+                run_puncta_analysis_func, self.viewer,
+                puncta_measure_dropdown_labels, puncta_measure_dropdown_images,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('condensate_analysis', {
+                'labels_layer': puncta_measure_dropdown_labels.currentText(),
+                'image_layer': puncta_measure_dropdown_images.currentText(),
+            })
+        puncta_measure_button.clicked.connect(_on_puncta_analysis)
         measure_puncta_layout.addWidget(puncta_measure_button) # Add the button to the layout
         measure_puncta_widget = QWidget()
         measure_puncta_widget.setLayout(measure_puncta_layout)
@@ -1882,6 +1926,7 @@ class MenuManager:
         autocorrelation_actions = {
             'Auto-Correlation Function Analysis': (self.central_manager.toolbox_functions_ui._add_run_autocorrelation_analysis, {'separate_widget': True})
         }
+        
         self._add_actions_to_menu(autocorrelation_actions, colocalization_tools_submenu)
 
         # Create a sub-sub-menu for pixel wise correlation analysis tools
@@ -1899,6 +1944,13 @@ class MenuManager:
             'Manders Colocalization Coefficient': (self.central_manager.toolbox_functions_ui._add_run_manders_coloc, {'separate_widget': True})
         }
         self._add_actions_to_menu(obj_coloc_tools_actions, obj_coloc_tools_sub_submenu)
+
+        # Create a sub-menu for spatial metrology tools
+        spatial_metrology_submenu = self.toolbox_menu.addMenu('Spatial Metrology')
+        spatial_metrology_actions = {
+            'Per-Cell Spatial ACF Analysis': (self.central_manager.toolbox_functions_ui._add_run_sacf_analysis, {'separate_widget': True})
+        }
+        self._add_actions_to_menu(spatial_metrology_actions, spatial_metrology_submenu)
 
         # Create a sub-menu for data visulaization tools
         data_visualization_submenu = self.toolbox_menu.addMenu('Data Visualization')

@@ -43,3 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (List any features that are deprecated and will be removed in future releases here)
 
 [1.0.0]: https://github.com/BanerjeeLab-repertoire/pycat-napari/releases/tag/v1.0.0
+
+## [1.0.2] - 2025-06-26
+### Added
+- Batch processing module (`batch_processor.py`): session config recording,
+  JSON export/import, and batch runner with folder picker and progress dialog
+- Spatial ACF analysis module (`spatial_acf_tools.py`): per-cell LIR-cropped
+  SACF, drawn-rectangle mode, and whole-image mode with Gaussian sigma fitting
+  and cluster diameter output per slice
+- `largestinteriorrectangle` added as a core dependency
+
+### Fixed
+- Cellpose v4 compatibility: `model_type` → `pretrained_model` argument
+- GPU acceleration: CUDA PyTorch install documented as primary method

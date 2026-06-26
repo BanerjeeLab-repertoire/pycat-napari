@@ -112,7 +112,18 @@ def run_pycat_func():
         print(f"An unexpected error occurred: {e}")
 
     print("Running PyCAT")  # Print message to console
-    CentralManager(napari.Viewer(title="PyCAT-Napari"))  # Initialize CentralManager and Napari Viewer
+    viewer = napari.Viewer(title="PyCAT-Napari")
+    cm = CentralManager(viewer)
+    viewer._pycat_central_manager = cm  # allows batch processor to find file_io.filePath
+
+    # Batch processing setup
+    from pycat.batch_processor import BatchProcessor, add_batch_toolbar_button
+    from pycat.batch_step_registry import register_all_steps
+    bp = BatchProcessor(viewer)
+    register_all_steps(bp)
+    viewer._pycat_batch_processor = bp
+    add_batch_toolbar_button(viewer, bp)
+
     napari.run()
 
 

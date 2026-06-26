@@ -115,7 +115,6 @@ class BatchWorker(QThread):
         config: Dict,
         output_dir: Path,
         step_registry: Dict[str, Callable],
-        viewer,
         parent=None,
     ):
         super().__init__(parent)
@@ -123,7 +122,6 @@ class BatchWorker(QThread):
         self.config = config
         self.output_dir = output_dir
         self.step_registry = step_registry
-        self.viewer = viewer
         self._cancelled = False
 
     def cancel(self):
@@ -165,20 +163,23 @@ class BatchWorker(QThread):
 
     def _process_file(self, image_path: Path, output_dir: Path):
         """
-        Replay each recorded step for a single image file.
+        Replay each recorded step for a single image file in headless mode.
 
-        The design here is intentionally open-ended: PyCAT's pipeline widgets
-        call functions through the step registry.  Each entry in config['steps']
-        has:
-            { "step": "<name>", "params": { ... } }
+        Steps communicate via a shared `state` dict rather than the napari viewer.
+        Each step function signature is:
+            fn(state: dict, image_path: Path, params: dict, output_dir: Path) -> None
 
-        The registry maps step names → callables that accept
-            (viewer, image_path, params, output_dir)
-        and return nothing (they operate via napari layers / pycat data store).
+        The state dict is initialised empty and built up as steps run:
+            state['image']         – raw image array (set by open_image)
+            state['preprocessed']  – processed image (set by preprocessing steps)
+            state['data_instance'] – BaseDataClass for this file
+            state['labeled_cells'] – labeled cell mask array
+            state['puncta_mask']   – refined puncta mask array
 
         Steps that are not registered are logged and skipped so that configs
         created in one PyCAT version remain forward-compatible.
         """
+        state: Dict = {}  # shared across all steps for this file
         for step_entry in self.config.get("steps", []):
             step_name = step_entry.get("step", "")
             params = step_entry.get("params", {})
@@ -186,7 +187,7 @@ class BatchWorker(QThread):
             if fn is None:
                 print(f"[PyCAT Batch] Step '{step_name}' not registered – skipping.")
                 continue
-            fn(self.viewer, image_path, params, output_dir)
+            fn(state, image_path, params, output_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +386,6 @@ class BatchDialog(QDialog):
             config=config,
             output_dir=output_dir,
             step_registry=self.processor.step_registry,
-            viewer=self.processor.viewer,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
