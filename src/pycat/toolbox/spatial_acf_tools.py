@@ -107,7 +107,9 @@ def _lir_crop(image, binary_mask):
     """
     rect = lir.lir(binary_mask.astype(bool))
     x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
-    if w < 4 or h < 4:
+    print(f"[PyCAT SACF]     LIR result: x={x} y={y} w={w} h={h} (mask area={binary_mask.sum()}px)")
+    if w < 2 or h < 2:
+        print(f"[PyCAT SACF]     LIR rectangle degenerate — cell mask may be too thin or curved.")
         return None, None
     return image[y:y + h, x:x + w].copy().astype(float), (x, y, w, h)
 
@@ -306,6 +308,7 @@ def sacf_lir_mode(stack, labeled_cell_mask, microns_per_pixel=1.0):
 
         for cell_label in cell_labels:
             binary_mask = labeled_cell_mask == cell_label
+            print(f"[PyCAT SACF]   Cell {cell_label}: mask pixels={binary_mask.sum()}")
             roi, rect = _lir_crop(slice_img, binary_mask)
             extra = {
                 'lir_x': rect[0] if rect else np.nan,
