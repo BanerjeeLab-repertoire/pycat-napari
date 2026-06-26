@@ -178,8 +178,34 @@ class BaseUIClass:
         # Filter out the dropdowns, so we don't pass them to the processing function
         non_dropdown_args = [arg for arg in args if not isinstance(arg, QComboBox)]
 
-        # Call the processing function with the extracted arguments
+        # Call the processing function and time it for performance metrics
+        import time
+        import pandas as pd
+        from pycat.data.data_modules import BaseDataClass
+        t0 = time.perf_counter()
         processing_function(*layers, *non_dropdown_args, **kwargs)
+        elapsed = time.perf_counter() - t0
+
+        # Store timing in data_instance if one is present in the args
+        data_instance = next(
+            (a for a in non_dropdown_args if isinstance(a, BaseDataClass)), None
+        )
+        if data_instance is not None:
+            step_name = getattr(processing_function, '__name__', str(processing_function))
+            image_shape = str(layers[0].data.shape) if layers else ''
+            new_row = pd.DataFrame([{
+                'step': step_name,
+                'elapsed_s': round(elapsed, 4),
+                'image_shape': image_shape,
+            }])
+            if 'timing_df' not in data_instance.data_repository:
+                data_instance.data_repository['timing_df'] = new_row
+            else:
+                data_instance.data_repository['timing_df'] = pd.concat(
+                    [data_instance.data_repository['timing_df'], new_row],
+                    ignore_index=True
+                )
+            print(f"[PyCAT Timing] {step_name}: {elapsed:.3f}s")
 
     def clear_dock(self):
         """

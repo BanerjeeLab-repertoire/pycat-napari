@@ -548,6 +548,21 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
 
     data_instance.data_repository['sacf_results_df'] = results_df
 
+    elapsed = time.perf_counter() - t0
+    new_timing_row = pd.DataFrame([{
+        'step': 'run_sacf_analysis',
+        'elapsed_s': round(elapsed, 4),
+        'image_shape': str(stack.shape),
+    }])
+    if 'timing_df' not in data_instance.data_repository:
+        data_instance.data_repository['timing_df'] = new_timing_row
+    else:
+        data_instance.data_repository['timing_df'] = pd.concat(
+            [data_instance.data_repository['timing_df'], new_timing_row],
+            ignore_index=True
+        )
+    print(f"[PyCAT Timing] run_sacf_analysis: {elapsed:.3f}s")
+
     summary = results_df.groupby('slice').agg(
         n_rois=('roi', 'count'),
         mean_diameter_x_um=('diameter_x_um', 'mean'),
