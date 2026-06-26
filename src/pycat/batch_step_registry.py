@@ -188,7 +188,7 @@ def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir
         microns_per_pixel=microns_per_pixel,
     )
     results_df.to_csv(output_dir / f"{image_path.stem}_sacf_results.csv", index=False)
-    data_instance.set_data('sacf_results_df', results_df)
+    data_instance.data_repository['sacf_results_df'] = results_df
     print(f"[PyCAT Batch]   SACF done: {len(results_df)} rows.")
 
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):

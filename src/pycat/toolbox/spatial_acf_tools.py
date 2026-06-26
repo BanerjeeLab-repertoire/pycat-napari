@@ -543,7 +543,6 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
         napari_show_warning(f"SACF: Unknown mode '{mode}'.")
         return
 
-    data_instance.set_data('sacf_results_df', results_df)
     data_instance.data_repository['sacf_results_df'] = results_df
 
     summary = results_df.groupby('slice').agg(
