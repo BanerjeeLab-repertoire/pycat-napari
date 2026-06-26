@@ -653,14 +653,18 @@ def cellpose_segmentation(image, object_diameter):
     masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0])
 
     # Post-process segmentation masks to improve results.
-    mask = masks > 0 # Ensure the mask is binary
+    binary_mask = masks > 0  # Binary version for morphological operations
     # Split objects that are erroneously connected. deprecated method replaced by cv2 binary watershed
     #split_mask = split_touching_objects(mask, sigma=object_diameter//4) 
-    split_mask = opencv_watershed_func(mask)
-    mask = binary_morph_operation(split_mask, iterations=7, element_size=3, element_shape='Disk', mode='Opening') 
-    mask = extend_mask_to_edges(mask, 3) # Extend the mask to eliminate the empty border cellpose leaves
+    split_mask = opencv_watershed_func(binary_mask)
+    refined_binary = binary_morph_operation(split_mask, iterations=7, element_size=3, element_shape='Disk', mode='Opening')
+    refined_binary = extend_mask_to_edges(refined_binary, 3)  # Extend the mask to eliminate the empty border cellpose leaves
 
-    return mask
+    # Re-label the refined binary mask so each cell retains a unique integer ID.
+    # This is required for per-cell analyses (SACF, cell analyzer, etc.).
+    labeled_mask = sk.measure.label(refined_binary)
+
+    return labeled_mask
 
 def run_cellpose_segmentation(image_layer, data_instance, viewer):
     """
