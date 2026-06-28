@@ -28,6 +28,7 @@ import math
 # Third party imports
 import napari 
 from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
     QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction)
 from PyQt5.QtCore import Qt
@@ -709,26 +710,96 @@ class ToolboxFunctionsUI(BaseUIClass):
 
     def _add_run_segment_subcellular_objects(self, layout=None, separate_widget=False):
         """Add a widget for subcellular object segmentation, optionally in a separate dock."""
+        from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QFormLayout, QGroupBox
         process_cells_layout = QVBoxLayout()
-        self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True) # Add widget title label
-        self.add_text_label(process_cells_layout, 'Select Pre-Processed Image to Segment') # Add a text label
-        process_cells_image1_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        process_cells_layout.addWidget(process_cells_image1_dropdown) # Add the dropdown to the layout
-        self.add_text_label(process_cells_layout, 'Select Fluorescence Image to Process') # Add a text label
-        process_cells_image2_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        process_cells_layout.addWidget(process_cells_image2_dropdown) # Add the dropdown to the layout
-        process_cells_button = QPushButton("Run Condensate Segmentation") # Create a button widget
+        self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
+        self.add_text_label(process_cells_layout, 'Select Pre-Processed Image to Segment')
+        process_cells_image1_dropdown = self.create_layer_dropdown(napari.layers.Image)
+        process_cells_layout.addWidget(process_cells_image1_dropdown)
+        self.add_text_label(process_cells_layout, 'Select Fluorescence Image to Process')
+        process_cells_image2_dropdown = self.create_layer_dropdown(napari.layers.Image)
+        process_cells_layout.addWidget(process_cells_image2_dropdown)
+
+        # ── Refinement parameters ──────────────────────────────────────────
+        params_group = QGroupBox("Refinement Parameters")
+        params_layout = QFormLayout()
+        params_group.setLayout(params_layout)
+
+        def _make_spinbox(min_val, max_val, default, step, decimals=2):
+            sb = QDoubleSpinBox()
+            sb.setRange(min_val, max_val)
+            sb.setValue(default)
+            sb.setSingleStep(step)
+            sb.setDecimals(decimals)
+            return sb
+
+        # Min spot radius — minimum puncta size in pixels
+        min_spot_spin = QDoubleSpinBox()
+        min_spot_spin.setRange(1, 20)
+        min_spot_spin.setValue(2)
+        min_spot_spin.setSingleStep(0.5)
+        min_spot_spin.setDecimals(1)
+        min_spot_spin.setToolTip("Minimum puncta radius in pixels. Increase to exclude small noise specks.")
+        params_layout.addRow("Min spot radius (px):", min_spot_spin)
+
+        # Kurtosis threshold — how peaked the intensity distribution must be
+        kurtosis_spin = _make_spinbox(-10.0, 0.0, -3.0, 0.5)
+        kurtosis_spin.setToolTip("Kurtosis threshold. More negative = keep flatter distributions (more permissive). Default -3.0. Try -5.0 to -8.0 if too many puncta are rejected.")
+        params_layout.addRow("Kurtosis threshold:", kurtosis_spin)
+
+        # Local SNR threshold
+        local_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
+        local_snr_spin.setToolTip("Local SNR threshold. Lower = keep dimmer puncta. Default 1.0. Try 0.5 if puncta in bright regions are being lost.")
+        params_layout.addRow("Local SNR threshold:", local_snr_spin)
+
+        # Global SNR threshold
+        global_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
+        global_snr_spin.setToolTip("Global SNR threshold relative to whole-cell background. Default 1.0. Lower to retain puncta in high-background cells.")
+        params_layout.addRow("Global SNR threshold:", global_snr_spin)
+
+        # Intensity scale (HWHM multiplier)
+        hwhm_spin = _make_spinbox(0.0, 5.0, 1.17, 0.1)
+        hwhm_spin.setToolTip("Intensity threshold scale (multiples of local background SD). Default 1.17 (HWHM). Lower = keep puncta closer to background intensity.")
+        params_layout.addRow("Intensity scale (×SD):", hwhm_spin)
+
+        # Max area fraction
+        max_area_spin = _make_spinbox(0.01, 1.0, 0.25, 0.05)
+        max_area_spin.setToolTip("Maximum puncta area as a fraction of cell area. Default 0.25. Increase if large condensates are being excluded.")
+        params_layout.addRow("Max area (fraction of cell):", max_area_spin)
+
+        process_cells_layout.addWidget(params_group)
+
+        # ── Run button ────────────────────────────────────────────────────
+        process_cells_button = QPushButton("Run Condensate Segmentation")
         def _on_condensate_seg():
+            import functools
+            # Partially apply the refinement params to run_segment_subcellular_objects
+            fn = functools.partial(
+                run_segment_subcellular_objects,
+                kurtosis_threshold=kurtosis_spin.value(),
+                local_snr_threshold=local_snr_spin.value(),
+                global_snr_threshold=global_snr_spin.value(),
+                intensity_hwhm_scale=hwhm_spin.value(),
+                max_area_fraction=max_area_spin.value(),
+                min_spot_radius=min_spot_spin.value(),
+            )
+            fn.__name__ = 'run_segment_subcellular_objects'
             self.on_general_button_clicked(
-                run_segment_subcellular_objects, self.viewer,
+                fn, self.viewer,
                 process_cells_image1_dropdown, process_cells_image2_dropdown,
                 self.central_manager.active_data_class, self.viewer)
             self._record('condensate_segmentation', {
                 'seg_image_layer': process_cells_image1_dropdown.currentText(),
                 'measure_image_layer': process_cells_image2_dropdown.currentText(),
+                'kurtosis_threshold': kurtosis_spin.value(),
+                'local_snr_threshold': local_snr_spin.value(),
+                'global_snr_threshold': global_snr_spin.value(),
+                'intensity_hwhm_scale': hwhm_spin.value(),
+                'max_area_fraction': max_area_spin.value(),
+                'min_spot_radius': min_spot_spin.value(),
             })
         process_cells_button.clicked.connect(_on_condensate_seg)
-        process_cells_layout.addWidget(process_cells_button) # Add the button to the layout
+        process_cells_layout.addWidget(process_cells_button)
         process_cells_widget = QWidget()
         process_cells_widget.setLayout(process_cells_layout)
         self._add_widget_to_layout_or_dock(process_cells_widget, layout, separate_widget, "Condensate Segmentation Dock")

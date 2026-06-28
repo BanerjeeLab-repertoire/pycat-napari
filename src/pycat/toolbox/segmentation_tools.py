@@ -862,7 +862,9 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
             viewer.add_labels(output_mask, name=f"Random Forest Segmentation {idx+1} on {image_layer.name}")
 
 
-def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius):
+def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius,
+                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
+                                     intensity_hwhm_scale=1.17, max_area_fraction=0.25):
     """
     Refines a segmentation mask by filtering based on intensity, size, shape, and local background
     conditions. It aims to ensure that detected objects are valid and significant relative to
@@ -979,27 +981,26 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
 
 
         # Setup local intensity based conditions
-        hwhm = np.sqrt(2*np.log(2)) # HWHM is approx 1.17 sigma
         local_intensity_condition = (
-            img_object_mean < (img_local_bg_mean + hwhm*img_local_bg_std) or # could use dilated object mean too
-            processed_object_mean < (processed_local_bg_mean + hwhm*processed_local_bg_std)
+            img_object_mean < (img_local_bg_mean + intensity_hwhm_scale*img_local_bg_std) or
+            processed_object_mean < (processed_local_bg_mean + intensity_hwhm_scale*processed_local_bg_std)
         )
 
         # Setup global intensity based conditions
         cell_intensity_condition = img_object_mean < cell_bg_mean
         # Setup kurtosis based conditions
-        kurtosis_condition = img_object_kurtosis < -3.0 or processed_object_kurtosis < -3.0
+        kurtosis_condition = img_object_kurtosis < kurtosis_threshold or processed_object_kurtosis < kurtosis_threshold
         # Setup area based conditions
         min_area = math.ceil(np.pi * min_spot_radius**2)
-        area_condition = df['area'].values[0] > cell_area/4 or df['area'].values[0] < min_area
+        area_condition = df['area'].values[0] > cell_area*max_area_fraction or df['area'].values[0] < min_area
         # Setup ellipticity based condition
         ellipticty_condition = ellipticity > 0.99
         # Setup gradient based condition
         gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
         # Setup 'local' SNR condition
-        local_snr_condition = (img_dilated_object_mean/(img_local_bg_std+np.finfo(np.float32).eps)) <= 1.0 
+        local_snr_condition = (img_dilated_object_mean/(img_local_bg_std+np.finfo(np.float32).eps)) <= local_snr_threshold
         # Setup 'global' SNR condition
-        global_snr_condition = (img_dilated_object_mean/(cell_bg_std+np.finfo(np.float32).eps)) <= 1.0
+        global_snr_condition = (img_dilated_object_mean/(cell_bg_std+np.finfo(np.float32).eps)) <= global_snr_threshold
 
         # If any of the conditions are met, remove the object from the mask
         if (local_intensity_condition or cell_intensity_condition 
@@ -1011,7 +1012,9 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
 
     return refined_puncta_mask
 
-def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_mask, min_spot_radius=2):
+def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_mask, min_spot_radius=2,
+                           kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
+                           intensity_hwhm_scale=1.17, max_area_fraction=0.25):
     """
     Refines a puncta mask through a series of image processing steps, including smoothing,
     morphological operations, refinement filtering, and watershed segmentation. This
@@ -1070,14 +1073,22 @@ def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_ma
     # Label the puncta within the mask for individual analysis
     labeled_puncta_mask = sk.measure.label(puncta_mask)
     # First round of puncta refinement using filtering criteria
-    refined_puncta_mask = puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius)
+    refined_puncta_mask = puncta_refinement_filtering_func(
+        original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius,
+        kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
+        global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
+        max_area_fraction=max_area_fraction)
     # Apply watershed segmentation to separate closely positioned puncta
     watershed_puncta_mask = apply_watershed_labeling(original_img, refined_puncta_mask, sigma=min_spot_radius/2)
     # Deprecated method involving cv2 watershed 
     #watershed_puncta_mask = opencv_watershed_func(refined_puncta_mask, dist_thresh=0.5, sigma=min_spot_radius, dilation_size=1, dilation_iterations=3)
     #watershed_puncta_mask = sk.measure.label(watershed_puncta_mask)
     # Second round of refinement after watershed segmentation
-    refined_puncta_mask = puncta_refinement_filtering_func(original_img, processed_img, refined_puncta_mask, cell_mask, watershed_puncta_mask, min_spot_radius)
+    refined_puncta_mask = puncta_refinement_filtering_func(
+        original_img, processed_img, refined_puncta_mask, cell_mask, watershed_puncta_mask, min_spot_radius,
+        kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
+        global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
+        max_area_fraction=max_area_fraction)
     # Final morphological opening to clean up the segmentation
     refined_mask = binary_morph_operation(refined_puncta_mask, iterations=1, element_size=1, element_shape='Disk', mode='Opening')
 
@@ -1170,7 +1181,9 @@ def cell_mask_stretching(image, cell_masks):
     return output_image
 
 
-def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None):
+def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
+                                kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
+                                intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -1208,40 +1221,63 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     # Convert images to float32 for consistent processing
     original_img = dtype_conversion_func(original_image, 'float32')
     pre_processed_img = dtype_conversion_func(pre_processed_image, 'float32')
-    cell_mask = cell_mask.astype(bool) # Ensure mask is boolean
+    cell_mask = cell_mask.astype(bool)  # Ensure mask is boolean
+
+    # ── Bounding-box crop ────────────────────────────────────────────────
+    # All expensive operations (bg removal, Felzenszwalb, Niblack/Sauvola)
+    # run on the full image even though only a small cell ROI is needed.
+    # Cropping to the bounding box first gives a speedup proportional to
+    # (image_area / cell_area) — typically 5-20x for 3 cells on 1024x1024.
+    rows = np.any(cell_mask, axis=1)
+    cols = np.any(cell_mask, axis=0)
+    r0, r1 = np.where(rows)[0][[0, -1]]
+    c0, c1 = np.where(cols)[0][[0, -1]]
+    # Add a border of ball_radius so edge effects don't corrupt the crop
+    pad = int(ball_radius)
+    r0p = max(0, r0 - pad);  r1p = min(cell_mask.shape[0], r1 + pad + 1)
+    c0p = max(0, c0 - pad);  c1p = min(cell_mask.shape[1], c1 + pad + 1)
+
+    orig_crop  = original_img[r0p:r1p, c0p:c1p]
+    proc_crop  = pre_processed_img[r0p:r1p, c0p:c1p]
+    mask_crop  = cell_mask[r0p:r1p, c0p:c1p]
 
     # Initialize a flag indicating whether to perform background removal
     perform_bg_removal = True
     # Check if conditions are met to potentially skip background removal
-    if cell_df is not None and not cell_df.empty: # Is no df, the user has not run cell analyzer
+    if cell_df is not None and not cell_df.empty:
         cell_kurt = cell_df.loc[cell_df['label'] == cell_label, 'img_kurtosis'].values
         cell_gaussian_snr = cell_df.loc[cell_df['label'] == cell_label, 'gaussian_snr_estimate'].values
-        # Check if kurtosis is NaN or Gaussian SNR is below 1.0
-        if np.isnan(cell_kurt[0]) or cell_gaussian_snr[0] < 1.0: # These values indicate nothing present in the cell
-            perform_bg_removal = False # So we can skip this and save processing time
+        if np.isnan(cell_kurt[0]) or cell_gaussian_snr[0] < 1.0:
+            perform_bg_removal = False
 
-    # Perform background removal
+    # Perform background removal on the cropped ROI
     if perform_bg_removal:
-        bg_removed_img = rb_gaussian_bg_removal_with_edge_enhancement(pre_processed_img, ball_radius, cell_mask)
+        bg_removed_crop = rb_gaussian_bg_removal_with_edge_enhancement(proc_crop, ball_radius, mask_crop)
     else:
-        bg_removed_img = np.zeros_like(original_img)
+        bg_removed_crop = np.zeros_like(orig_crop)
 
     # Check for contrast after bg removal
-    contrast_flag = check_contrast_func(bg_removed_img)
+    contrast_flag = check_contrast_func(bg_removed_crop)
     if contrast_flag:
         napari_show_info(f"Cell {cell_label} has low contrast, likely has no puncta...")
-        # If there is no contrast, return empty masks and skip the segmentation for faster processing
         puncta_mask = np.zeros_like(cell_mask)
         refined_puncta_mask = np.zeros_like(cell_mask)
     else:
-        # Call segmentation_func with the appropriate arguments
-        puncta_mask = fz_segmentation_and_binarization(bg_removed_img, cell_mask, ball_radius)
-        # Refine the puncta mask using custom filtering criteria, primarily based on local intensity aroudn the 'object'  
-        refined_puncta_mask = puncta_refinement_func(original_img, pre_processed_img, puncta_mask, cell_mask, min_spot_radius=2)
+        # Segment and refine on the cropped ROI
+        puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
+        refined_puncta_mask_crop = puncta_refinement_func(orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=2)
+
+        # Paste cropped results back into full-size output arrays
+        puncta_mask = np.zeros_like(cell_mask)
+        refined_puncta_mask = np.zeros_like(cell_mask)
+        puncta_mask[r0p:r1p, c0p:c1p] = puncta_mask_crop
+        refined_puncta_mask[r0p:r1p, c0p:c1p] = refined_puncta_mask_crop
 
     return refined_puncta_mask, puncta_mask
 
-def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer):
+def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer,
+                                    kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
+                                    intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -1315,7 +1351,11 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
         cell_mask_holder = cell_mask_holder.astype(bool)
 
         # Segment and refine puncta within the cell
-        refined_puncta_mask, puncta_mask = segment_subcellular_objects(original_img, contrast_stretched_img, cell_mask_holder, label, ball_radius, cell_df)    
+        refined_puncta_mask, puncta_mask = segment_subcellular_objects(
+            original_img, contrast_stretched_img, cell_mask_holder, label, ball_radius, cell_df,
+            kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
+            global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
+            max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 

@@ -253,7 +253,13 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
         cell_mask_holder = (labeled_cells == label).astype(bool)
         refined, unrefined = segment_subcellular_objects(
             original_image.copy(), CMS_img.copy(),
-            cell_mask_holder, label, ball_radius, cell_df
+            cell_mask_holder, label, ball_radius, cell_df,
+            kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
+            local_snr_threshold=params.get('local_snr_threshold', 1.0),
+            global_snr_threshold=params.get('global_snr_threshold', 1.0),
+            intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
+            max_area_fraction=params.get('max_area_fraction', 0.25),
+            min_spot_radius=params.get('min_spot_radius', 2),
         )
         total_puncta_mask |= unrefined
         total_refined_puncta_mask |= refined

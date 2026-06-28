@@ -33,11 +33,6 @@ import SimpleITK as sitk
 # Local application imports
 from pycat.utils.general_utils import dtype_conversion_func, get_default_intensity_range 
 from pycat.ui.ui_utils import add_image_with_default_colormap
-from pycat.toolbox.gpu_utils import (
-    GPU_AVAILABLE, gpu_pre_process_image, gpu_white_tophat,
-    gpu_grey_erosion, gpu_grey_dilation, gpu_gaussian_filter,
-    gpu_laplace_of_gaussian, gpu_rolling_ball_background,
-)
 
 
 
@@ -610,7 +605,7 @@ def apply_laplace_of_gauss_enhancement(image, sigma=3):
     
     # Shift the image to ensure all values are positive
     shifted_image = LoG_img + np.abs(np.min(LoG_img))
-    
+
     # Rescale the intensity to a narrow range to prepare for inversion
     rescaled_img = apply_rescale_intensity(shifted_image, out_min=0.0, out_max=0.1)
     
@@ -1298,7 +1293,7 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
     Background = waverecn(coeffs, 'db1')
     
     BG_unfiltered = Background.copy()
-    Background = gpu_gaussian_filter(Background.astype('float32'), sigma=2**num_levels)  # GPU-accelerated smoothing
+    Background = ndi.gaussian_filter(Background, sigma=2**num_levels) # Smooth the background with a gaussian filter w/ sigma=2^(#lvls) 
     
     # Modify coefficients for noise estimation and removal
     coeffs2[0] = np.ones_like(coeffs2[0]) # Set approximation coefficients to 1 (constant)
@@ -1609,19 +1604,14 @@ def pre_process_image(image, ball_radius, window_size):
     - Enhancing contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization).
     """
 
-    # Dispatch to GPU-accelerated pipeline when CuPy is available,
-    # falling back to the original CPU path automatically.
-    if GPU_AVAILABLE:
-        return gpu_pre_process_image(image, ball_radius, window_size)
-
-    # ── CPU path (original implementation) ──────────────────────────────
+    # ── CPU path ─────────────────────────────────────────────────────────
     input_dtype = str(image.dtype)  # Store original image data type for conversion back after processing
     img = dtype_conversion_func(image, output_bit_depth='float32') # Convert image data type to float32 for processing
 
     # Apply White Top Hat filter to highlight small elements in the image
     white_top_hat_img = ndi.white_tophat(img, footprint=sk.morphology.disk(ball_radius))
     rescaled_top_hat = apply_rescale_intensity(white_top_hat_img, out_min=0.3, out_max=1.0)
-    top_hat_enhanced_img = rescaled_top_hat * img 
+    top_hat_enhanced_img = rescaled_top_hat * img
 
     # Enhance the image using the Laplacian of Gaussian (LoG) filter
     _, inverted_LoG_img = apply_laplace_of_gauss_enhancement(img, sigma=3)
@@ -1685,8 +1675,17 @@ def run_pre_process_image(data_instance, viewer):
     
     # Retrieve the image and parameters for pre-processing from the data instance
     image = active_layer.data
-    ball_radius = data_instance.data_repository['ball_radius'] 
-    window_size = data_instance.data_repository['cell_diameter'] // 2
+    ball_radius = int(data_instance.data_repository['ball_radius'])
+    window_size = int(data_instance.data_repository['cell_diameter']) // 2
+
+    # Cap ball_radius relative to image size to prevent MemoryError on large/upscaled images.
+    # disk(r) creates a (2r+1)^2 footprint; scipy needs ~8x that in RAM for white_tophat.
+    # Limit to 5% of the smallest image dimension as a safe upper bound.
+    max_radius = max(4, int(min(image.shape[-2:]) * 0.05))
+    if ball_radius > max_radius:
+        print(f"[PyCAT] ball_radius {ball_radius} capped to {max_radius} for image shape {image.shape}")
+        ball_radius = max_radius
+    window_size = min(window_size, max_radius * 2)
 
     # Apply pre-processing to the selected image
     pre_processed_image = pre_process_image(image, ball_radius, window_size)

@@ -46,6 +46,16 @@ GPU_AVAILABLE: bool = False
 cp = None           # cupy module reference, set below if available
 cpnd = None         # cupyx.scipy.ndimage reference
 
+# Suppress CuPy's CUDA path warning — CuPy works via the driver even without
+# the full CUDA toolkit installed, so this warning is not actionable for most users.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore",
+    message="CUDA path could not be detected",
+    category=UserWarning,
+    module="cupy",
+)
+
 if os.environ.get("PYCAT_FORCE_CPU", "0") != "1":
     try:
         import cupy as _cp

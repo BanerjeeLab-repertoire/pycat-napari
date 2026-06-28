@@ -1,0 +1,305 @@
+"""
+PyCAT Numba JIT Acceleration Utilities
+=======================================
+Provides JIT-compiled versions of the most expensive pure-arithmetic
+operations in PyCAT's image processing pipeline using Numba.
+
+Numba compiles these functions to native machine code on the first call
+(per session), then runs at near-C speed on every subsequent call.
+Compilation is cached to disk so the second session onwards is instant.
+
+Targeted operations
+-------------------
+The PyWavelets wavedecn/waverecn calls and scipy morphological operations
+(white_tophat, gaussian_filter) are already written in C and cannot be
+accelerated further by Numba.  The functions here target the pure-NumPy
+arithmetic between those calls, which is where Python overhead accumulates:
+
+    - wbns_post_process        : bg subtraction, noise thresholding, clipping
+    - rescale_intensity_numba  : min-max rescaling
+    - invert_image_numba       : intensity inversion
+    - clip_to_zero_numba       : positivity constraint (clip negatives)
+    - top_hat_enhance_numba    : elementwise multiply of tophat × image
+
+All functions accept and return float32 NumPy arrays.
+
+Graceful fallback
+-----------------
+If Numba is not installed, every function falls back to a plain NumPy
+implementation transparently.  No calling code needs to change.
+
+Author
+------
+    Gable Wadsworth / Christian Neureuter, Banerjee Lab, SUNY Buffalo
+
+Date
+----
+    2025
+"""
+
+from __future__ import annotations
+import numpy as np
+
+# ---------------------------------------------------------------------------
+# Numba availability check
+# ---------------------------------------------------------------------------
+
+NUMBA_AVAILABLE: bool = False
+try:
+    import numba
+    from numba import njit, prange
+    NUMBA_AVAILABLE = True
+    print("[PyCAT Numba] Numba detected — JIT acceleration enabled.")
+except ImportError:
+    print("[PyCAT Numba] Numba not installed — using NumPy fallback.")
+    # Provide a no-op decorator so the rest of the file is syntax-valid
+    def njit(*args, **kwargs):
+        def decorator(fn):
+            return fn
+        return decorator if args and callable(args[0]) else decorator
+    prange = range
+
+
+# ---------------------------------------------------------------------------
+# JIT-compiled arithmetic kernels
+# ---------------------------------------------------------------------------
+
+@njit(cache=True, parallel=True, fastmath=True)
+def _rescale_intensity_kernel(image: np.ndarray,
+                               img_min: float,
+                               img_max: float,
+                               out_min: float,
+                               out_max: float) -> np.ndarray:
+    """Rescale image pixel values to [out_min, out_max].
+    Min/max passed in explicitly to avoid parallel reduction race condition.
+    """
+    result = np.empty_like(image)
+    h, w = image.shape
+    rng = img_max - img_min
+    out_rng = out_max - out_min
+
+    if rng == 0.0:
+        for i in prange(h):
+            for j in range(w):
+                result[i, j] = out_min
+    else:
+        scale = out_rng / rng
+        for i in prange(h):
+            for j in range(w):
+                result[i, j] = (image[i, j] - img_min) * scale + out_min
+
+    return result
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def _clip_to_zero_kernel(image: np.ndarray) -> np.ndarray:
+    """Clip all negative values to zero (positivity constraint)."""
+    result = np.empty_like(image)
+    h, w = image.shape
+    for i in prange(h):
+        for j in range(w):
+            v = image[i, j]
+            result[i, j] = v if v > 0.0 else 0.0
+    return result
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def _invert_kernel(image: np.ndarray, img_max: float) -> np.ndarray:
+    """Invert image: result = max_val - image.
+    Max passed in explicitly to avoid serial loop bottleneck.
+    """
+    result = np.empty_like(image)
+    h, w = image.shape
+    for i in prange(h):
+        for j in range(w):
+            result[i, j] = img_max - image[i, j]
+    return result
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def _elementwise_multiply_kernel(a: np.ndarray,
+                                  b: np.ndarray) -> np.ndarray:
+    """Elementwise multiply two same-shape float32 arrays."""
+    result = np.empty_like(a)
+    h, w = a.shape
+    for i in prange(h):
+        for j in range(w):
+            result[i, j] = a[i, j] * b[i, j]
+    return result
+
+
+@njit(cache=True, parallel=True, fastmath=True)
+def _wbns_post_process_kernel(img: np.ndarray,
+                               background: np.ndarray,
+                               noise_smooth: np.ndarray,
+                               bg_scale: float,
+                               noise_scale_bg: float,
+                               noise_scale_img: float,
+                               noise_threshold: float) -> tuple:
+    """
+    Combined WBNS post-processing kernel — all arithmetic in one JIT pass:
+      1. Noise thresholding
+      2. Background subtraction + positivity
+      3. Noise subtraction from background-corrected image + positivity
+      4. Noise subtraction from original image + positivity
+
+    Returns (bg_noise_corrected, noise_corrected).
+    """
+    h, w = img.shape
+    bg_noise_corrected = np.empty_like(img)
+    noise_corrected    = np.empty_like(img)
+
+    for i in prange(h):
+        for j in range(w):
+            ns = noise_smooth[i, j]
+            # Clip noise smooth to threshold
+            if ns > noise_threshold:
+                ns = noise_threshold
+
+            bg_sub = img[i, j] - bg_scale * background[i, j]
+            if bg_sub < 0.0:
+                bg_sub = 0.0
+
+            bgn = bg_sub - noise_scale_bg * ns
+            if bgn < 0.0:
+                bgn = 0.0
+            bg_noise_corrected[i, j] = bgn
+
+            nc = img[i, j] - noise_scale_img * ns
+            if nc < 0.0:
+                nc = 0.0
+            noise_corrected[i, j] = nc
+
+    return bg_noise_corrected, noise_corrected
+
+
+# ---------------------------------------------------------------------------
+# Public API — same interface as the original functions
+# ---------------------------------------------------------------------------
+
+def rescale_intensity_fast(image: np.ndarray,
+                            out_min: float = 0.0,
+                            out_max: float = 1.0) -> np.ndarray:
+    """
+    Numba-accelerated min-max intensity rescaling.
+    Drop-in replacement for apply_rescale_intensity(image, out_min, out_max).
+    Min/max computed in NumPy (safe, fast) then passed to parallel Numba kernel.
+    """
+    img = np.ascontiguousarray(image, dtype=np.float32)
+    img_min = float(img.min())
+    img_max = float(img.max())
+    if NUMBA_AVAILABLE:
+        return _rescale_intensity_kernel(img, img_min, img_max, float(out_min), float(out_max))
+    # NumPy fallback
+    if img_max == img_min:
+        return np.full_like(img, out_min)
+    return (img - img_min) / (img_max - img_min) * (out_max - out_min) + out_min
+
+
+def clip_to_zero_fast(image: np.ndarray) -> np.ndarray:
+    """
+    Numba-accelerated positivity clipping.
+    Drop-in replacement for image[image < 0] = 0.
+    """
+    img = np.ascontiguousarray(image, dtype=np.float32)
+    if NUMBA_AVAILABLE:
+        return _clip_to_zero_kernel(img)
+    return np.clip(img, 0.0, None)
+
+
+def invert_fast(image: np.ndarray) -> np.ndarray:
+    """
+    Numba-accelerated image inversion (max - image).
+    Drop-in replacement for invert_image().
+    Max computed in NumPy (safe) then passed to parallel Numba kernel.
+    """
+    img = np.ascontiguousarray(image, dtype=np.float32)
+    img_max = float(img.max())
+    if NUMBA_AVAILABLE:
+        return _invert_kernel(img, img_max)
+    return img_max - img
+
+
+def multiply_fast(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Numba-accelerated elementwise multiply.
+    Drop-in replacement for a * b.
+    """
+    a = np.ascontiguousarray(a, dtype=np.float32)
+    b = np.ascontiguousarray(b, dtype=np.float32)
+    if NUMBA_AVAILABLE:
+        return _elementwise_multiply_kernel(a, b)
+    return a * b
+
+
+def wbns_post_process_fast(img: np.ndarray,
+                            background: np.ndarray,
+                            noise_smooth: np.ndarray,
+                            bg_scale: float = 0.65,
+                            noise_scale_bg: float = 0.2,
+                            noise_scale_img: float = 0.7,
+                            noise_threshold: float = None) -> tuple:
+    """
+    Numba-accelerated WBNS post-processing.
+
+    Replaces the final arithmetic block of wbns_func — background
+    subtraction, noise thresholding, and dual noise correction — in a
+    single parallel kernel pass instead of 6 separate NumPy operations.
+
+    Parameters
+    ----------
+    img : np.ndarray float32
+    background : np.ndarray float32  (Gaussian-smoothed wavelet background)
+    noise_smooth : np.ndarray float32 (Gaussian-smoothed noise component)
+    bg_scale : float   coefficient for background subtraction (default 0.65)
+    noise_scale_bg : float  noise coefficient for bg-corrected image (0.2)
+    noise_scale_img : float noise coefficient for original image (0.7)
+    noise_threshold : float  2-sigma threshold; computed from noise_smooth if None
+
+    Returns
+    -------
+    bg_noise_corrected, noise_corrected : np.ndarray, np.ndarray
+    """
+    img    = np.ascontiguousarray(img,         dtype=np.float32)
+    bg     = np.ascontiguousarray(background,  dtype=np.float32)
+    ns     = np.ascontiguousarray(noise_smooth, dtype=np.float32)
+
+    if noise_threshold is None:
+        noise_threshold = float(ns.mean() + 2.0 * ns.std())
+
+    if NUMBA_AVAILABLE:
+        return _wbns_post_process_kernel(
+            img, bg, ns,
+            float(bg_scale), float(noise_scale_bg), float(noise_scale_img),
+            float(noise_threshold)
+        )
+
+    # NumPy fallback
+    ns_clipped = np.clip(ns, 0.0, noise_threshold)
+    bg_sub = np.clip(img - bg_scale * bg, 0.0, None)
+    bg_noise_corrected = np.clip(bg_sub - noise_scale_bg * ns_clipped, 0.0, None)
+    noise_corrected    = np.clip(img    - noise_scale_img * ns_clipped, 0.0, None)
+    return bg_noise_corrected, noise_corrected
+
+
+# ---------------------------------------------------------------------------
+# Warm-up function — call once at startup to trigger JIT compilation
+# in the background so the first real image is fast
+# ---------------------------------------------------------------------------
+
+def warmup_numba():
+    """
+    Pre-compile all Numba kernels using a tiny dummy image.
+    Call this once at startup (e.g. from run_pycat_func) so the user
+    never experiences the compilation delay during actual analysis.
+    """
+    if not NUMBA_AVAILABLE:
+        return
+    dummy = np.random.rand(64, 64).astype(np.float32)
+    dummy2 = np.random.rand(64, 64).astype(np.float32)
+    rescale_intensity_fast(dummy, 0.0, 1.0)
+    clip_to_zero_fast(dummy)
+    invert_fast(dummy)
+    multiply_fast(dummy, dummy2)
+    wbns_post_process_fast(dummy, dummy2, dummy2)
+    print("[PyCAT Numba] JIT kernels compiled and cached.")

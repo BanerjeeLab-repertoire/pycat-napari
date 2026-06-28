@@ -54,7 +54,15 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
 # Standard library imports
-import sys 
+import sys
+import warnings
+# Suppress CuPy's CUDA path warning before any imports trigger it.
+# CuPy works via the GPU driver alone; the full CUDA toolkit is not required.
+warnings.filterwarnings(
+    "ignore",
+    message="CUDA path could not be detected",
+    category=UserWarning,
+)
 import importlib.resources as resources
 
 # Third party imports
@@ -112,6 +120,17 @@ def run_pycat_func():
         print(f"An unexpected error occurred: {e}")
 
     print("Running PyCAT")  # Print message to console
+
+    # Pre-compile Numba JIT kernels in background thread so first analysis is fast
+    import threading
+    def _warmup():
+        try:
+            from pycat.toolbox.numba_utils import warmup_numba
+            warmup_numba()
+        except Exception as e:
+            print(f"[PyCAT Numba] Warmup skipped: {e}")
+    threading.Thread(target=_warmup, daemon=True).start()
+
     viewer = napari.Viewer(title="PyCAT-Napari")
     cm = CentralManager(viewer)
 

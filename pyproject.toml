@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.1.0"
+version = "1.1.5"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = "==3.9.*"
@@ -55,6 +55,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "largestinteriorrectangle",
+    "numba",
     "seaborn",
     "simpleitk",
 ]
