@@ -34,18 +34,46 @@ def _get_data(data_instance, key, default=None):
 
 
 def _load_image(image_path: Path):
-    """Load an image file using AICSImage (same as PyCAT's open_2d_image)."""
-    from aicsimageio import AICSImage
-    img = AICSImage(str(image_path))
-    # Get first scene, timepoint, and channel as a 2D YX array
-    data = img.get_image_data("YX", S=0, T=0, C=0)
-    # Store physical pixel size in microns if available
+    """
+    Load an image file using AICSImage with a tifffile fallback for NumPy 2.0
+    compatibility.  AICSImage is tried first (preserves physical pixel size
+    metadata); if it raises a NumPy 2.0 byteorder error, tifffile is used
+    directly and pixel size defaults to 1.0 µm.
+    """
+    microns_per_pixel = 1.0
+
     try:
-        px_size = img.physical_pixel_sizes
-        microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
-    except Exception:
-        microns_per_pixel = 1.0
-    return data, microns_per_pixel
+        from aicsimageio import AICSImage
+        img = AICSImage(str(image_path))
+        data = img.get_image_data("YX", S=0, T=0, C=0)
+        try:
+            px_size = img.physical_pixel_sizes
+            microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
+        except Exception:
+            pass
+        return data, microns_per_pixel
+
+    except AttributeError as e:
+        if "newbyteorder" not in str(e):
+            raise
+        # NumPy 2.0 compatibility fallback — use tifffile or skimage directly
+        print(f"[PyCAT Batch] AICSImage newbyteorder error on {image_path.name} "
+              f"— falling back to tifffile.")
+
+    # Fallback: tifffile for .tif/.tiff, skimage for everything else
+    suffix = image_path.suffix.lower()
+    if suffix in ('.tif', '.tiff'):
+        import tifffile
+        data = tifffile.imread(str(image_path))
+    else:
+        from skimage import io
+        data = io.imread(str(image_path))
+
+    # Squeeze to 2D: take first frame/channel if stack
+    while data.ndim > 2:
+        data = data[0]
+
+    return data.astype('float32'), microns_per_pixel
 
 
 def _save_array(arr: np.ndarray, path: Path):

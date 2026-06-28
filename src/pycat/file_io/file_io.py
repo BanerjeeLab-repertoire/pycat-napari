@@ -308,7 +308,21 @@ class FileIOClass:
             self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
 
             # Open the image using AICSImage package
-            image = AICSImage(file_path) 
+            # Wrap in try/except for NumPy 2.0 newbyteorder compatibility
+            try:
+                image = AICSImage(file_path)
+                # Trigger a read to surface any newbyteorder error early
+                _ = image.dims
+            except AttributeError as _e:
+                if "newbyteorder" not in str(_e):
+                    raise
+                from napari.utils.notifications import show_warning as napari_show_warning
+                napari_show_warning(
+                    f"NumPy 2.0 compatibility issue reading {os.path.basename(file_path)}. "
+                    "Please upgrade aicsimageio:  pip install 'aicsimageio>=4.14.0'"
+                )
+                raise
+            image = AICSImage(file_path)
 
             self.central_manager.active_data_class.update_metadata(image)
             

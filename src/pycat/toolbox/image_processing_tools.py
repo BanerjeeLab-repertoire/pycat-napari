@@ -33,6 +33,11 @@ import SimpleITK as sitk
 # Local application imports
 from pycat.utils.general_utils import dtype_conversion_func, get_default_intensity_range 
 from pycat.ui.ui_utils import add_image_with_default_colormap
+from pycat.toolbox.gpu_utils import (
+    GPU_AVAILABLE, gpu_pre_process_image, gpu_white_tophat,
+    gpu_grey_erosion, gpu_grey_dilation, gpu_gaussian_filter,
+    gpu_laplace_of_gaussian, gpu_rolling_ball_background,
+)
 
 
 
@@ -1293,7 +1298,7 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
     Background = waverecn(coeffs, 'db1')
     
     BG_unfiltered = Background.copy()
-    Background = ndi.gaussian_filter(Background, sigma=2**num_levels) # Smooth the background with a gaussian filter w/ sigma=2^(#lvls) 
+    Background = gpu_gaussian_filter(Background.astype('float32'), sigma=2**num_levels)  # GPU-accelerated smoothing
     
     # Modify coefficients for noise estimation and removal
     coeffs2[0] = np.ones_like(coeffs2[0]) # Set approximation coefficients to 1 (constant)
@@ -1604,6 +1609,12 @@ def pre_process_image(image, ball_radius, window_size):
     - Enhancing contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization).
     """
 
+    # Dispatch to GPU-accelerated pipeline when CuPy is available,
+    # falling back to the original CPU path automatically.
+    if GPU_AVAILABLE:
+        return gpu_pre_process_image(image, ball_radius, window_size)
+
+    # ── CPU path (original implementation) ──────────────────────────────
     input_dtype = str(image.dtype)  # Store original image data type for conversion back after processing
     img = dtype_conversion_func(image, output_bit_depth='float32') # Convert image data type to float32 for processing
 
