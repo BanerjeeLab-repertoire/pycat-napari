@@ -307,23 +307,57 @@ class FileIOClass:
             self.filePath = file_path  
             self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
 
-            # Open the image using AICSImage package
-            # Wrap in try/except for NumPy 2.0 newbyteorder compatibility
+            # Open the image using AICSImage. If a NumPy 2.0 newbyteorder
+            # AttributeError is raised (typically from tifffile reading a
+            # ColorMap tag), fall back to tifffile.imread directly which
+            # avoids the tag-parsing code path that triggers the error.
+            _use_fallback = False
             try:
                 image = AICSImage(file_path)
-                # Trigger a read to surface any newbyteorder error early
-                _ = image.dims
+                _ = image.dims  # trigger read to surface error early
             except AttributeError as _e:
                 if "newbyteorder" not in str(_e):
                     raise
-                from napari.utils.notifications import show_warning as napari_show_warning
-                napari_show_warning(
-                    f"NumPy 2.0 compatibility issue reading {os.path.basename(file_path)}. "
-                    "Please upgrade aicsimageio:  pip install 'aicsimageio>=4.14.0'"
-                )
-                raise
-            image = AICSImage(file_path)
+                _use_fallback = True
+                print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
 
+            if _use_fallback:
+                # skimage also uses tifffile internally so hits the same NumPy 2.0
+                # bug. PIL/Pillow has its own independent TIFF reader that avoids
+                # tifffile entirely and works correctly with NumPy 2.0.
+                try:
+                    from PIL import Image as _PILImage
+                    import numpy as _np
+                    _pil_img = _PILImage.open(file_path)
+                    # PIL loads one frame at a time; iterate frames for stacks
+                    _frames = []
+                    try:
+                        while True:
+                            _frames.append(_np.array(_pil_img).astype('float32'))
+                            _pil_img.seek(_pil_img.tell() + 1)
+                    except EOFError:
+                        pass
+                    if len(_frames) == 1:
+                        all_channels.append((_frames[0], file_path, 0))
+                    else:
+                        for _ci, _frame in enumerate(_frames):
+                            all_channels.append((_frame, file_path, _ci))
+                    from napari.utils.notifications import show_warning as _warn
+                    _warn(
+                        f"{os.path.basename(file_path)} loaded via PIL fallback (NumPy 2.0 / tifffile conflict). "
+                        "Run 'python fix_tifffile.py' to permanently fix this."
+                    )
+                except Exception as _pil_e:
+                    from napari.utils.notifications import show_warning as _warn
+                    _warn(
+                        f"Could not load {os.path.basename(file_path)}: NumPy 2.0 is incompatible with "
+                        "the installed tifffile version. Run 'python fix_tifffile.py' to fix this permanently, "
+                        "or downgrade NumPy: pip install 'numpy<2.0'"
+                    )
+                    print(f"[PyCAT] PIL fallback also failed: {_pil_e}")
+                continue  # skip the AICSImage path below
+
+            image = AICSImage(file_path)
             self.central_manager.active_data_class.update_metadata(image)
             
             # Get the number of pages and channels in the image
