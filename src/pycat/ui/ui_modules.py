@@ -54,6 +54,7 @@ from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_l
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.data.data_modules import BaseDataClass
 from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
+from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis
 
 
 class BaseUIClass:
@@ -305,6 +306,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.central_manager = central_manager
         #self.central_manager.add_observer(self) # placeholder for possible future implementation of observer pattern
         self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
+        self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -1419,6 +1421,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.condensate_layout)
+        self.central_manager.toolbox_functions_ui._add_run_timeseries_condensate_analysis(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.condensate_layout)
         # ... Add other components in the order you want ...
 
