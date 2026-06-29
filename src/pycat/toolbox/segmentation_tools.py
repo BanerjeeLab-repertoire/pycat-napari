@@ -39,6 +39,21 @@ from pycat.utils.general_utils import dtype_conversion_func, check_contrast_func
 from pycat.utils.math_utils import remove_outliers_iqr
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity, rb_gaussian_bg_removal_with_edge_enhancement
 
+# Cache GPU availability at module load time — avoids re-initializing the
+# CUDA context on every Cellpose call. The actual check is deferred until
+# first use so module import stays fast.
+_CELLPOSE_USE_GPU = None
+
+def _get_cellpose_gpu():
+    global _CELLPOSE_USE_GPU
+    if _CELLPOSE_USE_GPU is None:
+        try:
+            import torch
+            _CELLPOSE_USE_GPU = torch.cuda.is_available()
+        except Exception:
+            _CELLPOSE_USE_GPU = False
+    return _CELLPOSE_USE_GPU
+
 
 
 
@@ -637,10 +652,7 @@ def cellpose_segmentation(image, object_diameter):
       image for segmentation.
     """
     
-    # Initialize Cellpose with the preferred model for cell and nucleus segmentation.
-    model = models.CellposeModel(gpu=True, pretrained_model='cyto2')
-    #model = models.CellposeModel(gpu=True, pretrained_model='nuclei')
-    #model = models.CellposeModel(gpu=True, pretrained_model='nuclei')
+    model = models.CellposeModel(gpu=_get_cellpose_gpu(), pretrained_model='cyto2')
     
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing

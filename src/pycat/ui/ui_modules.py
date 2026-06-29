@@ -54,7 +54,7 @@ from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_l
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.data.data_modules import BaseDataClass
 from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
-from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis
+from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack
 
 
 class BaseUIClass:
@@ -307,6 +307,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         #self.central_manager.add_observer(self) # placeholder for possible future implementation of observer pattern
         self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
         self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
+        self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -324,8 +325,12 @@ class ToolboxFunctionsUI(BaseUIClass):
         """Add a widget for saving and clearing all data, optionally in a separate dock."""
         save_and_clear_layout = QVBoxLayout()
         save_and_clear_button = QPushButton("Save and Clear") # Create a button widget
-        save_and_clear_button.clicked.connect(lambda: self.on_general_button_clicked(
-            self.central_manager.file_io.save_and_clear_all, None, self.viewer))
+        def _on_save_and_clear():
+            self.on_general_button_clicked(
+                self.central_manager.file_io.save_and_clear_all, None, self.viewer)
+            # save_and_clear_all records the step internally after dialogs
+            # close, capturing the actual layer and dataframe selections made.
+        save_and_clear_button.clicked.connect(_on_save_and_clear)
         save_and_clear_layout.addWidget(save_and_clear_button) # Add the button to the layout
         save_and_clear_widget = QWidget()
         save_and_clear_widget.setLayout(save_and_clear_layout)
@@ -407,8 +412,14 @@ class ToolboxFunctionsUI(BaseUIClass):
         upscaling_checkbox.setChecked(True) # Set the checkbox to checked by default
         upscaling_layout.addWidget(upscaling_checkbox) # Add the checkbox to the layout
         upscaling_button = QPushButton("Run Upscaling") # Create a button widget
-        upscaling_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_upscaling_func, None, upscaling_checkbox, self.central_manager.active_data_class, self.viewer))
+        def _on_upscaling():
+            self.on_general_button_clicked(
+                run_upscaling_func, None, upscaling_checkbox,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('upscaling', {
+                'update_data_class': upscaling_checkbox.isChecked(),
+            })
+        upscaling_button.clicked.connect(_on_upscaling)
         upscaling_layout.addWidget(upscaling_button) # Add the button to the layout
         upscaling_widget = QWidget()
         upscaling_widget.setLayout(upscaling_layout)
@@ -439,8 +450,15 @@ class ToolboxFunctionsUI(BaseUIClass):
         remove_background_layout = QVBoxLayout()
         self.add_text_label(remove_background_layout, 'Enhanced RB-Gauss Background Removal', bold=True) # Add widget title label
         remove_background_button = QPushButton("Remove Background") # Create a button widget
-        remove_background_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_enhanced_rb_gaussian_bg_removal, None, self.central_manager.active_data_class, self.viewer))
+        def _on_enhanced_bg_removal():
+            self.on_general_button_clicked(
+                run_enhanced_rb_gaussian_bg_removal, None,
+                self.central_manager.active_data_class, self.viewer)
+            self._record('background_removal', {
+                'active_layer': self.viewer.layers.selection.active.name
+                if self.viewer.layers.selection.active else '',
+            })
+        remove_background_button.clicked.connect(_on_enhanced_bg_removal)
         remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
         remove_background_widget = QWidget()
         remove_background_widget.setLayout(remove_background_layout)
@@ -1304,6 +1322,10 @@ class AnalysisMethodsUI(BaseUIClass):
         """
         self._switch_analysis(BaseDataClass, CondensateAnalysisUI, *args, **kwargs)
 
+    def _switch_to_timeseries_analysis(self, *args, **kwargs):
+        """Switches the analysis interface to time-series condensate analysis."""
+        self._switch_analysis(BaseDataClass, TimeSeriesCondensateUI, *args, **kwargs)
+
     def _switch_to_object_coloc_analysis(self, *args, **kwargs):
         """
         Switches the analysis interface to object colocalization analysis.
@@ -1421,7 +1443,6 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.condensate_layout)
-        self.central_manager.toolbox_functions_ui._add_run_timeseries_condensate_analysis(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.condensate_layout)
         # ... Add other components in the order you want ...
 
@@ -1442,6 +1463,150 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Align the layout to the top of the widget to ensure orderly arrangement
         self.condensate_layout.setAlignment(Qt.AlignTop)
+
+
+class TimeSeriesCondensateUI(AnalysisMethodsUI):
+    """
+    Dedicated pipeline dock for time-series condensate analysis.
+
+    Workflow order:
+      1. Open Image Stack   — loads (T,H,W) via Open/Save File(s) > Open Image Stack
+      2. Select Reference Frame — user picks which frame to use for segmentation
+      3. Pre-process Image  — runs on the reference frame
+      4. Enhanced BG Removal
+      5. Cellpose Segmentation — on the reference frame
+      6. Cell Analyzer — produces Labeled Cell Mask
+      7. Time-Series Condensate Analysis — propagates segmentation across all frames
+      8. Save and Clear
+    """
+
+    def __init__(self, viewer, central_manager):
+        super().__init__(viewer, central_manager)
+        self.ts_layout = QVBoxLayout()
+
+    def setup_ui(self):
+        tfu = self.central_manager.toolbox_functions_ui
+
+        # ── Step 1: instruction label ─────────────────────────────────────
+        from PyQt5.QtWidgets import QLabel, QFrame
+        instr = QLabel(
+            "<b>Step 1:</b> Load your time-series via<br>"
+            "<i>★ Open/Save File(s) → Open Image Stack (T/Z)</i>"
+        )
+        instr.setWordWrap(True)
+        instr.setStyleSheet("padding: 6px; background: #2a2a2a; border-radius: 4px;")
+        self.ts_layout.addWidget(instr)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        self.ts_layout.addWidget(sep)
+
+        # ── Step 2: Reference frame selector ─────────────────────────────
+        self._add_reference_frame_selector(self.ts_layout)
+
+        # ── Steps 3-4: measurement lines and lazy stack preprocessing ──────
+        # Lazy preprocessing builds dask-backed layers so frames are
+        # processed one at a time on demand rather than all upfront.
+        tfu._add_measure_line(layout=self.ts_layout)
+        tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
+
+        # ── Steps 5-6: Cellpose and cell analysis on the reference frame ──
+        # Run these on the extracted 2D reference frame layer (Step 2),
+        # not on the full stack.
+        tfu._add_run_cellpose_segmentation(layout=self.ts_layout)
+        tfu._add_run_cell_analysis_func(layout=self.ts_layout)
+
+        # ── Step 7: time-series condensate analysis ───────────────────────
+        tfu._add_run_timeseries_condensate_analysis(layout=self.ts_layout)
+
+        # ── Step 8: save and clear ────────────────────────────────────────
+        tfu._add_save_and_clear(layout=self.ts_layout)
+
+        main_widget = QWidget()
+        main_widget.setLayout(self.ts_layout)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(main_widget)
+
+        self.viewer.window.add_dock_widget(
+            scroll_area, name="Time-Series Condensate Analysis Dock"
+        )
+
+        main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.ts_layout.setAlignment(Qt.AlignTop)
+
+    def _add_reference_frame_selector(self, layout):
+        """
+        Widget that lets the user extract a single reference frame from a
+        (T,H,W) stack layer and add it as a 2D layer so that pre-processing
+        and Cellpose can operate on it normally.
+        """
+        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QSpinBox, QPushButton
+        import numpy as np
+
+        group = QGroupBox("Step 2 — Select Reference Frame")
+        form = QFormLayout(group)
+
+        stack_dropdown = self.central_manager.toolbox_functions_ui.create_layer_dropdown(
+            napari.layers.Image
+        )
+        form.addRow("Stack layer:", stack_dropdown)
+
+        frame_spin = QSpinBox()
+        frame_spin.setRange(0, 9999)
+        frame_spin.setValue(0)
+        frame_spin.setToolTip(
+            "Frame index (0-based) to use for pre-processing, Cellpose, and cell analysis. "
+            "This frame's cell mask will be propagated to all other frames."
+        )
+        form.addRow("Reference frame index:", frame_spin)
+
+        extract_btn = QPushButton("Extract Reference Frame → 2D Layer")
+
+        def _on_extract():
+            layer_name = stack_dropdown.currentText()
+            try:
+                layer = self.viewer.layers[layer_name]
+            except KeyError:
+                from napari.utils.notifications import show_warning as napari_show_warning
+                napari_show_warning(f"Layer '{layer_name}' not found.")
+                return
+
+            data = layer.data
+            if data.ndim < 3:
+                from napari.utils.notifications import show_warning as napari_show_warning
+                napari_show_warning("Selected layer is already 2D — no extraction needed.")
+                return
+
+            frame_idx = int(frame_spin.value())
+            if frame_idx >= data.shape[0]:
+                from napari.utils.notifications import show_warning as napari_show_warning
+                napari_show_warning(
+                    f"Frame index {frame_idx} out of range "
+                    f"(stack has {data.shape[0]} frames)."
+                )
+                return
+
+            ref_frame = data[frame_idx].astype(np.float32)
+            ref_name = f"{layer_name} [frame {frame_idx}]"
+            self.viewer.add_image(ref_frame, name=ref_name)
+
+            # Store reference frame index in data instance for the TS tool
+            self.central_manager.active_data_class.data_repository[
+                'timeseries_reference_frame'
+            ] = frame_idx
+
+            from napari.utils.notifications import show_info as napari_show_info
+            napari_show_info(
+                f"Reference frame {frame_idx} extracted as '{ref_name}'. "
+                "Use this layer for pre-processing and Cellpose."
+            )
+
+        extract_btn.clicked.connect(_on_extract)
+        form.addRow("", extract_btn)
+        layout.addWidget(group)
 
 
 class ObjectColocAnalysisUI(AnalysisMethodsUI):
@@ -1905,6 +2070,8 @@ class MenuManager:
             """
             file_io_methods_dict = {
                 'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
+                'Open Image Stack (T/Z)': (self.central_manager.file_io.open_image_stack, {}),
+                'Open Andor/Imaris File (.ims)': (self.central_manager.file_io.open_ims_file, {}),
                 'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
@@ -1916,7 +2083,8 @@ class MenuManager:
         Add specific analysis methods as actions to the analysis methods menu. 
         """
         condensate_analysis_dict = {
-            'Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository})
+            'Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository})
         }
         self._add_actions_to_menu(condensate_analysis_dict, self.analysis_methods_menu)
 

@@ -307,19 +307,24 @@ class FileIOClass:
             self.filePath = file_path  
             self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
 
-            # Open the image using AICSImage. If a NumPy 2.0 newbyteorder
-            # AttributeError is raised (typically from tifffile reading a
-            # ColorMap tag), fall back to tifffile.imread directly which
-            # avoids the tag-parsing code path that triggers the error.
+            # Open the image using AICSImage.
+            # We detect NumPy 2.0 newbyteorder errors lazily — only reading
+            # the minimal metadata needed (xarray_dask_data uses dask so no
+            # full read happens).  Avoid calling image.dims or image.data
+            # eagerly as these trigger full image reads on large files.
             _use_fallback = False
             try:
                 image = AICSImage(file_path)
-                _ = image.dims  # trigger read to surface error early
+                # Access only the dask-backed metadata — does not read pixel data
+                _ = image.xarray_dask_data.dims
             except AttributeError as _e:
                 if "newbyteorder" not in str(_e):
                     raise
                 _use_fallback = True
                 print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
+            except Exception:
+                # Any other error on metadata access — try normal path anyway
+                image = AICSImage(file_path)
 
             if _use_fallback:
                 # skimage also uses tifffile internally so hits the same NumPy 2.0
@@ -406,6 +411,335 @@ class FileIOClass:
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
             })
 
+
+
+    def open_image_stack(self):
+        """
+        Opens a single multi-frame TIFF file as a (T, H, W) or (T, C, H, W)
+        image stack and adds it to the napari viewer as a 3D image layer.
+
+        Intended for time-series or z-stack data used in the Time-Series
+        Condensate Analysis tool.  Unlike open_2d_image, this method preserves
+        the time/z dimension and adds the full stack as a single napari layer.
+
+        Metadata (pixel size) and diameter defaults are still populated in
+        the active data instance so downstream tools work correctly.
+        """
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "Open Image Stack (T/Z)",
+            "",
+            "Image Files (*.tiff *.tif *.czi);;All Files (*)",
+            options=options,
+        )
+        if not file_path:
+            return
+
+        self.filePath = file_path
+        self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
+
+        # Try AICSImage first; fall back to tifffile on NumPy 2.0 environments
+        _use_fallback = False
+        try:
+            image = AICSImage(file_path)
+            _ = image.dims
+        except AttributeError as _e:
+            if "newbyteorder" not in str(_e):
+                raise
+            _use_fallback = True
+            print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
+
+        if _use_fallback:
+            try:
+                from PIL import Image as _PILImage
+                import numpy as _np
+                _pil = _PILImage.open(file_path)
+                _frames = []
+                try:
+                    while True:
+                        _frames.append(_np.array(_pil).astype('float32'))
+                        _pil.seek(_pil.tell() + 1)
+                except EOFError:
+                    pass
+                stack = _np.stack(_frames, axis=0)  # (T, H, W)
+                from napari.utils.notifications import show_warning as _warn
+                _warn(
+                    f"{os.path.basename(file_path)} loaded via PIL fallback. "
+                    "Run 'python fix_tifffile.py' to permanently fix NumPy 2.0 compatibility."
+                )
+            except Exception as _pil_e:
+                from napari.utils.notifications import show_warning as _warn
+                _warn(
+                    f"Could not load {os.path.basename(file_path)}: "
+                    "NumPy 2.0 / tifffile conflict. Run 'python fix_tifffile.py' to fix."
+                )
+                print(f"[PyCAT] PIL stack fallback failed: {_pil_e}")
+                return
+        else:
+            self.central_manager.active_data_class.update_metadata(image)
+
+            # Get time and channel dimensions
+            n_t = getattr(image.dims, 'T', 1)
+            n_c = getattr(image.dims, 'C', 1)
+            n_z = getattr(image.dims, 'Z', 1)
+
+            # Determine which dimension is the "stack" axis
+            # Priority: T > Z (treat Z as stack if no time dimension)
+            stack_dim = 'T' if n_t > 1 else 'Z'
+            n_frames = n_t if n_t > 1 else n_z
+
+            if n_frames == 1:
+                from napari.utils.notifications import show_warning as napari_show_warning
+                napari_show_warning(
+                    "This file appears to be a single frame — use "
+                    "'Open 2D Image(s)' instead for 2D images."
+                )
+
+            if n_c > 1:
+                # Multi-channel stack: ask user which channel to load
+                from PyQt5.QtWidgets import QInputDialog
+                channel_names = [f"Channel {i}" for i in range(n_c)]
+                choice, ok = QInputDialog.getItem(
+                    None, "Select Channel",
+                    f"This file has {n_c} channels. Select one to load as stack:",
+                    channel_names, 0, False
+                )
+                if not ok:
+                    return
+                channel_idx = channel_names.index(choice)
+                frames = []
+                for t in range(n_frames):
+                    kwargs = {'C': channel_idx, 'T': t} if stack_dim == 'T' else {'C': channel_idx, 'Z': t, 'T': 0}
+                    frames.append(image.get_image_data("YX", **kwargs))
+                stack = np.stack(frames, axis=0).astype('float32')
+            else:
+                # Single channel — load all frames
+                frames = []
+                for t in range(n_frames):
+                    kwargs = {'C': 0, 'T': t} if stack_dim == 'T' else {'C': 0, 'Z': t, 'T': 0}
+                    frames.append(image.get_image_data("YX", **kwargs))
+                stack = np.stack(frames, axis=0).astype('float32')
+
+        layer_name = f"{self.base_file_name} Stack"
+        self.viewer.add_image(stack, name=layer_name)
+
+        # Update data instance with size defaults from the frame shape
+        frame_h = stack.shape[1]
+        self.central_manager.active_data_class.data_repository['object_size'] = frame_h // 20
+        self.central_manager.active_data_class.data_repository['cell_diameter'] = frame_h // 8
+
+        from napari.utils.notifications import show_info as napari_show_info
+        napari_show_info(
+            f"Loaded stack: {stack.shape[0]} frames, "
+            f"{stack.shape[1]}×{stack.shape[2]} px  →  layer '{layer_name}'"
+        )
+
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+        if bp:
+            bp.record('open_image_stack', {
+                'file_path': self.filePath,
+                'n_frames': int(stack.shape[0]),
+                'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
+                'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
+            })
+
+
+    def open_ims_file(self):
+        """
+        Opens an Andor/Bitplane Imaris .ims file lazily using dask — only the
+        frames napari actually displays are read from disk, keeping RAM usage
+        minimal regardless of file size.
+
+        The .ims format is HDF5-based with dimensions (T, C, Z, Y, X).
+        For 2D time-series data (Z=1) this produces a lazy (T, H, W) dask
+        array per channel, suitable for the Time-Series Condensate Analysis
+        pipeline.  Frames are only read into memory when requested
+        (e.g. when the time slider is moved or a frame is extracted).
+
+        Requires:  pip install imaris-ims-file-reader hdf5plugin dask
+        """
+        try:
+            from imaris_ims_file_reader.ims import ims as ImsReader
+        except ImportError as _ie:
+            from napari.utils.notifications import show_warning as napari_show_warning
+            napari_show_warning(
+                f"Missing dependency: {_ie}\n"
+                "Install with:  pip install imaris-ims-file-reader hdf5plugin dask"
+            )
+            return
+
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "Open Andor/Imaris File",
+            "",
+            "Imaris Files (*.ims);;All Files (*)",
+            options=options,
+        )
+        if not file_path:
+            return
+
+        self.filePath = file_path
+        self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
+
+        try:
+            # Open with squeeze_output=False — always (T, C, Z, Y, X)
+            reader = ImsReader(file_path, squeeze_output=False)
+            n_t    = reader.TimePoints
+            n_c    = reader.Channels
+            shape  = reader.shape          # (T, C, Z, Y, X)
+            n_z    = shape[2]
+            H, W   = shape[3], shape[4]
+            dtype  = reader.dtype
+
+            print(f"[PyCAT IMS] {self.base_file_name}: "
+                  f"T={n_t} C={n_c} Z={n_z} Y={H} X={W}  dtype={dtype}")
+
+            # Physical pixel size
+            microns_per_pixel = 1.0
+            try:
+                ext_x = (reader.read_numerical_dataset_attr('ExtMax0') -
+                         reader.read_numerical_dataset_attr('ExtMin0'))
+                microns_per_pixel = float(ext_x) / float(W)
+            except Exception:
+                pass
+
+            # Channel selection
+            if n_c > 1:
+                from PyQt5.QtWidgets import QInputDialog
+                channel_names = [f"Channel {i}" for i in range(n_c)]
+                choice, ok = QInputDialog.getItem(
+                    None, "Select Channel",
+                    f"This file has {n_c} channels. Select one to load:",
+                    channel_names, 0, False
+                )
+                if not ok:
+                    return
+                channel_idx = channel_names.index(choice)
+            else:
+                channel_idx = 0
+
+            # ── Build lazy dask array — no data is read yet ──────────────
+            # Each delayed task reads exactly one (H, W) frame on demand.
+            frame_dtype = np.float32
+
+            # Use a custom lazy array class that reads frames on demand
+            # without dask — avoids the distributed/SSL crash on Windows.
+            class _ImsLazyArray:
+                """
+                Numpy-compatible lazy array for IMS stacks that avoids dask.
+                Napari probes shape/dtype, calls __getitem__ per frame, and
+                also calls transpose() and __array__. All are handled here
+                so napari gets real numpy arrays at every step.
+                """
+                def __init__(self, fp, n, c, z_idx, H, W):
+                    self._fp = fp
+                    self._n  = n
+                    self._c  = c
+                    self._z  = z_idx
+                    self.shape = (n, H, W)
+                    self.dtype = np.dtype('float32')
+                    self.ndim  = 3
+
+                def _read_frame(self, t):
+                    r = ImsReader(self._fp, squeeze_output=False)
+                    return r[int(t), self._c, self._z, :, :].astype(np.float32)
+
+                def __len__(self):
+                    return self._n
+
+                def __getitem__(self, idx):
+                    # Materialise to numpy immediately so napari can
+                    # call transpose and any other numpy ops freely.
+                    if isinstance(idx, tuple):
+                        t_idx = idx[0]
+                        spatial = idx[1:]
+                    else:
+                        t_idx = idx
+                        spatial = (slice(None), slice(None))
+                    if isinstance(t_idx, (int, np.integer)):
+                        return self._read_frame(t_idx)[spatial]
+                    # Slice of frames — materialise the requested range
+                    t_range = range(*t_idx.indices(self._n))
+                    frames = [self._read_frame(t) for t in t_range]
+                    arr = np.stack(frames, axis=0)
+                    return arr[(slice(None),) + spatial]
+
+                def __array__(self, dtype=None):
+                    frames = [self._read_frame(t) for t in range(self._n)]
+                    arr = np.stack(frames, axis=0)
+                    return arr if dtype is None else arr.astype(dtype)
+
+                def transpose(self, *axes):
+                    # Napari calls data.transpose(order) during slice setup.
+                    # Materialise the full array and transpose it.
+                    return np.asarray(self).transpose(*axes)
+
+            if n_z == 1:
+                layer_name = f"{self.base_file_name} [C{channel_idx}] Stack"
+                if n_t == 1:
+                    # Single frame — load eagerly as 2D
+                    frame = reader[0, channel_idx, 0, :, :].astype(np.float32)
+                    self.load_into_viewer(frame,
+                                         name=f"{self.base_file_name} [C{channel_idx}]")
+                    channel_data = frame
+                else:
+                    lazy_data = _ImsLazyArray(file_path, n_t, channel_idx, 0, H, W)
+                    self.viewer.add_image(lazy_data, name=layer_name)
+                    self._ims_lazy_ref = lazy_data
+                    channel_data = reader[0, channel_idx, 0, :, :].astype(np.float32)
+                    from napari.utils.notifications import show_info as napari_show_info
+                    napari_show_info(
+                        f"Lazy-loaded IMS time-series: {n_t} frames, "
+                        f"{H}×{W} px → '{layer_name}' (frames read on demand)"
+                    )
+            else:
+                from PyQt5.QtWidgets import QInputDialog
+                t_choice, ok = QInputDialog.getInt(
+                    None, "Select Timepoint",
+                    f"This file has {n_t} timepoints and {n_z} Z slices.\n"
+                    "Enter timepoint index to load (0-based):",
+                    0, 0, n_t - 1, 1
+                )
+                if not ok:
+                    t_choice = 0
+                lazy_data = _ImsLazyArray(file_path, n_z, channel_idx, t_choice, H, W)
+                layer_name = f"{self.base_file_name} [C{channel_idx}] T{t_choice}"
+                self.viewer.add_image(lazy_data, name=layer_name)
+                self._ims_lazy_ref = lazy_data
+                channel_data = reader[t_choice, channel_idx, 0, :, :].astype(np.float32)
+                from napari.utils.notifications import show_info as napari_show_info
+                napari_show_info(
+                    f"Lazy-loaded IMS z-stack: {n_z} slices, T={t_choice} "
+                    f"→ '{layer_name}' (slices read on demand)"
+                )
+
+            # Update data instance
+            self.central_manager.active_data_class.data_repository['object_size'] = H // 20
+            self.central_manager.active_data_class.data_repository['cell_diameter'] = H // 8
+            self.central_manager.active_data_class.data_repository['microns_per_pixel_sq'] = (
+                microns_per_pixel ** 2
+            )
+
+            self.viewer.add_shapes(name='Object Diameter', shape_type='line',
+                                   edge_color='red', edge_width=2)
+            self.viewer.add_shapes(name='Cell Diameter', shape_type='line',
+                                   edge_color='white', edge_width=5)
+
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp:
+                bp.record('open_ims_file', {
+                    'file_path': file_path,
+                    'channel': channel_idx,
+                    'n_timepoints': n_t,
+                    'n_z': n_z,
+                })
+
+        except Exception as e:
+            import traceback
+            from napari.utils.notifications import show_warning as napari_show_warning
+            napari_show_warning(f"Failed to load IMS file: {e}")
+            print(f"[PyCAT IMS] Error:\n{traceback.format_exc()}")
+            print(f"[PyCAT IMS] Error:\n{traceback.format_exc()}")
 
     def open_2d_mask(self):
         """
@@ -566,9 +900,6 @@ class FileIOClass:
         these items from the viewer and repository after saving. It supports flexible file naming and formats, ensuring 
         data is preserved in a user-specified manner.
         """
-        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
-        if bp:
-            bp.record('save_and_clear', {})
         self.viewer = viewer
         # Get layer names and dataframe names from the viewer and analysis data abd present them to the user
         dataframe_names = self.central_manager.active_data_class.get_dataframes().keys()
@@ -601,6 +932,16 @@ class FileIOClass:
         else:
             #save_name = os.path.dirname(save_file_path) + os.sep + self.base_file_name
             save_name = os.path.join(os.path.dirname(save_file_path), self.base_file_name)
+
+        # Record the save selections now that we have the full picture
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+        if bp:
+            bp.record('save_and_clear', {
+                'save_path': save_name,
+                'saved_layers': list(selected_layers),
+                'saved_dataframes': list(selected_dataframes),
+                'clear_all': clear_all,
+            })
 
         # Get the names of all layers in the viewer
         layer_names = [layer.name for layer in self.viewer.layers]

@@ -66,6 +66,205 @@ from pycat.ui.ui_utils import show_dataframes_dialog
 
 
 # ---------------------------------------------------------------------------
+# Lazy stack preprocessing
+# ---------------------------------------------------------------------------
+
+def build_lazy_preprocessed_stack(stack_data, ball_radius, window_size):
+    """
+    Build a lazy dask array where each frame is preprocessed only when
+    napari requests it.  No frames are processed at call time.
+
+    Parameters
+    ----------
+    stack_data : np.ndarray or dask.array.Array, shape (T, H, W)
+        Raw image stack — can already be a dask array (e.g. from IMS loader).
+    ball_radius : int
+    window_size : int
+
+    Returns
+    -------
+    dask.array.Array, shape (T, H, W), dtype float32
+    """
+    import dask
+    import dask.array as da
+    dask.config.set(scheduler='synchronous')
+    from pycat.toolbox.image_processing_tools import pre_process_image
+
+    if hasattr(stack_data, 'compute'):
+        # Already a dask array — wrap each slice lazily
+        get_frame = lambda t: stack_data[t].compute()
+    else:
+        get_frame = lambda t: stack_data[t]
+
+    n_t = stack_data.shape[0]
+    H, W = stack_data.shape[1], stack_data.shape[2]
+
+    def _preprocess_frame(t, br, ws):
+        frame = get_frame(t).astype(np.float32)
+        return pre_process_image(frame, br, ws).astype(np.float32)
+
+    delayed_frames = [
+        da.from_delayed(
+            dask.delayed(_preprocess_frame)(t, ball_radius, window_size),
+            shape=(H, W),
+            dtype=np.float32,
+        )
+        for t in range(n_t)
+    ]
+    return da.stack(delayed_frames, axis=0)
+
+
+def build_lazy_bg_removed_stack(preprocessed_stack, ball_radius):
+    """
+    Build a lazy dask array where background removal runs on each frame
+    only when napari requests it.
+
+    Parameters
+    ----------
+    preprocessed_stack : np.ndarray or dask.array.Array, shape (T, H, W)
+    ball_radius : int
+
+    Returns
+    -------
+    dask.array.Array, shape (T, H, W), dtype float32
+    """
+    import dask
+    import dask.array as da
+    dask.config.set(scheduler='synchronous')
+    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
+
+    if hasattr(preprocessed_stack, 'compute'):
+        get_frame = lambda t: preprocessed_stack[t].compute()
+    else:
+        get_frame = lambda t: preprocessed_stack[t]
+
+    n_t = preprocessed_stack.shape[0]
+    H, W = preprocessed_stack.shape[1], preprocessed_stack.shape[2]
+
+    def _bg_remove_frame(t, br):
+        frame = get_frame(t).astype(np.float32)
+        return rb_gaussian_bg_removal_with_edge_enhancement(frame, br).astype(np.float32)
+
+    delayed_frames = [
+        da.from_delayed(
+            dask.delayed(_bg_remove_frame)(t, ball_radius),
+            shape=(H, W),
+            dtype=np.float32,
+        )
+        for t in range(n_t)
+    ]
+    return da.stack(delayed_frames, axis=0)
+
+
+def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
+    """
+    Widget that builds lazy preprocessed and background-removed stacks from
+    a raw image stack without processing any frames upfront.
+
+    Designed for use in the Time-Series Condensate Analysis pipeline as a
+    replacement for the standard Pre-process + Background Removal buttons,
+    which process only the active (single) layer.
+
+    The output dask layers are named consistently so the Time-Series
+    Condensate Analysis widget can find them automatically.
+    """
+    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QCheckBox
+
+    grp = QGroupBox("Lazy Stack Pre-processing")
+    form = QFormLayout(grp)
+
+    stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
+    form.addRow("Raw stack layer:", stack_dropdown)
+
+    preprocess_check = QCheckBox("Pre-process each frame")
+    preprocess_check.setChecked(True)
+    form.addRow("", preprocess_check)
+
+    bg_check = QCheckBox("Background removal each frame")
+    bg_check.setChecked(True)
+    form.addRow("", bg_check)
+
+    build_btn = QPushButton("Build Lazy Processing Layers")
+    build_btn.setToolTip(
+        "Creates dask-backed layers — no frames are processed now.\n"
+        "Processing happens one frame at a time as napari displays each frame\n"
+        "or when the Time-Series analysis requests a frame."
+    )
+
+    def _on_build():
+        layer_name = stack_dropdown.currentText()
+        try:
+            layer = ui_instance.viewer.layers[layer_name]
+        except KeyError:
+            napari_show_warning(f"Layer '{layer_name}' not found.")
+            return
+
+        stack_data = layer.data
+        if stack_data.ndim != 3:
+            napari_show_warning("Lazy preprocessing requires a 3D (T, H, W) stack layer.")
+            return
+
+        data_instance = ui_instance.central_manager.active_data_class
+        ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
+        window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
+
+        # Cap ball_radius as in the standard preprocessor
+        H = stack_data.shape[1]
+        max_radius = max(4, int(H * 0.05))
+        ball_radius  = min(ball_radius, max_radius)
+        window_size  = min(window_size, max_radius * 2)
+
+        proc_layer = None
+        bg_layer   = None
+
+        if preprocess_check.isChecked():
+            lazy_proc = build_lazy_preprocessed_stack(stack_data, ball_radius, window_size)
+            proc_name = f"Pre-Processed {layer_name}"
+            ui_instance.viewer.add_image(lazy_proc, name=proc_name, colormap='viridis')
+            # Keep a reference to prevent GC
+            ui_instance._lazy_proc_ref = lazy_proc
+            proc_layer = proc_name
+            napari_show_info(
+                f"Lazy preprocessed stack created: '{proc_name}' "
+                f"({stack_data.shape[0]} frames, processed on demand)"
+            )
+
+        if bg_check.isChecked():
+            source = lazy_proc if preprocess_check.isChecked() else stack_data
+            lazy_bg = build_lazy_bg_removed_stack(source, ball_radius)
+            bg_name = f"Enhanced Background Removed {layer_name}"
+            ui_instance.viewer.add_image(lazy_bg, name=bg_name, colormap='viridis')
+            ui_instance._lazy_bg_ref = lazy_bg
+            bg_layer = bg_name
+            napari_show_info(
+                f"Lazy BG-removed stack created: '{bg_name}' "
+                f"({stack_data.shape[0]} frames, processed on demand)"
+            )
+
+        # Record for batch
+        ui_instance._record('lazy_preprocess_stack', {
+            'stack_layer': layer_name,
+            'ball_radius': ball_radius,
+            'window_size': window_size,
+            'preprocess': preprocess_check.isChecked(),
+            'bg_removal': bg_check.isChecked(),
+        })
+
+    build_btn.clicked.connect(_on_build)
+    form.addRow("", build_btn)
+
+    widget = QWidget()
+    widget.setLayout(form.__class__.__new__(form.__class__))
+    grp_widget = QWidget()
+    from PyQt5.QtWidgets import QVBoxLayout as _QVB
+    _l = _QVB(grp_widget)
+    _l.addWidget(grp)
+    ui_instance._add_widget_to_layout_or_dock(
+        grp_widget, layout, separate_widget, "Lazy Stack Pre-processing"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Pure analysis functions
 # ---------------------------------------------------------------------------
 
@@ -346,8 +545,13 @@ def _add_run_timeseries_condensate_analysis(
 
     ref_spin = QSpinBox()
     ref_spin.setRange(0, 9999)
-    ref_spin.setValue(0)
-    ref_spin.setToolTip("Frame index (0-based) used as drift correction reference.")
+    # Pre-populate from Step 2 reference frame selector if available
+    _preselected_ref = ui_instance.central_manager.active_data_class.data_repository.get(
+        'timeseries_reference_frame', 0)
+    ref_spin.setValue(int(_preselected_ref))
+    ref_spin.setToolTip(
+        "Frame index (0-based) used as drift correction reference. "
+        "Auto-populated from the reference frame selected in Step 2.")
     opts_layout.addRow("Reference frame:", ref_spin)
 
     drift_checkbox = QCheckBox("Apply drift correction (phase cross-correlation)")

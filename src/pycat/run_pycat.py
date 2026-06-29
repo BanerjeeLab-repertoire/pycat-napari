@@ -91,7 +91,7 @@ def _prewarm_cellpose_model():
             return
         print("Cellpose model not found in cache — downloading now (one-time setup, may take a minute)...")
         from cellpose import models
-        models.CellposeModel(pretrained_model='cyto2')
+        models.CellposeModel(gpu=False, pretrained_model='cyto2')  # GPU init done separately in background
         print("Cellpose model downloaded and cached successfully.")
     except Exception as e:
         print(f"Warning: Could not pre-cache Cellpose model: {e}")
@@ -121,7 +121,8 @@ def run_pycat_func():
 
     print("Running PyCAT")  # Print message to console
 
-    # Pre-compile Numba JIT kernels in background thread so first analysis is fast
+    # Pre-compile Numba JIT kernels and check GPU in background thread
+    # so the GUI opens instantly without waiting for CUDA initialization
     import threading
     def _warmup():
         try:
@@ -129,6 +130,16 @@ def run_pycat_func():
             warmup_numba()
         except Exception as e:
             print(f"[PyCAT Numba] Warmup skipped: {e}")
+        # PyTorch/CUDA initialization — done in background so GUI opens instantly
+        try:
+            import torch
+            if torch.cuda.is_available():
+                print(f"[PyCAT] PyTorch CUDA available — Cellpose will use GPU: {torch.cuda.get_device_name(0)}")
+            else:
+                print("[PyCAT] PyTorch CUDA not available — Cellpose will use CPU.")
+                print("[PyCAT] To enable GPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
+        except Exception as e:
+            print(f"[PyCAT] Could not check PyTorch CUDA status: {e}")
     threading.Thread(target=_warmup, daemon=True).start()
 
     viewer = napari.Viewer(title="PyCAT-Napari")

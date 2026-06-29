@@ -322,8 +322,38 @@ def replay_save_and_clear(state: dict, image_path: Path, params: dict, output_di
 # Step map
 # ---------------------------------------------------------------------------
 
+def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay upscaling — not applicable in headless batch mode since
+    upscaling is a viewer operation. Log and skip."""
+    print(f"[PyCAT Batch] Upscaling step skipped in headless mode "
+          f"(upscaling is applied interactively).")
+
+
+def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay enhanced RB-Gaussian background removal on the preprocessed image."""
+    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
+    import math
+
+    preprocessed = state.get('preprocessed')
+    if preprocessed is None:
+        print("[PyCAT Batch] background_removal: no preprocessed image in state — skipping.")
+        return
+
+    data_instance = state['data_instance']
+    ball_radius = math.ceil(_get_data(data_instance, 'ball_radius', 50))
+    bg_removed = rb_gaussian_bg_removal_with_edge_enhancement(
+        preprocessed.astype(np.float32), ball_radius
+    )
+    state['preprocessed'] = bg_removed.astype(np.float32)
+    _save_array(bg_removed.astype(np.float32),
+                output_dir / f"{image_path.stem}_bg_removed.tiff")
+    print(f"[PyCAT Batch]   Background removal done.")
+
+
 _STEP_MAP = {
     'open_image':               replay_open_image,
+    'upscaling':                replay_upscaling,
+    'background_removal':       replay_background_removal,
     'preprocessing':            replay_preprocessing,
     'background_removal':       replay_background_removal,
     'cellpose_segmentation':    replay_cellpose_segmentation,
