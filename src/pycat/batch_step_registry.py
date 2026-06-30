@@ -135,6 +135,19 @@ def _save_array(arr: np.ndarray, path: Path):
     io.imsave(str(path), arr)
 
 
+def _normalize_to_float(arr: np.ndarray) -> np.ndarray:
+    """
+    Normalize an image to [0, 1] float32.
+    skimage functions (equalize_adapthist, etc.) require float images in
+    [-1, 1].  Raw images from file are uint16/uint8 with values up to 65535.
+    """
+    arr = np.asarray(arr).astype(np.float32)
+    mn, mx = arr.min(), arr.max()
+    if mx > 1.0 or mn < 0.0:
+        arr = (arr - mn) / (mx - mn + 1e-8)
+    return arr
+
+
 # ---------------------------------------------------------------------------
 # Replay functions
 # Each signature: fn(state, image_path, params, output_dir) -> None
@@ -226,18 +239,36 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
 
 
 def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Run pre_process_image on the raw image."""
+    """
+    Run pre_process_image on the segmentation channel (state['image']).
+    Also preprocesses the fluorescence channel separately if it differs,
+    storing it in state['preprocessed_fluorescence'] for downstream use.
+    """
     from pycat.toolbox.image_processing_tools import pre_process_image
 
-    image = state['image']
     data_instance = state['data_instance']
     ball_radius = _get_data(data_instance, 'ball_radius', 50)
     window_size = _get_data(data_instance, 'cell_diameter', 100) // 2
 
-    preprocessed = pre_process_image(image, ball_radius, window_size)
-    state['preprocessed'] = preprocessed
+    # Preprocess segmentation channel (used for Cellpose)
+    seg_image = _normalize_to_float(state['image'])
+    preprocessed = pre_process_image(seg_image, ball_radius, window_size)
+    state['preprocessed'] = np.asarray(preprocessed).astype(np.float32)
 
-    _save_array(preprocessed, output_dir / f"{image_path.stem}_preprocessed.tiff")
+    _save_array(state['preprocessed'],
+                output_dir / f"{image_path.stem}_preprocessed.tiff")
+
+    # Preprocess fluorescence channel separately if different from seg
+    fluor = state.get('fluorescence_image')
+    if fluor is not None and not np.array_equal(fluor, state['image']):
+        fluor_norm = _normalize_to_float(fluor)
+        fluor_proc = pre_process_image(fluor_norm, ball_radius, window_size)
+        state['preprocessed_fluorescence'] = np.asarray(fluor_proc).astype(np.float32)
+        _save_array(state['preprocessed_fluorescence'],
+                    output_dir / f"{image_path.stem}_preprocessed_fluor.tiff")
+    else:
+        state['preprocessed_fluorescence'] = state['preprocessed']
+
     print(f"[PyCAT Batch]   Preprocessing done.")
 
 
@@ -318,11 +349,12 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     )
     import pandas as pd
 
-    # Use the fluorescence-channel image for puncta intensity measurement
-    # when it differs from the segmentation channel (per the recorded
-    # channel_assignment from the GUI session); otherwise they're the same.
+    # Use the preprocessed fluorescence channel for condensate segmentation.
+    # This is the bg-removed enhanced image of the fluorescence channel,
+    # not the raw image or the segmentation channel preprocessed image.
     original_image = state.get('fluorescence_image', state['image'])
-    pre_processed_image = state['preprocessed']
+    pre_processed_image = state.get('preprocessed_fluorescence',
+                                     state['preprocessed'])
     data_instance = state['data_instance']
     ball_radius = _get_data(data_instance, 'ball_radius', 50)
 
@@ -373,7 +405,7 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     """
     from pycat.toolbox.feature_analysis_tools import puncta_analysis_func
 
-    # Use the same fluorescence-channel image that was used for segmentation
+    # Use the fluorescence channel image for puncta intensity measurement
     image = state.get('fluorescence_image', state['image'])
     data_instance = state['data_instance']
     puncta_mask = state.get('puncta_mask')
@@ -487,12 +519,27 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
 
     data_instance = state['data_instance']
     ball_radius = math.ceil(_get_data(data_instance, 'ball_radius', 50))
+
+    # Background remove segmentation channel
     bg_removed = rb_gaussian_bg_removal_with_edge_enhancement(
-        preprocessed.astype(np.float32), ball_radius
+        _normalize_to_float(preprocessed), ball_radius
     )
     state['preprocessed'] = bg_removed.astype(np.float32)
-    _save_array(bg_removed.astype(np.float32),
+    _save_array(state['preprocessed'],
                 output_dir / f"{image_path.stem}_bg_removed.tiff")
+
+    # Background remove fluorescence channel if separate
+    fluor_proc = state.get('preprocessed_fluorescence')
+    if fluor_proc is not None and fluor_proc is not preprocessed:
+        bg_fluor = rb_gaussian_bg_removal_with_edge_enhancement(
+            _normalize_to_float(fluor_proc), ball_radius
+        )
+        state['preprocessed_fluorescence'] = bg_fluor.astype(np.float32)
+        _save_array(state['preprocessed_fluorescence'],
+                    output_dir / f"{image_path.stem}_bg_removed_fluor.tiff")
+    else:
+        state['preprocessed_fluorescence'] = state['preprocessed']
+
     print(f"[PyCAT Batch]   Background removal done.")
 
 

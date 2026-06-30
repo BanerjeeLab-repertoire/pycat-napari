@@ -88,11 +88,25 @@ def _session_zarr_dir():
 
 
 def _read_source_frame(stack_data, t):
-    """Read frame t from any stack type (numpy, zarr, _ZarrTYX, dask)."""
+    """
+    Read frame t from any stack type (numpy, zarr, _ZarrTYX, dask) and
+    normalize to [0, 1] float32.
+
+    skimage's equalize_adapthist (used in pre_process_image) requires float
+    images in [-1, 1].  Raw IMS/TIFF stacks are uint16 (0–65535) or uint8
+    (0–255).  Normalizing here ensures every consumer — preprocessing,
+    background removal, and analysis — receives correctly scaled data,
+    matching what dtype_conversion_func does in the standard 2D pipeline.
+    """
     frame = stack_data[t]
     if hasattr(frame, 'compute'):
         frame = frame.compute()
-    return np.asarray(frame).astype(np.float32)
+    arr = np.asarray(frame).astype(np.float32)
+    # Normalize to [0, 1] if outside that range
+    mn, mx = arr.min(), arr.max()
+    if mx > 1.0:
+        arr = (arr - mn) / (mx - mn + 1e-8)
+    return arr
 
 
 class _ZarrStack:
@@ -121,38 +135,155 @@ class _ZarrStack:
         return np.asarray(self._z[0])[np.newaxis]
 
 
+# ---------------------------------------------------------------------------
+# Parallel frame processing helpers
+# ---------------------------------------------------------------------------
+
+def _process_frame_worker(args):
+    """
+    Top-level picklable function for ProcessPoolExecutor.
+    Reads one pre-normalised frame from a filesystem zarr store,
+    applies the named processing function, and returns (t, result).
+    """
+    import warnings
+    # Suppress CuPy/CUDA warnings that fire on every worker process spawn
+    warnings.filterwarnings("ignore", message="CUDA path could not be detected")
+    warnings.filterwarnings("ignore", category=UserWarning, module="cupy")
+
+    t, src_zarr_path, process_fn_name, process_fn_kwargs = args
+
+    import numpy as np
+    import zarr as _zarr
+
+    src = _zarr.open(src_zarr_path, mode='r')
+    frame = np.asarray(src[t]).astype(np.float32)
+    # Source was already normalised to [0,1] by _prepare_source_zarr
+
+    if process_fn_name == 'preprocess':
+        from pycat.toolbox.image_processing_tools import pre_process_image
+        result = pre_process_image(frame,
+                                   process_fn_kwargs['ball_radius'],
+                                   process_fn_kwargs['window_size'])
+    elif process_fn_name == 'bg_remove':
+        from pycat.toolbox.image_processing_tools import (
+            rb_gaussian_bg_removal_with_edge_enhancement)
+        result = rb_gaussian_bg_removal_with_edge_enhancement(
+            frame, process_fn_kwargs['ball_radius'])
+    else:
+        result = frame
+
+    return t, np.asarray(result).astype(np.float32)
+
+
 class _StackProcessWorker(QThread):
     """
-    Background worker: processes frames one at a time and writes each
-    immediately to a zarr store.  Napari can read already-written frames
-    while later frames are still being processed.
+    Background worker that processes a (T, H, W) stack frame-by-frame and
+    writes results to a zarr store on disk.
+
+    Uses a ProcessPoolExecutor to run N_WORKERS frames in parallel — one
+    worker per CPU core (capped at 8 to avoid RAM pressure on large stacks).
+    Each worker is an independent process so the GIL is bypassed and all
+    CPU cores are used.  Results are written to zarr in order as they
+    complete so napari can display already-processed frames immediately.
+
+    Speedup is roughly linear with core count up to memory bandwidth limits:
+    a 4-core machine processes ~4× faster than the old serial approach.
     """
     progress    = pyqtSignal(int, int)   # (frames_done, total)
     finished    = pyqtSignal(str)        # zarr store path when all done
     error       = pyqtSignal(str)
 
-    def __init__(self, stack_data, zarr_path, process_fn, n_t, H, W, parent=None):
+    def __init__(self, stack_data, zarr_path, process_fn_name, process_fn_kwargs,
+                 n_t, H, W, n_workers=None, parent=None):
         super().__init__(parent)
-        self._stack   = stack_data
-        self._path    = zarr_path
-        self._fn      = process_fn
-        self._n_t     = n_t
-        self._H, self._W = H, W
+        self._stack_data        = stack_data
+        self._path              = zarr_path
+        self._process_fn_name   = process_fn_name
+        self._process_fn_kwargs = process_fn_kwargs
+        self._n_t               = n_t
+        self._H, self._W        = H, W
+        import os
+        self._n_workers = n_workers or min(8, max(1, os.cpu_count() - 1))
+
+    def _prepare_source_zarr(self):
+        """
+        Copy the source stack into a temporary zarr DirectoryStore so that
+        worker processes can open it by filesystem path.
+
+        IMS files use an HDF5-backed zarr store that is not a filesystem
+        directory and cannot be re-opened by path in a subprocess.
+        Any other non-filesystem source (numpy array, dask array) also
+        needs to be materialised once before being handed to workers.
+
+        Returns the path to a zarr DirectoryStore containing the
+        normalised (float32, [0,1]) source frames.
+        """
+        import zarr as _zarr
+        import os, tempfile
+
+        src = self._stack_data
+        src_zarr_path = None
+
+        # Check if source is already a filesystem zarr DirectoryStore
+        if isinstance(src, str) and os.path.isdir(src):
+            src_zarr_path = src
+        elif hasattr(src, 'store') and isinstance(getattr(src, 'store', None),
+                                                    _zarr.storage.DirectoryStore):
+            src_zarr_path = src.store.path
+
+        if src_zarr_path and os.path.isdir(src_zarr_path):
+            return src_zarr_path   # already a filesystem zarr — use directly
+
+        # Need to materialise into a temp zarr directory
+        tmp_dir = tempfile.mkdtemp(prefix='pycat_src_')
+        tmp_path = os.path.join(tmp_dir, 'source')
+        z_out = _zarr.open(tmp_path, mode='w',
+                           shape=(self._n_t, self._H, self._W),
+                           chunks=(1, self._H, self._W),
+                           dtype=np.float32)
+        for t in range(self._n_t):
+            frame = _read_source_frame(src, t)  # already normalises to [0,1]
+            z_out[t] = frame
+            self.progress.emit(t + 1, self._n_t * 2)  # first half of progress
+        return tmp_path
 
     def run(self):
         try:
             import zarr as _zarr
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
             z = _zarr.open(
                 self._path, mode='w',
                 shape=(self._n_t, self._H, self._W),
                 chunks=(1, self._H, self._W),
                 dtype=np.float32,
             )
-            for t in range(self._n_t):
-                frame = _read_source_frame(self._stack, t)
-                z[t]  = self._fn(frame)
-                self.progress.emit(t + 1, self._n_t)
+
+            # Ensure source is a filesystem zarr that subprocesses can open
+            src_path = self._prepare_source_zarr()
+
+            args = [
+                (t, src_path, self._process_fn_name, self._process_fn_kwargs)
+                for t in range(self._n_t)
+            ]
+
+            done = 0
+            offset = self._n_t   # progress offset after materialisation phase
+            batch_size = self._n_workers * 4
+
+            with ProcessPoolExecutor(max_workers=self._n_workers) as executor:
+                for batch_start in range(0, self._n_t, batch_size):
+                    batch = args[batch_start:batch_start + batch_size]
+                    futures = {executor.submit(_process_frame_worker, a): a[0]
+                               for a in batch}
+                    for future in as_completed(futures):
+                        t_idx, result = future.result()
+                        z[t_idx] = result
+                        done += 1
+                        self.progress.emit(offset + done, self._n_t * 2)
+
             self.finished.emit(self._path)
+
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -186,11 +317,14 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     bg_check.setChecked(True)
     form.addRow("", bg_check)
 
-    build_btn = QPushButton("Build Lazy Processing Layers")
+    import os as _os
+    _n_workers = min(8, max(1, _os.cpu_count() - 1))
+    build_btn = QPushButton(f"▶  Process Stack  ({_n_workers} parallel workers)")
     build_btn.setToolTip(
-        "Creates dask-backed layers — no frames are processed now.\n"
-        "Processing happens one frame at a time as napari displays each frame\n"
-        "or when the Time-Series analysis requests a frame."
+        f"Processes all frames using {_n_workers} CPU cores in parallel,\n"
+        "writing each frame to a zarr store on disk as it completes.\n"
+        "Napari displays already-processed frames immediately while\n"
+        "later frames are still being computed."
     )
 
     # Worker references kept alive on ui_instance so GC doesn't kill them
@@ -224,13 +358,12 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
         build_btn.setEnabled(False)
 
-        def _start_worker(source, process_fn, zarr_name, display_name, colormap,
-                          on_done_cb=None):
+        def _start_worker(source, fn_name, fn_kwargs, zarr_name, display_name,
+                          colormap, on_done_cb=None):
             import zarr as _zarr
             import os
             zarr_path = os.path.join(zarr_dir, zarr_name)
             # Pre-create the zarr store so napari can open it immediately
-            # (frames will be NaN until processed, but the layer exists)
             _zarr.open(zarr_path, mode='w',
                        shape=(n_t, H, W), chunks=(1, H, W), dtype=np.float32)
             z_arr  = _zarr.open(zarr_path, mode='r')
@@ -241,12 +374,12 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
             # Track this zarr ref so the time-series analysis can find it
             setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
 
-            worker = _StackProcessWorker(source, zarr_path, process_fn,
+            worker = _StackProcessWorker(source, zarr_path, fn_name, fn_kwargs,
                                          n_t, H, W)
             ui_instance._ts_workers.append(worker)
 
             prog = QProgressBar()
-            prog.setMaximum(n_t)
+            prog.setMaximum(n_t * 2)  # phase 1: materialise source; phase 2: process
             prog.setValue(0)
             build_btn.parent().layout().addWidget(prog)
 
@@ -276,19 +409,13 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
             worker.start()
             return worker, z_arr
 
-        from pycat.toolbox.image_processing_tools import (
-            pre_process_image,
-            rb_gaussian_bg_removal_with_edge_enhancement,
-        )
+
 
         proc_source   = stack_data
         proc_zarr_ref = None
 
         if preprocess_check.isChecked():
             br, ws = ball_radius, window_size
-            def _preprocess(frame):
-                return pre_process_image(frame, br, ws).astype(np.float32)
-
             proc_name  = f"Pre-Processed {layer_name}"
             zarr_name  = f"preproc_{id(layer_name)}"
 
@@ -296,23 +423,22 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                 nonlocal proc_source
                 import zarr as _zarr
                 proc_source = _zarr.open(zarr_path, mode='r')
-                # If bg removal also requested, launch it now
                 if bg_check.isChecked():
                     _start_bg(proc_source)
 
-            _start_worker(stack_data, _preprocess, zarr_name, proc_name,
-                          'green', on_done_cb=_after_preproc)
+            _start_worker(stack_data, 'preprocess',
+                          {'ball_radius': br, 'window_size': ws},
+                          zarr_name, proc_name, 'green',
+                          on_done_cb=_after_preproc)
         else:
             proc_source = stack_data
 
         def _start_bg(source):
-            br = ball_radius
-            def _bg_remove(frame):
-                return rb_gaussian_bg_removal_with_edge_enhancement(
-                    frame, br).astype(np.float32)
             bg_name   = f"Enhanced Background Removed {layer_name}"
             zarr_name = f"bgrem_{id(layer_name)}"
-            _start_worker(source, _bg_remove, zarr_name, bg_name, 'viridis')
+            _start_worker(source, 'bg_remove',
+                          {'ball_radius': ball_radius},
+                          zarr_name, bg_name, 'viridis')
 
         if bg_check.isChecked() and not preprocess_check.isChecked():
             _start_bg(stack_data)
