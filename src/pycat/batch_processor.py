@@ -453,6 +453,14 @@ class BatchProcessor:
         )
         print(f"[PyCAT Batch] Recorded step: {step_name}  params={params}")
 
+        # Notify the workflow checklist so it can auto-check this step
+        try:
+            cm = getattr(self, '_central_manager', None)
+            if cm is not None:
+                cm.workflow_checklist.on_step_recorded(step_name)
+        except Exception:
+            pass
+
     def clear_recording(self):
         """Reset the session recording."""
         self.config = _empty_config()

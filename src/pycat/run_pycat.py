@@ -64,6 +64,17 @@ import warnings
 # Must be an env var — dask.config.set() is too late since dask checks
 # _distributed_available() before consulting config during .compute().
 os.environ.setdefault('DASK_SCHEDULER', 'synchronous')
+
+# Suppress CuPy CUDA path warning in ALL processes (main + worker subprocesses).
+# PYTHONWARNINGS is read by every Python interpreter at startup before any
+# imports run, so it suppresses the warning even in ProcessPoolExecutor workers
+# that spawn fresh interpreters where warnings.filterwarnings() is too late.
+_cupy_filter = 'ignore::UserWarning:cupy._environment'
+_existing = os.environ.get('PYTHONWARNINGS', '')
+if _cupy_filter not in _existing:
+    os.environ['PYTHONWARNINGS'] = (
+        (_existing + ',' if _existing else '') + _cupy_filter
+    )
 # Suppress CuPy's CUDA path warning before any imports trigger it.
 # CuPy works via the GPU driver alone; the full CUDA toolkit is not required.
 warnings.filterwarnings(
@@ -159,6 +170,7 @@ def run_pycat_func():
     bp = BatchProcessor(viewer)
     register_all_steps(bp)
     cm._pycat_batch_processor = bp   # readable via central_manager in widgets
+    bp._central_manager = cm          # so bp.record() can notify the checklist
     add_batch_toolbar_button(viewer, bp)
 
     napari.run()

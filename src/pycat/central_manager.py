@@ -20,6 +20,7 @@ Date
 
 # Local application imports
 from pycat.file_io.file_io import FileIOClass
+from pycat.ui.workflow_checklist import WorkflowChecklistManager
 from pycat.data.data_modules import BaseDataClass
 from pycat.ui.ui_modules import ToolboxFunctionsUI, AnalysisMethodsUI, MenuManager
 
@@ -75,6 +76,9 @@ class CentralManager:
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)
+
+        # Workflow checklist — activated when user switches to an analysis mode
+        self.workflow_checklist = WorkflowChecklistManager(self.viewer)
 
     def set_active_data_class(self, data_class):
         """

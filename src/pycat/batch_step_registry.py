@@ -573,6 +573,39 @@ def replay_open_stack(state: dict, image_path: Path, params: dict, output_dir: P
     replay_open_image(state, image_path, params, output_dir)
 
 
+def replay_ts_cellpose_keyframe(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Run keyframe Cellpose on the preprocessed stack and propagate masks.
+    Uses the same interval and diameter recorded from the GUI session.
+    """
+    from pycat.toolbox.ts_cellpose_tools import run_keyframe_cellpose
+
+    preprocessed = state.get('preprocessed')
+    if preprocessed is None:
+        raise RuntimeError("ts_cellpose_keyframe requires preprocessing to run first.")
+
+    # Stack may be 2D (single reference frame) — promote to (1, H, W)
+    if preprocessed.ndim == 2:
+        preprocessed = preprocessed[np.newaxis]
+
+    interval      = params.get('keyframe_interval', 20)
+    cell_diameter = params.get('cell_diameter',
+                               _get_data(state['data_instance'], 'cell_diameter', 100))
+
+    mask_stack, kf_indices = run_keyframe_cellpose(
+        preprocessed.astype(np.float32), cell_diameter, interval
+    )
+
+    state['labeled_cells']          = mask_stack[0]   # frame-0 mask for cell analysis
+    state['ts_cell_mask_stack']     = mask_stack
+    state['ts_cellpose_keyframes']  = kf_indices
+
+    _save_array(mask_stack[0].astype(np.uint16),
+                output_dir / f"{image_path.stem}_ts_cell_mask.tiff")
+    print(f"[PyCAT Batch]   TS Cellpose done: {len(kf_indices)} keyframes, "
+          f"{mask_stack.shape[0]} frames total.")
+
+
 _STEP_MAP = {
     'open_image':               replay_open_image,
     'open_stack':               replay_open_stack,    # unified IMS + TIFF stack
@@ -587,6 +620,7 @@ _STEP_MAP = {
     'condensate_segmentation':  replay_condensate_segmentation,
     'condensate_analysis':      replay_condensate_analysis,
     'sacf_analysis':            replay_sacf_analysis,
+    'ts_cellpose_keyframe':      replay_ts_cellpose_keyframe,
     'save_and_clear':           replay_save_and_clear,
 }
 

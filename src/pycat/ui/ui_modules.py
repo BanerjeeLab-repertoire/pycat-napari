@@ -48,6 +48,7 @@ from pycat.toolbox.pixel_wise_corr_analysis_tools import run_pwcca
 from pycat.toolbox.obj_based_coloc_analysis_tools import run_manders_coloc, run_obca
 from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
 from pycat.toolbox.video_export_tools import _add_export_timeseries_video
+from pycat.toolbox.ts_cellpose_tools import _add_run_ts_cellpose
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels, run_label_binary_mask, 
@@ -329,6 +330,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
         self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)
         self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
+        self._add_run_ts_cellpose = lambda **kw: _add_run_ts_cellpose(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -1478,6 +1480,12 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         This includes initializing and arranging various analysis and processing steps
         in the user interface.
         """
+        # Activate the workflow checklist for this pipeline
+        try:
+            self.central_manager.workflow_checklist.activate('condensate')
+        except Exception:
+            pass
+
         # Add analysis and processing steps to the layout
         # Each method call adds a specific UI component for condensate analysis
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.condensate_layout)
@@ -1530,6 +1538,13 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         super().__init__(viewer, central_manager)
         self.ts_layout = QVBoxLayout()
 
+        # Activate the workflow checklist for this pipeline
+        try:
+            self.central_manager.workflow_checklist.activate('timeseries')
+        except Exception:
+            pass
+
+
     def setup_ui(self):
         tfu = self.central_manager.toolbox_functions_ui
 
@@ -1556,10 +1571,12 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         tfu._add_measure_line(layout=self.ts_layout)
         tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
 
-        # ── Steps 5-6: Cellpose and cell analysis on the reference frame ──
-        # Run these on the extracted 2D reference frame layer (Step 2),
-        # not on the full stack.
-        tfu._add_run_cellpose_segmentation(layout=self.ts_layout)
+        # ── Steps 5-6: Cellpose and cell analysis ─────────────────────────
+        # Keyframe Cellpose: runs Cellpose every N frames and propagates
+        # the nearest mask to all other frames — much faster than running
+        # on every frame while remaining accurate for slow-moving cells.
+        # Cell Analyzer still runs on the frame-0 mask as normal.
+        tfu._add_run_ts_cellpose(layout=self.ts_layout)
         tfu._add_run_cell_analysis_func(layout=self.ts_layout)
 
         # ── Step 7: time-series condensate analysis ───────────────────────
