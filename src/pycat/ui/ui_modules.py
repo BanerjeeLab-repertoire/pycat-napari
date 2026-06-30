@@ -47,6 +47,7 @@ from pycat.toolbox.feature_analysis_tools import (
 from pycat.toolbox.pixel_wise_corr_analysis_tools import run_pwcca
 from pycat.toolbox.obj_based_coloc_analysis_tools import run_manders_coloc, run_obca
 from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
+from pycat.toolbox.video_export_tools import _add_export_timeseries_video
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels, run_label_binary_mask, 
@@ -109,6 +110,14 @@ class BaseUIClass:
         Updates the items in the dropdown based on the current layers in the viewer that match the specified type.
         Optionally ensures a 'None' option is available in the dropdown.
 
+        Preserves the user's current selection across rebuilds when possible —
+        previously the dropdown silently reset to index 0 (the first/oldest
+        layer) every time any layer was added or removed anywhere in the
+        viewer, discarding the user's actual choice without any visual
+        indication. This caused batch config recordings to capture stale
+        defaults like "Segmentation Image" instead of the intended
+        "Upscaled Segmentation Image" the user had selected.
+
         Parameters
         ----------
         dropdown : QComboBox
@@ -116,6 +125,9 @@ class BaseUIClass:
         layer_type : type
             The type of layer to include in the dropdown.
         """
+        # Remember what was selected before rebuilding
+        previous_selection = dropdown.currentText()
+
         # Check if 'None' option exists and store its state
         none_option_exists = dropdown.findText("None") != -1
 
@@ -128,7 +140,13 @@ class BaseUIClass:
         # Add 'None' option if it was present before
         if none_option_exists: #or dropdown.count() == 0:
             dropdown.insertItem(0, "None")
-            dropdown.setCurrentIndex(0)
+
+        # Restore the previous selection if it still exists among the
+        # current layers; only fall back to the default (index 0) if the
+        # previously selected layer was actually removed from the viewer.
+        restored_index = dropdown.findText(previous_selection)
+        if restored_index != -1:
+            dropdown.setCurrentIndex(restored_index)
 
     def add_text_label(self, layout, text, font_size=10, bold=False):
         """
@@ -310,6 +328,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
         self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
         self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)
+        self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -344,8 +363,15 @@ class ToolboxFunctionsUI(BaseUIClass):
         measure_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(measure_layout, 'Measure Object Diameters', bold=True) # Add widget title label
         measure_button = QPushButton("Measure Line(s)") # Create a button widget
-        measure_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            self.central_manager.active_data_class.calculate_length, None, self.viewer)) # function, viewer, *args
+        def _on_measure_line():
+            self.on_general_button_clicked(
+                self.central_manager.active_data_class.calculate_length, None, self.viewer)
+            self._record('measure_line', {
+                'object_size': self.central_manager.active_data_class.data_repository.get('object_size'),
+                'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter'),
+                'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius'),
+            })
+        measure_button.clicked.connect(_on_measure_line)
         measure_layout.addWidget(measure_button) # Add the button to the layout
         measure_widget = QWidget() # Create a main widget to contain the input widget
         measure_widget.setLayout(measure_layout) # Set the layout for the widget
@@ -361,9 +387,16 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(pre_process_layout, 'Image Pre-processing', bold=True) # Add a widget title label
         pre_process_button = QPushButton("Pre-process Image") # Create a button widget
         def _on_preprocess():
+            # Capture the active layer BEFORE running — the operation adds a
+            # new output layer to the viewer which napari may then select
+            # as active, making post-hoc capture unreliable.
+            active = self.viewer.layers.selection.active
+            active_name = active.name if active is not None else ''
             self.on_general_button_clicked(
                 run_pre_process_image, None, self.central_manager.active_data_class, self.viewer)
-            self._record('preprocessing', {})
+            self._record('preprocessing', {
+                'active_layer': active_name,
+            })
         pre_process_button.clicked.connect(_on_preprocess)
         pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
         pre_process_widget = QWidget()
@@ -415,11 +448,17 @@ class ToolboxFunctionsUI(BaseUIClass):
         upscaling_layout.addWidget(upscaling_checkbox) # Add the checkbox to the layout
         upscaling_button = QPushButton("Run Upscaling") # Create a button widget
         def _on_upscaling():
+            # run_upscaling_func operates on viewer.layers.selection (the
+            # highlighted set), not just the single active layer — record
+            # all selected layer names so replay knows what was upscaled.
+            selected_names = [l.name for l in self.viewer.layers.selection
+                              if l is not None]
             self.on_general_button_clicked(
                 run_upscaling_func, None, upscaling_checkbox,
                 self.central_manager.active_data_class, self.viewer)
             self._record('upscaling', {
                 'update_data_class': upscaling_checkbox.isChecked(),
+                'selected_layers': selected_names,
             })
         upscaling_button.clicked.connect(_on_upscaling)
         upscaling_layout.addWidget(upscaling_button) # Add the button to the layout
@@ -453,12 +492,17 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(remove_background_layout, 'Enhanced RB-Gauss Background Removal', bold=True) # Add widget title label
         remove_background_button = QPushButton("Remove Background") # Create a button widget
         def _on_enhanced_bg_removal():
+            # Capture BEFORE running — previously this read the active layer
+            # AFTER the operation completed, by which point napari had often
+            # auto-selected the newly created output layer instead of the
+            # input layer that was actually processed.
+            active = self.viewer.layers.selection.active
+            active_name = active.name if active is not None else ''
             self.on_general_button_clicked(
                 run_enhanced_rb_gaussian_bg_removal, None,
                 self.central_manager.active_data_class, self.viewer)
             self._record('background_removal', {
-                'active_layer': self.viewer.layers.selection.active.name
-                if self.viewer.layers.selection.active else '',
+                'active_layer': active_name,
             })
         remove_background_button.clicked.connect(_on_enhanced_bg_removal)
         remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
@@ -1472,7 +1516,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
     Dedicated pipeline dock for time-series condensate analysis.
 
     Workflow order:
-      1. Open Image Stack   — loads (T,H,W) via Open/Save File(s) > Open Image Stack
+      1. Open Image Stack   — loads (T,H,W) via Open/Save File(s) > Open Image Stack (T/Z / IMS)
       2. Select Reference Frame — user picks which frame to use for segmentation
       3. Pre-process Image  — runs on the reference frame
       4. Enhanced BG Removal
@@ -1493,7 +1537,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         from PyQt5.QtWidgets import QLabel, QFrame
         instr = QLabel(
             "<b>Step 1:</b> Load your time-series via<br>"
-            "<i>★ Open/Save File(s) → Open Image Stack (T/Z)</i>"
+            "<i>★ Open/Save File(s) → Open Image Stack (T/Z / IMS)</i>"
         )
         instr.setWordWrap(True)
         instr.setStyleSheet("padding: 6px; background: #2a2a2a; border-radius: 4px;")
@@ -1520,6 +1564,9 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         # ── Step 7: time-series condensate analysis ───────────────────────
         tfu._add_run_timeseries_condensate_analysis(layout=self.ts_layout)
+
+        # ── Step 8: export video for presentations ─────────────────────────
+        tfu._add_export_timeseries_video(layout=self.ts_layout)
 
         # ── Step 8: save and clear ────────────────────────────────────────
         tfu._add_save_and_clear(layout=self.ts_layout)
@@ -1593,7 +1640,22 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
             ref_frame = data[frame_idx].astype(np.float32)
             ref_name = f"{layer_name} [frame {frame_idx}]"
+
+            # Save the current time slider position so we can restore it
+            # after adding the 2D layer.  Napari resets dims.current_step
+            # to all-zeros when a 2D layer is added on top of a 3D stack,
+            # which collapses the time slider and makes the original stack
+            # appear stuck.
+            saved_step = tuple(self.viewer.dims.current_step)
+
             self.viewer.add_image(ref_frame, name=ref_name)
+
+            # Restore the time slider position.  The 2D layer has fewer
+            # dims so napari may have zeroed axis 0 (the T axis).
+            try:
+                self.viewer.dims.current_step = saved_step
+            except Exception:
+                pass
 
             # Store reference frame index in data instance for the TS tool
             self.central_manager.active_data_class.data_repository[
@@ -2073,8 +2135,8 @@ class MenuManager:
             """
             file_io_methods_dict = {
                 'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
-                'Open Image Stack (T/Z)': (self.central_manager.file_io.open_image_stack, {}),
-                'Open Andor/Imaris File (.ims)': (self.central_manager.file_io.open_ims_file, {}),
+                'Open Image Stack (T/Z / IMS)': (self.central_manager.file_io.open_stack, {}),
+                # IMS files are now handled by the unified Open Stack menu item above
                 'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }

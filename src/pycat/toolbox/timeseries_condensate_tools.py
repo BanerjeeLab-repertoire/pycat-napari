@@ -69,91 +69,93 @@ from pycat.ui.ui_utils import show_dataframes_dialog
 # Lazy stack preprocessing
 # ---------------------------------------------------------------------------
 
-def build_lazy_preprocessed_stack(stack_data, ball_radius, window_size):
+# ---------------------------------------------------------------------------
+# Zarr-backed frame-by-frame processing
+# ---------------------------------------------------------------------------
+# Architecture: process every frame once in a background worker, writing
+# each frame immediately to a zarr store on disk.  The zarr store is then
+# handed to napari as a _ZarrStack wrapper — lazy reads, zero dask, no
+# recomputation on slider scrub, no SSL crash.
+
+import tempfile as _tempfile
+
+
+def _session_zarr_dir():
+    """Return a per-session temp dir for zarr stores (created once)."""
+    if not hasattr(_session_zarr_dir, '_path'):
+        _session_zarr_dir._path = _tempfile.mkdtemp(prefix='pycat_ts_')
+    return _session_zarr_dir._path
+
+
+def _read_source_frame(stack_data, t):
+    """Read frame t from any stack type (numpy, zarr, _ZarrTYX, dask)."""
+    frame = stack_data[t]
+    if hasattr(frame, 'compute'):
+        frame = frame.compute()
+    return np.asarray(frame).astype(np.float32)
+
+
+class _ZarrStack:
     """
-    Build a lazy dask array where each frame is preprocessed only when
-    napari requests it.  No frames are processed at call time.
-
-    Parameters
-    ----------
-    stack_data : np.ndarray or dask.array.Array, shape (T, H, W)
-        Raw image stack — can already be a dask array (e.g. from IMS loader).
-    ball_radius : int
-    window_size : int
-
-    Returns
-    -------
-    dask.array.Array, shape (T, H, W), dtype float32
+    Lightweight napari-compatible wrapper around a zarr Array.
+    Presents shape/dtype/ndim and reads frames on demand without dask.
+    Zarr reads only the chunk(s) needed for the current slider position.
     """
-    import dask
-    import dask.array as da
-    dask.config.set(scheduler='synchronous')
-    from pycat.toolbox.image_processing_tools import pre_process_image
+    def __init__(self, z):
+        self._z    = z
+        self.shape = z.shape
+        self.dtype = z.dtype
+        self.ndim  = z.ndim
 
-    if hasattr(stack_data, 'compute'):
-        # Already a dask array — wrap each slice lazily
-        get_frame = lambda t: stack_data[t].compute()
-    else:
-        get_frame = lambda t: stack_data[t]
+    def __getitem__(self, idx):
+        return np.asarray(self._z[idx])
 
-    n_t = stack_data.shape[0]
-    H, W = stack_data.shape[1], stack_data.shape[2]
+    def __array__(self, dtype=None):
+        arr = np.asarray(self._z)
+        return arr if dtype is None else arr.astype(dtype)
 
-    def _preprocess_frame(t, br, ws):
-        frame = get_frame(t).astype(np.float32)
-        return pre_process_image(frame, br, ws).astype(np.float32)
+    def __len__(self):
+        return self.shape[0]
 
-    delayed_frames = [
-        da.from_delayed(
-            dask.delayed(_preprocess_frame)(t, ball_radius, window_size),
-            shape=(H, W),
-            dtype=np.float32,
-        )
-        for t in range(n_t)
-    ]
-    return da.stack(delayed_frames, axis=0)
+    def transpose(self, *axes):
+        return np.asarray(self._z[0])[np.newaxis]
 
 
-def build_lazy_bg_removed_stack(preprocessed_stack, ball_radius):
+class _StackProcessWorker(QThread):
     """
-    Build a lazy dask array where background removal runs on each frame
-    only when napari requests it.
-
-    Parameters
-    ----------
-    preprocessed_stack : np.ndarray or dask.array.Array, shape (T, H, W)
-    ball_radius : int
-
-    Returns
-    -------
-    dask.array.Array, shape (T, H, W), dtype float32
+    Background worker: processes frames one at a time and writes each
+    immediately to a zarr store.  Napari can read already-written frames
+    while later frames are still being processed.
     """
-    import dask
-    import dask.array as da
-    dask.config.set(scheduler='synchronous')
-    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
+    progress    = pyqtSignal(int, int)   # (frames_done, total)
+    finished    = pyqtSignal(str)        # zarr store path when all done
+    error       = pyqtSignal(str)
 
-    if hasattr(preprocessed_stack, 'compute'):
-        get_frame = lambda t: preprocessed_stack[t].compute()
-    else:
-        get_frame = lambda t: preprocessed_stack[t]
+    def __init__(self, stack_data, zarr_path, process_fn, n_t, H, W, parent=None):
+        super().__init__(parent)
+        self._stack   = stack_data
+        self._path    = zarr_path
+        self._fn      = process_fn
+        self._n_t     = n_t
+        self._H, self._W = H, W
 
-    n_t = preprocessed_stack.shape[0]
-    H, W = preprocessed_stack.shape[1], preprocessed_stack.shape[2]
-
-    def _bg_remove_frame(t, br):
-        frame = get_frame(t).astype(np.float32)
-        return rb_gaussian_bg_removal_with_edge_enhancement(frame, br).astype(np.float32)
-
-    delayed_frames = [
-        da.from_delayed(
-            dask.delayed(_bg_remove_frame)(t, ball_radius),
-            shape=(H, W),
-            dtype=np.float32,
-        )
-        for t in range(n_t)
-    ]
-    return da.stack(delayed_frames, axis=0)
+    def run(self):
+        try:
+            import zarr as _zarr
+            z = _zarr.open(
+                self._path, mode='w',
+                shape=(self._n_t, self._H, self._W),
+                chunks=(1, self._H, self._W),
+                dtype=np.float32,
+            )
+            for t in range(self._n_t):
+                frame = _read_source_frame(self._stack, t)
+                z[t]  = self._fn(frame)
+                self.progress.emit(t + 1, self._n_t)
+            self.finished.emit(self._path)
+        except Exception:
+            import traceback
+            self.error.emit(traceback.format_exc())
 
 
 def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
@@ -191,6 +193,9 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         "or when the Time-Series analysis requests a frame."
     )
 
+    # Worker references kept alive on ui_instance so GC doesn't kill them
+    ui_instance._ts_workers = getattr(ui_instance, '_ts_workers', [])
+
     def _on_build():
         layer_name = stack_dropdown.currentText()
         try:
@@ -208,40 +213,111 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
         window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
 
-        # Cap ball_radius as in the standard preprocessor
         H = stack_data.shape[1]
         max_radius = max(4, int(H * 0.05))
         ball_radius  = min(ball_radius, max_radius)
         window_size  = min(window_size, max_radius * 2)
 
-        proc_layer = None
-        bg_layer   = None
+        n_t = stack_data.shape[0]
+        W   = stack_data.shape[2]
+        zarr_dir = _session_zarr_dir()
+
+        build_btn.setEnabled(False)
+
+        def _start_worker(source, process_fn, zarr_name, display_name, colormap,
+                          on_done_cb=None):
+            import zarr as _zarr
+            import os
+            zarr_path = os.path.join(zarr_dir, zarr_name)
+            # Pre-create the zarr store so napari can open it immediately
+            # (frames will be NaN until processed, but the layer exists)
+            _zarr.open(zarr_path, mode='w',
+                       shape=(n_t, H, W), chunks=(1, H, W), dtype=np.float32)
+            z_arr  = _zarr.open(zarr_path, mode='r')
+            wrapper = _ZarrStack(z_arr)
+            ui_instance.viewer.add_image(wrapper, name=display_name,
+                                         colormap=colormap)
+
+            # Track this zarr ref so the time-series analysis can find it
+            setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
+
+            worker = _StackProcessWorker(source, zarr_path, process_fn,
+                                         n_t, H, W)
+            ui_instance._ts_workers.append(worker)
+
+            prog = QProgressBar()
+            prog.setMaximum(n_t)
+            prog.setValue(0)
+            build_btn.parent().layout().addWidget(prog)
+
+            def _on_progress(done, total):
+                prog.setValue(done)
+                # Refresh the napari layer so newly written frames appear
+                try:
+                    ui_instance.viewer.layers[display_name].refresh()
+                except Exception:
+                    pass
+
+            def _on_finished(path):
+                prog.setValue(n_t)
+                napari_show_info(f"'{display_name}' — all {n_t} frames processed.")
+                if on_done_cb:
+                    on_done_cb(path)
+                build_btn.setEnabled(True)
+
+            def _on_error(msg):
+                napari_show_warning(f"Processing error — see terminal.")
+                print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
+                build_btn.setEnabled(True)
+
+            worker.progress.connect(_on_progress)
+            worker.finished.connect(_on_finished)
+            worker.error.connect(_on_error)
+            worker.start()
+            return worker, z_arr
+
+        from pycat.toolbox.image_processing_tools import (
+            pre_process_image,
+            rb_gaussian_bg_removal_with_edge_enhancement,
+        )
+
+        proc_source   = stack_data
+        proc_zarr_ref = None
 
         if preprocess_check.isChecked():
-            lazy_proc = build_lazy_preprocessed_stack(stack_data, ball_radius, window_size)
-            proc_name = f"Pre-Processed {layer_name}"
-            ui_instance.viewer.add_image(lazy_proc, name=proc_name, colormap='viridis')
-            # Keep a reference to prevent GC
-            ui_instance._lazy_proc_ref = lazy_proc
-            proc_layer = proc_name
-            napari_show_info(
-                f"Lazy preprocessed stack created: '{proc_name}' "
-                f"({stack_data.shape[0]} frames, processed on demand)"
-            )
+            br, ws = ball_radius, window_size
+            def _preprocess(frame):
+                return pre_process_image(frame, br, ws).astype(np.float32)
 
-        if bg_check.isChecked():
-            source = lazy_proc if preprocess_check.isChecked() else stack_data
-            lazy_bg = build_lazy_bg_removed_stack(source, ball_radius)
-            bg_name = f"Enhanced Background Removed {layer_name}"
-            ui_instance.viewer.add_image(lazy_bg, name=bg_name, colormap='viridis')
-            ui_instance._lazy_bg_ref = lazy_bg
-            bg_layer = bg_name
-            napari_show_info(
-                f"Lazy BG-removed stack created: '{bg_name}' "
-                f"({stack_data.shape[0]} frames, processed on demand)"
-            )
+            proc_name  = f"Pre-Processed {layer_name}"
+            zarr_name  = f"preproc_{id(layer_name)}"
 
-        # Record for batch
+            def _after_preproc(zarr_path):
+                nonlocal proc_source
+                import zarr as _zarr
+                proc_source = _zarr.open(zarr_path, mode='r')
+                # If bg removal also requested, launch it now
+                if bg_check.isChecked():
+                    _start_bg(proc_source)
+
+            _start_worker(stack_data, _preprocess, zarr_name, proc_name,
+                          'green', on_done_cb=_after_preproc)
+        else:
+            proc_source = stack_data
+
+        def _start_bg(source):
+            br = ball_radius
+            def _bg_remove(frame):
+                return rb_gaussian_bg_removal_with_edge_enhancement(
+                    frame, br).astype(np.float32)
+            bg_name   = f"Enhanced Background Removed {layer_name}"
+            zarr_name = f"bgrem_{id(layer_name)}"
+            _start_worker(source, _bg_remove, zarr_name, bg_name, 'viridis')
+
+        if bg_check.isChecked() and not preprocess_check.isChecked():
+            _start_bg(stack_data)
+
+        # Record for batch — note: slider interactions are NOT recorded
         ui_instance._record('lazy_preprocess_stack', {
             'stack_layer': layer_name,
             'ball_radius': ball_radius,
@@ -253,8 +329,6 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     build_btn.clicked.connect(_on_build)
     form.addRow("", build_btn)
 
-    widget = QWidget()
-    widget.setLayout(form.__class__.__new__(form.__class__))
     grp_widget = QWidget()
     from PyQt5.QtWidgets import QVBoxLayout as _QVB
     _l = _QVB(grp_widget)

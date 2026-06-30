@@ -241,27 +241,6 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     print(f"[PyCAT Batch]   Preprocessing done.")
 
 
-def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Run rolling-ball + gaussian background removal on the preprocessed image."""
-    from pycat.toolbox.image_processing_tools import rb_gaussian_background_removal
-
-    image = state['preprocessed']
-    data_instance = state['data_instance']
-    ball_radius = _get_data(data_instance, 'ball_radius', 50)
-
-    # rb_gaussian_background_removal is the pure function; signature varies by version
-    try:
-        bg_removed = rb_gaussian_background_removal(image, ball_radius)
-    except TypeError:
-        # Fall back to calling with just the image if signature differs
-        from pycat.toolbox.image_processing_tools import apply_rescale_intensity
-        bg_removed = apply_rescale_intensity(image)
-
-    state['preprocessed'] = bg_removed
-    _save_array(bg_removed, output_dir / f"{image_path.stem}_bg_removed.tiff")
-    print(f"[PyCAT Batch]   Background removal done.")
-
-
 def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Run Cellpose on the raw image to get a labeled cell mask."""
     from pycat.toolbox.segmentation_tools import cellpose_segmentation
@@ -437,10 +416,63 @@ def replay_save_and_clear(state: dict, image_path: Path, params: dict, output_di
 # ---------------------------------------------------------------------------
 
 def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Replay upscaling — not applicable in headless batch mode since
-    upscaling is a viewer operation. Log and skip."""
-    print(f"[PyCAT Batch] Upscaling step skipped in headless mode "
-          f"(upscaling is applied interactively).")
+    """
+    Apply the same bicubic-interpolation upscaling used by run_upscaling_func
+    in the GUI, doubling resolution (capped at 2048x2048). Updates both the
+    raw image and preprocessed image in state, and the relevant data_instance
+    fields, mirroring what the GUI does for every selected layer.
+    """
+    from pycat.toolbox.image_processing_tools import upscale_image_interp
+
+    data_instance = state['data_instance']
+    image = state['image']
+    num_row, num_col = image.shape[-2], image.shape[-1]
+
+    if num_row >= 2048 or num_col >= 2048:
+        print(f"[PyCAT Batch]   Upscaling skipped — already at/above 2048px "
+              f"({image.shape}).")
+        return
+
+    upscale_factor = 2
+    upscaled = upscale_image_interp(image, num_row, num_col, upscale_factor=upscale_factor)
+    upscaled = np.clip(upscaled, 0, None).astype(np.float32)
+
+    state['image'] = upscaled
+    state['preprocessed'] = upscaled.copy()
+
+    if params.get('update_data_class', True):
+        data_instance.data_repository['cell_diameter'] = (
+            _get_data(data_instance, 'cell_diameter', 100) * upscale_factor
+        )
+        data_instance.data_repository['ball_radius'] = (
+            _get_data(data_instance, 'ball_radius', 50) * upscale_factor
+        )
+        data_instance.data_repository['microns_per_pixel_sq'] = (
+            _get_data(data_instance, 'microns_per_pixel_sq', 1.0) / (upscale_factor ** 2)
+        )
+
+    # Also upscale the fluorescence channel if it was separately loaded
+    # (multi-channel files where seg and fluor are different channels).
+    # In the GUI the user selects both layers before clicking upscale.
+    fluor = state.get('fluorescence_image')
+    if fluor is not None and fluor is not image:
+        fr, fc = fluor.shape[-2], fluor.shape[-1]
+        if fr < 2048 and fc < 2048:
+            fluor_up = upscale_image_interp(fluor, fr, fc, upscale_factor=upscale_factor)
+            state['fluorescence_image'] = np.clip(fluor_up, 0, None).astype(np.float32)
+
+    # Update channels_by_name too if populated
+    for name, arr in state.get('channels_by_name', {}).items():
+        if arr is not None and arr is not image:
+            cr, cc = arr.shape[-2], arr.shape[-1]
+            if cr < 2048 and cc < 2048:
+                arr_up = upscale_image_interp(arr, cr, cc, upscale_factor=upscale_factor)
+                state['channels_by_name'][name] = np.clip(arr_up, 0, None).astype(np.float32)
+
+    _save_array(upscaled, output_dir / f"{image_path.stem}_upscaled.tiff")
+    selected = params.get('selected_layers', params.get('active_layer', '?'))
+    print(f"[PyCAT Batch]   Upscaling done: {image.shape} -> {upscaled.shape}  "
+          f"(layers: {selected})")
 
 
 def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -464,10 +496,43 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     print(f"[PyCAT Batch]   Background removal done.")
 
 
+def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Measure Line records object/cell diameter measurements made interactively
+    via drawn lines in the GUI — there is no equivalent automatic action for
+    headless batch mode since it requires the user to draw on the image.
+    The cell_diameter/object_size/ball_radius values from the recorded
+    params (captured at the moment Measure Line was clicked) are already
+    applied to data_instance by replay_open_image, so this step is a no-op
+    that exists only to keep the recorded step sequence complete and to
+    surface the values that were in effect at that point in the GUI session.
+    """
+    print(f"[PyCAT Batch]   Measure Line skipped in headless mode "
+          f"(values already set: cell_diameter={params.get('cell_diameter')}, "
+          f"ball_radius={params.get('ball_radius')}).")
+
+
+def replay_open_stack(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Replay a unified open_stack step (covers former open_image_stack and
+    open_ims_file).  For batch headless replay we load the segmentation and
+    fluorescence channels using the same channel_assignment logic as
+    replay_open_image, then store them in state identically so all downstream
+    steps (cellpose, condensate segmentation, etc.) work unchanged.
+    """
+    # Delegate to the existing open_image replay — it already handles
+    # multi-channel files via channel_assignment and state['channels_by_name'].
+    # The only difference is the step name; the params schema is the same.
+    replay_open_image(state, image_path, params, output_dir)
+
+
 _STEP_MAP = {
     'open_image':               replay_open_image,
+    'open_stack':               replay_open_stack,    # unified IMS + TIFF stack
+    'open_ims_file':            replay_open_stack,    # legacy key — keep for old configs
+    'open_image_stack':         replay_open_stack,    # legacy key — keep for old configs
+    'measure_line':              replay_measure_line,
     'upscaling':                replay_upscaling,
-    'background_removal':       replay_background_removal,
     'preprocessing':            replay_preprocessing,
     'background_removal':       replay_background_removal,
     'cellpose_segmentation':    replay_cellpose_segmentation,

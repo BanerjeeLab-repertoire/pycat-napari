@@ -55,7 +55,15 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # Standard library imports
 import sys
+import os
 import warnings
+
+# Set dask scheduler to synchronous BEFORE dask is imported anywhere.
+# Prevents dask from importing 'distributed' which crashes on Windows
+# environments with malformed SSL certificates in the Windows cert store.
+# Must be an env var — dask.config.set() is too late since dask checks
+# _distributed_available() before consulting config during .compute().
+os.environ.setdefault('DASK_SCHEDULER', 'synchronous')
 # Suppress CuPy's CUDA path warning before any imports trigger it.
 # CuPy works via the GPU driver alone; the full CUDA toolkit is not required.
 warnings.filterwarnings(
