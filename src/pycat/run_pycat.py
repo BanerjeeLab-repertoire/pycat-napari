@@ -69,6 +69,9 @@ os.environ.setdefault('DASK_SCHEDULER', 'synchronous')
 # PYTHONWARNINGS is read by every Python interpreter at startup before any
 # imports run, so it suppresses the warning even in ProcessPoolExecutor workers
 # that spawn fresh interpreters where warnings.filterwarnings() is too late.
+# Also set CUDA_PATH to empty string to prevent CuPy from searching for
+# the CUDA toolkit — this stops the warning at its source in worker processes.
+os.environ.setdefault('CUDA_PATH', '')
 _cupy_filter = 'ignore::UserWarning:cupy._environment'
 _existing = os.environ.get('PYTHONWARNINGS', '')
 if _cupy_filter not in _existing:

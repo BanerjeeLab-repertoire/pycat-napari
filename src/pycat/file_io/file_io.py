@@ -1080,10 +1080,12 @@ class FileIOClass:
             # Save only the selected layers based on their names
             for layer_name in selected_layers:
                 if layer_name in layer_names:
-                    layer_data = self.viewer.layers[layer_name].data
-                    layer_type = type(self.viewer.layers[layer_name]).__name__  # Gets the type of layer, like 'Labels' or 'Image'
-                    file_extension, processed_data = self.determine_file_format_and_process_data(layer_type, layer_data)
-                    sk.io.imsave(f"{save_name}_{layer_name.replace(' ', '_').lower()}{file_extension}", processed_data)
+                    layer = self.viewer.layers[layer_name]
+                    layer_data = layer.data
+                    layer_type = type(layer).__name__
+                    safe_name  = layer_name.replace(' ', '_').lower()
+                    self._save_layer(layer_data, layer_type,
+                                     save_name, safe_name)
             
             # Save only the selected dataframes
             dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
@@ -1105,36 +1107,98 @@ class FileIOClass:
                     self.viewer.layers.remove(layer_name)
             self.central_manager.active_data_class.reset_values(df_names_to_reset=selected_dataframes)
 
-    def determine_file_format_and_process_data(self, layer_type, data):
+    def _save_layer(self, data, layer_type: str, save_name: str, safe_name: str):
         """
-        Determines the appropriate file format based on the layer type and processes the data to ensure compatibility 
-        with the selected format. Supports image and label layer types.
+        Save a layer to disk, handling zarr-backed lazy stacks, regular
+        numpy arrays, and label/shape layers.
 
-        Parameters
-        ----------
-        layer_type : str
-            The type of the layer, such as 'Image', 'Labels', or 'Shapes'.
-        data : array-like
-            The data associated with the layer to be processed and saved.
+        For 3D stacks (T, H, W) — whether backed by zarr, numpy, or any
+        other lazy array — frames are written one at a time as a multi-page
+        TIFF so the full stack is never held in RAM simultaneously.  This
+        is essential for 600-frame 2048×2048 stacks that would otherwise
+        require ~5 GB of RAM just for the save operation.
 
-        Returns
-        -------
-        tuple
-            A tuple containing the file extension as a string and the processed data ready for saving.
-
-        Notes
-        -----
-        This method supports various formats, choosing PNG for labels and shapes for their lower resolution requirements 
-        and TIFF or PNG for images depending on their dimensional properties. This ensures that data is saved in the most 
-        appropriate format to maintain quality and usability.
+        Naming convention
+        -----------------
+        2D image          → <save_name>_<layer>.tiff
+        3D image stack    → <save_name>_<layer>_stack.tiff   (multi-page)
+        Labels (2D)       → <save_name>_<layer>.png
+        Labels (3D stack) → <save_name>_<layer>_masks.tiff  (multi-page)
         """
-        if layer_type in ['Labels', 'Shapes']:  # Label layers are 16-bit int in Napari so we convert to uint16 and save as PNG
-            return ".png", dtype_conversion_func(data, 'uint16')  
+        import tifffile
+
+        is_lazy = hasattr(data, '_z') or hasattr(data, 'store')  # _ZarrStack or zarr.Array
+
+        # Materialise only what we need
+        def _frame(t):
+            f = data[t]
+            return np.asarray(f).astype(np.float32) if layer_type == 'Image' else np.asarray(f)
+
+        def _to_uint16(arr):
+            arr = np.asarray(arr).astype(np.float32)
+            mn, mx = arr.min(), arr.max()
+            if mx <= 1.0:
+                arr = arr * 65535
+            elif mx > 65535:
+                arr = (arr - mn) / (mx - mn + 1e-8) * 65535
+            return arr.astype(np.uint16)
+
+        if layer_type in ('Labels',):
+            if hasattr(data, 'shape') and len(data.shape) == 3:
+                # 3D label stack (e.g. TS Cell Masks) → multi-page TIFF
+                out_path = f"{save_name}_{safe_name}_masks.tiff"
+                with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
+                    for t in range(data.shape[0]):
+                        tw.write(np.asarray(data[t]).astype(np.uint16),
+                                 contiguous=True)
+                print(f"[PyCAT] Saved 3D label stack → {out_path}")
+            else:
+                arr = np.asarray(data).astype(np.uint16)
+                out_path = f"{save_name}_{safe_name}.png"
+                sk.io.imsave(out_path, arr)
+
+        elif layer_type == 'Shapes':
+            arr = dtype_conversion_func(np.asarray(data), 'uint16')
+            sk.io.imsave(f"{save_name}_{safe_name}.png", arr)
+
         elif layer_type == 'Image':
-            if data.ndim == 3:  # RGB images are usually overlays and therefore dont need very high resolution
+            ndim = data.shape[0] if hasattr(data, 'shape') else len(data)
+            # Check if this is a (T, H, W) stack
+            shape = data.shape if hasattr(data, 'shape') else None
+
+            if shape is not None and len(shape) == 3 and not (
+                shape[2] in (3, 4) and shape[0] < 10
+            ):
+                # 3D grayscale stack — save as multi-page TIFF, one frame at a time
+                n_t = shape[0]
+                out_path = f"{save_name}_{safe_name}_stack.tiff"
+                print(f"[PyCAT] Saving {n_t}-frame stack to {out_path} …")
+                with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
+                    for t in range(n_t):
+                        tw.write(_to_uint16(_frame(t)), contiguous=True)
+                print(f"[PyCAT] Saved stack → {out_path}")
+            else:
+                # 2D image or RGB
+                arr = np.asarray(data)
+                if arr.ndim == 2:
+                    out_path = f"{save_name}_{safe_name}.tiff"
+                    tifffile.imwrite(out_path, _to_uint16(arr))
+                else:
+                    out_path = f"{save_name}_{safe_name}.png"
+                    sk.io.imsave(out_path, dtype_conversion_func(arr, 'uint8'))
+        else:
+            # Unknown — save raw
+            np.save(f"{save_name}_{safe_name}.npy", np.asarray(data))
+
+    def determine_file_format_and_process_data(self, layer_type, data):
+        """Legacy helper kept for compatibility; new code uses _save_layer."""
+        if layer_type in ['Labels', 'Shapes']:
+            return ".png", dtype_conversion_func(data, 'uint16')
+        elif layer_type == 'Image':
+            if data.ndim == 3:
                 return ".png", dtype_conversion_func(data, 'uint8')
-            else:  # Regular 2D images are saved as 16 bit TIFF
+            else:
                 return ".tiff", dtype_conversion_func(data, 'uint16')
-        else:  # Defaults to saving as raw data file if the layer type is not recognized, can be changed 
-            return ".dat", data 
+        else:
+            return ".dat", data
         

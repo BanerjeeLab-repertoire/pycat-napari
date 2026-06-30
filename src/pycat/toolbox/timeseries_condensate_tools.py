@@ -62,6 +62,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from pycat.toolbox.segmentation_tools import segment_subcellular_objects
+from pycat.toolbox.ts_cache_manager import (
+    get_cache_paths, cache_exists, write_meta, discard_cache, cache_size_mb
+)
 from pycat.ui.ui_utils import show_dataframes_dialog
 
 
@@ -146,9 +149,13 @@ def _process_frame_worker(args):
     applies the named processing function, and returns (t, result).
     """
     import warnings
-    # Suppress CuPy/CUDA warnings that fire on every worker process spawn
-    warnings.filterwarnings("ignore", message="CUDA path could not be detected")
-    warnings.filterwarnings("ignore", category=UserWarning, module="cupy")
+    import os
+    # Suppress CuPy CUDA path warnings before any imports can trigger them.
+    # Must use both filterwarnings AND env var because different Python
+    # versions check them in different orders at process startup.
+    warnings.filterwarnings("ignore", message="CUDA path could not be detected",
+                            category=UserWarning)
+    os.environ.setdefault("CUDA_PATH", "")  # prevents CuPy from searching
 
     t, src_zarr_path, process_fn_name, process_fn_kwargs = args
 
@@ -323,12 +330,51 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     build_btn.setToolTip(
         f"Processes all frames using {_n_workers} CPU cores in parallel,\n"
         "writing each frame to a zarr store on disk as it completes.\n"
-        "Napari displays already-processed frames immediately while\n"
-        "later frames are still being computed."
+        "Results are cached next to the source file and reloaded\n"
+        "automatically on next open — no reprocessing needed."
     )
+    discard_btn = QPushButton("🗑  Discard Cache")
+    discard_btn.setToolTip(
+        "Delete the cached preprocessed zarr stores for this file.\n"
+        "Use this if you change processing parameters and want to\n"
+        "force a full reprocess on the next run."
+    )
+    discard_btn.clicked.connect(_on_discard_cache)
 
     # Worker references kept alive on ui_instance so GC doesn't kill them
     ui_instance._ts_workers = getattr(ui_instance, '_ts_workers', [])
+
+    def _load_from_cache(cache_paths, layer_name, existing,
+                         want_preproc, want_bgrem):
+        """Reload zarr stores from cache into napari layers."""
+        import zarr as _zarr
+        if want_preproc and existing.get('preproc'):
+            z = _zarr.open(str(cache_paths['preproc']), mode='r')
+            wrapper = _ZarrStack(z)
+            name = f"Pre-Processed {layer_name}"
+            ui_instance.viewer.add_image(wrapper, name=name, colormap='green')
+            ui_instance._ts_zarr_preproc = str(cache_paths['preproc'])
+            napari_show_info(f"Loaded '{name}' from cache.")
+        if want_bgrem and existing.get('bgrem'):
+            z = _zarr.open(str(cache_paths['bgrem']), mode='r')
+            wrapper = _ZarrStack(z)
+            name = f"Enhanced Background Removed {layer_name}"
+            ui_instance.viewer.add_image(wrapper, name=name, colormap='viridis')
+            ui_instance._ts_zarr_bgrem = str(cache_paths['bgrem'])
+            napari_show_info(f"Loaded '{name}' from cache.")
+
+    def _on_discard_cache():
+        source_file = getattr(ui_instance.central_manager.file_io,
+                              '_ims_file_path', None) or                       getattr(ui_instance.central_manager.file_io,
+                              'filePath', None)
+        if not source_file:
+            napari_show_warning("No source file known — nothing to discard.")
+            return
+        data_instance = ui_instance.central_manager.active_data_class
+        ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
+        window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
+        discard_cache(source_file, ball_radius, window_size)
+        napari_show_info("Preprocessing cache discarded. Next run will reprocess.")
 
     def _on_build():
         layer_name = stack_dropdown.currentText()
@@ -354,52 +400,112 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
         n_t = stack_data.shape[0]
         W   = stack_data.shape[2]
-        zarr_dir = _session_zarr_dir()
+
+        # Determine cache paths — use source file path if available
+        source_file = getattr(ui_instance.central_manager.file_io,
+                              '_ims_file_path', None) or                       getattr(ui_instance.central_manager.file_io,
+                              'filePath', None)
+
+        cache_paths = None
+        if source_file:
+            cache_paths = get_cache_paths(source_file, ball_radius, window_size)
+            existing    = cache_exists(source_file, ball_radius, window_size)
+
+            # If both caches exist, offer to reload instead of reprocessing
+            if existing.get('preproc') or existing.get('bgrem'):
+                sz = cache_size_mb(source_file)
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    None, "Preprocessing Cache Found",
+                    f"A cached preprocessed stack was found for this file\n"
+                    f"(ball_radius={ball_radius}, window_size={window_size})\n"
+                    f"Cache size: {sz:.0f} MB\n\n"
+                    f"Reload from cache?\n"
+                    f"(Choose No to reprocess and overwrite the cache)",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    _load_from_cache(cache_paths, layer_name,
+                                     existing, preprocess_check.isChecked(),
+                                     bg_check.isChecked())
+                    return
+
+            # Use cache directory as zarr destination
+            cache_paths['preproc'].parent.mkdir(parents=True, exist_ok=True)
+            zarr_dir = str(cache_paths['preproc'].parent)
+        else:
+            zarr_dir = _session_zarr_dir()
+            cache_paths = None
 
         build_btn.setEnabled(False)
+
+
+        # Single shared progress bar and label for all workers —
+        # avoids leaving multiple stuck bars on screen.
+        prog_bar = QProgressBar()
+        prog_bar.setMaximum(n_t * 2)
+        prog_bar.setValue(0)
+        prog_bar.setVisible(False)
+        prog_label = QLabel("")
+        prog_label.setVisible(False)
+        build_btn.parent().layout().addWidget(prog_label)
+        build_btn.parent().layout().addWidget(prog_bar)
 
         def _start_worker(source, fn_name, fn_kwargs, zarr_name, display_name,
                           colormap, on_done_cb=None):
             import zarr as _zarr
             import os
             zarr_path = os.path.join(zarr_dir, zarr_name)
-            # Pre-create the zarr store so napari can open it immediately
             _zarr.open(zarr_path, mode='w',
                        shape=(n_t, H, W), chunks=(1, H, W), dtype=np.float32)
-            z_arr  = _zarr.open(zarr_path, mode='r')
+            z_arr   = _zarr.open(zarr_path, mode='r')
             wrapper = _ZarrStack(z_arr)
             ui_instance.viewer.add_image(wrapper, name=display_name,
                                          colormap=colormap)
-
-            # Track this zarr ref so the time-series analysis can find it
             setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
 
             worker = _StackProcessWorker(source, zarr_path, fn_name, fn_kwargs,
                                          n_t, H, W)
             ui_instance._ts_workers.append(worker)
 
-            prog = QProgressBar()
-            prog.setMaximum(n_t * 2)  # phase 1: materialise source; phase 2: process
-            prog.setValue(0)
-            build_btn.parent().layout().addWidget(prog)
+            prog_bar.setValue(0)
+            prog_bar.setMaximum(n_t * 2)
+            prog_bar.setVisible(True)
+            prog_label.setText(f"Preparing frames…")
+            prog_label.setVisible(True)
 
             def _on_progress(done, total):
-                prog.setValue(done)
-                # Refresh the napari layer so newly written frames appear
+                prog_bar.setValue(done)
+                if done <= n_t:
+                    prog_label.setText(
+                        f"{display_name}: copying frame {done}/{n_t}…")
+                else:
+                    prog_label.setText(
+                        f"{display_name}: processing frame {done - n_t}/{n_t}…")
                 try:
                     ui_instance.viewer.layers[display_name].refresh()
                 except Exception:
                     pass
 
-            def _on_finished(path):
-                prog.setValue(n_t)
-                napari_show_info(f"'{display_name}' — all {n_t} frames processed.")
-                if on_done_cb:
-                    on_done_cb(path)
-                build_btn.setEnabled(True)
+            def _on_finished(path, _dn=display_name, _cb=on_done_cb):
+                prog_bar.setValue(n_t * 2)
+                napari_show_info(
+                    f"'{_dn}' — all {n_t} frames processed.")
+                if _cb:
+                    # More work coming — keep bar visible, reset for next stage
+                    prog_bar.setValue(0)
+                    prog_label.setText("Starting next stage…")
+                    _cb(path)
+                else:
+                    # Final step — hide bar
+                    prog_bar.setVisible(False)
+                    prog_label.setVisible(False)
+                    build_btn.setEnabled(True)
 
             def _on_error(msg):
-                napari_show_warning(f"Processing error — see terminal.")
+                prog_bar.setVisible(False)
+                prog_label.setVisible(False)
+                napari_show_warning("Processing error — see terminal.")
                 print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
                 build_btn.setEnabled(True)
 
@@ -410,19 +516,23 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
             return worker, z_arr
 
 
-
         proc_source   = stack_data
         proc_zarr_ref = None
 
         if preprocess_check.isChecked():
             br, ws = ball_radius, window_size
             proc_name  = f"Pre-Processed {layer_name}"
-            zarr_name  = f"preproc_{id(layer_name)}"
+            # Use cache path as zarr name if available, else temp-dir name
+            zarr_name  = (str(cache_paths['preproc'].name)
+                          if cache_paths else f"preproc_{id(layer_name)}")
 
             def _after_preproc(zarr_path):
                 nonlocal proc_source
                 import zarr as _zarr
                 proc_source = _zarr.open(zarr_path, mode='r')
+                if cache_paths and source_file:
+                    write_meta(source_file, ball_radius, window_size,
+                               n_t, H, W)
                 if bg_check.isChecked():
                     _start_bg(proc_source)
 
@@ -435,10 +545,18 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
         def _start_bg(source):
             bg_name   = f"Enhanced Background Removed {layer_name}"
-            zarr_name = f"bgrem_{id(layer_name)}"
+            zarr_name = (str(cache_paths['bgrem'].name)
+                         if cache_paths else f"bgrem_{id(layer_name)}")
+
+            def _after_bg(zarr_path):
+                if cache_paths and source_file:
+                    write_meta(source_file, ball_radius, window_size,
+                               n_t, H, W)
+
             _start_worker(source, 'bg_remove',
                           {'ball_radius': ball_radius},
-                          zarr_name, bg_name, 'viridis')
+                          zarr_name, bg_name, 'viridis',
+                          on_done_cb=_after_bg)
 
         if bg_check.isChecked() and not preprocess_check.isChecked():
             _start_bg(stack_data)
@@ -454,6 +572,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
     build_btn.clicked.connect(_on_build)
     form.addRow("", build_btn)
+    form.addRow("", discard_btn)
 
     grp_widget = QWidget()
     from PyQt5.QtWidgets import QVBoxLayout as _QVB
