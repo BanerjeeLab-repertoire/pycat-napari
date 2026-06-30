@@ -28,6 +28,11 @@ import warnings
 import numpy as np
 import skimage as sk
 from aicsimageio import AICSImage
+from pycat.utils.channel_naming import (
+    extract_channel_info_from_aicsimage,
+    extract_channel_info_from_ims,
+    suggest_colormap,
+)
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit
 from napari.utils.notifications import show_warning as napari_show_warning
 
@@ -185,13 +190,22 @@ class ChannelAssignmentDialog(QDialog):
         Initializes the user interface components of the dialog, including labels and text input
         fields for channel names, and the OK button to accept the naming.
     """
-    def __init__(self, channels, is_mask=False, parent=None):
+    def __init__(self, channels, is_mask=False, parent=None, channel_info=None):
         """
         Initializes the dialog with the provided channels, setting up the UI for channel naming.
+
+        Parameters
+        ----------
+        channel_info : list of dict, optional
+            Per-channel metadata-derived info from identify_channel(), used
+            to pre-populate default names (e.g. "DAPI", "EGFP") instead of
+            generic "Segmentation Image"/"Fluorescence Image" placeholders
+            when channel identity could be determined from file metadata.
         """
         super().__init__(parent)
         self.channels = channels
         self.is_mask = is_mask
+        self.channel_info = channel_info or []
         self.initUI()
 
     def initUI(self):
@@ -208,9 +222,23 @@ class ChannelAssignmentDialog(QDialog):
             label = QLabel(f"Channel {channel_num + 1} ({os.path.basename(file_path)}):")
             input_field = QLineEdit()
 
-            # Set the default name based on the file path or a generic naming convention
+            # Set the default name — prefer metadata-derived channel identity
+            # (e.g. "DAPI", "EGFP") when available; fall back to the original
+            # position-based convention otherwise so existing workflows that
+            # rely on "Segmentation Image"/"Fluorescence Image" still work.
+            info = self.channel_info[channel_num] if channel_num < len(self.channel_info) else None
             if not self.is_mask:
-                if channel_num == 0:
+                if info is not None and info.get('source') != 'position':
+                    # Metadata gave us a real identity — use it, but keep the
+                    # familiar suffix for the first two channels so downstream
+                    # dropdowns that default to these names still find them.
+                    if channel_num == 0:
+                        default_name = f"Segmentation Image ({info['label']})"
+                    elif channel_num == 1:
+                        default_name = f"Fluorescence Image ({info['label']})"
+                    else:
+                        default_name = f"{info['layer_name']} {os.path.basename(file_path)}"
+                elif channel_num == 0:
                     default_name = "Segmentation Image"
                 elif channel_num == 1:
                     default_name = "Fluorescence Image"
@@ -300,6 +328,9 @@ class FileIOClass:
         if not file_paths: 
             return
 
+        self._last_channel_info = []  # reset per file-open to avoid accumulation
+        self._last_channel_assignment = []  # reset per file-open
+
         all_channels = [] # Create a list to store all channels for multichannel images
 
         for file_path in file_paths:
@@ -387,9 +418,23 @@ class FileIOClass:
                     channel_data = image.get_image_data("YX", C=channel_num, T=0)
                     all_channels.append((channel_data, file_path, channel_num))
 
+            # Identify channel identity from OME/Bio-Formats metadata
+            # (fluorophore name, emission wavelength, or position fallback)
+            for ch_num in range(num_channels):
+                try:
+                    self._last_channel_info = getattr(self, '_last_channel_info', [])
+                    self._last_channel_info.append(
+                        extract_channel_info_from_aicsimage(image, ch_num)
+                    )
+                except Exception:
+                    pass
+
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
-            self.assign_channels_in_dialog(all_channels)
+            self.assign_channels_in_dialog(
+                all_channels,
+                channel_info=getattr(self, '_last_channel_info', None)
+            )
         # If only one channel, default to 'Fluorescence Image'
         else:
             fluorescence_image = all_channels[0][0]
@@ -409,6 +454,7 @@ class FileIOClass:
                 'file_path': self.filePath,
                 'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
+                'channel_assignment': getattr(self, '_last_channel_assignment', None),
             })
 
 
@@ -560,11 +606,12 @@ class FileIOClass:
         """
         try:
             from imaris_ims_file_reader.ims import ims as ImsReader
+            import zarr
         except ImportError as _ie:
             from napari.utils.notifications import show_warning as napari_show_warning
             napari_show_warning(
                 f"Missing dependency: {_ie}\n"
-                "Install with:  pip install imaris-ims-file-reader hdf5plugin dask"
+                "Install with:  pip install imaris-ims-file-reader hdf5plugin zarr"
             )
             return
 
@@ -603,115 +650,144 @@ class FileIOClass:
             except Exception:
                 pass
 
-            # Channel selection
-            if n_c > 1:
-                from PyQt5.QtWidgets import QInputDialog
-                channel_names = [f"Channel {i}" for i in range(n_c)]
-                choice, ok = QInputDialog.getItem(
-                    None, "Select Channel",
-                    f"This file has {n_c} channels. Select one to load:",
-                    channel_names, 0, False
-                )
-                if not ok:
-                    return
-                channel_idx = channel_names.index(choice)
-            else:
-                channel_idx = 0
+            # Load all channels — each gets its own napari layer,
+            # matching the behaviour of open_2d_image for multi-channel TIFFs.
+            # channel_idx is used below to set data_instance defaults from ch 0.
+            channels_to_load = list(range(n_c))
 
             # ── Build lazy dask array — no data is read yet ──────────────
             # Each delayed task reads exactly one (H, W) frame on demand.
             frame_dtype = np.float32
 
-            # Use a custom lazy array class that reads frames on demand
-            # without dask — avoids the distributed/SSL crash on Windows.
-            class _ImsLazyArray:
-                """
-                Numpy-compatible lazy array for IMS stacks that avoids dask.
-                Napari probes shape/dtype, calls __getitem__ per frame, and
-                also calls transpose() and __array__. All are handled here
-                so napari gets real numpy arrays at every step.
-                """
-                def __init__(self, fp, n, c, z_idx, H, W):
-                    self._fp = fp
-                    self._n  = n
-                    self._c  = c
-                    self._z  = z_idx
-                    self.shape = (n, H, W)
-                    self.dtype = np.dtype('float32')
-                    self.ndim  = 3
+            # ── Lazy loading via zarr ──────────────────────────────────────
+            # imaris_ims_file_reader exposes the IMS HDF5 file as a zarr store.
+            # zarr arrays are natively lazy — napari reads only the chunks it
+            # needs to display the current frame, so a 600-frame 2048×2048
+            # stack opens instantly with minimal RAM use.
+            # The full array is only read when napari explicitly needs it
+            # (e.g. for colour limit detection on the first frame).
+            self._ims_reader    = reader
+            self._ims_channels  = channels_to_load
+            self._ims_n_frames  = n_t
+            self._ims_n_z       = n_z
+            self._ims_file_path = file_path
+            channel_data = None  # will be set to ch 0 in loop below
 
-                def _read_frame(self, t):
-                    r = ImsReader(self._fp, squeeze_output=False)
-                    return r[int(t), self._c, self._z, :, :].astype(np.float32)
+            from napari.utils.notifications import show_info as napari_show_info
 
-                def __len__(self):
-                    return self._n
+            # Keep zarr refs alive across the channel loop
+            self._ims_zarr_refs = []
 
-                def __getitem__(self, idx):
-                    # Materialise to numpy immediately so napari can
-                    # call transpose and any other numpy ops freely.
-                    if isinstance(idx, tuple):
-                        t_idx = idx[0]
-                        spatial = idx[1:]
-                    else:
-                        t_idx = idx
-                        spatial = (slice(None), slice(None))
-                    if isinstance(t_idx, (int, np.integer)):
-                        return self._read_frame(t_idx)[spatial]
-                    # Slice of frames — materialise the requested range
-                    t_range = range(*t_idx.indices(self._n))
-                    frames = [self._read_frame(t) for t in t_range]
-                    arr = np.stack(frames, axis=0)
-                    return arr[(slice(None),) + spatial]
-
-                def __array__(self, dtype=None):
-                    frames = [self._read_frame(t) for t in range(self._n)]
-                    arr = np.stack(frames, axis=0)
-                    return arr if dtype is None else arr.astype(dtype)
-
-                def transpose(self, *axes):
-                    # Napari calls data.transpose(order) during slice setup.
-                    # Materialise the full array and transpose it.
-                    return np.asarray(self).transpose(*axes)
-
-            if n_z == 1:
-                layer_name = f"{self.base_file_name} [C{channel_idx}] Stack"
+            for channel_idx in channels_to_load:
+              _ch_info = extract_channel_info_from_ims(reader, channel_idx)
+              _ch_label = _ch_info['layer_name']
+              _ch_colormap = suggest_colormap(_ch_info['bucket'])
+              if n_z == 1:
+                layer_name = f"{self.base_file_name} {_ch_label} Stack"
                 if n_t == 1:
                     # Single frame — load eagerly as 2D
                     frame = reader[0, channel_idx, 0, :, :].astype(np.float32)
                     self.load_into_viewer(frame,
-                                         name=f"{self.base_file_name} [C{channel_idx}]")
+                                         name=f"{self.base_file_name} {_ch_label}")
                     channel_data = frame
                 else:
-                    lazy_data = _ImsLazyArray(file_path, n_t, channel_idx, 0, H, W)
-                    self.viewer.add_image(lazy_data, name=layer_name)
-                    self._ims_lazy_ref = lazy_data
-                    channel_data = reader[0, channel_idx, 0, :, :].astype(np.float32)
-                    from napari.utils.notifications import show_info as napari_show_info
+                    # Open as zarr store — shape is (T, C, Z, Y, X)
+                    # chunks are (1, 1, 1, 512, 256) so each frame is read
+                    # chunk-by-chunk — only the displayed frame is loaded.
+                    # We wrap it in a lightweight zarr virtual array that
+                    # squeezes out the C and Z dims to give napari (T, Y, X).
+                    zarr_store = ImsReader(file_path, aszarr=True)
+                    z_full = zarr.open(zarr_store, mode='r')
+                    # z_full.shape == (T, C, Z, Y, X)
+                    # Build a (T, H, W) virtual zarr array for the selected channel
+                    # by creating a new zarr array backed by a custom store that
+                    # reads from z_full[:, channel_idx, 0, :, :]
+                    # Simplest correct approach: use zarr.Array directly with
+                    # a squeeze wrapper that napari accepts.
+
+                    class _ZarrTYX:
+                        """
+                        Thin wrapper presenting z_full[:, c, 0, :, :] as a
+                        (T, Y, X) array that satisfies napari's requirements:
+                          - shape, dtype, ndim attributes
+                          - __getitem__ returning numpy arrays
+                          - transpose() working correctly
+                        This is identical to what PIL does: a lightweight
+                        object that reads from disk only when pixels are needed.
+                        """
+                        def __init__(self, z, c):
+                            self._z = z
+                            self._c = c
+                            T, _, _, Y, X = z.shape
+                            self.shape = (T, Y, X)
+                            self.dtype = np.dtype('float32')
+                            self.ndim  = 3
+
+                        def __getitem__(self, idx):
+                            if isinstance(idx, tuple):
+                                t_idx  = idx[0]
+                                spatial = idx[1:]
+                            else:
+                                t_idx  = idx
+                                spatial = (slice(None), slice(None))
+                            # Read from zarr — only the requested chunks load
+                            raw = self._z[t_idx, self._c, 0]  # (Y, X) or (T, Y, X)
+                            arr = np.asarray(raw).astype(np.float32)
+                            if arr.ndim == 2:
+                                return arr[spatial]
+                            return arr[(slice(None),) + spatial]
+
+                        def __array__(self, dtype=None):
+                            arr = np.stack(
+                                [np.asarray(self._z[t, self._c, 0]).astype(np.float32)
+                                 for t in range(self.shape[0])], axis=0)
+                            return arr if dtype is None else arr.astype(dtype)
+
+                        def __len__(self):
+                            return self.shape[0]
+
+                        def transpose(self, *axes):
+                            # napari calls transpose((0,1,2)) at init —
+                            # materialise only frame 0 to set up the layer,
+                            # then napari uses __getitem__ for subsequent frames
+                            return np.asarray(self.__getitem__(0))[np.newaxis]
+
+                    lazy_tyx = _ZarrTYX(z_full, channel_idx)
+                    # Keep references alive per channel
+                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_tyx))
+                    if channel_idx == 0:
+                        channel_data = lazy_tyx[0]
+                        self._ims_zarr_store = zarr_store
+                        self._ims_zarr_array = z_full
+                        self._ims_lazy_tyx   = lazy_tyx
+
+                    self.viewer.add_image(lazy_tyx, name=layer_name, colormap=_ch_colormap)
                     napari_show_info(
-                        f"Lazy-loaded IMS time-series: {n_t} frames, "
-                        f"{H}×{W} px → '{layer_name}' (frames read on demand)"
+                        f"Lazy-loaded IMS {_ch_label}: {n_t} frames {H}\u00d7{W}px "
+                        f"(only displayed frames read from disk)"
                     )
-            else:
+              else:
                 from PyQt5.QtWidgets import QInputDialog
-                t_choice, ok = QInputDialog.getInt(
-                    None, "Select Timepoint",
-                    f"This file has {n_t} timepoints and {n_z} Z slices.\n"
-                    "Enter timepoint index to load (0-based):",
-                    0, 0, n_t - 1, 1
-                )
-                if not ok:
-                    t_choice = 0
-                lazy_data = _ImsLazyArray(file_path, n_z, channel_idx, t_choice, H, W)
-                layer_name = f"{self.base_file_name} [C{channel_idx}] T{t_choice}"
-                self.viewer.add_image(lazy_data, name=layer_name)
-                self._ims_lazy_ref = lazy_data
-                channel_data = reader[t_choice, channel_idx, 0, :, :].astype(np.float32)
-                from napari.utils.notifications import show_info as napari_show_info
+                if channel_idx == 0:
+                    t_choice, ok = QInputDialog.getInt(
+                        None, "Select Timepoint",
+                        f"This file has {n_t} timepoints and {n_z} Z slices.\n"
+                        "Enter timepoint index to load (0-based):",
+                        0, 0, n_t - 1, 1
+                    )
+                    if not ok:
+                        t_choice = 0
+                slices = [reader[t_choice, channel_idx, z, :, :].astype(np.float32)
+                          for z in range(n_z)]
+                stack = np.stack(slices, axis=0)
+                layer_name = f"{self.base_file_name} {_ch_label} T{t_choice}"
+                self.viewer.add_image(stack, name=layer_name, colormap=_ch_colormap)
+                if channel_idx == 0:
+                    channel_data = stack[0]
                 napari_show_info(
-                    f"Lazy-loaded IMS z-stack: {n_z} slices, T={t_choice} "
-                    f"→ '{layer_name}' (slices read on demand)"
+                    f"Loaded IMS z-stack {_ch_label}: {n_z} slices, T={t_choice} \u2192 '{layer_name}'"
                 )
+              # end channel loop
 
             # Update data instance
             self.central_manager.active_data_class.data_repository['object_size'] = H // 20
@@ -729,7 +805,7 @@ class FileIOClass:
             if bp:
                 bp.record('open_ims_file', {
                     'file_path': file_path,
-                    'channel': channel_idx,
+                    'channels': channels_to_load,
                     'n_timepoints': n_t,
                     'n_z': n_z,
                 })
@@ -800,7 +876,7 @@ class FileIOClass:
             self.load_into_viewer(mask_image, name="Mask Layer", is_mask=True)
 
         
-    def assign_channels_in_dialog(self, all_channels, is_mask=False):
+    def assign_channels_in_dialog(self, all_channels, is_mask=False, channel_info=None):
         """
         Displays a dialog for the user to assign names to each channel of an opened image or mask. This method aids in 
         organizing and identifying channels, especially when dealing with multichannel data.
@@ -817,7 +893,7 @@ class FileIOClass:
         This method facilitates better data management within the Napari viewer by allowing users to assign meaningful 
         names to various channels, enhancing the interpretability of multichannel datasets.
         """
-        dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask)
+        dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
         result = dialog.exec_()
 
         if result == QDialog.Accepted:
@@ -825,7 +901,12 @@ class FileIOClass:
             channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
         elif result == QDialog.Rejected:
             return # If the user cancels the dialog do nothing
-        
+
+        # Record the final channel_num -> layer_name assignment so batch
+        # replay can recreate the exact same image-type-to-channel mapping.
+        # Stored on self so open_image()'s bp.record call can include it.
+        self._last_channel_assignment = []
+
         # Load each channel into the viewer with the assigned name
         for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
             name = channel_names[i]
@@ -839,6 +920,16 @@ class FileIOClass:
                         name = f"{os.path.basename(file_path)}_ch_{channel_num}"
                 else:
                     name = f"Mask Layer {channel_num}"
+
+            # Capture detected identity (if any) alongside the final name
+            info = channel_info[channel_num] if channel_info and channel_num < len(channel_info) else None
+            self._last_channel_assignment.append({
+                'channel_num': channel_num,
+                'layer_name': name,
+                'detected_label': info.get('label') if info else None,
+                'detected_source': info.get('source') if info else None,
+            })
+
             self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
     
 

@@ -33,19 +33,26 @@ def _get_data(data_instance, key, default=None):
     return data_instance.data_repository.get(key, default)
 
 
-def _load_image(image_path: Path):
+def _load_image(image_path: Path, channel: int = 0):
     """
-    Load an image file using AICSImage with a tifffile fallback for NumPy 2.0
-    compatibility.  AICSImage is tried first (preserves physical pixel size
-    metadata); if it raises a NumPy 2.0 byteorder error, tifffile is used
-    directly and pixel size defaults to 1.0 µm.
+    Load a single channel of an image file using AICSImage with a tifffile
+    fallback for NumPy 2.0 compatibility.
+
+    Parameters
+    ----------
+    image_path : Path
+    channel : int
+        Which channel to load (C index). Defaults to 0. Use _load_all_channels
+        when the recorded channel_assignment needs to select a specific
+        non-zero channel for a given image type (e.g. Segmentation vs
+        Fluorescence Image came from different channels in the GUI session).
     """
     microns_per_pixel = 1.0
 
     try:
         from aicsimageio import AICSImage
         img = AICSImage(str(image_path))
-        data = img.get_image_data("YX", S=0, T=0, C=0)
+        data = img.get_image_data("YX", S=0, T=0, C=channel)
         try:
             px_size = img.physical_pixel_sizes
             microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
@@ -56,7 +63,6 @@ def _load_image(image_path: Path):
     except AttributeError as e:
         if "newbyteorder" not in str(e):
             raise
-        # NumPy 2.0 compatibility fallback — use tifffile or skimage directly
         print(f"[PyCAT Batch] AICSImage newbyteorder error on {image_path.name} "
               f"— falling back to tifffile.")
 
@@ -69,11 +75,58 @@ def _load_image(image_path: Path):
         from skimage import io
         data = io.imread(str(image_path))
 
-    # Squeeze to 2D: take first frame/channel if stack
+    # If multi-channel, select the requested channel; otherwise squeeze to 2D
+    if data.ndim == 3 and channel < data.shape[0]:
+        data = data[channel]
     while data.ndim > 2:
         data = data[0]
 
     return data.astype('float32'), microns_per_pixel
+
+
+def _resolve_channel_for_layer(channel_assignment, layer_name_substring: str, default: int = 0) -> int:
+    """
+    Look up which channel was assigned to a given layer name during the
+    original GUI session, so batch replay uses the same channel for the
+    same image type (e.g. "Segmentation Image" vs "Fluorescence Image").
+
+    Works for any number of recorded channels (2, 3, 4+). If more than one
+    channel name matches the substring (e.g. a 3+ fluorophore file where
+    two layers both contain "Fluorescence"), the first match by channel
+    index is used and a warning is printed — callers needing a *specific*
+    additional channel beyond the primary seg/fluor pair should instead
+    look it up directly from state['channels_by_name'] by its exact
+    recorded layer name.
+
+    Parameters
+    ----------
+    channel_assignment : list of dict or None
+        The recorded 'channel_assignment' from the open_image step, each
+        dict having 'channel_num' and 'layer_name' keys.
+    layer_name_substring : str
+        Substring to match against recorded layer_name (case-insensitive),
+        e.g. "Segmentation" or "Fluorescence".
+    default : int
+        Channel index to use if no assignment was recorded or no match found.
+
+    Returns
+    -------
+    int — the channel index to load.
+    """
+    if not channel_assignment:
+        return default
+    target = layer_name_substring.lower()
+    matches = [entry for entry in channel_assignment
+               if target in entry.get('layer_name', '').lower()]
+    if not matches:
+        return default
+    if len(matches) > 1:
+        names = [m.get('layer_name') for m in matches]
+        print(f"[PyCAT Batch]   Note: multiple channels matched '{layer_name_substring}' "
+              f"({names}) — using the first: '{matches[0].get('layer_name')}'. "
+              f"For files with 3+ fluorophores, reference additional channels "
+              f"directly via state['channels_by_name'][exact_layer_name].")
+    return matches[0].get('channel_num', default)
 
 
 def _save_array(arr: np.ndarray, path: Path):
@@ -95,24 +148,81 @@ def _save_array(arr: np.ndarray, path: Path):
 # ---------------------------------------------------------------------------
 
 def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Load the image and populate the per-file state dict."""
+    """
+    Load the image and populate the per-file state dict.
+
+    If the original GUI session recorded a channel_assignment (from a
+    multi-channel file where the user assigned names to each channel via
+    the channel naming dialog), this is used to resolve which channel
+    index backs the "Segmentation Image" and "Fluorescence Image" roles,
+    and — for files with 3+ fluorophores — every recorded channel is also
+    loaded individually and made available in
+    state['channels_by_name'][layer_name] for use by any future replay
+    step that needs a specific additional channel (e.g. a second
+    condensate marker or a colocalization channel).
+
+    This generalizes to any number of channels — 2, 3, 4, or more — since
+    the lookup is driven entirely by the recorded layer names rather than
+    a fixed seg/fluor pair.
+    """
     from pycat.data.data_modules import BaseDataClass
 
-    image, microns_per_pixel = _load_image(image_path)
+    channel_assignment = params.get('channel_assignment')
+
+    seg_channel = _resolve_channel_for_layer(channel_assignment, 'Segmentation', default=0)
+    fluor_channel = _resolve_channel_for_layer(channel_assignment, 'Fluorescence', default=0)
+
+    image, microns_per_pixel = _load_image(image_path, channel=seg_channel)
 
     data_instance = BaseDataClass()
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
     data_instance.data_repository['microns_per_pixel_sq'] = microns_per_pixel ** 2
-
-    # Estimate cell/object diameters from recorded params, or use defaults
     data_instance.data_repository['cell_diameter'] = params.get('cell_diameter', 100)
     data_instance.data_repository['ball_radius'] = params.get('ball_radius', 50)
 
     state['image'] = image
-    state['preprocessed'] = image.copy()  # will be updated by preprocessing steps
+    state['preprocessed'] = image.copy()
     state['data_instance'] = data_instance
 
-    print(f"[PyCAT Batch]   Loaded {image_path.name}  shape={image.shape}")
+    # Load the fluorescence channel separately if it differs from the
+    # segmentation channel — used later by condensate segmentation/analysis
+    if fluor_channel != seg_channel:
+        fluor_image, _ = _load_image(image_path, channel=fluor_channel)
+        state['fluorescence_image'] = fluor_image
+    else:
+        state['fluorescence_image'] = image
+
+    # Load every recorded channel (covers 3+ fluorophore files) and store
+    # by its assigned layer name so any channel can be referenced later,
+    # not just the two primary seg/fluor roles.
+    state['channels_by_name'] = {}
+    loaded_channel_cache = {seg_channel: image}
+    if fluor_channel != seg_channel:
+        loaded_channel_cache[fluor_channel] = state['fluorescence_image']
+
+    if channel_assignment:
+        for entry in channel_assignment:
+            ch_num = entry.get('channel_num')
+            layer_name = entry.get('layer_name')
+            if ch_num is None or layer_name is None:
+                continue
+            if ch_num not in loaded_channel_cache:
+                extra_image, _ = _load_image(image_path, channel=ch_num)
+                loaded_channel_cache[ch_num] = extra_image
+            state['channels_by_name'][layer_name] = loaded_channel_cache[ch_num]
+
+        n_channels = len(channel_assignment)
+        print(f"[PyCAT Batch]   Loaded {image_path.name}  shape={image.shape}  "
+              f"({n_channels} channel(s); seg_channel={seg_channel}, "
+              f"fluor_channel={fluor_channel} from recorded assignment)")
+        if n_channels > 2:
+            extra_names = [e['layer_name'] for e in channel_assignment
+                           if e.get('channel_num') not in (seg_channel, fluor_channel)]
+            if extra_names:
+                print(f"[PyCAT Batch]   Additional channels available in "
+                      f"state['channels_by_name']: {extra_names}")
+    else:
+        print(f"[PyCAT Batch]   Loaded {image_path.name}  shape={image.shape}")
 
 
 def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -229,7 +339,10 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     )
     import pandas as pd
 
-    original_image = state['image']
+    # Use the fluorescence-channel image for puncta intensity measurement
+    # when it differs from the segmentation channel (per the recorded
+    # channel_assignment from the GUI session); otherwise they're the same.
+    original_image = state.get('fluorescence_image', state['image'])
     pre_processed_image = state['preprocessed']
     data_instance = state['data_instance']
     ball_radius = _get_data(data_instance, 'ball_radius', 50)
@@ -281,7 +394,8 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     """
     from pycat.toolbox.feature_analysis_tools import puncta_analysis_func
 
-    image = state['image']
+    # Use the same fluorescence-channel image that was used for segmentation
+    image = state.get('fluorescence_image', state['image'])
     data_instance = state['data_instance']
     puncta_mask = state.get('puncta_mask')
     labeled_cells = state.get('labeled_cells')

@@ -46,6 +46,7 @@ from pycat.toolbox.feature_analysis_tools import (
     run_cell_analysis_func, run_puncta_analysis_func)
 from pycat.toolbox.pixel_wise_corr_analysis_tools import run_pwcca
 from pycat.toolbox.obj_based_coloc_analysis_tools import run_manders_coloc, run_obca
+from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels, run_label_binary_mask, 
@@ -308,6 +309,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
         self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
         self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
+        self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -1676,6 +1678,7 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.object_coloc_layout)
+        self.central_manager.toolbox_functions_ui._add_run_two_channel_coloc(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_obca(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_manders_coloc(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.object_coloc_layout)
