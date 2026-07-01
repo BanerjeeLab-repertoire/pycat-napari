@@ -91,14 +91,25 @@ class BaseUIClass:
         """
         self.viewer = viewer
 
-    def create_layer_dropdown(self, layer_type):
+    def create_layer_dropdown(self, layer_type, name_hint: str = ''):
         """
         Creates a dropdown (QComboBox) widget that lists layers of a specific type.
 
         Parameters
         ----------
         layer_type : type
-            The type of layer to list in the dropdown, e.g., napari.layers.Image or napari.layers.Labels.
+            The type of layer to list in the dropdown, e.g., napari.layers.Image
+            or napari.layers.Labels.
+        name_hint : str, optional
+            A substring to match against layer names when auto-selecting after a
+            new layer is inserted. When a new layer whose name contains name_hint
+            is added to the viewer, this dropdown will automatically jump to it.
+            This implements the "auto-populate the appropriate layer as it is
+            generated" UX pattern for sequential pipelines: pass e.g.
+            name_hint='BG-Removed' for a background-removal output dropdown,
+            name_hint='Labeled Cell Mask' for a cell-mask dropdown, etc.
+            If name_hint is empty (the default), no auto-selection occurs on
+            insert — the dropdown stays on whatever the user last chose.
 
         Returns
         -------
@@ -106,11 +117,8 @@ class BaseUIClass:
             The created dropdown widget populated with layers of the specified type.
         """
         dropdown = QComboBox()
-        # Prevent scroll wheel from changing the dropdown selection when the
-        # user is scrolling through the panel.  The dropdown only consumes
-        # scroll events when it is actively open (popup visible).
-        # Without this, hovering over any dropdown while scrolling the dock
-        # silently changes the selected layer, causing hard-to-notice errors.
+        # Prevent scroll wheel from accidentally changing the selection while
+        # the user scrolls through the dock panel.
         dropdown.wheelEvent = lambda event: (
             dropdown.WheelEvent_orig(event)
             if dropdown.view().isVisible()
@@ -120,9 +128,29 @@ class BaseUIClass:
 
         self.update_dropdown_items(dropdown, layer_type)
 
-        # Update the dropdown items whenever layers are added or removed from the viewer
-        self.viewer.layers.events.inserted.connect(lambda e: self.update_dropdown_items(dropdown, layer_type))
-        self.viewer.layers.events.removed.connect(lambda e: self.update_dropdown_items(dropdown, layer_type))
+        def _on_inserted(event):
+            self.update_dropdown_items(dropdown, layer_type)
+            # Auto-select: if a name_hint was given and the new layer matches,
+            # switch to it so the user doesn't have to manually find it.
+            if name_hint:
+                try:
+                    new_name = event.value.name if hasattr(event, 'value') else ''
+                    if not new_name:
+                        # fallback: check the most-recently added matching layer
+                        for layer in reversed(self.viewer.layers):
+                            if isinstance(layer, layer_type) and name_hint.lower() in layer.name.lower():
+                                new_name = layer.name
+                                break
+                    if new_name and name_hint.lower() in new_name.lower():
+                        idx = dropdown.findText(new_name)
+                        if idx != -1:
+                            dropdown.setCurrentIndex(idx)
+                except Exception:
+                    pass
+
+        self.viewer.layers.events.inserted.connect(_on_inserted)
+        self.viewer.layers.events.removed.connect(
+            lambda e: self.update_dropdown_items(dropdown, layer_type))
         return dropdown
 
     def update_dropdown_items(self, dropdown, layer_type):
@@ -353,6 +381,44 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_spatial_metrology = lambda **kw: _add_spatial_metrology(self, **kw)
         self._add_advanced_analysis = lambda **kw: _add_advanced_analysis(self, **kw)
         self._add_condensate_physics = lambda **kw: _add_condensate_physics(self, **kw)
+        # New pipeline UI entry points exposed as standalone toolbox tools.
+        # These use the same (ui_instance, layout=None, separate_widget=False)
+        # calling convention as _add_spatial_metrology so they slot directly
+        # into the toolbox menu with {'separate_widget': True}.
+        from pycat.toolbox.brightfield_ui import (
+            _add_bf_preprocessing, _add_bf_condensate_segmentation,
+            _add_bf_od_metrics, _add_bf_per_cell_summary,
+            _add_bf_spatial, _add_bf_dynamics, _add_bf_texture, _add_bf_frame_qc)
+        from pycat.toolbox.zstack_segmentation_ui import (
+            _add_zstack_bg_removal, _add_zstack_cell_seg,
+            _add_zstack_condensate_seg, _add_zstack_metrics)
+
+        def _make_dock_wrapper(fn, dock_name):
+            def _wrapper(layout=None, separate_widget=False):
+                from PyQt5.QtWidgets import QVBoxLayout as _VBL, QWidget as _QW, QScrollArea as _QSA
+                from PyQt5.QtCore import Qt as _Qt
+                inner_layout = _VBL()
+                fn(self, inner_layout)
+                w = _QW(); w.setLayout(inner_layout)
+                if separate_widget:
+                    sa = _QSA(); sa.setWidgetResizable(True); sa.setWidget(w)
+                    self.viewer.window.add_dock_widget(sa, name=dock_name, area='right')
+                elif layout is not None:
+                    layout.addLayout(inner_layout)
+            return _wrapper
+
+        self._add_bf_preprocessing           = _make_dock_wrapper(_add_bf_preprocessing,           'BF Preprocessing')
+        self._add_bf_condensate_segmentation = _make_dock_wrapper(_add_bf_condensate_segmentation, 'BF Condensate Segmentation')
+        self._add_bf_od_metrics              = _make_dock_wrapper(_add_bf_od_metrics,              'BF Optical Density Metrics')
+        self._add_bf_per_cell_summary        = _make_dock_wrapper(_add_bf_per_cell_summary,        'BF Per-Cell Summary')
+        self._add_bf_spatial                 = _make_dock_wrapper(_add_bf_spatial,                 'BF Spatial Metrology')
+        self._add_bf_dynamics                = _make_dock_wrapper(_add_bf_dynamics,                'BF Dynamics')
+        self._add_bf_texture                 = _make_dock_wrapper(_add_bf_texture,                 'BF Texture')
+        self._add_bf_frame_qc                = _make_dock_wrapper(_add_bf_frame_qc,                'BF Frame Quality')
+        self._add_zstack_bg_removal          = _make_dock_wrapper(_add_zstack_bg_removal,          '3D Background Removal')
+        self._add_zstack_cell_seg            = _make_dock_wrapper(_add_zstack_cell_seg,            '3D Cell Segmentation')
+        self._add_zstack_condensate_seg      = _make_dock_wrapper(_add_zstack_condensate_seg,      '3D Condensate Segmentation')
+        self._add_zstack_metrics             = _make_dock_wrapper(_add_zstack_metrics,             '3D Condensate Metrics')
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -885,10 +951,18 @@ class ToolboxFunctionsUI(BaseUIClass):
         local_thresh_layout.addWidget(window_label_value) # Add the slider value to the layout
 
         # Button to apply thresholding
-        local_thresh_button = QPushButton("Apply Thresholding") # Create a button widget
-        local_thresh_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_local_thresholding, None, k_slider, window_slider, local_thresh_mode_dropdown.currentText(), self.viewer))
-        local_thresh_layout.addWidget(local_thresh_button) # Add the button to the layout
+        def _on_local_thresh():
+            self.on_general_button_clicked(
+                run_local_thresholding, None, k_slider, window_slider,
+                local_thresh_mode_dropdown.currentText(), self.viewer)
+            self._record('local_thresholding', {
+                'method': local_thresh_mode_dropdown.currentText(),
+                'k_value': round((k_slider.value() / 50.0) - 1, 2),
+                'window_size': window_slider.value(),
+            })
+        local_thresh_button = QPushButton("Apply Thresholding")
+        local_thresh_button.clicked.connect(_on_local_thresh)
+        local_thresh_layout.addWidget(local_thresh_button)
         sauvola_widget = QWidget()
         sauvola_widget.setLayout(local_thresh_layout)
         self._add_widget_to_layout_or_dock(sauvola_widget, layout, separate_widget, "Local Thresholding Dock")
@@ -900,7 +974,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         process_cells_layout = QVBoxLayout()
         self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
         self.add_text_label(process_cells_layout, 'Select Pre-Processed Image to Segment')
-        process_cells_image1_dropdown = self.create_layer_dropdown(napari.layers.Image)
+        process_cells_image1_dropdown = self.create_layer_dropdown(napari.layers.Image, name_hint='Pre-Processed')
         process_cells_layout.addWidget(process_cells_image1_dropdown)
         self.add_text_label(process_cells_layout, 'Select Fluorescence Image to Process')
         process_cells_image2_dropdown = self.create_layer_dropdown(napari.layers.Image)
@@ -999,15 +1073,15 @@ class ToolboxFunctionsUI(BaseUIClass):
         cell_segmentation_layout = QVBoxLayout()
         self.add_text_label(cell_segmentation_layout, 'Cell/Nuclei Analysis', bold=True) # Add widget title label
         self.add_text_label(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis') # Add a text label
-        cell_segmentation_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
+        cell_segmentation_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels, name_hint='Labeled Cell Mask')
         cell_segmentation_layout.addWidget(cell_segmentation_dropdown_labels) # Add the dropdown to the layout
         self.add_text_label(cell_segmentation_layout, 'Select Mask Layer to Omit') # Add a text label
         cell_segmentation_dropdown_omit = self.create_layer_dropdown(napari.layers.Labels)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
         cell_segmentation_layout.addWidget(cell_segmentation_dropdown_omit)
         self.add_text_label(cell_segmentation_layout, 'Select Image for Cell Analysis') # Add a text label
-        cell_segmentation_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        cell_segmentation_layout.addWidget(cell_segmentation_dropdown_images) # Add the dropdown to the layout
+        cell_segmentation_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
+        cell_segmentation_layout.addWidget(cell_segmentation_dropdown_images)
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
         def _on_cell_analysis():
             self.on_general_button_clicked(
@@ -1032,10 +1106,10 @@ class ToolboxFunctionsUI(BaseUIClass):
         measure_puncta_layout = QVBoxLayout()
         self.add_text_label(measure_puncta_layout, 'Condensate Analysis', bold=True) # Add widget title label
         self.add_text_label(measure_puncta_layout, 'Select Puncta Mask for Measurement') # Add a text label
-        puncta_measure_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        measure_puncta_layout.addWidget(puncta_measure_dropdown_labels) # Add the dropdown to the layout
-        self.add_text_label(measure_puncta_layout, 'Select Image for Puncta Measurement') # Add a text label
-        puncta_measure_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
+        puncta_measure_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels, name_hint='Refined Puncta')
+        measure_puncta_layout.addWidget(puncta_measure_dropdown_labels)
+        self.add_text_label(measure_puncta_layout, 'Select Image for Puncta Measurement')
+        puncta_measure_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
         measure_puncta_layout.addWidget(puncta_measure_dropdown_images) # Add the dropdown to the layout
         puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
         def _on_puncta_analysis():
@@ -1081,10 +1155,20 @@ class ToolboxFunctionsUI(BaseUIClass):
         range_layout.addWidget(upper_limit_input)  # Add the upper limit input to the layout
         ACF_layout.addLayout(range_layout)  # Add the range inputs layout to the main vertical layout
 
-        ACF_button = QPushButton("Calculate ACF") # Create a button widget
-        ACF_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            run_autocorrelation_analysis, self.viewer, ACF_image_dropdown, ACF_roi_dropdown, lower_limit_input, upper_limit_input, self.central_manager.active_data_class))
-        ACF_layout.addWidget(ACF_button) # Add the button to the layout
+        def _on_acf():
+            self.on_general_button_clicked(
+                run_autocorrelation_analysis, self.viewer, ACF_image_dropdown,
+                ACF_roi_dropdown, lower_limit_input, upper_limit_input,
+                self.central_manager.active_data_class)
+            self._record('sacf_analysis', {
+                'image_layer': ACF_image_dropdown.currentText(),
+                'roi_layer': ACF_roi_dropdown.currentText(),
+                'lower_limit': lower_limit_input.text(),
+                'upper_limit': upper_limit_input.text(),
+            })
+        ACF_button = QPushButton("Calculate ACF")
+        ACF_button.clicked.connect(_on_acf)
+        ACF_layout.addWidget(ACF_button)
         ACF_widget = QWidget() # Create a main widget to contain the input widget
         ACF_widget.setLayout(ACF_layout) # Set the layout for the widget
         self._add_widget_to_layout_or_dock(ACF_widget, layout, separate_widget, "ACF Dock") # Add widget to layout or dock
@@ -1216,10 +1300,17 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(rp_layout, 'Select Intensity Image to Measure') # Add a text label
         rp_dropdown_image = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         rp_layout.addWidget(rp_dropdown_image) # Add the dropdown to the layout
-        rp_button = QPushButton("Measure Region Properties") # Create a button widget
-        rp_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_measure_region_props, self.viewer, rp_dropdown_layers, rp_dropdown_image, self.central_manager.active_data_class))
-        rp_layout.addWidget(rp_button) # Add the button to the layout
+        def _on_rp():
+            self.on_general_button_clicked(
+                run_measure_region_props, self.viewer, rp_dropdown_layers,
+                rp_dropdown_image, self.central_manager.active_data_class)
+            self._record('measure_region_props', {
+                'mask_layer': rp_dropdown_layers.currentText(),
+                'image_layer': rp_dropdown_image.currentText(),
+            })
+        rp_button = QPushButton("Measure Region Properties")
+        rp_button.clicked.connect(_on_rp)
+        rp_layout.addWidget(rp_button)
         rp_widget = QWidget() 
         rp_widget.setLayout(rp_layout)
         self._add_widget_to_layout_or_dock(rp_widget, layout, separate_widget, "Region Properties Dock")
@@ -1258,10 +1349,15 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(label_mask_layout, 'Select Binary Mask to Label') # Add a text label
         label_mask_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
         label_mask_layout.addWidget(label_mask_dropdown) # Add the dropdown to the layout
-        label_mask_button = QPushButton("Label Binary Mask") # Create a button widget
-        label_mask_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_label_binary_mask, self.viewer, label_mask_dropdown, self.viewer))
-        label_mask_layout.addWidget(label_mask_button) # Add the button to the layout
+        def _on_label_mask():
+            self.on_general_button_clicked(
+                run_label_binary_mask, self.viewer, label_mask_dropdown, self.viewer)
+            self._record('label_binary_mask', {
+                'mask_layer': label_mask_dropdown.currentText(),
+            })
+        label_mask_button = QPushButton("Label Binary Mask")
+        label_mask_button.clicked.connect(_on_label_mask)
+        label_mask_layout.addWidget(label_mask_button)
         label_mask_widget = QWidget()
         label_mask_widget.setLayout(label_mask_layout)
         self._add_widget_to_layout_or_dock(label_mask_widget, layout, separate_widget, "Binary Mask Labeler")
@@ -1690,6 +1786,8 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
     def __init__(self, viewer, central_manager):
         super().__init__(viewer, central_manager)
         self.ts_layout = QVBoxLayout()
+        self.ts_layout.setSpacing(4)
+        self.ts_layout.setContentsMargins(4, 4, 4, 4)
 
         # Activate the workflow checklist for this pipeline
         try:
@@ -1738,19 +1836,19 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         tfu._add_run_ts_cellpose(layout=self.ts_layout)
         tfu._add_run_cell_analysis_func(layout=self.ts_layout)
 
-        # ── Step 7: time-series condensate analysis ───────────────────────
+        # ── Step 7: Time-Series Condensate Analysis ────────────────────────
         tfu._add_run_timeseries_condensate_analysis(layout=self.ts_layout)
 
-        # ── Step 8: advanced analysis (morphological/dynamic/org) ──────────
+        # ── Step 8: Advanced Analysis (dynamic spatial / morphological) ─────
         tfu._add_advanced_analysis(layout=self.ts_layout)
 
-        # ── Step 8b: condensate biophysics ───────────────────────────────
+        # ── Step 8b: Condensate Biophysics (MSD, Csat, kinetics) ───────────
         tfu._add_condensate_physics(layout=self.ts_layout)
 
-        # ── Step 9: export video for presentations ──────────────────────────
+        # ── Step 9: Export video  [optional] ─────────────────────────────────
         tfu._add_export_timeseries_video(layout=self.ts_layout)
 
-        # ── Step 8: save and clear ────────────────────────────────────────
+        # ── Step 10: Save & Clear ─────────────────────────────────────────────
         tfu._add_save_and_clear(layout=self.ts_layout)
 
         main_widget = QWidget()
@@ -1759,12 +1857,17 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(main_widget)
+        scroll_area.setMinimumWidth(310)
 
         self.viewer.window.add_dock_widget(
             scroll_area, name="Time-Series Condensate Analysis Dock"
         )
 
-        main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Minimum vertical policy: inner widget is only as tall as its content.
+        # Without this, Qt stretches main_widget to fill the entire dock and
+        # distributes the extra space among sections — creating large gaps.
+        # Scroll appears automatically if the dock is shorter than the content.
+        main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.ts_layout.setAlignment(Qt.AlignTop)
 
@@ -1852,8 +1955,28 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         start_spin.valueChanged.connect(lambda _: _update_count())
         end_spin.valueChanged.connect(lambda _: _update_count())
 
-        # Auto-populate range from stack when dropdown changes
+        # Auto-populate range from stack when dropdown changes.
+        # _range_locked becomes True once the user clicks Apply ROI — after
+        # that, inserting new layers (which triggers currentIndexChanged via
+        # the name_hint auto-select machinery) must NOT reset the spinboxes
+        # back to full range, because the user has deliberately set a range.
+        _range_locked = [False]
+
         def _on_stack_changed():
+            if _range_locked[0]:
+                # User has already applied a range — only update the maximums
+                # (so the spinboxes don't go out of bounds on a different stack)
+                # but preserve the current start/end values.
+                name = stack_dropdown.currentText()
+                try:
+                    layer = self.viewer.layers[name]
+                    n_t = layer.data.shape[0] if layer.data.ndim == 3 else 1
+                    end_spin.setMaximum(n_t - 1)
+                    start_spin.setMaximum(n_t - 1)
+                    frame_spin.setMaximum(n_t - 1)
+                except Exception:
+                    pass
+                return
             name = stack_dropdown.currentText()
             try:
                 layer = self.viewer.layers[name]
@@ -1884,48 +2007,66 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         )
         roi_grp_layout.addWidget(roi_check)
 
+        # ── Add ROI layer button ──────────────────────────────────────────
+        # Creates a ready-to-draw Shapes layer rather than requiring the user
+        # to add one manually from the napari layer panel. Clicking activates
+        # Rectangle mode immediately so the user can draw straight away.
+        def _add_roi_shapes_layer():
+            roi_name = "Draw XY ROI Here"
+            # Reuse existing layer if already present
+            if roi_name not in [l.name for l in self.viewer.layers]:
+                import napari.layers as _nl
+                roi_layer = self.viewer.add_shapes(
+                    name=roi_name,
+                    shape_type='rectangle',
+                    face_color='transparent',
+                    edge_color='#f0a500',
+                    edge_width=3,
+                )
+            else:
+                roi_layer = self.viewer.layers[roi_name]
+            self.viewer.layers.selection.active = roi_layer
+            self.viewer.layers.selection.active.mode = 'add_rectangle'
+            # Update the shapes dropdown to reflect the new layer
+            self.central_manager.toolbox_functions_ui.update_dropdown_items(
+                roi_shapes_dd, napari.layers.Shapes)
+            idx = roi_shapes_dd.findText(roi_name)
+            if idx != -1:
+                roi_shapes_dd.setCurrentIndex(idx)
+
+        add_roi_btn = QPushButton("＋  Add ROI Drawing Layer")
+        add_roi_btn.setToolTip(
+            "Creates a Shapes layer pre-configured for rectangle drawing "
+            "and activates Rectangle mode — just click and drag to define "
+            "the XY region to crop all subsequent processing to."
+        )
+        add_roi_btn.clicked.connect(_add_roi_shapes_layer)
+        roi_grp_layout.addWidget(add_roi_btn)
+
         roi_shapes_dd = self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            napari.layers.Shapes)
+            napari.layers.Shapes, name_hint='ROI')
         roi_shapes_dd.setEnabled(False)
         roi_shapes_dd.setToolTip("Shapes layer containing the Rectangle to crop to.")
         roi_grp_layout.addWidget(roi_shapes_dd)
 
-        # ── Batch auto-crop strategy ──────────────────────────────────────
+        # Batch auto-crop note (read-only, strategy is always 'auto' for
+        # interactive use — the batch replay uses Cellpose bbox or Multi-Otsu,
+        # but those algorithms require a Cellpose mask that doesn't exist yet
+        # at this step in the interactive pipeline, so we keep this simple).
         batch_roi_check = QCheckBox("Enable auto-crop in batch replay")
         batch_roi_check.setChecked(True)
         batch_roi_check.setToolTip(
-            "In headless batch mode, automatically compute cell bounding boxes\n"
-            "so condensate segmentation runs in each cell's tight crop rather\n"
-            "than the full image — much faster for sparse fields.\n\n"
-            "Strategy A (Cellpose): uses bounding boxes from the cell mask.\n"
-            "Strategy B (Multi-Otsu): 3-class thresholding finds cells without\n"
-            "a separate segmentation step — best for single-channel images."
-        )
+            "In headless batch replay, PyCAT will automatically compute a\n"
+            "tight cell bounding-box crop so condensate segmentation runs\n"
+            "in each cell's region only — much faster for sparse fields.\n\n"
+            "The batch strategy (Cellpose bbox or Multi-Otsu) is chosen\n"
+            "automatically at replay time based on what masks are available.\n"
+            "No action needed here for interactive analysis.")
         roi_grp_layout.addWidget(batch_roi_check)
 
-        strategy_dd = _QCB()
-        strategy_dd.addItems([
-            "auto  (Cellpose bbox if mask available, else Multi-Otsu)",
-            "cellpose  (bounding boxes from cell mask)",
-            "multi_otsu  (3-class threshold, no cell mask needed)",
-        ])
-        strategy_dd.setEnabled(True)
-        strategy_dd.wheelEvent = lambda e: (
-            strategy_dd.__class__.wheelEvent(strategy_dd, e)
-            if strategy_dd.view().isVisible() else e.ignore()
-        )
-        roi_grp_layout.addWidget(strategy_dd)
-
-        otsu_classes_spin = QSpinBox()
-        otsu_classes_spin.setRange(2, 5)
-        otsu_classes_spin.setValue(3)
-        otsu_classes_spin.setPrefix("Otsu classes: ")
-        otsu_classes_spin.setToolTip(
-            "Number of intensity classes for multi-Otsu thresholding.\n"
-            "3 = background / cytoplasm / condensates (recommended).\n"
-            "2 = simple background / cell threshold."
-        )
-        roi_grp_layout.addWidget(otsu_classes_spin)
+        # Keep these as hidden variables so the record call below still works
+        strategy_dd    = None   # used only in batch record, not shown in UI
+        otsu_classes_spin = None
 
         roi_info = QLabel("")
         roi_info.setStyleSheet("color: #aaa; font-size: 9pt;")
@@ -2022,6 +2163,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
             dr['timeseries_frame_start']     = t_start
             dr['timeseries_frame_end']        = t_end
             dr['timeseries_n_frames']         = t_end - t_start + 1
+            _range_locked[0] = True   # prevent new layer insertions from resetting the range
             dr['timeseries_roi_y0']           = y0
             dr['timeseries_roi_y1']           = y1
             dr['timeseries_roi_x0']           = x0
@@ -2055,7 +2197,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
             )
 
             # Determine batch auto-crop strategy from UI
-            strategy_text = strategy_dd.currentText().split()[0]   # 'auto', 'cellpose', 'multi_otsu'
+            strategy_text = 'auto'   # strategy decided at batch replay time
 
             # Record for batch — includes both the GUI rectangle crop (for
             # replay_set_frame_range) and the batch auto-crop config
@@ -2076,7 +2218,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
                 self.central_manager.toolbox_functions_ui._record(
                     'auto_crop_roi', {
                         'strategy':       strategy_text,
-                        'n_otsu_classes': otsu_classes_spin.value(),
+                        'n_otsu_classes': 3,   # default; set at batch replay time
                         'padding_px':     8,
                     })
 
@@ -2716,7 +2858,6 @@ class MenuManager:
         """
         condensate_analysis_dict = {
             'Cellular Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'Cellular Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_brightfield_analysis, {}),
             'In Vitro Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
             'In Vitro Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
             'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
@@ -2849,14 +2990,56 @@ class MenuManager:
         }
         self._add_actions_to_menu(obj_coloc_tools_actions, obj_coloc_tools_sub_submenu)
 
-        # Create a sub-menu for spatial metrology tools
+        # ── Condensate & Cell Analysis ─────────────────────────────────────────
+        condensate_analysis_submenu = self.toolbox_menu.addMenu('Condensate & Cell Analysis')
+        condensate_analysis_actions = {
+            'Cell Analyzer': (self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func, {'separate_widget': True}),
+            'Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects, {'separate_widget': True}),
+            'Condensate Analyzer': (self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(condensate_analysis_actions, condensate_analysis_submenu)
+
+        # ── Spatial Metrology ──────────────────────────────────────────────────
         spatial_metrology_submenu = self.toolbox_menu.addMenu('Spatial Metrology')
         spatial_metrology_actions = {
-            'Per-Cell Spatial ACF Analysis': (self.central_manager.toolbox_functions_ui._add_run_sacf_analysis, {'separate_widget': True})
+            'Per-Cell Spatial ACF Analysis': (self.central_manager.toolbox_functions_ui._add_run_sacf_analysis, {'separate_widget': True}),
+            'Spatial Metrology (NND, Ripley, Voronoi…)': (self.central_manager.toolbox_functions_ui._add_spatial_metrology, {'separate_widget': True}),
         }
         self._add_actions_to_menu(spatial_metrology_actions, spatial_metrology_submenu)
 
-        # Create a sub-menu for data visulaization tools
+        # ── Advanced Analysis ──────────────────────────────────────────────────
+        advanced_analysis_submenu = self.toolbox_menu.addMenu('Advanced Analysis')
+        advanced_analysis_actions = {
+            'Dynamic Spatial Phenotyping / Tracking': (self.central_manager.toolbox_functions_ui._add_advanced_analysis, {'separate_widget': True}),
+            'Condensate Biophysics (MSD, C_sat, Kinetics…)': (self.central_manager.toolbox_functions_ui._add_condensate_physics, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(advanced_analysis_actions, advanced_analysis_submenu)
+
+        # ── Brightfield Tools ──────────────────────────────────────────────────
+        brightfield_submenu = self.toolbox_menu.addMenu('Brightfield Tools')
+        brightfield_actions = {
+            'BF Preprocessing (flat-field, halo, CLAHE)': (self.central_manager.toolbox_functions_ui._add_bf_preprocessing, {'separate_widget': True}),
+            'BF Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_bf_condensate_segmentation, {'separate_widget': True}),
+            'BF Optical Density Metrics': (self.central_manager.toolbox_functions_ui._add_bf_od_metrics, {'separate_widget': True}),
+            'BF Per-Cell Summary': (self.central_manager.toolbox_functions_ui._add_bf_per_cell_summary, {'separate_widget': True}),
+            'BF Spatial Metrology': (self.central_manager.toolbox_functions_ui._add_bf_spatial, {'separate_widget': True}),
+            'BF Dynamics': (self.central_manager.toolbox_functions_ui._add_bf_dynamics, {'separate_widget': True}),
+            'BF Texture Analysis': (self.central_manager.toolbox_functions_ui._add_bf_texture, {'separate_widget': True}),
+            'BF Frame Quality': (self.central_manager.toolbox_functions_ui._add_bf_frame_qc, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(brightfield_actions, brightfield_submenu)
+
+        # ── Z-Stack (3D) Tools ─────────────────────────────────────────────────
+        zstack_submenu = self.toolbox_menu.addMenu('Z-Stack (3D) Tools')
+        zstack_actions = {
+            '3D Background Removal': (self.central_manager.toolbox_functions_ui._add_zstack_bg_removal, {'separate_widget': True}),
+            '3D Cell Segmentation': (self.central_manager.toolbox_functions_ui._add_zstack_cell_seg, {'separate_widget': True}),
+            '3D Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_zstack_condensate_seg, {'separate_widget': True}),
+            '3D Condensate Metrics': (self.central_manager.toolbox_functions_ui._add_zstack_metrics, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(zstack_actions, zstack_submenu)
+
+        # ── Data Visualization ─────────────────────────────────────────────────
         data_visualization_submenu = self.toolbox_menu.addMenu('Data Visualization')
         data_visualization_actions = {
             'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True})

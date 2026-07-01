@@ -197,10 +197,10 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     grp  = QGroupBox("Spatial Metrology")
     form = QFormLayout(grp)
 
-    ui_instance.add_text_label(
-        None,
-        'Quantitative spatial analysis of condensate positions within cells.',
-    )
+    desc = QLabel('Quantitative spatial analysis of condensate positions within cells.')
+    desc.setWordWrap(True)
+    desc.setStyleSheet("font-size:10px; color:#aaa; padding-bottom:4px;")
+    form.addRow(desc)
 
     # Layer selectors
     puncta_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)

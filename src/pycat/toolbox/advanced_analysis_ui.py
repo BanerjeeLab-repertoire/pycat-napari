@@ -18,7 +18,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
-    QTabWidget, QComboBox,
+    QTabWidget, QComboBox, QSizePolicy,
 )
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -52,9 +52,26 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     outer = QVBoxLayout()
     ui_instance.add_text_label(outer, 'Advanced Condensate Analysis', bold=True)
     tabs = QTabWidget()
+    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+    def _fit_tab_height(idx=None):
+        # Cap the tab widget height to the current tab's content + tab bar.
+        # QTabWidget normally reserves space for the tallest tab in ALL tabs;
+        # this overrides that by calling setMaximumHeight() whenever the tab
+        # changes, collapsing the empty space that would otherwise appear when
+        # a shorter tab (Morphological, Organizational) is active.
+        w = tabs.currentWidget()
+        if w is None:
+            return
+        bar_h     = tabs.tabBar().sizeHint().height()
+        content_h = w.sizeHint().height()
+        tabs.setMaximumHeight(bar_h + content_h + 12)  # 12px margin
+
+    tabs.currentChanged.connect(_fit_tab_height)
 
     # ── Tab 1: Morphological Complexity ─────────────────────────────────
     morph_widget = QWidget()
+    morph_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     mf = QFormLayout(morph_widget)
 
     punc_dd_m = ui_instance.create_layer_dropdown(napari.layers.Labels)
@@ -146,6 +163,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     # ── Tab 2: Dynamic Spatial Phenotyping ──────────────────────────────
     dyn_widget = QWidget()
+    dyn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     df = QFormLayout(dyn_widget)
 
     stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
@@ -385,6 +403,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     # ── Tab 3: Organizational Metrics ───────────────────────────────────
     org_widget = QWidget()
+    org_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     of = QFormLayout(org_widget)
 
     punc_dd_o = ui_instance.create_layer_dropdown(napari.layers.Labels)
@@ -505,7 +524,15 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     outer.addWidget(tabs)
     widget = QWidget()
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     widget.setLayout(outer)
+
+    # Initialise height cap after all tab content is constructed.
+    # Must be deferred (via a zero-ms timer) so Qt has finished computing
+    # sizeHints before we read them.
+    from PyQt5.QtCore import QTimer
+    QTimer.singleShot(0, _fit_tab_height)
+
     ui_instance._add_widget_to_layout_or_dock(
         widget, layout, separate_widget, "Advanced Analysis"
     )

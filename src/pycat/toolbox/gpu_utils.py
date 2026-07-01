@@ -66,9 +66,22 @@ if os.environ.get("PYCAT_FORCE_CPU", "0") != "1":
         cp   = _cp
         cpnd = _cpnd
         GPU_AVAILABLE = True
-        print("[PyCAT GPU] CuPy detected — GPU acceleration enabled.")
+        # Only print in the main process — this module is imported fresh in
+        # every ProcessPoolExecutor worker subprocess, so without this guard
+        # the message prints once per worker (8x on an 8-core machine).
+        import multiprocessing as _mp
+        try:
+            if _mp.current_process().name == 'MainProcess':
+                print("[PyCAT GPU] CuPy detected — GPU acceleration enabled.")
+        except Exception:
+            pass
     except Exception as _e:
-        print(f"[PyCAT GPU] CuPy not available ({_e}) — using CPU fallback.")
+        import multiprocessing as _mp
+        try:
+            if _mp.current_process().name == 'MainProcess':
+                print(f"[PyCAT GPU] CuPy not available ({_e}) — using CPU fallback.")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

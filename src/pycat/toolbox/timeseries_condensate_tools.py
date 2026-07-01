@@ -318,6 +318,17 @@ def _process_frame_worker(args):
                                            process_fn_kwargs['ball_radius'],
                                            process_fn_kwargs['window_size'])
         preproc_result = np.asarray(preproc_result).astype(np.float32)
+        # Re-normalise preproc output to [0,1] per frame before passing to
+        # background removal — matching what the old two-pass path did
+        # implicitly via _read_source_frame when Pass 2 read back the preproc
+        # zarr. pre_process_image output is NOT guaranteed to be in [0,1]
+        # (CLAHE, tophat, wavelet all can shift the range), so without this
+        # step some frames arrive at rb_gaussian_bg_removal_with_edge_enhancement
+        # at a different absolute scale than others, producing the inconsistent
+        # intensity patterns visible in the enhanced background-removed stack.
+        _pr_mn, _pr_mx = preproc_result.min(), preproc_result.max()
+        if _pr_mx > _pr_mn:
+            preproc_result = (preproc_result - _pr_mn) / (_pr_mx - _pr_mn)
         bgrem_result = rb_gaussian_bg_removal_with_edge_enhancement(
             preproc_result, process_fn_kwargs['ball_radius'])
         return t, preproc_result, np.asarray(bgrem_result).astype(np.float32)
@@ -1133,7 +1144,7 @@ def _ts_analyze_frame_worker(args):
      ball_radius, microns_per_pixel_sq,
      kurtosis_threshold, local_snr_threshold, global_snr_threshold,
      intensity_hwhm_scale, max_area_fraction, min_spot_radius,
-     compute_spatial) = args
+     compute_spatial, per_frame_normalize) = args
 
     import numpy as np
     import zarr as _zarr
@@ -1165,8 +1176,28 @@ def _ts_analyze_frame_worker(args):
     for cell_label in cell_labels:
         cell_binary_mask = (labeled_cell_mask == cell_label)
 
+        # Per-frame within-cell normalization for dissolution/dynamics experiments:
+        # normalising to the CURRENT frame's own intensity range makes all
+        # intensity-based conditions scale-invariant, so rising dilute-phase
+        # background and falling condensate peaks don't progressively knock out
+        # real condensates. Uses robust 1st–99th percentile to avoid clip
+        # artefacts from outliers. When disabled (default / steady-state), the
+        # raw frame is used directly, preserving the original behaviour.
+        if per_frame_normalize:
+            _cpx = frame_raw[cell_binary_mask]
+            if _cpx.size > 0:
+                _plo = float(np.percentile(_cpx, 1))
+                _phi = float(np.percentile(_cpx, 99))
+                _frame_raw_seg = (np.clip((frame_raw - _plo) / max(_phi - _plo, 1e-8),
+                                          0.0, 1.0).astype(np.float32)
+                                  if _phi > _plo else frame_raw)
+            else:
+                _frame_raw_seg = frame_raw
+        else:
+            _frame_raw_seg = frame_raw
+
         refined, _ = segment_subcellular_objects(
-            frame_raw, frame_proc, cell_binary_mask, int(cell_label),
+            _frame_raw_seg, frame_proc, cell_binary_mask, int(cell_label),
             ball_radius, cell_df=None,
             kurtosis_threshold=kurtosis_threshold,
             local_snr_threshold=local_snr_threshold,
@@ -1241,6 +1272,16 @@ def _ts_analyze_frame_worker(args):
 
         records.append(metrics)
 
+    # Inverse-shift the condensate mask back to the original (unshifted)
+    # coordinate system before returning. Drift correction shifts the analysis
+    # frame INTO reference-frame space for segmentation; without this step the
+    # mask is in the drift-corrected space and appears spatially offset when
+    # napari overlays it on the original (unshifted) image layer.
+    if dr != 0 or dc != 0:
+        total_refined = np.asarray(
+            _apply_shift(total_refined.astype(np.uint8), -dr, -dc)
+        ).astype(bool)
+
     return t, records, total_refined.astype(np.uint8)
 
 
@@ -1263,6 +1304,7 @@ def run_timeseries_condensate_analysis(
     use_parallel: bool = True,
     n_workers: Optional[int] = None,
     cancel_check=None,
+    per_frame_normalize: bool = False,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Core time-series condensate analysis — no viewer dependency.
@@ -1371,7 +1413,7 @@ def run_timeseries_condensate_analysis(
              ball_radius, microns_per_pixel_sq,
              kurtosis_threshold, local_snr_threshold, global_snr_threshold,
              intensity_hwhm_scale, max_area_fraction, min_spot_radius,
-             compute_spatial)
+             compute_spatial, per_frame_normalize)
             for t in range(n_frames)
         ]
 
@@ -1423,8 +1465,21 @@ def run_timeseries_condensate_analysis(
             for cell_label in cell_labels:
                 cell_binary_mask = (labeled_cell_mask == cell_label)
 
+                if per_frame_normalize:
+                    _cpx = frame_raw[cell_binary_mask]
+                    if _cpx.size > 0:
+                        _plo = float(np.percentile(_cpx, 1))
+                        _phi = float(np.percentile(_cpx, 99))
+                        _frame_raw_seg = (np.clip((frame_raw - _plo) / max(_phi - _plo, 1e-8),
+                                                  0.0, 1.0).astype(np.float32)
+                                          if _phi > _plo else frame_raw)
+                    else:
+                        _frame_raw_seg = frame_raw
+                else:
+                    _frame_raw_seg = frame_raw
+
                 refined, _ = segment_subcellular_objects(
-                    frame_raw, frame_proc,
+                    _frame_raw_seg, frame_proc,
                     cell_binary_mask, int(cell_label),
                     ball_radius, cell_df=None,
                     kurtosis_threshold=kurtosis_threshold,
@@ -1501,6 +1556,12 @@ def run_timeseries_condensate_analysis(
 
                 records.append(metrics)
 
+            # Inverse-shift mask back to original coordinates (same fix as
+            # the parallel worker path — see comment there for rationale).
+            if dr != 0 or dc != 0:
+                total_refined = np.asarray(
+                    _apply_shift(total_refined.astype(np.uint8), -dr, -dc)
+                ).astype(bool)
             condensate_stack[t] = total_refined.astype(np.uint8)
 
             if progress_callback is not None:
@@ -1648,7 +1709,7 @@ def _add_run_timeseries_condensate_analysis(
 
     ts_layout.addWidget(opts_group)
 
-    # ── Refinement parameters (same as condensate segmentation widget) ────
+    # ── Refinement parameters ────────────────────────────────────────────
     ref_group = QGroupBox("Refinement Parameters")
     ref_layout = QFormLayout(ref_group)
 
@@ -1659,12 +1720,72 @@ def _add_run_timeseries_condensate_analysis(
         if tip: sb.setToolTip(tip)
         return sb
 
-    min_spot_spin  = _dspin(1, 20, 2, 0.5,  "Minimum puncta radius in pixels.")
-    kurtosis_spin  = _dspin(-10, 0, -3.0, 0.5, "Kurtosis threshold. More negative = more permissive.")
-    lsnr_spin      = _dspin(0, 5, 1.0, 0.1,  "Local SNR threshold. Lower = keep dimmer puncta.")
-    gsnr_spin      = _dspin(0, 5, 1.0, 0.1,  "Global SNR threshold.")
-    hwhm_spin      = _dspin(0, 5, 1.17, 0.1, "Intensity scale (multiples of local BG SD).")
-    maxarea_spin   = _dspin(0.01, 1.0, 0.25, 0.05, "Max puncta area as fraction of cell area.")
+    min_spot_spin  = _dspin(1, 20, 2, 0.5,
+        "Minimum condensate radius in pixels.")
+    kurtosis_spin  = _dspin(-10, 0, -3.0, 0.5,
+        "Kurtosis threshold for each candidate condensate.\n"
+        "More NEGATIVE = more permissive (keeps flatter-peaked spots).\n"
+        "Decrease for dissolution experiments where condensate peaks\n"
+        "become less sharp as they dissolve into the dilute phase.")
+    lsnr_spin      = _dspin(0, 5, 1.0, 0.1,
+        "Local SNR (peak / local background noise). LOWER = keep dimmer condensates.\n"
+        "Decrease for dissolution experiments.")
+    gsnr_spin      = _dspin(0, 5, 1.0, 0.1,
+        "Global SNR (peak / cell-wide background noise). LOWER = more permissive.\n"
+        "Decrease for dissolution experiments.")
+    hwhm_spin      = _dspin(0, 5, 1.17, 0.1,
+        "Intensity threshold: condensate mean must exceed local background mean\n"
+        "by this many standard deviations. LOWER = accept dimmer condensates.\n"
+        "Decrease for dissolution experiments.")
+    maxarea_spin   = _dspin(0.01, 1.0, 0.25, 0.05,
+        "Max condensate area as a fraction of cell area. Rejects objects that are\n"
+        "implausibly large (likely segmentation artifacts or merged nuclei).")
+
+    # Presets row — quick switching between experiment types
+    from PyQt5.QtWidgets import QHBoxLayout as _QHL2, QPushButton as _QPB2
+    preset_row = _QHL2()
+    preset_lbl = QLabel("Preset:")
+    preset_lbl.setStyleSheet("font-size:9pt; color:#aaa;")
+    preset_row.addWidget(preset_lbl)
+
+    def _apply_steady_state():
+        kurtosis_spin.setValue(-3.0); lsnr_spin.setValue(1.0)
+        gsnr_spin.setValue(1.0); hwhm_spin.setValue(1.17)
+        per_frame_norm_cb.setChecked(False)
+
+    def _apply_dissolution():
+        kurtosis_spin.setValue(-5.0); lsnr_spin.setValue(0.5)
+        gsnr_spin.setValue(0.5); hwhm_spin.setValue(0.7)
+        per_frame_norm_cb.setChecked(True)
+
+    ss_btn = _QPB2("Steady-state")
+    ss_btn.setToolTip("Default thresholds for stable condensates")
+    ss_btn.clicked.connect(_apply_steady_state)
+    dis_btn = _QPB2("Dissolution / dynamics")
+    dis_btn.setToolTip(
+        "Relaxed thresholds for experiments where condensate signal\n"
+        "decays over time (e.g. optodroplets dissolving after light-off,\n"
+        "or condensates weakening under stress). Enables per-frame\n"
+        "intensity normalisation and lowers SNR / kurtosis thresholds.")
+    dis_btn.clicked.connect(_apply_dissolution)
+    preset_row.addWidget(ss_btn)
+    preset_row.addWidget(dis_btn)
+    preset_row.addStretch()
+    ref_layout.addRow(preset_row)
+
+    per_frame_norm_cb = QCheckBox("Per-frame intensity normalisation")
+    per_frame_norm_cb.setChecked(False)
+    per_frame_norm_cb.setToolTip(
+        "Normalise each frame's pixel intensities to [0, 1] within the\n"
+        "cell mask before running refinement filtering. This makes the\n"
+        "local and global intensity conditions scale-invariant — the\n"
+        "thresholds compare relative contrast rather than absolute counts.\n\n"
+        "Essential for dissolution / dynamics experiments where the dilute\n"
+        "phase intensity rises over time: without this, rising background\n"
+        "progressively triggers intensity conditions and removes real\n"
+        "condensates from later frames.\n\n"
+        "For steady-state experiments this can be left off.")
+    ref_layout.addRow("", per_frame_norm_cb)
 
     ref_layout.addRow("Min spot radius (px):", min_spot_spin)
     ref_layout.addRow("Kurtosis threshold:", kurtosis_spin)
@@ -1753,6 +1874,7 @@ def _add_run_timeseries_condensate_analysis(
             max_area_fraction=maxarea_spin.value(),
             min_spot_radius=min_spot_spin.value(),
             compute_spatial=spatial_checkbox.isChecked(),
+            per_frame_normalize=per_frame_norm_cb.isChecked(),
         )
         _run_ripley = ripley_checkbox.isChecked() and spatial_checkbox.isChecked()
         _run_ripley_ref[0] = _run_ripley
@@ -1783,6 +1905,7 @@ def _add_run_timeseries_condensate_analysis(
             'local_snr_threshold': lsnr_spin.value(),
             'global_snr_threshold': gsnr_spin.value(),
             'intensity_hwhm_scale': hwhm_spin.value(),
+            'per_frame_normalize': per_frame_norm_cb.isChecked(),
             'max_area_fraction': maxarea_spin.value(),
             'min_spot_radius': min_spot_spin.value(),
             'compute_spatial': spatial_checkbox.isChecked(),

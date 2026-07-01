@@ -500,14 +500,40 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     omission_mask = omit_mask_layer.data if omit_mask_layer is not None else None
     image = image_layer.data
 
-    # Check for shape compatibility between mask and image layers
-    if cell_masks.shape != image.shape:
-        raise ValueError("Mask and image layers must have the same shape!")
+    # ── Handle 3D TS mask stacks (T, H, W) ───────────────────────────────
+    # When the user selects the TS Cell Masks layer from keyframe Cellpose,
+    # .data is a 3D (T, H, W) array. cell_analysis_func and opencv_contour_func
+    # only handle 2D masks. Extract the reference frame (frame 0 by default,
+    # or the stored reference frame index) as a single 2D slice.
+    if cell_masks.ndim == 3:
+        ref_frame = 0
+        try:
+            ref_frame = int(data_instance.data_repository.get('reference_frame', 0))
+        except Exception:
+            pass
+        cell_masks = np.asarray(cell_masks[ref_frame])
+    if omission_mask is not None and omission_mask.ndim == 3:
+        ref_frame = 0
+        omission_mask = np.asarray(omission_mask[ref_frame])
+
+    # For image: if 3D take the same reference frame so shapes still match
+    _image_for_analysis = image
+    if hasattr(image, 'ndim') and image.ndim == 3:
+        ref_frame_img = 0
+        try:
+            ref_frame_img = int(data_instance.data_repository.get('reference_frame', 0))
+        except Exception:
+            pass
+        _image_for_analysis = np.asarray(image[ref_frame_img])
+
+    # Check for shape compatibility between 2D mask and 2D image
+    if cell_masks.shape[-2:] != _image_for_analysis.shape[-2:]:
+        raise ValueError("Mask and image layers must have compatible spatial dimensions!")
     if omission_mask is not None and omission_mask.shape != cell_masks.shape:
-        raise ValueError("Omission mask and cell mask layers must have the same shape!")
+        omission_mask = None  # silently drop mismatched omission mask
     
     # Perform cell analysis and retrieve the labeled cell masks and cell statistics
-    labeled_cell_masks, cell_df = cell_analysis_func(image, cell_masks, omission_mask, data_instance)
+    labeled_cell_masks, cell_df = cell_analysis_func(_image_for_analysis, cell_masks, omission_mask, data_instance)
 
     # Store the cell statistics in the data repository
     data_instance.data_repository['cell_df'] = cell_df
