@@ -112,6 +112,146 @@ def _read_source_frame(stack_data, t):
     return arr
 
 
+def _get_zarr_dir_path(stack_like) -> Optional[str]:
+    """
+    Return the filesystem directory path backing a stack, if it is already
+    a filesystem-backed zarr array (e.g. a _ZarrStack wrapper produced by
+    lazy stack preprocessing).  Returns None if the stack is a plain
+    in-memory array or otherwise not filesystem-zarr-backed.
+    """
+    import zarr as _zarr
+    z = getattr(stack_like, '_z', None)  # _ZarrStack wrapper
+    if z is None and hasattr(stack_like, 'store'):
+        z = stack_like  # already a raw zarr Array
+    if z is not None:
+        store = getattr(z, 'store', None)
+        if isinstance(store, _zarr.storage.DirectoryStore):
+            return store.path
+    return None
+
+
+def _materialize_stack_to_zarr(stack_like, n_frames: int, H: int, W: int,
+                                prefix: str = 'ts_analysis_src') -> str:
+    """
+    Ensure `stack_like` is available as a filesystem zarr DirectoryStore and
+    return its path, so that worker processes can open frames independently
+    by path rather than requiring large arrays to be pickled through IPC.
+
+    If the stack is already filesystem-zarr-backed (typical after the lazy
+    stack preprocessing step), this returns the existing path immediately
+    with no copying.  Otherwise every frame is read once and written to a
+    new temporary zarr store — a one-time cost paid before parallel
+    dispatch, and far cheaper than the per-frame analysis work that follows.
+    """
+    import zarr as _zarr
+    import os
+
+    existing = _get_zarr_dir_path(stack_like)
+    if existing and os.path.isdir(existing):
+        return existing
+
+    tmp_dir  = _session_zarr_dir()
+    tmp_path = os.path.join(tmp_dir, f'{prefix}_{id(stack_like)}')
+    z_out = _zarr.open(tmp_path, mode='w',
+                       shape=(n_frames, H, W), chunks=(1, H, W),
+                       dtype=np.float32)
+    for t in range(n_frames):
+        z_out[t] = _read_source_frame(stack_like, t)
+    return tmp_path
+
+
+def estimate_temporal_correlation(
+    stack_data, n_sample_pairs: int = 20,
+) -> dict:
+    """
+    Estimate frame-to-frame correlation in a time-series stack to check
+    whether the acquisition is in an "oversampling regime" where
+    pseudo-3D tri-planar temporal filtering (treating T like Z — see
+    pseudo3d_tri_planar_filter) is justified.
+
+    The same physical argument that makes tri-planar filtering valid for
+    a Z-stack — genuine correlation between adjacent slices, typically
+    from Nyquist-or-better axial sampling — only transfers to the time
+    axis when frames are acquired fast enough relative to the sample's
+    dynamics that adjacent frames are still highly similar. A slow
+    time-lapse (minutes between frames, substantial condensate movement/
+    fusion/fission between frames) does NOT have this property, and
+    applying tri-planar-across-T filtering there would blur together
+    frames that are only coincidentally adjacent in the file, not
+    genuinely correlated — the opposite of what the technique is for.
+
+    Parameters
+    ----------
+    stack_data : array-like, shape (T, H, W)
+        Raw (unprocessed) time-series stack. Sampled, not read in full,
+        for speed on large stacks.
+    n_sample_pairs : int
+        Number of consecutive-frame pairs to sample (evenly spaced across
+        the stack) for the correlation estimate.
+
+    Returns
+    -------
+    dict with keys:
+        mean_correlation   : mean Pearson correlation between consecutive
+                             sampled frame pairs (0-1, higher = more
+                             oversampled / more redundant between frames)
+        min_correlation, max_correlation
+        regime             : 'oversampled' (mean_correlation > 0.9),
+                             'moderate' (0.7-0.9),
+                             'undersampled' (< 0.7)
+        recommendation     : human-readable guidance string
+    """
+    n_t = stack_data.shape[0]
+    if n_t < 2:
+        return dict(mean_correlation=np.nan, regime='insufficient_data',
+                    recommendation='Need at least 2 frames to estimate temporal correlation.')
+
+    n_pairs = min(n_sample_pairs, n_t - 1)
+    sample_indices = np.linspace(0, n_t - 2, n_pairs, dtype=int)
+
+    correlations = []
+    for t in sample_indices:
+        f0 = np.asarray(_read_source_frame(stack_data, int(t)))
+        f1 = np.asarray(_read_source_frame(stack_data, int(t) + 1))
+        f0_flat = f0.ravel().astype(np.float64)
+        f1_flat = f1.ravel().astype(np.float64)
+        if f0_flat.std() < 1e-9 or f1_flat.std() < 1e-9:
+            continue
+        corr = float(np.corrcoef(f0_flat, f1_flat)[0, 1])
+        correlations.append(corr)
+
+    if not correlations:
+        return dict(mean_correlation=np.nan, regime='insufficient_data',
+                    recommendation='Could not compute correlation (flat/uniform frames sampled).')
+
+    mean_corr = float(np.mean(correlations))
+    min_corr  = float(np.min(correlations))
+    max_corr  = float(np.max(correlations))
+
+    if mean_corr > 0.9:
+        regime = 'oversampled'
+        rec = (f"Mean frame-to-frame correlation {mean_corr:.2f} — this acquisition "
+               f"is temporally oversampled. Pseudo-3D tri-planar temporal filtering "
+               f"is well-justified and should improve consistency without blurring "
+               f"real dynamics.")
+    elif mean_corr > 0.7:
+        regime = 'moderate'
+        rec = (f"Mean frame-to-frame correlation {mean_corr:.2f} — moderate temporal "
+               f"correlation. Tri-planar temporal filtering may help but could "
+               f"slightly soften fast dynamics; inspect results before relying on it "
+               f"for quantitative analysis.")
+    else:
+        regime = 'undersampled'
+        rec = (f"Mean frame-to-frame correlation {mean_corr:.2f} — frames change "
+               f"substantially between timepoints. Tri-planar temporal filtering is "
+               f"NOT recommended here: it would blend together frames that are only "
+               f"coincidentally adjacent, not genuinely correlated, and could blur "
+               f"or misrepresent real condensate dynamics.")
+
+    return dict(mean_correlation=mean_corr, min_correlation=min_corr,
+               max_correlation=max_corr, regime=regime, recommendation=rec)
+
+
 class _ZarrStack:
     """
     Lightweight napari-compatible wrapper around a zarr Array.
@@ -166,6 +306,22 @@ def _process_frame_worker(args):
     frame = np.asarray(src[t]).astype(np.float32)
     # Source was already normalised to [0,1] by _prepare_source_zarr
 
+    if process_fn_name == 'preprocess_and_bg_remove':
+        # Combined single-pass mode: compute both stages from one read of
+        # the source frame, avoiding a second full-stack disk round trip.
+        # Fixes a bottleneck where preprocessing and background removal ran
+        # as two entirely separate ProcessPoolExecutor passes — each frame
+        # was read from disk, pickled to a worker, and written back twice.
+        from pycat.toolbox.image_processing_tools import (
+            pre_process_image, rb_gaussian_bg_removal_with_edge_enhancement)
+        preproc_result = pre_process_image(frame,
+                                           process_fn_kwargs['ball_radius'],
+                                           process_fn_kwargs['window_size'])
+        preproc_result = np.asarray(preproc_result).astype(np.float32)
+        bgrem_result = rb_gaussian_bg_removal_with_edge_enhancement(
+            preproc_result, process_fn_kwargs['ball_radius'])
+        return t, preproc_result, np.asarray(bgrem_result).astype(np.float32)
+
     if process_fn_name == 'preprocess':
         from pycat.toolbox.image_processing_tools import pre_process_image
         result = pre_process_image(frame,
@@ -198,17 +354,21 @@ class _StackProcessWorker(QThread):
     """
     progress    = pyqtSignal(int, int)   # (frames_done, total)
     finished    = pyqtSignal(str)        # zarr store path when all done
+    finished2   = pyqtSignal(str)        # second zarr path (combined mode only)
     error       = pyqtSignal(str)
 
     def __init__(self, stack_data, zarr_path, process_fn_name, process_fn_kwargs,
-                 n_t, H, W, n_workers=None, parent=None):
+                 n_t, H, W, n_workers=None, parent=None, zarr_path2=None,
+                 pseudo3d_temporal=False):
         super().__init__(parent)
         self._stack_data        = stack_data
         self._path              = zarr_path
+        self._path2             = zarr_path2   # combined mode: bg_remove output
         self._process_fn_name   = process_fn_name
         self._process_fn_kwargs = process_fn_kwargs
         self._n_t               = n_t
         self._H, self._W        = H, W
+        self._pseudo3d_temporal = pseudo3d_temporal
         import os
         self._n_workers = n_workers or min(8, max(1, os.cpu_count() - 1))
 
@@ -259,15 +419,54 @@ class _StackProcessWorker(QThread):
             import zarr as _zarr
             from concurrent.futures import ProcessPoolExecutor, as_completed
 
+            combined_mode = (self._process_fn_name == 'preprocess_and_bg_remove'
+                             and self._path2 is not None)
+
             z = _zarr.open(
                 self._path, mode='w',
                 shape=(self._n_t, self._H, self._W),
                 chunks=(1, self._H, self._W),
                 dtype=np.float32,
             )
+            z2 = None
+            if combined_mode:
+                z2 = _zarr.open(
+                    self._path2, mode='w',
+                    shape=(self._n_t, self._H, self._W),
+                    chunks=(1, self._H, self._W),
+                    dtype=np.float32,
+                )
 
             # Ensure source is a filesystem zarr that subprocesses can open
             src_path = self._prepare_source_zarr()
+
+            # ── Pseudo-3D temporal pre-pass ───────────────────────────────
+            # Same technique as the Z-stack pipeline (see bg_removal_3d),
+            # applied along T instead of Z: in an oversampling regime
+            # (adjacent frames genuinely correlated — check via
+            # estimate_temporal_correlation before enabling this), treating
+            # the whole (T, H, W) stack like a pseudo-volume and running
+            # tri-planar Gaussian pre-smoothing (XY, XT, YT planes averaged)
+            # gives a temporally-consistent baseline before the existing
+            # per-frame parallel pipeline runs — the per-frame dispatch
+            # below is completely unmodified, it just reads from this
+            # pre-smoothed source instead of the raw one.
+            if self._pseudo3d_temporal:
+                from pycat.toolbox.image_processing_tools import gaussian_smooth_3d_pseudo
+                raw_src = _zarr.open(src_path, mode='r')
+                whole = np.asarray(raw_src).astype(np.float32)
+                ball_radius = self._process_fn_kwargs.get('ball_radius', 15)
+                smoothed = gaussian_smooth_3d_pseudo(
+                    whole, sigma=max(1.0, ball_radius / 4))
+                mn, mx = smoothed.min(), smoothed.max()
+                if mx > mn:
+                    smoothed = (smoothed - mn) / (mx - mn)
+                smoothed_path = src_path + '_t3d_presmooth'
+                z_smoothed = _zarr.open(
+                    smoothed_path, mode='w', shape=smoothed.shape,
+                    chunks=(1, self._H, self._W), dtype=np.float32)
+                z_smoothed[:] = smoothed
+                src_path = smoothed_path
 
             args = [
                 (t, src_path, self._process_fn_name, self._process_fn_kwargs)
@@ -276,6 +475,7 @@ class _StackProcessWorker(QThread):
 
             done = 0
             offset = self._n_t   # progress offset after materialisation phase
+            total_progress = self._n_t * (3 if self._pseudo3d_temporal else 2)
             batch_size = self._n_workers * 4
 
             with ProcessPoolExecutor(max_workers=self._n_workers) as executor:
@@ -284,12 +484,40 @@ class _StackProcessWorker(QThread):
                     futures = {executor.submit(_process_frame_worker, a): a[0]
                                for a in batch}
                     for future in as_completed(futures):
-                        t_idx, result = future.result()
-                        z[t_idx] = result
+                        result = future.result()
+                        if combined_mode:
+                            t_idx, preproc_res, bgrem_res = result
+                            z[t_idx]  = preproc_res
+                            z2[t_idx] = bgrem_res
+                        else:
+                            t_idx, res = result
+                            z[t_idx] = res
                         done += 1
-                        self.progress.emit(offset + done, self._n_t * 2)
+                        self.progress.emit(offset + done, total_progress)
+
+            # ── Pseudo-3D temporal post-pass ──────────────────────────────
+            # Tri-planar Gabor edge-enhancement on the whole output stack,
+            # blended (averaged) with the per-frame result — same
+            # "unmodified per-frame core, tri-planar pre/post passes
+            # around it" pattern as the Z-stack pipeline. Only the primary
+            # output path (self._path) gets this treatment; in combined
+            # mode the bg_remove output (self._path2) already reflects the
+            # temporally-smoothed source from the pre-pass and keeps its
+            # own per-slice Gabor step from the composite 2D pipeline.
+            if self._pseudo3d_temporal:
+                from pycat.toolbox.image_processing_tools import gabor_filter_3d_pseudo
+                out_whole = np.asarray(_zarr.open(self._path, mode='r')).astype(np.float32)
+                gabor_whole = gabor_filter_3d_pseudo(out_whole)
+                gmn, gmx = gabor_whole.min(), gabor_whole.max()
+                if gmx > gmn:
+                    gabor_whole = (gabor_whole - gmn) / (gmx - gmn)
+                blended = (out_whole + gabor_whole) / 2.0
+                z[:] = blended
+                self.progress.emit(total_progress, total_progress)
 
             self.finished.emit(self._path)
+            if combined_mode:
+                self.finished2.emit(self._path2)
 
         except Exception:
             import traceback
@@ -324,6 +552,68 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     bg_check.setChecked(True)
     form.addRow("", bg_check)
 
+    # ── Pseudo-3D temporal filtering ────────────────────────────────────
+    # Same tri-planar technique used for Z-stacks, applied along T. Only
+    # justified when adjacent frames are genuinely correlated (a temporal
+    # "oversampling" regime) — check first rather than assuming.
+    corr_label = QLabel(
+        "<span style='color:#888;font-size:9pt;'>"
+        "Check frame-to-frame correlation before enabling temporal "
+        "pseudo-3D filtering \u2014 it's only justified when adjacent "
+        "frames are genuinely similar.</span>"
+    )
+    corr_label.setWordWrap(True)
+    form.addRow(corr_label)
+
+    check_corr_btn = QPushButton("Check Temporal Correlation")
+    form.addRow(check_corr_btn)
+
+    pseudo3d_temporal_cb = QCheckBox("Pseudo-3D temporal filtering (tri-planar across T)")
+    pseudo3d_temporal_cb.setChecked(False)
+    pseudo3d_temporal_cb.setToolTip(
+        "Runs Gaussian pre-smoothing and Gabor edge-enhancement along XY, "
+        "XT, and YT planes (averaged) instead of XY-only \u2014 the same "
+        "technique used for Z-stack pseudo-3D filtering, applied to T. "
+        "Only enable this if frame-to-frame correlation is high (check "
+        "above first) \u2014 otherwise it will blur real dynamics between "
+        "frames that aren't actually similar to each other. "
+        "Adds a whole-stack pass before and after the per-frame pipeline."
+    )
+    form.addRow(pseudo3d_temporal_cb)
+
+    def _on_check_correlation():
+        from pycat.toolbox.timeseries_condensate_tools import estimate_temporal_correlation
+        layer_name = stack_dropdown.currentText()
+        try:
+            layer = ui_instance.viewer.layers[layer_name]
+        except KeyError:
+            napari_show_warning(f"Layer '{layer_name}' not found.")
+            return
+        stack_data = layer.data
+        if stack_data.ndim != 3:
+            napari_show_warning("Correlation check requires a 3D (T,H,W) stack.")
+            return
+
+        result = estimate_temporal_correlation(stack_data)
+        regime_colors = {
+            'oversampled':  '#5cb85c',
+            'moderate':     '#f0a500',
+            'undersampled': '#d9534f',
+        }
+        color = regime_colors.get(result['regime'], '#aaa')
+        corr_label.setText(
+            f"<span style='color:{color};font-size:9pt;'>"
+            f"<b>{result['regime'].upper()}</b> \u2014 "
+            f"mean correlation {result.get('mean_correlation', float('nan')):.2f}. "
+            f"{result['recommendation']}</span>"
+        )
+        napari_show_info(
+            f"Temporal correlation: {result['regime']} "
+            f"(mean r={result.get('mean_correlation', float('nan')):.2f})"
+        )
+
+    check_corr_btn.clicked.connect(_on_check_correlation)
+
     import os as _os
     _n_workers = min(8, max(1, _os.cpu_count() - 1))
     build_btn = QPushButton(f"▶  Process Stack  ({_n_workers} parallel workers)")
@@ -333,14 +623,6 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         "Results are cached next to the source file and reloaded\n"
         "automatically on next open — no reprocessing needed."
     )
-    discard_btn = QPushButton("🗑  Discard Cache")
-    discard_btn.setToolTip(
-        "Delete the cached preprocessed zarr stores for this file.\n"
-        "Use this if you change processing parameters and want to\n"
-        "force a full reprocess on the next run."
-    )
-    discard_btn.clicked.connect(_on_discard_cache)
-
     # Worker references kept alive on ui_instance so GC doesn't kill them
     ui_instance._ts_workers = getattr(ui_instance, '_ts_workers', [])
 
@@ -376,6 +658,14 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         discard_cache(source_file, ball_radius, window_size)
         napari_show_info("Preprocessing cache discarded. Next run will reprocess.")
 
+    discard_btn = QPushButton("🗑  Discard Cache")
+    discard_btn.setToolTip(
+        "Delete the cached preprocessed zarr stores for this file.\n"
+        "Use this if you change processing parameters and want to\n"
+        "force a full reprocess on the next run."
+    )
+    discard_btn.clicked.connect(_on_discard_cache)
+
     def _on_build():
         layer_name = stack_dropdown.currentText()
         try:
@@ -398,8 +688,77 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         ball_radius  = min(ball_radius, max_radius)
         window_size  = min(window_size, max_radius * 2)
 
-        n_t = stack_data.shape[0]
-        W   = stack_data.shape[2]
+        full_n_t = stack_data.shape[0]
+        W        = stack_data.shape[2]
+
+        # Respect user-defined frame range if set
+        dr      = ui_instance.central_manager.active_data_class.data_repository
+        t_start = int(dr.get('timeseries_frame_start', 0))
+        t_end   = int(dr.get('timeseries_frame_end', full_n_t - 1))
+        t_start = max(0, min(t_start, full_n_t - 1))
+        t_end   = max(t_start, min(t_end, full_n_t - 1))
+        n_t     = t_end - t_start + 1
+
+        # Wrap the source so index 0..n_t-1 maps to t_start..t_end
+        class _SlicedStack:
+            def __init__(self, src, start, end):
+                self._src   = src
+                self._start = start
+                n           = end - start + 1
+                if hasattr(src, 'shape'):
+                    self.shape = (n,) + src.shape[1:]
+                else:
+                    self.shape = (n, H, W)
+                self.ndim = 3
+            def __getitem__(self, idx):
+                if isinstance(idx, (int, np.integer)):
+                    return self._src[self._start + int(idx)]
+                return self._src[self._start + idx]
+
+        if t_start > 0 or t_end < full_n_t - 1:
+            stack_data = _SlicedStack(stack_data, t_start, t_end)
+            napari_show_info(
+                f"Processing frame range {t_start}–{t_end} "
+                f"({n_t} of {full_n_t} frames)."
+            )
+
+        # ── XY ROI crop ───────────────────────────────────────────────────
+        roi_active = dr.get('timeseries_roi_active', False)
+        y0 = int(dr.get('timeseries_roi_y0', 0))
+        y1 = int(dr.get('timeseries_roi_y1', H))
+        x0 = int(dr.get('timeseries_roi_x0', 0))
+        x1 = int(dr.get('timeseries_roi_x1', W))
+
+        # Clamp to actual frame dimensions
+        y0, y1 = max(0, y0), min(H, y1)
+        x0, x1 = max(0, x0), min(W, x1)
+
+        if roi_active and (y0 > 0 or y1 < H or x0 > 0 or x1 < W):
+            class _CroppedStack:
+                """Wraps any stack and spatially crops every frame on read."""
+                def __init__(self, src, _y0, _y1, _x0, _x1):
+                    self._src = src
+                    self._y0, self._y1 = _y0, _y1
+                    self._x0, self._x1 = _x0, _x1
+                    nh = _y1 - _y0
+                    nw = _x1 - _x0
+                    nt = src.shape[0] if hasattr(src, 'shape') else len(src)
+                    self.shape = (nt, nh, nw)
+                    self.ndim  = 3
+                def __getitem__(self, idx):
+                    frame = self._src[idx]
+                    arr   = np.asarray(frame)
+                    if arr.ndim == 2:
+                        return arr[self._y0:self._y1, self._x0:self._x1]
+                    return arr[:, self._y0:self._y1, self._x0:self._x1]
+
+            stack_data = _CroppedStack(stack_data, y0, y1, x0, x1)
+            H = y1 - y0
+            W = x1 - x0
+            napari_show_info(
+                f"XY crop active: y[{y0}:{y1}] x[{x0}:{x1}] "
+                f"→ {H}×{W}px per frame."
+            )
 
         # Determine cache paths — use source file path if available
         source_file = getattr(ui_instance.central_manager.file_io,
@@ -464,12 +823,14 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                                          colormap=colormap)
             setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
 
-            worker = _StackProcessWorker(source, zarr_path, fn_name, fn_kwargs,
-                                         n_t, H, W)
+            worker = _StackProcessWorker(
+                source, zarr_path, fn_name, fn_kwargs, n_t, H, W,
+                pseudo3d_temporal=pseudo3d_temporal_cb.isChecked())
             ui_instance._ts_workers.append(worker)
 
+            _n_stages = 3 if pseudo3d_temporal_cb.isChecked() else 2
             prog_bar.setValue(0)
-            prog_bar.setMaximum(n_t * 2)
+            prog_bar.setMaximum(n_t * _n_stages)
             prog_bar.setVisible(True)
             prog_label.setText(f"Preparing frames…")
             prog_label.setVisible(True)
@@ -479,9 +840,12 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                 if done <= n_t:
                     prog_label.setText(
                         f"{display_name}: copying frame {done}/{n_t}…")
-                else:
+                elif done <= n_t * 2:
                     prog_label.setText(
                         f"{display_name}: processing frame {done - n_t}/{n_t}…")
+                else:
+                    prog_label.setText(
+                        f"{display_name}: pseudo-3D temporal blend pass…")
                 try:
                     ui_instance.viewer.layers[display_name].refresh()
                 except Exception:
@@ -519,30 +883,6 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         proc_source   = stack_data
         proc_zarr_ref = None
 
-        if preprocess_check.isChecked():
-            br, ws = ball_radius, window_size
-            proc_name  = f"Pre-Processed {layer_name}"
-            # Use cache path as zarr name if available, else temp-dir name
-            zarr_name  = (str(cache_paths['preproc'].name)
-                          if cache_paths else f"preproc_{id(layer_name)}")
-
-            def _after_preproc(zarr_path):
-                nonlocal proc_source
-                import zarr as _zarr
-                proc_source = _zarr.open(zarr_path, mode='r')
-                if cache_paths and source_file:
-                    write_meta(source_file, ball_radius, window_size,
-                               n_t, H, W)
-                if bg_check.isChecked():
-                    _start_bg(proc_source)
-
-            _start_worker(stack_data, 'preprocess',
-                          {'ball_radius': br, 'window_size': ws},
-                          zarr_name, proc_name, 'green',
-                          on_done_cb=_after_preproc)
-        else:
-            proc_source = stack_data
-
         def _start_bg(source):
             bg_name   = f"Enhanced Background Removed {layer_name}"
             zarr_name = (str(cache_paths['bgrem'].name)
@@ -558,7 +898,108 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                           zarr_name, bg_name, 'viridis',
                           on_done_cb=_after_bg)
 
-        if bg_check.isChecked() and not preprocess_check.isChecked():
+        if preprocess_check.isChecked() and bg_check.isChecked():
+            # ── Combined single-pass mode ────────────────────────────────
+            # Both stages are computed from one read of each source frame
+            # inside a single ProcessPoolExecutor pass, instead of running
+            # preprocessing to completion, writing it to disk, then reading
+            # it all back for a second full background-removal pass. This
+            # roughly halves wall-clock time and I/O for the default case
+            # where both checkboxes are on.
+            import zarr as _zarr, os as _os_
+
+            preproc_name = f"Pre-Processed {layer_name}"
+            bgrem_name   = f"Enhanced Background Removed {layer_name}"
+            preproc_zarr_name = (str(cache_paths['preproc'].name)
+                                 if cache_paths else f"preproc_{id(layer_name)}")
+            bgrem_zarr_name   = (str(cache_paths['bgrem'].name)
+                                 if cache_paths else f"bgrem_{id(layer_name)}")
+
+            preproc_path = _os_.path.join(zarr_dir, preproc_zarr_name)
+            bgrem_path   = _os_.path.join(zarr_dir, bgrem_zarr_name)
+
+            _zarr.open(preproc_path, mode='w', shape=(n_t, H, W),
+                      chunks=(1, H, W), dtype=np.float32)
+            _zarr.open(bgrem_path, mode='w', shape=(n_t, H, W),
+                      chunks=(1, H, W), dtype=np.float32)
+
+            preproc_wrapper = _ZarrStack(_zarr.open(preproc_path, mode='r'))
+            bgrem_wrapper   = _ZarrStack(_zarr.open(bgrem_path, mode='r'))
+            ui_instance.viewer.add_image(preproc_wrapper, name=preproc_name,
+                                         colormap='green')
+            ui_instance.viewer.add_image(bgrem_wrapper, name=bgrem_name,
+                                         colormap='viridis')
+            ui_instance._ts_zarr_preproc = preproc_path
+            ui_instance._ts_zarr_bgrem   = bgrem_path
+
+            worker = _StackProcessWorker(
+                stack_data, preproc_path, 'preprocess_and_bg_remove',
+                {'ball_radius': ball_radius, 'window_size': window_size},
+                n_t, H, W, zarr_path2=bgrem_path,
+                pseudo3d_temporal=pseudo3d_temporal_cb.isChecked(),
+            )
+            ui_instance._ts_workers.append(worker)
+
+            _n_stages = 3 if pseudo3d_temporal_cb.isChecked() else 2
+            prog_bar.setValue(0); prog_bar.setMaximum(n_t * _n_stages)
+            prog_bar.setVisible(True)
+            prog_label.setText("Preparing frames…"); prog_label.setVisible(True)
+
+            def _on_progress(done, total):
+                prog_bar.setValue(done)
+                if done <= n_t:
+                    prog_label.setText(f"Copying frame {done}/{n_t}…")
+                elif done <= n_t * 2:
+                    prog_label.setText(
+                        f"Preprocessing + BG removal: frame {done - n_t}/{n_t}…")
+                else:
+                    prog_label.setText("Pseudo-3D temporal blend pass…")
+                for _name in (preproc_name, bgrem_name):
+                    try:
+                        ui_instance.viewer.layers[_name].refresh()
+                    except Exception:
+                        pass
+
+            def _on_finished(_path):
+                if cache_paths and source_file:
+                    write_meta(source_file, ball_radius, window_size, n_t, H, W)
+                prog_bar.setVisible(False)
+                prog_label.setVisible(False)
+                build_btn.setEnabled(True)
+                napari_show_info(
+                    f"'{preproc_name}' and '{bgrem_name}' — "
+                    f"all {n_t} frames processed in a single combined pass."
+                )
+
+            def _on_error(msg):
+                prog_bar.setVisible(False)
+                prog_label.setVisible(False)
+                napari_show_warning("Processing error — see terminal.")
+                print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
+                build_btn.setEnabled(True)
+
+            worker.progress.connect(_on_progress)
+            worker.finished.connect(_on_finished)   # fires once, after finished2
+            worker.error.connect(_on_error)
+            worker.start()
+
+        elif preprocess_check.isChecked():
+            br, ws = ball_radius, window_size
+            proc_name  = f"Pre-Processed {layer_name}"
+            zarr_name  = (str(cache_paths['preproc'].name)
+                          if cache_paths else f"preproc_{id(layer_name)}")
+
+            def _after_preproc(zarr_path):
+                if cache_paths and source_file:
+                    write_meta(source_file, ball_radius, window_size,
+                               n_t, H, W)
+
+            _start_worker(stack_data, 'preprocess',
+                          {'ball_radius': br, 'window_size': ws},
+                          zarr_name, proc_name, 'green',
+                          on_done_cb=_after_preproc)
+
+        elif bg_check.isChecked():
             _start_bg(stack_data)
 
         # Record for batch — note: slider interactions are NOT recorded
@@ -568,6 +1009,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
             'window_size': window_size,
             'preprocess': preprocess_check.isChecked(),
             'bg_removal': bg_check.isChecked(),
+            'pseudo3d_temporal': pseudo3d_temporal_cb.isChecked(),
         })
 
     build_btn.clicked.connect(_on_build)
@@ -664,6 +1106,144 @@ def _condensate_metrics_per_cell(
     }
 
 
+def _ts_analyze_frame_worker(args):
+    """
+    Top-level picklable worker for parallel time-series condensate analysis.
+
+    Reads one frame's raw and preprocessed data directly from filesystem
+    zarr stores (avoiding IPC pickling of large arrays), performs drift
+    correction, per-cell condensate segmentation, area/count metrics, and
+    optional per-frame spatial metrology — all independent per frame given
+    a fixed cell mask, making this an embarrassingly parallel workload.
+
+    Also fixes a redundant double-labeling: the original serial
+    implementation called sk.measure.label() once inside the per-cell
+    metrics helper and again inside the spatial metrology block on the
+    same array. Here it is computed once per cell and reused for both.
+
+    Returns (t, list_of_metric_dicts, condensate_mask_uint8_for_frame).
+    """
+    import warnings, os
+    warnings.filterwarnings("ignore", message="CUDA path could not be detected",
+                            category=UserWarning)
+    os.environ.setdefault("CUDA_PATH", "")
+
+    (t, raw_zarr_path, proc_zarr_path, labeled_cell_mask, cell_labels,
+     reference_raw, use_drift_correction, reference_frame,
+     ball_radius, microns_per_pixel_sq,
+     kurtosis_threshold, local_snr_threshold, global_snr_threshold,
+     intensity_hwhm_scale, max_area_fraction, min_spot_radius,
+     compute_spatial) = args
+
+    import numpy as np
+    import zarr as _zarr
+    import skimage as sk
+    from pycat.toolbox.segmentation_tools import segment_subcellular_objects
+
+    raw_src  = _zarr.open(raw_zarr_path, mode='r')
+    proc_src = _zarr.open(proc_zarr_path, mode='r')
+    frame_raw  = np.asarray(raw_src[t]).astype(np.float32)
+    frame_proc = np.asarray(proc_src[t]).astype(np.float32)
+    H, W = frame_raw.shape
+
+    dr, dc = 0, 0
+    if use_drift_correction and t != reference_frame:
+        from skimage.registration import phase_cross_correlation
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            shift, _, _ = phase_cross_correlation(
+                reference_raw, frame_raw, normalization=None)
+        dr, dc = int(round(shift[0])), int(round(shift[1]))
+        if dr != 0 or dc != 0:
+            frame_raw  = _apply_shift(frame_raw,  dr, dc)
+            frame_proc = _apply_shift(frame_proc, dr, dc)
+
+    total_refined = np.zeros((H, W), dtype=bool)
+    records = []
+    _mpx = float(microns_per_pixel_sq ** 0.5)
+
+    for cell_label in cell_labels:
+        cell_binary_mask = (labeled_cell_mask == cell_label)
+
+        refined, _ = segment_subcellular_objects(
+            frame_raw, frame_proc, cell_binary_mask, int(cell_label),
+            ball_radius, cell_df=None,
+            kurtosis_threshold=kurtosis_threshold,
+            local_snr_threshold=local_snr_threshold,
+            global_snr_threshold=global_snr_threshold,
+            intensity_hwhm_scale=intensity_hwhm_scale,
+            max_area_fraction=max_area_fraction,
+            min_spot_radius=min_spot_radius,
+        )
+        total_refined |= refined
+
+        # Single connected-components pass, reused for area/count metrics
+        # AND spatial metrology (previously computed twice on the same array).
+        labeled_puncta = sk.measure.label(refined)
+        n_condensates  = int(labeled_puncta.max())
+        total_area_px  = int(refined.sum())
+        cell_area_px   = int(cell_binary_mask.sum())
+        total_area_um2 = total_area_px * microns_per_pixel_sq
+        condensate_fraction = (total_area_px / cell_area_px
+                               if cell_area_px > 0 else 0.0)
+
+        props = sk.measure.regionprops(labeled_puncta) if n_condensates > 0 else []
+        mean_area_um2 = (float(np.mean([p.area for p in props])) * microns_per_pixel_sq
+                         if props else 0.0)
+
+        metrics = {
+            'cell_label': int(cell_label),
+            'total_condensate_area_px': total_area_px,
+            'total_condensate_area_um2': round(total_area_um2, 4),
+            'cell_area_px': cell_area_px,
+            'condensate_fraction': round(condensate_fraction, 6),
+            'n_condensates': n_condensates,
+            'mean_condensate_area_um2': round(mean_area_um2, 4),
+            'frame': t,
+            'drift_row_px': dr,
+            'drift_col_px': dc,
+        }
+
+        if compute_spatial:
+            if len(props) >= 2:
+                try:
+                    _coords_arr = np.array([
+                        [p.centroid[0] * _mpx, p.centroid[1] * _mpx]
+                        for p in props
+                    ])
+                    from pycat.toolbox.spatial_metrology_tools import (
+                        nearest_neighbour_distance, local_object_density,
+                        convex_hull_metrics,
+                    )
+                    from pycat.toolbox.organizational_metrics_tools import (
+                        inter_condensate_spacing,
+                    )
+                    _cell_area = cell_area_px * microns_per_pixel_sq
+                    _nnd = nearest_neighbour_distance(_coords_arr)
+                    _kde = local_object_density(_coords_arr)
+                    _hull = convex_hull_metrics(_coords_arr, _cell_area)
+                    _spc = inter_condensate_spacing(_coords_arr, k_neighbours=1)
+                    metrics['nnd_mean_um']      = _nnd['mean_nnd']
+                    metrics['nnd_cv']           = _nnd['cv_nnd']
+                    metrics['kde_mean_density'] = _kde['mean_density']
+                    metrics['hull_occupancy']   = _hull['occupancy_fraction']
+                    metrics['hull_compactness'] = _hull['hull_compactness']
+                    metrics['spacing_cv']       = _spc.attrs.get(
+                        'coefficient_of_variation', np.nan)
+                except Exception:
+                    for k in ('nnd_mean_um', 'nnd_cv', 'kde_mean_density',
+                              'hull_occupancy', 'hull_compactness', 'spacing_cv'):
+                        metrics[k] = np.nan
+            else:
+                for k in ('nnd_mean_um', 'nnd_cv', 'kde_mean_density',
+                          'hull_occupancy', 'hull_compactness', 'spacing_cv'):
+                    metrics[k] = np.nan
+
+        records.append(metrics)
+
+    return t, records, total_refined.astype(np.uint8)
+
+
 def run_timeseries_condensate_analysis(
     stack: np.ndarray,
     preprocessed_stack: np.ndarray,
@@ -679,9 +1259,32 @@ def run_timeseries_condensate_analysis(
     max_area_fraction: float = 0.25,
     min_spot_radius: float = 2.0,
     progress_callback=None,
+    compute_spatial: bool = True,
+    use_parallel: bool = True,
+    n_workers: Optional[int] = None,
+    cancel_check=None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Core time-series condensate analysis — no viewer dependency.
+
+    Parallelisation
+    ----------------
+    Per-frame condensate segmentation is embarrassingly parallel: each
+    frame's analysis depends only on its own raw/preprocessed data and the
+    (fixed) cell mask, never on other frames. This function dispatches
+    frames across a ProcessPoolExecutor (default: all available cores,
+    capped at 8) when use_parallel=True and there are enough frames to
+    amortise pool startup cost (>=10 frames).
+
+    Workers read their frame directly from filesystem zarr stores rather
+    than receiving pickled arrays through IPC — the same pattern used by
+    the lazy stack preprocessing stage — so large frame arrays are never
+    serialised through the multiprocessing queue. If the input stacks are
+    not already filesystem-zarr-backed (e.g. plain in-memory numpy arrays),
+    they are materialised to a temporary zarr store once before dispatch.
+
+    Falls back to a serial loop when use_parallel=False or n_frames < 10,
+    where parallel dispatch overhead would exceed the benefit.
 
     Parameters
     ----------
@@ -704,7 +1307,20 @@ def run_timeseries_condensate_analysis(
     intensity_hwhm_scale, max_area_fraction, min_spot_radius :
         Refinement parameters passed through to segment_subcellular_objects.
     progress_callback : callable(frame_idx, total_frames) or None
-        Called after each frame completes for progress reporting.
+        Called as each frame completes for progress reporting.  In the
+        parallel path this is called as results arrive (out-of-order
+        completion is normal), so frame_idx counts completed frames,
+        not a specific frame number.
+    compute_spatial : bool
+        Whether to compute per-frame spatial metrics (NND, KDE, hull, spacing).
+    use_parallel : bool
+        Use ProcessPoolExecutor for frame-level parallelism (default True).
+    n_workers : int or None
+        Number of worker processes.  Defaults to min(8, cpu_count()-1).
+    cancel_check : callable() -> bool or None
+        If provided, checked periodically; when it returns True, remaining
+        work is abandoned and an InterruptedError is raised (parallel path
+        only — matches the cancellation contract used by the serial caller).
 
     Returns
     -------
@@ -713,7 +1329,7 @@ def run_timeseries_condensate_analysis(
             frame, cell_label, total_condensate_area_px,
             total_condensate_area_um2, cell_area_px,
             condensate_fraction, n_condensates, mean_condensate_area_um2,
-            drift_row_px, drift_col_px
+            drift_row_px, drift_col_px[, spatial columns if compute_spatial]
     condensate_stack : np.ndarray, shape (T, H, W), dtype uint8
         Stack of refined puncta masks for each frame (for napari display).
     """
@@ -726,67 +1342,186 @@ def run_timeseries_condensate_analysis(
     cell_labels = np.unique(labeled_cell_mask)
     cell_labels = cell_labels[cell_labels != 0]
 
-    reference_raw = stack[reference_frame].astype(np.float32)
+    reference_raw = stack[reference_frame]
+    if hasattr(reference_raw, 'compute'):
+        reference_raw = reference_raw.compute()
+    reference_raw = np.asarray(reference_raw).astype(np.float32)
 
     records = []
     condensate_stack = np.zeros((n_frames, H, W), dtype=np.uint8)
 
-    for t in range(n_frames):
-        napari_show_info(f"[TimeSeries] Frame {t + 1}/{n_frames} …")
-        print(f"[PyCAT TimeSeries] Frame {t + 1}/{n_frames}")
+    should_parallelize = use_parallel and n_frames >= 10 and len(cell_labels) > 0
 
-        frame_raw  = stack[t].astype(np.float32)
-        frame_proc = preprocessed_stack[t].astype(np.float32)
+    if should_parallelize:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        import os as _os
 
-        # Drift correction
-        dr, dc = 0, 0
-        if use_drift_correction and t != reference_frame:
-            dr, dc = _phase_shift(frame_raw, reference_raw)
-            if dr != 0 or dc != 0:
-                frame_raw  = _apply_shift(frame_raw,  dr, dc)
-                frame_proc = _apply_shift(frame_proc, dr, dc)
-                print(f"[PyCAT TimeSeries]   Drift corrected: row={dr}px col={dc}px")
+        workers = n_workers or min(8, max(1, _os.cpu_count() - 1))
 
-        # Per-cell condensate segmentation
-        total_refined = np.zeros((H, W), dtype=bool)
+        # Materialise both stacks to filesystem zarr once — reuses existing
+        # zarr paths if the stacks already came from lazy preprocessing.
+        raw_zarr_path  = _materialize_stack_to_zarr(
+            stack, n_frames, H, W, prefix='ts_analysis_raw')
+        proc_zarr_path = _materialize_stack_to_zarr(
+            preprocessed_stack, n_frames, H, W, prefix='ts_analysis_proc')
 
-        for cell_label in cell_labels:
-            cell_binary_mask = (labeled_cell_mask == cell_label).astype(bool)
+        tasks = [
+            (t, raw_zarr_path, proc_zarr_path, labeled_cell_mask, cell_labels,
+             reference_raw, use_drift_correction, reference_frame,
+             ball_radius, microns_per_pixel_sq,
+             kurtosis_threshold, local_snr_threshold, global_snr_threshold,
+             intensity_hwhm_scale, max_area_fraction, min_spot_radius,
+             compute_spatial)
+            for t in range(n_frames)
+        ]
 
-            refined, _ = segment_subcellular_objects(
-                frame_raw, frame_proc,
-                cell_binary_mask, int(cell_label),
-                ball_radius, cell_df=None,
-                kurtosis_threshold=kurtosis_threshold,
-                local_snr_threshold=local_snr_threshold,
-                global_snr_threshold=global_snr_threshold,
-                intensity_hwhm_scale=intensity_hwhm_scale,
-                max_area_fraction=max_area_fraction,
-                min_spot_radius=min_spot_radius,
-            )
-            total_refined |= refined
+        done = 0
+        batch_size = workers * 4
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            for batch_start in range(0, n_frames, batch_size):
+                if cancel_check is not None and cancel_check():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise InterruptedError("Cancelled by user.")
 
-            metrics = _condensate_metrics_per_cell(
-                refined, cell_binary_mask, int(cell_label), microns_per_pixel_sq
-            )
-            metrics['frame'] = t
-            metrics['drift_row_px'] = dr
-            metrics['drift_col_px'] = dc
-            records.append(metrics)
+                batch = tasks[batch_start:batch_start + batch_size]
+                futures = {executor.submit(_ts_analyze_frame_worker, task): task[0]
+                           for task in batch}
+                for future in as_completed(futures):
+                    t_idx, frame_records, frame_mask = future.result()
+                    records.extend(frame_records)
+                    condensate_stack[t_idx] = frame_mask
+                    done += 1
+                    if progress_callback is not None:
+                        progress_callback(done, n_frames)
 
-        condensate_stack[t] = total_refined.astype(np.uint8)
+    else:
+        # ── Serial fallback ──────────────────────────────────────────────
+        # Used for small stacks (<10 frames) or when explicitly requested.
+        # Still benefits from the single-labeling fix applied in the
+        # parallel worker by reusing the same per-frame logic inline.
+        for t in range(n_frames):
+            frame_raw  = stack[t]
+            if hasattr(frame_raw, 'compute'):
+                frame_raw = frame_raw.compute()
+            frame_raw = np.asarray(frame_raw).astype(np.float32)
 
-        if progress_callback is not None:
-            progress_callback(t + 1, n_frames)
+            frame_proc = preprocessed_stack[t]
+            if hasattr(frame_proc, 'compute'):
+                frame_proc = frame_proc.compute()
+            frame_proc = np.asarray(frame_proc).astype(np.float32)
+
+            dr, dc = 0, 0
+            if use_drift_correction and t != reference_frame:
+                dr, dc = _phase_shift(frame_raw, reference_raw)
+                if dr != 0 or dc != 0:
+                    frame_raw  = _apply_shift(frame_raw,  dr, dc)
+                    frame_proc = _apply_shift(frame_proc, dr, dc)
+
+            total_refined = np.zeros((H, W), dtype=bool)
+            _mpx = float(microns_per_pixel_sq ** 0.5)
+
+            for cell_label in cell_labels:
+                cell_binary_mask = (labeled_cell_mask == cell_label)
+
+                refined, _ = segment_subcellular_objects(
+                    frame_raw, frame_proc,
+                    cell_binary_mask, int(cell_label),
+                    ball_radius, cell_df=None,
+                    kurtosis_threshold=kurtosis_threshold,
+                    local_snr_threshold=local_snr_threshold,
+                    global_snr_threshold=global_snr_threshold,
+                    intensity_hwhm_scale=intensity_hwhm_scale,
+                    max_area_fraction=max_area_fraction,
+                    min_spot_radius=min_spot_radius,
+                )
+                total_refined |= refined
+
+                # Single labeling pass, reused for metrics + spatial (fixes
+                # the previous double sk.measure.label() call per iteration).
+                labeled_puncta = sk.measure.label(refined)
+                n_condensates  = int(labeled_puncta.max())
+                total_area_px  = int(refined.sum())
+                cell_area_px   = int(cell_binary_mask.sum())
+                total_area_um2 = total_area_px * microns_per_pixel_sq
+                condensate_fraction = (total_area_px / cell_area_px
+                                       if cell_area_px > 0 else 0.0)
+
+                props = (sk.measure.regionprops(labeled_puncta)
+                         if n_condensates > 0 else [])
+                mean_area_um2 = (float(np.mean([p.area for p in props]))
+                                 * microns_per_pixel_sq if props else 0.0)
+
+                metrics = {
+                    'cell_label': int(cell_label),
+                    'total_condensate_area_px': total_area_px,
+                    'total_condensate_area_um2': round(total_area_um2, 4),
+                    'cell_area_px': cell_area_px,
+                    'condensate_fraction': round(condensate_fraction, 6),
+                    'n_condensates': n_condensates,
+                    'mean_condensate_area_um2': round(mean_area_um2, 4),
+                    'frame': t,
+                    'drift_row_px': dr,
+                    'drift_col_px': dc,
+                }
+
+                if compute_spatial:
+                    if len(props) >= 2:
+                        try:
+                            _coords_arr = np.array([
+                                [p.centroid[0] * _mpx, p.centroid[1] * _mpx]
+                                for p in props
+                            ])
+                            from pycat.toolbox.spatial_metrology_tools import (
+                                nearest_neighbour_distance, local_object_density,
+                                convex_hull_metrics,
+                            )
+                            from pycat.toolbox.organizational_metrics_tools import (
+                                inter_condensate_spacing,
+                            )
+                            _cell_area = cell_area_px * microns_per_pixel_sq
+                            _nnd  = nearest_neighbour_distance(_coords_arr)
+                            _kde  = local_object_density(_coords_arr)
+                            _hull = convex_hull_metrics(_coords_arr, _cell_area)
+                            _spc  = inter_condensate_spacing(_coords_arr, k_neighbours=1)
+                            metrics['nnd_mean_um']      = _nnd['mean_nnd']
+                            metrics['nnd_cv']           = _nnd['cv_nnd']
+                            metrics['kde_mean_density'] = _kde['mean_density']
+                            metrics['hull_occupancy']   = _hull['occupancy_fraction']
+                            metrics['hull_compactness'] = _hull['hull_compactness']
+                            metrics['spacing_cv']       = _spc.attrs.get(
+                                'coefficient_of_variation', np.nan)
+                        except Exception:
+                            for k in ('nnd_mean_um', 'nnd_cv', 'kde_mean_density',
+                                      'hull_occupancy', 'hull_compactness', 'spacing_cv'):
+                                metrics[k] = np.nan
+                    else:
+                        for k in ('nnd_mean_um', 'nnd_cv', 'kde_mean_density',
+                                  'hull_occupancy', 'hull_compactness', 'spacing_cv'):
+                            metrics[k] = np.nan
+
+                records.append(metrics)
+
+            condensate_stack[t] = total_refined.astype(np.uint8)
+
+            if progress_callback is not None:
+                progress_callback(t + 1, n_frames)
 
     # Build tidy DataFrame with frame as first column
     results_df = pd.DataFrame(records)
-    col_order = ['frame', 'cell_label',
+    # Build column list dynamically so it works whether or not spatial
+    # metrics were computed (they're absent when compute_spatial=False or
+    # when a frame had fewer than 2 condensates).
+    core_cols = ['frame', 'cell_label',
                  'total_condensate_area_px', 'total_condensate_area_um2',
                  'cell_area_px', 'condensate_fraction',
                  'n_condensates', 'mean_condensate_area_um2',
                  'drift_row_px', 'drift_col_px']
-    results_df = results_df[col_order]
+    spatial_cols = ['nnd_mean_um', 'nnd_cv', 'kde_mean_density',
+                    'hull_occupancy', 'hull_compactness', 'spacing_cv']
+    col_order = core_cols + [c for c in spatial_cols
+                              if c in results_df.columns]
+    results_df = results_df[col_order].sort_values(
+        ['frame', 'cell_label']).reset_index(drop=True)
 
     return results_df, condensate_stack
 
@@ -816,7 +1551,9 @@ class TimeSeriesWorker(QThread):
                 self.progress.emit(frame, total)
 
             results_df, cstack = run_timeseries_condensate_analysis(
-                progress_callback=_cb, **self._kwargs
+                progress_callback=_cb,
+                cancel_check=lambda: self._cancelled,
+                **self._kwargs
             )
             self.finished.emit(results_df, cstack)
         except InterruptedError:
@@ -877,6 +1614,38 @@ def _add_run_timeseries_condensate_analysis(
     drift_checkbox.setChecked(True)
     opts_layout.addRow("", drift_checkbox)
 
+    spatial_checkbox = QCheckBox("Compute per-frame spatial metrics")
+    spatial_checkbox.setChecked(True)
+    spatial_checkbox.setToolTip(
+        "For each cell at each frame, compute:\n"
+        "  • Mean nearest-neighbour distance (NND)\n"
+        "  • NND coefficient of variation (clustering index)\n"
+        "  • Mean local KDE density\n"
+        "  • Convex hull occupancy fraction\n"
+        "  • Convex hull compactness\n"
+        "  • Inter-condensate spacing CV\n\n"
+        "These appear as additional columns in the results DataFrame and\n"
+        "can be plotted as time series to track spatial reorganization.\n"
+        "Adds ~10–20% to analysis time; disable for quick previews."
+    )
+    opts_layout.addRow("", spatial_checkbox)
+
+    # Extended spatial options — shown when spatial_checkbox is checked
+    ripley_checkbox = QCheckBox("Also compute Ripley's L and PCF  [slower]")
+    ripley_checkbox.setChecked(False)
+    ripley_checkbox.setEnabled(True)
+    ripley_checkbox.setToolTip(
+        "Compute Ripley's L(r) and Pair Correlation Function g(r) for each\n"
+        "cell at each frame.  Results are stored in data_repository as\n"
+        "timeseries_ripleys_l and timeseries_pcf DataFrames.\n\n"
+        "These are multi-scale analyses (~30 r-values per cell per frame)\n"
+        "and are substantially slower — recommended only for short stacks\n"
+        "or when spatial scale information is specifically needed."
+    )
+    opts_layout.addRow("", ripley_checkbox)
+    spatial_checkbox.stateChanged.connect(
+        lambda s: ripley_checkbox.setEnabled(bool(s)))
+
     ts_layout.addWidget(opts_group)
 
     # ── Refinement parameters (same as condensate segmentation widget) ────
@@ -920,7 +1689,8 @@ def _add_run_timeseries_condensate_analysis(
     btn_row.addWidget(cancel_btn)
     ts_layout.addLayout(btn_row)
 
-    _worker_ref = [None]   # mutable container so closure can update it
+    _worker_ref  = [None]   # mutable container so closure can update it
+    _run_ripley_ref = [False]  # mutable: set in _on_run, read in _on_finished
 
     def _on_run():
         # Validate inputs
@@ -957,9 +1727,20 @@ def _add_run_timeseries_condensate_analysis(
         ball_radius   = float(data_instance.data_repository.get('ball_radius', 50))
         mpx_sq        = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
 
+        # IMPORTANT: do NOT call .astype()/np.asarray() on stack_data or
+        # proc_data here. If these are lazy zarr-backed _ZarrStack layers
+        # (the normal case after lazy stack preprocessing), eagerly
+        # converting dtype triggers __array__ and materialises the entire
+        # (T, H, W) stack into RAM immediately, defeating both the lazy
+        # loading AND the parallel analysis path's ability to detect and
+        # reuse the existing on-disk zarr store (it would have to write
+        # a redundant copy back to disk before parallel dispatch).
+        # Per-frame dtype conversion happens lazily inside the analysis
+        # function instead (both the parallel worker and serial fallback
+        # already read each frame and cast it to float32 individually).
         kwargs = dict(
-            stack=stack_data.astype(np.float32),
-            preprocessed_stack=proc_data.astype(np.float32),
+            stack=stack_data,
+            preprocessed_stack=proc_data,
             labeled_cell_mask=mask_data,
             ball_radius=ball_radius,
             microns_per_pixel_sq=mpx_sq,
@@ -971,7 +1752,10 @@ def _add_run_timeseries_condensate_analysis(
             intensity_hwhm_scale=hwhm_spin.value(),
             max_area_fraction=maxarea_spin.value(),
             min_spot_radius=min_spot_spin.value(),
+            compute_spatial=spatial_checkbox.isChecked(),
         )
+        _run_ripley = ripley_checkbox.isChecked() and spatial_checkbox.isChecked()
+        _run_ripley_ref[0] = _run_ripley
 
         n_frames = stack_data.shape[0]
         progress_bar.setMaximum(n_frames)
@@ -1001,6 +1785,7 @@ def _add_run_timeseries_condensate_analysis(
             'intensity_hwhm_scale': hwhm_spin.value(),
             'max_area_fraction': maxarea_spin.value(),
             'min_spot_radius': min_spot_spin.value(),
+            'compute_spatial': spatial_checkbox.isChecked(),
         })
 
     def _on_finished(results_df, condensate_stack, stack_name):
@@ -1024,22 +1809,82 @@ def _add_run_timeseries_condensate_analysis(
             )
 
         # Build summary: condensate fraction vs frame per cell
-        summary = results_df.groupby('frame').agg(
+        agg_dict = dict(
             n_cells=('cell_label', 'count'),
             mean_condensate_fraction=('condensate_fraction', 'mean'),
             std_condensate_fraction=('condensate_fraction', 'std'),
             mean_total_area_um2=('total_condensate_area_um2', 'mean'),
             total_n_condensates=('n_condensates', 'sum'),
-        ).round(6).reset_index()
+        )
+        # Add spatial summaries to frame-level aggregation if present
+        spatial_cols_present = [c for c in
+            ['nnd_mean_um','nnd_cv','kde_mean_density',
+             'hull_occupancy','hull_compactness','spacing_cv']
+            if c in results_df.columns]
+        for sc in spatial_cols_present:
+            agg_dict[f'mean_{sc}'] = (sc, 'mean')
 
-        show_dataframes_dialog("Time-Series Condensate Analysis", [
+        summary = results_df.groupby('frame').agg(
+            **agg_dict).round(6).reset_index()
+
+        tables = [
             ("Per-Cell Per-Frame Results", results_df.round(4)),
             ("Summary (per frame)", summary),
-        ])
+        ]
+
+        # Optional post-run Ripley's L and PCF (per cell across all frames)
+        _run_ripley = _run_ripley_ref[0]
+        if _run_ripley:
+            try:
+                from pycat.toolbox.spatial_metrology_tools import (
+                    ripleys_l, pair_correlation_function, get_puncta_centroids)
+                import skimage as _sk
+                mpx = float(data_instance.data_repository.get(
+                    'microns_per_pixel_sq', 1.0) ** 0.5)
+                cell_mask_layer = ui_instance.viewer.layers[mask_name]
+                cmask = cell_mask_layer.data
+
+                ripley_rows, pcf_rows = [], []
+                n_frames_rip = condensate_stack.shape[0]
+                for t in range(n_frames_rip):
+                    frame_mask = condensate_stack[t]
+                    coords_df  = get_puncta_centroids(frame_mask, cmask, mpx)
+                    for cl in coords_df['cell_label'].unique():
+                        if cl == 0: continue
+                        sub    = coords_df[coords_df['cell_label'] == cl]
+                        coords = sub[['y_um','x_um']].values
+                        cm     = (cmask == cl).astype(bool)
+                        area   = float(cm.sum()) * (mpx**2)
+                        if len(coords) >= 3:
+                            rl = ripleys_l(coords, area)
+                            rl['frame'] = t; rl['cell_label'] = cl
+                            ripley_rows.append(rl)
+                            pc = pair_correlation_function(coords, area)
+                            pc['frame'] = t; pc['cell_label'] = cl
+                            pcf_rows.append(pc)
+
+                if ripley_rows:
+                    import pandas as _pd
+                    rdf = _pd.concat(ripley_rows, ignore_index=True)
+                    pdf = _pd.concat(pcf_rows, ignore_index=True)
+                    data_instance.data_repository['timeseries_ripleys_l'] = rdf
+                    data_instance.data_repository['timeseries_pcf']        = pdf
+                    tables += [
+                        ("Ripley's L(r) — all frames", rdf.round(4)),
+                        ("Pair Correlation g(r) — all frames", pdf.round(4)),
+                    ]
+            except Exception as _re:
+                print(f"[PyCAT TS] Ripley/PCF computation failed: {_re}")
+
+        show_dataframes_dialog("Time-Series Condensate Analysis", tables)
 
         napari_show_info(
             f"Time-Series analysis complete: {results_df['frame'].nunique()} frames, "
             f"{results_df['cell_label'].nunique()} cells."
+            + (f" Spatial metrics: {', '.join(spatial_cols_present)}."
+               if spatial_cols_present else "")
+            + " Use Advanced Analysis → Dynamic tab to track condensates "
+              "with Bayesian or greedy linking."
         )
 
         _plot_condensate_fraction(results_df)

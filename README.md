@@ -14,6 +14,7 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 - [System Requirements](#system-requirements)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
+- [TrackMate Integration (Optional)](#trackmate-integration-optional)
 - [Usage](#usage)
 - [Documentation](#documentation)
 - [Notebooks](#notebooks)
@@ -28,13 +29,17 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 
 ## Features
 
-PyCAT-Napari provides a comprehensive suite of tools for biological image analysis, with a focus on in-cellulo and per-cell analyses.
+PyCAT-Napari provides a comprehensive suite of tools for biological image analysis, spanning cellular and in-vitro condensate systems, 2D/Z-stack/time-series acquisitions, and both fluorescence and brightfield modalities.
 
 | Category                     | Capabilities                                                                                              |
 |------------------------------|----------------------------------------------------------------------------------------------------------|
-| **Image Processing and Segmentation** | - Versatile toolbox with common image processing and analysis functions.<br>- Specialized condensate segmentation and object filtering algorithms.<br>- Optimized for in-cellulo analysis in challenging biological datasets. |
-| **Quantitative Region Analysis**      | - Simple and intuitive layer and ROI mask design.<br>- Extensive ROI feature analysis, including area, intensity, shape, texture, and more.<br>- Advanced colocalization analysis:<br>&nbsp;&nbsp;&nbsp;- Object-based metrics: Jaccard Index, Dice Coefficient, Mander’s coefficients, and distance analysis.<br>&nbsp;&nbsp;&nbsp;- Pixel-wise metrics: Pearson’s R, Spearman’s R, Li’s ICQ, and more.<br>&nbsp;&nbsp;&nbsp;- Modified Costes analysis: Automated thresholds and statistical significance testing.<br>- Correlation function analysis: Auto- and cross-correlation functions with Gaussian fitting. |
-| **Integrated Analysis Pipelines**     | - **Condensate Analysis Pipeline**: Tailored for in-cellulo biomolecular condensates.<br>- **Colocalization Analysis Pipeline**: Combines object-based and pixel-wise methods for robust colocalization studies.<br>- **General ROI Analysis Pipeline**: Flexible pipeline for exploratory measurements.<br>- **Fibril Analysis Pipeline**: Specialized for analyzing beta-amyloid fibers and fibril structures. |
+| **Image Processing and Segmentation** | - Versatile toolbox with common image processing and analysis functions.<br>- Specialized condensate segmentation and object filtering algorithms.<br>- Optimized for in-cellulo analysis in challenging biological datasets.<br>- Pseudo-3D (tri-planar) filtering for Gaussian/Gabor/DoG linear filters — applies the same 2D kernel along XY, XZ, and YZ (or XY/XT/YT for time series) planes and averages the result, exploiting genuine correlation between adjacent Z-slices or oversampled frames.<br>- Optional GPU acceleration (rolling-ball background removal and morphological operations) via CuPy. |
+| **Quantitative Region Analysis**      | - Simple and intuitive layer and ROI mask design.<br>- Extensive ROI feature analysis, including area, intensity, shape, texture, and more.<br>- Advanced colocalization analysis:<br>&nbsp;&nbsp;&nbsp;- Object-based metrics: Jaccard Index, Dice Coefficient, Mander's coefficients, and distance analysis.<br>&nbsp;&nbsp;&nbsp;- Pixel-wise metrics: Pearson's R, Spearman's R, Li's ICQ, and more.<br>&nbsp;&nbsp;&nbsp;- Modified Costes analysis: Automated thresholds and statistical significance testing.<br>- Correlation function analysis: Auto- and cross-correlation functions with Gaussian fitting.<br>- Spatial metrology: nearest-neighbour distance, Ripley's L, pair correlation, Voronoi/Delaunay, convex hull, radial localization.<br>- Morphological complexity: fractal dimension, lacunarity, tortuosity, orientation order.<br>- Organizational metrics: spatial entropy, DBSCAN clustering, inter-condensate spacing, occupancy. |
+| **Condensate Biophysics**             | - Mean-squared displacement (MSD) and anomalous diffusion fitting (D, α).<br>- Saturation concentration (C_sat) estimation via bimodal intensity decomposition and dilution-series lever-rule fitting.<br>- Fusion relaxation kinetics (τ = ηR/γ) and coarsening mechanism discrimination (Ostwald ripening vs. coalescence).<br>- Kaplan-Meier survival analysis for condensate lifetimes.<br>- Frame quality diagnostics that distinguish photobleaching from focal drift. |
+| **Trajectory Tracking**               | - Greedy nearest-neighbour and Bayesian (Hungarian/LAP) trajectory linking with velocity-assisted prediction and gap closing.<br>- Merge/fission event detection.<br>- Optional bridge to real [TrackMate](https://imagej.net/plugins/trackmate/) (Jaqaman LAP tracker, Kalman tracker) via an embedded headless Fiji instance — see [TrackMate Integration](#trackmate-integration-optional). |
+| **Time-Series & Z-Stack Analysis**    | - Lazy, zarr-backed loading and parallelized preprocessing for large multi-dimensional acquisitions (time series with nested Z-stacks, multi-position/multi-channel files).<br>- Keyframe Cellpose segmentation with nearest-keyframe propagation across time and IoU-based stitching across Z.<br>- Per-frame spatial metrics and drift correction.<br>- 3D condensate segmentation built on the validated 2D per-slice pipeline, linked into true 3D objects across Z. |
+| **Batch Processing**                  | - Record-and-replay batch system: GUI actions are automatically recorded to a reusable JSON config.<br>- Headless replay across an entire folder of files with per-step error isolation (one bad file doesn't abort the run).<br>- Session reload: scan a previous output folder and restore all layers/dataframes without re-running analysis. |
+| **Integrated Analysis Pipelines**     | - **Cellular Condensate Analysis** (Fluorescence & Brightfield): tailored for in-cellulo biomolecular condensates.<br>- **In Vitro Condensate Analysis** (Fluorescence & Brightfield): field-level statistics, droplet size distributions, C_sat estimation, and contact-angle measurement for coverslip droplet assays.<br>- **Time-Series Condensate Analysis**: full T·H·W pipeline with drift correction and per-frame spatial metrics.<br>- **Z-Stack (3D) Condensate Analysis**: 3D segmentation and volumetric metrics.<br>- **Colocalization Analysis Pipeline**: combines object-based and pixel-wise methods for robust colocalization studies.<br>- **General ROI Analysis Pipeline**: flexible pipeline for exploratory measurements.<br>- **Fibril Analysis Pipeline**: specialized for analyzing beta-amyloid fibers and fibril structures, with morphological complexity and organizational metrics built in. |
 
 
 ## System Requirements
@@ -53,9 +58,9 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
 ### Minimum Requirements
 - **Python Version**: 3.9.x (Required)
   > ⚠️ **Important**: PyCAT-Napari is currently only compatible with Python 3.9. Other versions are not supported in this release. Future releases may aim to expand to more versions. 
-- RAM: 8GB (16GB recommended)
-- Disk Space: ~100MB (including dependencies)
-- GPU: Not required (CPU-only processing)
+- RAM: 8GB (16GB recommended; large time-series/Z-stack acquisitions benefit from more)
+- Disk Space: ~100MB (including dependencies); optional TrackMate integration downloads an additional ~500MB–1GB Fiji distribution on first use
+- GPU: Not required — PyCAT runs entirely on CPU by default. An NVIDIA GPU with CUDA is optional and used automatically when available (Cellpose segmentation, and rolling-ball/morphological operations via the `[gpu]` extra) for faster processing.
 
 ## Getting Started
 
@@ -161,6 +166,15 @@ pip install "pycat-napari[dev]"
 
 # Additional bio-image analysis tools
 pip install "pycat-napari[devbio-napari]"
+
+# GPU-accelerated rolling-ball/morphological operations (requires NVIDIA GPU + CUDA)
+pip install "pycat-napari[gpu]"
+
+# StarDist segmentation option
+pip install "pycat-napari[stardist]"
+
+# TrackMate tracking bridge (see TrackMate Integration below)
+pip install "pycat-napari[trackmate]"
 ```
 > 💡 **Tip**: You can designate multiple optional dependencies by separating them with a comma
    ```bash
@@ -210,6 +224,42 @@ If you encounter any failures, check:
 
 Still having problems installing or running the program? Open a github issue. If you need urgent help, reach out to us and we will try to get back to you as soon as possible. 
 
+## TrackMate Integration (Optional)
+
+PyCAT's Dynamic Analysis tab (Advanced Analysis → Dynamic) includes an optional third trajectory-linking option — real [TrackMate](https://imagej.net/plugins/trackmate/) (the Jaqaman LAP tracker or Kalman tracker), running via an embedded, headless Fiji instance — alongside PyCAT's own Bayesian (Hungarian) and Greedy NNL linkers. TrackMate's LAP tracker models track merging and splitting directly within its global assignment optimization, which can give more rigorous results for condensates that frequently fuse or divide.
+
+This is fully optional — nobody who doesn't select the TrackMate option in the linker dropdown pays any cost for it existing.
+
+#### Installation
+
+```bash
+pip install "pycat-napari[trackmate]"
+# or, added to an existing environment:
+pip install pyimagej
+```
+
+You will also need a **Java runtime (JDK 11+)** on your system `PATH` — `pip` does not install Java itself:
+
+```bash
+# via conda/mamba (recommended, works on all platforms)
+mamba install openjdk=11
+
+# or via your OS package manager (e.g. Ubuntu/Debian)
+sudo apt install openjdk-11-jdk
+
+# or download directly from Adoptium: https://adoptium.net/
+```
+
+#### First run
+
+The first time you select the TrackMate option and click **Run Dynamic Analysis**, PyCAT downloads and caches a full Fiji distribution (via Maven) automatically — no manual Fiji installation needed. This is a one-time step that requires network access and can take several minutes depending on your connection; subsequent runs start in a few seconds from the local cache.
+
+> ⚠️ **Note**: The embedded Java Virtual Machine can only be started once per PyCAT session — if you need to change Java/Fiji settings, restart PyCAT rather than trying to reinitialize mid-session.
+
+#### What gets bridged vs. reimplemented
+
+PyCAT's own condensate/cell segmentation always runs first, exactly as with the other linkers — TrackMate's *detection* step is never invoked. Only its *linking* step (its actual strength) processes PyCAT's pre-computed centroids, and results are converted back into PyCAT's standard trajectory DataFrame so every downstream tool (MSD, fusion kinetics, Kaplan-Meier survival, coarsening analysis) works identically regardless of which linker produced the tracks.
+
 ## Usage
 
 PyCAT-Napari offers two ways to analyze your data: through a user-friendly GUI or programmatically via Python code. PyCAT was developed as a low/no-code solution to image analysis so usage of the GUI is recommedned. API usage has not been thoroughly tested however many core functions are modular and should work via API. 
@@ -233,6 +283,12 @@ PyCAT-Napari integrates seamlessly with the Napari interface, providing users wi
 
 - 🟨 **Layer Tools** - where users can easily add or remove various layers such as images, shapes, and labels from the viewer. This feature allows for quick management of the visual elements, including the ability to hide or show layers using the eye icon.
 - 🟪 **Shape and Label Tools** - which include node tools for manipulating shape layers, as well as paint brush, eraser, and bucket tools for label layers. Users can also apply colormaps to images and change opacity to view overlapping images. 
+
+> 💡 **Multi-dimensional acquisitions**: `Open Image Stack (T/Z / IMS)` handles time series, Z-stacks, and nested time-series-with-Z-stack acquisitions (both dimensions preserved as a lazy 4D array — napari adds T and Z sliders automatically) for IMS and OME-TIFF/CZI files, reading channel/T/Z/position dimensions from file metadata. Multi-position acquisitions (multiple stage positions/scenes in one experiment) are auto-detected and offered via a selection dialog. See the **Time-Series** and **Z-Stack (3D)** analysis pipelines for the corresponding processing workflows.
+
+> 💡 **Workflow checklist**: every analysis pipeline shows a live, auto-checking checklist dock on the right side of the viewer, tracking which pipeline steps you've completed and highlighting the next one — useful both as a guide for new users and as a quick verification that nothing was skipped before saving.
+
+> 💡 **Batch processing**: every GUI step you run is automatically recorded to a reusable JSON config. Once you've worked through a pipeline on one file, use `Open/Save File(s) > Batch Process` to replay the identical sequence of steps across an entire folder headlessly — one bad file won't abort the rest of the batch.
 
 
 
@@ -339,7 +395,18 @@ PyCAT excels at in-cellulo nuclear condensate analysis. An example pair of image
 
 ![PyCAT condensate segmentation](./assets/screenshots/save_and_clear_popup.png)
 
+#### Other Analysis Pipelines
 
+The walkthrough above covers `Cellular Condensate Analysis (Fluorescence)` in detail; every other pipeline follows the same "Load → Preprocess → Segment → Analyze → Save" philosophy with pipeline-specific steps:
+
+- **Cellular Condensate Analysis (Brightfield)** — for brightfield/transmitted-light acquisitions of condensates in cells; adds flat-field correction, halo suppression, and optical-density-based metrics in place of fluorescence intensity.
+- **In Vitro Condensate Analysis** (Fluorescence & Brightfield) — for cell-free droplet assays; no cell segmentation step, instead reporting field-level statistics (volume fraction, droplet size distribution, number density), C_sat estimation, and (brightfield only) contact-angle measurement.
+- **Time-Series Condensate Analysis** — for T·H·W stacks; adds a reference-frame/frame-range selector, lazy parallelized stack preprocessing, keyframe Cellpose segmentation, drift correction, and per-frame spatial metrics.
+- **Z-Stack (3D) Condensate Analysis** — for Z·H·W volumes; runs 3D background removal, 3D cell segmentation (per-slice Cellpose stitched across Z), and 3D condensate segmentation with volumetric metrics (volume, sphericity, ellipsoid axes).
+- **Colocalization Analysis** — combines object-based and pixel-wise colocalization methods.
+- **Fibril Analysis** — for beta-amyloid fibers and other fibrillar structures, with morphological complexity (fractal dimension, tortuosity, orientation order) and organizational metrics built into the pipeline.
+
+Each pipeline dock includes a live workflow checklist tracking your progress. See the [full documentation](https://pycat-napari.readthedocs.io/en/latest/) for detailed walkthroughs of each.
 
 ### Programmatic API
 
@@ -511,6 +578,12 @@ If you use PyCAT-Napari in your research, please cite:
 5. **File Loading Errors (`newbyteorder` / tifffile)**
    - See [NumPy 2.0 Compatibility](#numpy-20-compatibility) below
 
+6. **TrackMate Integration Errors**
+   - `ImportError: TrackMate bridge requires pyimagej` — install with `pip install "pycat-napari[trackmate]"`
+   - Java not found — install a JDK 11+ (`mamba install openjdk=11` is the most reliable cross-platform option) and confirm it's on `PATH` with `java -version`
+   - Slow or failed first run — the first TrackMate run downloads a full Fiji distribution over the network; this can take several minutes and will fail without internet access, but only needs to happen once (cached afterward)
+   - The embedded Java process cannot be restarted mid-session — if you change Java/Fiji configuration, restart PyCAT entirely rather than retrying within the same session
+
 If the above suggestions did not help, you can use the info below to open an issue or contact the maintainers. Modern AIs (ChatGPT, Claude, etc) are very good at troubleshooting installation issues and error messages, and may be your best option for a fast solution to any non-critical issues.
 
 ---
@@ -566,17 +639,26 @@ pip install "numpy<2.0"
 
 ## Project Status & Roadmap
 
-Current Version: 1.2.0
+Current Version: 1.5.0
 
 ### Recent Updates
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
+### Completed (formerly on this roadmap)
+- ✅ GPU acceleration for rolling-ball background removal and morphological operations (CuPy, `[gpu]` extra)
+- ✅ 3D / Z-stack support: full 3D condensate segmentation pipeline, built on the validated 2D per-slice algorithms and linked into true 3D objects across Z
+- ✅ Time-series support: lazy zarr-backed loading, parallelized preprocessing, keyframe Cellpose, drift correction, per-frame spatial metrics
+- ✅ Multi-dimensional file I/O: nested time-series-with-Z-stack acquisitions and multi-position/multi-scene files (IMS, OME-TIFF, CZI)
+- ✅ Batch processing: record-and-replay headless batch runner with per-step error isolation
+- ✅ Expanded analysis methods: spatial metrology, morphological complexity, organizational metrics, MSD/diffusion, C_sat estimation, fusion/coarsening kinetics, Kaplan-Meier survival
+- ✅ In vitro (cell-free) condensate analysis pipelines, fluorescence and brightfield
+- ✅ Optional integration with real TrackMate for trajectory linking
+
 ### Roadmap
 - Extended file format support (including migration to BioIO) and integration with native napari IO
-- GPU acceleration/parallelization, and multi-threading, e.g. performance optimizations
-- 3D, Z-stack, time series support
-- Expanded analysis methods and more individual tools
-- ML classifiers and segmentation models trained on annotated data output by PyCAT 
+- ML classifiers and segmentation models trained on annotated data output by PyCAT
+- Ground-truth benchmarking for tracking and segmentation accuracy
+- Statistical comparison tooling across experimental conditions/batches
 - See our full [Roadmap Page](https://pycat-napari.readthedocs.io/en/latest/development/roadmap.html) for more detailed information and wish list
 
 ## Acknowledgments
@@ -588,6 +670,12 @@ This project was developed by Christian Neureuter in the Condensate Biophysics L
 - [scikit-image](https://scikit-image.org/) - Image processing
 - [numpy](https://numpy.org/) - Numerical computing
 - [pandas](https://pandas.pydata.org/) - Data analysis
+- [Cellpose](https://www.cellpose.org/) - Deep-learning cell/nucleus segmentation
+- [PyTorch](https://pytorch.org/) - Deep learning backend
+- [AICSImageIO](https://github.com/AllenCellModeling/aicsimageio) - Microscope file format reading
+- [zarr](https://zarr.dev/) - Lazy, chunked array storage for large multi-dimensional acquisitions
+- [scipy](https://scipy.org/) - Scientific computing (optimization, linear assignment, filtering)
+- Optional: [CuPy](https://cupy.dev/) (GPU acceleration), [StarDist](https://github.com/stardist/stardist) (alternative segmentation), [pyimagej](https://github.com/imagej/pyimagej) (TrackMate bridge)
 
 ### Special Thanks
 - Banerjee Lab members for testing and feedback

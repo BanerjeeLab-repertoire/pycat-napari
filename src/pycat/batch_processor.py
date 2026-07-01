@@ -187,7 +187,14 @@ class BatchWorker(QThread):
             if fn is None:
                 print(f"[PyCAT Batch] Step '{step_name}' not registered – skipping.")
                 continue
-            fn(state, image_path, params, output_dir)
+            try:
+                fn(state, image_path, params, output_dir)
+            except Exception as _step_exc:
+                import traceback
+                print(f"[PyCAT Batch] ERROR in step '{step_name}' for "
+                      f"{image_path.name}:\n{traceback.format_exc()}")
+                print(f"[PyCAT Batch] Skipping remaining steps for this file.")
+                break
 
 
 # ---------------------------------------------------------------------------

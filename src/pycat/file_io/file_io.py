@@ -61,6 +61,7 @@ from napari.utils.notifications import show_warning as napari_show_warning
 from pycat.ui.ui_utils import add_image_with_default_colormap
 from pycat.utils.general_utils import dtype_conversion_func
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
+from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
 
 
@@ -657,27 +658,70 @@ class FileIOClass:
         channel_data = None
         self._ims_zarr_refs = []
 
-        for channel_idx in channels_to_load:
-            with _suppress_ims_chunk_prints():
-                _ch_info = extract_channel_info_from_ims(reader, channel_idx)
-            _ch_label    = _ch_info['layer_name']
-            _ch_colormap = suggest_colormap(_ch_info['bucket'])
+        # ── Multi-position detection ─────────────────────────────────────
+        # A single IMS file never contains multiple stage positions —
+        # Imaris ("File Series") multi-position acquisitions are always
+        # saved as separate sibling .ims files. Detect them by filename
+        # pattern and offer to open the ones the user wants alongside
+        # this one, rather than silently only ever showing this position.
+        from pycat.file_io.multidim_io import (
+            find_sibling_position_files, show_position_selection_dialog)
 
-            if n_z == 1:
-                layer_name = f"{self.base_file_name} {_ch_label} Stack"
-                if n_t == 1:
+        sibling_positions = find_sibling_position_files(file_path)
+        positions_to_open = [file_path]
+        if sibling_positions:
+            selected_idx = show_position_selection_dialog(
+                sibling_positions,
+                title=f"Multi-Position Acquisition Detected ({len(sibling_positions)} positions)",
+            )
+            if selected_idx:
+                positions_to_open = [sibling_positions[i]['path']
+                                     for i in selected_idx]
+                napari_show_info(
+                    f"Opening {len(positions_to_open)} of "
+                    f"{len(sibling_positions)} detected position(s)."
+                )
+            # else: user cancelled the multi-position dialog — fall back
+            # to opening only the originally-selected file.
+
+        for pos_path in positions_to_open:
+            pos_suffix = ''
+            if len(positions_to_open) > 1:
+                # Tag layer names with the position so multiple positions
+                # opened together remain distinguishable in the layer list.
+                for sp in sibling_positions:
+                    if sp['path'] == pos_path:
+                        pos_suffix = f" [Pos {sp['position_index']}]"
+                        break
+
+            if pos_path == file_path:
+                pos_reader = reader
+            else:
+                pos_reader = ImsReader(pos_path, squeeze_output=False)
+
+            for channel_idx in channels_to_load:
+                with _suppress_ims_chunk_prints():
+                    _ch_info = extract_channel_info_from_ims(pos_reader, channel_idx)
+                _ch_label    = _ch_info['layer_name']
+                _ch_colormap = suggest_colormap(_ch_info['bucket'])
+
+                if n_t == 1 and n_z == 1:
+                    # Single 2D frame — no lazy wrapper needed
                     with _suppress_ims_chunk_prints():
-                        frame = reader[0, channel_idx, 0, :, :].astype(np.float32)
-                    self.load_into_viewer(frame,
-                                         name=f"{self.base_file_name} {_ch_label}")
+                        frame = pos_reader[0, channel_idx, 0, :, :].astype(np.float32)
+                    self.load_into_viewer(
+                        frame, name=f"{self.base_file_name} {_ch_label}{pos_suffix}")
                     channel_data = frame
-                else:
-                    zarr_store = ImsReader(file_path, aszarr=True)
+
+                elif n_z == 1:
+                    # Pure time series (T, Y, X) — existing lazy path, unchanged.
+                    layer_name = f"{self.base_file_name} {_ch_label} Stack{pos_suffix}"
+                    zarr_store = ImsReader(pos_path, aszarr=True)
                     z_full = zarr.open(zarr_store, mode='r')
                     lazy_tyx = _ZarrTYX(z_full, channel_idx,
                                         suppress_ctx=_suppress_ims_chunk_prints)
                     self._ims_zarr_refs.append((zarr_store, z_full, lazy_tyx))
-                    if channel_idx == 0:
+                    if channel_idx == 0 and pos_path == file_path:
                         channel_data = lazy_tyx[0]
                         self._ims_zarr_store = zarr_store
                         self._ims_zarr_array = z_full
@@ -685,32 +729,54 @@ class FileIOClass:
                     self.viewer.add_image(lazy_tyx, name=layer_name,
                                          colormap=_ch_colormap)
                     napari_show_info(
-                        f"Lazy-loaded IMS {_ch_label}: {n_t} frames "
+                        f"Lazy-loaded IMS {_ch_label}{pos_suffix}: {n_t} frames "
                         f"{H}\u00d7{W}px (frames read on demand)"
                     )
-            else:
-                from PyQt5.QtWidgets import QInputDialog
-                if channel_idx == 0:
-                    t_choice, ok = QInputDialog.getInt(
-                        None, "Select Timepoint",
-                        f"This file has {n_t} timepoints and {n_z} Z slices.\n"
-                        "Enter timepoint index to load (0-based):",
-                        0, 0, n_t - 1, 1
+
+                elif n_t == 1:
+                    # Pure z-stack (Z, Y, X), no time dimension — lazy, on demand.
+                    layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{pos_suffix}"
+                    zarr_store = ImsReader(pos_path, aszarr=True)
+                    z_full = zarr.open(zarr_store, mode='r')
+                    lazy_zyx = _ZarrZYX(z_full, channel_idx, t=0,
+                                        suppress_ctx=_suppress_ims_chunk_prints)
+                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_zyx))
+                    if channel_idx == 0 and pos_path == file_path:
+                        channel_data = lazy_zyx[0]
+                    self.viewer.add_image(lazy_zyx, name=layer_name,
+                                         colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Lazy-loaded IMS z-stack {_ch_label}{pos_suffix}: "
+                        f"{n_z} slices {H}\u00d7{W}px (slices read on demand)"
                     )
-                    if not ok:
-                        t_choice = 0
-                with _suppress_ims_chunk_prints():
-                    slices = [reader[t_choice, channel_idx, z, :, :].astype(np.float32)
-                              for z in range(n_z)]
-                stack = np.stack(slices, axis=0)
-                layer_name = f"{self.base_file_name} {_ch_label} T{t_choice}"
-                self.viewer.add_image(stack, name=layer_name,
-                                      colormap=_ch_colormap)
-                if channel_idx == 0:
-                    channel_data = stack[0]
-                napari_show_info(
-                    f"Loaded IMS z-stack {_ch_label}: {n_z} slices → '{layer_name}'"
-                )
+
+                else:
+                    # Nested time-series-with-z-stack (T, Z, Y, X) — the
+                    # scenario this fix targets. Previously this branch
+                    # forced a single-timepoint choice and DISCARDED every
+                    # other timepoint's z-data entirely. Now a genuine
+                    # lazy 4D array is handed to napari, which natively
+                    # adds both a T slider and a Z slider — no data lost,
+                    # nothing materialised until the user scrubs to it.
+                    layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{pos_suffix}"
+                    zarr_store = ImsReader(pos_path, aszarr=True)
+                    z_full = zarr.open(zarr_store, mode='r')
+                    lazy_tzyx = _ZarrTZYX(z_full, channel_idx,
+                                          suppress_ctx=_suppress_ims_chunk_prints)
+                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_tzyx))
+                    if channel_idx == 0 and pos_path == file_path:
+                        channel_data = lazy_tzyx[0, 0]
+                        self._ims_zarr_store = zarr_store
+                        self._ims_zarr_array = z_full
+                        self._ims_lazy_tzyx  = lazy_tzyx
+                    self.viewer.add_image(lazy_tzyx, name=layer_name,
+                                         colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Lazy-loaded IMS T-Z stack {_ch_label}{pos_suffix}: "
+                        f"{n_t} timepoints \u00d7 {n_z} z-slices, "
+                        f"{H}\u00d7{W}px (nothing pre-loaded — scrub T/Z sliders "
+                        f"to read on demand)"
+                    )
 
         self._finalise_stack_load(H, W, microns_per_pixel, channels_to_load,
                                   n_t, n_z, file_path, source='ims')
@@ -720,31 +786,59 @@ class FileIOClass:
 
     def _open_stack_generic(self, file_path: str, ext: str):
         """
-        Generic stack loader for TIFF and CZI files.  Uses a memory-mapped
-        numpy array (for TIFF) or a temporary zarr store (for CZI/other)
-        so napari gets lazy frame access without dask.
+        Generic stack loader for TIFF, OME-TIFF, and CZI files via AICSImage.
+
+        Reads the full T, C, Z dimensions from file metadata (OME-XML,
+        ImageJ hyperstack description, or format-native equivalent) rather
+        than forcing a choice between T and Z when both are present —
+        nested time-series-with-z-stack acquisitions are loaded as genuine
+        lazy 4D (T, Z, Y, X) per-channel arrays, matching the IMS loader.
+
+        Multi-position acquisitions (OME-XML scenes / Bio-Formats series)
+        are detected via AICSImage's `.scenes` and offered through the
+        same position-selection dialog used for IMS sibling files.
         """
         import tempfile, zarr as _zarr
 
         from napari.utils.notifications import show_info as napari_show_info
         from napari.utils.notifications import show_warning as napari_show_warning
+        from pycat.file_io.multidim_io import (
+            show_position_selection_dialog, _ZarrTZYX_generic)
 
         microns_per_pixel = 1.0
         n_c = 1
 
-        # ── Read metadata and build a (T, C, H, W) numpy array ──────────
+        # ── Read metadata ────────────────────────────────────────────────
         try:
+            try:
+                from aicsimageio import AICSImage as _AICSImage
+                AICSImage = _AICSImage
+            except ImportError:
+                raise RuntimeError(
+                    "aicsimageio is required to open TIFF/CZI stacks. "
+                    "Install with: pip install aicsimageio"
+                )
             image = AICSImage(file_path)
-            _ = image.xarray_dask_data.dims   # probe without materialising
-            n_t = getattr(image.dims, 'T', 1)
-            n_c = getattr(image.dims, 'C', 1)
-            n_z = getattr(image.dims, 'Z', 1)
-            H   = getattr(image.dims, 'Y', None)
-            W   = getattr(image.dims, 'X', None)
-
-            stack_dim    = 'T' if n_t > 1 else 'Z'
-            n_frames     = n_t if n_t > 1 else n_z
             use_aicsimage = True
+
+            # ── Multi-position (scene) detection ───────────────────────
+            scenes = list(getattr(image, 'scenes', []) or [])
+            scenes_to_load = [image.current_scene] if scenes else [None]
+            if len(scenes) > 1:
+                scene_dicts = [{'position_index': i, 'filename': s}
+                               for i, s in enumerate(scenes)]
+                selected_idx = show_position_selection_dialog(
+                    scene_dicts,
+                    title=f"Multi-Position Acquisition Detected ({len(scenes)} scenes)",
+                )
+                if selected_idx:
+                    scenes_to_load = [scenes[i] for i in selected_idx]
+                    napari_show_info(
+                        f"Opening {len(scenes_to_load)} of {len(scenes)} "
+                        f"detected scene(s)."
+                    )
+                else:
+                    scenes_to_load = [image.current_scene]
 
             try:
                 px = image.physical_pixel_sizes
@@ -756,10 +850,10 @@ class FileIOClass:
 
         except Exception:
             use_aicsimage = False
-            # Fallback: tifffile direct read
+            scenes_to_load = [None]
+            # Fallback: tifffile direct read (no scene/T/Z metadata available)
             import tifffile
             arr = tifffile.imread(file_path)
-            # Normalise to (T, H, W) — squeeze singleton dims
             while arr.ndim > 3 and arr.shape[0] == 1:
                 arr = arr[0]
             if arr.ndim == 2:
@@ -768,61 +862,131 @@ class FileIOClass:
             H, W = arr.shape[1], arr.shape[2]
             n_c = 1
             n_t, n_z = n_frames, 1
-            stack_dim = 'T'
 
-        # ── Build a zarr store on disk: one chunk per frame ─────────────
-        channels_to_load = list(range(n_c))
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
+        channels_to_load = list(range(n_c)) if not use_aicsimage else None
+        H = W = n_t = n_z = None
 
-        for channel_idx in channels_to_load:
+        for scene in scenes_to_load:
+            scene_suffix = ''
+            if use_aicsimage and len(scenes_to_load) > 1:
+                image.set_scene(scene)
+                scene_suffix = f" [{scene}]"
+
             if use_aicsimage:
-                _ch_info = extract_channel_info_from_aicsimage(image, channel_idx)
-            else:
-                _ch_info = {'layer_name': f'C{channel_idx}',
-                             'bucket': 'unknown', 'label': f'C{channel_idx}',
-                             'source': 'position'}
+                n_t = getattr(image.dims, 'T', 1)
+                n_c = getattr(image.dims, 'C', 1)
+                n_z = getattr(image.dims, 'Z', 1)
+                H   = getattr(image.dims, 'Y', None)
+                W   = getattr(image.dims, 'X', None)
+                channels_to_load = list(range(n_c))
 
-            _ch_label    = _ch_info['layer_name']
-            _ch_colormap = suggest_colormap(_ch_info['bucket'])
-            layer_name   = f"{self.base_file_name} {_ch_label} Stack"
+            for channel_idx in channels_to_load:
+                if use_aicsimage:
+                    _ch_info = extract_channel_info_from_aicsimage(image, channel_idx)
+                else:
+                    _ch_info = {'layer_name': f'C{channel_idx}',
+                                 'bucket': 'unknown', 'label': f'C{channel_idx}',
+                                 'source': 'position'}
 
-            # Read all frames for this channel
-            if use_aicsimage:
-                frames = []
-                for t in range(n_frames):
-                    kw = {'C': channel_idx,
-                          'T': t if stack_dim == 'T' else 0,
-                          'Z': 0 if stack_dim == 'T' else t}
-                    frames.append(image.get_image_data('YX', **kw).astype(np.float32))
-                arr_ch = np.stack(frames, axis=0)
-            else:
-                arr_ch = arr.astype(np.float32)
+                _ch_label    = _ch_info['layer_name']
+                _ch_colormap = suggest_colormap(_ch_info['bucket'])
 
-            H = arr_ch.shape[1]
-            W = arr_ch.shape[2]
+                import os as _os
 
-            # Write to zarr with per-frame chunks
-            import os as _os
-            zarr_path = _os.path.join(zarr_dir, f'ch{channel_idx}')
-            z = _zarr.open(zarr_path, mode='w',
-                           shape=arr_ch.shape,
-                           chunks=(1, H, W),
-                           dtype=np.float32)
-            z[:] = arr_ch
-            self._stack_zarr_paths.append(zarr_path)
+                if not use_aicsimage:
+                    # tifffile fallback — single (T,H,W), no Z/scene metadata
+                    arr_ch = arr.astype(np.float32)
+                    layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
+                    zarr_path = _os.path.join(zarr_dir, f'ch{channel_idx}')
+                    z = _zarr.open(zarr_path, mode='w', shape=arr_ch.shape,
+                                   chunks=(1, H, W), dtype=np.float32)
+                    z[:] = arr_ch
+                    self._stack_zarr_paths.append(zarr_path)
+                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    self.viewer.add_image(wrapper, name=layer_name,
+                                          colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Loaded {_ch_label}: {n_frames} frames "
+                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
+                    )
+                    continue
 
-            # Wrap in the same lazy interface as IMS
-            z_lazy = _zarr.open(zarr_path, mode='r')
-            wrapper = _ZarrTYX_generic(z_lazy)
-            self.viewer.add_image(wrapper, name=layer_name,
-                                  colormap=_ch_colormap)
-            napari_show_info(
-                f"Loaded {_ch_label}: {n_frames} frames "
-                f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
-            )
+                if n_t == 1 and n_z == 1:
+                    frame = image.get_image_data(
+                        'YX', C=channel_idx, T=0, Z=0).astype(np.float32)
+                    self.load_into_viewer(
+                        frame,
+                        name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
 
-        self._finalise_stack_load(H, W, microns_per_pixel, channels_to_load,
+                elif n_z == 1:
+                    # Pure time series (T, Y, X) — lazily written to zarr.
+                    layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
+                    zarr_path = _os.path.join(
+                        zarr_dir, f'ch{channel_idx}_s{scene_suffix or "0"}')
+                    dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
+                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
+                                   chunks=(1, H, W), dtype=np.float32)
+                    for t in range(n_t):
+                        z[t] = np.asarray(dask_arr[t]).astype(np.float32)
+                    self._stack_zarr_paths.append(zarr_path)
+                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    self.viewer.add_image(wrapper, name=layer_name,
+                                          colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Loaded {_ch_label}{scene_suffix}: {n_t} frames "
+                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
+                    )
+
+                elif n_t == 1:
+                    # Pure z-stack (Z, Y, X)
+                    layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{scene_suffix}"
+                    zarr_path = _os.path.join(
+                        zarr_dir, f'ch{channel_idx}_z{scene_suffix or "0"}')
+                    dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
+                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
+                                   chunks=(1, H, W), dtype=np.float32)
+                    for zi in range(n_z):
+                        z[zi] = np.asarray(dask_arr[zi]).astype(np.float32)
+                    self._stack_zarr_paths.append(zarr_path)
+                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    self.viewer.add_image(wrapper, name=layer_name,
+                                          colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Loaded {_ch_label}{scene_suffix} z-stack: {n_z} slices "
+                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
+                    )
+
+                else:
+                    # Nested time-series-with-z-stack (T, Z, Y, X) — the
+                    # scenario this fix targets. Previously this branch
+                    # picked EITHER T or Z as "the" stack dimension and
+                    # silently discarded the other entirely. Now both are
+                    # preserved as a genuine lazy 4D array; napari adds a
+                    # T slider and a Z slider automatically for 4D layers.
+                    layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{scene_suffix}"
+                    zarr_path = _os.path.join(
+                        zarr_dir, f'ch{channel_idx}_tz{scene_suffix or "0"}')
+                    dask_arr = image.get_image_dask_data('TZYX', C=channel_idx)
+                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
+                                   chunks=(1, 1, H, W), dtype=np.float32)
+                    for t in range(n_t):
+                        for zi in range(n_z):
+                            z[t, zi] = np.asarray(dask_arr[t, zi]).astype(np.float32)
+                    self._stack_zarr_paths.append(zarr_path)
+                    wrapper = _ZarrTZYX_generic(_zarr.open(zarr_path, mode='r'))
+                    self.viewer.add_image(wrapper, name=layer_name,
+                                          colormap=_ch_colormap)
+                    napari_show_info(
+                        f"Loaded {_ch_label}{scene_suffix} T-Z stack: "
+                        f"{n_t} timepoints \u00d7 {n_z} z-slices, "
+                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed, "
+                        f"nothing pre-loaded beyond this write pass)"
+                    )
+
+        self._finalise_stack_load(H, W, microns_per_pixel,
+                                  list(range(n_c)),
                                   n_t if use_aicsimage else n_frames,
                                   n_z if use_aicsimage else 1,
                                   file_path, source='generic')

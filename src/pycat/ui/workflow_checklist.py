@@ -55,14 +55,19 @@ CONDENSATE_PIPELINE = [
     ('cell_analysis',           '7.  Cell Analyzer'),
     ('condensate_segmentation', '8.  Condensate segmentation'),
     ('condensate_analysis',     '9.  Condensate analysis'),
-    ('save_and_clear',          '10. Save & Clear'),
+    ('spatial_metrology',       '10. Spatial Metrology  [optional]'),
+    ('morphological_complexity','11. Morphological Complexity  [optional]'),
+    ('dynamic_spatial',         '12. Dynamic Spatial Phenotyping  [optional]'),
+    ('organizational_metrics',  '13. Organizational Metrics  [optional]'),
+    ('save_and_clear',          '14. Save & Clear'),
 ]
 
 TIMESERIES_PIPELINE = [
     ('open_stack',              '1.  Open IMS / image stack'),
-    ('',                        '2.  Extract reference frame'),
+    ('set_frame_range',         '2.  Select reference frame & range'),
     ('measure_line',            '3.  Measure lines (cell & object diameter)'),
     ('lazy_preprocess_stack',   '4.  Preprocess stack (zarr-backed)'),
+    ('auto_crop_roi',            '4b. Auto-crop ROI  [batch only, optional]'),
     ('ts_cellpose_keyframe',    '5.  Keyframe Cellpose segmentation'),
     ('cell_analysis',           '6.  Cell Analyzer'),
     ('timeseries_condensate',   '7.  Time-Series Condensate Analysis'),
@@ -81,13 +86,96 @@ COLOC_PIPELINE = [
     ('condensate_segmentation', '8.  Condensate segmentation (Ch 1)'),
     ('condensate_analysis',     '9.  Condensate analysis (Ch 1)'),
     ('two_channel_condensate_coloc', '10. Two-Channel Colocalization'),
-    ('save_and_clear',          '11. Save & Clear'),
+    ('save_and_clear',          '14. Save & Clear'),
+]
+
+CELLULAR_BF_PIPELINE = [
+    ('open_image',                 '1.  Open brightfield image'),
+    ('bf_preprocess',              '2.  Preprocess (flat-field, BG, halo, CLAHE)'),
+    ('bf_cell_segmentation',       '3.  Cell segmentation  [optional]'),
+    ('bf_condensate_segmentation', '4.  Segment condensate spots'),
+    ('',                           '5.  OD metrics & per-condensate analysis'),
+    ('',                           '6.  Per-cell summary'),
+    ('',                           '7.  Spatial Metrology  [optional]'),
+    ('',                           '8.  Dynamics (time-series)  [optional]'),
+    ('',                           '9.  OD Texture  [optional]'),
+    ('',                           '10. Frame Quality (time-series)  [optional]'),
+    ('save_and_clear',             '11. Save & Clear'),
+]
+
+INVITRO_FLUOR_PIPELINE = [
+    ('open_image',        '1.  Open fluorescence image'),
+    ('ivf_preprocess',    '2.  Preprocess'),
+    ('ivf_segmentation',  '3.  Segment droplets (whole field)'),
+    ('',                  '4.  Field summary & partition coefficient'),
+    ('',                  '5.  Size distribution fit'),
+    ('',                  '6.  Spatial Metrology  [optional]'),
+    ('',                  '7.  Dynamics & coarsening  [optional]'),
+    ('',                  '8.  Phase diagram / C_sat  [optional]'),
+    ('',                  '9.  Frame Quality  [optional]'),
+    ('save_and_clear',    '10. Save & Clear'),
+]
+
+INVITRO_BF_PIPELINE = [
+    ('open_image',          '1.  Open brightfield image'),
+    ('ivbf_preprocess',     '2.  Preprocess'),
+    ('ivbf_segmentation',   '3.  Segment droplets'),
+    ('',                    '4.  OD & field summary'),
+    ('',                    '5.  Size distribution & contact angle'),
+    ('',                    '6.  Spatial Metrology  [optional]'),
+    ('',                    '7.  Dynamics & coarsening  [optional]'),
+    ('',                    '8.  Focus Quality  [optional]'),
+    ('save_and_clear',      '9.  Save & Clear'),
+]
+
+FIBRIL_PIPELINE = [
+    ('measure_line',            '1.  Measure lines (fibril/object diameter)'),
+    ('upscaling',               '2.  Upscale image  [optional]'),
+    ('',                        '3.  Bilateral filter  [optional]'),
+    ('preprocessing',           '4.  Pre-process image'),
+    ('background_removal',      '5.  Background removal'),
+    ('',                        '6.  Peak & edge enhancement'),
+    ('',                        '7.  Morphological Gaussian filter  [optional]'),
+    ('',                        '8.  Random Forest classification  [optional]'),
+    ('',                        '9.  Local thresholding  [optional]'),
+    ('',                        '10. Label connected components'),
+    ('',                        '11. Measure binary mask'),
+    ('morphological_complexity','12. Morphological Complexity (fractal D, lacunarity, tortuosity, orientation)  [optional]'),
+    ('organizational_metrics',  '13. Organizational Metrics (spacing, clustering, occupancy)  [optional]'),
+    ('save_and_clear',          '14. Save & Clear'),
+]
+
+ZSTACK_PIPELINE = [
+    ('open_image',                     '1.  Open Z-stack (or T-Z stack, pick one T)'),
+    ('zstack_bg_removal',              '2.  3D Background Removal'),
+    ('zstack_cell_segmentation',       '3.  3D Cell Segmentation  [optional]'),
+    ('zstack_condensate_segmentation', '4.  3D Condensate Segmentation'),
+    ('',                               '5.  3D Metrics'),
+    ('save_and_clear',                 '6.  Save & Clear'),
 ]
 
 PIPELINE_DEFS = {
-    'condensate':   CONDENSATE_PIPELINE,
-    'timeseries':   TIMESERIES_PIPELINE,
-    'coloc':        COLOC_PIPELINE,
+    'condensate':    CONDENSATE_PIPELINE,
+    'timeseries':    TIMESERIES_PIPELINE,
+    'coloc':         COLOC_PIPELINE,
+    'cellular_bf':   CELLULAR_BF_PIPELINE,
+    'invitro_fluor': INVITRO_FLUOR_PIPELINE,
+    'invitro_bf':    INVITRO_BF_PIPELINE,
+    'fibril':        FIBRIL_PIPELINE,
+    'zstack':        ZSTACK_PIPELINE,
+}
+
+# Human-readable display names for the checklist header — used instead of
+# pipeline_name.title() so multi-word / abbreviated keys render cleanly.
+PIPELINE_DISPLAY_NAMES = {
+    'condensate':    'Cellular Condensate Analysis',
+    'timeseries':    'Time-Series Condensate Analysis',
+    'coloc':         'Colocalization Analysis',
+    'cellular_bf':   'Cellular Condensate Analysis (Brightfield)',
+    'invitro_fluor': 'In Vitro Condensate Analysis (Fluorescence)',
+    'invitro_bf':    'In Vitro Condensate Analysis (Brightfield)',
+    'fibril':        'Fibril Analysis',
+    'zstack':        'Z-Stack (3D) Condensate Analysis',
 }
 
 
@@ -115,7 +203,9 @@ class WorkflowChecklist(QWidget):
         root.setSpacing(4)
 
         # Header
-        header = QLabel(f"Workflow: {self._pipeline_name.title()}")
+        display_name = PIPELINE_DISPLAY_NAMES.get(
+            self._pipeline_name, self._pipeline_name.replace('_', ' ').title())
+        header = QLabel(f"Workflow: {display_name}")
         font = QFont()
         font.setBold(True)
         font.setPointSize(10)

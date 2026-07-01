@@ -53,6 +53,60 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 
 # ---------------------------------------------------------------------------
+# Lazy mask-stack view
+# ---------------------------------------------------------------------------
+
+class _KeyframeMaskStack:
+    """
+    Lazy read-only view over nearest-keyframe-propagated Cellpose masks.
+
+    Stores only the unique keyframe masks (typically ~n_t/interval of them)
+    instead of materialising a full (T, H, W) array with the same mask
+    duplicated across every frame in its temporal window. For a 600-frame
+    stack at interval=20 (~30 unique masks) and 2048x2048 uint16 masks,
+    this is roughly a 20x memory reduction (~5GB -> ~250MB).
+
+    Exposes the same minimal array-protocol duck-typing that napari and
+    downstream code already rely on for zarr-backed lazy stacks (see
+    _ZarrStack in timeseries_condensate_tools.py): shape, dtype, ndim,
+    __getitem__, __array__, __len__. Read-only — this data is never
+    mutated after creation in the current pipeline.
+    """
+    def __init__(self, keyframe_masks: dict, keyframe_indices: list, n_t: int):
+        self._keyframe_masks   = keyframe_masks
+        self._keyframe_indices = sorted(keyframe_indices)
+        self._n_t = n_t
+        sample = next(iter(keyframe_masks.values()))
+        self.shape = (n_t,) + sample.shape
+        self.dtype = sample.dtype
+        self.ndim  = 3
+
+    def _nearest_keyframe(self, t: int) -> int:
+        return min(self._keyframe_indices, key=lambda k: abs(k - t))
+
+    def __getitem__(self, idx):
+        if isinstance(idx, (int, np.integer)):
+            t = int(idx)
+            if t < 0:
+                t += self._n_t
+            return self._keyframe_masks[self._nearest_keyframe(t)]
+        if isinstance(idx, slice):
+            indices = range(*idx.indices(self._n_t))
+            return np.stack([self[i] for i in indices], axis=0)
+        idx_arr = np.asarray(idx)
+        if idx_arr.ndim == 1:
+            return np.stack([self[int(i)] for i in idx_arr], axis=0)
+        raise IndexError(f"Unsupported index for _KeyframeMaskStack: {idx!r}")
+
+    def __array__(self, dtype=None):
+        arr = np.stack([self[t] for t in range(self._n_t)], axis=0)
+        return arr if dtype is None else arr.astype(dtype)
+
+    def __len__(self):
+        return self._n_t
+
+
+# ---------------------------------------------------------------------------
 # Pure analysis functions
 # ---------------------------------------------------------------------------
 
@@ -102,11 +156,10 @@ def run_keyframe_cellpose(
         if progress_callback:
             progress_callback(i + 1, len(keyframe_indices))
 
-    # Propagate: each frame gets the mask of its nearest keyframe
-    mask_stack = np.zeros((n_t, H, W), dtype=np.uint16)
-    for t in range(n_t):
-        nearest = min(keyframe_indices, key=lambda k: abs(k - t))
-        mask_stack[t] = keyframe_masks[nearest]
+    # Propagate: each frame gets the mask of its nearest keyframe.
+    # Lazy view instead of full (T, H, W) materialisation — see
+    # _KeyframeMaskStack docstring for the memory-saving rationale.
+    mask_stack = _KeyframeMaskStack(keyframe_masks, keyframe_indices, n_t)
 
     return mask_stack, keyframe_indices
 
@@ -224,7 +277,39 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
         run_btn.setEnabled(False)
 
         # Materialise stack to numpy if lazy
-        stack_np = np.asarray(data).astype(np.float32)
+        # Respect frame range set by reference frame selector
+        dr      = ui_instance.central_manager.active_data_class.data_repository
+        t_start = int(dr.get('timeseries_frame_start', 0))
+        t_end   = int(dr.get('timeseries_frame_end', data.shape[0] - 1))
+        t_start = max(0, min(t_start, data.shape[0] - 1))
+        t_end   = max(t_start, min(t_end, data.shape[0] - 1))
+
+        if t_start > 0 or t_end < data.shape[0] - 1:
+            napari_show_info(
+                f"Keyframe Cellpose: using frame range {t_start}–{t_end} "
+                f"({t_end - t_start + 1} of {data.shape[0]} frames)."
+            )
+            stack_np = np.asarray(data[t_start:t_end + 1]).astype(np.float32)
+        else:
+            stack_np = np.asarray(data).astype(np.float32)
+
+        # Apply XY ROI crop if set
+        roi_active = dr.get('timeseries_roi_active', False)
+        if roi_active:
+            y0 = int(dr.get('timeseries_roi_y0', 0))
+            y1 = int(dr.get('timeseries_roi_y1', stack_np.shape[1]))
+            x0 = int(dr.get('timeseries_roi_x0', 0))
+            x1 = int(dr.get('timeseries_roi_x1', stack_np.shape[2]))
+            y0, y1 = max(0, y0), min(stack_np.shape[1], y1)
+            x0, x1 = max(0, x0), min(stack_np.shape[2], x1)
+            stack_np = stack_np[:, y0:y1, x0:x1]
+            napari_show_info(
+                f"Keyframe Cellpose: XY crop y[{y0}:{y1}] x[{x0}:{x1}] applied."
+            )
+
+        # Store range on data repository for condensate analysis step
+        dr['timeseries_frame_start'] = t_start
+        dr['timeseries_frame_end']   = t_end
 
         worker = _KeyframeCellposeWorker(stack_np, cell_diameter, interval)
         ui_instance._ts_cellpose_worker = worker
@@ -239,25 +324,43 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
             run_btn.setEnabled(True)
 
             if max_proj_check.isChecked():
-                # Union of all keyframe masks — conservative cell ROI
+                # Union of all keyframe masks — conservative cell ROI.
+                # np.broadcast_to WITHOUT .copy() creates a read-only
+                # stride-tricked view: the same 2D union array is presented
+                # as (T,H,W) without allocating n_t separate copies in
+                # memory. Safe here since this data is only read/displayed,
+                # never mutated after creation.
                 union = np.zeros(mask_stack.shape[1:], dtype=np.uint16)
                 for t in kf_indices:
                     union = np.where(mask_stack[t] > 0, mask_stack[t], union)
-                mask_stack = np.broadcast_to(union, mask_stack.shape).copy()
+                mask_stack = np.broadcast_to(union, mask_stack.shape)
 
-            # Add (T, H, W) label stack to viewer
+            # Add (T, H, W) label stack to viewer as a genuinely writable
+            # array — napari Labels layers support paint/edit tools, so a
+            # read-only lazy view or broadcast_to view (used above purely
+            # to save memory during storage/return) must be materialised
+            # into a real, independent array here rather than handed to
+            # add_labels() directly. This is a one-time cost paid only if
+            # the user displays the layer, not held throughout the session.
+            display_stack = np.asarray(mask_stack).copy()
+
             ts_mask_name = f"TS Cell Masks [{layer_name}]"
             ui_instance.viewer.add_labels(
-                mask_stack, name=ts_mask_name
+                display_stack, name=ts_mask_name
             )
 
             # Also add frame-0 mask as a standard 2D Labels layer
             # so Cell Analyzer and downstream tools work unchanged
             ui_instance.viewer.add_labels(
-                mask_stack[0], name="Labeled Cell Mask"
+                np.asarray(mask_stack[0]).copy(), name="Labeled Cell Mask"
             )
 
-            # Store in data instance
+            # Store the LAZY (or broadcast-view) version in the data
+            # repository, not display_stack — this data is only ever read,
+            # never mutated, downstream (confirmed: batch_step_registry.py
+            # stores it into per-file state without further writes), so
+            # keeping it lazy here avoids holding a full duplicated-frame
+            # array in memory for the rest of the session.
             data_inst = ui_instance.central_manager.active_data_class
             data_inst.data_repository['ts_cell_mask_stack'] = mask_stack
             data_inst.data_repository['ts_cellpose_keyframes'] = kf_indices

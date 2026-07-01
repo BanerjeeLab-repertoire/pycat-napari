@@ -247,8 +247,11 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     from pycat.toolbox.image_processing_tools import pre_process_image
 
     data_instance = state['data_instance']
-    ball_radius = _get_data(data_instance, 'ball_radius', 50)
-    window_size = _get_data(data_instance, 'cell_diameter', 100) // 2
+    # Prefer recorded params; fall back to data_instance for legacy configs
+    ball_radius = int(params.get('ball_radius',
+                      _get_data(data_instance, 'ball_radius', 50)))
+    window_size = int(params.get('window_size',
+                      _get_data(data_instance, 'cell_diameter', 100) // 2))
 
     # Preprocess segmentation channel (used for Cellpose)
     seg_image = _normalize_to_float(state['image'])
@@ -273,26 +276,55 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
 
 
 def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Run Cellpose on the raw image to get a labeled cell mask."""
-    from pycat.toolbox.segmentation_tools import cellpose_segmentation
-
-    image = state['image']
-    data_instance = state['data_instance']
+    """
+    Run cell segmentation using the method recorded from the GUI session.
+    Supports 'cellpose' (default), 'stardist', and 'random_forest'.
+    Random Forest requires interactive annotation and falls back to Cellpose
+    in headless mode with a warning.
+    """
+    method          = params.get('method', 'cellpose')
+    image           = _normalize_to_float(state.get('preprocessed', state['image']))
+    data_instance   = state['data_instance']
     object_diameter = _get_data(data_instance, 'cell_diameter', 100)
 
-    cell_masks = cellpose_segmentation(image, object_diameter)
-    state['cellpose_mask'] = cell_masks
+    cell_masks = None
 
-    _save_array(cell_masks.astype(np.uint16),
-                output_dir / f"{image_path.stem}_cellpose_mask.tiff")
-    print(f"[PyCAT Batch]   Cellpose done: {len(np.unique(cell_masks))-1} cells found.")
+    if method == 'stardist':
+        try:
+            from stardist.models import StarDist2D
+            from csbdeep.utils import normalize as csbdeep_normalize
+            img = csbdeep_normalize(image, 1, 99.8)
+            model = StarDist2D.from_pretrained('2D_versatile_fluo')
+            cell_masks, _ = model.predict_instances(img)
+            cell_masks = cell_masks.astype(np.uint16)
+            print(f"[PyCAT Batch]   StarDist done: {cell_masks.max()} cells found.")
+        except ImportError:
+            print("[PyCAT Batch]   StarDist not installed — falling back to Cellpose.")
+            method = 'cellpose'
+
+    if method == 'random_forest':
+        print("[PyCAT Batch]   Random Forest requires interactive annotation — "
+              "falling back to Cellpose for headless replay.")
+        method = 'cellpose'
+
+    if method == 'cellpose':
+        from pycat.toolbox.segmentation_tools import cellpose_segmentation
+        cell_masks = cellpose_segmentation(image, object_diameter)
+        cell_masks = np.asarray(cell_masks).astype(np.uint16)
+        print(f"[PyCAT Batch]   Cellpose done: {cell_masks.max()} cells found.")
+
+    state['cellpose_mask'] = cell_masks
+    _save_array(cell_masks, output_dir / f"{image_path.stem}_cell_mask.tiff")
 
 
 def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Run cell_analysis_func on the Cellpose mask to get labeled cells + cell_df."""
     from pycat.toolbox.feature_analysis_tools import cell_analysis_func
 
-    image = state['image']
+    # Use the processed fluorescence image for cell morphology measurements,
+    # matching what the GUI passes: the bg-removed fluorescence layer.
+    image = state.get('preprocessed_fluorescence',
+                       state.get('fluorescence_image', state['image']))
     data_instance = state['data_instance']
     cell_masks = state.get('cellpose_mask')
 
@@ -350,11 +382,14 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     import pandas as pd
 
     # Use the preprocessed fluorescence channel for condensate segmentation.
-    # This is the bg-removed enhanced image of the fluorescence channel,
-    # not the raw image or the segmentation channel preprocessed image.
+    # seg_image_layer → the bg-removed enhanced layer used as the thresholding
+    # source; measure_image_layer → the raw/fluorescence image for intensity.
+    # In replay we map these to the equivalent state arrays:
+    #   seg_image_layer   → state['preprocessed_fluorescence'] (enhanced)
+    #   measure_image_layer → state['fluorescence_image'] (raw intensity)
     original_image = state.get('fluorescence_image', state['image'])
     pre_processed_image = state.get('preprocessed_fluorescence',
-                                     state['preprocessed'])
+                                     state.get('preprocessed', state['image']))
     data_instance = state['data_instance']
     ball_radius = _get_data(data_instance, 'ball_radius', 50)
 
@@ -373,20 +408,48 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     total_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
 
+    # Per-cell bounding boxes from auto_crop_roi step (if it ran).
+    # Processing each cell in its own tight crop avoids operating on the
+    # full 2048×2048 image for every cell — substantial speedup for images
+    # with sparse cells surrounded by large background regions.
+    cell_bboxes = state.get('cell_bboxes')   # {label: (y0,y1,x0,x1)} or None
+
     for label in unique_labels:
         cell_mask_holder = (labeled_cells == label).astype(bool)
-        refined, unrefined = segment_subcellular_objects(
-            original_image.copy(), CMS_img.copy(),
-            cell_mask_holder, label, ball_radius, cell_df,
-            kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
-            local_snr_threshold=params.get('local_snr_threshold', 1.0),
-            global_snr_threshold=params.get('global_snr_threshold', 1.0),
-            intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
-            max_area_fraction=params.get('max_area_fraction', 0.25),
-            min_spot_radius=params.get('min_spot_radius', 2),
-        )
-        total_puncta_mask |= unrefined
-        total_refined_puncta_mask |= refined
+
+        if cell_bboxes and label in cell_bboxes:
+            # Crop both images and mask to the cell bounding box
+            y0, y1, x0, x1 = cell_bboxes[label]
+            orig_crop  = original_image[y0:y1, x0:x1].copy()
+            proc_crop  = CMS_img[y0:y1, x0:x1].copy()
+            mask_crop  = cell_mask_holder[y0:y1, x0:x1]
+
+            refined_crop, unrefined_crop = segment_subcellular_objects(
+                orig_crop, proc_crop, mask_crop, label, ball_radius, cell_df,
+                kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
+                local_snr_threshold=params.get('local_snr_threshold', 1.0),
+                global_snr_threshold=params.get('global_snr_threshold', 1.0),
+                intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
+                max_area_fraction=params.get('max_area_fraction', 0.25),
+                min_spot_radius=params.get('min_spot_radius', 2),
+            )
+            # Stitch results back into full-image mask
+            total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
+            total_refined_puncta_mask[y0:y1, x0:x1] |= refined_crop
+        else:
+            # No bounding box — process full image (original behaviour)
+            refined, unrefined = segment_subcellular_objects(
+                original_image.copy(), CMS_img.copy(),
+                cell_mask_holder, label, ball_radius, cell_df,
+                kurtosis_threshold=params.get('kurtosis_threshold', -3.0),
+                local_snr_threshold=params.get('local_snr_threshold', 1.0),
+                global_snr_threshold=params.get('global_snr_threshold', 1.0),
+                intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
+                max_area_fraction=params.get('max_area_fraction', 0.25),
+                min_spot_radius=params.get('min_spot_radius', 2),
+            )
+            total_puncta_mask |= unrefined
+            total_refined_puncta_mask |= refined
 
     state['puncta_mask'] = total_refined_puncta_mask
     state['puncta_mask_unrefined'] = total_puncta_mask
@@ -518,7 +581,8 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         return
 
     data_instance = state['data_instance']
-    ball_radius = math.ceil(_get_data(data_instance, 'ball_radius', 50))
+    ball_radius = math.ceil(int(params.get('ball_radius',
+                                _get_data(data_instance, 'ball_radius', 50))))
 
     # Background remove segmentation channel
     bg_removed = rb_gaussian_bg_removal_with_edge_enhancement(
@@ -606,9 +670,302 @@ def replay_ts_cellpose_keyframe(state: dict, image_path: Path, params: dict, out
           f"{mask_stack.shape[0]} frames total.")
 
 
+def replay_set_frame_range(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Restore the frame range and optional XY ROI crop recorded from the GUI session.
+    Slices all loaded image arrays to the correct temporal and spatial region
+    so all downstream replay steps see the same data as the GUI session did.
+    """
+    t_start = params.get('frame_start', 0)
+    t_end   = params.get('frame_end', 9999)
+    ref     = params.get('reference_frame', 0)
+    roi_active = params.get('roi_active', False)
+    y0 = params.get('roi_y0', 0)
+    y1 = params.get('roi_y1', None)   # None = full extent
+    x0 = params.get('roi_x0', 0)
+    x1 = params.get('roi_x1', None)
+
+    if state.get('data_instance'):
+        dr = state['data_instance'].data_repository
+        dr['timeseries_frame_start']     = t_start
+        dr['timeseries_frame_end']       = t_end
+        dr['timeseries_reference_frame'] = ref
+        dr['timeseries_n_frames']        = t_end - t_start + 1
+        dr['timeseries_roi_active']      = roi_active
+        dr['timeseries_roi_y0']          = y0
+        dr['timeseries_roi_y1']          = y1
+        dr['timeseries_roi_x0']          = x0
+        dr['timeseries_roi_x1']          = x1
+
+    # Apply temporal slice then spatial crop to all image arrays in state
+    for key in ('image', 'preprocessed', 'fluorescence_image'):
+        arr = state.get(key)
+        if arr is None or not hasattr(arr, 'ndim'):
+            continue
+        # Temporal slice
+        if arr.ndim == 3:
+            t_end_clamped = min(t_end, arr.shape[0] - 1)
+            arr = arr[t_start:t_end_clamped + 1]
+        # Spatial crop
+        if roi_active:
+            _y1 = y1 if y1 is not None else arr.shape[-2]
+            _x1 = x1 if x1 is not None else arr.shape[-1]
+            if arr.ndim == 3:
+                arr = arr[:, y0:_y1, x0:_x1]
+            elif arr.ndim == 2:
+                arr = arr[y0:_y1, x0:_x1]
+        state[key] = arr
+
+    roi_str = (f", ROI y[{y0}:{y1}] x[{x0}:{x1}]" if roi_active else "")
+    print(f"[PyCAT Batch]   Frame range: {t_start}\u2013{t_end} "
+          f"({t_end - t_start + 1} frames, reference={ref}){roi_str}")
+
+
+def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """
+    Automatically detect per-cell bounding boxes for efficient batch processing.
+
+    In the GUI, users draw a rectangle to restrict spatial processing.
+    In batch mode this step computes equivalent bounding boxes automatically
+    using one of two strategies:
+
+    Strategy A — 'cellpose' (default when a cell mask is available):
+        Uses bounding boxes from the labeled cell mask already in state.
+        Each cell is cropped individually for condensate segmentation.
+        Requires cellpose_segmentation to have run first.
+
+    Strategy B — 'multi_otsu':
+        Three-class multi-Otsu thresholding finds the foreground (non-
+        background) region automatically. The bounding box of all foreground
+        pixels is used as a single global crop, and a binary cell mask is
+        generated from the thresholding result.
+        Use for single-channel images without a cell segmentation step,
+        or to restrict processing to a tissue sub-region.
+
+    Both strategies store bboxes in state['cell_bboxes'] as:
+        {cell_label: (y0, y1, x0, x1)}
+
+    replay_condensate_segmentation reads this dict to process each cell
+    in its own tight crop rather than operating on the full image.
+    """
+    from pycat.toolbox.batch_roi_tools import (
+        cell_bboxes_from_mask, multi_otsu_foreground_bbox,
+        multi_otsu_cell_mask,
+    )
+
+    strategy = params.get('strategy', 'auto')
+    padding  = int(params.get('padding_px', 8))
+
+    # Resolve strategy: 'auto' = cellpose if mask exists, else multi_otsu
+    labeled_cells = state.get('labeled_cells') or state.get('cellpose_mask')
+    if strategy == 'auto':
+        strategy = 'cellpose' if (labeled_cells is not None and
+                                   labeled_cells.max() > 0) else 'multi_otsu'
+
+    if strategy == 'cellpose' and labeled_cells is not None and labeled_cells.max() > 0:
+        bboxes = cell_bboxes_from_mask(labeled_cells, padding_px=padding)
+        state['cell_bboxes'] = bboxes
+        print(f"[PyCAT Batch]   Auto-crop (Cellpose): {len(bboxes)} cell bounding boxes computed.")
+        for lbl, (y0, y1, x0, x1) in list(bboxes.items())[:3]:
+            print(f"    Cell {lbl}: y[{y0}:{y1}] x[{x0}:{x1}]  "
+                  f"({y1-y0}×{x1-x0}px)")
+        if len(bboxes) > 3:
+            print(f"    ... and {len(bboxes)-3} more")
+
+    else:
+        # Multi-Otsu strategy
+        image = _normalize_to_float(state.get('preprocessed', state['image']))
+        n_classes = int(params.get('n_otsu_classes', 3))
+        bbox = multi_otsu_foreground_bbox(image, n_classes=n_classes,
+                                           padding_px=padding)
+        if bbox is None:
+            print("[PyCAT Batch]   Auto-crop (multi-Otsu): no foreground detected — "
+                  "using full image.")
+            state['cell_bboxes'] = None
+            return
+
+        y0, y1, x0, x1 = bbox
+        print(f"[PyCAT Batch]   Auto-crop (multi-Otsu): foreground bbox "
+              f"y[{y0}:{y1}] x[{x0}:{x1}]  ({y1-y0}×{x1-x0}px)")
+
+        # Generate a pseudo-cell mask from multi-Otsu for downstream steps
+        # that expect a labeled_cells array (condensate_segmentation, analysis)
+        if state.get('labeled_cells') is None:
+            otsu_mask = multi_otsu_cell_mask(image, n_classes=n_classes)
+            state['cellpose_mask'] = otsu_mask
+            state['labeled_cells'] = otsu_mask
+            print(f"[PyCAT Batch]   Multi-Otsu cell mask: "
+                  f"{otsu_mask.max()} regions found.")
+
+        state['cell_bboxes'] = {lbl: bbox
+                                  for lbl in np.unique(state['labeled_cells'])
+                                  if lbl > 0}
+
+
+
+
+# ---------------------------------------------------------------------------
+# Brightfield / In-vitro replay functions
+# ---------------------------------------------------------------------------
+
+def replay_bf_preprocess(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay brightfield preprocessing (flat-field, BG subtract, halo, CLAHE)."""
+    from pycat.toolbox.brightfield_tools import preprocess_brightfield
+
+    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    result = preprocess_brightfield(
+        image,
+        bg_kernel=params.get('bg_kernel', 50),
+        halo_weight=params.get('halo_weight', 0.35),
+    )
+    state['bf_enhanced']      = result['enhanced']
+    state['bf_bg_subtracted'] = result['bg_subtracted']
+
+    _save_array(result['enhanced'].astype(np.float32),
+                output_dir / f"{image_path.stem}_bf_enhanced.tiff")
+    print(f"[PyCAT Batch]   BF preprocessing done.")
+
+
+def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay brightfield dark-blob condensate segmentation."""
+    from pycat.toolbox.brightfield_tools import segment_bf_condensates
+
+    enhanced = state.get('bf_enhanced')
+    if enhanced is None:
+        print("[PyCAT Batch] BF condensate segmentation: no enhanced image — skipping.")
+        return
+
+    labeled = segment_bf_condensates(
+        enhanced,
+        min_diameter_px=params.get('min_diameter_px', 3.0),
+        max_diameter_px=params.get('max_diameter_px', 50.0),
+        min_circularity=params.get('min_circularity', 0.5),
+    )
+    state['bf_condensate_mask'] = labeled
+    state['cellpose_mask']      = labeled   # alias for downstream compatibility
+    state['labeled_cells']      = labeled
+
+    _save_array(labeled.astype(np.uint16),
+                output_dir / f"{image_path.stem}_bf_condensate_mask.tiff")
+    print(f"[PyCAT Batch]   BF condensate segmentation: {int(labeled.max())} spots.")
+
+
+def replay_bf_cell_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay brightfield Cellpose cell segmentation."""
+    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    diameter = params.get('cell_diameter', 80)
+
+    try:
+        from cellpose import models
+        try:
+            model = models.CellposeModel(pretrained_model='brightfield')
+        except Exception:
+            model = models.CellposeModel(pretrained_model='cyto2')
+        masks, _, _ = model.eval(image, diameter=diameter, channels=[0, 0])
+        state['bf_cell_mask'] = masks.astype(np.int32)
+        _save_array(masks.astype(np.uint16),
+                    output_dir / f"{image_path.stem}_bf_cell_mask.tiff")
+        print(f"[PyCAT Batch]   BF cell segmentation: {int(masks.max())} cells.")
+    except Exception as e:
+        print(f"[PyCAT Batch]   BF cell segmentation failed: {e} — skipping.")
+
+
+def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro fluorescence preprocessing (no cell mask)."""
+    from pycat.toolbox.image_processing_tools import pre_process_image
+
+    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    ball  = params.get('ball_radius', 15)
+    proc  = pre_process_image(image, ball_radius=ball, window_size=ball * 2)
+    state['preprocessed'] = np.asarray(proc).astype(np.float32)
+
+    _save_array(state['preprocessed'],
+                output_dir / f"{image_path.stem}_ivf_preprocessed.tiff")
+    print(f"[PyCAT Batch]   In vitro fluorescence preprocessing done.")
+
+
+def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro fluorescence droplet segmentation (whole field, no cell mask)."""
+    from pycat.toolbox.segmentation_tools import (
+        segment_subcellular_objects, cell_mask_stretching)
+    import pandas as pd
+
+    pre = state.get('preprocessed', state['image'])
+    raw = _normalize_to_float(state['image'])
+    ball = state['data_instance'].data_repository.get('ball_radius', 15)
+
+    H, W = pre.shape
+    whole = np.ones((H, W), dtype=bool)
+    whole[:2, :2] = False
+    cms = cell_mask_stretching(pre, whole.astype(int))
+
+    refined, unrefined = segment_subcellular_objects(
+        raw.copy(), cms.copy(), whole, 1, ball, cell_df=None,
+        min_spot_radius=params.get('min_radius', 2.0),
+        kurtosis_threshold=params.get('kurtosis', -3.0),
+        local_snr_threshold=params.get('local_snr_threshold', 0.8),
+        global_snr_threshold=0.8,
+    )
+    import skimage as sk
+    labeled = sk.measure.label(refined).astype(np.int32)
+    state['ivf_droplet_mask'] = labeled
+    state['cellpose_mask']    = labeled
+    state['labeled_cells']    = labeled
+
+    _save_array(labeled.astype(np.uint16),
+                output_dir / f"{image_path.stem}_ivf_droplet_mask.tiff")
+    print(f"[PyCAT Batch]   In vitro fluorescence segmentation: {int(labeled.max())} droplets.")
+
+
+def replay_ivbf_preprocess(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro brightfield preprocessing."""
+    from pycat.toolbox.brightfield_tools import preprocess_brightfield
+
+    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    result = preprocess_brightfield(
+        image,
+        bg_kernel=params.get('bg_kernel', 60),
+        halo_weight=params.get('halo_weight', 0.3),
+    )
+    state['ivbf_enhanced']      = result['enhanced']
+    state['ivbf_bg_subtracted'] = result['bg_subtracted']
+    state['ivbf_source']        = image
+
+    _save_array(result['enhanced'].astype(np.float32),
+                output_dir / f"{image_path.stem}_ivbf_enhanced.tiff")
+    print(f"[PyCAT Batch]   In vitro BF preprocessing done.")
+
+
+def replay_ivbf_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro brightfield droplet segmentation."""
+    from pycat.toolbox.brightfield_tools import segment_bf_condensates
+
+    enhanced = state.get('ivbf_enhanced')
+    if enhanced is None:
+        print("[PyCAT Batch] IVBF segmentation: no enhanced image — skipping.")
+        return
+
+    labeled = segment_bf_condensates(
+        enhanced,
+        min_diameter_px=params.get('min_d', 4.0),
+        max_diameter_px=params.get('max_d', 200.0),
+        min_circularity=params.get('min_circularity', 0.5),
+    )
+    state['ivbf_droplet_mask'] = labeled
+    state['cellpose_mask']     = labeled
+    state['labeled_cells']     = labeled
+
+    _save_array(labeled.astype(np.uint16),
+                output_dir / f"{image_path.stem}_ivbf_droplet_mask.tiff")
+    print(f"[PyCAT Batch]   In vitro BF segmentation: {int(labeled.max())} droplets.")
+
+
 _STEP_MAP = {
     'open_image':               replay_open_image,
     'open_stack':               replay_open_stack,    # unified IMS + TIFF stack
+    'set_frame_range':          replay_set_frame_range,
+    'auto_crop_roi':            replay_auto_crop_roi,
+    'lazy_preprocess_stack':    lambda s,p,pa,o: print('[PyCAT Batch]   TS preprocessing skipped in headless mode (zarr cache required).'),
     'open_ims_file':            replay_open_stack,    # legacy key — keep for old configs
     'open_image_stack':         replay_open_stack,    # legacy key — keep for old configs
     'measure_line':              replay_measure_line,
@@ -621,6 +978,31 @@ _STEP_MAP = {
     'condensate_analysis':      replay_condensate_analysis,
     'sacf_analysis':            replay_sacf_analysis,
     'ts_cellpose_keyframe':      replay_ts_cellpose_keyframe,
+    'spatial_metrology':        lambda s,p,pa,o: print('[PyCAT Batch]   Spatial metrology skipped in headless mode.'),
+    'morphological_complexity':        lambda s,p,pa,o: print('[PyCAT Batch]   morphological_complexity skipped.'),
+    'dynamic_spatial':        lambda s,p,pa,o: print('[PyCAT Batch]   dynamic_spatial skipped.'),
+    'organizational_metrics':        lambda s,p,pa,o: print('[PyCAT Batch]   organizational_metrics skipped.'),
+    'export_timeseries_video':            lambda s,p,pa,o: print('[PyCAT Batch]   Video export skipped in headless mode.'),
+    'timeseries_condensate_analysis':     lambda s,p,pa,o: print('[PyCAT Batch]   TS condensate analysis skipped in headless mode.'),
+    'two_channel_condensate_coloc':       lambda s,p,pa,o: print('[PyCAT Batch]   Two-channel colocalization skipped in headless mode.'),
+    'bf_preprocess':              replay_bf_preprocess,
+    'bf_cell_segmentation':       replay_bf_cell_segmentation,
+    'bf_condensate_segmentation': replay_bf_condensate_segmentation,
+    'ivf_preprocess':             replay_ivf_preprocess,
+    'ivf_segmentation':           replay_ivf_segmentation,
+    'ivbf_preprocess':            replay_ivbf_preprocess,
+    'ivbf_segmentation':          replay_ivbf_segmentation,
+    'zstack_bg_removal':              lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Z-stack background removal skipped in headless mode '
+        '(batch file loading only extracts single 2D planes — 3D volume batch '
+        'processing is not yet supported; run this step interactively in the '
+        'Z-Stack Condensate Analysis dock).'),
+    'zstack_cell_segmentation':       lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Z-stack cell segmentation skipped in headless mode '
+        '(requires a 3D volume — not available via batch file loading).'),
+    'zstack_condensate_segmentation': lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Z-stack condensate segmentation skipped in headless mode '
+        '(requires a 3D volume — not available via batch file loading).'),
     'save_and_clear':           replay_save_and_clear,
 }
 

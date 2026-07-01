@@ -49,6 +49,13 @@ from pycat.toolbox.obj_based_coloc_analysis_tools import run_manders_coloc, run_
 from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
 from pycat.toolbox.video_export_tools import _add_export_timeseries_video
 from pycat.toolbox.ts_cellpose_tools import _add_run_ts_cellpose
+from pycat.toolbox.spatial_metrology_ui import _add_spatial_metrology
+from pycat.toolbox.advanced_analysis_ui import _add_advanced_analysis
+from pycat.toolbox.condensate_physics_ui import _add_condensate_physics
+from pycat.toolbox.brightfield_ui import BrightfieldCondensateUI
+from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
+from pycat.toolbox.invitro_bf_ui import InVitroBFUI
+from pycat.toolbox.zstack_segmentation_ui import ZStackSegmentationUI
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels, run_label_binary_mask, 
@@ -99,6 +106,18 @@ class BaseUIClass:
             The created dropdown widget populated with layers of the specified type.
         """
         dropdown = QComboBox()
+        # Prevent scroll wheel from changing the dropdown selection when the
+        # user is scrolling through the panel.  The dropdown only consumes
+        # scroll events when it is actively open (popup visible).
+        # Without this, hovering over any dropdown while scrolling the dock
+        # silently changes the selected layer, causing hard-to-notice errors.
+        dropdown.wheelEvent = lambda event: (
+            dropdown.WheelEvent_orig(event)
+            if dropdown.view().isVisible()
+            else event.ignore()
+        )
+        dropdown.WheelEvent_orig = dropdown.__class__.wheelEvent
+
         self.update_dropdown_items(dropdown, layer_type)
 
         # Update the dropdown items whenever layers are added or removed from the viewer
@@ -331,6 +350,9 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)
         self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
         self._add_run_ts_cellpose = lambda **kw: _add_run_ts_cellpose(self, **kw)
+        self._add_spatial_metrology = lambda **kw: _add_spatial_metrology(self, **kw)
+        self._add_advanced_analysis = lambda **kw: _add_advanced_analysis(self, **kw)
+        self._add_condensate_physics = lambda **kw: _add_condensate_physics(self, **kw)
 
     def _add_open_2d_image(self, layout=None, separate_widget=False):
         """Add a widget to open 2D images, optionally in a separate dock."""
@@ -396,8 +418,11 @@ class ToolboxFunctionsUI(BaseUIClass):
             active_name = active.name if active is not None else ''
             self.on_general_button_clicked(
                 run_pre_process_image, None, self.central_manager.active_data_class, self.viewer)
+            dr = self.central_manager.active_data_class.data_repository
             self._record('preprocessing', {
                 'active_layer': active_name,
+                'ball_radius':  int(dr.get('ball_radius', 50)),
+                'window_size':  int(dr.get('cell_diameter', 100)) // 2,
             })
         pre_process_button.clicked.connect(_on_preprocess)
         pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
@@ -503,8 +528,10 @@ class ToolboxFunctionsUI(BaseUIClass):
             self.on_general_button_clicked(
                 run_enhanced_rb_gaussian_bg_removal, None,
                 self.central_manager.active_data_class, self.viewer)
+            dr = self.central_manager.active_data_class.data_repository
             self._record('background_removal', {
                 'active_layer': active_name,
+                'ball_radius':  int(dr.get('ball_radius', 50)),
             })
         remove_background_button.clicked.connect(_on_enhanced_bg_removal)
         remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
@@ -687,46 +714,137 @@ class ToolboxFunctionsUI(BaseUIClass):
 
 
     def _add_run_cellpose_segmentation(self, layout=None, separate_widget=False):
-        """Add a widget for Cellpose segmentation, optionally in a separate dock."""
-        cellpose_layout = QVBoxLayout()
-        self.add_text_label(cellpose_layout, 'Cellpose Segmentation', bold=True) # Add a widget title label
-        self.add_text_label(cellpose_layout, 'Select Image for Cellpose') # Add a text label
-        cellpose_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        cellpose_layout.addWidget(cellpose_dropdown) # Add the dropdown to the layout
-        cellpose_button = QPushButton("Run Cellpose") # Create a button widget
-        def _on_cellpose():
-            self.on_general_button_clicked(
-                run_cellpose_segmentation, self.viewer, cellpose_dropdown,
-                self.central_manager.active_data_class, self.viewer)
-            self._record('cellpose_segmentation', {
-                'image_layer': cellpose_dropdown.currentText(),
-                'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
-                'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
-            })
-        cellpose_button.clicked.connect(_on_cellpose)
-        cellpose_layout.addWidget(cellpose_button) # Add the button to the layout
-        cellpose_widget = QWidget()
-        cellpose_widget.setLayout(cellpose_layout)
-        self._add_widget_to_layout_or_dock(cellpose_widget, layout, separate_widget, "Cellpose Dock")
+        """
+        Unified cell segmentation widget with a method selector.
+        Defaults to Cellpose; offers StarDist and Random Forest as alternatives.
+        """
+        from PyQt5.QtWidgets import QButtonGroup, QRadioButton, QStackedWidget, QGroupBox
 
+        seg_layout = QVBoxLayout()
+        self.add_text_label(seg_layout, 'Cell Segmentation', bold=True)
+
+        # ── Method selector (radio buttons) ─────────────────────────────
+        method_group = QGroupBox("Segmentation method")
+        method_row   = QVBoxLayout(method_group)
+        rb_cellpose  = QRadioButton("Cellpose  (deep learning, recommended)")
+        rb_stardist  = QRadioButton("StarDist  (star-convex, nucleus-optimised)")
+        rb_rf        = QRadioButton("Random Forest  (pixel classifier, manual annotation)")
+        rb_cellpose.setChecked(True)
+        for rb in (rb_cellpose, rb_stardist, rb_rf):
+            method_row.addWidget(rb)
+        seg_layout.addWidget(method_group)
+
+        # ── Shared image dropdown ────────────────────────────────────────
+        self.add_text_label(seg_layout, 'Select image layer:')
+        image_dropdown = self.create_layer_dropdown(napari.layers.Image)
+        seg_layout.addWidget(image_dropdown)
+
+        # ── RF-only extras (annotation layer) — shown/hidden by selection ──
+        rf_extra = QWidget()
+        rf_row   = QVBoxLayout(rf_extra)
+        rf_row.setContentsMargins(0, 0, 0, 0)
+        self.add_text_label(rf_row, 'Select annotation layer (for RF training):')
+        rf_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels)
+        rf_row.addWidget(rf_labels_dropdown)
+        rf_extra.setVisible(False)
+        seg_layout.addWidget(rf_extra)
+
+        def _on_method_changed():
+            rf_extra.setVisible(rb_rf.isChecked())
+
+        rb_cellpose.toggled.connect(_on_method_changed)
+        rb_stardist.toggled.connect(_on_method_changed)
+        rb_rf.toggled.connect(_on_method_changed)
+
+        # ── Run button ───────────────────────────────────────────────────
+        run_btn = QPushButton("Run Segmentation")
+
+        def _on_run():
+            layer_name = image_dropdown.currentText()
+            dr = self.central_manager.active_data_class.data_repository
+
+            if rb_cellpose.isChecked():
+                self.on_general_button_clicked(
+                    run_cellpose_segmentation, self.viewer, image_dropdown,
+                    self.central_manager.active_data_class, self.viewer)
+                self._record('cellpose_segmentation', {
+                    'method': 'cellpose',
+                    'image_layer': layer_name,
+                    'cell_diameter': dr.get('cell_diameter', 100),
+                    'ball_radius':   dr.get('ball_radius', 50),
+                })
+
+            elif rb_stardist.isChecked():
+                self._run_stardist_segmentation(layer_name)
+                self._record('cellpose_segmentation', {
+                    'method': 'stardist',
+                    'image_layer': layer_name,
+                    'cell_diameter': dr.get('cell_diameter', 100),
+                })
+
+            else:  # Random Forest
+                self.on_general_button_clicked(
+                    run_train_and_apply_rf_classifier, self.viewer,
+                    image_dropdown, rf_labels_dropdown,
+                    self.central_manager.active_data_class, self.viewer)
+                self._record('cellpose_segmentation', {
+                    'method': 'random_forest',
+                    'image_layer': layer_name,
+                    'annotation_layer': rf_labels_dropdown.currentText(),
+                })
+
+        run_btn.clicked.connect(_on_run)
+        seg_layout.addWidget(run_btn)
+
+        seg_widget = QWidget()
+        seg_widget.setLayout(seg_layout)
+        self._add_widget_to_layout_or_dock(seg_widget, layout, separate_widget,
+                                            "Cell Segmentation")
+
+    def _run_stardist_segmentation(self, layer_name: str):
+        """Run StarDist 2D segmentation on the named layer."""
+        try:
+            from stardist.models import StarDist2D
+            from csbdeep.utils import normalize as csbdeep_normalize
+        except ImportError:
+            from napari.utils.notifications import show_warning as w
+            w("StarDist not installed. Run: pip install stardist")
+            return
+
+        import numpy as np
+        try:
+            image = self.viewer.layers[layer_name].data
+        except KeyError:
+            from napari.utils.notifications import show_warning as w
+            w(f"Layer '{layer_name}' not found.")
+            return
+
+        from napari.utils.notifications import show_info as napari_show_info
+        napari_show_info("Running StarDist — please wait…")
+
+        img = np.asarray(image).astype(np.float32)
+        img = csbdeep_normalize(img, 1, 99.8)
+
+        model = StarDist2D.from_pretrained('2D_versatile_fluo')
+        labels, _ = model.predict_instances(img)
+        labels = labels.astype(np.uint16)
+
+        dr = self.central_manager.active_data_class.data_repository
+        cell_diameter = float(dr.get('cell_diameter', 100))
+        layer_out = f"StarDist Segmentation on {layer_name}"
+        self.viewer.add_labels(labels, name=layer_out)
+
+        # Also create Labeled Cell Mask for downstream compatibility
+        self.viewer.add_labels(labels.copy(), name="Labeled Cell Mask")
+
+        dr['stardist_labels'] = labels
+        napari_show_info(
+            f"StarDist complete: {labels.max()} cells detected → '{layer_out}'")
 
     def _add_run_train_and_apply_rf_classifier(self, layout=None, separate_widget=False):
-        """Add a widget for training and applying a random forest pixel classifier, optionally in a separate dock."""
-        rf_layout = QVBoxLayout()
-        self.add_text_label(rf_layout, 'Random Forest Pixel Classifier', bold=True) # Add widget title label
-        self.add_text_label(rf_layout, 'Select Annotations for Random Forest') # Add a text label
-        rf_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        rf_layout.addWidget(rf_labels_dropdown) # Add the dropdown to the layout
-        self.add_text_label(rf_layout, 'Select Image for Random Forest') # Add a text label
-        rf_image_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        rf_layout.addWidget(rf_image_dropdown) # Add the dropdown to the layout
-        rf_button = QPushButton("Run Random Forest") # Create a button widget
-        rf_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_train_and_apply_rf_classifier, self.viewer, rf_image_dropdown, rf_labels_dropdown, self.central_manager.active_data_class, self.viewer))
-        rf_layout.addWidget(rf_button) # Add the button to the layout
-        rf_widget = QWidget()
-        rf_widget.setLayout(rf_layout)
-        self._add_widget_to_layout_or_dock(rf_widget, layout, separate_widget, "Random Forest Dock")
+        """Kept for backward compatibility — RF is now in the unified segmentation widget."""
+        self._add_run_cellpose_segmentation(layout=layout,
+                                            separate_widget=separate_widget)
 
 
     def _add_run_local_thresholding(self, layout=None, separate_widget=False):
@@ -1370,6 +1488,22 @@ class AnalysisMethodsUI(BaseUIClass):
         """
         self._switch_analysis(BaseDataClass, CondensateAnalysisUI, *args, **kwargs)
 
+    def _switch_to_invitro_fluor_analysis(self, *args, **kwargs):
+        """Switch to the in vitro fluorescence condensate analysis pipeline."""
+        self._switch_analysis(BaseDataClass, InVitroFluorUI, *args, **kwargs)
+
+    def _switch_to_invitro_bf_analysis(self, *args, **kwargs):
+        """Switch to the in vitro brightfield condensate analysis pipeline."""
+        self._switch_analysis(BaseDataClass, InVitroBFUI, *args, **kwargs)
+
+    def _switch_to_zstack_analysis(self, *args, **kwargs):
+        """Switch to the Z-stack (3D) condensate segmentation pipeline."""
+        self._switch_analysis(BaseDataClass, ZStackSegmentationUI, *args, **kwargs)
+
+    def _switch_to_brightfield_analysis(self, *args, **kwargs):
+        """Switch to the brightfield condensate analysis pipeline."""
+        self._switch_analysis(BaseDataClass, BrightfieldCondensateUI, *args, **kwargs)
+
     def _switch_to_timeseries_analysis(self, *args, **kwargs):
         """Switches the analysis interface to time-series condensate analysis."""
         self._switch_analysis(BaseDataClass, TimeSeriesCondensateUI, *args, **kwargs)
@@ -1483,6 +1617,12 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         # Activate the workflow checklist for this pipeline
         try:
             self.central_manager.workflow_checklist.activate('condensate')
+            # Replay any steps already recorded before the pipeline was opened
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp:
+                for step in bp.config.get('steps', []):
+                    self.central_manager.workflow_checklist.on_step_recorded(
+                        step['step'])
         except Exception:
             pass
 
@@ -1497,6 +1637,19 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.condensate_layout)
+
+        # ── Spatial Metrology ───────────────────────────────────────────────
+        self.central_manager.toolbox_functions_ui._add_spatial_metrology(
+            layout=self.condensate_layout)
+
+        # ── Advanced Analysis (Morphological / Dynamic / Organizational) ──
+        self.central_manager.toolbox_functions_ui._add_advanced_analysis(
+            layout=self.condensate_layout)
+
+        # ── Condensate Biophysics (MSD, Csat, kinetics, QC) ─────────────
+        self.central_manager.toolbox_functions_ui._add_condensate_physics(
+            layout=self.condensate_layout)
+
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.condensate_layout)
         # ... Add other components in the order you want ...
 
@@ -1541,6 +1694,12 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # Activate the workflow checklist for this pipeline
         try:
             self.central_manager.workflow_checklist.activate('timeseries')
+            # Replay any steps already recorded before the pipeline was opened
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp:
+                for step in bp.config.get('steps', []):
+                    self.central_manager.workflow_checklist.on_step_recorded(
+                        step['step'])
         except Exception:
             pass
 
@@ -1582,7 +1741,13 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # ── Step 7: time-series condensate analysis ───────────────────────
         tfu._add_run_timeseries_condensate_analysis(layout=self.ts_layout)
 
-        # ── Step 8: export video for presentations ─────────────────────────
+        # ── Step 8: advanced analysis (morphological/dynamic/org) ──────────
+        tfu._add_advanced_analysis(layout=self.ts_layout)
+
+        # ── Step 8b: condensate biophysics ───────────────────────────────
+        tfu._add_condensate_physics(layout=self.ts_layout)
+
+        # ── Step 9: export video for presentations ──────────────────────────
         tfu._add_export_timeseries_video(layout=self.ts_layout)
 
         # ── Step 8: save and clear ────────────────────────────────────────
@@ -1605,85 +1770,320 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
     def _add_reference_frame_selector(self, layout):
         """
-        Widget that lets the user extract a single reference frame from a
-        (T,H,W) stack layer and add it as a 2D layer so that pre-processing
-        and Cellpose can operate on it normally.
+        Widget for selecting a reference frame and optionally restricting all
+        subsequent analysis to a contiguous sub-range of the stack.
+
+        The frame range is stored in the data repository and respected by:
+          - Lazy stack preprocessing (only processes the selected range)
+          - Keyframe Cellpose (keyframes only within the range)
+          - Time-Series Condensate Analysis (iterates only over the range)
+          - Save & Clear (saves only the range if a sub-range is active)
+
+        This lets users analyse a specific phase of an experiment
+        (e.g. frames 100–400 after stimulus addition) without modifying
+        the source file or loading the whole stack into memory.
         """
-        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QSpinBox, QPushButton
+        from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QSpinBox,
+                                      QPushButton, QCheckBox, QLabel)
         import numpy as np
 
-        group = QGroupBox("Step 2 — Select Reference Frame")
-        form = QFormLayout(group)
+        group = QGroupBox("Step 2 — Reference Frame & Analysis Range")
+        form  = QFormLayout(group)
 
         stack_dropdown = self.central_manager.toolbox_functions_ui.create_layer_dropdown(
             napari.layers.Image
         )
         form.addRow("Stack layer:", stack_dropdown)
 
+        # Reference frame
         frame_spin = QSpinBox()
         frame_spin.setRange(0, 9999)
         frame_spin.setValue(0)
         frame_spin.setToolTip(
-            "Frame index (0-based) to use for pre-processing, Cellpose, and cell analysis. "
-            "This frame's cell mask will be propagated to all other frames."
+            "Frame index (0-based) to use for pre-processing and Cellpose. "
+            "This frame's cell mask is propagated to all analysed frames."
         )
-        form.addRow("Reference frame index:", frame_spin)
+        form.addRow("Reference frame:", frame_spin)
 
-        extract_btn = QPushButton("Extract Reference Frame → 2D Layer")
+        # Frame range
+        range_check = QCheckBox("Restrict to frame range")
+        range_check.setChecked(False)
+        range_check.setToolTip(
+            "When checked, all subsequent steps (preprocessing, Cellpose, "
+            "condensate analysis) operate only on frames in the selected range. "
+            "Useful for analysing a specific phase of the experiment."
+        )
+        form.addRow("", range_check)
+
+        start_spin = QSpinBox()
+        start_spin.setRange(0, 9999)
+        start_spin.setValue(0)
+        start_spin.setEnabled(False)
+        start_spin.setToolTip("First frame of the analysis range (inclusive, 0-based).")
+        form.addRow("Start frame:", start_spin)
+
+        end_spin = QSpinBox()
+        end_spin.setRange(0, 9999)
+        end_spin.setValue(599)
+        end_spin.setEnabled(False)
+        end_spin.setToolTip("Last frame of the analysis range (inclusive, 0-based).")
+        form.addRow("End frame:", end_spin)
+
+        range_info = QLabel("")
+        range_info.setStyleSheet("color: #aaa; font-size: 9pt;")
+        form.addRow("", range_info)
+
+        def _update_range_controls():
+            enabled = range_check.isChecked()
+            start_spin.setEnabled(enabled)
+            end_spin.setEnabled(enabled)
+            if enabled:
+                n = end_spin.value() - start_spin.value() + 1
+                range_info.setText(f"{n} frames selected")
+            else:
+                range_info.setText("")
+
+        def _update_count():
+            if range_check.isChecked():
+                n = end_spin.value() - start_spin.value() + 1
+                range_info.setText(f"{n} frames selected")
+
+        range_check.stateChanged.connect(lambda _: _update_range_controls())
+        start_spin.valueChanged.connect(lambda _: _update_count())
+        end_spin.valueChanged.connect(lambda _: _update_count())
+
+        # Auto-populate range from stack when dropdown changes
+        def _on_stack_changed():
+            name = stack_dropdown.currentText()
+            try:
+                layer = self.viewer.layers[name]
+                n_t = layer.data.shape[0] if layer.data.ndim == 3 else 1
+                end_spin.setValue(max(0, n_t - 1))
+                end_spin.setMaximum(n_t - 1)
+                start_spin.setMaximum(n_t - 1)
+                frame_spin.setMaximum(n_t - 1)
+            except Exception:
+                pass
+        stack_dropdown.currentIndexChanged.connect(_on_stack_changed)
+
+        # ── XY ROI crop controls ─────────────────────────────────────────
+        from PyQt5.QtWidgets import QComboBox as _QCB, QGroupBox as _QGB
+
+        roi_grp = _QGB("XY Region of Interest")
+        roi_grp.setFlat(True)
+        roi_grp_layout = QVBoxLayout(roi_grp)
+        roi_grp_layout.setContentsMargins(0, 4, 0, 0)
+
+        # ── GUI interactive mode ──────────────────────────────────────────
+        roi_check = QCheckBox("Restrict to drawn rectangle (interactive)")
+        roi_check.setChecked(False)
+        roi_check.setToolTip(
+            "Draw a Rectangle shape on the stack layer, then check this box.\n"
+            "All preprocessing steps in this session will be cropped to that region.\n"
+            "In batch replay, the automatic strategy below is used instead."
+        )
+        roi_grp_layout.addWidget(roi_check)
+
+        roi_shapes_dd = self.central_manager.toolbox_functions_ui.create_layer_dropdown(
+            napari.layers.Shapes)
+        roi_shapes_dd.setEnabled(False)
+        roi_shapes_dd.setToolTip("Shapes layer containing the Rectangle to crop to.")
+        roi_grp_layout.addWidget(roi_shapes_dd)
+
+        # ── Batch auto-crop strategy ──────────────────────────────────────
+        batch_roi_check = QCheckBox("Enable auto-crop in batch replay")
+        batch_roi_check.setChecked(True)
+        batch_roi_check.setToolTip(
+            "In headless batch mode, automatically compute cell bounding boxes\n"
+            "so condensate segmentation runs in each cell's tight crop rather\n"
+            "than the full image — much faster for sparse fields.\n\n"
+            "Strategy A (Cellpose): uses bounding boxes from the cell mask.\n"
+            "Strategy B (Multi-Otsu): 3-class thresholding finds cells without\n"
+            "a separate segmentation step — best for single-channel images."
+        )
+        roi_grp_layout.addWidget(batch_roi_check)
+
+        strategy_dd = _QCB()
+        strategy_dd.addItems([
+            "auto  (Cellpose bbox if mask available, else Multi-Otsu)",
+            "cellpose  (bounding boxes from cell mask)",
+            "multi_otsu  (3-class threshold, no cell mask needed)",
+        ])
+        strategy_dd.setEnabled(True)
+        strategy_dd.wheelEvent = lambda e: (
+            strategy_dd.__class__.wheelEvent(strategy_dd, e)
+            if strategy_dd.view().isVisible() else e.ignore()
+        )
+        roi_grp_layout.addWidget(strategy_dd)
+
+        otsu_classes_spin = QSpinBox()
+        otsu_classes_spin.setRange(2, 5)
+        otsu_classes_spin.setValue(3)
+        otsu_classes_spin.setPrefix("Otsu classes: ")
+        otsu_classes_spin.setToolTip(
+            "Number of intensity classes for multi-Otsu thresholding.\n"
+            "3 = background / cytoplasm / condensates (recommended).\n"
+            "2 = simple background / cell threshold."
+        )
+        roi_grp_layout.addWidget(otsu_classes_spin)
+
+        roi_info = QLabel("")
+        roi_info.setStyleSheet("color: #aaa; font-size: 9pt;")
+        roi_grp_layout.addWidget(roi_info)
+
+        form.addRow(roi_grp)
+
+        def _on_roi_toggle():
+            enabled = roi_check.isChecked()
+            roi_shapes_dd.setEnabled(enabled)
+            if not enabled:
+                roi_info.setText("")
+
+        roi_check.stateChanged.connect(lambda _: _on_roi_toggle())
+
+        def _get_roi_bbox():
+            """
+            Extract (y0, y1, x0, x1) crop box from the first Rectangle shape
+            in the selected Shapes layer.  Returns None if no valid rectangle found.
+            """
+            try:
+                shapes_layer = self.viewer.layers[roi_shapes_dd.currentText()]
+            except KeyError:
+                return None
+            if not shapes_layer.data:
+                return None
+            # napari shapes data: list of (N,2) arrays in (y,x) order
+            for shape_data in shapes_layer.data:
+                pts = np.asarray(shape_data)
+                if pts.ndim == 2 and pts.shape[1] == 2:
+                    y0 = int(np.floor(pts[:,0].min()))
+                    y1 = int(np.ceil(pts[:,0].max()))
+                    x0 = int(np.floor(pts[:,1].min()))
+                    x1 = int(np.ceil(pts[:,1].max()))
+                    return (y0, y1, x0, x1)
+            return None
+
+        extract_btn = QPushButton("Apply ROI / Range & Extract Reference Frame")
+        extract_btn.setToolTip(
+            "Extracts the reference frame (cropped if ROI is set) as a 2D layer\n"
+            "and stores the frame range and XY crop so all downstream steps\n"
+            "operate on the same spatial and temporal region."
+        )
 
         def _on_extract():
             layer_name = stack_dropdown.currentText()
             try:
                 layer = self.viewer.layers[layer_name]
             except KeyError:
-                from napari.utils.notifications import show_warning as napari_show_warning
-                napari_show_warning(f"Layer '{layer_name}' not found.")
+                from napari.utils.notifications import show_warning as w
+                w(f"Layer '{layer_name}' not found.")
                 return
 
             data = layer.data
             if data.ndim < 3:
-                from napari.utils.notifications import show_warning as napari_show_warning
-                napari_show_warning("Selected layer is already 2D — no extraction needed.")
+                from napari.utils.notifications import show_warning as w
+                w("Selected layer is already 2D — no extraction needed.")
                 return
 
-            frame_idx = int(frame_spin.value())
-            if frame_idx >= data.shape[0]:
-                from napari.utils.notifications import show_warning as napari_show_warning
-                napari_show_warning(
-                    f"Frame index {frame_idx} out of range "
-                    f"(stack has {data.shape[0]} frames)."
-                )
-                return
+            n_t = data.shape[0]
+            H   = data.shape[1]
+            W   = data.shape[2]
+            frame_idx = min(int(frame_spin.value()), n_t - 1)
 
-            ref_frame = data[frame_idx].astype(np.float32)
-            ref_name = f"{layer_name} [frame {frame_idx}]"
+            # ── Temporal range ───────────────────────────────────────────
+            if range_check.isChecked():
+                t_start = max(0, min(int(start_spin.value()), n_t - 1))
+                t_end   = max(t_start, min(int(end_spin.value()), n_t - 1))
+            else:
+                t_start, t_end = 0, n_t - 1
 
-            # Save the current time slider position so we can restore it
-            # after adding the 2D layer.  Napari resets dims.current_step
-            # to all-zeros when a 2D layer is added on top of a 3D stack,
-            # which collapses the time slider and makes the original stack
-            # appear stuck.
+            # ── XY crop ─────────────────────────────────────────────────
+            y0, y1, x0, x1 = 0, H, 0, W   # defaults: full frame
+            if roi_check.isChecked():
+                bbox = _get_roi_bbox()
+                if bbox is None:
+                    from napari.utils.notifications import show_warning as w
+                    w("No valid Rectangle shape found in the selected Shapes layer.")
+                    return
+                y0_raw, y1_raw, x0_raw, x1_raw = bbox
+                # Clamp to image bounds
+                y0 = max(0, y0_raw);  y1 = min(H, y1_raw)
+                x0 = max(0, x0_raw);  x1 = min(W, x1_raw)
+                if y1 <= y0 or x1 <= x0:
+                    from napari.utils.notifications import show_warning as w
+                    w(f"ROI bounding box is degenerate: y=[{y0},{y1}] x=[{x0},{x1}]")
+                    return
+                roi_info.setText(f"Crop: y[{y0}:{y1}] x[{x0}:{x1}]  "
+                                  f"({y1-y0}×{x1-x0} px)")
+
+            # ── Store everything in data repository ──────────────────────
+            dr = self.central_manager.active_data_class.data_repository
+            dr['timeseries_reference_frame'] = frame_idx
+            dr['timeseries_frame_start']     = t_start
+            dr['timeseries_frame_end']        = t_end
+            dr['timeseries_n_frames']         = t_end - t_start + 1
+            dr['timeseries_roi_y0']           = y0
+            dr['timeseries_roi_y1']           = y1
+            dr['timeseries_roi_x0']           = x0
+            dr['timeseries_roi_x1']           = x1
+            dr['timeseries_roi_active']       = roi_check.isChecked()
+
+            # ── Extract and crop the reference frame ─────────────────────
+            ref_frame = np.asarray(data[frame_idx]).astype(np.float32)
+            if roi_check.isChecked():
+                ref_frame = ref_frame[y0:y1, x0:x1]
+
+            ref_name  = f"{layer_name} [frame {frame_idx}]"
+            if roi_check.isChecked():
+                ref_name += f" [ROI {y1-y0}×{x1-x0}]"
+
             saved_step = tuple(self.viewer.dims.current_step)
-
             self.viewer.add_image(ref_frame, name=ref_name)
-
-            # Restore the time slider position.  The 2D layer has fewer
-            # dims so napari may have zeroed axis 0 (the T axis).
             try:
                 self.viewer.dims.current_step = saved_step
             except Exception:
                 pass
 
-            # Store reference frame index in data instance for the TS tool
-            self.central_manager.active_data_class.data_repository[
-                'timeseries_reference_frame'
-            ] = frame_idx
-
             from napari.utils.notifications import show_info as napari_show_info
+            range_str = (f"frames {t_start}–{t_end} ({t_end-t_start+1} frames)"
+                         if range_check.isChecked() else f"all {n_t} frames")
+            roi_str   = (f", ROI y[{y0}:{y1}] x[{x0}:{x1}]"
+                         if roi_check.isChecked() else "")
             napari_show_info(
                 f"Reference frame {frame_idx} extracted as '{ref_name}'. "
-                "Use this layer for pre-processing and Cellpose."
+                f"Analysis range: {range_str}{roi_str}."
             )
+
+            # Determine batch auto-crop strategy from UI
+            strategy_text = strategy_dd.currentText().split()[0]   # 'auto', 'cellpose', 'multi_otsu'
+
+            # Record for batch — includes both the GUI rectangle crop (for
+            # replay_set_frame_range) and the batch auto-crop config
+            self.central_manager.toolbox_functions_ui._record(
+                'set_frame_range', {
+                    'stack_layer':     layer_name,
+                    'reference_frame': frame_idx,
+                    'frame_start':     t_start,
+                    'frame_end':       t_end,
+                    'roi_y0': y0, 'roi_y1': y1,
+                    'roi_x0': x0, 'roi_x1': x1,
+                    'roi_active': roi_check.isChecked(),
+                })
+
+            # Record the auto-crop step separately so it appears in the
+            # batch config and can be replayed in headless mode
+            if batch_roi_check.isChecked():
+                self.central_manager.toolbox_functions_ui._record(
+                    'auto_crop_roi', {
+                        'strategy':       strategy_text,
+                        'n_otsu_classes': otsu_classes_spin.value(),
+                        'padding_px':     8,
+                    })
+
+        form.addRow("", extract_btn)
+        extract_btn.clicked.connect(_on_extract)
+        layout.addWidget(group)
+
 
         extract_btn.clicked.connect(_on_extract)
         form.addRow("", extract_btn)
@@ -1990,7 +2390,35 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         """
         Sets up the UI components specifically required for fibril analysis, detailing the
         process flow and enabling comprehensive analysis features through a structured UI layout.
+
+        Pipeline order:
+          1-9.  Preprocessing, enhancement, and segmentation (unchanged from baseline)
+          10.   Label connected components — converts the final binary mask into
+                individually-labeled fibril objects, required for the per-object
+                spatial metrology steps that follow.
+          11.   Measure binary mask — whole-image intensity/area summary (baseline).
+          12.   Morphological Complexity — fractal dimension, lacunarity, and
+                tortuosity (path length vs. end-to-end distance) are the standard
+                quantitative descriptors for fibrillar/filamentous structures;
+                orientation order parameter quantifies fibril bundle alignment
+                (nematic order), relevant for amyloid, collagen, cytoskeletal,
+                or DNA fibril studies.
+          13.   Organizational Metrics — spatial entropy, DBSCAN cluster sizing,
+                inter-fibril spacing, and network occupancy characterise how
+                fibrils are distributed and bundled across the field.
+          14.   Save & Clear.
         """
+        # Activate the workflow checklist for this pipeline
+        try:
+            self.central_manager.workflow_checklist.activate('fibril')
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp:
+                for step in bp.config.get('steps', []):
+                    self.central_manager.workflow_checklist.on_step_recorded(
+                        step['step'])
+        except Exception:
+            pass
+
         # Setup the specific UI components for fibril analysis
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.fibril_layout)
@@ -2001,7 +2429,16 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_morphological_gaussian_filter(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_local_thresholding(layout=self.fibril_layout)
+        self.central_manager.toolbox_functions_ui._add_run_label_binary_mask(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_measure_binary_mask(layout=self.fibril_layout)
+
+        # ── Spatial metrology additions ─────────────────────────────────
+        # Morphological Complexity and Organizational Metrics tabs from the
+        # Advanced Analysis dock apply directly to labeled fibril masks —
+        # tortuosity and orientation order in particular were designed with
+        # fibrillar structures in mind (see morphological_complexity_tools.py).
+        self.central_manager.toolbox_functions_ui._add_advanced_analysis(layout=self.fibril_layout)
+
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.fibril_layout)
         # ... Add other components in the order you want ...
 
@@ -2090,6 +2527,118 @@ class MenuManager:
         self.file_menu = self.viewer.window._qt_window.menuBar().addMenu('★ Open/Save File(s)')
         self._add_file_io_methods_to_menu()
 
+    def _open_session_loader(self):
+        """Open a folder browser to select a PyCAT output directory and reload."""
+        from PyQt5.QtWidgets import (QFileDialog, QDialog, QVBoxLayout,
+                                      QListWidget, QPushButton, QLabel,
+                                      QHBoxLayout, QCheckBox, QProgressBar,
+                                      QAbstractItemView)
+        from pathlib import Path
+        from napari.utils.notifications import (
+            show_info as napari_show_info,
+            show_warning as napari_show_warning,
+        )
+
+        folder = QFileDialog.getExistingDirectory(
+            None, "Select PyCAT Output Folder", "",
+            QFileDialog.ShowDirsOnly
+        )
+        if not folder:
+            return
+        folder = Path(folder)
+
+        groups = scan_output_folder(folder)
+        if not groups:
+            napari_show_warning(
+                f"No recognised PyCAT outputs found in {folder.name}.\n"
+                "Expected files like *_preprocessed.tiff, *_cell_df.csv, etc."
+            )
+            return
+
+        dlg = QDialog()
+        dlg.setWindowTitle(f"Load Session — {folder.name}")
+        dlg.setMinimumWidth(520)
+        dlg.setMinimumHeight(480)
+        vl = QVBoxLayout(dlg)
+
+        n_files = sum(len(v) for v in groups.values())
+        vl.addWidget(QLabel(
+            f"Found {n_files} PyCAT output file(s) from "
+            f"{len(groups)} image stem(s) in:\n{folder}"
+        ))
+
+        group_list = QListWidget()
+        group_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        for stem, files in sorted(groups.items()):
+            n_img = sum(1 for f in files if f["layer_type"] == "image")
+            n_lbl = sum(1 for f in files if f["layer_type"] == "labels")
+            n_df  = sum(1 for f in files if f["layer_type"] == "dataframe")
+            group_list.addItem(
+                f"{stem}  —  {n_img} image(s), {n_lbl} label(s), {n_df} table(s)"
+            )
+        group_list.selectAll()
+        vl.addWidget(group_list)
+
+        prog_bar    = QProgressBar(); prog_bar.setVisible(False)
+        status_lbl  = QLabel("")
+        vl.addWidget(prog_bar)
+        vl.addWidget(status_lbl)
+
+        btn_row    = QHBoxLayout()
+        load_btn   = QPushButton("Load Selected")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(load_btn); btn_row.addWidget(cancel_btn)
+        vl.addLayout(btn_row)
+
+        cancel_btn.clicked.connect(dlg.reject)
+
+        def _on_load():
+            selected_stems = {
+                item.text().split("  —  ")[0].strip()
+                for item in group_list.selectedItems()
+            }
+            if not selected_stems:
+                napari_show_warning("No images selected.")
+                return
+
+            all_files = [
+                info for stem, files in groups.items()
+                if stem in selected_stems
+                for info in files
+            ]
+            n = len(all_files)
+            prog_bar.setMaximum(n); prog_bar.setValue(0)
+            prog_bar.setVisible(True); load_btn.setEnabled(False)
+
+            data_instance = self.central_manager.active_data_class
+
+            def _prog(done, total):
+                prog_bar.setValue(done)
+                status_lbl.setText(f"Loading {done}/{total}…")
+
+            result = load_session(
+                folder, self.central_manager.viewer,
+                data_instance, progress_callback=_prog,
+            )
+
+            prog_bar.setVisible(False); load_btn.setEnabled(True)
+            n_layers = len(result["loaded_layers"])
+            n_dfs    = len(result["loaded_dfs"])
+            n_skip   = len(result["skipped"])
+            status_lbl.setText(
+                f"Loaded {n_layers} layer(s), {n_dfs} table(s)"
+                + (f", {n_skip} skipped." if n_skip else ".")
+            )
+            napari_show_info(
+                f"Session reloaded: {n_layers} layers, {n_dfs} DataFrames"
+                + (f" ({n_skip} skipped — see terminal)." if n_skip else ".")
+            )
+            for p, reason in result["skipped"]:
+                print(f"[PyCAT Session] Skipped {p.name}: {reason}")
+
+        load_btn.clicked.connect(_on_load)
+        dlg.exec_()
+
     def make_lambda(self, action_method, kwargs):
         """
         Creates a lambda function for triggering actions with arguments. This allows
@@ -2153,6 +2702,7 @@ class MenuManager:
             file_io_methods_dict = {
                 'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
                 'Open Image Stack (T/Z / IMS)': (self.central_manager.file_io.open_stack, {}),
+                'Load Previous Session Results': (self._open_session_loader, {}),
                 # IMS files are now handled by the unified Open Stack menu item above
                 'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
@@ -2165,8 +2715,12 @@ class MenuManager:
         Add specific analysis methods as actions to the analysis methods menu. 
         """
         condensate_analysis_dict = {
-            'Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository})
+            'Cellular Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Cellular Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_brightfield_analysis, {}),
+            'In Vitro Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
+            'In Vitro Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
+            'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Z-Stack (3D) Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
         }
         self._add_actions_to_menu(condensate_analysis_dict, self.analysis_methods_menu)
 

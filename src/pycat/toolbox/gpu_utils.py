@@ -75,6 +75,11 @@ if os.environ.get("PYCAT_FORCE_CPU", "0") != "1":
 # Transfer helpers
 # ---------------------------------------------------------------------------
 
+def gpu_available() -> bool:
+    """Return True if CuPy is installed and a CUDA GPU is functional."""
+    return GPU_AVAILABLE
+
+
 def to_gpu(arr: np.ndarray):
     """Send a NumPy array to the GPU. Returns unchanged if GPU unavailable."""
     if GPU_AVAILABLE:

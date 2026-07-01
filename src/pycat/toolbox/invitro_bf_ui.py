@@ -1,0 +1,492 @@
+"""
+PyCAT In Vitro Brightfield Condensate UI
+==========================================
+Pipeline for brightfield images of in vitro LLPS droplet assays.
+
+Pipeline
+--------
+  Step 2 — Preprocess    : flat-field, BG subtract, halo correction, CLAHE
+  Step 3 — Segment       : dark-blob segmentation (no cell mask)
+  Step 4 — OD metrics    : optical density, CNR, field summary
+  Step 5 — Size & shape  : size distribution fit, contact angle
+  Step 6 — Spatial       : NND, Ripley, etc
+  Step 7 — Dynamics      : coarsening, sedimentation, tracking, MSD, fusions
+  Step 8 — Focus QC      : Brenner/Tenengrad focus quality
+
+Compared to In Vitro Fluorescence:
+  - Uses OD not fluorescence intensity
+  - Contact angle measurement available (BF-specific)
+  - No bleaching QC (no fluorophore)
+  - Sedimentation more visible in BF (contrast increases as droplets settle)
+"""
+from __future__ import annotations
+import numpy as np
+import pandas as pd
+import napari
+from napari.utils.notifications import (
+    show_info    as napari_show_info,
+    show_warning as napari_show_warning,
+)
+from PyQt5.QtWidgets import (
+    QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
+    QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
+    QScrollArea, QSizePolicy,
+)
+from PyQt5.QtCore import QThread, pyqtSignal
+
+
+class _IVBFWorker(QThread):
+    finished = pyqtSignal(object)
+    error    = pyqtSignal(str)
+    def __init__(self, fn):
+        super().__init__(); self._fn = fn
+    def run(self):
+        try:    self.finished.emit(self._fn())
+        except Exception:
+            import traceback; self.error.emit(traceback.format_exc())
+
+
+class InVitroBFUI:
+    def __init__(self, viewer, central_manager):
+        self.viewer = viewer; self.central_manager = central_manager
+
+    def _dr(self):  return self.central_manager.active_data_class.data_repository
+    def _mpx(self): return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
+    def _record(self, step, params):
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+        if bp: bp.record(step, params)
+    def create_layer_dropdown(self, lt):
+        return self.central_manager.toolbox_functions_ui.create_layer_dropdown(lt)
+    def _img(self, dd):
+        arr = np.asarray(self.viewer.layers[dd.currentText()].data).astype(np.float32)
+        mn, mx = arr.min(), arr.max()
+        return (arr-mn)/(mx-mn+1e-8) if mx > mn else arr
+
+    def setup_ui(self):
+        try:
+            self.central_manager.workflow_checklist.activate('invitro_bf')
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp:
+                for step in bp.config.get('steps', []):
+                    self.central_manager.workflow_checklist.on_step_recorded(
+                        step['step'])
+        except Exception:
+            pass
+
+        layout = QVBoxLayout(); layout.setSpacing(4)
+        header = QLabel(
+            "<b>In Vitro Brightfield Condensate Analysis</b><br>"
+            "<span style='color:#888;font-size:9pt;'>"
+            "Dark droplets on bright buffer background — no cell segmentation.</span>"
+        )
+        header.setWordWrap(True)
+        header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
+        layout.addWidget(header)
+
+        _ivbf_preprocessing(self, layout)
+        _ivbf_segmentation(self, layout)
+        _ivbf_od_field(self, layout)
+        _ivbf_size_contact(self, layout)
+        _ivbf_spatial(self, layout)
+        _ivbf_dynamics(self, layout)
+        _ivbf_focus_qc(self, layout)
+
+        layout.addStretch()
+        main_w = QWidget(); main_w.setLayout(layout)
+        main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(main_w)
+        self.viewer.window.add_dock_widget(scroll, name="In Vitro Brightfield Analysis")
+
+
+def _run_btn(form, label="▶  Run"):
+    prog = QProgressBar(); prog.setVisible(False)
+    btn  = QPushButton(label)
+    form.addRow(prog); form.addRow(btn)
+    return prog, btn
+
+
+def _show(title, tables):
+    from pycat.ui.ui_utils import show_dataframes_dialog
+    show_dataframes_dialog(title, [(k, v.round(4) if hasattr(v,'round') else v)
+                                   for k,v in tables])
+
+
+def _ivbf_preprocessing(ui, layout):
+    grp  = QGroupBox("Step 2 — Preprocess Brightfield Image")
+    form = QFormLayout(grp)
+
+    img_dd = ui.create_layer_dropdown(napari.layers.Image)
+    ref_cb = QCheckBox("Use flat-field reference")
+    ref_dd = ui.create_layer_dropdown(napari.layers.Image)
+    ref_dd.setEnabled(False)
+    ref_cb.stateChanged.connect(lambda s: ref_dd.setEnabled(bool(s)))
+    form.addRow("Brightfield image:", img_dd)
+    form.addRow(ref_cb); form.addRow("  Reference:", ref_dd)
+
+    bg_sp   = QSpinBox(); bg_sp.setRange(10,300); bg_sp.setValue(60)
+    bg_sp.setToolTip("Background kernel size. For in vitro the field is large and\n"
+                     "illumination very uniform — 60-100px works well.")
+    halo_sp = QDoubleSpinBox(); halo_sp.setRange(0,0.8); halo_sp.setValue(0.3)
+    form.addRow("BG kernel (px):", bg_sp)
+    form.addRow("Halo suppression:", halo_sp)
+
+    prog, run = _run_btn(form, "▶  Preprocess")
+
+    def _on_run():
+        from pycat.toolbox.brightfield_tools import preprocess_brightfield
+        try: img = ui._img(img_dd)
+        except KeyError as e: napari_show_warning(str(e)); return
+        ref = ui._img(ref_dd) if ref_cb.isChecked() else None
+        prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
+        def _task():
+            return preprocess_brightfield(img, bg_kernel=bg_sp.value(),
+                                           halo_weight=halo_sp.value(),
+                                           background_image=ref)
+        worker = _IVBFWorker(_task)
+        ui._ivbf_pre_worker = worker
+        def _done(res):
+            prog.setVisible(False); run.setEnabled(True)
+            base = img_dd.currentText()
+            ui.viewer.add_image(res['bg_subtracted'],
+                                 name=f"IVBF BG-Subtracted [{base}]", colormap='gray_r')
+            ui.viewer.add_image(res['enhanced'],
+                                 name=f"IVBF Enhanced [{base}]", colormap='viridis')
+            ui._dr()['ivbf_enhanced']     = res['enhanced']
+            ui._dr()['ivbf_bg_subtracted']= res['bg_subtracted']
+            ui._dr()['ivbf_source']       = img
+            ui._record('ivbf_preprocess', {'image_layer': img_dd.currentText(),
+                                            'bg_kernel': bg_sp.value()})
+            napari_show_info("In vitro BF preprocessing done.")
+        def _err(msg):
+            prog.setVisible(False); run.setEnabled(True)
+            napari_show_warning("Preprocessing error."); print(f"[PyCAT IVBF] {msg}")
+        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
+
+
+def _ivbf_segmentation(ui, layout):
+    grp  = QGroupBox("Step 3 — Segment Droplets (dark blobs on bright BG)")
+    form = QFormLayout(grp)
+    enh_dd = ui.create_layer_dropdown(napari.layers.Image)
+    form.addRow("Enhanced BF image:", enh_dd)
+    min_d = QDoubleSpinBox(); min_d.setRange(1,100); min_d.setValue(4.0)
+    max_d = QDoubleSpinBox(); max_d.setRange(5,1000); max_d.setValue(200.0)
+    circ  = QDoubleSpinBox(); circ.setRange(0.1,1.0);  circ.setValue(0.5)
+    max_d.setToolTip("In vitro droplets can be larger than cellular condensates.")
+    form.addRow("Min diameter (px):", min_d)
+    form.addRow("Max diameter (px):", max_d)
+    form.addRow("Min circularity:", circ)
+    prog, run = _run_btn(form, "▶  Segment Droplets")
+
+    def _on_run():
+        from pycat.toolbox.brightfield_tools import segment_bf_condensates
+        try: enh = ui._img(enh_dd)
+        except KeyError as e: napari_show_warning(str(e)); return
+        prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
+        def _task():
+            return segment_bf_condensates(enh, min_diameter_px=min_d.value(),
+                                           max_diameter_px=max_d.value(),
+                                           min_circularity=circ.value())
+        worker = _IVBFWorker(_task)
+        ui._ivbf_seg_worker = worker
+        def _done(labeled):
+            prog.setVisible(False); run.setEnabled(True)
+            n = int(labeled.max())
+            ui.viewer.add_labels(labeled, name=f"IVBF Droplet Mask ({n} droplets)")
+            ui._dr()['ivbf_droplet_mask'] = labeled
+            ui._record('ivbf_segmentation', {'enhanced_layer': enh_dd.currentText(),
+                                              'min_d': min_d.value(), 'max_d': max_d.value()})
+            napari_show_info(f"In vitro BF: {n} droplets segmented.")
+        def _err(msg):
+            prog.setVisible(False); run.setEnabled(True)
+            napari_show_warning("Segmentation error."); print(f"[PyCAT IVBF Seg] {msg}")
+        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
+
+
+def _ivbf_od_field(ui, layout):
+    grp  = QGroupBox("Step 4 — Optical Density & Field Summary")
+    form = QFormLayout(grp)
+    raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    form.addRow("Raw BF image:", raw_dd)
+    form.addRow("Droplet mask:", mask_dd)
+    run = QPushButton("▶  Compute OD & Field Summary")
+    form.addRow(run)
+
+    def _on_run():
+        from pycat.toolbox.brightfield_tools import bf_condensate_metrics
+        from pycat.toolbox.invitro_tools import field_summary
+        try:
+            raw  = ui._img(raw_dd)
+            mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
+        except KeyError as e: napari_show_warning(str(e)); return
+        mpx = ui._mpx()
+        # For in vitro BF, pass mask as both droplet and "cell" (whole field)
+        od_proxy = 1 - raw  # inverted intensity as OD proxy for field_summary
+        summ = field_summary(mask, od_proxy, mpx)
+        per_drop = bf_condensate_metrics(raw, mask, None, mpx)
+        ui._dr()['ivbf_field_summary'] = summ
+        ui._dr()['ivbf_droplet_df']    = per_drop
+        summ_df = pd.DataFrame([summ])
+        _show("IVBF Field Summary", [
+            ("Field statistics", summ_df),
+            ("Per-droplet OD metrics", per_drop),
+        ])
+        napari_show_info(
+            f"Φ={summ['volume_fraction']:.3f}, n={summ['n_droplets']}, "
+            f"mean R={summ['mean_radius_um']:.2f}µm, "
+            f"mean OD={per_drop['mean_od'].mean():.3f}"
+        )
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
+
+
+def _ivbf_size_contact(ui, layout):
+    grp  = QGroupBox("Step 5 — Size Distribution & Contact Angle")
+    form = QFormLayout(grp)
+
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    form.addRow("Droplet mask:", mask_dd)
+
+    # Contact angle selector
+    single_lbl_sp = QSpinBox(); single_lbl_sp.setRange(0, 9999); single_lbl_sp.setValue(0)
+    single_lbl_sp.setToolTip("Label ID for contact angle measurement (0 = largest droplet).")
+    form.addRow("Label for contact angle (0=largest):", single_lbl_sp)
+
+    bins_sp = QSpinBox(); bins_sp.setRange(5,100); bins_sp.setValue(30)
+    form.addRow("Size histogram bins:", bins_sp)
+
+    run = QPushButton("▶  Fit Size Distribution & Contact Angle")
+    form.addRow(run)
+
+    def _on_run():
+        from pycat.toolbox.invitro_tools import (
+            fit_size_distribution, estimate_contact_angle)
+        import skimage as sk
+        try:
+            mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
+        except KeyError as e: napari_show_warning(str(e)); return
+
+        mpx = ui._mpx()
+        props = sk.measure.regionprops(mask.astype(np.int32))
+        if not props:
+            napari_show_warning("No droplets in mask."); return
+
+        radii = np.array([np.sqrt(p.area * mpx**2 / np.pi) for p in props])
+        size_res = fit_size_distribution(radii, bins_sp.value())
+        ui._dr()['ivbf_size_dist'] = size_res
+        size_df = pd.DataFrame([{k:v for k,v in size_res.items() if not hasattr(v,'__len__')}])
+
+        # Contact angle for selected or largest droplet
+        lbl_id = single_lbl_sp.value()
+        if lbl_id == 0:
+            lbl_id = max(props, key=lambda p: p.area).label
+        raw = ui._dr().get('ivbf_source')
+        tables = [("Size distribution fit", size_df)]
+        if raw is not None:
+            ca_res = estimate_contact_angle(raw, mask, droplet_label=lbl_id)
+            if ca_res.get('fit_success'):
+                ca_df = pd.DataFrame([{k:v for k,v in ca_res.items()
+                                       if not hasattr(v,'__len__')}])
+                tables.append(("Contact angle", ca_df))
+                napari_show_info(
+                    f"Size: {size_res.get('preferred_model','?')}, "
+                    f"PDI={size_res.get('polydispersity_index',np.nan):.3f}. "
+                    f"Contact angle: {ca_res.get('contact_angle_deg',np.nan):.1f}°"
+                )
+            else:
+                napari_show_warning("Contact angle fit failed — check droplet boundary.")
+        else:
+            napari_show_info(f"Size: {size_res.get('preferred_model','?')}, "
+                              f"PDI={size_res.get('polydispersity_index',np.nan):.3f}")
+
+        _show("IVBF Size & Contact Angle", tables)
+    run.clicked.connect(_on_run)
+    import skimage as sk
+    layout.addWidget(grp)
+
+
+def _ivbf_spatial(ui, layout):
+    grp  = QGroupBox("Step 6 — Spatial Metrology")
+    form = QFormLayout(grp)
+    mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    form.addRow("Droplet mask:", mask_dd)
+    run = QPushButton("▶  Run Spatial Metrology")
+    form.addRow(run)
+
+    def _on_run():
+        from pycat.toolbox.spatial_metrology_tools import (
+            get_puncta_centroids, run_all_spatial_metrics)
+        from pycat.toolbox.spatial_metrology_ui import _results_to_dataframes
+        try:
+            mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
+        except KeyError as e: napari_show_warning(str(e)); return
+        H, W = mask.shape[:2]
+        field_lbl = np.ones((H, W), dtype=np.int32); field_lbl[:2, :2] = 0
+        mpx = ui._mpx()
+
+        def _task():
+            coords_df = get_puncta_centroids(mask, field_lbl, mpx)
+            if coords_df.empty:
+                return {}
+            results = {}
+            for cell_lbl in [c for c in coords_df['cell_label'].unique() if c != 0]:
+                sub    = coords_df[coords_df['cell_label'] == cell_lbl]
+                coords = sub[['y_um', 'x_um']].values
+                if len(coords) < 2:
+                    continue
+                cmask  = (field_lbl == cell_lbl)
+                results[cell_lbl] = run_all_spatial_metrics(coords, cmask, mpx)
+            return results
+
+        worker = _IVBFWorker(_task)
+        ui._ivbf_sp_worker = worker
+        def _done(res):
+            if not res:
+                napari_show_warning("Need at least 2 droplets for spatial metrics."); return
+            _show("IVBF Spatial", list(_results_to_dataframes(res).items()))
+            napari_show_info("Spatial metrology done.")
+        def _err(msg):
+            napari_show_warning("Spatial error."); print(f"[PyCAT IVBF Sp] {msg}")
+        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
+
+
+def _ivbf_dynamics(ui, layout):
+    grp  = QGroupBox("Step 7 — Dynamics & Coarsening (time-series)")
+    form = QFormLayout(grp)
+    stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
+    form.addRow("Droplet mask stack (T,H,W):", stack_dd)
+    dt_sp   = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
+    disp_sp = QDoubleSpinBox(); disp_sp.setRange(0.1,100); disp_sp.setValue(10.0)
+    form.addRow("Frame interval (s):", dt_sp)
+    form.addRow("Max displacement (µm):", disp_sp)
+    cb_coarse = QCheckBox("Coarsening kinetics"); cb_coarse.setChecked(True)
+    cb_sed    = QCheckBox("Sedimentation detection"); cb_sed.setChecked(True)
+    cb_msd    = QCheckBox("MSD / diffusion");        cb_msd.setChecked(True)
+    cb_fuse   = QCheckBox("Fusion relaxation");      cb_fuse.setChecked(True)
+    form.addRow(cb_coarse); form.addRow(cb_sed); form.addRow(cb_msd); form.addRow(cb_fuse)
+    prog, run = _run_btn(form, "▶  Run Dynamics")
+
+    def _on_run():
+        from pycat.toolbox.dynamic_spatial_tools import (
+            extract_frame_properties, link_trajectories_bayesian)
+        from pycat.toolbox.condensate_physics_tools import (
+            compute_msd, fit_anomalous_diffusion, msd_per_track, fit_coarsening)
+        from pycat.toolbox.invitro_tools import (
+            coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
+        try:
+            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data)
+        except KeyError as e: napari_show_warning(str(e)); return
+        if stack.ndim != 3:
+            napari_show_warning("Needs a 3D (T,H,W) mask stack."); return
+
+        mpx = ui._mpx(); dt = dt_sp.value()
+        do = dict(c=cb_coarse.isChecked(), s=cb_sed.isChecked(),
+                  m=cb_msd.isChecked(), f=cb_fuse.isChecked())
+        prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
+
+        def _task():
+            props  = extract_frame_properties(stack, mpx)
+            tracks = link_trajectories_bayesian(props, max_displacement_um=disp_sp.value())
+            res = {'tracks': tracks}
+            cs = coarsening_statistics(stack, mpx, dt)
+            res['coarsening_stats'] = cs
+            if do['c']:
+                r = cs['mean_radius_um'].values; t = cs['time_s'].values
+                res['coarsening_fit'] = fit_coarsening(t, r)
+            if do['s']:
+                res['sedimentation'] = detect_sedimentation(cs)
+            if do['m']:
+                msd_df = compute_msd(tracks, frame_interval_s=dt)
+                res['msd']    = msd_df
+                res['msd_fit']= fit_anomalous_diffusion(msd_df)
+                res['msd_pt'] = msd_per_track(tracks, dt)
+            if do['f']:
+                res['fusions'] = detect_and_fit_fusions(stack, tracks, None, mpx, dt)
+            return res
+
+        worker = _IVBFWorker(_task)
+        ui._ivbf_dyn_worker = worker
+        def _done(res):
+            prog.setVisible(False); run.setEnabled(True)
+            dr = ui._dr(); dr['ivbf_trajectories'] = res['tracks']
+            tables = [("Coarsening per frame", res['coarsening_stats'])]
+            if 'coarsening_fit' in res:
+                co = res['coarsening_fit']
+                tables.append(("Coarsening fit",
+                                pd.DataFrame([{k:v for k,v in co.items() if not hasattr(v,'__len__')}])))
+                napari_show_info(f"Coarsening: {co.get('preferred_mechanism','?')}")
+            if 'sedimentation' in res:
+                sed = res['sedimentation']
+                sed_df = pd.DataFrame([{k:v for k,v in sed.items() if k!='recommendation'}])
+                tables.append(("Sedimentation", sed_df))
+                if sed.get('sedimentation_detected'):
+                    napari_show_warning(f"Sedimentation detected: {sed.get('recommendation','')}")
+            if 'msd' in res:
+                fit = res['msd_fit']
+                fit_df = pd.DataFrame([{k:v for k,v in fit.items() if not hasattr(v,'__len__')}])
+                tables += [("MSD", res['msd']), ("Diffusion", fit_df), ("Per-track", res['msd_pt'])]
+            if 'fusions' in res and not res['fusions'].empty:
+                dr['ivbf_fusions'] = res['fusions']
+                tables.append(("Fusion relaxation", res['fusions']))
+            _show("IVBF Dynamics", tables)
+        def _err(msg):
+            prog.setVisible(False); run.setEnabled(True)
+            napari_show_warning("Dynamics error."); print(f"[PyCAT IVBF Dyn] {msg}")
+        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
+
+
+def _ivbf_focus_qc(ui, layout):
+    grp  = QGroupBox("Step 8 — Focus Quality (time-series)")
+    form = QFormLayout(grp)
+    form.addRow(QLabel(
+        "<span style='color:#aaa;font-size:9pt;'>"
+        "BF focus QC using Brenner/Tenengrad/normalised variance.\n"
+        "No bleaching correction — no fluorophore to bleach.</span>"
+    ))
+    stack_dd = ui.create_layer_dropdown(napari.layers.Image)
+    form.addRow("BF stack (T,H,W):", stack_dd)
+    dt_sp  = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
+    thr_sp = QDoubleSpinBox(); thr_sp.setRange(0.1,0.9);  thr_sp.setValue(0.4)
+    form.addRow("Frame interval (s):", dt_sp)
+    form.addRow("Defocus threshold:", thr_sp)
+    run = QPushButton("▶  Assess Focus")
+    form.addRow(run)
+
+    def _on_run():
+        from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
+        try:
+            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data).astype(np.float32)
+        except KeyError as e: napari_show_warning(str(e)); return
+        if stack.ndim != 3:
+            napari_show_warning("Needs a 3D (T,H,W) stack."); return
+        mn, mx = stack.min(), stack.max()
+        if mx > mn: stack = (stack-mn)/(mx-mn)
+        run.setEnabled(False)
+        def _task():
+            return bf_analyse_frame_quality(stack, dt_sp.value(), thr_sp.value())
+        worker = _IVBFWorker(_task)
+        ui._ivbf_qc_worker = worker
+        def _done(res):
+            run.setEnabled(True)
+            df = res['per_frame_df']; summ = res['summary']
+            ui._dr()['ivbf_frame_qc'] = df
+            summ_df = pd.DataFrame([{k:v for k,v in summ.items() if k!='recommendation'}])
+            _show("IVBF Focus QC", [("Summary", summ_df), ("Per-frame", df)])
+            n = summ['n_defocused_frames']
+            if n > 0:
+                napari_show_warning(f"IVBF Focus: {n} defocused frame(s). {summ['recommendation']}")
+            else:
+                napari_show_info(f"IVBF Focus: {summ['dominant_cause']}. {summ['recommendation']}")
+        def _err(msg):
+            run.setEnabled(True); napari_show_warning("Focus QC error."); print(f"[PyCAT IVBF QC] {msg}")
+        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
+    run.clicked.connect(_on_run)
+    layout.addWidget(grp)
