@@ -67,6 +67,46 @@ from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
 from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack
 
 
+def _apply_scroll_guard(widget):
+    """
+    Recursively walk a widget tree and patch wheelEvent on all interactive
+    controls (QComboBox, QAbstractSpinBox, QAbstractSlider) so that the
+    scroll wheel only adjusts them when they have keyboard focus or their
+    popup is open. Without this, hovering over any spinbox or slider inside
+    a QScrollArea dock while scrolling silently adjusts the control instead
+    of scrolling the panel.
+
+    Call once on the root widget of any dock that lives inside a QScrollArea.
+    """
+    from PyQt5.QtWidgets import (QAbstractSpinBox, QAbstractSlider,
+                                  QComboBox as _QCB)
+    from PyQt5.QtCore import QEvent
+
+    def _patch(w):
+        if isinstance(w, _QCB):
+            # Only scroll the combobox when its dropdown list is open
+            orig = w.__class__.wheelEvent
+            def _cb_wheel(event, _w=w, _orig=orig):
+                if _w.view().isVisible():
+                    _orig(_w, event)
+                else:
+                    event.ignore()
+            w.wheelEvent = _cb_wheel
+        elif isinstance(w, (QAbstractSpinBox, QAbstractSlider)):
+            # Only scroll the spinbox/slider when it has keyboard focus
+            orig = w.__class__.wheelEvent
+            def _spin_wheel(event, _w=w, _orig=orig):
+                if _w.hasFocus():
+                    _orig(_w, event)
+                else:
+                    event.ignore()
+            w.wheelEvent = _spin_wheel
+        for child in w.findChildren((_QCB, QAbstractSpinBox, QAbstractSlider)):
+            _patch(child)
+
+    _patch(widget)
+
+
 class BaseUIClass:
     """
     A base UI class designed to provide utility functions for managing UI elements
@@ -808,7 +848,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         # ── RF-only extras (annotation layer) — shown/hidden by selection ──
         rf_extra = QWidget()
         rf_row   = QVBoxLayout(rf_extra)
-        rf_row.setContentsMargins(0, 0, 0, 0)
+        rf_row.setContentsMargins(2, 0, 0, 0)
         self.add_text_label(rf_row, 'Select annotation layer (for RF training):')
         rf_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels)
         rf_row.addWidget(rf_labels_dropdown)
@@ -1766,6 +1806,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Align the layout to the top of the widget to ensure orderly arrangement
         self.condensate_layout.setAlignment(Qt.AlignTop)
+        _apply_scroll_guard(main_widget)
 
 
 class TimeSeriesCondensateUI(AnalysisMethodsUI):
@@ -1786,8 +1827,8 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
     def __init__(self, viewer, central_manager):
         super().__init__(viewer, central_manager)
         self.ts_layout = QVBoxLayout()
-        self.ts_layout.setSpacing(4)
-        self.ts_layout.setContentsMargins(4, 4, 4, 4)
+        self.ts_layout.setSpacing(8)
+        self.ts_layout.setContentsMargins(6, 6, 6, 6)
 
         # Activate the workflow checklist for this pipeline
         try:
@@ -1870,6 +1911,9 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.ts_layout.setAlignment(Qt.AlignTop)
+        # Prevent scroll wheel from adjusting spinboxes/sliders/dropdowns
+        # when the user is scrolling through the dock panel.
+        _apply_scroll_guard(main_widget)
 
     def _add_reference_frame_selector(self, layout):
         """
@@ -1995,7 +2039,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         roi_grp = _QGB("XY Region of Interest")
         roi_grp.setFlat(True)
         roi_grp_layout = QVBoxLayout(roi_grp)
-        roi_grp_layout.setContentsMargins(0, 4, 0, 0)
+        roi_grp_layout.setContentsMargins(4, 8, 4, 4)
 
         # ── GUI interactive mode ──────────────────────────────────────────
         roi_check = QCheckBox("Restrict to drawn rectangle (interactive)")
@@ -2227,11 +2271,6 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         layout.addWidget(group)
 
 
-        extract_btn.clicked.connect(_on_extract)
-        form.addRow("", extract_btn)
-        layout.addWidget(group)
-
-
 class ObjectColocAnalysisUI(AnalysisMethodsUI):
     """
     A specialized user interface (UI) class for object-based colocalization analysis
@@ -2322,6 +2361,7 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Align UI components to the top of the layout for a tidy presentation
         self.object_coloc_layout.setAlignment(Qt.AlignTop)
+        _apply_scroll_guard(main_widget)
 
 
 class PixelColocAnalysisUI(AnalysisMethodsUI):

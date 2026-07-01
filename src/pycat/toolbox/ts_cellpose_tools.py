@@ -342,10 +342,9 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
 
     # ── Segmentation method ───────────────────────────────────────────────
     method_grp = QGroupBox("Method")
-    method_grp.setFlat(True)
     method_layout = QVBoxLayout(method_grp)
-    method_layout.setSpacing(2)
-    method_layout.setContentsMargins(0, 2, 0, 2)
+    method_layout.setSpacing(3)
+    method_layout.setContentsMargins(4, 4, 4, 4)
 
     rb_cellpose = QRadioButton("Cellpose  (deep learning, recommended)")
     rb_stardist = QRadioButton("StarDist  (star-convex, nuclei)")
@@ -370,7 +369,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     rf_ann_row_lbl = QLabel("RF annotation:")
     rf_ann_container = QWidget()
     rf_ann_row = QHBoxLayout(rf_ann_container)
-    rf_ann_row.setContentsMargins(0,0,0,0)
+    rf_ann_row.setContentsMargins(2,0,0,0)
     rf_ann_row.addWidget(rf_ann_row_lbl)
     rf_ann_row.addWidget(rf_ann_dd)
     rf_ann_container.setVisible(False)
@@ -385,7 +384,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
         "The two brightest classes are merged as 'cell'.")
     otsu_container = QWidget()
     otsu_row = QHBoxLayout(otsu_container)
-    otsu_row.setContentsMargins(0,0,0,0)
+    otsu_row.setContentsMargins(2,0,0,0)
     otsu_row.addWidget(QLabel("Otsu classes:"))
     otsu_row.addWidget(otsu_spin)
     otsu_container.setVisible(False)

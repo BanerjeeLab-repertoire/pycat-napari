@@ -118,7 +118,8 @@ class BrightfieldCondensateUI:
             pass
 
         layout = QVBoxLayout()
-        layout.setSpacing(4)
+        layout.setSpacing(8)
+        layout.setContentsMargins(4, 4, 4, 4)
 
         header = QLabel(
             "<b>Brightfield Condensate Analysis</b><br>"
@@ -139,11 +140,11 @@ class BrightfieldCondensateUI:
         _add_bf_texture(self, layout)
         _add_bf_frame_qc(self, layout)
 
-        layout.addStretch()
-
         main_w = QWidget()
         main_w.setLayout(layout)
-        main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        from pycat.ui.ui_modules import _apply_scroll_guard
+        _apply_scroll_guard(main_w)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

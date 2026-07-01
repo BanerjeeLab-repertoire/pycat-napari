@@ -73,7 +73,9 @@ class InVitroBFUI:
         except Exception:
             pass
 
-        layout = QVBoxLayout(); layout.setSpacing(4)
+        layout = QVBoxLayout()
+        layout.setSpacing(8)
+        layout.setContentsMargins(4, 4, 4, 4)
         header = QLabel(
             "<b>In Vitro Brightfield Condensate Analysis</b><br>"
             "<span style='color:#888;font-size:9pt;'>"
@@ -91,9 +93,10 @@ class InVitroBFUI:
         _ivbf_dynamics(self, layout)
         _ivbf_focus_qc(self, layout)
 
-        layout.addStretch()
         main_w = QWidget(); main_w.setLayout(layout)
-        main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        from pycat.ui.ui_modules import _apply_scroll_guard
+        _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="In Vitro Brightfield Analysis")
 

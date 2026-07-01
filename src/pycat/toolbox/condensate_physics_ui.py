@@ -37,13 +37,32 @@ class _PhysicsWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
+
+def _fit_tab_height(tabs):
+    """Cap tab widget to current tab content height, eliminating empty space."""
+    from PyQt5.QtCore import QTimer as _QT
+    def _do():
+        w = tabs.currentWidget()
+        if w:
+            tabs.setMaximumHeight(tabs.tabBar().sizeHint().height() + w.sizeHint().height() + 12)
+    tabs.currentChanged.connect(lambda _: _do())
+    _QT.singleShot(0, _do)
+
 def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     outer = QVBoxLayout()
+    outer.setSpacing(6)
+    outer.setContentsMargins(2, 2, 2, 2)
     ui_instance.add_text_label(outer, 'Condensate Biophysics', bold=True)
     tabs = QTabWidget()
+    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    _fit_tab_height(tabs)
 
     # ── Tab 1: MSD / Diffusion ───────────────────────────────────────────
-    msd_w = QWidget(); mf = QFormLayout(msd_w)
+    msd_w = QWidget()
+    msd_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    mf = QFormLayout(msd_w)
+    mf.setContentsMargins(4, 4, 4, 4)
+    mf.setSpacing(5)
 
     stack_dd_msd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     mf.addRow("Condensate mask stack (T,H,W):", stack_dd_msd)
@@ -390,7 +409,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     tabs.addTab(surv_w, "Survival")
 
     outer.addWidget(tabs)
-    widget = QWidget(); widget.setLayout(outer)
+    widget = QWidget()
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    widget.setLayout(outer)
     ui_instance._add_widget_to_layout_or_dock(
         widget, layout, separate_widget, "Condensate Biophysics"
     )

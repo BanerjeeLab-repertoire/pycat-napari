@@ -196,6 +196,8 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     """
     grp  = QGroupBox("Spatial Metrology")
     form = QFormLayout(grp)
+    form.setContentsMargins(4, 4, 4, 4)
+    form.setSpacing(5)
 
     desc = QLabel('Quantitative spatial analysis of condensate positions within cells.')
     desc.setWordWrap(True)
@@ -359,7 +361,10 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     form.addRow("", run_btn)
 
     widget = QWidget()
+    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     outer  = QVBoxLayout(widget)
+    outer.setSpacing(6)
+    outer.setContentsMargins(2, 2, 2, 2)
     outer.addWidget(grp)
     ui_instance._add_widget_to_layout_or_dock(
         widget, layout, separate_widget, "Spatial Metrology"

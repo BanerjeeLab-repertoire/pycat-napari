@@ -73,6 +73,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     morph_widget = QWidget()
     morph_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     mf = QFormLayout(morph_widget)
+    mf.setContentsMargins(4, 4, 4, 4)
+    mf.setSpacing(5)
 
     punc_dd_m = ui_instance.create_layer_dropdown(napari.layers.Labels)
     cell_dd_m = ui_instance.create_layer_dropdown(napari.layers.Labels)
@@ -165,6 +167,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     dyn_widget = QWidget()
     dyn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     df = QFormLayout(dyn_widget)
+    df.setContentsMargins(4, 4, 4, 4)
+    df.setSpacing(5)
 
     stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     df.addRow("TS condensate mask stack (T,H,W):", stack_dd)
@@ -405,6 +409,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     org_widget = QWidget()
     org_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     of = QFormLayout(org_widget)
+    of.setContentsMargins(4, 4, 4, 4)
+    of.setSpacing(5)
 
     punc_dd_o = ui_instance.create_layer_dropdown(napari.layers.Labels)
     cell_dd_o = ui_instance.create_layer_dropdown(napari.layers.Labels)
