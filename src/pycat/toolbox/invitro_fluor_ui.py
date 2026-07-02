@@ -37,7 +37,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
-    QScrollArea, QSizePolicy, QHBoxLayout, QTabWidget,
+    QScrollArea, QSizePolicy, QHBoxLayout, QTabWidget, QComboBox,
 )
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -188,6 +188,29 @@ def _ivf_segmentation(ui, layout):
     form.addRow("Kurtosis threshold:", kurt_sp)
     form.addRow("Local SNR threshold:", lsnr_sp)
 
+    # Segmentation-method selector: the kurtosis/SNR spot detector suits dim
+    # sub-diffraction puncta; local (Sauvola) thresholding suits large,
+    # well-defined in-vitro droplets where a simple adaptive threshold is
+    # cleaner. The spot-detector params above apply to "Spot detection"; the
+    # window/k params below apply to "Local threshold".
+    method_dd = QComboBox()
+    method_dd.addItems(["Spot detection (kurtosis / SNR)",
+                        "Local threshold (Sauvola)"])
+    method_dd.setToolTip(
+        "Spot detection = dim/small puncta. Local threshold = large, "
+        "well-defined droplets (brought over from General Analysis).")
+    form.addRow("Segmentation method:", method_dd)
+
+    lt_k = QDoubleSpinBox(); lt_k.setRange(-2.0, 2.0); lt_k.setSingleStep(0.05)
+    lt_k.setValue(0.0); lt_k.setDecimals(3)
+    lt_k.setToolTip("Sauvola k: lower = more inclusive threshold.")
+    form.addRow("Local threshold k:", lt_k)
+
+    lt_win = QSpinBox(); lt_win.setRange(3, 501); lt_win.setSingleStep(2)
+    lt_win.setValue(35)
+    lt_win.setToolTip("Local window size (px, forced odd).")
+    form.addRow("Local window size (px):", lt_win)
+
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
     def _on_run():
@@ -198,9 +221,19 @@ def _ivf_segmentation(ui, layout):
             raw = ui._img(raw_dd)
         except KeyError as e: napari_show_warning(str(e)); return
         ball = int(ui._dr().get('ball_radius', 15))
+        use_local = method_dd.currentIndex() == 1
+        k_val = lt_k.value(); win = lt_win.value()
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
+            import skimage as sk
+            # Local (Sauvola) thresholding path — for large, well-defined droplets
+            if use_local:
+                from pycat.toolbox.segmentation_tools import local_thresholding_func
+                binary = local_thresholding_func(pre, window_size=win,
+                                                 k_val=k_val, mode='Sauvola')
+                labeled = sk.measure.label(np.asarray(binary) > 0)
+                return labeled.astype(np.int32), (np.asarray(binary) > 0)
             # No cell mask — use whole image as single "cell"
             H, W = pre.shape
             whole = np.ones((H, W), dtype=bool)
@@ -227,11 +260,15 @@ def _ivf_segmentation(ui, layout):
             prog.setVisible(False); run.setEnabled(True)
             labeled, unrefined = result
             n = int(labeled.max())
+            _mname = 'local-threshold' if use_local else 'spot-detection'
             ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
             ui._dr()['ivf_droplet_mask'] = labeled
             ui._record('ivf_segmentation', {
                 'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
+                'method': _mname,
                 'min_radius': min_r.value(), 'kurtosis': kurt_sp.value(),
+                'local_snr': lsnr_sp.value(),
+                'local_threshold_k': k_val, 'local_window': win,
             })
             napari_show_info(f"In vitro: {n} droplets segmented.")
 
@@ -270,6 +307,8 @@ def _ivf_field_summary(ui, layout):
         part = partition_coefficient_field(img, mask)
         ui._dr()['ivf_field_summary']   = summ
         ui._dr()['ivf_partition_coeff'] = part
+        ui._record('ivf_field_summary', {
+            'image_layer': img_dd.currentText(), 'mask_layer': mask_dd.currentText()})
 
         summ_df = pd.DataFrame([summ])
         part_df = part['per_droplet_df']
@@ -313,6 +352,8 @@ def _ivf_size_distribution(ui, layout):
             napari_show_warning("Need at least 5 droplets for size distribution fit."); return
         res = fit_size_distribution(radii, n_bins=bins_sp.value())
         ui._dr()['ivf_size_dist'] = res
+        ui._record('ivf_size_distribution', {
+            'mask_layer': mask_dd.currentText(), 'n_bins': bins_sp.value()})
         res_df = pd.DataFrame([{k: v for k,v in res.items() if not hasattr(v,'__len__')}])
         _show("Size Distribution", [("Fit parameters", res_df)])
         napari_show_info(
@@ -371,6 +412,7 @@ def _ivf_spatial(ui, layout):
                 napari_show_warning("Need at least 2 droplets for spatial metrics."); return
             dfs = _results_to_dataframes(res)
             _show("IVF Spatial Metrology", list(dfs.items()))
+            ui._record('ivf_spatial_metrology', {'mask_layer': mask_dd.currentText()})
             napari_show_info("Spatial metrology complete.")
         def _err(msg):
             napari_show_warning("Spatial error — see terminal."); print(f"[PyCAT IVF Sp] {msg}")
@@ -510,6 +552,10 @@ def _ivf_dynamics(ui, layout):
                 tables.append(("KM survival", res['km']))
 
             _show("IVF Dynamics", tables)
+            ui._record('ivf_dynamics', {
+                'mask_stack': stack_dd.currentText(),
+                'frame_interval_s': dt_sp.value(),
+                'max_displacement_um': disp_sp.value()})
 
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -551,6 +597,9 @@ def _ivf_phase_diagram(ui, layout):
         if res.get('fit_success'):
             res_df = pd.DataFrame([{k:v for k,v in res.items() if not hasattr(v,'__len__')}])
             _show("C_sat Estimation", [("Lever rule fit", res_df)])
+            ui._record('ivf_phase_diagram', {
+                'concentrations': conc_edit.text(),
+                'volume_fractions': phi_edit.text()})
             napari_show_info(
                 f"C_sat ≈ {res['C_sat']:.2f} µM  "
                 f"(R²={res['r_squared']:.3f})"
@@ -605,6 +654,10 @@ def _ivf_frame_qc(ui, layout):
             cause = summ['dominant_cause']
             summ_df = pd.DataFrame([{k:v for k,v in summ.items() if k!='recommendation'}])
             _show("IVF Frame QC", [("Summary", summ_df), ("Per-frame", df)])
+            ui._record('ivf_frame_qc', {
+                'stack_layer': stack_dd.currentText(),
+                'frame_interval_s': dt_sp.value(),
+                'blur_threshold': thr_sp.value()})
             if 'corrected' in res:
                 ui.viewer.add_image(res['corrected'],
                                      name=f"Bleach-Corrected [{layer.name}]",

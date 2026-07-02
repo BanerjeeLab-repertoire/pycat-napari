@@ -222,20 +222,52 @@ class TemperatureDependentUI:
 
     def _make_text_layer(self, stack_name, temps, elapsed_s):
         from pycat.toolbox.temperature_tools import build_temperature_labels
-        stack = np.asarray(self.viewer.layers[stack_name].data)
-        n = stack.shape[0]
         labels = build_temperature_labels(temps, elapsed_s)
-        # One text point per frame, anchored top-left; napari shows the text
-        # for the current T slice via the 'frame' coordinate.
-        H = stack.shape[1]
-        coords = np.array([[i, 0.06 * H, 0.05 * stack.shape[2]] for i in range(n)])
-        props = {'label': labels}
+        n = len(labels)
+
+        # Remove any legacy Points-layer annotation from older versions (that
+        # one lived in data space and moved/scaled when zooming).
         if "Temperature Annotation" in self.viewer.layers:
             self.viewer.layers.remove("Temperature Annotation")
-        self.viewer.add_points(
-            coords, name="Temperature Annotation", size=0,
-            properties=props, text={'string': '{label}', 'size': 12,
-                                    'color': 'yellow', 'anchor': 'upper_left'})
+
+        # Use napari's canvas-fixed text overlay so the readout stays put while
+        # zooming/panning, and update it as the T slider moves.
+        ov = self.viewer.text_overlay
+        ov.visible = True
+        try:
+            ov.color = 'yellow'
+        except Exception:
+            pass
+        try:
+            ov.font_size = 12
+        except Exception:
+            pass
+        try:
+            ov.position = 'top_left'
+        except Exception:
+            pass
+
+        def _update(event=None):
+            try:
+                idx = int(self.viewer.dims.current_step[0])
+            except Exception:
+                idx = 0
+            idx = max(0, min(idx, n - 1))
+            try:
+                self.viewer.text_overlay.text = labels[idx]
+            except Exception:
+                pass
+
+        # Replace any previous callback so re-running Step 2 doesn't stack them.
+        prev = getattr(self, '_temp_overlay_cb', None)
+        if prev is not None:
+            try:
+                self.viewer.dims.events.current_step.disconnect(prev)
+            except Exception:
+                pass
+        self._temp_overlay_cb = _update
+        self.viewer.dims.events.current_step.connect(_update)
+        _update()
 
     # ── Step 3: turbidity ──────────────────────────────────────────────
     def _add_turbidity(self, layout):
@@ -369,18 +401,48 @@ class TemperatureDependentUI:
         return float(stored) ** 0.5 if stored else 1.0
 
     def _on_scalebar(self):
-        # napari has a built-in scale bar; set the layer scale + enable it.
+        # napari has a built-in scale bar; set the layer scale + units and enable it.
         px = self._pixel_size()
         try:
-            self.viewer.scale_bar.visible = True
-            self.viewer.scale_bar.unit = "um"
-            sname = self._stack_dd.currentText()
-            if sname in [l.name for l in self.viewer.layers]:
-                lyr = self.viewer.layers[sname]
-                # scale is (…, y, x); set the last two dims to the pixel size
-                sc = list(lyr.scale)
-                sc[-1] = px; sc[-2] = px
-                lyr.scale = sc
+            # Apply the same spatial scale + 'um' units to every layer so the
+            # scale bar renders in µm (napari 0.7 needs consistent units) and
+            # overlays stay aligned (uniform scale preserves relative positions).
+            for lyr in self.viewer.layers:
+                try:
+                    nd = lyr.ndim
+                    if nd >= 2:
+                        sc = list(lyr.scale)
+                        sc[-1] = px; sc[-2] = px
+                        lyr.scale = sc
+                        lyr.units = tuple(['um'] * nd)
+                except Exception:
+                    pass
+
+            sb = self.viewer.scale_bar
+            sb.visible = True
+            # Pin the bar to the chosen reference length so its label doesn't
+            # jump to round numbers as you zoom (attribute name varies by
+            # napari version).
+            for _attr in ('length', 'fixed_length'):
+                if hasattr(sb, _attr):
+                    try:
+                        setattr(sb, _attr, float(self._scalebar_um.value()))
+                        break
+                    except Exception:
+                        pass
+            # Older napari (<0.7) used scale_bar.unit; harmless where deprecated.
+            try:
+                sb.unit = "um"
+            except Exception:
+                pass
+
+            # After rescaling, the old camera zoom leaves the image tiny in a
+            # mostly-black canvas — refit the view so the image fills it again.
+            try:
+                self.viewer.reset_view()
+            except Exception:
+                pass
+
             napari_show_info(
                 f"Scale bar enabled at {px:.4g} µm/px "
                 f"({self._scalebar_um.value():.0f} µm reference).")
@@ -530,4 +592,25 @@ class TemperatureDependentUI:
             plt.close(fig)
             self._export_prog.setValue(i + 1)
 
-        iio.imwrite(str(out_path), np.stack(frames), fps=fps)
+        arr = np.stack(frames)
+        # H.264 requires even width/height and yuv420p for broad player
+        # compatibility (VLC/QuickTime/browsers). Crop to even dims and pass an
+        # explicit codec — imageio's pyav plugin otherwise left the codec None
+        # ("expected bytes, NoneType found") and produced an unplayable file.
+        if arr.shape[1] % 2:
+            arr = arr[:, :-1, :, :]
+        if arr.shape[2] % 2:
+            arr = arr[:, :, :-1, :]
+        last_err = None
+        for _kwargs in ({'codec': 'libx264', 'out_pixel_format': 'yuv420p'},
+                        {'codec': 'libx264'},
+                        {'codec': 'mpeg4'},
+                        {}):
+            try:
+                iio.imwrite(str(out_path), arr, fps=fps, **_kwargs)
+                last_err = None
+                break
+            except Exception as _e:
+                last_err = _e
+        if last_err is not None:
+            raise last_err

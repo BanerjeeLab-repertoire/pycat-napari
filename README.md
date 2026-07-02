@@ -182,6 +182,37 @@ pip install "pycat-napari[trackmate]"
    pip install "pycat-napari[arm-mac, dev]"
    ```
 
+### Cellpose Model: cyto2 (default) vs Cellpose-SAM
+
+PyCAT pins **`cellpose<4`** by default, which uses the fast **`cyto2`** CNN. This is
+the recommended model for most users: it runs quickly on CPU and reproduces the
+segmentation behavior of PyCAT 1.0.0. The Cellpose model can be chosen from a
+dropdown in the Cellpose segmentation widget.
+
+If you want the newer **Cellpose-SAM** model (`cpsam`, from Cellpose ≥ 4), be
+aware of two things:
+
+- Cellpose 4 **removed** the legacy `cyto`/`cyto2`/`cyto3` weights — a single
+  environment can have **either** `cyto2` (Cellpose < 4) **or** `cpsam`
+  (Cellpose ≥ 4), never both.
+- Cellpose-SAM is a large transformer model. It is **substantially slower on
+  CPU** and benefits from a modern CUDA-capable GPU.
+
+To use Cellpose-SAM, create a **separate environment** with a newer Cellpose:
+
+```bash
+# Separate env for Cellpose-SAM (cpsam)
+mamba create -n pycat-sam python=3.12
+mamba activate pycat-sam
+pip install pycat-napari
+pip install "cellpose>=4"          # replaces the pinned cyto2 Cellpose
+```
+
+PyCAT detects the installed Cellpose version automatically: the segmentation
+model dropdown will show `cyto2` (and `cyto`, `nuclei`) on Cellpose < 4, or
+`cpsam` on Cellpose ≥ 4. No code changes are needed to switch — just activate
+the environment that has the Cellpose version you want.
+
 
 ### Alternative Installation Methods
 

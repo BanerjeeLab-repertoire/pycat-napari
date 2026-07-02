@@ -884,6 +884,100 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     print(f"[PyCAT Batch]   In vitro fluorescence preprocessing done.")
 
 
+def _ivf_droplet_mask_and_image(state):
+    """Fetch the in vitro droplet mask and a 2D fluorescence image from state."""
+    mask = state.get('ivf_droplet_mask')
+    if mask is None:
+        mask = state.get('labeled_cells')
+    img = state.get('preprocessed', state.get('image'))
+    img = _normalize_to_float(img) if img is not None else None
+    if img is not None and img.ndim == 3:
+        img = img[0]
+    return mask, img
+
+
+def replay_ivf_field_summary(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro field summary + partition coefficient from the droplet mask."""
+    from pycat.toolbox.invitro_tools import field_summary, partition_coefficient_field
+    import pandas as pd
+    mask, img = _ivf_droplet_mask_and_image(state)
+    if mask is None or img is None:
+        print('[PyCAT Batch]   IVF field summary skipped (no droplet mask/image in state).')
+        return
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    summ = field_summary(mask, img, mpx)
+    part = partition_coefficient_field(img, mask)
+    pd.DataFrame([summ]).to_csv(
+        output_dir / f"{image_path.stem}_ivf_field_summary.csv", index=False)
+    if isinstance(part.get('per_droplet_df'), pd.DataFrame):
+        part['per_droplet_df'].to_csv(
+            output_dir / f"{image_path.stem}_ivf_partition.csv", index=False)
+    print(f"[PyCAT Batch]   IVF field summary: Phi={summ.get('volume_fraction', float('nan')):.3f}, "
+          f"n={summ.get('n_droplets', 0)}.")
+
+
+def replay_ivf_size_distribution(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro droplet size-distribution fit from the droplet mask."""
+    from pycat.toolbox.invitro_tools import fit_size_distribution
+    import pandas as pd, numpy as np
+    import skimage as sk
+    mask, _ = _ivf_droplet_mask_and_image(state)
+    if mask is None:
+        print('[PyCAT Batch]   IVF size distribution skipped (no droplet mask in state).')
+        return
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    props = sk.measure.regionprops(mask.astype(np.int32))
+    radii = np.array([np.sqrt(p.area * mpx**2 / np.pi) for p in props])
+    if len(radii) < 5:
+        print(f'[PyCAT Batch]   IVF size distribution skipped ({len(radii)} droplets < 5).')
+        return
+    res = fit_size_distribution(radii, n_bins=int(params.get('n_bins', 30)))
+    row = {k: v for k, v in res.items() if not hasattr(v, '__len__')}
+    pd.DataFrame([row]).to_csv(
+        output_dir / f"{image_path.stem}_ivf_size_distribution.csv", index=False)
+    print(f"[PyCAT Batch]   IVF size distribution: {res.get('preferred_model', '?')} preferred.")
+
+
+def replay_ivf_spatial_metrology(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay in vitro spatial metrology (whole field as one 'cell') from the droplet mask."""
+    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids, run_all_spatial_metrics
+    import numpy as np
+    import pandas as pd
+
+    def _flatten_scalars(prefix, obj, out):
+        # Recursively collect scalar (non-array) values into flat columns.
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                _flatten_scalars(f"{prefix}_{k}" if prefix else str(k), v, out)
+        elif np.isscalar(obj):
+            out[prefix] = obj
+
+    mask, _ = _ivf_droplet_mask_and_image(state)
+    if mask is None:
+        print('[PyCAT Batch]   IVF spatial metrology skipped (no droplet mask in state).')
+        return
+    mpx = state['data_instance'].data_repository.get('microns_per_pixel_sq', 1.0) ** 0.5
+    H, W = mask.shape[:2]
+    field_lbl = np.ones((H, W), dtype=np.int32); field_lbl[:2, :2] = 0
+    coords_df = get_puncta_centroids(mask, field_lbl, mpx)
+    rows = []
+    for cl in [c for c in coords_df['cell_label'].unique() if c != 0]:
+        sub = coords_df[coords_df['cell_label'] == cl]
+        coords = sub[['y_um', 'x_um']].values
+        if len(coords) < 2:
+            continue
+        res = run_all_spatial_metrics(coords, (field_lbl == cl), mpx)
+        row = {'field_label': int(cl)}
+        _flatten_scalars('', res, row)
+        rows.append(row)
+    if not rows:
+        print('[PyCAT Batch]   IVF spatial metrology skipped (<2 droplets).')
+        return
+    pd.DataFrame(rows).to_csv(
+        output_dir / f"{image_path.stem}_ivf_spatial_metrology.csv", index=False)
+    print(f"[PyCAT Batch]   IVF spatial metrology: {len(rows)} field(s) analysed.")
+
+
 def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay in vitro fluorescence droplet segmentation (whole field, no cell mask)."""
     from pycat.toolbox.segmentation_tools import (
@@ -990,6 +1084,15 @@ _STEP_MAP = {
     'bf_condensate_segmentation': replay_bf_condensate_segmentation,
     'ivf_preprocess':             replay_ivf_preprocess,
     'ivf_segmentation':           replay_ivf_segmentation,
+    'ivf_field_summary':          replay_ivf_field_summary,
+    'ivf_size_distribution':      replay_ivf_size_distribution,
+    'ivf_spatial_metrology':      replay_ivf_spatial_metrology,
+    'ivf_dynamics':               lambda s,p,pa,o: print(
+        '[PyCAT Batch]   IVF dynamics skipped (time-series; not a per-image batch step).'),
+    'ivf_phase_diagram':          lambda s,p,pa,o: print(
+        '[PyCAT Batch]   IVF phase diagram skipped (dilution series; manual multi-condition input).'),
+    'ivf_frame_qc':               lambda s,p,pa,o: print(
+        '[PyCAT Batch]   IVF frame QC skipped (time-series; not a per-image batch step).'),
     'ivbf_preprocess':            replay_ivbf_preprocess,
     'ivbf_segmentation':          replay_ivbf_segmentation,
     'zstack_bg_removal':              lambda s,p,pa,o: print(

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.40"
+version = "1.5.56"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -42,7 +42,7 @@ classifiers = [
 dependencies = [
     "aicsimageio>=4.14.0",
     "aicspylibczi>=3.0.5",
-    "cellpose",
+    "cellpose<4",
     "matplotlib",
     "napari",
     "numpy>=1.22,<2.0",

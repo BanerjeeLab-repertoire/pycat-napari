@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
     QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QObject
 
 # Local application imports
 from pycat.toolbox.image_processing_tools import (
@@ -80,46 +80,127 @@ from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
 from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack
 
 
+class _WheelScrollGuard(QObject):
+    """
+    Event filter that stops the mouse wheel from changing spin box / slider /
+    combo values unless the control has keyboard focus, and forwards the wheel
+    event to the enclosing QScrollArea so the panel scrolls instead.
+
+    This replaces the older instance-attribute `wheelEvent` patch, which does
+    not work in PyQt5: Qt dispatches the C++ virtual `wheelEvent`, which never
+    looks up a Python instance attribute, so the guard was silently bypassed
+    (the control changed value AND swallowed the scroll).
+    """
+    def eventFilter(self, obj, event):
+        from PyQt5.QtCore import QEvent
+        if event.type() == QEvent.Wheel and not obj.hasFocus():
+            from PyQt5.QtWidgets import QScrollArea, QApplication
+            p = obj.parentWidget()
+            while p is not None:
+                if isinstance(p, QScrollArea):
+                    QApplication.sendEvent(p.viewport(), event)
+                    break
+                p = p.parentWidget()
+            return True   # consume: the control must not change its value
+        return False
+
+
+# Module-level singleton filter, held by this reference so it is never GC'd.
+_GLOBAL_WHEEL_GUARD = None
+
+
+def _wheel_guard():
+    global _GLOBAL_WHEEL_GUARD
+    if _GLOBAL_WHEEL_GUARD is None:
+        _GLOBAL_WHEEL_GUARD = _WheelScrollGuard()
+    return _GLOBAL_WHEEL_GUARD
+
+
+def guard_wheel(control):
+    """
+    Install the wheel-scroll guard on a SINGLE control (spin box / slider /
+    combo). Safe to call at widget-creation time, before the control is placed
+    inside a QScrollArea — the enclosing scroll area is located at event time.
+    """
+    from PyQt5.QtCore import Qt
+    if control is None or getattr(control, '_pycat_scroll_guard', False):
+        return
+    control.setFocusPolicy(Qt.StrongFocus)
+    control.installEventFilter(_wheel_guard())
+    control._pycat_scroll_guard = True
+
+
+class _FileDropFilter(QObject):
+    """
+    Application-level event filter that routes files dropped anywhere on the
+    napari window into PyCAT's own openers (channel assignment + data-repository
+    registration), instead of napari's default reader which bypasses the PyCAT
+    pipeline. Also accepts the drag-enter so the drop actually fires.
+
+    Text/number input widgets are left alone so path drops into fields still work.
+    """
+    def __init__(self, file_io):
+        super().__init__()
+        self._file_io = file_io
+
+    def eventFilter(self, obj, event):
+        from PyQt5.QtCore import QEvent
+        from PyQt5.QtWidgets import QLineEdit, QTextEdit, QAbstractSpinBox
+        et = event.type()
+        if et not in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+            return False
+        if isinstance(obj, (QLineEdit, QTextEdit, QAbstractSpinBox)):
+            return False   # let input fields handle their own drops
+        md = event.mimeData() if hasattr(event, 'mimeData') else None
+        if md is None or not md.hasUrls():
+            return False
+        paths = [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
+        paths = [p for p in paths if p]
+        if not paths:
+            return False
+        if et in (QEvent.DragEnter, QEvent.DragMove):
+            event.acceptProposedAction()
+            return True
+        # Drop
+        event.acceptProposedAction()
+        self._route(paths)
+        return True
+
+    def _route(self, paths):
+        import os
+        ims    = [p for p in paths if os.path.splitext(p)[1].lower() == '.ims']
+        others = [p for p in paths if os.path.splitext(p)[1].lower() != '.ims']
+        try:
+            if others:
+                # 2D / multichannel opener (channel-assignment dialog).
+                self._file_io.open_2d_image(file_paths=others)
+            for p in ims:
+                # IMS must go through the lazy stack loader.
+                self._file_io.open_stack(file_path=p)
+        except Exception as e:
+            try:
+                from napari.utils.notifications import show_warning
+                show_warning(f"PyCAT could not open dropped file(s): {e}")
+            except Exception:
+                print(f"[PyCAT] Drop-open error: {e}")
+
+
 def _apply_scroll_guard(widget):
     """
-    Recursively walk a widget tree and patch wheelEvent on all interactive
-    controls (QComboBox, QAbstractSpinBox, QAbstractSlider) so that the
-    scroll wheel only adjusts them when they have keyboard focus or their
-    popup is open. Without this, hovering over any spinbox or slider inside
-    a QScrollArea dock while scrolling silently adjusts the control instead
-    of scrolling the panel.
+    Recursively install a wheel-scroll guard on all interactive controls
+    (QComboBox, QAbstractSpinBox, QAbstractSlider) in a widget tree so that,
+    inside a QScrollArea dock, hovering over a spin box / slider / combo while
+    scrolling scrolls the panel instead of silently adjusting the control.
 
     Call once on the root widget of any dock that lives inside a QScrollArea.
     """
     from PyQt5.QtWidgets import (QAbstractSpinBox, QAbstractSlider,
                                   QComboBox as _QCB)
-    from PyQt5.QtCore import QEvent
-
-    def _patch(w):
-        if getattr(w, '_pycat_scroll_guard', False):
-            return   # already patched — don't double-wrap
-        if isinstance(w, _QCB):
-            orig = w.__class__.wheelEvent
-            def _cb_wheel(event, _w=w, _orig=orig):
-                if _w.view().isVisible():
-                    _orig(_w, event)
-                else:
-                    event.ignore()
-            w.wheelEvent = _cb_wheel
-            w._pycat_scroll_guard = True
-        elif isinstance(w, (QAbstractSpinBox, QAbstractSlider)):
-            orig = w.__class__.wheelEvent
-            def _spin_wheel(event, _w=w, _orig=orig):
-                if _w.hasFocus():
-                    _orig(_w, event)
-                else:
-                    event.ignore()
-            w.wheelEvent = _spin_wheel
-            w._pycat_scroll_guard = True
-        for child in w.findChildren((_QCB, QAbstractSpinBox, QAbstractSlider)):
-            _patch(child)
-
-    _patch(widget)
+    controls = list(widget.findChildren((_QCB, QAbstractSpinBox, QAbstractSlider)))
+    if isinstance(widget, (_QCB, QAbstractSpinBox, QAbstractSlider)):
+        controls.insert(0, widget)
+    for w in controls:
+        guard_wheel(w)
 
 
 class BaseUIClass:
@@ -173,13 +254,9 @@ class BaseUIClass:
         """
         dropdown = QComboBox()
         # Prevent scroll wheel from accidentally changing the selection while
-        # the user scrolls through the dock panel.
-        dropdown.wheelEvent = lambda event: (
-            dropdown.WheelEvent_orig(event)
-            if dropdown.view().isVisible()
-            else event.ignore()
-        )
-        dropdown.WheelEvent_orig = dropdown.__class__.wheelEvent
+        # the user scrolls through the dock panel (event-filter based; the
+        # older instance-attribute wheelEvent patch never fired under PyQt5).
+        guard_wheel(dropdown)
 
         self.update_dropdown_items(dropdown, layer_type)
 
@@ -347,8 +424,16 @@ class BaseUIClass:
         """
         Removes all dock widgets from the viewer's window.
         """
-        # Remove all widgest from the dock
-        dock_widgets = list(self.viewer.window._dock_widgets.values())
+        # Remove all widgets from the dock. napari 0.7 renamed the private
+        # `_dock_widgets` to the public `dock_widgets`; prefer the public API
+        # and fall back to the old attribute for older napari versions.
+        container = getattr(self.viewer.window, 'dock_widgets', None)
+        if container is None:
+            container = getattr(self.viewer.window, '_dock_widgets', {})
+        try:
+            dock_widgets = list(container.values())
+        except AttributeError:
+            dock_widgets = list(container)
         for dw in dock_widgets:
             self.viewer.window.remove_dock_widget(dw)
 
@@ -368,8 +453,12 @@ class BaseUIClass:
         
         # Adjust the brush size for label layers and switch modes for shape layers
         if isinstance(active_layer, napari.layers.Labels):
-            active_layer_size = active_layer.data.shape[0]
-            active_layer.brush_size = active_layer_size//150
+            # Base brush size on the SPATIAL extent (last two dims), not shape[0]
+            # — for a 3D (T/Z, H, W) mask shape[0] is the frame count, which for
+            # a short stack gives 0 and makes napari divide-by-zero (NaN) on the
+            # first paint click. Floor at 1 so the brush is always valid.
+            spatial = active_layer.data.shape[-2:]
+            active_layer.brush_size = max(1, max(spatial) // 150)
             active_layer.mode = 'paint'
             active_layer.selected_label = 1
         elif isinstance(active_layer, napari.layers.Shapes):
@@ -398,13 +487,25 @@ class BaseUIClass:
             # Create a main widget to contain the input widget
             main_widget = QWidget()
             main_widget.setLayout(dock_layout)
-            
+
+            # Guard all spin boxes / sliders / combos in this widget against
+            # accidental wheel-scroll value changes (covers every toolbox tool
+            # that goes through this common docking path).
+            try:
+                _apply_scroll_guard(main_widget)
+            except Exception:
+                pass
+
             # Add the main widget to the viewer as a dock widget
             self.viewer.window.add_dock_widget(main_widget, name=dock_name)
         else:        
             # Add the widget to the existing layout in the dock                    
             layout.addWidget(widget)
             layout.setContentsMargins(1, 1, 1, 1)
+            try:
+                _apply_scroll_guard(widget)
+            except Exception:
+                pass
 
 
     def _record(self, step_name, params):
@@ -933,6 +1034,30 @@ class ToolboxFunctionsUI(BaseUIClass):
             method_row.addWidget(rb)
         seg_layout.addWidget(method_group)
 
+        # ── Cellpose model selector (version-aware) ──────────────────────
+        from pycat.toolbox.segmentation_tools import (
+            available_cellpose_models, default_cellpose_model)
+        cp_model_group = QWidget()
+        cp_model_row = QVBoxLayout(cp_model_group)
+        cp_model_row.setContentsMargins(2, 0, 0, 0)
+        self.add_text_label(cp_model_row, 'Cellpose model:')
+        cp_model_dropdown = QComboBox()
+        try:
+            _models = available_cellpose_models()
+        except Exception:
+            _models = ['cyto2']
+        cp_model_dropdown.addItems(_models)
+        _default = default_cellpose_model() if _models else 'cyto2'
+        _idx = cp_model_dropdown.findText(_default)
+        if _idx >= 0:
+            cp_model_dropdown.setCurrentIndex(_idx)
+        cp_model_dropdown.setToolTip(
+            "cyto2 = fast Cellpose <4 CNN (default). cpsam = Cellpose-SAM "
+            "(Cellpose >=4 only; much slower on CPU). Only models supported by "
+            "your installed Cellpose version are shown.")
+        cp_model_row.addWidget(cp_model_dropdown)
+        seg_layout.addWidget(cp_model_group)
+
         # ── Shared image dropdown ────────────────────────────────────────
         self.add_text_label(seg_layout, 'Select image layer:')
         image_dropdown = self.create_layer_dropdown(napari.layers.Image)
@@ -950,10 +1075,12 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         def _on_method_changed():
             rf_extra.setVisible(rb_rf.isChecked())
+            cp_model_group.setVisible(rb_cellpose.isChecked())
 
         rb_cellpose.toggled.connect(_on_method_changed)
         rb_stardist.toggled.connect(_on_method_changed)
         rb_rf.toggled.connect(_on_method_changed)
+        _on_method_changed()
 
         # ── Run button ───────────────────────────────────────────────────
         run_btn = QPushButton("Run Segmentation")
@@ -963,11 +1090,13 @@ class ToolboxFunctionsUI(BaseUIClass):
             dr = self.central_manager.active_data_class.data_repository
 
             if rb_cellpose.isChecked():
+                dr['cellpose_model'] = cp_model_dropdown.currentText()
                 self.on_general_button_clicked(
                     run_cellpose_segmentation, self.viewer, image_dropdown,
                     self.central_manager.active_data_class, self.viewer)
                 self._record('cellpose_segmentation', {
                     'method': 'cellpose',
+                    'cellpose_model': cp_model_dropdown.currentText(),
                     'image_layer': layer_name,
                     'cell_diameter': dr.get('cell_diameter', 100),
                     'ball_radius':   dr.get('ball_radius', 50),
@@ -1058,6 +1187,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         # k_value slider
         k_label = QLabel("Threshold k value:") # Add a text label
         k_slider = QSlider(Qt.Horizontal) # Create a slider widget
+        guard_wheel(k_slider)
         k_slider.setRange(0, 100)  # 100 steps from 0 to 100
         k_slider.setValue(50)  # default is 0
         k_slider.setSingleStep(1)  # Adjust for 0.01 steps
@@ -1075,6 +1205,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['ball_radius']) # Calculate the default window size  
         window_label = QLabel(f"Window Size:") # Add a text label
         window_slider = QSlider(Qt.Horizontal) # Create a slider widget
+        guard_wheel(window_slider)
         window_slider.setRange(10, 250) # 100 steps from 10 to 250
         window_slider.setValue(def_window_size) # Set the default value
         window_label_value = QLabel(str(def_window_size)) # Set the default value
@@ -1588,6 +1719,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         # Alpha/Blend Slider
         slider_label = QLabel("Alpha/Blend Value:") # Add a text label
         alpha_blend_slider = QSlider(Qt.Horizontal) # Create a slider widget
+        guard_wheel(alpha_blend_slider)
         alpha_blend_slider.setRange(0, 10)  # 100 steps from 0 to 100
         alpha_blend_slider.setValue(5)  # default is 0.5
         alpha_blend_slider.setSingleStep(1)  # Adjust for 0.01 steps
@@ -2821,6 +2953,27 @@ class MenuManager:
         # Setup and populate the "Open File(s)" menu with file I/O actions
         self.file_menu = self.viewer.window._qt_window.menuBar().addMenu('★ Open/Save File(s)')
         self._add_file_io_methods_to_menu()
+
+        # Clear button directly on the menu bar, next to Open/Save, with a
+        # hazard icon. Resets the workspace to the workflow start WITHOUT saving.
+        self.clear_action = QAction('\u2620 Clear', self.viewer.window._qt_window)
+        self.clear_action.setToolTip(
+            'Clear all layers and data WITHOUT saving — resets to the start of a workflow.')
+        self.clear_action.triggered.connect(
+            lambda: self.central_manager.file_io.clear_all_without_saving(self.viewer, confirm=True))
+        self.viewer.window._qt_window.menuBar().addAction(self.clear_action)
+
+        # Route files dropped onto the napari window through PyCAT's openers
+        # (napari's default drop bypasses PyCAT's channel-assignment pipeline).
+        try:
+            from PyQt5.QtWidgets import QApplication
+            self._pycat_drop_filter = _FileDropFilter(self.central_manager.file_io)
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self._pycat_drop_filter)
+            self.viewer.window._qt_window.setAcceptDrops(True)
+        except Exception as _e:
+            print(f"[PyCAT] Could not install file-drop handler: {_e}")
 
     def _open_session_loader(self):
         """Open a folder browser to select a PyCAT output directory and reload."""

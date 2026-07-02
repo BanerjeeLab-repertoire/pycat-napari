@@ -640,10 +640,13 @@ def peak_and_edge_enhancement_func(image, ball_radius):
   # Smooth the enhanced image with a small Gaussian filter
   gabor_img = ndi.gaussian_filter(gabor_img, 0.5)
 
-  # Apply CLAHE with a fixed 64-px tile (5× faster than ball_radius*4
-  # which could be large; quality is indistinguishable for condensate images)
-  output_image = sk.exposure.equalize_adapthist(gabor_img, kernel_size=64,
-                                                 clip_limit=0.0025, nbins=128)
+  # CLAHE tile scaled to the rolling-ball radius (v1.0.0 behavior). A fixed
+  # 64-px tile is MORE aggressive for large ball radii (smaller tile => more
+  # local equalization), which over-enhances background and suppresses
+  # low-contrast puncta; scaling the tile to ball_radius*4 keeps it gentle.
+  k_size = math.ceil(ball_radius * 4)
+  output_image = sk.exposure.equalize_adapthist(gabor_img, kernel_size=k_size,
+                                                 clip_limit=0.0025)
 
   # Convert the output image back to the original input data type for consistency
   output_image = dtype_conversion_func(output_image, output_bit_depth=input_dtype)
@@ -1798,14 +1801,15 @@ def pre_process_image(image, ball_radius, window_size):
     # Apply Gaussian filter for image smoothing
     img = ndi.gaussian_filter(img, 1)
 
-    # Apply CLAHE for contrast enhancement.
-    # Using a fixed 64-px tile and nbins=128 gives a 5× speedup with
-    # identical visual quality for condensate images — the tile size only
-    # affects the locality of the histogram equalisation, and 64px is
-    # still much smaller than a typical cell (hundreds of pixels).
+    # Apply CLAHE for contrast enhancement. The tile is scaled to the user's
+    # window_size (v1.0.0 behavior) rather than a fixed 64-px tile: a fixed
+    # tile smaller than the chosen window is more aggressive (more local
+    # equalization) and ignores the window_size control, over-enhancing
+    # background texture and suppressing low-contrast puncta.
     clip_limit = 0.0025
-    img = sk.exposure.equalize_adapthist(img, kernel_size=64,
-                                          clip_limit=clip_limit, nbins=128)
+    k_size = math.ceil(window_size)
+    img = sk.exposure.equalize_adapthist(img, kernel_size=k_size,
+                                          clip_limit=clip_limit)
 
     # Convert the processed image back to its original data type
     output_image = dtype_conversion_func(img, output_bit_depth=input_dtype)

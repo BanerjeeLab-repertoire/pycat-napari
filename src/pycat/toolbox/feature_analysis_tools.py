@@ -528,7 +528,14 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
 
     # Check for shape compatibility between 2D mask and 2D image
     if cell_masks.shape[-2:] != _image_for_analysis.shape[-2:]:
-        raise ValueError("Mask and image layers must have compatible spatial dimensions!")
+        raise ValueError(
+            "Mask and image layers must have compatible spatial dimensions! "
+            f"Mask '{getattr(mask_layer, 'name', '?')}' reduced to spatial dims "
+            f"{tuple(cell_masks.shape[-2:])} (full shape {tuple(mask_layer.data.shape)}); "
+            f"image '{getattr(image_layer, 'name', '?')}' reduced to "
+            f"{tuple(_image_for_analysis.shape[-2:])} (full shape {tuple(np.asarray(image).shape)}). "
+            "Check that the mask was generated from this exact image (same H×W) "
+            "and that neither was cropped, resized, or transposed.")
     if omission_mask is not None and omission_mask.shape != cell_masks.shape:
         omission_mask = None  # silently drop mismatched omission mask
     

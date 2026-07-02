@@ -54,7 +54,8 @@ from pycat.utils.channel_naming import (
     extract_channel_info_from_ims,
     suggest_colormap,
 )
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
+from PyQt5.QtGui import QFont
 from napari.utils.notifications import show_warning as napari_show_warning
 
 # Local application imports
@@ -161,6 +162,25 @@ class LayerDataframeSelectionDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         layout.addWidget(self.ok_btn)
         layout.addWidget(self.cancel_btn)
+
+        # Clear WITHOUT saving — discards everything after an explicit confirm.
+        self.clear_without_saving = False
+        self.discard_btn = QPushButton("☠  Clear Without Saving")
+        self.discard_btn.setToolTip(
+            "Discard all layers and data without saving anything.")
+        self.discard_btn.setStyleSheet(
+            "QPushButton { color: #b00020; font-weight: bold; }")
+        def _on_discard():
+            confirm = QMessageBox.warning(
+                self, "Clear without saving?",
+                "This will permanently clear ALL layers and data and save "
+                "NOTHING.\n\nAll unsaved data will be lost. Continue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if confirm == QMessageBox.Yes:
+                self.clear_without_saving = True
+                self.accept()
+        self.discard_btn.clicked.connect(_on_discard)
+        layout.addWidget(self.discard_btn)
 
         self.setLayout(layout)
 
@@ -406,7 +426,7 @@ class FileIOClass:
         self.filePath = ""
         self.base_file_name = ""
 
-    def open_2d_image(self):
+    def open_2d_image(self, file_paths=None):
         """
         Opens a dialog for selecting and opening 2D image files. Supports multiple file formats and handles multichannel 
         images by assigning channels through a dialog. The method updates the Napari viewer with the opened images and 
@@ -419,8 +439,14 @@ class FileIOClass:
         information are extracted and stored, which can be crucial for accurate image analysis tasks.
         """
         #print("FileIO data_instance id:", id(self.central_manager.active_data_class))
-        options = QFileDialog.Options()
-        file_paths, _ = QFileDialog.getOpenFileNames(None, "Open File(s)", "", "Image Files (*.tiff *.tif *.czi *.png);;All Files (*)", options=options)
+        # A QAction.triggered signal passes a `checked` bool to its slot; ignore
+        # anything that isn't an actual list/tuple of paths so the menu still
+        # opens the file dialog (only the drop handler passes real paths).
+        if not isinstance(file_paths, (list, tuple)):
+            file_paths = None
+        if file_paths is None:
+            options = QFileDialog.Options()
+            file_paths, _ = QFileDialog.getOpenFileNames(None, "Open File(s)", "", "Image Files (*.tiff *.tif *.czi *.png);;All Files (*)", options=options)
 
         # Check if any files were selected
         if not file_paths: 
@@ -557,7 +583,7 @@ class FileIOClass:
 
 
 
-    def open_stack(self):
+    def open_stack(self, file_path=None):
         """
         Open any supported multi-frame image file as a lazy (T, Y, X) or
         (Z, Y, X) stack — one layer per channel — without loading the full
@@ -585,13 +611,19 @@ class FileIOClass:
         - Each channel becomes its own named napari layer.
         - The time/Z slider is preserved after loading.
         """
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getOpenFileName(
-            None, "Open Image Stack",
-            "",
-            "Image Stacks (*.ims *.tif *.tiff *.czi);;All Files (*)",
-            options=options,
-        )
+        # A QAction.triggered signal passes a `checked` bool to its slot; ignore
+        # anything that isn't a real path string so the menu still opens the
+        # dialog (only the drop handler passes a real path).
+        if not isinstance(file_path, str):
+            file_path = None
+        if file_path is None:
+            options = QFileDialog.Options()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Open Image Stack",
+                "",
+                "Image Stacks (*.ims *.tif *.tiff *.czi);;All Files (*)",
+                options=options,
+            )
         if not file_path:
             return
 
@@ -865,6 +897,11 @@ class FileIOClass:
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
+        # Keep lazy sources (AICSImage readers + dask arrays) alive for as long
+        # as the layers exist, so on-demand frame reads keep working without an
+        # eager copy to disk.
+        if not hasattr(self, '_stack_lazy_refs'):
+            self._stack_lazy_refs = []
         channels_to_load = list(range(n_c)) if not use_aicsimage else None
         H = W = n_t = n_z = None
 
@@ -899,17 +936,14 @@ class FileIOClass:
                     # tifffile fallback — single (T,H,W), no Z/scene metadata
                     arr_ch = arr.astype(np.float32)
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
-                    zarr_path = _os.path.join(zarr_dir, f'ch{channel_idx}')
-                    z = _zarr.open(zarr_path, mode='w', shape=arr_ch.shape,
-                                   chunks=(1, H, W), dtype=np.float32)
-                    z[:] = arr_ch
-                    self._stack_zarr_paths.append(zarr_path)
-                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    # Data is already in memory — wrap it directly (no disk copy).
+                    wrapper = _ZarrTYX_generic(arr_ch)
+                    self._stack_lazy_refs.append(arr_ch)
                     self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
                     napari_show_info(
                         f"Loaded {_ch_label}: {n_frames} frames "
-                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
+                        f"{H}\u00d7{W}px → '{layer_name}'"
                     )
                     continue
 
@@ -921,36 +955,25 @@ class FileIOClass:
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
 
                 elif n_z == 1:
-                    # Pure time series (T, Y, X) — lazily written to zarr.
+                    # Pure time series (T, Y, X) — wrap the dask array so
+                    # frames load on demand (lazy; no eager copy to disk).
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
-                    zarr_path = _os.path.join(
-                        zarr_dir, f'ch{channel_idx}_s{scene_suffix or "0"}')
                     dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
-                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
-                                   chunks=(1, H, W), dtype=np.float32)
-                    for t in range(n_t):
-                        z[t] = np.asarray(dask_arr[t]).astype(np.float32)
-                    self._stack_zarr_paths.append(zarr_path)
-                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    wrapper = _ZarrTYX_generic(dask_arr)
+                    self._stack_lazy_refs.append((image, dask_arr))
                     self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
                     napari_show_info(
                         f"Loaded {_ch_label}{scene_suffix}: {n_t} frames "
-                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
+                        f"{H}\u00d7{W}px → '{layer_name}' (lazy)"
                     )
 
                 elif n_t == 1:
                     # Pure z-stack (Z, Y, X)
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{scene_suffix}"
-                    zarr_path = _os.path.join(
-                        zarr_dir, f'ch{channel_idx}_z{scene_suffix or "0"}')
                     dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
-                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
-                                   chunks=(1, H, W), dtype=np.float32)
-                    for zi in range(n_z):
-                        z[zi] = np.asarray(dask_arr[zi]).astype(np.float32)
-                    self._stack_zarr_paths.append(zarr_path)
-                    wrapper = _ZarrTYX_generic(_zarr.open(zarr_path, mode='r'))
+                    wrapper = _ZarrTYX_generic(dask_arr)
+                    self._stack_lazy_refs.append((image, dask_arr))
                     self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
                     napari_show_info(
@@ -1175,6 +1198,48 @@ class FileIOClass:
 
 
 
+    def _clear_everything(self, viewer):
+        """
+        Reset the napari space to the workflow start state: remove all layers,
+        reset the data repository/dataframes, and reset the workflow checklist
+        progress bar. Saves nothing. Shared by Save & Clear's discard option and
+        the top-bar Clear button.
+        """
+        self.viewer = viewer
+        try:
+            df_names = list(self.central_manager.active_data_class.get_dataframes().keys())
+        except Exception:
+            df_names = []
+        viewer.layers.select_all()
+        viewer.layers.remove_selected()
+        self.central_manager.active_data_class.reset_values(
+            clear_all=True, df_names_to_reset=df_names)
+        # Reset the workflow checklist so the next dataset starts from step 1.
+        try:
+            wc = getattr(self.central_manager, 'workflow_checklist', None)
+            if wc is not None:
+                wc.reset()
+        except Exception:
+            pass
+
+    def clear_all_without_saving(self, viewer, confirm=True):
+        """
+        Clear all layers and data without saving, resetting the workspace to the
+        beginning-of-workflow (startup) state. If `confirm` is True, asks for
+        explicit confirmation first and warns that all unsaved data will be lost.
+        """
+        if confirm:
+            reply = QMessageBox.warning(
+                None, "Clear everything without saving?",
+                "This resets the workspace to the start of a workflow.\n\n"
+                "All layers and analysis data will be permanently cleared and "
+                "NOTHING will be saved. All unsaved data will be lost.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+        self._clear_everything(viewer)
+        print("[PyCAT] Workspace cleared without saving.")
+
     def save_and_clear_all(self, viewer):
         """
         Provides options for saving selected layers and dataframes based on user input from a dialog, with additional 
@@ -1196,6 +1261,12 @@ class FileIOClass:
         dataframe_names = self.central_manager.active_data_class.get_dataframes().keys()
         dialog = LayerDataframeSelectionDialog(self.viewer.layers, dataframe_names)
         result = dialog.exec_()
+
+        # If the user chose "Clear Without Saving", discard everything now.
+        if result == QDialog.Accepted and getattr(dialog, 'clear_without_saving', False):
+            self._clear_everything(viewer)
+            print("[PyCAT] Cleared all layers and data without saving.")
+            return
 
         # If user clicks OK, proceed with saving and clearing
         if result == QDialog.Accepted:
@@ -1270,6 +1341,15 @@ class FileIOClass:
                 if layer_name in layer_names:
                     self.viewer.layers.remove(layer_name)
             self.central_manager.active_data_class.reset_values(df_names_to_reset=selected_dataframes)
+
+        # Reset the workflow checklist progress bar so the next dataset starts
+        # from step 1 rather than showing the previous run's completed pills.
+        try:
+            wc = getattr(self.central_manager, 'workflow_checklist', None)
+            if wc is not None:
+                wc.reset()
+        except Exception:
+            pass
 
     def _save_layer(self, data, layer_type: str, save_name: str, safe_name: str):
         """

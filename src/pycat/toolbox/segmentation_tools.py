@@ -55,6 +55,70 @@ def _get_cellpose_gpu():
     return _CELLPOSE_USE_GPU
 
 
+# ---------------------------------------------------------------------------
+# Cellpose version awareness — cyto2 (Cellpose <4 CNN) vs cpsam (Cellpose >=4)
+# ---------------------------------------------------------------------------
+# Cellpose 4 (Cellpose-SAM) removed the legacy cyto/cyto2/cyto3 weights: passing
+# pretrained_model='cyto2' there is silently ignored and cpsam is loaded instead
+# (a large ViT-L transformer that is very slow on CPU). The two model families
+# require different Cellpose versions and cannot coexist in one environment, so
+# PyCAT pins cellpose<4 by default (fast cyto2 CNN) and adapts automatically if a
+# newer Cellpose is installed.
+
+_CELLPOSE_MODEL_CACHE = {}
+
+
+def _cellpose_major_version():
+    """Return the installed Cellpose major version as an int (0 if unknown)."""
+    try:
+        import cellpose
+        return int(str(cellpose.version).split('.')[0])
+    except Exception:
+        return 0
+
+
+def available_cellpose_models():
+    """
+    List the segmentation model names valid for the INSTALLED Cellpose version.
+    Cellpose <4 exposes the legacy CNNs (cyto2 default); Cellpose >=4 exposes
+    only the SAM/DINO models (cpsam default).
+    """
+    if _cellpose_major_version() >= 4:
+        return ['cpsam']
+    return ['cyto2', 'cyto', 'nuclei']
+
+
+def default_cellpose_model():
+    """The preferred default model for the installed Cellpose version."""
+    return available_cellpose_models()[0]
+
+
+def _build_cellpose_model(model_name):
+    """
+    Build (and cache) a Cellpose model using the correct API for the installed
+    version. On Cellpose <4 the builtin name goes through `model_type`; on
+    Cellpose >=4 it goes through `pretrained_model`.
+    """
+    gpu = _get_cellpose_gpu()
+    key = (model_name, gpu, _cellpose_major_version())
+    if key in _CELLPOSE_MODEL_CACHE:
+        return _CELLPOSE_MODEL_CACHE[key]
+
+    if _cellpose_major_version() >= 4:
+        # Cellpose 4+: legacy names don't exist; fall back to cpsam explicitly.
+        name = model_name if model_name in available_cellpose_models() else 'cpsam'
+        model = models.CellposeModel(gpu=gpu, pretrained_model=name)
+    else:
+        # Cellpose <4: builtin CNNs are selected via model_type.
+        try:
+            model = models.CellposeModel(gpu=gpu, model_type=model_name)
+        except TypeError:
+            # Very old API fallback
+            model = models.CellposeModel(gpu=gpu, pretrained_model=model_name)
+    _CELLPOSE_MODEL_CACHE[key] = model
+    return model
+
+
 
 
 
@@ -619,7 +683,7 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
     return boolean_mask
 
 
-def cellpose_segmentation(image, object_diameter):
+def cellpose_segmentation(image, object_diameter, model_name=None):
     """
     Perform cell segmentation on an image using Cellpose, a deep-learning-based method for cell/nucleus segmentation.
 
@@ -652,8 +716,13 @@ def cellpose_segmentation(image, object_diameter):
       image for segmentation.
     """
     
-    model = models.CellposeModel(gpu=_get_cellpose_gpu(), pretrained_model='cyto2')
-    
+    # Select the model for the installed Cellpose version (default cyto2 on
+    # Cellpose <4, cpsam on Cellpose >=4). The model is cached across calls so
+    # weights are not reloaded every segmentation.
+    if model_name is None:
+        model_name = default_cellpose_model()
+    model = _build_cellpose_model(model_name)
+
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing
     img = sk.exposure.equalize_adapthist(img, kernel_size=object_diameter//2, clip_limit=0.0025)
@@ -661,8 +730,12 @@ def cellpose_segmentation(image, object_diameter):
     img = apply_rescale_intensity(img, out_min=0.0, out_max=1.0)
 
     image_preprocessed = dtype_conversion_func(img, 'uint16') # Convert the image to uint16 for Cellpose
-    # Apply Cellpose model to segment cells/nuclei.
-    masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0])
+    # Apply Cellpose model to segment cells/nuclei. Cellpose >=4 ignores the
+    # `channels` argument (SAM is channel-order invariant); Cellpose <4 uses it.
+    if _cellpose_major_version() >= 4:
+        masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter)
+    else:
+        masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0])
 
     # Post-process segmentation masks to improve results.
     binary_mask = masks > 0  # Binary version for morphological operations
@@ -698,9 +771,10 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
     # Retrieve the image data and cell diameter from the data instance
     image = image_layer.data
     object_diameter = data_instance.data_repository['cell_diameter']
-    
+    model_name = data_instance.data_repository.get('cellpose_model', None)
+
     # Perform cell segmentation using Cellpose.
-    cell_masks = cellpose_segmentation(image, object_diameter)
+    cell_masks = cellpose_segmentation(image, object_diameter, model_name=model_name)
     
     # Add the segmentation results as a new label layer to the viewer.
     viewer.add_labels(cell_masks, name=f"Cellpose Segmentation on {image_layer.name}")
@@ -1195,7 +1269,8 @@ def cell_mask_stretching(image, cell_masks):
 
 def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
                                 kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
-                                intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2):
+                                intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
+                                crop_to_cell=False):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -1235,19 +1310,25 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     pre_processed_img = dtype_conversion_func(pre_processed_image, 'float32')
     cell_mask = cell_mask.astype(bool)  # Ensure mask is boolean
 
-    # ── Bounding-box crop ────────────────────────────────────────────────
-    # All expensive operations (bg removal, Felzenszwalb, Niblack/Sauvola)
-    # run on the full image even though only a small cell ROI is needed.
-    # Cropping to the bounding box first gives a speedup proportional to
-    # (image_area / cell_area) — typically 5-20x for 3 cells on 1024x1024.
-    rows = np.any(cell_mask, axis=1)
-    cols = np.any(cell_mask, axis=0)
-    r0, r1 = np.where(rows)[0][[0, -1]]
-    c0, c1 = np.where(cols)[0][[0, -1]]
-    # Add a border of ball_radius so edge effects don't corrupt the crop
-    pad = int(ball_radius)
-    r0p = max(0, r0 - pad);  r1p = min(cell_mask.shape[0], r1 + pad + 1)
-    c0p = max(0, c0 - pad);  c1p = min(cell_mask.shape[1], c1 + pad + 1)
+    # ── Processing region ────────────────────────────────────────────────
+    # By DEFAULT process the whole image (v1.0.0 behavior): background removal
+    # (gaussian σ≈2·ball_radius, ~3σ support), CLAHE (kernel≈4·ball_radius), and
+    # Felzenszwalb are all context-dependent, so a tight cell crop changes
+    # results near cell edges and degrades condensate segmentation quality.
+    # crop_to_cell=True restores the faster bounding-box crop for users who
+    # accept that approximation (a border of only ball_radius is NOT enough
+    # context to match whole-image results).
+    if crop_to_cell:
+        rows = np.any(cell_mask, axis=1)
+        cols = np.any(cell_mask, axis=0)
+        r0, r1 = np.where(rows)[0][[0, -1]]
+        c0, c1 = np.where(cols)[0][[0, -1]]
+        pad = int(ball_radius)
+        r0p = max(0, r0 - pad);  r1p = min(cell_mask.shape[0], r1 + pad + 1)
+        c0p = max(0, c0 - pad);  c1p = min(cell_mask.shape[1], c1 + pad + 1)
+    else:
+        r0p, r1p = 0, cell_mask.shape[0]
+        c0p, c1p = 0, cell_mask.shape[1]
 
     orig_crop  = original_img[r0p:r1p, c0p:c1p]
     proc_crop  = pre_processed_img[r0p:r1p, c0p:c1p]

@@ -35,7 +35,8 @@ class _AdvancedAnalysisWorker(QThread):
 
     def run(self):
         try:
-            result = self._task(**self._kwargs)
+            result = self._task(progress_emit=self.progress.emit,
+                                should_cancel=self.isInterruptionRequested, **self._kwargs)
             self.finished.emit(result)
         except Exception:
             import traceback
@@ -90,7 +91,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_m = QProgressBar(); prog_m.setVisible(False)
     run_m  = QPushButton("▶  Run Morphological Analysis")
-    mf.addRow(prog_m); mf.addRow(run_m)
+    stop_m = QPushButton("■  Stop"); stop_m.setVisible(False)
+    mf.addRow(prog_m); mf.addRow(run_m); mf.addRow(stop_m)
 
     def _on_morph():
         from pycat.toolbox.morphological_complexity_tools import (
@@ -110,7 +112,9 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         prog_m.setMaximum(max(n_cells, 1)); prog_m.setValue(0); prog_m.setVisible(True)
         run_m.setEnabled(False)
 
-        def _task():
+        def _task(progress_emit=None, should_cancel=None):
+            def _cancelled():
+                return bool(should_cancel and should_cancel())
             if cb_fd.isChecked():
                 results['fractal_dimension'] = fractal_dimension_per_cell(pmask, cmask)
             if cb_lac.isChecked():
@@ -120,6 +124,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
                 import skimage as sk
                 lp = sk.measure.label(pmask > 0)
                 results['tortuosity'] = tortuosity_per_object(lp, mpx)
+            if _cancelled():
+                return results
             if cb_orient.isChecked():
                 import skimage as sk
                 lp = sk.measure.label(pmask > 0)
@@ -136,9 +142,15 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
         worker = _AdvancedAnalysisWorker(_task, {})
         ui_instance._morph_worker = worker
+        worker.progress.connect(lambda v, m: prog_m.setValue(v))
+        stop_m.setVisible(True)
+        try: stop_m.clicked.disconnect()
+        except Exception: pass
+        stop_m.clicked.connect(lambda: (worker.requestInterruption(), stop_m.setEnabled(False)))
+        stop_m.setEnabled(True)
 
         def _done(res):
-            prog_m.setVisible(False); run_m.setEnabled(True)
+            prog_m.setVisible(False); run_m.setEnabled(True); stop_m.setVisible(False)
             for k, v in res.items():
                 dr[f'morph_{k}'] = v
             from pycat.ui.ui_utils import show_dataframes_dialog
@@ -153,7 +165,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_info("Morphological complexity analysis complete.")
 
         def _err(msg):
-            prog_m.setVisible(False); run_m.setEnabled(True)
+            prog_m.setVisible(False); run_m.setEnabled(True); stop_m.setVisible(False)
             napari_show_warning("Morphological analysis error — see terminal.")
             print(f"[PyCAT Morph] ERROR:\n{msg}")
 
@@ -180,10 +192,11 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         "Greedy NNL (fast, simple)",
         "TrackMate LAP (via pyimagej, requires Fiji)",
     ])
-    linker_dd.wheelEvent = lambda e: (
-        linker_dd.__class__.wheelEvent(linker_dd, e)
-        if linker_dd.view().isVisible() else e.ignore()
-    )
+    try:
+        from pycat.ui.ui_modules import guard_wheel
+        guard_wheel(linker_dd)
+    except Exception:
+        pass
     df.addRow("Linking algorithm:", linker_dd)
 
     max_disp = QDoubleSpinBox(); max_disp.setRange(0.1, 20); max_disp.setValue(2.0)
@@ -274,7 +287,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_d = QProgressBar(); prog_d.setVisible(False)
     run_d  = QPushButton("▶  Run Dynamic Analysis")
-    df.addRow(prog_d); df.addRow(run_d)
+    stop_d = QPushButton("■  Stop"); stop_d.setVisible(False)
+    df.addRow(prog_d); df.addRow(run_d); df.addRow(stop_d)
 
     def _on_dynamic():
         from pycat.toolbox.dynamic_spatial_tools import (
@@ -293,14 +307,18 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
         dr  = ui_instance.central_manager.active_data_class.data_repository
         mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
-        prog_d.setMaximum(5); prog_d.setValue(0); prog_d.setVisible(True)
+        prog_d.setMaximum(5); progress_emit and progress_emit(0, 5); prog_d.setVisible(True)
         run_d.setEnabled(False)
 
-        def _task():
+        def _task(progress_emit=None, should_cancel=None):
+            def _cancelled():
+                return bool(should_cancel and should_cancel())
             res = {}
             props = extract_frame_properties(np.asarray(stack), mpx)
             tracks = None
-            prog_d.setValue(1)
+            progress_emit and progress_emit(1, 5)
+            if _cancelled():
+                return res
 
             if cb_track.isChecked() or cb_life.isChecked() or cb_nb.isChecked() or cb_grow.isChecked():
                 linker_idx = linker_dd.currentIndex()
@@ -344,34 +362,40 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
                 if cb_track.isChecked():
                     res['trajectories']    = tracks
                     res['trajectory_metrics'] = trajectory_metrics(tracks)
-                prog_d.setValue(2)
+                progress_emit and progress_emit(2, 5)
 
             if cb_mf.isChecked():
                 res['merge_fission'] = detect_merge_fission(
                     np.asarray(stack), mpx, prox_um.value())
-                prog_d.setValue(3)
+                progress_emit and progress_emit(3, 5)
 
             if cb_life.isChecked() and tracks is not None:
                 res['lifetime_distribution'] = cluster_lifetime_analysis(tracks)
-                prog_d.setValue(3)
+                progress_emit and progress_emit(3, 5)
 
             if cb_nb.isChecked() and tracks is not None:
                 res['neighbourhood_persistence'] = neighbourhood_persistence(
                     props, tracks, nb_rad.value())
-                prog_d.setValue(4)
+                progress_emit and progress_emit(4, 5)
 
             if cb_grow.isChecked() and tracks is not None:
                 res['growth_kinetics'] = growth_shrinkage_kinetics(
                     tracks, frame_dt.value())
-                prog_d.setValue(5)
+                progress_emit and progress_emit(5, 5)
 
             return res
 
         worker = _AdvancedAnalysisWorker(_task, {})
         ui_instance._dyn_worker = worker
+        worker.progress.connect(lambda v, m: prog_d.setValue(v))
+        stop_d.setVisible(True)
+        try: stop_d.clicked.disconnect()
+        except Exception: pass
+        stop_d.clicked.connect(lambda: (worker.requestInterruption(), stop_d.setEnabled(False)))
+        stop_d.setEnabled(True)
 
         def _done(res):
-            prog_d.setVisible(False); run_d.setEnabled(True)
+            prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
             for k, v in res.items():
                 dr[f'dyn_{k}'] = v
             from pycat.ui.ui_utils import show_dataframes_dialog
@@ -395,7 +419,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_info("Dynamic spatial phenotyping complete.")
 
         def _err(msg):
-            prog_d.setVisible(False); run_d.setEnabled(True)
+            prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
             napari_show_warning("Dynamic analysis error — see terminal.")
             print(f"[PyCAT Dynamic] ERROR:\n{msg}")
 
@@ -434,7 +458,8 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_o = QProgressBar(); prog_o.setVisible(False)
     run_o  = QPushButton("▶  Run Organizational Metrics")
-    of.addRow(prog_o); of.addRow(run_o)
+    stop_o = QPushButton("■  Stop"); stop_o.setVisible(False)
+    of.addRow(prog_o); of.addRow(run_o); of.addRow(stop_o)
 
     def _on_org():
         from pycat.toolbox.organizational_metrics_tools import (
@@ -457,11 +482,15 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         prog_o.setMaximum(max(n, 1)); prog_o.setValue(0); prog_o.setVisible(True)
         run_o.setEnabled(False)
 
-        def _task():
+        def _task(progress_emit=None, should_cancel=None):
+            def _cancelled():
+                return bool(should_cancel and should_cancel())
             res = {'occupancy': per_cell_occupancy(pmask, cmask, mpx) if cb_occ.isChecked() else None}
             ent_rows, clsz_rows, spc_rows, bnd_rows = [], [], [], []
 
             for i, cl in enumerate(cells):
+                if _cancelled():
+                    break
                 sub = coords_df[coords_df['cell_label'] == cl]
                 coords = sub[['y_um', 'x_um']].values
                 cm = (cmask == cl).astype(bool)
@@ -492,7 +521,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
                                      'median_dist_to_boundary_um': bd['median_dist_um'],
                                      'max_inscribed_radius_um':    bd['max_inscribed_radius_um']})
 
-                prog_o.setValue(i + 1)
+                progress_emit and progress_emit(i + 1, n)
 
             out = {}
             if ent_rows:  out['spatial_entropy']  = pd.DataFrame(ent_rows)
@@ -504,9 +533,15 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
         worker = _AdvancedAnalysisWorker(_task, {})
         ui_instance._org_worker = worker
+        worker.progress.connect(lambda v, m: prog_o.setValue(v))
+        stop_o.setVisible(True)
+        try: stop_o.clicked.disconnect()
+        except Exception: pass
+        stop_o.clicked.connect(lambda: (worker.requestInterruption(), stop_o.setEnabled(False)))
+        stop_o.setEnabled(True)
 
         def _done(res):
-            prog_o.setVisible(False); run_o.setEnabled(True)
+            prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
             for k, v in res.items():
                 dr[f'org_{k}'] = v
             from pycat.ui.ui_utils import show_dataframes_dialog
@@ -518,7 +553,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_info("Organizational metrics complete.")
 
         def _err(msg):
-            prog_o.setVisible(False); run_o.setEnabled(True)
+            prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
             napari_show_warning("Organizational metrics error — see terminal.")
             print(f"[PyCAT Org] ERROR:\n{msg}")
 
