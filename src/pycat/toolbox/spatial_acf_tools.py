@@ -61,6 +61,7 @@ Date
 
 # Standard library imports
 import warnings
+import time
 
 # Third-party imports
 import numpy as np
@@ -494,6 +495,7 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
         Required for mode='drawn_rectangle'.
     plot_results : bool
     """
+    t0 = time.perf_counter()
     image = image_layer.data
     if image.ndim == 2:
         stack = image[np.newaxis, ...]

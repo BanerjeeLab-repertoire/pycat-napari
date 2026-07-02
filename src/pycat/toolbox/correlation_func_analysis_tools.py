@@ -100,6 +100,11 @@ def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
     """
     Computes a two-dimensional Gaussian function, often used in image processing to generate Gaussian blurs.
 
+    NOTE: this is the CCF/ACF-fitting Gaussian (no background offset). For
+    per-spot localization / PSF fitting use
+    gaussian_localization_tools.gaussian_2d_offset, which adds a background
+    term. Kept separate on purpose; do not merge without checking CCF fits.
+
     Parameters
     ----------
     xy : tuple of numpy.ndarray

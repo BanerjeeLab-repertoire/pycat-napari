@@ -61,7 +61,7 @@ TIMESERIES_PIPELINE = [
     ('auto_crop_roi',           '4b. Auto-crop ROI  [batch, opt]'),
     ('ts_cellpose_keyframe',    '5.  Keyframe Cellpose segmentation'),
     ('cell_analysis',           '6.  Cell Analyzer'),
-    ('timeseries_condensate',   '7.  Time-Series Condensate Analysis'),
+    ('timeseries_condensate_analysis', '7.  Time-Series Condensate Analysis'),
     ('export_timeseries_video', '8.  Export video  [opt]'),
     ('save_and_clear',          '9.  Save & Clear'),
 ]
@@ -145,6 +145,40 @@ ZSTACK_PIPELINE = [
     ('save_and_clear',                 '6.  Save & Clear'),
 ]
 
+VPT_PIPELINE = [
+    ('open_image',              '1.  Open multichannel image'),
+    ('vpt_segment_host',        '2.  Segment host + erode interface'),
+    ('vpt_detect_beads',        '3.  Detect beads'),
+    ('vpt_link_trajectories',   '4.  Link trajectories'),
+    ('vpt_microrheology',       '5.  MSD & viscosity'),
+]
+
+FRAP_PIPELINE = [
+    ('open_image',       '1.  Open recovery time-series'),
+    ('frap_define_roi',  '2.  Define bleach & reference ROIs'),
+    ('frap_analysis',    '3.  Analyze recovery (fit τ½ & mobile fraction)'),
+]
+
+FUSION_PIPELINE = [
+    ('open_image',            '1.  Load C-Trap .h5 or image stack'),
+    ('fusion_build_signal',   '2.  Build fusion signal (force / aspect ratio)'),
+    ('fusion_fit',            '3.  Fit relaxation → τ'),
+]
+
+TEMPERATURE_PIPELINE = [
+    ('open_image',              '1.  Open OME-TIFF + temperature CSV'),
+    ('temperature_sync',        '2.  Sync temperatures to frames'),
+    ('temperature_turbidity',   '3.  Entropy turbidity → T_phase / T_clear'),
+    ('temperature_export_video','4.  Scale bar & annotated export'),
+]
+
+FD_CURVE_PIPELINE = [
+    ('fd_load',     '1.  Load Lumicks .h5 (Force / Distance)'),
+    ('fd_segment',  '2.  Unfold into stretch/relax cycles'),
+    ('fd_plot',     '3.  Plot FD loops (+ WLC reference)'),
+    ('fd_rips',     '4.  Detect rips / unzips (G4 unfolding)'),
+]
+
 PIPELINE_DEFS = {
     'condensate':    CONDENSATE_PIPELINE,
     'timeseries':    TIMESERIES_PIPELINE,
@@ -154,6 +188,11 @@ PIPELINE_DEFS = {
     'invitro_bf':    INVITRO_BF_PIPELINE,
     'fibril':        FIBRIL_PIPELINE,
     'zstack':        ZSTACK_PIPELINE,
+    'vpt':           VPT_PIPELINE,
+    'frap':          FRAP_PIPELINE,
+    'fusion':        FUSION_PIPELINE,
+    'temperature':   TEMPERATURE_PIPELINE,
+    'fd_curve':      FD_CURVE_PIPELINE,
 }
 
 PIPELINE_DISPLAY_NAMES = {
@@ -165,6 +204,11 @@ PIPELINE_DISPLAY_NAMES = {
     'invitro_bf':    'In Vitro (BF)',
     'fibril':        'Fibril',
     'zstack':        'Z-Stack (3D)',
+    'vpt':           'Particle Tracking',
+    'frap':          'FRAP',
+    'fusion':        'Droplet Fusion',
+    'temperature':   'Temperature-Dependent',
+    'fd_curve':      'Force-Distance Curve',
 }
 
 

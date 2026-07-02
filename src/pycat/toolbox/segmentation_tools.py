@@ -1374,5 +1374,20 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
         total_refined_puncta_mask += refined_puncta_mask
 
 
+    n_condensates = int(total_refined_puncta_mask.max())
+    if n_condensates == 0:
+        napari_show_warning(
+            "Condensate segmentation found 0 objects after refinement filtering.\n"
+            "Possible causes:\n"
+            "  • The image has not been preprocessed — run Pre-process and Background Removal first.\n"
+            "  • Thresholds are too strict for this image — try lowering Kurtosis threshold (e.g. -5),\n"
+            "    Local/Global SNR thresholds (e.g. 0.5), or the Intensity scale (e.g. 0.8).\n"
+            "  • The wrong image layer is selected in the dropdown — check both dropdowns point to\n"
+            "    the correct pre-processed and raw layers.\n"
+            "No mask layers were added to avoid cluttering the viewer with empty results."
+        )
+        return
     viewer.add_labels(total_puncta_mask.astype(int), name=f"Total Puncta Mask")
     viewer.add_labels(total_refined_puncta_mask.astype(int), name=f"Total Refined Puncta Mask")
+    napari_show_info(
+        f"Condensate segmentation complete: {n_condensates} objects found.")

@@ -540,6 +540,74 @@ def bf_analyse_focus_series(
     })
 
 
+def select_best_slice(stack: np.ndarray, method: str = 'std') -> int:
+    """
+    Select the "best" slice of a Z- or T-stack by an information/focus proxy.
+
+    For nuclei/DAPI and many transmitted-light stacks the most informative
+    plane is the one with the highest intensity spread or sharpness. This
+    returns the index of that slice — useful for reducing a stack to a single
+    representative plane before 2D segmentation (the max-std heuristic from the
+    classic DAPI border pipeline).
+
+    Parameters
+    ----------
+    stack : (N, H, W) image stack.
+    method : slice-scoring metric —
+        'std'      : maximum standard deviation (max intensity spread; the
+                     original DAPI heuristic — highest ≈ max-information plane)
+        'brenner'  : maximum Brenner gradient (sharpest focus)
+        'tenengrad': maximum Sobel gradient magnitude (sharpest edges)
+
+    Returns
+    -------
+    int : index of the selected slice. Returns 0 for a 2D input.
+    """
+    arr = np.asarray(stack)
+    if arr.ndim == 2:
+        return 0
+    if arr.ndim != 3:
+        raise ValueError(f"select_best_slice expects a 2D or 3D array, got ndim={arr.ndim}")
+
+    m = method.lower()
+    if m == 'brenner':
+        scores = np.array([bf_focus_metric(arr[i]) for i in range(arr.shape[0])])
+    elif m == 'tenengrad':
+        scores = []
+        for i in range(arr.shape[0]):
+            f = arr[i].astype(np.float32)
+            gy = ndimage.sobel(f, axis=0); gx = ndimage.sobel(f, axis=1)
+            scores.append(float((gy ** 2 + gx ** 2).mean()))
+        scores = np.array(scores)
+    else:  # 'std'
+        scores = arr.reshape(arr.shape[0], -1).std(axis=1)
+
+    return int(np.argmax(scores))
+
+
+def run_best_slice(method_dropdown, viewer):
+    """
+    Extract the best slice of the active Z/T-stack as a new 2D layer.
+
+    `method_dropdown` is a QComboBox with 'std' / 'brenner' / 'tenengrad'.
+    Adds the selected 2D plane as a new image layer.
+    """
+    import napari
+    from napari.utils.notifications import show_info as _info, show_warning as _warn
+    active = viewer.layers.selection.active
+    if active is None or not isinstance(active, napari.layers.Image):
+        _warn("Select an active image layer first.")
+        return
+    data = np.asarray(active.data)
+    if data.ndim != 3:
+        _warn("Best-slice needs a 3D (Z/T, H, W) stack.")
+        return
+    method = method_dropdown.currentText() if hasattr(method_dropdown, 'currentText') else 'std'
+    idx = select_best_slice(data, method=method)
+    viewer.add_image(data[idx], name=f"{active.name} best slice [{method} #{idx}]")
+    _info(f"Best slice by {method}: index {idx} of {data.shape[0]}.")
+
+
 # ---------------------------------------------------------------------------
 # 5. OD-based coarsening / growth kinetics (brightfield time-series)
 # ---------------------------------------------------------------------------

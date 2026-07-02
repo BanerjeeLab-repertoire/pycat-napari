@@ -4,6 +4,30 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.39] - 2026-07-02
+### Changed
+- **Minimum Python is now 3.12** (supported range `>=3.12,<3.14`). Python 3.9
+  reached end-of-life on 2025-10-31 and core dependencies (NumPy, napari, and
+  others) have dropped it; moving the floor keeps installs resolvable and the
+  toolchain current. The upper bound is a tested-ceiling promise and will be
+  widened once 3.14 wheels are verified across the stack.
+- Updated build metadata (classifiers) and black/ruff `target-version` to py312.
+### Added (recent analysis modules)
+- Force-Distance Curve (DNA tethering) workflow with ssDNA/ssRNA FJC model and
+  rip/unzip (G-quadruplex) detection.
+- Molecular Counting by Photobleaching (step-noise / Mutch method).
+- Gaussian Spot Localization (sub-pixel centre + PSF width, 2D/3D).
+- VPT bead quality-fit classification (singlet / aggregate / out-of-plane) with
+  aggregates routed to a secondary tracked population.
+- Client Partition / Enrichment (second-channel recruitment into condensates).
+- Intensity Profiles (line-scan + radial, interface-width estimation).
+- Exposed Morphological Complexity metrics (fractal dimension, lacunarity,
+  tortuosity, orientational order) via a Toolbox panel.
+- Spatial Randomness, FFT bandpass, manual threshold, best-slice, and
+  temperature-dependent condensate tools.
+### Note
+- Install into a Python 3.12 environment first, e.g. `mamba create -n pycat-env python=3.12`, then install PyCAT.
+
 ## [1.0.0] - 2024-11-22
 ### Added
 - Initial public release of PyCAT-Napari

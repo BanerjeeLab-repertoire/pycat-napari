@@ -315,3 +315,132 @@ def orientation_order_parameter(
         mean_eccentricity=float(df['eccentricity'].mean()),
         mean_anisotropy=float(df['anisotropy'].mean()),
     )
+
+# ---------------------------------------------------------------------------
+# UI entry point (Toolbox)
+# ---------------------------------------------------------------------------
+
+def _add_morphological_complexity(ui_instance, layout=None, separate_widget=False):
+    """
+    Widget: morphological-complexity metrics on a condensate mask —
+    fractal dimension, lacunarity, tortuosity, and orientational order.
+    """
+    import napari
+    import numpy as np
+    import pandas as pd
+    from PyQt5.QtWidgets import (
+        QGroupBox, QFormLayout, QLabel, QPushButton, QCheckBox, QProgressBar)
+
+    grp  = QGroupBox("Morphological Complexity")
+    form = QFormLayout(grp)
+    form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+
+    desc = QLabel(
+        "Shape-complexity metrics on a condensate mask: box-counting fractal "
+        "dimension and lacunarity (space-filling / gappiness of the whole "
+        "pattern), plus per-object tortuosity and an orientational order "
+        "parameter. Takes a labels (or binary) mask.")
+    desc.setWordWrap(True)
+    desc.setStyleSheet("font-size:9pt; color:#aaa; padding-bottom:4px;")
+    form.addRow(desc)
+
+    mask_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
+    mask_dd.setToolTip("Condensate mask — labels (per-object metrics) or binary.")
+    form.addRow("Condensate mask:", mask_dd)
+
+    cb_fractal = QCheckBox("Fractal dimension + lacunarity (whole pattern)")
+    cb_fractal.setChecked(True); form.addRow(cb_fractal)
+    cb_tortuosity = QCheckBox("Tortuosity (per object)")
+    cb_tortuosity.setChecked(True); form.addRow(cb_tortuosity)
+    cb_orient = QCheckBox("Orientational order parameter")
+    cb_orient.setChecked(True); form.addRow(cb_orient)
+
+    prog = QProgressBar(); prog.setVisible(False)
+    btn  = QPushButton("▶  Compute Complexity Metrics")
+    form.addRow(prog); form.addRow(btn)
+
+    def _mpx():
+        try:
+            v = ui_instance.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
+            return float(v) ** 0.5 if v else 1.0
+        except Exception:
+            return 1.0
+
+    def _on_run():
+        from napari.utils.notifications import show_info as _info, show_warning as _warn
+        layers = [l.name for l in ui_instance.viewer.layers]
+        mname = mask_dd.currentText()
+        if mname not in layers:
+            _warn("Select a valid condensate mask."); return
+        mask = np.asarray(ui_instance.viewer.layers[mname].data)
+        if mask.ndim != 2:
+            _warn("Morphological metrics expect a 2D mask (or one slice)."); return
+
+        prog.setVisible(True); prog.setRange(0, 0)
+        tables = []
+        summary = {}
+        try:
+            binary = mask > 0
+            if cb_fractal.isChecked():
+                fd = fractal_dimension_box_counting(binary)
+                lac = lacunarity(binary)
+                summary['fractal_dimension'] = round(float(fd), 4)
+                if not lac.empty:
+                    tables.append(('Lacunarity', lac.round(4)))
+                    summary['mean_lacunarity'] = round(float(lac['lacunarity'].mean()), 4) \
+                        if 'lacunarity' in lac.columns else None
+            if cb_tortuosity.isChecked():
+                tort = tortuosity_per_object(mask, microns_per_pixel=_mpx())
+                if not tort.empty:
+                    tables.append(('Tortuosity (per object)', tort.round(4)))
+                    tcol = [c for c in tort.columns if 'tortuosity' in c.lower()]
+                    if tcol:
+                        summary['median_tortuosity'] = round(float(tort[tcol[0]].median()), 4)
+            if cb_orient.isChecked():
+                orient = orientation_order_parameter(mask)
+                summary['orientational_order_S'] = round(float(orient.get('S', np.nan)), 4)
+                odf = orient.get('per_object_df')
+                if odf is not None and not odf.empty:
+                    tables.append(('Orientation (per object)', odf.round(4)))
+        except Exception as e:
+            prog.setVisible(False)
+            _warn(f"Complexity metrics failed: {e}")
+            import traceback; traceback.print_exc(); return
+        prog.setVisible(False)
+
+        summary_df = pd.DataFrame([summary]) if summary else pd.DataFrame()
+        try:
+            ui_instance.central_manager.active_data_class.data_repository[
+                'morphological_complexity_summary'] = summary_df
+        except Exception:
+            pass
+        rec = getattr(ui_instance, '_record', None)
+        if callable(rec):
+            rec('morphological_complexity', {'mask': mname, **summary})
+
+        try:
+            from pycat.ui.ui_utils import show_dataframes_dialog
+            all_tables = ([('Summary', summary_df)] if not summary_df.empty else []) + tables
+            if all_tables:
+                show_dataframes_dialog("Morphological Complexity", all_tables)
+        except Exception:
+            pass
+        bits = ", ".join(f"{k}={v}" for k, v in summary.items())
+        _info(f"Morphological complexity — {bits}" if bits else "Done.")
+
+    btn.clicked.connect(_on_run)
+
+    if layout is not None and not separate_widget:
+        layout.addWidget(grp)
+    else:
+        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
+        w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
+        w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        try:
+            from pycat.ui.ui_modules import _apply_scroll_guard
+            _apply_scroll_guard(w)
+        except Exception:
+            pass
+        sa = QScrollArea(); sa.setWidgetResizable(True); sa.setWidget(w)
+        ui_instance.viewer.window.add_dock_widget(sa, name="Morphological Complexity", area='right')
+

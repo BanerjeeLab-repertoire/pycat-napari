@@ -50,10 +50,23 @@ from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
 from pycat.toolbox.video_export_tools import _add_export_timeseries_video
 from pycat.toolbox.ts_cellpose_tools import _add_run_ts_cellpose
 from pycat.toolbox.spatial_metrology_ui import _add_spatial_metrology
+from pycat.toolbox.spatial_randomness_tools import _add_spatial_randomness
+from pycat.toolbox.fft_bandpass_tools import run_fft_bandpass, run_im2bw
+from pycat.toolbox.brightfield_tools import run_best_slice
+from pycat.toolbox.molecular_counting_tools import _add_molecular_counting
+from pycat.toolbox.gaussian_localization_tools import _add_gaussian_localization
+from pycat.toolbox.partition_enrichment_tools import _add_client_enrichment
+from pycat.toolbox.intensity_profile_tools import _add_intensity_profile
+from pycat.toolbox.morphological_complexity_tools import _add_morphological_complexity
 from pycat.toolbox.advanced_analysis_ui import _add_advanced_analysis
 from pycat.toolbox.condensate_physics_ui import _add_condensate_physics
 from pycat.toolbox.brightfield_ui import BrightfieldCondensateUI
 from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
+from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
+from pycat.toolbox.frap_ui import FRAPUI
+from pycat.toolbox.fusion_ui import DropletFusionUI
+from pycat.toolbox.temperature_ui import TemperatureDependentUI
+from pycat.toolbox.fd_curve_ui import FDCurveUI
 from pycat.toolbox.invitro_bf_ui import InVitroBFUI
 from pycat.toolbox.zstack_segmentation_ui import ZStackSegmentationUI
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
@@ -83,8 +96,9 @@ def _apply_scroll_guard(widget):
     from PyQt5.QtCore import QEvent
 
     def _patch(w):
+        if getattr(w, '_pycat_scroll_guard', False):
+            return   # already patched — don't double-wrap
         if isinstance(w, _QCB):
-            # Only scroll the combobox when its dropdown list is open
             orig = w.__class__.wheelEvent
             def _cb_wheel(event, _w=w, _orig=orig):
                 if _w.view().isVisible():
@@ -92,8 +106,8 @@ def _apply_scroll_guard(widget):
                 else:
                     event.ignore()
             w.wheelEvent = _cb_wheel
+            w._pycat_scroll_guard = True
         elif isinstance(w, (QAbstractSpinBox, QAbstractSlider)):
-            # Only scroll the spinbox/slider when it has keyboard focus
             orig = w.__class__.wheelEvent
             def _spin_wheel(event, _w=w, _orig=orig):
                 if _w.hasFocus():
@@ -101,6 +115,7 @@ def _apply_scroll_guard(widget):
                 else:
                     event.ignore()
             w.wheelEvent = _spin_wheel
+            w._pycat_scroll_guard = True
         for child in w.findChildren((_QCB, QAbstractSpinBox, QAbstractSlider)):
             _patch(child)
 
@@ -276,11 +291,16 @@ class BaseUIClass:
             layers = []
             for dropdown in args:
                 if isinstance(dropdown, QComboBox):
-                    # Check for 'None' selection in the dropdown
-                    if dropdown.currentText() == "None":
+                    name = dropdown.currentText()
+                    if name == "None" or not name:
                         layers.append(None)
+                    elif name not in [l.name for l in viewer.layers]:
+                        from napari.utils.notifications import show_warning as _warn
+                        _warn(
+                            f"Layer '{name}' not found in viewer. "                            f"The dropdown may be pointing to a layer that was "                            f"removed or renamed. Re-run the previous step or "                            f"select the correct layer from the dropdown.")
+                        return
                     else:
-                        layers.append(viewer.layers[dropdown.currentText()])
+                        layers.append(viewer.layers[name])
         else:
             layers = []
 
@@ -292,7 +312,14 @@ class BaseUIClass:
         import pandas as pd
         from pycat.data.data_modules import BaseDataClass
         t0 = time.perf_counter()
-        processing_function(*layers, *non_dropdown_args, **kwargs)
+        try:
+            processing_function(*layers, *non_dropdown_args, **kwargs)
+        except Exception as _e:
+            from napari.utils.notifications import show_warning as _warn
+            import traceback as _tb
+            _warn(f"Step failed: {type(_e).__name__}: {_e}\n"                  f"See terminal for details.")
+            _tb.print_exc()
+            return
         elapsed = time.perf_counter() - t0
 
         # Store timing in data_instance if one is present in the args
@@ -419,6 +446,12 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
         self._add_run_ts_cellpose = lambda **kw: _add_run_ts_cellpose(self, **kw)
         self._add_spatial_metrology = lambda **kw: _add_spatial_metrology(self, **kw)
+        self._add_spatial_randomness = lambda **kw: _add_spatial_randomness(self, **kw)
+        self._add_molecular_counting = lambda **kw: _add_molecular_counting(self, **kw)
+        self._add_gaussian_localization = lambda **kw: _add_gaussian_localization(self, **kw)
+        self._add_client_enrichment = lambda **kw: _add_client_enrichment(self, **kw)
+        self._add_intensity_profile = lambda **kw: _add_intensity_profile(self, **kw)
+        self._add_morphological_complexity = lambda **kw: _add_morphological_complexity(self, **kw)
         self._add_advanced_analysis = lambda **kw: _add_advanced_analysis(self, **kw)
         self._add_condensate_physics = lambda **kw: _add_condensate_physics(self, **kw)
         # New pipeline UI entry points exposed as standalone toolbox tools.
@@ -729,6 +762,66 @@ class ToolboxFunctionsUI(BaseUIClass):
         clahe_widget.setLayout(clahe_layout)
         self._add_widget_to_layout_or_dock(clahe_widget, layout, separate_widget, "CLAHE Dock")
 
+
+    def _add_run_fft_bandpass(self, layout=None, separate_widget=False):
+        """FFT bandpass filter — annular frequency mask for background/feature isolation."""
+        fft_layout = QVBoxLayout()
+        self.add_text_label(fft_layout, 'FFT Bandpass Filter', bold=True)
+        self.add_text_label(fft_layout,
+            'Annular frequency mask: keeps spatial frequencies between the '
+            'inner and outer radii. Removes low-frequency background and '
+            'high-frequency noise. Works on a 2D image or a whole stack.')
+        self.add_text_label(fft_layout, 'Inner radius (low cutoff, px)')
+        fft_low_input = QLineEdit(); fft_low_input.setPlaceholderText('3')
+        fft_layout.addWidget(fft_low_input)
+        self.add_text_label(fft_layout, 'Outer radius (high cutoff, px)')
+        fft_high_input = QLineEdit(); fft_high_input.setPlaceholderText('40')
+        fft_layout.addWidget(fft_high_input)
+        fft_button = QPushButton("Run FFT Bandpass")
+        fft_button.clicked.connect(lambda: self.on_general_button_clicked(
+            run_fft_bandpass, None, fft_low_input, fft_high_input, self.viewer))
+        fft_layout.addWidget(fft_button)
+        fft_widget = QWidget(); fft_widget.setLayout(fft_layout)
+        self._add_widget_to_layout_or_dock(fft_widget, layout, separate_widget, "FFT Bandpass Dock")
+
+    def _add_run_im2bw(self, layout=None, separate_widget=False):
+        """MATLAB-style manual threshold binarization (absolute intensity cutoff)."""
+        bw_layout = QVBoxLayout()
+        self.add_text_label(bw_layout, 'Manual Threshold (im2bw)', bold=True)
+        self.add_text_label(bw_layout,
+            'Binarize on an absolute intensity value you supply (pixels ≥ '
+            'threshold → 1). Unlike Otsu/Li, the level is not auto-chosen.')
+        self.add_text_label(bw_layout, 'Threshold value')
+        bw_input = QLineEdit(); bw_input.setPlaceholderText('e.g. 0.5 or 128')
+        bw_layout.addWidget(bw_input)
+        bw_button = QPushButton("Binarize")
+        bw_button.clicked.connect(lambda: self.on_general_button_clicked(
+            run_im2bw, None, bw_input, self.viewer))
+        bw_layout.addWidget(bw_button)
+        bw_widget = QWidget(); bw_widget.setLayout(bw_layout)
+        self._add_widget_to_layout_or_dock(bw_widget, layout, separate_widget, "Manual Threshold Dock")
+
+    def _add_run_best_slice(self, layout=None, separate_widget=False):
+        """Extract the best (most-informative/sharpest) slice of a Z/T-stack."""
+        bs_layout = QVBoxLayout()
+        self.add_text_label(bs_layout, 'Best Slice Selector', bold=True)
+        self.add_text_label(bs_layout,
+            'Reduce a Z- or T-stack to a single representative 2D plane — the '
+            'most informative slice (max std) or the sharpest (Brenner / '
+            'Tenengrad). Useful before 2D segmentation of a nuclear/DAPI stack.')
+        self.add_text_label(bs_layout, 'Selection metric')
+        bs_method = QComboBox(); bs_method.addItems(['std', 'brenner', 'tenengrad'])
+        bs_method.setToolTip(
+            "std: maximum intensity spread (max-information plane).\n"
+            "brenner: sharpest focus (Brenner gradient).\n"
+            "tenengrad: sharpest edges (Sobel gradient magnitude).")
+        bs_layout.addWidget(bs_method)
+        bs_button = QPushButton("Extract Best Slice")
+        bs_button.clicked.connect(lambda: self.on_general_button_clicked(
+            run_best_slice, None, bs_method, self.viewer))
+        bs_layout.addWidget(bs_button)
+        bs_widget = QWidget(); bs_widget.setLayout(bs_layout)
+        self._add_widget_to_layout_or_dock(bs_widget, layout, separate_widget, "Best Slice Dock")
 
     def _add_run_peak_and_edge_enhancement(self, layout=None, separate_widget=False):
         """Add a widget for peak and edge enhancement, optionally in a separate dock."""
@@ -1627,6 +1720,26 @@ class AnalysisMethodsUI(BaseUIClass):
     def _switch_to_invitro_fluor_analysis(self, *args, **kwargs):
         """Switch to the in vitro fluorescence condensate analysis pipeline."""
         self._switch_analysis(BaseDataClass, InVitroFluorUI, *args, **kwargs)
+
+    def _switch_to_vpt_analysis(self, *args, **kwargs):
+        """Switch to the Video Particle Tracking (microrheology) pipeline."""
+        self._switch_analysis(BaseDataClass, VideoParticleTrackingUI, *args, **kwargs)
+
+    def _switch_to_frap_analysis(self, *args, **kwargs):
+        """Switch to the FRAP analysis pipeline."""
+        self._switch_analysis(BaseDataClass, FRAPUI, *args, **kwargs)
+
+    def _switch_to_fusion_analysis(self, *args, **kwargs):
+        """Switch to the Droplet Fusion (C-Trap) pipeline."""
+        self._switch_analysis(BaseDataClass, DropletFusionUI, *args, **kwargs)
+
+    def _switch_to_temperature_analysis(self, *args, **kwargs):
+        """Switch to the Temperature-Dependent Condensate pipeline."""
+        self._switch_analysis(BaseDataClass, TemperatureDependentUI, *args, **kwargs)
+
+    def _switch_to_fd_curve_analysis(self, *args, **kwargs):
+        """Switch to the Force-Distance Curve (DNA tethering) pipeline."""
+        self._switch_analysis(BaseDataClass, FDCurveUI, *args, **kwargs)
 
     def _switch_to_invitro_bf_analysis(self, *args, **kwargs):
         """Switch to the in vitro brightfield condensate analysis pipeline."""
@@ -2720,6 +2833,7 @@ class MenuManager:
             show_info as napari_show_info,
             show_warning as napari_show_warning,
         )
+        from pycat.file_io.session_loader import scan_output_folder, load_session
 
         folder = QFileDialog.getExistingDirectory(
             None, "Select PyCAT Output Folder", "",
@@ -2896,14 +3010,29 @@ class MenuManager:
         """
         Add specific analysis methods as actions to the analysis methods menu. 
         """
-        condensate_analysis_dict = {
+        # Imaging/morphometric pipelines — agnostic to whether the system has a
+        # membrane (cellular or in vitro), hence "Condensate & Cell Analysis".
+        condensate_cell_analysis_submenu = self.analysis_methods_menu.addMenu('Condensate & Cell Analysis')
+        condensate_cell_analysis_dict = {
             'Cellular Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
             'In Vitro Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
             'In Vitro Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
             'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
             'Z-Stack (3D) Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
         }
-        self._add_actions_to_menu(condensate_analysis_dict, self.analysis_methods_menu)
+        self._add_actions_to_menu(condensate_cell_analysis_dict, condensate_cell_analysis_submenu)
+
+        # Biophysics pipelines — dynamics, material properties, and single-tether
+        # force measurements.
+        biophysics_submenu = self.analysis_methods_menu.addMenu('Biophysics')
+        biophysics_dict = {
+            'Video Particle Tracking (Microrheology)': (self.central_manager.analysis_methods_ui._switch_to_vpt_analysis, {}),
+            'FRAP (Fluorescence Recovery)': (self.central_manager.analysis_methods_ui._switch_to_frap_analysis, {}),
+            'Droplet Fusion (C-Trap)': (self.central_manager.analysis_methods_ui._switch_to_fusion_analysis, {}),
+            'Temperature-Dependent Condensate': (self.central_manager.analysis_methods_ui._switch_to_temperature_analysis, {}),
+            'Force-Distance Curve (DNA Tethering)': (self.central_manager.analysis_methods_ui._switch_to_fd_curve_analysis, {}),
+        }
+        self._add_actions_to_menu(biophysics_dict, biophysics_submenu)
 
         coloc_analysis_submenu = self.analysis_methods_menu.addMenu('Colocalization Analysis')
         coloc_analysis_actions = {
@@ -2963,7 +3092,8 @@ class MenuManager:
             'Peak and Edge Enhancement': (self.central_manager.toolbox_functions_ui._add_run_peak_and_edge_enhancement, {'separate_widget': True}),
             'Morphological Gaussian Filter': (self.central_manager.toolbox_functions_ui._add_run_morphological_gaussian_filter, {'separate_widget': True}),
             'LoG Filter': (self.central_manager.toolbox_functions_ui._add_run_apply_laplace_of_gauss_filter, {'separate_widget': True}),            
-            'Deblur by Pixel Reassignment': (self.central_manager.toolbox_functions_ui._add_run_dpr, {'separate_widget': True})
+            'Deblur by Pixel Reassignment': (self.central_manager.toolbox_functions_ui._add_run_dpr, {'separate_widget': True}),
+            'FFT Bandpass Filter': (self.central_manager.toolbox_functions_ui._add_run_fft_bandpass, {'separate_widget': True}),
         }
         self._add_actions_to_menu(enhancements_and_filters_actions, enhancements_and_filters_submenu)
 
@@ -2971,9 +3101,11 @@ class MenuManager:
         image_segmentation_submenu = self.toolbox_menu.addMenu('Image Segmentation')
         image_segmentation_actions = {
             'Local Thresholding': (self.central_manager.toolbox_functions_ui._add_run_local_thresholding, {'separate_widget': True}),
+            'Manual Threshold (im2bw)': (self.central_manager.toolbox_functions_ui._add_run_im2bw, {'separate_widget': True}),
             'Cellpose Segmentation': (self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation, {'separate_widget': True}),
             'Random Forest Classifier': (self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier, {'separate_widget': True}),
-            'Felzenszwalb Segmentation and Region Merging': (self.central_manager.toolbox_functions_ui._add_run_fz_segmentation_and_merging, {'separate_widget': True})
+            'Felzenszwalb Segmentation and Region Merging': (self.central_manager.toolbox_functions_ui._add_run_fz_segmentation_and_merging, {'separate_widget': True}),
+            'Gaussian Spot Localization': (self.central_manager.toolbox_functions_ui._add_gaussian_localization, {'separate_widget': True})
         }
         self._add_actions_to_menu(image_segmentation_actions, image_segmentation_submenu)
 
@@ -3009,7 +3141,8 @@ class MenuManager:
         # Create a sub-menu for colocalization tools
         colocalization_tools_submenu = self.toolbox_menu.addMenu('Colocalization/Correlation')
         autocorrelation_actions = {
-            'Auto-Correlation Function Analysis': (self.central_manager.toolbox_functions_ui._add_run_autocorrelation_analysis, {'separate_widget': True})
+            'Auto-Correlation Function Analysis': (self.central_manager.toolbox_functions_ui._add_run_autocorrelation_analysis, {'separate_widget': True}),
+            'Client Partition / Enrichment': (self.central_manager.toolbox_functions_ui._add_client_enrichment, {'separate_widget': True})
         }
         
         self._add_actions_to_menu(autocorrelation_actions, colocalization_tools_submenu)
@@ -3044,6 +3177,9 @@ class MenuManager:
         spatial_metrology_actions = {
             'Per-Cell Spatial ACF Analysis': (self.central_manager.toolbox_functions_ui._add_run_sacf_analysis, {'separate_widget': True}),
             'Spatial Metrology (NND, Ripley, Voronoi…)': (self.central_manager.toolbox_functions_ui._add_spatial_metrology, {'separate_widget': True}),
+            'Spatial Randomness (noise vs. clustering)': (self.central_manager.toolbox_functions_ui._add_spatial_randomness, {'separate_widget': True}),
+            'Intensity Profiles (line / radial)': (self.central_manager.toolbox_functions_ui._add_intensity_profile, {'separate_widget': True}),
+            'Morphological Complexity (fractal, lacunarity…)': (self.central_manager.toolbox_functions_ui._add_morphological_complexity, {'separate_widget': True}),
         }
         self._add_actions_to_menu(spatial_metrology_actions, spatial_metrology_submenu)
 
@@ -3052,6 +3188,7 @@ class MenuManager:
         advanced_analysis_actions = {
             'Dynamic Spatial Phenotyping / Tracking': (self.central_manager.toolbox_functions_ui._add_advanced_analysis, {'separate_widget': True}),
             'Condensate Biophysics (MSD, C_sat, Kinetics…)': (self.central_manager.toolbox_functions_ui._add_condensate_physics, {'separate_widget': True}),
+            'Molecular Counting (Photobleaching)': (self.central_manager.toolbox_functions_ui._add_molecular_counting, {'separate_widget': True}),
         }
         self._add_actions_to_menu(advanced_analysis_actions, advanced_analysis_submenu)
 
@@ -3076,6 +3213,7 @@ class MenuManager:
             '3D Cell Segmentation': (self.central_manager.toolbox_functions_ui._add_zstack_cell_seg, {'separate_widget': True}),
             '3D Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_zstack_condensate_seg, {'separate_widget': True}),
             '3D Condensate Metrics': (self.central_manager.toolbox_functions_ui._add_zstack_metrics, {'separate_widget': True}),
+            'Best Slice Selector': (self.central_manager.toolbox_functions_ui._add_run_best_slice, {'separate_widget': True}),
         }
         self._add_actions_to_menu(zstack_actions, zstack_submenu)
 

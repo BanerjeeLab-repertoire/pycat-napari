@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.18"
+version = "1.5.40"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
-requires-python = "==3.9.*"
+requires-python = ">=3.12,<3.14"
 license = {file = "LICENSE"}
 include-package-data = true
 authors = [
@@ -32,7 +32,8 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Scientific/Engineering :: Visualization",
@@ -142,11 +143,11 @@ qt_api = "pyqt5"
 
 [tool.black]
 line-length = 88
-target-version = ["py39"]
+target-version = ["py312"]
 include = '\.pyi?$'
 
 [tool.ruff]
 select = ["E", "F", "B", "I"]
 ignore = ["E501"]
 line-length = 88
-target-version = "py39"
+target-version = "py312"

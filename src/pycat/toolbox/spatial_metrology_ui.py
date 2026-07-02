@@ -20,7 +20,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
     QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel,
-    QProgressBar, QComboBox,
+    QProgressBar, QComboBox, QSizePolicy,
 )
 from PyQt5.QtCore import QThread, pyqtSignal
 

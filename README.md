@@ -48,23 +48,23 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
 
 | Platform      | Python | Status    | Notes                    |
 |--------------|---------|-----------|--------------------------|
-| Windows 10/11 | 3.9     | Tested    | Logo display issue      |
-| Mac M1/ARM   | 3.9     | Tested    | Requires specific torch |
-| Mac Intel    | 3.9     | Untested* | Should work            |
-| Linux        | 3.9     | Untested* | Should work            |
+| Windows 10/11 | 3.12    | Tested    | Logo display issue      |
+| Mac M1/ARM   | 3.12    | Tested    | Requires specific torch |
+| Mac Intel    | 3.12    | Untested* | Should work            |
+| Linux        | 3.12    | Untested* | Should work            |
 
 *While untested, these platforms should work with standard installation.
 
 ### Minimum Requirements
-- **Python Version**: 3.9.x (Required)
-  > ⚠️ **Important**: PyCAT-Napari is currently only compatible with Python 3.9. Other versions are not supported in this release. Future releases may aim to expand to more versions. 
+- **Python Version**: 3.12.x (Required)
+  > ⚠️ **Important**: PyCAT-Napari requires Python 3.12 (supported range 3.12–3.13). Earlier versions, including 3.9, are no longer supported as of v1.5.39. 
 - RAM: 8GB (16GB recommended; large time-series/Z-stack acquisitions benefit from more)
 - Disk Space: ~100MB (including dependencies); optional TrackMate integration downloads an additional ~500MB–1GB Fiji distribution on first use
 - GPU: Not required — PyCAT runs entirely on CPU by default. An NVIDIA GPU with CUDA is optional and used automatically when available (Cellpose segmentation, and rolling-ball/morphological operations via the `[gpu]` extra) for faster processing.
 
 ## Getting Started
 
-PyCAT requires Python 3.9 and a package/environment manager. We recommend using Mambaforge/Miniforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
+PyCAT requires Python 3.12 and a package/environment manager. We recommend using Mambaforge/Miniforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
 
 ### Initial Setup Check
 
@@ -122,14 +122,14 @@ Already have Anaconda? That's fine! You can skip the Miniforge installation and 
 
 Basic environment commands:
 ```bash
-# Create new environment with Python 3.9
-mamba create -n pycat-env python=3.9
+# Create new environment with Python 3.12
+mamba create -n pycat-env python=3.12
 
 # Activate the environment
 mamba activate pycat-env
 
 # Verify you're in the right environment
-python --version  # Should show Python 3.9.x
+python --version  # Should show Python 3.12.x
 ```
 
 ## Installation
@@ -139,7 +139,7 @@ python --version  # Should show Python 3.9.x
 Create and activate a new environment:
 ```bash
 # Create environment
-mamba create -n pycat-env python=3.9
+mamba create -n pycat-env python=3.12
 
 # Activate environment
 mamba activate pycat-env
@@ -205,7 +205,7 @@ After installation, verify PyCAT-Napari is working correctly:
 mamba activate pycat-env
 
 # Verify Python version
-python --version  # Should show 3.9.x
+python --version  # Should show 3.12.x
 
 # Test basic import
 python -c "import pycat; print('PyCAT import successful!')"
@@ -216,7 +216,7 @@ run-pycat  # Should open the GUI window
 
 If you encounter any failures, check:
 
-1. Python version (must be 3.9.x)
+1. Python version (must be 3.12.x)
 2. Environment activation
 3. Complete installation of dependencies
 4. [Troubleshooting Tips](#support--troubleshooting)
@@ -557,7 +557,7 @@ If you use PyCAT-Napari in your research, please cite:
 ### Common Issues
 
 1. **Installation Problems**
-   - Verify Python 3.9 installation
+   - Verify Python 3.12 installation
    - Check platform-specific requirements
    - Use provided environment files
 
@@ -603,7 +603,7 @@ this means your environment has NumPy 2.0 installed, which is incompatible with 
 This is the simplest fix and the one we recommend for most users:
 
 ```bash
-mamba create -n pycat-env python=3.9
+mamba create -n pycat-env python=3.12
 mamba activate pycat-env
 pip install pycat-napari
 ```

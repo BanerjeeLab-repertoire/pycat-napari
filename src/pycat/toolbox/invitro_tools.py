@@ -526,7 +526,7 @@ def detect_and_fit_fusions(
     check for their presence before relying on fusion relaxation results.
     """
     from pycat.toolbox.dynamic_spatial_tools import detect_merge_fission
-    from pycat.toolbox.condensate_physics_tools import fit_fusion_relaxation
+    from pycat.toolbox.condensate_physics_tools import fit_aspect_ratio_relaxation
 
     if mask_stack.ndim != 3:
         return pd.DataFrame()
@@ -570,7 +570,7 @@ def detect_and_fit_fusions(
             ar = np.ones(len(post))  # no shape data — fit will report fit_success=False
 
         t_arr = (post['frame'].values - t0) * frame_interval_s
-        fit = fit_fusion_relaxation(t_arr, ar, t0_frame=0)
+        fit = fit_aspect_ratio_relaxation(t_arr, ar, t0_frame=0)
 
         r_post = (float(np.sqrt(post.iloc[0]['area_um2'] / np.pi))
                   if 'area_um2' in post.columns else np.nan)

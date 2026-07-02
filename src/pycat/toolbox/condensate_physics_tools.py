@@ -381,7 +381,7 @@ def intensity_decomposition_per_cell(
 # 3. Fusion kinetics — aspect ratio relaxation
 # ---------------------------------------------------------------------------
 
-def fit_fusion_relaxation(
+def fit_aspect_ratio_relaxation(
     time_s: np.ndarray,
     aspect_ratio: np.ndarray,
     t0_frame: int = 0,
@@ -426,6 +426,13 @@ def fit_fusion_relaxation(
     except Exception:
         return dict(tau_s=np.nan, AR_0=np.nan, r_squared=np.nan,
                     fit_ar=np.array([]), fit_success=False)
+
+
+# Backward-compatible alias. NOTE: this fits IMAGE aspect-ratio relaxation of a
+# merge event; it is distinct from fusion_tools.fit_fusion_relaxation, which
+# fits the C-Trap FORCE model S(t)=a*exp(-t/tau)+b*t+d. Prefer the explicit
+# name fit_aspect_ratio_relaxation to avoid confusing the two.
+fit_fusion_relaxation = fit_aspect_ratio_relaxation
 
 
 # ---------------------------------------------------------------------------

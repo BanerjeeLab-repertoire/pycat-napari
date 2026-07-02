@@ -16,6 +16,7 @@ from napari.utils.notifications import (
     show_warning as napari_show_warning,
 )
 from PyQt5.QtWidgets import (
+    QSizePolicy,
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QTabWidget, QComboBox,
@@ -218,7 +219,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         napari_show_info(f"Preferred mechanism: {res.get('preferred_mechanism','?')}")
 
     def _on_fusion():
-        from pycat.toolbox.condensate_physics_tools import fit_fusion_relaxation
+        from pycat.toolbox.condensate_physics_tools import fit_aspect_ratio_relaxation
         from pycat.toolbox.dynamic_spatial_tools import detect_merge_fission
         dr = ui_instance.central_manager.active_data_class.data_repository
         ts_df = dr.get('timeseries_condensate_df')

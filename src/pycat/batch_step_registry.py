@@ -1003,6 +1003,80 @@ _STEP_MAP = {
     'zstack_condensate_segmentation': lambda s,p,pa,o: print(
         '[PyCAT Batch]   Z-stack condensate segmentation skipped in headless mode '
         '(requires a 3D volume — not available via batch file loading).'),
+    # Interactive general-analysis steps — recorded for provenance but not
+    # replayed headlessly (they are exploratory tools that require interactive
+    # layer/ROI selection rather than a fixed automated sequence).
+    'local_thresholding':       lambda s,p,pa,o: print(
+        '[PyCAT Batch]   local_thresholding skipped in headless mode '
+        '(interactive general-analysis step).'),
+    'label_binary_mask':        lambda s,p,pa,o: print(
+        '[PyCAT Batch]   label_binary_mask skipped in headless mode '
+        '(interactive general-analysis step).'),
+    'measure_region_props':     lambda s,p,pa,o: print(
+        '[PyCAT Batch]   measure_region_props skipped in headless mode '
+        '(interactive general-analysis step).'),
+    # Video Particle Tracking — interactive microrheology; recorded for
+    # provenance but not headlessly replayed (requires interactive channel
+    # selection and produces terminal microrheology output, not stored masks).
+    'vpt_segment_host':         lambda s,p,pa,o: print(
+        '[PyCAT Batch]   VPT host segmentation skipped in headless mode '
+        '(interactive multichannel step).'),
+    'vpt_detect_beads':         lambda s,p,pa,o: print(
+        '[PyCAT Batch]   VPT bead detection skipped in headless mode.'),
+    'vpt_link_trajectories':    lambda s,p,pa,o: print(
+        '[PyCAT Batch]   VPT trajectory linking skipped in headless mode.'),
+    'vpt_microrheology':        lambda s,p,pa,o: print(
+        '[PyCAT Batch]   VPT microrheology skipped in headless mode '
+        '(terminal reporting step).'),
+    # FRAP — interactive ROI selection; recorded for provenance, not replayed.
+    'frap_define_roi':          lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FRAP ROI definition skipped in headless mode.'),
+    'frap_analysis':            lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FRAP analysis skipped in headless mode '
+        '(interactive ROI + terminal reporting step).'),
+    # Droplet Fusion — interactive fit-window selection; recorded, not replayed.
+    'fusion_build_signal':      lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Fusion signal build skipped in headless mode.'),
+    'fusion_fit':               lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Fusion fit skipped in headless mode '
+        '(interactive fit-window + terminal reporting step).'),
+    'spatial_randomness':       lambda s,p,pa,o: print(
+        '[PyCAT Batch]   spatial_randomness skipped in headless mode '
+        '(interactive image/ROI selection step).'),
+    # Temperature-dependent condensate — interactive sync/annotation; recorded.
+    'temperature_sync':         lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Temperature sync skipped in headless mode '
+        '(interactive TIFF/CSV selection).'),
+    'temperature_turbidity':    lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Temperature turbidity skipped in headless mode.'),
+    'temperature_export_video': lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Temperature annotated export skipped in headless mode.'),
+    # Force-Distance curve — interactive .h5 load + channel/plot selection.
+    'fd_load':                  lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FD load skipped in headless mode (interactive .h5 selection).'),
+    'fd_segment':               lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FD segment skipped in headless mode.'),
+    'fd_plot':                  lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FD plot skipped in headless mode.'),
+    'fd_export':                lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FD export skipped in headless mode.'),
+    'fd_rips':                  lambda s,p,pa,o: print(
+        '[PyCAT Batch]   FD rip detection skipped in headless mode.'),
+    'molecular_counting':       lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Molecular counting skipped in headless mode '
+        '(interactive stack/mask selection).'),
+    'gaussian_localization':    lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Gaussian localization skipped in headless mode '
+        '(interactive image/points selection).'),
+    'client_enrichment':        lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Client enrichment skipped in headless mode '
+        '(interactive layer selection).'),
+    'intensity_profile':        lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Intensity profile skipped in headless mode '
+        '(interactive shapes/points selection).'),
+    'morphological_complexity': lambda s,p,pa,o: print(
+        '[PyCAT Batch]   Morphological complexity skipped in headless mode '
+        '(interactive mask selection).'),
     'save_and_clear':           replay_save_and_clear,
 }
 
