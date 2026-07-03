@@ -27,6 +27,10 @@ Key differences from Cellular Condensate Analysis:
   - Sedimentation detection for time-series
 """
 from __future__ import annotations
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t, **k: t
 import numpy as np
 import pandas as pd
 import napari
@@ -39,7 +43,7 @@ from PyQt5.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QHBoxLayout, QTabWidget, QComboBox,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 
 class _IVFWorker(QThread):
@@ -90,7 +94,7 @@ class InVitroFluorUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
         header = QLabel(
             "<b>In Vitro Fluorescence Condensate Analysis</b><br>"
             "<span style='color:#888;font-size:9pt;'>"
@@ -113,7 +117,7 @@ class InVitroFluorUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(main_w)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="In Vitro Fluorescence Analysis")
 
 
@@ -137,7 +141,7 @@ def _ivf_preprocessing(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Fluorescence image:", img_dd)
+    form.addRow(label_with_circle("Fluorescence image:", dropdown=img_dd), img_dd)
     ball_spin = QSpinBox(); ball_spin.setRange(2,200); ball_spin.setValue(15)
     ball_spin.setToolTip(
         "Rolling ball radius for background subtraction (pixels).\n"
@@ -339,7 +343,7 @@ def _ivf_size_distribution(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Droplet mask:", mask_dd)
+    form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     bins_sp = QSpinBox(); bins_sp.setRange(5,100); bins_sp.setValue(30)
     form.addRow("Histogram bins:", bins_sp)
     run = QPushButton("▶  Fit Size Distribution")
@@ -380,7 +384,7 @@ def _ivf_spatial(ui, layout):
         "NND, Ripley's L, PCF, Voronoi — identical to cellular analysis.</span>"
     ))
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Droplet mask:", mask_dd)
+    form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
@@ -628,7 +632,7 @@ def _ivf_frame_qc(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     stack_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Fluorescence stack (T,H,W):", stack_dd)
+    form.addRow(label_with_circle("Fluorescence stack (T,H,W):", dropdown=stack_dd), stack_dd)
     dt_sp  = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
     thr_sp = QDoubleSpinBox(); thr_sp.setRange(0.01,0.9);  thr_sp.setValue(0.3)
     form.addRow("Frame interval (s):", dt_sp)

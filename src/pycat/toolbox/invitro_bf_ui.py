@@ -32,7 +32,11 @@ from PyQt5.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t,**k: t
 
 
 class _IVBFWorker(QThread):
@@ -75,7 +79,7 @@ class InVitroBFUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
         header = QLabel(
             "<b>In Vitro Brightfield Condensate Analysis</b><br>"
             "<span style='color:#888;font-size:9pt;'>"
@@ -97,7 +101,7 @@ class InVitroBFUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(main_w)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="In Vitro Brightfield Analysis")
 
 
@@ -174,7 +178,7 @@ def _ivbf_segmentation(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Enhanced BF image:", enh_dd)
+    form.addRow(label_with_circle("Enhanced BF image:", dropdown=enh_dd), enh_dd)
     min_d = QDoubleSpinBox(); min_d.setRange(1,100); min_d.setValue(4.0)
     max_d = QDoubleSpinBox(); max_d.setRange(5,1000); max_d.setValue(200.0)
     circ  = QDoubleSpinBox(); circ.setRange(0.1,1.0);  circ.setValue(0.5)
@@ -257,7 +261,7 @@ def _ivbf_size_contact(ui, layout):
     form.setContentsMargins(9, 20, 9, 6)
 
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Droplet mask:", mask_dd)
+    form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
 
     # Contact angle selector
     single_lbl_sp = QSpinBox(); single_lbl_sp.setRange(0, 9999); single_lbl_sp.setValue(0)
@@ -323,7 +327,7 @@ def _ivbf_spatial(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Droplet mask:", mask_dd)
+    form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
@@ -372,7 +376,7 @@ def _ivbf_dynamics(ui, layout):
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Droplet mask stack (T,H,W):", stack_dd)
+    form.addRow(label_with_circle("Droplet mask stack (T,H,W):", dropdown=stack_dd), stack_dd)
     dt_sp   = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
     disp_sp = QDoubleSpinBox(); disp_sp.setRange(0.1,100); disp_sp.setValue(10.0)
     form.addRow("Frame interval (s):", dt_sp)
@@ -465,7 +469,7 @@ def _ivbf_focus_qc(ui, layout):
         "No bleaching correction — no fluorophore to bleach.</span>"
     ))
     stack_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("BF stack (T,H,W):", stack_dd)
+    form.addRow(label_with_circle("BF stack (T,H,W):", dropdown=stack_dd), stack_dd)
     dt_sp  = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
     thr_sp = QDoubleSpinBox(); thr_sp.setRange(0.1,0.9);  thr_sp.setValue(0.4)
     form.addRow("Frame interval (s):", dt_sp)

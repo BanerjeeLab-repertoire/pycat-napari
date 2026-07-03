@@ -4,6 +4,144 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.118] - 2026-07-03
+### Added
+- **Pipeline Step Diagnostics widget** (Toolbox → Image Processing → Pipeline Step
+  Diagnostics). Two tabbed panels — "Current (1.5.x)" and "v1.0.0 reference" — each
+  add a named napari layer for every sub-step of pre_process_image AND
+  rb_gaussian_bg_removal_with_edge_enhancement, so the exact step where the two
+  pipelines diverge is visible. Known labelled differences shown in the widget:
+  ① /max normalisation (current only); ② square vs disk structuring element;
+  ③ DoG (fixed σ=2.0/3.2) vs LoG (σ=3, radius-implicit).
+## [1.5.117] - 2026-07-03
+### Fixed
+- Missing `label_with_circle` import in `invitro_fluor_ui` (NameError on open)
+  and duplicate import in `invitro_bf_ui` / `brightfield_ui` — left over from
+  the scrollbar/import fix pass that stripped a `try/except` block.
+
+## [1.5.116] - 2026-07-03
+### Fixed (critical — 2-D fluorescence preprocessing regression)
+- **Aggressive signal suppression in preprocessing and background removal for
+  dim fluorescence images.** `dtype_conversion_func` uses `img_as_float32`,
+  which divides by 65535 (the full uint16 range). A typical condensate
+  fluorescence image with a true max of ~2000–3000 counts therefore arrives
+  at `pre_process_image` and `rb_gaussian_background_removal` as float32 in
+  the range [0, 0.046] instead of [0, 1]. Every subsequent multiplicative
+  step — the white-top-hat rescale, the DoG envelope, and the WBNS wavelet
+  thresholding — is calibrated for [0, 1] input; at 0.046 scale they all
+  over-suppress the signal and produce a near-blank output. Both functions
+  now normalise to [0, 1] by the actual image maximum immediately after the
+  dtype conversion, before any processing begins.
+## [1.5.115] - 2026-07-03
+### Fixed
+- **"Upscaling didn't work" visual confusion.** The upscaled layer is scaled to
+  `source_scale / 2` so both layers occupy the same world-space field of view
+  (correct for alignment). But this meant the 2x extra resolution was invisible —
+  both layers appeared identical in the napari canvas until you zoomed in. Now a
+  napari notification confirms success and explains: "Upscaled X: WxH → W2xH2 px
+  (2× linear). Both layers occupy the same field of view — zoom in to see the
+  extra resolution in 'Upscaled X'."
+### Note
+- The "aggressive preprocessing / yellow field" report is fixed by the CLAHE
+  range normalisation in 1.5.105 (`_safe_equalize_adapthist`). Users still
+  experiencing this should update to >= 1.5.105. All four CLAHE call sites in
+  `image_processing_tools.py` route through the safe wrapper that min-max
+  normalises to [0, 1] before CLAHE, preventing the near-zero collapse.
+## [1.5.114] - 2026-07-03
+### Fixed
+- **`QSizePolicy` NameError crashing Time-Series, FRAP, VPT, Z-Stack, and other
+  workflows on open.** `ts_cellpose_tools.py` imported it as `_QSP` but used the
+  bare `QSizePolicy` name — fatal NameError on any pipeline that invokes
+  `_add_run_ts_cellpose`. Fixed by exporting both names from the local import.
+- **Pixel-size gate removed from non-imaging workflows.** `_add_workflow_header`
+  was injecting the pixel-size QGroupBox into every pipeline including FD-Curve,
+  Droplet Fusion, and Colocalization. Now gated behind `include_pixel_gate=True`
+  (only set on Condensate, Time-Series, General, and Fibril imaging pipelines).
+- **Title clipping** fixed in all 7 separate workflow modules (brightfield,
+  in-vitro ×2, FRAP, VPT, FD-curve, z-stack) — all QFormLayout instances now
+  get a `setContentsMargins(9, 20, 9, 6)` top margin so the group-box title
+  never sits on top of the first content row.
+### Changed
+- **Status-circle UEX corrected to match the temperature-module design.** The
+  `StatusComboBox` inline-dot approach (wrong — inside the widget) is removed.
+  Key layer-selector fields now use `_layer_row` (in the condensate pipeline
+  tools) or `label_with_circle` (in the separate workflow modules), placing the
+  dot as a column to the *left* of the field label — exactly as designed.
+  Circles correctly show red (required) / yellow (optional) → green on selection.
+  A new `label_with_circle()` helper in `field_status.py` makes this available
+  to any `QFormLayout.addRow()` call with one line.
+## [1.5.113] - 2026-07-03
+### Added (field-status circles — rollout)
+- **The field-status circle is now on the key input of every step in every
+  workflow.** `create_layer_dropdown` (the shared layer-selection widget used
+  across all pipelines and tools) now returns a `StatusComboBox` — a QComboBox
+  that paints a small status dot at its left edge: red when no valid layer is
+  selected, green once a real layer is chosen. Because it is still a QComboBox,
+  every existing call site works unchanged, so this rolls the required-input
+  indicator out universally with no per-form edits. Combined with the Step 1
+  file-I/O block and pixel-size gate added to each pipeline header, the key
+  required inputs (file loaded, pixel size, layer selections) all carry the
+  red→green status indicator — the ~80% scope from the original design.
+## [1.5.112] - 2026-07-03
+### Fixed / Changed (workflow UI/UEX)
+- **Horizontal scrollbars removed from every workflow.** The 7 separate workflow
+  modules (brightfield, in-vitro fluor & BF, FRAP, VPT, force-distance, z-stack)
+  created their scroll areas without the always-off horizontal policy, and the
+  standalone-tool dock path had no scroll area at all. All dock paths now disable
+  the horizontal scrollbar so content fits the width (vertical scroll only).
+- **Field-status header rolled out to the main pipelines** (Cellular Condensate
+  fluorescence, Time-Series, Object/Pixel Colocalization, General, Fibril): each
+  now opens with the Step 1 file-I/O status block (green once an image is loaded)
+  and the conditional pixel-size gate — the same UEX pattern as the temperature
+  module — via a shared `_add_workflow_header` helper. Layout spacing tightened
+  for a more compact dock.
+## [1.5.111] - 2026-07-03
+### Fixed (µm scale consistency across all layers)
+- Every layer now preserves the micron scaling of the primary image, so masks,
+  processed images, upscaled layers, and overlays all occupy the same field of
+  view and stay aligned (previously only the source image carried the µm scale,
+  so derived layers — like the upscaled image — rendered at the wrong size).
+  Implemented as a single `inserted`-event listener in FileIO plus a re-align
+  when the reference scale is set: Image/Labels layers are aligned by field of
+  view (so an upscaled 2× mask gets half the reference pixel size), Shapes/Points
+  overlays inherit the reference per-pixel scale, and any layer that already
+  carries a deliberate non-unit scale is left untouched. No per-call-site changes
+  were needed — it covers all ~100 layer-creation calls centrally.
+## [1.5.110] - 2026-07-03
+### Changed
+- **Upscaling interpolation switched from bicubic spline to Akima.** The bicubic
+  `RectBivariateSpline` overshoots at sharp intensity edges, producing ringing
+  halos and negative values around bright puncta (hundreds of counts below
+  background, then clipped). A separable 2-D Akima interpolant is local and
+  shape-preserving: on a puncta test it produced zero negative/ringing pixels vs
+  52 for bicubic. Falls back to bicubic if Akima is unavailable.
+### Fixed
+- **Upscaled layer now aligns physically with its source** (scale set to the
+  source scale ÷ the upscale ratio). Previously the upscaled layer was added at
+  scale 1 while the source could carry a µm scale, so the source appeared
+  "embedded" as a small image inside a larger upscaled frame. The final
+  multiplication remains 2× — each "Upscaled X" is 2× of its own source X, with
+  no nested/compounding upscales.
+## [1.5.109] - 2026-07-03
+### Fixed
+- Silenced the napari `Window.qt_viewer` FutureWarning (deprecated public
+  access, removed in napari 0.8). The two places that read the Qt canvas size now
+  prefer the private `_qt_viewer` attribute and suppress the warning on the
+  public fallback — no behaviour change, just no console warning.
+## [1.5.108] - 2026-07-03
+### Fixed (crash on Home / reset view)
+- **"cannot convert float NaN to integer" crash when pressing Home.** The
+  \'Object Diameter\' and \'Cell Diameter\' line-annotation layers were created
+  empty on every image load, and an empty Shapes layer reports a NaN extent in
+  this napari build. reset_view (Home) then computed a NaN camera zoom, which the
+  scale-bar overlay hit with floor(log(NaN)) once the bar was in µm mode. Fix:
+  the diameter layers are now seeded with a single invisible near-zero-length
+  line so their extent is finite; measurement skips the seed (it reads the last
+  non-degenerate line), so results are unchanged.
+- Hardened both scale-bar paths against non-finite/zero pixel sizes
+  (`_enable_auto_scale_bar` validates the scale is finite and positive;
+  `draw_custom_scale_bar` rejects NaN/inf inputs), so no scale-bar code can put a
+  NaN into the world extent.
 ## [1.5.107] - 2026-07-03
 ### Changed
 - **Upscaling set to 2×** (linear) to match v1.0.0. This corrects 1.5.106, which

@@ -425,6 +425,66 @@ class FileIOClass:
         self.central_manager = central_manager
         self.filePath = ""
         self.base_file_name = ""
+        # Keep every layer physically aligned: when a layer is added anywhere in
+        # the app, give it the same field of view as the primary µm-scaled image
+        # so masks / processed images / overlays never render at the wrong size.
+        try:
+            self.viewer.layers.events.inserted.connect(
+                lambda e: self._align_layer_scales())
+        except Exception:
+            pass
+
+    def _align_layer_scales(self):
+        """Give every unit-scale layer the same physical extent as the primary
+        scaled image layer, so all layers overlay and the µm scale bar stays
+        consistent. Layers that already carry a meaningful (non-unit) scale — the
+        reference itself, or an explicitly-scaled upscaled layer — are left alone.
+        Image/Labels layers are aligned by field of view (handles upscaled masks);
+        Shapes/Points overlays inherit the reference's per-pixel scale."""
+        import numpy as np
+        try:
+            import napari.layers as _nl
+        except Exception:
+            return
+        try:
+            ref = None
+            for l in self.viewer.layers:
+                if isinstance(l, _nl.Image):
+                    rs = np.asarray(l.scale, float)
+                    if (rs.size >= 2 and np.all(np.isfinite(rs))
+                            and np.any(np.abs(rs[-2:] - 1.0) > 1e-9)):
+                        ref = l
+                        break
+            if ref is None:
+                return
+            ref_scale = np.asarray(ref.scale, float)
+            ref_shape = np.asarray(getattr(ref, 'data').shape, float)
+            if ref_shape.size < 2:
+                return
+            ref_fov = ref_shape[-2:] * ref_scale[-2:]
+            for l in self.viewer.layers:
+                if l is ref:
+                    continue
+                try:
+                    sc = np.asarray(l.scale, float)
+                    if sc.size >= 2 and np.any(np.abs(sc[-2:] - 1.0) > 1e-9):
+                        continue   # already scaled — don't override
+                    if isinstance(l, (_nl.Shapes, _nl.Points)):
+                        new_yx = ref_scale[-2:]     # pixel-coordinate overlay
+                    else:
+                        shp = np.asarray(getattr(l, 'data').shape, float)
+                        if shp.size < 2:
+                            continue
+                        new_yx = ref_fov / shp[-2:]
+                    if not (np.all(np.isfinite(new_yx)) and np.all(new_yx > 0)):
+                        continue
+                    new_scale = list(np.asarray(l.scale, float))
+                    new_scale[-2] = float(new_yx[0]); new_scale[-1] = float(new_yx[1])
+                    l.scale = new_scale
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
     def open_2d_image(self, file_paths=None):
         """
@@ -565,8 +625,7 @@ class FileIOClass:
             self.load_into_viewer(fluorescence_image, name="Fluorescence Image")
 
         # Add layers for measuring object and cell diameters to the viewer based on the image size
-        self.viewer.add_shapes(name='Object Diameter', shape_type='line', edge_color='red', edge_width=2)
-        self.viewer.add_shapes(name='Cell Diameter', shape_type='line', edge_color='white', edge_width=5)
+        self._add_diameter_annotation_layers()
 
         # Update the data instance with default sizes for object and cell diameters
         self.central_manager.active_data_class.data_repository['object_size'] = channel_data.shape[0] // 20
@@ -1057,10 +1116,7 @@ class FileIOClass:
         # "no metadata" fallback and anything else as metadata-derived.
         dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
 
-        self.viewer.add_shapes(name='Object Diameter', shape_type='line',
-                               edge_color='red', edge_width=2)
-        self.viewer.add_shapes(name='Cell Diameter', shape_type='line',
-                               edge_color='white', edge_width=5)
+        self._add_diameter_annotation_layers()
 
         # Auto scale bar for the freshly-loaded stack.
         self._enable_auto_scale_bar()
@@ -1191,6 +1247,27 @@ class FileIOClass:
             self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
     
 
+    def _add_diameter_annotation_layers(self):
+        """Add the 'Object Diameter'/'Cell Diameter' line-annotation layers,
+        seeded with one invisible near-zero-length line so the (otherwise empty)
+        Shapes layers report a FINITE extent. An empty Shapes layer reports a NaN
+        extent in this napari build, which makes reset_view (the Home button)
+        compute a NaN camera zoom and crash the scale-bar overlay. The seed is
+        ignored by calculate_length, which measures the last non-degenerate line."""
+        import numpy as _np
+        for _nm, _ec, _ew in (('Object Diameter', 'red', 2),
+                              ('Cell Diameter', 'white', 5)):
+            if _nm in [l.name for l in self.viewer.layers]:
+                continue
+            lyr = self.viewer.add_shapes(name=_nm, shape_type='line',
+                                         edge_color=_ec, edge_width=_ew)
+            try:
+                lyr.add(_np.array([[0.0, 0.0], [0.0, 1e-4]]),
+                        shape_type='line', edge_width=0.0)
+                lyr.current_edge_width = _ew
+            except Exception:
+                pass
+
     def _enable_auto_scale_bar(self, image_layer=None):
         """
         Enable napari's scale bar for a freshly-loaded image.
@@ -1216,12 +1293,21 @@ class FileIOClass:
             sb.visible = True
             # Show a µm bar whenever a real pixel size is known — from metadata
             # OR entered by the user (e.g. via the pixel-size gate). Only fall
-            # back to pixels when no valid scale exists.
-            if mpx_sq and abs(float(mpx_sq) - 1.0) > 1e-9:
-                px = float(mpx_sq) ** 0.5
-                sc = list(image_layer.scale)
-                sc[-1] = px; sc[-2] = px
-                image_layer.scale = sc
+            # back to pixels when no valid scale exists. A non-finite or non-
+            # positive scale would make the world extent degenerate and, on
+            # reset_view (the Home button), drive the camera zoom to NaN, which
+            # crashes napari's scale-bar overlay — so we validate strictly.
+            import numpy as _np
+            try:
+                mpx_sq = float(mpx_sq)
+            except (TypeError, ValueError):
+                mpx_sq = 1.0
+            px = _np.sqrt(mpx_sq) if (_np.isfinite(mpx_sq) and mpx_sq > 0) else 0.0
+            if _np.isfinite(px) and px > 0 and abs(px - 1.0) > 1e-9:
+                sc = [float(s) for s in image_layer.scale]
+                if all(_np.isfinite(s) and s > 0 for s in sc[:-2]) or len(sc) <= 2:
+                    sc[-1] = px; sc[-2] = px
+                    image_layer.scale = sc
                 label = 'um'
             else:
                 label = 'px'
@@ -1232,6 +1318,10 @@ class FileIOClass:
                     sb.unit = label
             except Exception:
                 pass
+            # Now that the reference image carries a µm scale, bring any layers
+            # that were added earlier (e.g. the diameter overlays) into alignment.
+            if label == 'um':
+                self._align_layer_scales()
         except Exception as e:
             print(f"[PyCAT] auto scale bar skipped: {e}")
 

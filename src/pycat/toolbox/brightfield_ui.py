@@ -37,7 +37,11 @@ from PyQt5.QtWidgets import (
     QFormLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel,
     QProgressBar, QScrollArea, QSizePolicy,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t,**k: t
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +123,7 @@ class BrightfieldCondensateUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
 
         header = QLabel(
             "<b>Brightfield Condensate Analysis</b><br>"
@@ -148,6 +152,7 @@ class BrightfieldCondensateUI:
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(main_w)
 
         self.viewer.window.add_dock_widget(
@@ -165,7 +170,7 @@ def _add_bf_preprocessing(ui, layout):
     form.setContentsMargins(9, 20, 9, 6)
 
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Brightfield image:", img_dd)
+    form.addRow(label_with_circle("Brightfield image:", dropdown=img_dd), img_dd)
 
     ref_cb = QCheckBox("Use flat-field reference layer")
     ref_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -276,7 +281,7 @@ def _add_bf_cell_segmentation(ui, layout):
     form.addRow(note)
 
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("BF image for segmentation:", img_dd)
+    form.addRow(label_with_circle("BF image for segmentation:", dropdown=img_dd), img_dd)
 
     diam_spin = QSpinBox(); diam_spin.setRange(10, 500); diam_spin.setValue(80)
     diam_spin.setToolTip("Approximate cell diameter in pixels.")
@@ -344,7 +349,7 @@ def _add_bf_condensate_segmentation(ui, layout):
     form.setContentsMargins(9, 20, 9, 6)
 
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Enhanced BF image:", enh_dd)
+    form.addRow(label_with_circle("Enhanced BF image:", dropdown=enh_dd), enh_dd)
 
     min_d = QDoubleSpinBox(); min_d.setRange(1, 50);  min_d.setValue(3.0)
     max_d = QDoubleSpinBox(); max_d.setRange(5, 500); max_d.setValue(50.0)
@@ -497,7 +502,7 @@ def _add_bf_per_cell_summary(ui, layout):
     ))
 
     cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Cell mask:", cell_dd)
+    form.addRow(label_with_circle("Cell mask:", dropdown=cell_dd), cell_dd)
     run = QPushButton("▶  Summarise Per Cell")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
@@ -619,7 +624,7 @@ def _add_bf_dynamics(ui, layout):
     ))
 
     stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Condensate mask stack (T,H,W):", stack_dd)
+    form.addRow(label_with_circle("Condensate mask stack (T,H,W):", dropdown=stack_dd), stack_dd)
 
     dt_spin   = QDoubleSpinBox(); dt_spin.setRange(0.01, 3600); dt_spin.setValue(1.0)
     disp_spin = QDoubleSpinBox(); disp_spin.setRange(0.1, 20);  disp_spin.setValue(2.0)
@@ -811,7 +816,7 @@ def _add_bf_frame_qc(ui, layout):
     ))
 
     stack_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("BF stack (T,H,W):", stack_dd)
+    form.addRow(label_with_circle("BF stack (T,H,W):", dropdown=stack_dd), stack_dd)
 
     dt_spin  = QDoubleSpinBox(); dt_spin.setRange(0.01, 3600); dt_spin.setValue(1.0)
     thr_spin = QDoubleSpinBox(); thr_spin.setRange(0.1, 0.9);  thr_spin.setValue(0.4)

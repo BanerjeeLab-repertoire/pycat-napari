@@ -53,7 +53,7 @@ class FDCurveUI:
             pass
 
         layout = QVBoxLayout()
-        layout.setSpacing(8); layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(8); layout.setContentsMargins(4, 20, 4, 4)
 
         header = QLabel(
             "<b>Force-Distance Curve (DNA Tethering)</b><br>"
@@ -74,7 +74,7 @@ class FDCurveUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Force-Distance Curve")
 

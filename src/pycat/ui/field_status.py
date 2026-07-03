@@ -359,3 +359,27 @@ def add_reset_buttons(form, registry, step):
     b2.clicked.connect(registry.reset_all)
     hb.addWidget(b1); hb.addWidget(b2)
     form.addRow(row)
+
+
+def label_with_circle(text, optional=False, dropdown=None):
+    """Return a QWidget containing [● circle][label text] for use as the
+    label column of a QFormLayout.addRow() call. The circle is red (required)
+    or yellow (optional) until a real layer is selected, then turns green.
+    If *dropdown* is given (a QComboBox), the circle updates automatically
+    when its selection changes — wire it after calling addRow()."""
+    from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
+    w=QWidget(); hb=QHBoxLayout(w); hb.setContentsMargins(0,0,0,0); hb.setSpacing(4)
+    c=StatusCircle()
+    init='yellow' if optional else 'red'
+    tip=('Optional — a default will be used.' if optional
+         else 'Required — select a layer to continue.')
+    c._set(init, tip)
+    hb.addWidget(c); hb.addWidget(QLabel(text))
+    if dropdown is not None:
+        def _upd(*_):
+            txt=(dropdown.currentText() or '').strip().lower()
+            bad=not txt or txt.startswith(('select','none','--','—','no ','choose'))
+            c._set(init if bad else 'green',
+                   tip if bad else 'Layer selected.')
+        dropdown.currentIndexChanged.connect(_upd); _upd()
+    return w

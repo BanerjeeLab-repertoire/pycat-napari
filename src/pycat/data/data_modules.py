@@ -371,15 +371,20 @@ class BaseDataClass:
         # Get the shapes layers
         cell_size_layer = viewer.layers['Cell Diameter'] if 'Cell Diameter' in viewer.layers else None
         object_size_layer = viewer.layers['Object Diameter'] if 'Object Diameter' in viewer.layers else None
-        # Get the coordinates of the last shape drawn
-        if cell_size_layer is not None:
-            cell_coords = cell_size_layer.data[-1] if cell_size_layer.data else None
-        else:
-            cell_coords = None
-        if object_size_layer is not None:
-            object_coords = object_size_layer.data[-1] if object_size_layer.data else None
-        else:
-            object_coords = None
+        # Get the last NON-DEGENERATE line drawn (skips the invisible seed line
+        # that gives these layers a finite extent — see _add_diameter_annotation_layers).
+        def _last_real_line(layer):
+            if layer is None or len(layer.data) == 0:
+                return None
+            for coords in reversed(layer.data):
+                try:
+                    if euclidean(coords[0], coords[1]) > 0.5:
+                        return coords
+                except Exception:
+                    continue
+            return None
+        cell_coords = _last_real_line(cell_size_layer)
+        object_coords = _last_real_line(object_size_layer)
 
         # Calculate the distance using the Euclidean distance formula
         if cell_coords is not None:

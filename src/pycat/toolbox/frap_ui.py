@@ -12,6 +12,10 @@ Steps
            pre-bleach normalization, recovery-model fit)
 """
 from __future__ import annotations
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t,**k: t
 import numpy as np
 import pandas as pd
 import napari
@@ -59,7 +63,7 @@ class FRAPUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
 
         header = QLabel(
             "<b>FRAP Analysis</b><br>"
@@ -78,7 +82,7 @@ class FRAPUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="FRAP Analysis")
 
@@ -145,7 +149,7 @@ class FRAPUI:
         # Auto-circle params (hidden until Auto-circle selected)
         self._circle_container = QWidget()
         cc = QFormLayout(self._circle_container)
-        cc.setContentsMargins(0, 0, 0, 0); cc.setSpacing(4)
+        cc.setContentsMargins(0, 20, 0, 0); cc.setSpacing(4)
         self._bl_cx = QSpinBox(); self._bl_cx.setRange(0, 10000); self._bl_cx.setValue(100)
         self._bl_cy = QSpinBox(); self._bl_cy.setRange(0, 10000); self._bl_cy.setValue(100)
         self._ref_cx = QSpinBox(); self._ref_cx.setRange(0, 10000); self._ref_cx.setValue(50)
@@ -304,7 +308,7 @@ class FRAPUI:
         model_grp = QGroupBox("Fit model")
         model_grp.setFlat(True)
         ml = QVBoxLayout(model_grp)
-        ml.setContentsMargins(4, 2, 4, 2); ml.setSpacing(2)
+        ml.setContentsMargins(4, 20, 4, 2); ml.setSpacing(2)
         self._rb_empirical = QRadioButton("Empirical  I(t)=(a+b·t/τ½)/(1+t/τ½)  → τ½, mobile frac")
         self._rb_empirical.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_rd        = QRadioButton("Reaction-diffusion (rectangular)  → D, k_off, mobile/bound frac")

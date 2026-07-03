@@ -303,7 +303,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     segmentation algorithm. When no dedicated channel is available, 
     Multi-Otsu thresholding provides a DNA-stain-free fallback.
     """
-    from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy as _QSP
+    from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
     grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
     form  = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)

@@ -381,7 +381,9 @@ def draw_custom_scale_bar(viewer, image_layer, pixel_um, scalebar_um=10.0,
     layer_name : str
     """
     import numpy as np
-    if pixel_um is None or pixel_um <= 0 or scalebar_um <= 0:
+    if (pixel_um is None or scalebar_um is None
+            or not np.isfinite(pixel_um) or not np.isfinite(scalebar_um)
+            or pixel_um <= 0 or scalebar_um <= 0):
         return None
     shp = np.asarray(image_layer.data).shape
     if len(shp) < 2:

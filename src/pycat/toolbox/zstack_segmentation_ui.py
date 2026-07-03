@@ -28,7 +28,11 @@ from PyQt5.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy,
 )
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t,**k: t
 
 
 class _ZWorker(QThread):
@@ -76,7 +80,7 @@ class ZStackSegmentationUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
         header = QLabel(
             "<b>Z-Stack (3D) Condensate Segmentation</b><br>"
             "<span style='color:#888;font-size:9pt;'>"
@@ -97,7 +101,7 @@ class ZStackSegmentationUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(main_w)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Z-Stack (3D) Condensate Analysis")
 
 
@@ -125,7 +129,7 @@ def _add_zstack_bg_removal(ui, layout):
     ))
 
     vol_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Raw Z-stack (Z,H,W):", vol_dd)
+    form.addRow(label_with_circle("Raw Z-stack (Z,H,W):", dropdown=vol_dd), vol_dd)
 
     ball_sp = QSpinBox(); ball_sp.setRange(2, 200); ball_sp.setValue(15)
     form.addRow("Ball radius (px):", ball_sp)
@@ -205,7 +209,7 @@ def _add_zstack_cell_seg(ui, layout):
     ))
 
     vol_dd = ui.create_layer_dropdown(napari.layers.Image)
-    form.addRow("Volume for cell segmentation:", vol_dd)
+    form.addRow(label_with_circle("Volume for cell segmentation:", dropdown=vol_dd), vol_dd)
 
     diam_sp = QSpinBox(); diam_sp.setRange(10, 500); diam_sp.setValue(100)
     form.addRow("Cell diameter (px):", diam_sp)

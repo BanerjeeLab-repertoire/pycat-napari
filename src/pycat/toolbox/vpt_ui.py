@@ -13,6 +13,10 @@ Pipeline
   Step 5 — Drift-correct (ensemble COM) + MSD + diffusion fit + viscosity
 """
 from __future__ import annotations
+try:
+    from pycat.ui.field_status import label_with_circle
+except Exception:
+    label_with_circle = lambda t,**k: t
 import numpy as np
 import pandas as pd
 import napari
@@ -74,7 +78,7 @@ class VideoParticleTrackingUI:
 
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(4, 20, 4, 4)
 
         header = QLabel(
             "<b>Video Particle Tracking (Microrheology)</b><br>"
@@ -95,7 +99,7 @@ class VideoParticleTrackingUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Video Particle Tracking")
 
@@ -352,7 +356,7 @@ class VideoParticleTrackingUI:
 
         method_grp = QGroupBox("Linker")
         ml = QVBoxLayout(method_grp)
-        ml.setContentsMargins(4, 4, 4, 4); ml.setSpacing(3)
+        ml.setContentsMargins(4, 20, 4, 4); ml.setSpacing(3)
         self._rb_trackmate = QRadioButton("TrackMate LAP  (recommended)")
         self._rb_trackmate.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_bayesian  = QRadioButton("Bayesian / Hungarian")

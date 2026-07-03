@@ -232,8 +232,11 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         except Exception:
             pass
         try:
-            qtv = (getattr(viewer.window, '_qt_viewer', None)
-                   or getattr(viewer.window, 'qt_viewer', None))
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter('ignore', FutureWarning)
+                qtv = (getattr(viewer.window, '_qt_viewer', None)
+                       or getattr(viewer.window, 'qt_viewer', None))
             welcome = getattr(qtv, '_welcome_widget', qtv) if qtv is not None else None
             if welcome is not None and logo_str:
                 for lbl in welcome.findChildren(QLabel):

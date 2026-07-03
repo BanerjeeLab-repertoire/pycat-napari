@@ -510,8 +510,18 @@ class BaseUIClass:
             except Exception:
                 pass
 
-            # Add the main widget to the viewer as a dock widget
-            self.viewer.window.add_dock_widget(main_widget, name=dock_name)
+            # Add the main widget to the viewer as a dock widget, wrapped in a
+            # scroll area whose horizontal scrollbar is disabled so content fits
+            # the dock width (vertical scroll only) — consistent with the pipeline
+            # docks and the separate workflow modules.
+            try:
+                _sa = QScrollArea()
+                _sa.setWidgetResizable(True)
+                _sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                _sa.setWidget(main_widget)
+                self.viewer.window.add_dock_widget(_sa, name=dock_name)
+            except Exception:
+                self.viewer.window.add_dock_widget(main_widget, name=dock_name)
         else:        
             # Add the widget to the existing layout in the dock                    
             layout.addWidget(widget)
@@ -527,6 +537,72 @@ class BaseUIClass:
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
             bp.record(step_name, params)
+
+    def _layer_row(self, layout, label_text, layer_type, name_hint='',
+                   optional=False):
+        """Add a status-circle + label + layer-dropdown row to *layout*, matching
+        the field-status UEX from the temperature workflow. Returns the dropdown.
+        Circle is red (required) or yellow (optional) until a real layer is
+        selected, then turns green. 'None' placeholders stay red/yellow."""
+        from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
+        try:
+            from pycat.ui.field_status import StatusCircle
+        except Exception:
+            dd = self.create_layer_dropdown(layer_type, name_hint)
+            self.add_text_label(layout, label_text)
+            layout.addWidget(dd)
+            return dd
+        row_w = QWidget()
+        row_h = QHBoxLayout(row_w)
+        row_h.setContentsMargins(0, 0, 0, 0); row_h.setSpacing(4)
+        circle = StatusCircle()
+        init_color = 'yellow' if optional else 'red'
+        init_tip = ('Optional — a default will be used.' if optional
+                    else 'Required — select a layer to continue.')
+        circle._set(init_color, init_tip)
+        row_h.addWidget(circle)
+        row_h.addWidget(QLabel(label_text))
+        row_h.addStretch(1)
+        layout.addWidget(row_w)
+        dd = self.create_layer_dropdown(layer_type, name_hint)
+        layout.addWidget(dd)
+        def _update_circle(*_):
+            txt = (dd.currentText() or '').strip().lower()
+            is_placeholder = (not txt or txt.startswith(
+                ('select', 'none', '--', '—', 'no ', 'choose')))
+            if not is_placeholder:
+                circle._set('green', 'Layer selected.')
+            else:
+                circle._set(init_color, init_tip)
+        dd.currentIndexChanged.connect(_update_circle)
+        _update_circle()
+        return dd
+
+    def _add_workflow_header(self, layout, include_pixel_gate=False):
+        """Add the Step 1 file-I/O status block to a workflow layout.
+        The 'Image loaded' indicator turns green once a file is open.
+        Pass include_pixel_gate=True only for imaging pipelines that need a
+        physical pixel size (condensate, time-series, general, fibril analysis).
+        Non-imaging workflows (FD-curve, Droplet Fusion, Force-Distance) omit it."""
+        try:
+            from pycat.ui.field_status import (
+                FieldRegistry, add_step1_file_io, add_pixel_size_gate)
+            reg = FieldRegistry()
+            self._field_registry = reg
+            add_step1_file_io(self.viewer, layout, reg)
+            if include_pixel_gate:
+                def _on_px(v):
+                    try:
+                        reg.refresh()
+                        self.central_manager.file_io._enable_auto_scale_bar()
+                    except Exception:
+                        pass
+                add_pixel_size_gate(
+                    layout,
+                    lambda: self.central_manager.active_data_class.data_repository,
+                    on_set=_on_px)
+        except Exception:
+            pass
 
 class ToolboxFunctionsUI(BaseUIClass):
     """
@@ -872,6 +948,112 @@ class ToolboxFunctionsUI(BaseUIClass):
         w = QWidget(); w.setLayout(lay)
         self._add_widget_to_layout_or_dock(w, layout, separate_widget, "Calibration Correction Dock")
 
+
+
+    def _add_pipeline_diagnostics(self, layout=None, separate_widget=False):
+        """Two diagnostic panels in one dock:
+          (A) CURRENT pipeline — a layer for every step of pre_process_image
+              and rb_gaussian_bg_removal_with_edge_enhancement.
+          (B) v1.0.0 pipeline — identical input, identical output labelling,
+              but following the original 1.0.0 code exactly (disk footprint,
+              LoG not DoG, no /max normalisation).
+        Run each panel independently to compare step-by-step.
+        """
+        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QTabWidget, QWidget, QVBoxLayout
+        import napari
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Pipeline Step Diagnostics', bold=True)
+        self.add_text_label(outer,
+            'Runs every sub-step and adds a named layer for each. '
+            'Compare current vs v1.0.0 to find where the pipelines diverge.')
+
+        tabs = QTabWidget()
+
+        def _make_panel(label, run_fn):
+            grp_w = QWidget(); vb = QVBoxLayout(grp_w)
+            form = QFormLayout()
+            form.setContentsMargins(4, 8, 4, 4)
+            img_dd = self.create_layer_dropdown(napari.layers.Image)
+            form.addRow("Image layer:", img_dd)
+            vb.addLayout(form)
+
+            run_btn = QPushButton(f"▶  Run {label}")
+            run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            prog = QProgressBar(); prog.setRange(0, 0); prog.setVisible(False)
+            vb.addWidget(run_btn); vb.addWidget(prog)
+
+            def _run():
+                name = img_dd.currentText()
+                if not name or name.lower() in ('none', 'select', '--'):
+                    from napari.utils.notifications import show_warning
+                    show_warning("Select an image layer first."); return
+                try:
+                    layer = self.viewer.layers[name]
+                    img = np.asarray(layer.data)
+                except Exception as e:
+                    from napari.utils.notifications import show_warning
+                    show_warning(f"Could not read layer: {e}"); return
+
+                dr = self.central_manager.active_data_class.data_repository
+                ball_radius = int(dr.get('ball_radius', 50))
+                window_size = int(dr.get('cell_diameter', 100)) // 2
+
+                prog.setVisible(True); run_btn.setEnabled(False)
+                try:
+                    steps = run_fn(img, ball_radius, window_size)
+                    for step_name, arr in steps:
+                        from pycat.ui.ui_utils import add_image_with_default_colormap
+                        add_image_with_default_colormap(
+                            arr.astype(np.float32), self.viewer, name=step_name)
+                    from napari.utils.notifications import show_info
+                    show_info(f"{label}: {len(steps)} step layers added.")
+                except Exception as e:
+                    from napari.utils.notifications import show_warning
+                    show_warning(f"{label} failed: {e}")
+                    import traceback; traceback.print_exc()
+                finally:
+                    prog.setVisible(False); run_btn.setEnabled(True)
+
+            run_btn.clicked.connect(_run)
+            return grp_w
+
+        # ── Tab A: Current full pipeline ──────────────────────────────────
+        from pycat.toolbox.pipeline_diagnostic_tools import (
+            preprocess_steps_current, bg_removal_steps_current,
+            preprocess_steps_v100, bg_removal_steps_v100)
+
+        def _run_current(img, br, ws):
+            return preprocess_steps_current(img, br, ws) +                    bg_removal_steps_current(img, br)
+
+        def _run_v100(img, br, ws):
+            return preprocess_steps_v100(img, br, ws) +                    bg_removal_steps_v100(img, br)
+
+        tab_curr = _make_panel("Current pipeline", _run_current)
+        tab_v100 = _make_panel("v1.0.0 pipeline", _run_v100)
+
+        tabs.addTab(tab_curr, "Current (1.5.x)")
+        tabs.addTab(tab_v100, "v1.0.0 reference")
+
+        # Description of known differences — shown as a note below tabs
+        outer.addWidget(tabs)
+        note = QLabel(
+            "<b>Key differences (current vs v1.0.0):</b><br>"
+            "① Current normalises to [0,1] (/actual max) before any processing; "
+            "v1.0.0 passes the raw /65535 float (dim images arrive at ~0.046 max).<br>"
+            "② Structuring element: current uses <b>square(2r+1)</b>; "
+            "v1.0.0 uses <b>disk(r)</b> — same radius, much larger area.<br>"
+            "③ Blob detection: current uses <b>DoG(σ=2.0, 3.2)</b> fixed sigmas; "
+            "v1.0.0 uses <b>LoG(σ=3)</b> — DoG sigmas don't scale with ball_radius."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("font-size:10px; color:#aaa; padding:4px;")
+        outer.addWidget(note)
+
+        w = QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Pipeline Step Diagnostics")
+
     def _add_run_enhanced_rb_gaussian_bg_removal(self, layout=None, separate_widget=False):
         """Add a widget for rolling-ball and Gaussian background removal with edge enhancement, optionally in a separate dock."""
         remove_background_layout = QVBoxLayout()
@@ -1203,9 +1385,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         seg_layout.addWidget(cp_model_group)
 
         # ── Shared image dropdown ────────────────────────────────────────
-        self.add_text_label(seg_layout, 'Select image layer:')
-        image_dropdown = self.create_layer_dropdown(napari.layers.Image)
-        seg_layout.addWidget(image_dropdown)
+        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image)
 
         # ── RF-only extras (annotation layer) — shown/hidden by selection ──
         rf_extra = QWidget()
@@ -1386,12 +1566,8 @@ class ToolboxFunctionsUI(BaseUIClass):
         from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QFormLayout, QGroupBox
         process_cells_layout = QVBoxLayout()
         self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
-        self.add_text_label(process_cells_layout, 'Select Pre-Processed Image to Segment')
-        process_cells_image1_dropdown = self.create_layer_dropdown(napari.layers.Image, name_hint='Pre-Processed')
-        process_cells_layout.addWidget(process_cells_image1_dropdown)
-        self.add_text_label(process_cells_layout, 'Select Fluorescence Image to Process')
-        process_cells_image2_dropdown = self.create_layer_dropdown(napari.layers.Image)
-        process_cells_layout.addWidget(process_cells_image2_dropdown)
+        process_cells_image1_dropdown = self._layer_row(process_cells_layout, 'Select Pre-Processed Image to Segment:', napari.layers.Image, name_hint='Pre-Processed')
+        process_cells_image2_dropdown = self._layer_row(process_cells_layout, 'Select Fluorescence Image to Process:', napari.layers.Image)
 
         # ── Refinement parameters ──────────────────────────────────────────
         params_group = QGroupBox("Refinement Parameters")
@@ -1487,16 +1663,10 @@ class ToolboxFunctionsUI(BaseUIClass):
         """Add a widget for cell analysis, optionally in a separate dock."""
         cell_segmentation_layout = QVBoxLayout()
         self.add_text_label(cell_segmentation_layout, 'Cell/Nuclei Analysis', bold=True) # Add widget title label
-        self.add_text_label(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis') # Add a text label
-        cell_segmentation_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels, name_hint='Labeled Cell Mask')
-        cell_segmentation_layout.addWidget(cell_segmentation_dropdown_labels) # Add the dropdown to the layout
-        self.add_text_label(cell_segmentation_layout, 'Select Mask Layer to Omit') # Add a text label
-        cell_segmentation_dropdown_omit = self.create_layer_dropdown(napari.layers.Labels)
+        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Labeled Cell Mask')
+        cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
-        cell_segmentation_layout.addWidget(cell_segmentation_dropdown_omit)
-        self.add_text_label(cell_segmentation_layout, 'Select Image for Cell Analysis') # Add a text label
-        cell_segmentation_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
-        cell_segmentation_layout.addWidget(cell_segmentation_dropdown_images)
+        cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image)
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
         cell_analysis_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_cell_analysis():
@@ -2176,6 +2346,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
 
         # Add analysis and processing steps to the layout
         # Each method call adds a specific UI component for condensate analysis
+        self._add_workflow_header(self.condensate_layout, include_pixel_gate=True)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.condensate_layout)
@@ -2278,6 +2449,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # ── Steps 3-4: measurement lines and lazy stack preprocessing ──────
         # Lazy preprocessing builds dask-backed layers so frames are
         # processed one at a time on demand rather than all upfront.
+        self._add_workflow_header(self.ts_layout, include_pixel_gate=True)
         tfu._add_measure_line(layout=self.ts_layout)
         tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
 
@@ -2766,6 +2938,7 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         """
         # Sequentially add UI components for object colocalization analysis
         # Each method enriches the UI with functional capabilities tailored to the analysis needs
+        self._add_workflow_header(self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.object_coloc_layout)
@@ -2851,6 +3024,7 @@ class PixelColocAnalysisUI(AnalysisMethodsUI):
         a structured UI layout.
         """
         # Setup the specific UI components for pixel wise correlation analysis
+        self._add_workflow_header(self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_clahe(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_wbns(layout=self.pixel_coloc_layout)
@@ -2931,6 +3105,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         process flow and enabling comprehensive analysis features through a structured UI layout.
         """
         # Setup the specific UI components for a general analysis
+        self._add_workflow_header(self.general_layout, include_pixel_gate=True)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.general_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.general_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.general_layout)
@@ -3040,6 +3215,7 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
             pass
 
         # Setup the specific UI components for fibril analysis
+        self._add_workflow_header(self.fibril_layout, include_pixel_gate=True)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_apply_bilateral_filter(layout=self.fibril_layout)
@@ -3155,15 +3331,21 @@ class MenuManager:
             center = (mins + maxs) / 2.0
             self.viewer.camera.center = tuple(float(center[d]) for d in dims)
 
-            # Zoom to fit: need the canvas size in pixels.
+            # Zoom to fit: need the canvas size in pixels. Prefer the private
+            # `_qt_viewer` attribute — the public `window.qt_viewer` property is
+            # deprecated (napari ≤0.8) and emits a FutureWarning on access, so we
+            # try the private one first and only fall back with the warning muted.
             cw = ch = None
-            for accessor in ('qt_viewer', '_qt_viewer'):
-                try:
-                    sz = getattr(self.viewer.window, accessor).canvas.size
-                    cw, ch = float(sz[0]), float(sz[1])
-                    break
-                except Exception:
-                    continue
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter('ignore', FutureWarning)
+                for accessor in ('_qt_viewer', 'qt_viewer'):
+                    try:
+                        sz = getattr(self.viewer.window, accessor).canvas.size
+                        cw, ch = float(sz[0]), float(sz[1])
+                        break
+                    except Exception:
+                        continue
             sizes = [float(maxs[d] - mins[d]) for d in dims]
             if nd == 2 and cw and ch and all(s > 0 for s in sizes):
                 # displayed dims are [y, x]; canvas is (width=x, height=y)
@@ -3466,7 +3648,8 @@ class MenuManager:
         # Create sub-menu for image processing functions
         image_processing_submenu = self.toolbox_menu.addMenu('Image Processing')
         image_processing_actions = {
-            'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True})
+            'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True}),
+            'Pipeline Step Diagnostics': (self.central_manager.toolbox_functions_ui._add_pipeline_diagnostics, {'separate_widget': True}),
         }
         self._add_actions_to_menu(image_processing_actions, image_processing_submenu)
 

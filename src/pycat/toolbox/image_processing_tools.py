@@ -413,20 +413,34 @@ def upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor
     specified otherwise by the `pad` parameter. This is important for applications where edge continuity is critical.
     """
 
-    # Define the initial and final grids for interpolation
-    x0 = np.linspace(-0.5, 0.5, num_col_initial)
-    y0 = np.linspace(-0.5, 0.5, num_row_initial)
-    X0, Y0 = np.meshgrid(x0, y0)
+    # Output grid size.
+    n_row_out = int(np.round(upscale_factor * num_row_initial))
+    n_col_out = int(np.round(upscale_factor * num_col_initial))
 
-    x = np.linspace(-0.5, 0.5, int(np.round(upscale_factor * num_col_initial)))
-    y = np.linspace(-0.5, 0.5, int(np.round(upscale_factor * num_row_initial)))
-    X, Y = np.meshgrid(x, y)
-
-    # Perform bicubic interpolation
-    interp_func = RectBivariateSpline(y0, x0, image)
-    magnified_image = interp_func(y, x)
+    # Separable 2-D Akima interpolation (columns, then rows). Akima is a local,
+    # shape-preserving interpolant: unlike a bicubic spline it does NOT overshoot
+    # at sharp intensity edges, so it produces no ringing halos or negative
+    # values around bright puncta (the bicubic path could dip hundreds of counts
+    # below background). Falls back to the bicubic spline if Akima is unavailable.
+    try:
+        from scipy.interpolate import Akima1DInterpolator
+        col0 = np.arange(num_col_initial, dtype=float)
+        row0 = np.arange(num_row_initial, dtype=float)
+        col1 = np.linspace(0, num_col_initial - 1, n_col_out)
+        row1 = np.linspace(0, num_row_initial - 1, n_row_out)
+        tmp = Akima1DInterpolator(col0, np.asarray(image, dtype=float),
+                                  axis=1)(col1)          # (H, n_col_out)
+        magnified_image = Akima1DInterpolator(row0, tmp, axis=0)(row1)  # (n_row_out, n_col_out)
+    except Exception:
+        x0 = np.linspace(-0.5, 0.5, num_col_initial)
+        y0 = np.linspace(-0.5, 0.5, num_row_initial)
+        x = np.linspace(-0.5, 0.5, n_col_out)
+        y = np.linspace(-0.5, 0.5, n_row_out)
+        interp_func = RectBivariateSpline(y0, x0, image)
+        magnified_image = interp_func(y, x)
 
     # Clean up by setting negative values to zero and padding the image
+    magnified_image = np.asarray(magnified_image)
     magnified_image[magnified_image < 0] = 0
     magnified_image = np.pad(magnified_image, 10, mode='constant')
 
@@ -537,7 +551,34 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
             update_data = False
 
         # Add the processed and potentially upscaled image back into the viewer
-        add_image_with_default_colormap(upscaled_img, viewer, name=f"Upscaled {layer.name}")
+        # Align the upscaled layer physically with its source: it has
+        # `upscale_factor`× more pixels over the SAME field of view, so its scale
+        # must be the source scale divided by the actual upscale ratio. Without
+        # this the upscaled layer (at scale 1) renders far larger than the source
+        # (which may carry a µm scale), making the source look "embedded" in it.
+        try:
+            _src_scale = [float(s) for s in layer.scale]
+            _ry = upscaled_img.shape[0] / image.shape[0]
+            _rx = upscaled_img.shape[1] / image.shape[1]
+            _new_scale = list(_src_scale)
+            if len(_new_scale) >= 2 and np.isfinite(_ry) and _ry > 0 and np.isfinite(_rx) and _rx > 0:
+                _new_scale[-2] = _src_scale[-2] / _ry
+                _new_scale[-1] = _src_scale[-1] / _rx
+            add_image_with_default_colormap(upscaled_img, viewer,
+                                            name=f"Upscaled {layer.name}",
+                                            scale=_new_scale)
+            # Notify the user that upscaling succeeded. Both layers overlay the
+            # same world-space field of view (the upscaled layer's scale is
+            # source_scale / upscale_factor), so they appear identical in napari
+            # until you zoom in — where the 2× finer pixel grid becomes visible.
+            _oh, _ow = image.shape[-2], image.shape[-1]
+            _nh, _nw = upscaled_img.shape[-2], upscaled_img.shape[-1]
+            napari_show_info(
+                f"Upscaled \"{layer.name}\": {_ow}×{_oh} → {_nw}×{_nh} px "
+                f"({upscale_factor}× linear). Both layers occupy the same field of "
+                f"view — zoom in to see the extra resolution in \"Upscaled {layer.name}\".")
+        except Exception:
+            add_image_with_default_colormap(upscaled_img, viewer, name=f"Upscaled {layer.name}")
 
 
 # Enhancements and Filters # 
@@ -1271,6 +1312,13 @@ def rb_gaussian_background_removal(image, ball_radius, equalize_intensity=False,
     input_dtype = str(image.dtype)
     # Convert the input image to float32 for processing
     img = dtype_conversion_func(image, 'float32')
+    # Normalise to [0, 1] by the actual image maximum BEFORE any processing.
+    # img_as_float32 divides by 65535, so a dim uint16 image arrives at ~0.046
+    # maximum instead of 1.0. The rolling-ball and Gaussian subtraction steps
+    # are tuned for [0, 1] input; at 0.046 scale they over-suppress the signal.
+    _rb_img_max = float(img.max())
+    if _rb_img_max > 0:
+        img = img / _rb_img_max
 
     # Apply the ROI mask if provided
     if roi_mask is not None:
@@ -1780,6 +1828,15 @@ def pre_process_image(image, ball_radius, window_size):
     # ── CPU path ─────────────────────────────────────────────────────────
     input_dtype = str(image.dtype)  # Store original image data type for conversion back after processing
     img = dtype_conversion_func(image, output_bit_depth='float32') # Convert image data type to float32 for processing
+    # Normalise to [0, 1] by the actual image maximum BEFORE any processing.
+    # sk.util.img_as_float32 divides by 65535, so a uint16 image that only
+    # uses values up to ~3000 (a typical dim condensate image) arrives as
+    # float32 with a maximum of ~0.046. Every subsequent multiplicative step
+    # (white-top-hat rescale, DoG, WBNS wavelet thresholding) is tuned for
+    # [0, 1] but receives [0, 0.046], causing near-total signal suppression.
+    _pp_max = float(img.max())
+    if _pp_max > 0:
+        img = img / _pp_max
 
     # Apply White Top Hat filter.
     # A square/rectangular structuring element is 8× faster than disk on
