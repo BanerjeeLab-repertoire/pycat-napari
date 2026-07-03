@@ -65,14 +65,18 @@ class PlottingWidget(QWidget):
 
         # Dropdown to select DataFrame
         self.df_combo = QComboBox()
+        self.df_combo.setToolTip("Choose which analysis result table (dataframe) to plot.")
         self.df_combo.addItems(self.dataframes.keys())
         self.df_combo.currentIndexChanged.connect(self.on_dataframe_changed)
         layout.addWidget(self.df_combo)
 
         # Radio buttons for plot type
         self.line_radio = QRadioButton("Scatter/Line Plot")
+        self.line_radio.setToolTip("Plot one column against another as points and/or a line.")
         self.violin_radio = QRadioButton("Violin Plot")
+        self.violin_radio.setToolTip("Show the distribution of a column as a violin (density) plot.")
         self.hist_radio = QRadioButton("Histogram Plot")
+        self.hist_radio.setToolTip("Show the distribution of a column as a histogram.")
         self.line_radio.clicked.connect(self.update_ui)
         self.violin_radio.clicked.connect(self.update_ui)
         self.hist_radio.clicked.connect(self.update_ui)
@@ -92,6 +96,7 @@ class PlottingWidget(QWidget):
 
         # Plot button
         self.plot_button = QPushButton("Plot")
+        self.plot_button.setToolTip("Draw the plot with the current settings.")
         self.plot_button.clicked.connect(self.plot_data)
         layout.addWidget(self.plot_button)
 
@@ -204,7 +209,9 @@ class PlottingWidget(QWidget):
         layout = QVBoxLayout()
         # Create dropdowns for the line plot data
         self.line_x_combo = QComboBox()
+        self.line_x_combo.setToolTip("Column to plot on the X axis.")
         self.line_y_combo = QComboBox()
+        self.line_y_combo.setToolTip("Column to plot on the Y axis.")
         # Populate the QComboBoxes with DataFrame columns
         self.line_x_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
         self.line_y_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
@@ -219,7 +226,9 @@ class PlottingWidget(QWidget):
 
         # For linestyle and Marker style
         self.linestyle_combo = QComboBox() 
+        self.linestyle_combo.setToolTip("Line style connecting the points ('None' = points only).")
         self.marker_combo = QComboBox()     
+        self.marker_combo.setToolTip("Marker symbol for each data point.")
         self.linestyle_combo.addItems(["-", "--", "-.", ":", "None"])
         self.marker_combo.addItems(["o", "s", "v", "x"])
         lm_layout = QHBoxLayout()
@@ -231,7 +240,9 @@ class PlottingWidget(QWidget):
 
         # For X-scale and Y-scale
         self.x_scale_combo = QComboBox()
+        self.x_scale_combo.setToolTip("Linear or logarithmic X axis.")
         self.y_scale_combo = QComboBox()
+        self.y_scale_combo.setToolTip("Linear or logarithmic Y axis.")
         self.x_scale_combo.addItems(["linear", "log"])
         self.y_scale_combo.addItems(["linear", "log"])
         scale_layout = QHBoxLayout()
@@ -243,8 +254,10 @@ class PlottingWidget(QWidget):
 
         # For X-limit and Y-limit
         self.x_limit = QLineEdit()
+        self.x_limit.setToolTip("Optional X-axis range as 'min,max'. Leave blank to autoscale.")
         self.x_limit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.y_limit = QLineEdit()
+        self.y_limit.setToolTip("Optional Y-axis range as 'min,max'. Leave blank to autoscale.")
         self.y_limit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         limit_layout = QHBoxLayout()
         limit_layout.addWidget(QLabel("X-Limit:"))
@@ -296,12 +309,14 @@ class PlottingWidget(QWidget):
 
         # For orientation
         self.orientation_combo = QComboBox()
+        self.orientation_combo.setToolTip("Vertical or horizontal violins.")
         self.orientation_combo.addItems(["v", "h"])
         combo_layout.addWidget(QLabel("Orientation:"))
         combo_layout.addWidget(self.orientation_combo)
 
         # For inner layout style
         self.inner_combo = QComboBox()
+        self.inner_combo.setToolTip("What to draw inside each violin (box, quartiles, points, or nothing).")
         self.inner_combo.addItems(["box", "quart", "point", "stick"])
         combo_layout.addWidget(QLabel("Inner Layout:"))
         combo_layout.addWidget(self.inner_combo)
@@ -327,15 +342,19 @@ class PlottingWidget(QWidget):
         layout = QVBoxLayout()
         # Create a dropdown for the histogram data
         self.hist_data_combo = QComboBox()
+        self.hist_data_combo.setToolTip("Column whose distribution the histogram shows.")
         self.hist_data_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
         # Create input fields for number of bins and bin width
         self.hist_bins_input = QLineEdit()
+        self.hist_bins_input.setToolTip("Number of histogram bins. Leave blank to auto-select.")
         self.hist_bins_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.hist_bin_width_input = QLineEdit()
+        self.hist_bin_width_input.setToolTip("Fixed bin width (overrides bin count if set).")
         self.hist_bin_width_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         # Radio buttons for 'cumulative' distribution function
         self.cumulative_true_radio = QRadioButton("True")
+        self.cumulative_true_radio.setToolTip("Plot the cumulative distribution instead of the raw counts.")
         self.cumulative_false_radio = QRadioButton("False")
         self.cumulative_false_radio.setChecked(True)  # default to False
         cumulative_layout = QHBoxLayout()
@@ -349,6 +368,7 @@ class PlottingWidget(QWidget):
 
         # Radio buttons for 'kde'
         self.kde_true_radio = QRadioButton("True")
+        self.kde_true_radio.setToolTip("Overlay a smooth kernel-density estimate on the histogram.")
         self.kde_false_radio = QRadioButton("False")
         self.kde_false_radio.setChecked(True)  # default to False
         kde_layout = QHBoxLayout()

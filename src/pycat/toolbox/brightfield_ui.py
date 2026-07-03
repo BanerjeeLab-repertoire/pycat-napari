@@ -168,6 +168,7 @@ def _add_bf_preprocessing(ui, layout):
     form.addRow("Brightfield image:", img_dd)
 
     ref_cb = QCheckBox("Use flat-field reference layer")
+    ref_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     ref_cb.setChecked(False)
     ref_dd = ui.create_layer_dropdown(napari.layers.Image)
     ref_dd.setEnabled(False)
@@ -626,9 +627,11 @@ def _add_bf_dynamics(ui, layout):
     form.addRow("Max displacement (µm):", disp_spin)
 
     cb_msd     = QCheckBox("MSD / anomalous diffusion"); cb_msd.setChecked(True)
+    cb_msd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     cb_coarse  = QCheckBox("Coarsening kinetics R(t)");   cb_coarse.setChecked(True)
     cb_km      = QCheckBox("Kaplan-Meier lifetime");      cb_km.setChecked(True)
     cb_mf      = QCheckBox("Merge / fission detection");  cb_mf.setChecked(True)
+    cb_mf.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(cb_msd); form.addRow(cb_coarse); form.addRow(cb_km); form.addRow(cb_mf)
 
     prog = QProgressBar(); prog.setVisible(False)

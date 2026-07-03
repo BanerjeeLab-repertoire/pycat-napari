@@ -634,6 +634,7 @@ def _ivf_frame_qc(ui, layout):
     form.addRow("Frame interval (s):", dt_sp)
     form.addRow("Blur threshold fraction:", thr_sp)
     apply_cb = QCheckBox("Apply bleaching correction (adds corrected layer)")
+    apply_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     apply_cb.setChecked(False)
     form.addRow(apply_cb)
     prog, run = _run_btn(form, "▶  Run Frame QC")

@@ -471,7 +471,15 @@ class WorkflowChecklistManager(QObject):
         except Exception:
             pass
 
-    def on_step_recorded(self, step_key: str):
+        # If an image is already loaded (the user opened a file, then opened the
+        # workflow), mark the file-I/O step complete so Step 1 isn't misleadingly
+        # shown as pending.
+        try:
+            import napari.layers as _nl
+            if any(isinstance(l, _nl.Image) for l in self._viewer.layers):
+                self._widget.mark_step('open_image')
+        except Exception:
+            pass
         if self._widget is not None:
             self._widget.mark_step(step_key)
 

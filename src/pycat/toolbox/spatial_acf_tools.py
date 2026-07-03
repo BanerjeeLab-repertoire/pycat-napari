@@ -76,6 +76,7 @@ from napari.utils.notifications import (
     show_info as napari_show_info,
 )
 from PyQt5.QtWidgets import (
+    QSizePolicy,
     QVBoxLayout, QLabel, QPushButton, QWidget, QComboBox, QButtonGroup,
     QRadioButton, QHBoxLayout,
 )
@@ -600,7 +601,9 @@ def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
     ui_instance.add_text_label(sacf_layout, 'ROI Mode:', font_size=9)
 
     rb_lir   = QRadioButton("LIR — largest interior rectangle per cell (default)")
+    rb_lir.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_rect  = QRadioButton("Drawn rectangle — select a Shapes layer")
+    rb_rect.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_whole = QRadioButton("Whole image — no ROI")
     rb_lir.setChecked(True)
 

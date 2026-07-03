@@ -59,6 +59,8 @@ from pycat.toolbox.partition_enrichment_tools import _add_client_enrichment
 from pycat.toolbox.intensity_profile_tools import _add_intensity_profile
 from pycat.toolbox.morphological_complexity_tools import _add_morphological_complexity
 from pycat.toolbox.advanced_analysis_ui import _add_advanced_analysis
+from pycat.toolbox.data_qc_ui import _add_data_qc
+from pycat.toolbox.contrast_cascade_ui import _add_contrast_cascade
 from pycat.toolbox.condensate_physics_ui import _add_condensate_physics
 from pycat.toolbox.brightfield_ui import BrightfieldCondensateUI
 from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
@@ -354,6 +356,8 @@ class BaseUIClass:
             If True, the label text will be bold.
         """
         label = QLabel(text)
+        label.setWordWrap(True)
+        label.setWordWrap(True)
         # Conditionally set font-weight based on the `bold` argument
         font_weight = "bold" if bold else "normal"
         label.setStyleSheet(f"font-size: {font_size}px; font-weight: {font_weight};")
@@ -564,6 +568,8 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_intensity_profile = lambda **kw: _add_intensity_profile(self, **kw)
         self._add_morphological_complexity = lambda **kw: _add_morphological_complexity(self, **kw)
         self._add_advanced_analysis = lambda **kw: _add_advanced_analysis(self, **kw)
+        self._add_data_qc = lambda **kw: _add_data_qc(self, **kw)
+        self._add_contrast_cascade = lambda **kw: _add_contrast_cascade(self, **kw)
         self._add_condensate_physics = lambda **kw: _add_condensate_physics(self, **kw)
         # New pipeline UI entry points exposed as standalone toolbox tools.
         # These use the same (ui_instance, layout=None, separate_widget=False)
@@ -585,7 +591,7 @@ class ToolboxFunctionsUI(BaseUIClass):
                 fn(self, inner_layout)
                 w = _QW(); w.setLayout(inner_layout)
                 if separate_widget:
-                    sa = _QSA(); sa.setWidgetResizable(True); sa.setWidget(w)
+                    sa = _QSA(); sa.setWidgetResizable(True); sa.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff); sa.setWidget(w)
                     self.viewer.window.add_dock_widget(sa, name=dock_name, area='right')
                 elif layout is not None:
                     layout.addLayout(inner_layout)
@@ -795,6 +801,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         lay.addWidget(QLabel("Correction method:")); lay.addWidget(method_dd)
 
         status = QLabel("No calibration loaded.")
+        status.setWordWrap(True)
         load_btn = QPushButton("Load Calibration Reference…")
         load_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_load():
@@ -1161,8 +1168,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         method_row   = QVBoxLayout(method_group)
         method_row.setContentsMargins(9, 20, 9, 6)
         rb_cellpose  = QRadioButton("Cellpose  (deep learning, recommended)")
+        rb_cellpose.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rb_stardist  = QRadioButton("StarDist  (star-convex, nucleus-optimised)")
+        rb_stardist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rb_rf        = QRadioButton("Random Forest  (pixel classifier, manual annotation)")
+        rb_rf.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rb_cellpose.setChecked(True)
         for rb in (rb_cellpose, rb_stardist, rb_rf):
             method_row.addWidget(rb)
@@ -1320,12 +1330,14 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         # k_value slider
         k_label = QLabel("Threshold k value:") # Add a text label
+        k_label.setWordWrap(True)
         k_slider = QSlider(Qt.Horizontal) # Create a slider widget
         guard_wheel(k_slider)
         k_slider.setRange(0, 100)  # 100 steps from 0 to 100
         k_slider.setValue(50)  # default is 0
         k_slider.setSingleStep(1)  # Adjust for 0.01 steps
         k_label_value = QLabel("0.0") 
+        k_label_value.setWordWrap(True)
         def update_k_label(val):
             # Convert slider integer value to float
             float_val = (val / 50.0) - 1 # Convert slider value to float range from -1 to 1 in 0.01 steps
@@ -1338,11 +1350,13 @@ class ToolboxFunctionsUI(BaseUIClass):
         # window_size slider
         def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['ball_radius']) # Calculate the default window size  
         window_label = QLabel(f"Window Size:") # Add a text label
+        window_label.setWordWrap(True)
         window_slider = QSlider(Qt.Horizontal) # Create a slider widget
         guard_wheel(window_slider)
         window_slider.setRange(10, 250) # 100 steps from 10 to 250
         window_slider.setValue(def_window_size) # Set the default value
         window_label_value = QLabel(str(def_window_size)) # Set the default value
+        window_label_value.setWordWrap(True)
         window_slider.valueChanged.connect(lambda val: window_label_value.setText(str(val))) # Connect the slider to the update function
         local_thresh_layout.addWidget(window_label) # Add the text label to the layout
         local_thresh_layout.addWidget(window_slider) # Add the slider to the layout
@@ -1869,12 +1883,14 @@ class ToolboxFunctionsUI(BaseUIClass):
         
         # Alpha/Blend Slider
         slider_label = QLabel("Alpha/Blend Value:") # Add a text label
+        slider_label.setWordWrap(True)
         alpha_blend_slider = QSlider(Qt.Horizontal) # Create a slider widget
         guard_wheel(alpha_blend_slider)
         alpha_blend_slider.setRange(0, 10)  # 100 steps from 0 to 100
         alpha_blend_slider.setValue(5)  # default is 0.5
         alpha_blend_slider.setSingleStep(1)  # Adjust for 0.01 steps
         slider_label_value = QLabel("0.5") 
+        slider_label_value.setWordWrap(True)
         def update_slider_label(val):
             # Convert slider integer value to float
             float_val = val * 0.1
@@ -2191,6 +2207,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         # Create a scroll area to enable scrolling for the UI components
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)  # Make the scroll area resizable
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)  # Set the main widget as the scroll area's content
 
         # Add the scroll area to the viewer as a dockable widget for condensate analysis
@@ -2292,6 +2309,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)
 
         self.viewer.window.add_dock_widget(
@@ -2372,6 +2390,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         form.addRow("End frame:", end_spin)
 
         range_info = QLabel("")
+        range_info.setWordWrap(True)
         range_info.setStyleSheet("color: #aaa; font-size: 9pt;")
         form.addRow("", range_info)
 
@@ -2390,9 +2409,22 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
                 n = end_spin.value() - start_spin.value() + 1
                 range_info.setText(f"{n} frames selected")
 
-        range_check.stateChanged.connect(lambda _: _update_range_controls())
-        start_spin.valueChanged.connect(lambda _: _update_count())
-        end_spin.valueChanged.connect(lambda _: _update_count())
+        def _on_user_range_edit():
+            # A manual edit to start/end (not a programmatic refresh) means the
+            # user has deliberately chosen a range — protect it from being reset
+            # by later downstream layer insertions.
+            if not _range_updating[0]:
+                _range_locked[0] = True
+            _update_count()
+
+        def _on_range_check_toggled():
+            if range_check.isChecked():
+                _range_locked[0] = True   # checking the box is a deliberate choice
+            _update_range_controls()
+
+        range_check.stateChanged.connect(lambda _: _on_range_check_toggled())
+        start_spin.valueChanged.connect(lambda _: _on_user_range_edit())
+        end_spin.valueChanged.connect(lambda _: _on_user_range_edit())
 
         # Auto-populate range from stack when dropdown changes.
         # _range_locked becomes True once the user clicks Apply ROI — after
@@ -2400,6 +2432,9 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # the name_hint auto-select machinery) must NOT reset the spinboxes
         # back to full range, because the user has deliberately set a range.
         _range_locked = [False]
+        # True only while _on_stack_changed is programmatically updating the
+        # spinboxes, so those updates are not mistaken for a user edit.
+        _range_updating = [False]
 
         def _on_stack_changed():
             if _range_locked[0]:
@@ -2420,12 +2455,14 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
             try:
                 layer = self.viewer.layers[name]
                 n_t = layer.data.shape[0] if layer.data.ndim == 3 else 1
+                _range_updating[0] = True
                 end_spin.setValue(max(0, n_t - 1))
                 end_spin.setMaximum(n_t - 1)
                 start_spin.setMaximum(n_t - 1)
                 frame_spin.setMaximum(n_t - 1)
+                _range_updating[0] = False
             except Exception:
-                pass
+                _range_updating[0] = False
         stack_dropdown.currentIndexChanged.connect(_on_stack_changed)
 
         # ── XY ROI crop controls ─────────────────────────────────────────
@@ -2438,6 +2475,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         # ── GUI interactive mode ──────────────────────────────────────────
         roi_check = QCheckBox("Restrict to drawn rectangle (interactive)")
+        roi_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         roi_check.setChecked(False)
         roi_check.setToolTip(
             "Draw a Rectangle shape on the stack layer, then check this box.\n"
@@ -2494,6 +2532,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # but those algorithms require a Cellpose mask that doesn't exist yet
         # at this step in the interactive pipeline, so we keep this simple).
         batch_roi_check = QCheckBox("Enable auto-crop in batch replay")
+        batch_roi_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         batch_roi_check.setChecked(True)
         batch_roi_check.setToolTip(
             "In headless batch replay, PyCAT will automatically compute a\n"
@@ -2509,6 +2548,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         otsu_classes_spin = None
 
         roi_info = QLabel("")
+        roi_info.setWordWrap(True)
         roi_info.setStyleSheet("color: #aaa; font-size: 9pt;")
         roi_grp_layout.addWidget(roi_info)
 
@@ -2747,6 +2787,7 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         # Set up a scrollable area to accommodate varying numbers of UI components
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)  # Assign the main widget as the scroll area's content
 
         # Integrate the scroll area into the viewer as a dockable widget
@@ -2829,6 +2870,7 @@ class PixelColocAnalysisUI(AnalysisMethodsUI):
         # Set up a scrollable area to accommodate varying numbers of UI components
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)  # Assign the main widget as the scroll area's content
 
         # Integrate the scroll area into the viewer as a dockable widget
@@ -2908,6 +2950,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         # Create a scroll area and set the main widget as its central widget
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
@@ -3026,6 +3069,7 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         # Create a scroll area and set the main widget as its central widget
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
@@ -3237,6 +3281,7 @@ class MenuManager:
 
         prog_bar    = QProgressBar(); prog_bar.setVisible(False)
         status_lbl  = QLabel("")
+        status_lbl.setWordWrap(True)
         vl.addWidget(prog_bar)
         vl.addWidget(status_lbl)
 
@@ -3464,9 +3509,9 @@ class MenuManager:
             'Local Thresholding': (self.central_manager.toolbox_functions_ui._add_run_local_thresholding, {'separate_widget': True}),
             'Manual Threshold (im2bw)': (self.central_manager.toolbox_functions_ui._add_run_im2bw, {'separate_widget': True}),
             'Cellpose Segmentation': (self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation, {'separate_widget': True}),
-            'Random Forest Classifier': (self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier, {'separate_widget': True}),
             'Felzenszwalb Segmentation and Region Merging': (self.central_manager.toolbox_functions_ui._add_run_fz_segmentation_and_merging, {'separate_widget': True}),
-            'Gaussian Spot Localization': (self.central_manager.toolbox_functions_ui._add_gaussian_localization, {'separate_widget': True})
+            'Gaussian Spot Localization': (self.central_manager.toolbox_functions_ui._add_gaussian_localization, {'separate_widget': True}),
+            'Contrast Cascade (bright body + dim fibers)': (self.central_manager.toolbox_functions_ui._add_contrast_cascade, {'separate_widget': True})
         }
         self._add_actions_to_menu(image_segmentation_actions, image_segmentation_submenu)
 
@@ -3581,6 +3626,7 @@ class MenuManager:
         # ── Data Visualization ─────────────────────────────────────────────────
         data_visualization_submenu = self.toolbox_menu.addMenu('Data Visualization')
         data_visualization_actions = {
-            'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True})
+            'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True}),
+            'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True})
         }
         self._add_actions_to_menu(data_visualization_actions, data_visualization_submenu)

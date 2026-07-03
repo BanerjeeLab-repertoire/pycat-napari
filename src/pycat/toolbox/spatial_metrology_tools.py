@@ -237,6 +237,7 @@ def ripleys_l(
     cell_area_um2: float,
     r_values: np.ndarray = None,
     edge_correct: bool = True,
+    boundary_dist_um: np.ndarray = None,
 ) -> pd.DataFrame:
     """
     Ripley's L(r) = sqrt(K(r)/π) − r.
@@ -245,23 +246,37 @@ def ripleys_l(
     L(r) < 0 indicates regularity / repulsion at scale r.
     L(r) = 0 is the CSR (complete spatial randomness) expectation.
 
-    Uses Ripley's edge correction (toroidal) approximation.
+    Edge correction
+    ---------------
+    Points near the study-region boundary have neighbours that fall outside the
+    field, which biases K(r) downward. When per-point distances to the boundary
+    are supplied (`boundary_dist_um`), this uses the **border method** (a.k.a.
+    reduced-sample estimator): at each radius r only points at least r from the
+    boundary are used as focal points, so every focal point sees its complete
+    neighbourhood. This is unbiased and rigorous. When boundary distances are
+    not available it falls back to a crude isotropic-weight approximation
+    (1 + r/√(A/π)), which is only qualitatively correct — prefer supplying
+    `boundary_dist_um`.
 
     Parameters
     ----------
     coords : (N, 2) array in µm
     cell_area_um2 : total cell area in µm²
-    r_values : radii to evaluate (µm). Defaults to 20 values up to
-               sqrt(cell_area / π) (the inscribed circle radius).
-    edge_correct : apply Ripley's edge correction
+    r_values : radii to evaluate (µm). Defaults to 30 values up to
+               0.5·sqrt(cell_area / π).
+    edge_correct : apply edge correction (border method or fallback weight)
+    boundary_dist_um : optional (N,) array, each point's distance to the study
+        region (cell) boundary in µm. Enables the rigorous border method.
 
     Returns
     -------
-    DataFrame with columns: r_um, K_r, L_r, L_r_minus_r
+    DataFrame with columns: r_um, K_r, L_r, L_r_minus_r, edge_method,
+        n_focal (focal points used at that r for the border method)
     """
     n = len(coords)
     if n < 3:
-        return pd.DataFrame(columns=['r_um', 'K_r', 'L_r', 'L_r_minus_r'])
+        return pd.DataFrame(columns=['r_um', 'K_r', 'L_r', 'L_r_minus_r',
+                                     'edge_method', 'n_focal'])
 
     if r_values is None:
         r_max = np.sqrt(cell_area_um2 / np.pi) * 0.5
@@ -269,21 +284,37 @@ def ripleys_l(
 
     density = n / cell_area_um2
     tree = spatial.KDTree(coords)
+    bdist = np.asarray(boundary_dist_um, dtype=float) if boundary_dist_um is not None else None
     rows = []
     for r in r_values:
-        # Count pairs within radius r (excluding self)
         counts = tree.query_ball_point(coords, r)
-        pair_sum = sum(len(c) - 1 for c in counts)  # subtract self
 
-        if edge_correct:
-            # Ripley's isotropic edge correction weight ≈ 1 + r/sqrt(A/π)
-            w = 1.0 + r / max(np.sqrt(cell_area_um2 / np.pi), 1e-8)
-            K = (pair_sum * w) / (n * density)
+        if bdist is not None:
+            # Border method: use only focal points ≥ r from the boundary.
+            interior = bdist >= r
+            n_focal = int(np.count_nonzero(interior))
+            if n_focal == 0:
+                rows.append({'r_um': r, 'K_r': np.nan, 'L_r': np.nan,
+                             'L_r_minus_r': np.nan, 'edge_method': 'border',
+                             'n_focal': 0})
+                continue
+            pair_sum = sum(len(counts[i]) - 1 for i in range(n) if interior[i])
+            K = pair_sum / (n_focal * density)
+            method = 'border'
         else:
-            K = pair_sum / (n * density)
+            pair_sum = sum(len(c) - 1 for c in counts)
+            if edge_correct:
+                w = 1.0 + r / max(np.sqrt(cell_area_um2 / np.pi), 1e-8)
+                K = (pair_sum * w) / (n * density)
+                method = 'approx_weight'
+            else:
+                K = pair_sum / (n * density)
+                method = 'none'
+            n_focal = n
 
-        L  = np.sqrt(max(K, 0) / np.pi)
-        rows.append({'r_um': r, 'K_r': K, 'L_r': L, 'L_r_minus_r': L - r})
+        L = np.sqrt(max(K, 0) / np.pi)
+        rows.append({'r_um': r, 'K_r': K, 'L_r': L, 'L_r_minus_r': L - r,
+                     'edge_method': method, 'n_focal': n_focal})
 
     return pd.DataFrame(rows)
 

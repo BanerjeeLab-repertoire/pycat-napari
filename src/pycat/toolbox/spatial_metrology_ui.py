@@ -74,7 +74,15 @@ class _SpatialWorker(QThread):
                 if c.get('kde'):
                     r['kde_density'] = local_object_density(coords)
                 if c.get('ripley'):
-                    r['ripleys_l'] = ripleys_l(coords, cell_area)
+                    # Per-point distance to the cell boundary (µm) enables the
+                    # rigorous border-method edge correction inside ripleys_l.
+                    from scipy.ndimage import distance_transform_edt
+                    edt_um = distance_transform_edt(cmask) * mpx
+                    yx_px = np.clip((coords / mpx).astype(int), 0,
+                                    np.array(cmask.shape) - 1)
+                    bdist = edt_um[yx_px[:, 0], yx_px[:, 1]]
+                    r['ripleys_l'] = ripleys_l(coords, cell_area,
+                                               boundary_dist_um=bdist)
                 if c.get('pcf'):
                     r['pcf'] = pair_correlation_function(coords, cell_area)
                 if c.get('voronoi'):
@@ -258,6 +266,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     prog_bar   = QProgressBar()
     prog_bar.setVisible(False)
     prog_label = QLabel("")
+    prog_label.setWordWrap(True)
     prog_label.setVisible(False)
     form.addRow(prog_label)
     form.addRow(prog_bar)
@@ -330,6 +339,11 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
 
             # Show in dialog
             from pycat.ui.ui_utils import show_dataframes_dialog
+            try:
+                from pycat.toolbox.analysis_plots import plot_spatial_metrology
+                plot_spatial_metrology(dfs, interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] spatial-metrology plot failed: {e}")
             tables = [(k.replace('_', ' ').title(), v.round(4))
                       for k, v in dfs.items()]
             show_dataframes_dialog("Spatial Metrology Results", tables)

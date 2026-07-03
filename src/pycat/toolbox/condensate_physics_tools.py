@@ -68,14 +68,21 @@ from scipy import optimize, stats, ndimage
 def compute_msd(
     tracks_df: pd.DataFrame,
     max_lag: int = None,
-    microns_per_pixel: float = 1.0,
     frame_interval_s: float = 1.0,
     min_track_length: int = 5,
 ) -> pd.DataFrame:
     """
-    Compute ensemble-averaged and per-track MSD from linked trajectories.
+    Compute ensemble-averaged MSD from linked trajectories, with a per-track
+    uncertainty that reflects the number of INDEPENDENT tracks (not the number
+    of correlated, overlapping displacement pairs).
 
-    MSD(τ) = <|r(t+τ) − r(t)|²>  averaged over all t and all tracks.
+    For each track and lag τ we first average that track's own squared
+    displacements into a single per-track MSD(τ). The ensemble MSD is then the
+    mean across tracks, and the uncertainty (msd_std / msd_sem) is the
+    track-to-track spread — a statistically honest error bar, since tracks are
+    independent whereas overlapping pairs within a track are not.
+
+    Coordinates are expected in microns (columns y_um, x_um).
 
     Parameters
     ----------
@@ -84,8 +91,6 @@ def compute_msd(
     max_lag : int or None
         Maximum lag (in frames) to compute.  Default: n_frames // 4
         (beyond n/4 the MSD estimate has too few samples to be reliable).
-    microns_per_pixel : float
-        Only used if y_um/x_um are in pixels rather than µm.
     frame_interval_s : float
         Physical time per frame in seconds.
     min_track_length : int
@@ -94,16 +99,18 @@ def compute_msd(
     Returns
     -------
     msd_df : DataFrame with columns:
-        lag_frames, lag_s, msd_um2 (ensemble MSD),
-        msd_std (standard deviation across tracks),
-        n_pairs (number of displacement pairs contributing)
+        lag_frames, lag_s, msd_um2 (ensemble MSD = mean over tracks),
+        msd_std (spread across tracks), msd_sem (standard error of the mean
+        over tracks), n_tracks (independent tracks at this lag),
+        n_pairs (total displacement pairs — reference only)
     """
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
         max_lag = max(1, len(frames) // 4)
 
-    # Per-track MSD at each lag
-    lag_msds: dict[int, list[float]] = {lag: [] for lag in range(1, max_lag + 1)}
+    # One MSD value per track per lag (tracks are the independent unit).
+    per_track: dict[int, list[float]] = {lag: [] for lag in range(1, max_lag + 1)}
+    pair_counts: dict[int, int] = {lag: 0 for lag in range(1, max_lag + 1)}
 
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0:
@@ -125,19 +132,26 @@ def compute_msd(
                         dx = x[j] - x[i]
                         disps.append(dy**2 + dx**2)
             if disps:
-                lag_msds[lag].extend(disps)
+                per_track[lag].append(float(np.mean(disps)))   # this track's MSD(τ)
+                pair_counts[lag] += len(disps)
 
     rows = []
     for lag in range(1, max_lag + 1):
-        vals = lag_msds[lag]
+        vals = per_track[lag]
         if not vals:
             continue
+        arr = np.asarray(vals)
+        n_tracks = arr.size
+        std = float(np.std(arr, ddof=1)) if n_tracks > 1 else np.nan
+        sem = std / np.sqrt(n_tracks) if n_tracks > 1 else np.nan
         rows.append({
             'lag_frames': lag,
             'lag_s':      lag * frame_interval_s,
-            'msd_um2':    float(np.mean(vals)),
-            'msd_std':    float(np.std(vals)),
-            'n_pairs':    len(vals),
+            'msd_um2':    float(np.mean(arr)),
+            'msd_std':    std,
+            'msd_sem':    sem,
+            'n_tracks':   n_tracks,
+            'n_pairs':    pair_counts[lag],
         })
     return pd.DataFrame(rows)
 
@@ -176,12 +190,32 @@ def fit_anomalous_diffusion(
                     fit_msd=np.array([]), log_log_slope=np.nan,
                     log_log_intercept=np.nan)
 
-    log_tau = np.log(df['lag_s'].values)
-    log_msd = np.log(df['msd_um2'].values)
+    tau = df['lag_s'].values.astype(float)
+    msd = df['msd_um2'].values.astype(float)
 
-    slope, intercept, r, p, se = stats.linregress(log_tau, log_msd)
-    alpha = float(slope)
-    D     = float(np.exp(intercept) / 4.0)
+    # Initial guess from a log-log regression (fast, unbiased enough to seed).
+    log_slope, log_intercept, r, _p, _se = stats.linregress(np.log(tau), np.log(msd))
+
+    # Refine with a DIRECT non-linear fit of MSD = 4·D·τ^α. This avoids the
+    # log-transform bias (Jensen) of the pure log-log fit, and weights points by
+    # their measured uncertainty (msd_sem) so noisy large-lag points, which have
+    # few independent tracks, no longer count as much as precise short-lag ones.
+    D_ll = float(np.exp(log_intercept) / 4.0)
+    a_ll = float(log_slope)
+    D, alpha = D_ll, a_ll
+    try:
+        sigma = None
+        if 'msd_sem' in df.columns:
+            sem = df['msd_sem'].values.astype(float)
+            if np.all(np.isfinite(sem)) and np.all(sem > 0):
+                sigma = sem
+        popt, _ = optimize.curve_fit(
+            lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
+            p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
+            bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
+        D, alpha = float(popt[0]), float(popt[1])
+    except Exception:
+        pass  # keep the log-log estimate if the non-linear fit fails
 
     if alpha < 0.85:
         motion_type = 'subdiffusion'
@@ -190,18 +224,22 @@ def fit_anomalous_diffusion(
     else:
         motion_type = 'Brownian'
 
-    tau_fit = df['lag_s'].values
+    tau_fit = tau
     msd_fit = 4 * D * tau_fit ** alpha
+    # R² of the (non-linear) model on the actual MSD values.
+    ss_res = float(np.sum((msd - msd_fit) ** 2))
+    ss_tot = float(np.sum((msd - msd.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
     return dict(
         D_um2_per_s=D,
         alpha=alpha,
         motion_type=motion_type,
-        r_squared=float(r**2),
+        r_squared=float(r2),
         fit_lags_s=tau_fit,
         fit_msd=msd_fit,
-        log_log_slope=slope,
-        log_log_intercept=intercept,
+        log_log_slope=a_ll,
+        log_log_intercept=log_intercept,
     )
 
 
@@ -385,28 +423,39 @@ def fit_aspect_ratio_relaxation(
     time_s: np.ndarray,
     aspect_ratio: np.ndarray,
     t0_frame: int = 0,
+    characteristic_length_um: float = None,
 ) -> dict:
     """
     Fit exponential decay of aspect ratio after a merge event.
 
     Model: AR(t) = 1 + (AR_0 − 1) · exp(−t / τ)
-    τ = η·R/γ  (capillary time; gives viscosity/surface tension ratio)
+    The relaxation time τ = (η/γ)·R (the capillary/visco-capillary time), where
+    R is the characteristic length of the fused droplet. τ alone gives only the
+    timescale; to recover the material ratio η/γ (the inverse capillary
+    velocity, in s/µm) you must divide by R.
 
     Parameters
     ----------
     time_s : array of time values in seconds (starting from merge event)
     aspect_ratio : array of aspect ratio values (major_axis / minor_axis)
     t0_frame : frame index within time_s where merge occurred
+    characteristic_length_um : optional droplet length scale R (µm), e.g. the
+        radius of the fused droplet. If given, η/γ = τ / R is returned.
 
     Returns
     -------
-    dict with keys: tau_s, AR_0, r_squared, fit_ar, fit_success
+    dict with keys: tau_s, AR_0, r_squared, fit_ar, fit_success,
+        characteristic_length_um, eta_over_gamma_s_per_um (η/γ, or NaN if R
+        was not provided).
     """
     t = time_s[t0_frame:]
     ar = aspect_ratio[t0_frame:]
+    R = characteristic_length_um
     if len(t) < 4 or ar[0] <= 1.0:
         return dict(tau_s=np.nan, AR_0=np.nan, r_squared=np.nan,
-                    fit_ar=np.array([]), fit_success=False)
+                    fit_ar=np.array([]), fit_success=False,
+                    characteristic_length_um=R,
+                    eta_over_gamma_s_per_um=np.nan)
 
     def model(t, AR_0, tau):
         return 1 + (AR_0 - 1) * np.exp(-t / max(tau, 1e-9))
@@ -421,11 +470,16 @@ def fit_aspect_ratio_relaxation(
         ss_res  = np.sum((ar - ar_fit)**2)
         ss_tot  = np.sum((ar - ar.mean())**2)
         r2      = 1 - ss_res / max(ss_tot, 1e-12)
+        eta_over_gamma = (float(tau) / R) if (R and R > 0) else np.nan
         return dict(tau_s=float(tau), AR_0=float(AR_0), r_squared=float(r2),
-                    fit_ar=ar_fit, fit_success=r2 > 0.5)
+                    fit_ar=ar_fit, fit_success=r2 > 0.5,
+                    characteristic_length_um=R,
+                    eta_over_gamma_s_per_um=eta_over_gamma)
     except Exception:
         return dict(tau_s=np.nan, AR_0=np.nan, r_squared=np.nan,
-                    fit_ar=np.array([]), fit_success=False)
+                    fit_ar=np.array([]), fit_success=False,
+                    characteristic_length_um=R,
+                    eta_over_gamma_s_per_um=np.nan)
 
 
 # Backward-compatible alias. NOTE: this fits IMAGE aspect-ratio relaxation of a
@@ -462,7 +516,10 @@ def fit_coarsening(
     -------
     dict with keys:
         preferred_mechanism : 'ostwald_ripening' | 'coalescence' | 'arrested'
-        ostwald_r2, coalescence_r2, arrested_r2
+        mechanism_confidence : 'high' | 'low' | 'n/a (arrested)'
+        mechanism_caveat     : plain-language reliability note
+        ostwald_r2, coalescence_r2
+        radius_change_um, radius_change_frac
         ostwald_K, coalescence_K (rate constants)
         R0 : initial radius
         fit_radii_ostwald, fit_radii_coalescence
@@ -493,19 +550,46 @@ def fit_coarsening(
         except Exception:
             results[name] = {'r2': -np.inf, 'K': np.nan, 'R0': np.nan, 'fit': np.full_like(t, np.nan)}
 
-    # Arrested: flat line
-    r2_arr = 1 - np.sum((R - R.mean())**2) / max(np.sum((R - R.mean())**2), 1e-12)
-    r2_arr = 0.0  # flat line has R²=0 by definition of residuals vs mean
+    # "Arrested" is not a power law, so an R² against the mean is meaningless.
+    # Instead judge it by how little the radius actually grows: if the total
+    # change is small relative to the scatter, growth is effectively arrested.
+    R = np.asarray(R, dtype=float)
+    radius_change = float(R[-1] - R[0])
+    radius_change_frac = radius_change / R[0] if R[0] else np.nan
+    noise = float(np.std(np.diff(R))) if len(R) > 2 else 0.0
+    is_arrested = (max(results['ostwald']['r2'], results['coalescence']['r2']) < 0.3
+                   or abs(radius_change) < 2.0 * noise)
 
-    best = max(['ostwald','coalescence'], key=lambda k: results[k]['r2'])
-    if max(results['ostwald']['r2'], results['coalescence']['r2']) < 0.3:
+    best = max(['ostwald', 'coalescence'], key=lambda k: results[k]['r2'])
+    if is_arrested:
         best = 'arrested'
+
+    # Discrimination confidence: t^(1/3) and t^(1/2) are both concave-increasing
+    # and hard to separate over a short time range, so only trust the mechanism
+    # call when one fit is clearly better AND the winner fits well.
+    r2_gap = abs(results['ostwald']['r2'] - results['coalescence']['r2'])
+    best_r2 = max(results['ostwald']['r2'], results['coalescence']['r2'])
+    if best == 'arrested':
+        confidence = 'n/a (arrested)'
+        caveat = ("Radius barely changes — growth is effectively arrested; "
+                  "no coarsening exponent is fitted.")
+    elif r2_gap > 0.1 and best_r2 > 0.85:
+        confidence = 'high'
+        caveat = ""
+    else:
+        confidence = 'low'
+        caveat = ("t^(1/3) (Ostwald) and t^(1/2) (coalescence) fit similarly "
+                  "over this time range; the preferred mechanism is suggestive, "
+                  "not definitive. Extend the time range to discriminate.")
 
     return dict(
         preferred_mechanism=best,
+        mechanism_confidence=confidence,
+        mechanism_caveat=caveat,
         ostwald_r2=results['ostwald']['r2'],
         coalescence_r2=results['coalescence']['r2'],
-        arrested_r2=r2_arr,
+        radius_change_um=radius_change,
+        radius_change_frac=radius_change_frac,
         ostwald_K=results['ostwald']['K'],
         coalescence_K=results['coalescence']['K'],
         R0=results.get(best, {}).get('R0', R[0]),
@@ -913,3 +997,172 @@ def kaplan_meier_lifetimes(
     df.attrs['median_lifetime_frames'] = median_lt
     df.attrs['mean_lifetime_frames']   = float(durations.mean())
     return df
+
+
+# ---------------------------------------------------------------------------
+# Per-track MSD curves + microrheology moduli (for plotting)
+# ---------------------------------------------------------------------------
+
+def per_track_msd_curves(
+    tracks_df: pd.DataFrame,
+    max_lag: int = None,
+    frame_interval_s: float = 1.0,
+    min_track_length: int = 5,
+) -> pd.DataFrame:
+    """
+    MSD(τ) curve for every individual track (for the spaghetti-plot overlay).
+
+    Returns a long DataFrame: track_id, lag_frames, lag_s, msd_um2.
+    Each track's MSD at a lag is the mean of that track's squared displacements
+    at that lag (time-averaged MSD per track).
+    """
+    frames = sorted(tracks_df['frame'].unique())
+    if max_lag is None:
+        max_lag = max(1, len(frames) // 4)
+    rows = []
+    for tid, grp in tracks_df.groupby('track_id'):
+        if tid < 0:
+            continue
+        grp = grp.sort_values('frame').reset_index(drop=True)
+        if len(grp) < min_track_length:
+            continue
+        y = grp['y_um'].values
+        x = grp['x_um'].values
+        t = grp['frame'].values
+        for lag in range(1, max_lag + 1):
+            disps = []
+            for i in range(len(t)):
+                for j in range(i + 1, len(t)):
+                    if t[j] - t[i] == lag:
+                        disps.append((y[j] - y[i]) ** 2 + (x[j] - x[i]) ** 2)
+            if disps:
+                rows.append({'track_id': int(tid), 'lag_frames': lag,
+                             'lag_s': lag * frame_interval_s,
+                             'msd_um2': float(np.mean(disps))})
+    return pd.DataFrame(rows)
+
+
+_KB = 1.380649e-23  # Boltzmann constant, J/K
+
+
+def compute_moduli_gser(
+    msd_df: pd.DataFrame,
+    bead_radius_um: float,
+    temperature_C: float = 24.0,
+    dimensions: int = 2,
+) -> pd.DataFrame:
+    """
+    Estimate the viscoelastic moduli G'(ω) (storage) and G''(ω) (loss) from the
+    ensemble MSD via the Mason (2000) generalized Stokes–Einstein relation with
+    the local power-law (algebraic) approximation:
+
+        |G*(ω)| = kB·T / (π·a·⟨Δr²(1/ω)⟩·Γ(1+α(ω)))
+        G'(ω)   = |G*|·cos(π·α/2),   G''(ω) = |G*|·sin(π·α/2)
+
+    where α(ω) is the local logarithmic slope of the MSD at τ = 1/ω, a is the
+    bead radius, and ⟨Δr²⟩ is the 3-D MSD. Tracking here is 2-D, so the measured
+    MSD is scaled to 3-D by 3/dimensions (×1.5 for 2-D) before applying the GSER,
+    which makes the viscous limit reduce to the 3-D Stokes–Einstein value.
+
+    This is a widely-used estimate valid in the intermediate-frequency range; it
+    is unreliable at the first/last one or two frequencies (edge effects in the
+    local-slope estimate) — those are dropped.
+
+    Parameters
+    ----------
+    msd_df : output of compute_msd() (needs lag_s, msd_um2).
+    bead_radius_um : probe radius a in µm.
+    temperature_C : temperature in Celsius.
+    dimensions : dimensionality of the tracked MSD (2 for xy tracking).
+
+    Returns
+    -------
+    DataFrame: omega_rad_s, freq_hz, alpha, g_star_pa, g_prime_pa,
+        g_double_prime_pa.
+    """
+    from scipy.special import gamma as _gamma
+    df = msd_df.dropna(subset=['lag_s', 'msd_um2'])
+    df = df[df['msd_um2'] > 0].sort_values('lag_s')
+    if len(df) < 4 or bead_radius_um <= 0:
+        return pd.DataFrame(columns=['omega_rad_s', 'freq_hz', 'alpha',
+                                     'g_star_pa', 'g_prime_pa',
+                                     'g_double_prime_pa'])
+    tau = df['lag_s'].values.astype(float)
+    msd_2d = df['msd_um2'].values.astype(float)
+    msd_3d = msd_2d * (3.0 / dimensions)          # scale to 3-D MSD
+
+    # Local logarithmic slope α(τ) = dln(MSD)/dln(τ) by finite differences.
+    ln_tau = np.log(tau)
+    ln_msd = np.log(msd_3d)
+    alpha = np.gradient(ln_msd, ln_tau)
+
+    T = temperature_C + 273.15
+    a_m = bead_radius_um * 1e-6
+    msd_m2 = msd_3d * 1e-12                        # µm² → m²
+
+    g_star = (_KB * T) / (np.pi * a_m * msd_m2 * _gamma(1.0 + alpha))
+    g_prime = g_star * np.cos(np.pi * alpha / 2.0)
+    g_double = g_star * np.sin(np.pi * alpha / 2.0)
+
+    omega = 1.0 / tau
+    out = pd.DataFrame({
+        'omega_rad_s': omega, 'freq_hz': omega / (2 * np.pi),
+        'alpha': alpha, 'g_star_pa': g_star,
+        'g_prime_pa': g_prime, 'g_double_prime_pa': g_double,
+    })
+    # Drop the endpoints where the local-slope estimate is least reliable.
+    if len(out) > 4:
+        out = out.iloc[1:-1].reset_index(drop=True)
+    return out.sort_values('omega_rad_s').reset_index(drop=True)
+
+
+def extract_fusion_relaxation(
+    mask_stack: np.ndarray,
+    microns_per_pixel: float = 1.0,
+    frame_interval_s: float = 1.0,
+    proximity_um: float = 1.0,
+    min_frames: int = 5,
+) -> list:
+    """
+    Find fusion (merge) events in a labelled condensate stack and, for each,
+    follow the merged droplet forward in time, recording its aspect ratio
+    (major/minor axis) as it relaxes back toward a sphere.
+
+    Returns a list of dicts, one per usable merge event:
+        t0_frame, time_s (from the merge), aspect_ratio, R_um (equivalent
+        radius of the merged droplet — a natural default characteristic length).
+    """
+    import skimage as sk
+    from pycat.toolbox.dynamic_spatial_tools import detect_merge_fission
+    events = detect_merge_fission(mask_stack, microns_per_pixel, proximity_um)
+    if events.empty:
+        return []
+    merges = events[events['event_type'] == 'merge']
+    tol_px = max(3.0, (proximity_um / max(microns_per_pixel, 1e-9)) * 5.0)
+    out = []
+    for _, ev in merges.iterrows():
+        t0 = int(ev['frame'])
+        cyx = np.array([ev['centroid_y_um'] / microns_per_pixel,
+                        ev['centroid_x_um'] / microns_per_pixel])
+        times, ars = [], []
+        R_char = np.nan
+        prev = cyx
+        for t in range(t0, len(mask_stack)):
+            lab = sk.measure.label(mask_stack[t] > 0)
+            props = sk.measure.regionprops(lab)
+            if not props:
+                break
+            best = min(props, key=lambda p: (p.centroid[0] - prev[0]) ** 2
+                       + (p.centroid[1] - prev[1]) ** 2)
+            dist = np.hypot(best.centroid[0] - prev[0], best.centroid[1] - prev[1])
+            if dist > tol_px:
+                break
+            minor = max(best.axis_minor_length, 1e-6)
+            ars.append(best.axis_major_length / minor)
+            times.append((t - t0) * frame_interval_s)
+            R_char = np.sqrt(best.area / np.pi) * microns_per_pixel
+            prev = np.array(best.centroid)
+        if len(ars) >= min_frames:
+            out.append(dict(t0_frame=t0, time_s=np.array(times, float),
+                            aspect_ratio=np.array(ars, float), R_um=float(R_char)))
+    return out

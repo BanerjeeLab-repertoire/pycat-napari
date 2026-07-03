@@ -98,6 +98,7 @@ class DropletFusionUI:
         mode_row = QHBoxLayout()
         self._rb_force = QRadioButton("C-Trap force (.h5)")
         self._rb_image = QRadioButton("Image stack (aspect ratio)")
+        self._rb_image.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_force.setChecked(True)
         self._rb_force.setToolTip("Fit the trap force transient from a Lumicks .h5 file.")
         self._rb_image.setToolTip(

@@ -175,6 +175,7 @@ class FDCurveUI:
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._smooth = QCheckBox("Savitzky-Golay smooth force")
+        self._smooth.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._smooth.setChecked(False)
         self._smooth.setToolTip("Lightly smooth the force channel before segmentation.")
         form.addRow(self._smooth)
@@ -243,6 +244,7 @@ class FDCurveUI:
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._show_wlc = QCheckBox("Overlay worm-like chain (dsDNA) reference")
+        self._show_wlc.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._show_wlc.setChecked(True)
         form.addRow(self._show_wlc)
 

@@ -49,6 +49,7 @@ from napari.utils.notifications import (
     show_warning as napari_show_warning,
 )
 from PyQt5.QtWidgets import (
+    QSizePolicy,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
     QFormLayout, QDoubleSpinBox, QCheckBox, QProgressBar,
 )

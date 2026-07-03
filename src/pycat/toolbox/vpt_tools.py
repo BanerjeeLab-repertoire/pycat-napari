@@ -701,8 +701,8 @@ def run_vpt_analysis(
                    max_frame_gap, microns_per_pixel)
     tracks = drift_correct_com(tracks)
     msd_df = compute_msd(
-        tracks, microns_per_pixel=1.0,
-        frame_interval_s=frame_interval_s, min_track_length=min_track_length)
+        tracks, frame_interval_s=frame_interval_s,
+        min_track_length=min_track_length)
     fit = fit_anomalous_diffusion(msd_df)
     eta = viscosity_from_diffusion(
         fit.get('D_um2_per_s', float('nan')), bead_radius_um, temperature_C)

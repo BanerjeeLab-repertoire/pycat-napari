@@ -350,3 +350,94 @@ def refresh_viewer_with_new_data(viewer, active_layer, new_data=None):
         viewer.add_labels(updated_data, name=layer_name)  # Re-add the layer with the updated data
     else:
         raise ValueError("The active layer type is not supported for refreshing the viewer.")
+
+def draw_custom_scale_bar(viewer, image_layer, pixel_um, scalebar_um=10.0,
+                          color='white', position='bottom_right',
+                          layer_name='PyCAT Scale Bar'):
+    """
+    Draw PyCAT's own scale bar as a Shapes layer in data coordinates.
+
+    This deliberately avoids napari's built-in ``viewer.scale_bar`` (and the
+    ``Layer.units`` / ``scale_bar.unit`` path), which on this napari build could
+    trigger the "inconsistent units" black-canvas refit. A filled rectangle in
+    data pixels is immune to that and zooms correctly, since a bar of N data
+    pixels always represents N * pixel_um microns.
+
+    The bar is a 2-D shape, so it broadcasts across every frame of a (T/Z, H, W)
+    stack. Any previous PyCAT scale-bar layer is removed first.
+
+    Parameters
+    ----------
+    viewer : napari.Viewer
+    image_layer : napari.layers.Image
+        Used only for its pixel dimensions (last two axes).
+    pixel_um : float
+        Microns per pixel (physical size of one pixel).
+    scalebar_um : float
+        Desired bar length in microns.
+    color : str
+        Bar and label colour.
+    position : {'bottom_right','bottom_left','top_right','top_left'}
+    layer_name : str
+    """
+    import numpy as np
+    if pixel_um is None or pixel_um <= 0 or scalebar_um <= 0:
+        return None
+    shp = np.asarray(image_layer.data).shape
+    if len(shp) < 2:
+        return None
+    H, W = int(shp[-2]), int(shp[-1])
+
+    bar_px = scalebar_um / pixel_um                 # length in data pixels
+    if bar_px >= W:                                  # too long for the field
+        return None
+    thick = max(2.0, 0.012 * H)                      # bar thickness
+    mx, my = 0.05 * W, 0.05 * H                       # margins
+
+    if 'right' in position:
+        x1 = W - mx; x0 = x1 - bar_px
+    else:
+        x0 = mx; x1 = x0 + bar_px
+    if 'bottom' in position:
+        y1 = H - my; y0 = y1 - thick
+    else:
+        y0 = my; y1 = y0 + thick
+
+    rect = np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]])
+
+    if layer_name in [l.name for l in viewer.layers]:
+        try:
+            viewer.layers.remove(layer_name)
+        except Exception:
+            pass
+
+    label = (f"{scalebar_um:.0f} \u00b5m" if scalebar_um >= 1
+             else f"{scalebar_um:g} \u00b5m")
+    text = {'string': [label], 'color': color, 'size': 12,
+            'anchor': 'upper_left' if 'bottom' in position else 'lower_left',
+            'translation': [-0.04 * H, 0]}
+    try:
+        sl = viewer.add_shapes(
+            [rect], shape_type='rectangle', name=layer_name,
+            face_color=color, edge_color=color, edge_width=0,
+            opacity=1.0, text=text)
+    except Exception:
+        # older/newer text API fallbacks
+        sl = viewer.add_shapes([rect], shape_type='rectangle', name=layer_name,
+                               face_color=color, edge_color=color)
+    # keep it out of the way of analysis: not editable, pinned on top
+    try:
+        sl.editable = False
+        sl.mouse_pan = True
+    except Exception:
+        pass
+    return sl
+
+
+def remove_custom_scale_bar(viewer, layer_name='PyCAT Scale Bar'):
+    """Remove the PyCAT scale-bar layer if present."""
+    if layer_name in [l.name for l in viewer.layers]:
+        try:
+            viewer.layers.remove(layer_name)
+        except Exception:
+            pass

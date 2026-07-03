@@ -43,6 +43,7 @@ from napari.utils.notifications import (
     show_warning as napari_show_warning,
 )
 from PyQt5.QtWidgets import (
+    QSizePolicy,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
     QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox, QFileDialog,
     QProgressBar, QCheckBox,
@@ -218,6 +219,7 @@ def _add_export_timeseries_video(ui_instance, layout=None, separate_widget=False
     form.addRow("Quality (0-10):", quality_spin)
 
     auto_contrast_check = QCheckBox("Auto contrast (sample frames for min/max)")
+    auto_contrast_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     auto_contrast_check.setChecked(True)
     form.addRow("", auto_contrast_check)
 

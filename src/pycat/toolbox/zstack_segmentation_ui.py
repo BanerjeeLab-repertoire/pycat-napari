@@ -131,6 +131,7 @@ def _add_zstack_bg_removal(ui, layout):
     form.addRow("Ball radius (px):", ball_sp)
 
     pseudo3d_cb = QCheckBox("Pseudo-3D tri-planar linear filtering")
+    pseudo3d_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     pseudo3d_cb.setChecked(True)
     pseudo3d_cb.setToolTip(
         "Runs the Gaussian and Gabor linear filtering steps along all "

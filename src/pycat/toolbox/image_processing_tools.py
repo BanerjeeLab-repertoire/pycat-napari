@@ -35,6 +35,25 @@ from pycat.utils.general_utils import dtype_conversion_func, get_default_intensi
 from pycat.ui.ui_utils import add_image_with_default_colormap
 
 
+def _safe_equalize_adapthist(img, **kwargs):
+    """CLAHE that is safe across skimage versions.
+
+    ``skimage.exposure.equalize_adapthist`` requires float input in [0, 1].
+    On skimage >= 0.26 an out-of-range float raises ValueError; on older
+    versions it silently clips everything to the maximum, collapsing the image
+    to a near-uniform field (the "yellow field / everything in one bin" bug).
+    Background-subtracted and enhanced images here are in the ORIGINAL intensity
+    scale (values far above 1), so we min-max normalise to [0, 1] before running
+    CLAHE. A constant image is returned as zeros (nothing to equalise).
+    """
+    a = np.asarray(img, dtype=np.float32)
+    lo = float(a.min()); hi = float(a.max())
+    if hi <= lo:
+        return np.zeros_like(a)
+    a = (a - lo) / (hi - lo)
+    return sk.exposure.equalize_adapthist(a, **kwargs)
+
+
 
 
 
@@ -470,6 +489,7 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
             napari_show_warning("Max resolution is 2048 x 2048. Micron sizes have not been updated.")
             continue
         else:
+            # v1.0.0 behaviour: 2× linear upscaling before preprocessing.
             upscale_factor = 2
 
         # Apply the upscaling function to the image
@@ -645,7 +665,7 @@ def peak_and_edge_enhancement_func(image, ball_radius):
   # local equalization), which over-enhances background and suppresses
   # low-contrast puncta; scaling the tile to ball_radius*4 keeps it gentle.
   k_size = math.ceil(ball_radius * 4)
-  output_image = sk.exposure.equalize_adapthist(gabor_img, kernel_size=k_size,
+  output_image = _safe_equalize_adapthist(gabor_img, kernel_size=k_size,
                                                  clip_limit=0.0025)
 
   # Convert the output image back to the original input data type for consistency
@@ -914,7 +934,7 @@ def run_clahe(clip_input, k_size_input, viewer):
     no_bins = image.shape[0]
 
     # Apply CLAHE to the image
-    CLAHE_img = sk.exposure.equalize_adapthist(img, kernel_size=k_size, clip_limit=clip_val, nbins=no_bins)
+    CLAHE_img = _safe_equalize_adapthist(img, kernel_size=k_size, clip_limit=clip_val, nbins=no_bins)
 
     # Convert the processed image back to its original data type
     CLAHE_img = dtype_conversion_func(CLAHE_img, output_bit_depth=input_dtype)
@@ -1210,7 +1230,7 @@ def subtract_background(image, background, bg_scaling_factor=0.75, equalize_inte
             k_size = math.ceil(window_size)
         else:
             k_size = None # Uses the skimage default window size of image.shape // 8
-        bg_subtracted_img = sk.exposure.equalize_adapthist(bg_subtracted_img, kernel_size=k_size, clip_limit=0.0025)
+        bg_subtracted_img = _safe_equalize_adapthist(bg_subtracted_img, kernel_size=k_size, clip_limit=0.0025)
 
     # Convert back to the original data type
     ouput_image = dtype_conversion_func(bg_subtracted_img, input_dtype)
@@ -1808,7 +1828,7 @@ def pre_process_image(image, ball_radius, window_size):
     # background texture and suppressing low-contrast puncta.
     clip_limit = 0.0025
     k_size = math.ceil(window_size)
-    img = sk.exposure.equalize_adapthist(img, kernel_size=k_size,
+    img = _safe_equalize_adapthist(img, kernel_size=k_size,
                                           clip_limit=clip_limit)
 
     # Convert the processed image back to its original data type

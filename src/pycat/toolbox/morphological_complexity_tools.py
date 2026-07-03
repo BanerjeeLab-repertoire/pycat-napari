@@ -349,10 +349,12 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
     form.addRow("Condensate mask:", mask_dd)
 
     cb_fractal = QCheckBox("Fractal dimension + lacunarity (whole pattern)")
+    cb_fractal.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     cb_fractal.setChecked(True); form.addRow(cb_fractal)
     cb_tortuosity = QCheckBox("Tortuosity (per object)")
     cb_tortuosity.setChecked(True); form.addRow(cb_tortuosity)
     cb_orient = QCheckBox("Orientational order parameter")
+    cb_orient.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     cb_orient.setChecked(True); form.addRow(cb_orient)
 
     prog = QProgressBar(); prog.setVisible(False)
@@ -422,6 +424,14 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
             all_tables = ([('Summary', summary_df)] if not summary_df.empty else []) + tables
+            try:
+                from pycat.toolbox.analysis_plots import plot_distributions
+                for _tname, _tdf in tables:
+                    if hasattr(_tdf, '__len__') and len(_tdf) > 5:
+                        plot_distributions(_tdf, title=f"Morphology — {_tname}",
+                                           interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] morphology distribution plot failed: {e}")
             if all_tables:
                 show_dataframes_dialog("Morphological Complexity", all_tables)
         except Exception:

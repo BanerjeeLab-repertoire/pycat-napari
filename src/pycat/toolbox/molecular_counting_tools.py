@@ -204,7 +204,8 @@ def count_molecules_pooled(traces: list, fast: int = 4,
     df['N'] = np.where((nu and nu > 0) & np.isfinite(df['initial_intensity']),
                        df['initial_intensity'] / nu, np.nan)
     n_used = int(df['used'].sum())
-    return dict(nu=float(nu) if nu else np.nan, per_trace=df, n_used=n_used)
+    return dict(nu=float(nu) if nu else np.nan, per_trace=df, n_used=n_used,
+                pooled_x=X, pooled_y=Y)
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +328,14 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
                 'stack_layer': sname, 'mask_layer': mname,
                 'nu': result['nu'], 'n_used': result['n_used']})
 
+        try:
+            from pycat.toolbox.analysis_plots import plot_molecular_counting
+            Nvals = df.loc[df['used'], 'N'].values if 'used' in df else df['N'].values
+            plot_molecular_counting(
+                result.get('pooled_x', []), result.get('pooled_y', []),
+                result['nu'], Nvals, interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] molecular-counting plot failed: {e}")
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
             overview = pd.DataFrame([{

@@ -26,9 +26,11 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar, QLineEdit,
-    QScrollArea, QSizePolicy,
+    QScrollArea, QSizePolicy, QComboBox,
 )
 from PyQt5.QtCore import Qt
+from pycat.ui.field_status import (
+    status_row, add_reset_buttons, REQUIRED, OPTIONAL, AUTO, EXPERT)
 
 
 class TemperatureDependentUI:
@@ -39,6 +41,15 @@ class TemperatureDependentUI:
 
     def _dr(self):
         return self.central_manager.active_data_class.data_repository
+
+    def _on_pixel_size_set(self, v):
+        """When the user enters a pixel size in the gate, refresh the field
+        circles AND update the on-screen scale bar to microns."""
+        self._registry.refresh()
+        try:
+            self.central_manager.file_io._enable_auto_scale_bar()
+        except Exception:
+            pass
 
     def _record(self, step, params):
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
@@ -70,6 +81,17 @@ class TemperatureDependentUI:
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
 
+        # Field-status framework: a status circle in front of each interactive
+        # input, a Step 1 file-I/O block, and a pixel-size gate that appears only
+        # when the metadata provided no scale.
+        from pycat.ui.field_status import (
+            FieldRegistry, add_step1_file_io, add_pixel_size_gate)
+        self._registry = FieldRegistry()
+        add_step1_file_io(self.viewer, layout, self._registry,
+                          on_change=self._registry.refresh)
+        self._pixel_gate_refresh = add_pixel_size_gate(
+            layout, self._dr, on_set=self._on_pixel_size_set)
+
         self._add_sync(layout)
         self._add_turbidity(layout)
         self._add_export(layout)
@@ -80,6 +102,7 @@ class TemperatureDependentUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Temperature-Dependent Microscopy")
 
@@ -96,7 +119,7 @@ class TemperatureDependentUI:
 
         self._stack_dd = self.create_layer_dropdown(napari.layers.Image)
         self._stack_dd.setToolTip("The MicroManager OME-TIFF stack (already opened).")
-        form.addRow("Stack layer:", self._stack_dd)
+        status_row(form, self._registry, "Stack layer:", self._stack_dd, REQUIRED, step="step2")
 
         tiff_row = QHBoxLayout()
         self._tiff_edit = QLineEdit(); self._tiff_edit.setPlaceholderText("path to .ome.tif (for metadata)")
@@ -135,13 +158,14 @@ class TemperatureDependentUI:
         self._temp_col = QLineEdit("AI0 (°C)")
         self._temp_col.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._temp_col.setToolTip("CSV column holding the temperature.")
-        form.addRow("Temp column:", self._temp_col)
+        status_row(form, self._registry, "Temp column:", self._temp_col, OPTIONAL, default="AI0 (°C)", step="step2")
 
         self._csv_header = QSpinBox(); self._csv_header.setRange(0, 100); self._csv_header.setValue(6)
         self._csv_header.setToolTip("Header row index for pd.read_csv (lab DAQ export uses 6).")
-        form.addRow("CSV header row:", self._csv_header)
+        status_row(form, self._registry, "CSV header row:", self._csv_header, OPTIONAL, default=6, step="step2")
 
         self._add_text_layer = QCheckBox("Add temperature text layer over image")
+        self._add_text_layer.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._add_text_layer.setChecked(True)
         form.addRow(self._add_text_layer)
 
@@ -310,11 +334,12 @@ class TemperatureDependentUI:
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._subtract_first = QCheckBox("Subtract first frame (remove static pattern)")
+        self._subtract_first.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._subtract_first.setChecked(False)
         self._subtract_first.setToolTip(
             "Subtract the (assumed clear) reference frame to remove the static "
             "illumination pattern before computing entropy.")
-        form.addRow(self._subtract_first)
+        status_row(form, self._registry, None, self._subtract_first, OPTIONAL, default=False, step="step3")
 
         # Reference frame to subtract (default 0) + an entropy-based guesser.
         ref_row = QHBoxLayout()
@@ -333,6 +358,7 @@ class TemperatureDependentUI:
         rw = QWidget(); rw.setLayout(ref_row); form.addRow("Reference frame:", rw)
 
         self._correct_focus = QCheckBox("Correct focal drift (off by default)")
+        self._correct_focus.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._correct_focus.setChecked(False)
         self._correct_focus.setToolTip(
             "Regress the per-frame focus score out of the entropy signal. Use "
@@ -340,21 +366,23 @@ class TemperatureDependentUI:
             "condensates themselves sharpen the focus metric, this subtracts real "
             "turbidity signal (corrected entropy dips below baseline) — leave off "
             "unless you know defocus is the problem.")
-        form.addRow(self._correct_focus)
+        status_row(form, self._registry, None, self._correct_focus, OPTIONAL, default=False, step="step3")
 
         self._entropy_bins = QSpinBox(); self._entropy_bins.setRange(16, 1024); self._entropy_bins.setValue(256)
         self._entropy_bins.setToolTip("Histogram bins for the entropy calculation.")
-        form.addRow("Entropy bins:", self._entropy_bins)
+        status_row(form, self._registry, "Entropy bins:", self._entropy_bins, EXPERT, default=256, step="step3")
 
         # Transition-temperature definition — different conventions suit different
         # samples, so let the user pick.
         from PyQt5.QtWidgets import QRadioButton, QButtonGroup
         self._method_baseline = QRadioButton("Baseline departure / return")
+        self._method_baseline.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._method_baseline.setChecked(True)
         self._method_baseline.setToolTip(
             "Report where the signal first leaves the baseline (cloud) and "
             "returns to it (clear) — the onset/offset of the transition.")
         self._method_midpoint = QRadioButton("Steepest point (midpoint)")
+        self._method_midpoint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._method_midpoint.setToolTip(
             "Report the steepest point of the transition (temperature of maximum "
             "|dS/dT|) — the transition midpoint.")
@@ -364,11 +392,41 @@ class TemperatureDependentUI:
         form.addRow("Transition point:", self._method_baseline)
         form.addRow("", self._method_midpoint)
 
+        # Onset threshold: how far above baseline (as a % of the baseline→peak
+        # amplitude) counts as the departure/return point. Only used by the
+        # baseline method.
+        self._onset_frac = QDoubleSpinBox()
+        self._onset_frac.setRange(1.0, 40.0); self._onset_frac.setValue(12.0)
+        self._onset_frac.setSuffix(" %"); self._onset_frac.setSingleStep(1.0)
+        self._onset_frac.setToolTip(
+            "Baseline method: the signal must rise this fraction of the "
+            "baseline-to-peak amplitude above baseline to count as the "
+            "departure (cloud) or return (clear) point. Lower = earlier onset.")
+        status_row(form, self._registry, "Onset threshold:", self._onset_frac, OPTIONAL, default=12.0, step="step3")
+
         self._turb_prog = QProgressBar(); self._turb_prog.setVisible(False)
         btn = QPushButton("▶  Compute Turbidity & Detect Transitions")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_turbidity)
         form.addRow(self._turb_prog); form.addRow(btn)
+
+        # Save / Clear results.
+        sc_row = QHBoxLayout()
+        save_btn = QPushButton("Save Results (CSV)")
+        save_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        save_btn.setToolTip("Save the transition summary (T_cloud, T_clear, "
+                            "hysteresis) and the full turbidity curve to CSV.")
+        save_btn.clicked.connect(self._on_save_turbidity)
+        clear_btn = QPushButton("Clear Results")
+        clear_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        clear_btn.setToolTip("Discard the stored turbidity results.")
+        clear_btn.clicked.connect(self._on_clear_turbidity)
+        sc_row.addWidget(save_btn); sc_row.addWidget(clear_btn)
+        form.addRow(sc_row)
+        # track the method choice + reference frame, and add reset buttons
+        self._registry.register(self._method_baseline, OPTIONAL, default=True, step="step3")
+        self._registry.register(self._ref_frame, OPTIONAL, default=0, step="step3")
+        add_reset_buttons(form, self._registry, "step3")
         layout.addWidget(grp)
 
     def _on_guess_clear_frame(self):
@@ -416,15 +474,28 @@ class TemperatureDependentUI:
                 reference_frame_index=self._ref_frame.value())
             sig_col = 'entropy_corrected' if self._correct_focus.isChecked() else 'entropy'
             method = 'baseline' if self._method_baseline.isChecked() else 'midpoint'
-            trans = detect_transitions(df, sig_col, method=method)
+            trans = detect_transitions(df, sig_col, method=method,
+                                       frac=self._onset_frac.value() / 100.0)
         except Exception as e:
             self._turb_prog.setVisible(False)
             napari_show_warning(f"Turbidity analysis failed: {e}")
             import traceback; traceback.print_exc(); return
         self._turb_prog.setVisible(False)
 
-        self._dr()['temp_turbidity_df'] = df
+        # Store the curve for the Plotting Widget without the focus_score column
+        # (it is collinear with turbidity and misleads if plotted/regressed).
+        self._dr()['temp_turbidity_df'] = df.drop(columns=['focus_score'], errors='ignore')
         self._dr()['temp_transitions'] = trans
+        summary = pd.DataFrame([{
+            'T_cloud_C':    round(trans['T_phase_C'], 3) if np.isfinite(trans['T_phase_C']) else None,
+            'T_clear_C':    round(trans['T_clear_C'], 3) if np.isfinite(trans['T_clear_C']) else None,
+            'hysteresis_C': round(trans['hysteresis_C'], 3) if np.isfinite(trans['hysteresis_C']) else None,
+            'cloud_branch': trans.get('cloud_branch'),
+            'clear_branch': trans.get('clear_branch'),
+            'method':       method,
+            'signal':       sig_col,
+        }])
+        self._dr()['temp_turbidity_summary'] = summary
         self._record('temperature_turbidity', {
             'subtract_first': self._subtract_first.isChecked(),
             'correct_focal_drift': self._correct_focus.isChecked(),
@@ -446,6 +517,32 @@ class TemperatureDependentUI:
             "Turbidity computed — see the results table (transition estimate "
             "may be unreliable; check the entropy curve).")
 
+    def _on_save_turbidity(self):
+        from PyQt5.QtWidgets import QFileDialog
+        import os
+        summary = self._dr().get('temp_turbidity_summary')
+        curve = self._dr().get('temp_turbidity_df')
+        if summary is None or curve is None:
+            napari_show_warning("No turbidity results to save. Run Step 3 first."); return
+        path, _ = QFileDialog.getSaveFileName(
+            None, "Save turbidity results (base name)",
+            "temperature_turbidity.csv", "CSV (*.csv)")
+        if not path:
+            return
+        base = path[:-4] if path.lower().endswith('.csv') else path
+        try:
+            summary.to_csv(base + "_transitions.csv", index=False)
+            curve.to_csv(base + "_curve.csv", index=False)
+            napari_show_info(
+                f"Saved {os.path.basename(base)}_transitions.csv and _curve.csv.")
+        except Exception as e:
+            napari_show_warning(f"Save failed: {e}")
+
+    def _on_clear_turbidity(self):
+        for k in ('temp_turbidity_df', 'temp_transitions', 'temp_turbidity_summary'):
+            self._dr().pop(k, None)
+        napari_show_info("Cleared turbidity results.")
+
     # ── Step 4: scale bar + export ─────────────────────────────────────
     def _add_export(self, layout):
         grp  = QGroupBox("Step 4 — Scale Bar & Annotated Export")
@@ -453,11 +550,25 @@ class TemperatureDependentUI:
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._use_scalebar = QCheckBox("Burn a scale bar into the exported video")
+        self._use_scalebar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._use_scalebar.setChecked(True)
         self._use_scalebar.setToolTip(
             "Draw a scale bar on the MP4 using the image's pixel size "
             "(set automatically on load, or via the Set Scale tool).")
         form.addRow(self._use_scalebar)
+
+        # On-screen scale bar (PyCAT's own Shapes-layer bar; length in microns).
+        self._scalebar_um = QDoubleSpinBox()
+        self._scalebar_um.setRange(0.1, 100000.0); self._scalebar_um.setDecimals(1)
+        self._scalebar_um.setValue(10.0); self._scalebar_um.setSuffix(" µm")
+        self._scalebar_um.setToolTip("Length of the scale bar drawn on the image.")
+        form.addRow("Scale bar length:", self._scalebar_um)
+        sb_btn = QPushButton("Draw Scale Bar on Image")
+        sb_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        sb_btn.setToolTip("Draw PyCAT's own scale bar as a layer (immune to the "
+                          "napari units black-canvas issue).")
+        sb_btn.clicked.connect(self._on_scalebar)
+        form.addRow(sb_btn)
 
         self._fps = QSpinBox(); self._fps.setRange(1, 60); self._fps.setValue(30)
         self._fps.setToolTip("Playback frame rate of the exported MP4.")
@@ -465,6 +576,7 @@ class TemperatureDependentUI:
 
         # Pattern-corrected (dust/scratch removed) stack option.
         self._export_corrected = QCheckBox("Use pattern-corrected stack (dust / scratch removed)")
+        self._export_corrected.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._export_corrected.setChecked(False)
         self._export_corrected.setToolTip(
             "Remove the static brightfield pattern using the Step 3 reference "
@@ -509,44 +621,28 @@ class TemperatureDependentUI:
         return float(stored) ** 0.5 if stored else 1.0
 
     def _on_scalebar(self):
-        # Drive the scale bar from the stack layer's SCALE only. Do NOT set
-        # lyr.units or scale_bar.unit: on this napari build, touching units on
-        # a 3D lazy stack triggers an "inconsistent units" refit that renders
-        # the layer black. Scale alone gives a correctly-sized bar; only the
-        # unit label is omitted.
+        # Draw PyCAT's OWN scale bar (a Shapes-layer rectangle in data pixels)
+        # rather than napari's scale_bar. This needs no Layer.units / scale_bar.unit
+        # (the "inconsistent units" black-canvas trigger on this build) and zooms
+        # correctly. The bar length in microns is set by the export field.
+        from pycat.ui.ui_utils import draw_custom_scale_bar
         px = self._pixel_size()
+        sname = self._stack_dd.currentText()
+        if sname not in [l.name for l in self.viewer.layers]:
+            napari_show_warning(f"Stack layer '{sname}' not found."); return
+        bar_um = self._scalebar_um.value() if hasattr(self, '_scalebar_um') else 10.0
         try:
-            sname = self._stack_dd.currentText()
-            if sname in [l.name for l in self.viewer.layers]:
-                lyr = self.viewer.layers[sname]
-                sc = list(lyr.scale)
-                sc[-1] = px; sc[-2] = px
-                lyr.scale = sc
-            sb = self.viewer.scale_bar
-            sb.visible = True
-            try:
-                import warnings as _w
-                with _w.catch_warnings():
-                    _w.simplefilter('ignore', FutureWarning)
-                    sb.unit = 'um'
-            except Exception:
-                pass
-            for _attr in ('length', 'fixed_length'):
-                if hasattr(sb, _attr):
-                    try:
-                        setattr(sb, _attr, None)
-                    except Exception:
-                        pass
-            napari_show_info(
-                f"Scale bar enabled at {px:.4g} \u00b5m/px.")
-            # Scaling shrinks the image in world coords; refit so it fills the
-            # view instead of snapping to a tiny corner. (Safe: no units set.)
-            try:
-                self.viewer.reset_view()
-            except Exception:
-                pass
+            sl = draw_custom_scale_bar(
+                self.viewer, self.viewer.layers[sname], px, scalebar_um=bar_um)
+            if sl is None:
+                napari_show_warning(
+                    "Could not draw scale bar — check the pixel size and that the "
+                    f"bar ({bar_um:g} µm) is shorter than the field of view.")
+            else:
+                napari_show_info(
+                    f"PyCAT scale bar: {bar_um:g} µm at {px:.4g} µm/px.")
         except Exception as e:
-            napari_show_warning(f"Could not enable scale bar: {e}")
+            napari_show_warning(f"Could not draw scale bar: {e}")
 
     def _on_export(self):
         from PyQt5.QtWidgets import QFileDialog
@@ -612,6 +708,7 @@ class TemperatureDependentUI:
         w2 = QWidget(); w2.setLayout(row2); form.addRow("Temp folder:", w2)
 
         self._batch_export_mp4 = QCheckBox("Also export annotated MP4 for each TIFF (saved beside it)")
+        self._batch_export_mp4.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._batch_export_mp4.setChecked(True)
         self._batch_export_mp4.setToolTip(
             "Render a temperature/time-annotated MP4 per TIFF, named from the "
@@ -619,11 +716,28 @@ class TemperatureDependentUI:
         form.addRow(self._batch_export_mp4)
 
         self._batch_export_corrected = QCheckBox("Also save pattern-corrected stack for each TIFF")
+        self._batch_export_corrected.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._batch_export_corrected.setChecked(False)
         self._batch_export_corrected.setToolTip(
             "Save a dust/scratch-corrected TIFF (gray-preserving) per input, "
             "named <file>_corrected.tif beside the source.")
         form.addRow(self._batch_export_corrected)
+
+        self._batch_phase_diagram = QCheckBox("Build a phase diagram from the batch")
+        self._batch_phase_diagram.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._batch_phase_diagram.setChecked(True)
+        self._batch_phase_diagram.setToolTip(
+            "After the batch, parse the filenames for the swept variable and "
+            "replicates and plot T_cloud vs that variable, shading the 2-phase "
+            "region. Warns if the filenames can't be parsed unambiguously.")
+        form.addRow(self._batch_phase_diagram)
+        self._phase_side = QComboBox()
+        self._phase_side.addItems(['2-phase above boundary (LCST)',
+                                   '2-phase below boundary (UCST)'])
+        self._phase_side.setToolTip(
+            "Which side of the cloud-point boundary is the two-phase region: "
+            "above for LCST-type (phase-separates on heating), below for UCST.")
+        form.addRow("Phase region:", self._phase_side)
 
         self._batch_prog = QProgressBar(); self._batch_prog.setVisible(False)
         btn = QPushButton("▶  Run Batch Turbidity Analysis")
@@ -677,6 +791,43 @@ class TemperatureDependentUI:
         except Exception:
             pass
         napari_show_info(f"Batch complete: {n_ok}/{len(df)} TIFFs processed successfully.")
+
+        # Phase diagram from the batch (parse filenames for the swept variable).
+        if getattr(self, '_batch_phase_diagram', None) and self._batch_phase_diagram.isChecked():
+            self._build_phase_diagram(df)
+
+    def _build_phase_diagram(self, df):
+        from pycat.toolbox.temperature_tools import parse_batch_filenames
+        ok_df = df[df['status'] == 'ok'] if 'status' in df else df
+        files = list(ok_df['file']) if 'file' in ok_df else []
+        if len(files) < 2:
+            napari_show_warning("Need at least two successfully-processed TIFFs "
+                                "to build a phase diagram."); return
+        parsed = parse_batch_filenames(files)
+        if not parsed['ok']:
+            napari_show_warning("Phase diagram: " + parsed['reason'] +
+                                (f" Detected tokens: {parsed['candidates']}."
+                                 if parsed.get('candidates') else ""))
+            return
+        # merge x_value onto the results by filename
+        xmap = {d['file']: d['x_value'] for d in parsed['per_file']}
+        pdf = ok_df.copy()
+        pdf['x_value'] = pdf['file'].map(lambda f: xmap.get(str(f)))
+        pdf = pdf.rename(columns={'T_phase_C': 'T_cloud'}).dropna(subset=['x_value', 'T_cloud'])
+        if pdf['x_value'].nunique() < 2:
+            napari_show_warning("Phase diagram: the swept variable takes only one "
+                                "value among successful files."); return
+        self._dr()['temp_phase_diagram_df'] = pdf
+        side = 'below' if self._phase_side.currentIndex() == 1 else 'above'
+        try:
+            from pycat.toolbox.analysis_plots import plot_phase_diagram
+            plot_phase_diagram(pdf, x_name=parsed['x_name'], two_phase=side,
+                               title=f"Phase diagram ({parsed['x_name']})",
+                               interactive=True)
+            napari_show_info(f"Phase diagram: {pdf['x_value'].nunique()} "
+                             f"{parsed['x_name']} values, swept variable auto-detected.")
+        except Exception as e:
+            napari_show_warning(f"Phase diagram plot failed: {e}")
 
     def _render_annotated_mp4(self, stack, temps, elapsed_s, out_path,
                               fps, pixel_um, scalebar_um):

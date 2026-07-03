@@ -227,6 +227,7 @@ def _add_intensity_profile(ui_instance, layout=None, separate_widget=False):
     mode_row = QHBoxLayout()
     rb_line = QRadioButton("Line (Shapes)")
     rb_radial = QRadioButton("Radial (centroids/points)")
+    rb_radial.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_line.setChecked(True)
     mode_row.addWidget(rb_line); mode_row.addWidget(rb_radial); mode_row.addStretch()
     mw = QWidget(); mw.setLayout(mode_row)
@@ -296,12 +297,18 @@ def _add_intensity_profile(ui_instance, layout=None, separate_widget=False):
                                               microns_per_pixel=mpp)
             if not profs:
                 _warn("No usable line shapes found."); return
-            combined = pd.concat([df for _i, df in profs], ignore_index=True)
+            combined = pd.concat([df.assign(line_index=_i) for _i, df in profs],
+                                 ignore_index=True)
             ui_instance.central_manager.active_data_class.data_repository['line_profile_df'] = combined
             rec = getattr(ui_instance, '_record', None)
             if callable(rec):
                 rec('intensity_profile', {'mode': 'line', 'image': iname,
                                           'n_lines': len(profs)})
+            try:
+                from pycat.toolbox.analysis_plots import plot_line_profiles
+                plot_line_profiles(combined, interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] line-profile plot failed: {e}")
             if show_dataframes_dialog:
                 show_dataframes_dialog("Line Profiles", [('Profiles', combined.round(3))])
             _info(f"Computed {len(profs)} line profile(s).")
@@ -348,6 +355,11 @@ def _add_intensity_profile(ui_instance, layout=None, separate_widget=False):
                 show_dataframes_dialog("Radial Profiles",
                                        [('Interface widths', iface_df.round(3)),
                                         ('Radial profiles', combined.round(3))])
+            try:
+                from pycat.toolbox.analysis_plots import plot_radial_profiles
+                plot_radial_profiles(combined, interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] radial-profile plot failed: {e}")
             med_iw = iface_df['interface_width_um'].median()
             _info(f"Computed {len(centers)} radial profile(s); "
                   f"median interface width ≈ {med_iw:.3f} µm.")

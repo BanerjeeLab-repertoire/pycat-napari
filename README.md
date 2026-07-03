@@ -156,6 +156,18 @@ Note: On Windows, due to some platform-specific rendering quirks, the applicatio
 pip install "pycat-napari[arm-mac]"
 ```
 
+### GPU Acceleration (recommended for Cellpose)
+
+Cellpose segmentation runs on CPU by default, but is **much faster on an NVIDIA GPU**. To enable GPU acceleration, install the CUDA build of PyTorch after installing PyCAT:
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+This single command is **safe on both GPU and CPU-only machines** — on a machine without a CUDA GPU it installs a working CPU build of PyTorch, so you can use the same instruction everywhere without worrying about mismatched versions. PyCAT detects the GPU automatically and falls back to CPU (with a warning) when none is present.
+
+> 💡 The `[gpu]` extra below is **separate**: it accelerates rolling-ball and morphological operations (via CuPy), not Cellpose. Install both for full GPU acceleration.
+
 ### Optional Features
 
 You can install PyCAT with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).

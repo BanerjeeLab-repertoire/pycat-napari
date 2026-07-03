@@ -213,6 +213,7 @@ class VideoParticleTrackingUI:
         form.addRow("Threshold:", self._bead_thresh)
 
         self._fit_quality = QCheckBox("Gaussian quality fit + classify beads")
+        self._fit_quality.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._fit_quality.setChecked(True)
         self._fit_quality.setToolTip(
             "Fit a 2D Gaussian to each bead to measure width/brightness and "
@@ -221,6 +222,7 @@ class VideoParticleTrackingUI:
         form.addRow(self._fit_quality)
 
         self._exclude_agg = QCheckBox("Route aggregates to a secondary population")
+        self._exclude_agg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._exclude_agg.setChecked(True)
         self._exclude_agg.setToolTip(
             "Keep aggregates OUT of the primary microrheology set (their "
@@ -230,6 +232,7 @@ class VideoParticleTrackingUI:
         form.addRow(self._exclude_agg)
 
         self._recover_defocus = QCheckBox("Keep recoverable out-of-plane beads")
+        self._recover_defocus.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._recover_defocus.setChecked(True)
         self._recover_defocus.setToolTip(
             "Keep beads flagged as out-of-plane/defocused (larger, dimmer). "
@@ -351,6 +354,7 @@ class VideoParticleTrackingUI:
         ml = QVBoxLayout(method_grp)
         ml.setContentsMargins(4, 4, 4, 4); ml.setSpacing(3)
         self._rb_trackmate = QRadioButton("TrackMate LAP  (recommended)")
+        self._rb_trackmate.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_bayesian  = QRadioButton("Bayesian / Hungarian")
         self._rb_greedy    = QRadioButton("Greedy nearest-neighbour")
         self._rb_trackmate.setChecked(True)
@@ -525,7 +529,7 @@ class VideoParticleTrackingUI:
 
         try:
             msd_df = compute_msd(
-                tracks, microns_per_pixel=1.0,
+                tracks,
                 frame_interval_s=self._frame_dt.value(),
                 min_track_length=self._min_track.value())
             fit = fit_anomalous_diffusion(msd_df)
@@ -550,6 +554,28 @@ class VideoParticleTrackingUI:
             'temperature_C': self._temp_C.value(),
             'min_track_length': self._min_track.value(),
             'D_um2_per_s': D, 'alpha': alpha, 'eta_Pa_s': eta})
+
+        # Graphs: the MSD spaghetti plot (per-track + ensemble mean + fit) and
+        # the viscoelastic moduli G'/G''. These communicate the result far better
+        # than a table; the numbers stay available in the summary table below.
+        try:
+            from pycat.toolbox.condensate_physics_tools import (
+                per_track_msd_curves, compute_moduli_gser)
+            from pycat.toolbox.analysis_plots import (
+                plot_msd_trajectories, plot_moduli)
+            ptc = per_track_msd_curves(
+                tracks, frame_interval_s=self._frame_dt.value(),
+                min_track_length=self._min_track.value())
+            plot_msd_trajectories(ptc, msd_df, fit,
+                                  title="VPT MSD (per-track + ensemble)",
+                                  interactive=True)
+            mod = compute_moduli_gser(msd_df, self._bead_radius.value(),
+                                      self._temp_C.value(), dimensions=2)
+            self._dr()['vpt_moduli_df'] = mod
+            if len(mod):
+                plot_moduli(mod, interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] VPT plots failed: {e}")
 
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog

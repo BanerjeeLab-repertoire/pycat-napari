@@ -43,6 +43,7 @@ from pycat.toolbox.image_processing_tools import apply_rescale_intensity, rb_gau
 # CUDA context on every Cellpose call. The actual check is deferred until
 # first use so module import stays fast.
 _CELLPOSE_USE_GPU = None
+_WARNED_CPU = False
 
 def _get_cellpose_gpu():
     global _CELLPOSE_USE_GPU
@@ -722,6 +723,25 @@ def cellpose_segmentation(image, object_diameter, model_name=None):
     if model_name is None:
         model_name = default_cellpose_model()
     model = _build_cellpose_model(model_name)
+
+    # Warn CPU-only users once per session — Cellpose is much slower without a
+    # CUDA GPU, and the large Cellpose-SAM (cpsam) model on Cellpose >= 4 can
+    # take minutes per image on CPU.
+    global _WARNED_CPU
+    if not _get_cellpose_gpu() and not _WARNED_CPU:
+        _WARNED_CPU = True
+        if _cellpose_major_version() >= 4:
+            napari_show_warning(
+                "Cellpose is running on CPU (no CUDA GPU detected). The "
+                "Cellpose-SAM model is very slow on CPU — expect minutes per "
+                "image. For speed, install CUDA PyTorch or switch to the cyto2 "
+                "model (cellpose<4). See the README GPU section.")
+        else:
+            napari_show_warning(
+                "Cellpose is running on CPU (no CUDA GPU detected). Segmentation "
+                "will be slower than on GPU. To enable GPU acceleration, install "
+                "CUDA PyTorch: pip install torch torchvision --index-url "
+                "https://download.pytorch.org/whl/cu118")
 
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing

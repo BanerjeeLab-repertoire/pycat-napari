@@ -109,6 +109,7 @@ class FRAPUI:
         form.addRow("Recovery stack:", self._rec_dd)
 
         self._multi_roi = QCheckBox("Multiple bleach ROIs (Mosaic / MicroPoint)")
+        self._multi_roi.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._multi_roi.setChecked(False)
         self._multi_roi.setToolTip(
             "For Andor Fusion Mosaic / MicroPoint acquisitions with several "
@@ -265,6 +266,7 @@ class FRAPUI:
         form.addRow("Bleach→recovery lag (s):", self._time_lag)
 
         self._photofade = QCheckBox("Photofading correction (reference ROI)")
+        self._photofade.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._photofade.setChecked(True)
         self._photofade.setToolTip(
             "Correct the bleach curve for acquisition photobleaching using the "
@@ -272,6 +274,7 @@ class FRAPUI:
         form.addRow(self._photofade)
 
         self._taylor = QCheckBox("Taylor et al. normalization")
+        self._taylor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._taylor.setChecked(True)
         self._taylor.setToolTip(
             "ON (Taylor / Brangwynne): I_norm = (I−I_0)/(I_pre−I_0), rescaling "
@@ -303,8 +306,11 @@ class FRAPUI:
         ml = QVBoxLayout(model_grp)
         ml.setContentsMargins(4, 2, 4, 2); ml.setSpacing(2)
         self._rb_empirical = QRadioButton("Empirical  I(t)=(a+b·t/τ½)/(1+t/τ½)  → τ½, mobile frac")
+        self._rb_empirical.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_rd        = QRadioButton("Reaction-diffusion (rectangular)  → D, k_off, mobile/bound frac")
+        self._rb_rd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_circ      = QRadioButton("Circular Soumpasis  → D (µm²/s), mobile frac")
+        self._rb_circ.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._rb_empirical.setChecked(True)
         self._rb_empirical.setToolTip("Empirical recovery model — reports a recovery half-time τ½.")
         self._rb_rd.setToolTip(
@@ -321,6 +327,7 @@ class FRAPUI:
         form.addRow(model_grp)
 
         self._fit_koff = QCheckBox("Fit k_off (reaction-diffusion; off = pure diffusion)")
+        self._fit_koff.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._fit_koff.setChecked(True)
         self._fit_koff.setToolTip(
             "Reaction-diffusion only. On: fit binding off-rate k_off. "
@@ -336,6 +343,7 @@ class FRAPUI:
             "physical dimensions for the reaction-diffusion fit.")
         self._pixel_um.setVisible(False)
         self._pixel_um_label = QLabel("Pixel size (µm/px):")
+        self._pixel_um_label.setWordWrap(True)
         form.addRow(self._pixel_um_label, self._pixel_um)
 
         self._bleach_radius = QDoubleSpinBox()
@@ -347,6 +355,7 @@ class FRAPUI:
             "from the ROI area if this is left at its default and a mask exists.")
         self._bleach_radius.setVisible(False)
         self._bleach_radius_label = QLabel("Bleach radius (µm):")
+        self._bleach_radius_label.setWordWrap(True)
         form.addRow(self._bleach_radius_label, self._bleach_radius)
 
         def _on_model():
@@ -549,6 +558,14 @@ class FRAPUI:
                 }])
                 tables.insert(0, ('Circular Soumpasis fit', circ_df))
             tables.append(('Recovery curve', result['results_df'].round(4)))
+            # Graph: the recovery curve with the fitted model — the core FRAP plot.
+            try:
+                from pycat.toolbox.analysis_plots import plot_frap_recovery
+                rdf = result['results_df']
+                plot_frap_recovery(rdf['time_s'].values, rdf['normalized'].values,
+                                   fit, title="FRAP recovery", interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] FRAP plot failed: {e}")
             show_dataframes_dialog("FRAP Results", tables)
         except Exception:
             pass

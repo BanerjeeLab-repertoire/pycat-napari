@@ -348,10 +348,12 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
     form.addRow("Min fit R²:", r2_spin)
 
     add_pts = QCheckBox("Add refined sub-pixel points layer")
+    add_pts.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     add_pts.setChecked(True)
     form.addRow(add_pts)
 
     add_mask = QCheckBox("Add binary peak mask (1 at each located spot)")
+    add_mask.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     add_mask.setChecked(False)
     add_mask.setToolTip(
         "Output a binary mask with a 1 at each localized spot's pixel — a "

@@ -515,7 +515,8 @@ def _baseline_onset(temp: np.ndarray, signal: np.ndarray,
 
 def detect_transitions(turbidity_df: pd.DataFrame,
                        signal_column: str = 'entropy_corrected',
-                       method: str = 'baseline') -> dict:
+                       method: str = 'baseline',
+                       frac: float = 0.12) -> dict:
     """
     Split the turbidity curve into heating and cooling branches at the
     maximum-temperature frame and estimate the transition temperatures.
@@ -541,10 +542,11 @@ def detect_transitions(turbidity_df: pd.DataFrame,
     cooling = df.iloc[loc:]
 
     _detect = _sigmoid_midpoint if method == 'midpoint' else _baseline_onset
+    _kw = {} if method == 'midpoint' else {'frac': frac}
     h_mid = _detect(heating['temperature_C'].values,
-                    heating[signal_column].values) if len(heating) > 4 else np.nan
+                    heating[signal_column].values, **_kw) if len(heating) > 4 else np.nan
     c_mid = _detect(cooling['temperature_C'].values,
-                    cooling[signal_column].values) if len(cooling) > 4 else np.nan
+                    cooling[signal_column].values, **_kw) if len(cooling) > 4 else np.nan
 
     def _rises(s):
         """True if the signal is higher at the end of the branch than the start."""
@@ -801,33 +803,37 @@ def plot_turbidity_transitions(df, transitions, signal_column='entropy',
     y0, y1 = ax.get_ylim()
     yr = y1 - y0
 
-    def _annotate(T, label, going_up, color):
-        """Vertical guide at temperature T with a staggered, non-clipping label."""
+    def _annotate(T, label, arrow_up, color):
+        """Vertical guide at T with a directional arrow that respects the
+        temperature sweep: heating (T rising) → arrow points up, cooling
+        (T falling) → arrow points down."""
         if not np.isfinite(T):
             return
         ax.axvline(T, color=color, ls='--', lw=1.1, alpha=0.55)
-        # One label sits high with a downward arrow, the other low with an
-        # upward arrow, so nearby T values don't collide.
-        if going_up:
-            ytext = y1 - 0.06 * yr; va = 'top'
-        else:
-            ytext = y0 + 0.06 * yr; va = 'bottom'
-        ax.annotate(f"{label}\n{T:.2f} \u00b0C",
-                    xy=(T, (y0 + y1) / 2), xytext=(T, ytext),
-                    ha='center', va=va, fontsize=9, fontweight='bold',
-                    color='0.15',
-                    bbox=dict(boxstyle='round,pad=0.25', fc='white', ec=color,
-                              alpha=0.92),
-                    arrowprops=dict(arrowstyle='->', color=color, lw=1.0,
-                                    alpha=0.8))
+        if arrow_up:                       # heating: temperature rising
+            y_tail, y_head = y0 + 0.12 * yr, y0 + 0.34 * yr
+            ytext = y0 + 0.02 * yr; va = 'bottom'
+        else:                              # cooling: temperature falling
+            y_tail, y_head = y1 - 0.12 * yr, y1 - 0.34 * yr
+            ytext = y1 - 0.02 * yr; va = 'top'
+        ax.annotate('', xy=(T, y_head), xytext=(T, y_tail),
+                    arrowprops=dict(arrowstyle='-|>', color=color, lw=1.8,
+                                    alpha=0.9))
+        ax.text(T, ytext, f"{label}\n{T:.2f} \u00b0C", ha='center', va=va,
+                fontsize=9, fontweight='bold', color='0.15',
+                bbox=dict(boxstyle='round,pad=0.25', fc='white', ec=color,
+                          alpha=0.92))
 
     _RED, _BLUE = '#d62728', '#1f77b4'
-    cloud_color = _RED if transitions.get('cloud_branch') == 'heating' else _BLUE
-    clear_color = _RED if transitions.get('clear_branch') == 'heating' else _BLUE
-    _annotate(transitions.get('T_phase_C'), 'T$_{cloud}$', going_up=True,
-              color=cloud_color)
-    _annotate(transitions.get('T_clear_C'), 'T$_{clear}$', going_up=False,
-              color=clear_color)
+    cloud_branch = transitions.get('cloud_branch')
+    clear_branch = transitions.get('clear_branch')
+    cloud_color = _RED if cloud_branch == 'heating' else _BLUE
+    clear_color = _RED if clear_branch == 'heating' else _BLUE
+    # heating branch → arrow up (T rising), cooling branch → arrow down.
+    _annotate(transitions.get('T_phase_C'), 'T$_{cloud}$',
+              arrow_up=(cloud_branch == 'heating'), color=cloud_color)
+    _annotate(transitions.get('T_clear_C'), 'T$_{clear}$',
+              arrow_up=(clear_branch == 'heating'), color=clear_color)
 
     ax.set_xlabel('temperature (\u00b0C)')
     ax.set_ylabel(signal_column.replace('_', ' '))
@@ -842,3 +848,92 @@ def plot_turbidity_transitions(df, transitions, signal_column='entropy',
     if interactive:
         plt.show(block=False)
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Batch phase diagram: parse filenames → (x-variable, replicate) → boundary
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+# number + unit tokens commonly used for the swept variable
+_CONC_UNITS = r'(?:mg[\s_/]*p?m?L|mg/?ml|ug/?ml|µg/?ml|mM|uM|µM|nM|M|%|wt%|v/v)'
+_TOKEN_RE = _re.compile(r'([0-9]*\.?[0-9]+)\s*[_\- ]?(' + _CONC_UNITS + r')', _re.I)
+_REPEAT_RE = _re.compile(r'(?:pos|rep|replicate|r|n|trial|fov)[\s_\-]?([0-9]+)', _re.I)
+
+
+def parse_batch_filenames(filenames):
+    """
+    Parse a set of batch TIFF filenames into a swept x-axis variable and
+    replicate groupings for a phase diagram.
+
+    Strategy: extract every "<number><unit>" token from each name, keyed by
+    (unit, position-within-name) so a constant buffer (e.g. 50 mM HEPES) is not
+    confused with a swept salt (e.g. 150–1500 mM). The (unit, position) whose
+    VALUE varies across the batch is the swept variable; if more than one varies,
+    or none does, parsing fails and the caller should ask the user.
+
+    Returns a dict:
+        ok         : bool
+        reason     : str (why parsing failed, if ok is False)
+        x_name     : label of the swept variable (e.g. 'mM')
+        per_file   : list of {file, x_value, replicate}
+        candidates : varying/ambiguous tokens found (for user disambiguation)
+    """
+    import os
+    from collections import defaultdict
+    parsed = []
+    for f in filenames:
+        base = os.path.basename(str(f))
+        toks = _TOKEN_RE.findall(base)
+        d = defaultdict(list)
+        for val, unit in toks:
+            u = unit.lower().replace(' ', '').replace('_', '')
+            d[u].append(float(val))
+        rep = _REPEAT_RE.search(base)
+        parsed.append({'file': base, 'tokens': dict(d),
+                       'replicate': int(rep.group(1)) if rep else None})
+
+    n = len(parsed)
+    # candidate = (unit, position); collect its value per file
+    col = defaultdict(dict)
+    for i, p in enumerate(parsed):
+        for unit, vals in p['tokens'].items():
+            for pos, v in enumerate(vals):
+                col[(unit, pos)][i] = v
+    # a candidate is "swept" if present in most files and takes ≥2 distinct values
+    varying = {k: d for k, d in col.items()
+               if len(d) >= max(2, 0.5 * n) and len(set(d.values())) >= 2}
+
+    def _label(key):
+        unit, pos = key
+        return unit if pos == 0 else f"{unit}#{pos + 1}"
+
+    if not varying:
+        return dict(ok=False, x_name=None, per_file=[],
+                    candidates=[_label(k) for k in col],
+                    reason=("Could not find a swept variable in the filenames: no "
+                            "number+unit token (e.g. '150mM', '3mgpmL') varies "
+                            "across the batch. Please specify the x-axis variable."))
+    if len(varying) > 1:
+        return dict(ok=False, x_name=None, per_file=[],
+                    candidates=[_label(k) for k in varying],
+                    reason=("More than one variable changes across the filenames "
+                            f"({', '.join(_label(k) for k in varying)}). Please "
+                            "specify which is the x-axis variable."))
+
+    key = next(iter(varying))
+    unit, pos = key
+    per_file = []
+    for i, p in enumerate(parsed):
+        vals = p['tokens'].get(unit)
+        if not vals or pos >= len(vals):
+            continue
+        per_file.append({'file': p['file'], 'x_value': float(vals[pos]),
+                         'replicate': p['replicate']})
+    if len(per_file) < 2:
+        return dict(ok=False, x_name=_label(key), per_file=per_file,
+                    candidates=[_label(k) for k in varying],
+                    reason="Not enough files carry the swept variable to plot.")
+    return dict(ok=True, reason='', x_name=_label(key), per_file=per_file,
+                candidates=[_label(k) for k in varying])

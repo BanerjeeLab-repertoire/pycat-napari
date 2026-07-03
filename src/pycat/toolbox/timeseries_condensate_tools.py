@@ -55,6 +55,7 @@ from napari.utils.notifications import (
     show_warning as napari_show_warning,
 )
 from PyQt5.QtWidgets import (
+    QSizePolicy,
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QCheckBox, QSpinBox, QDoubleSpinBox, QGroupBox, QFormLayout,
     QProgressBar,
@@ -561,6 +562,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow("", preprocess_check)
 
     bg_check = QCheckBox("Background removal each frame")
+    bg_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     bg_check.setChecked(True)
     form.addRow("", bg_check)
 
@@ -582,6 +584,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow(check_corr_btn)
 
     pseudo3d_temporal_cb = QCheckBox("Pseudo-3D temporal filtering (tri-planar across T)")
+    pseudo3d_temporal_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     pseudo3d_temporal_cb.setChecked(False)
     pseudo3d_temporal_cb.setToolTip(
         "Runs Gaussian pre-smoothing and Gabor edge-enhancement along XY, "
@@ -819,6 +822,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         prog_bar.setValue(0)
         prog_bar.setVisible(False)
         prog_label = QLabel("")
+        prog_label.setWordWrap(True)
         prog_label.setVisible(False)
         build_btn.parent().layout().addWidget(prog_label)
         build_btn.parent().layout().addWidget(prog_bar)
@@ -1675,10 +1679,12 @@ def _add_run_timeseries_condensate_analysis(
     opts_layout.addRow("Reference frame:", ref_spin)
 
     drift_checkbox = QCheckBox("Apply drift correction (phase cross-correlation)")
+    drift_checkbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     drift_checkbox.setChecked(True)
     opts_layout.addRow("", drift_checkbox)
 
     spatial_checkbox = QCheckBox("Compute per-frame spatial metrics")
+    spatial_checkbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     spatial_checkbox.setChecked(True)
     spatial_checkbox.setToolTip(
         "For each cell at each frame, compute:\n"
@@ -1696,6 +1702,7 @@ def _add_run_timeseries_condensate_analysis(
 
     # Extended spatial options — shown when spatial_checkbox is checked
     ripley_checkbox = QCheckBox("Also compute Ripley's L and PCF  [slower]")
+    ripley_checkbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     ripley_checkbox.setChecked(False)
     ripley_checkbox.setEnabled(True)
     ripley_checkbox.setToolTip(
@@ -1749,6 +1756,7 @@ def _add_run_timeseries_condensate_analysis(
     from PyQt5.QtWidgets import QHBoxLayout as _QHL2, QPushButton as _QPB2
     preset_row = _QHL2()
     preset_lbl = QLabel("Preset:")
+    preset_lbl.setWordWrap(True)
     preset_lbl.setStyleSheet("font-size:9pt; color:#aaa;")
     preset_row.addWidget(preset_lbl)
 
@@ -1778,6 +1786,7 @@ def _add_run_timeseries_condensate_analysis(
     ref_layout.addRow(preset_row)
 
     per_frame_norm_cb = QCheckBox("Per-frame intensity normalisation")
+    per_frame_norm_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     per_frame_norm_cb.setChecked(False)
     per_frame_norm_cb.setToolTip(
         "Normalise each frame's pixel intensities to [0, 1] within the\n"

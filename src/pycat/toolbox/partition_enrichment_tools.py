@@ -52,29 +52,57 @@ def client_enrichment(
     cell_mask: Optional[np.ndarray] = None,
     dilute_dilation_px: int = 0,
     background: float = 0.0,
+    background_mask: Optional[np.ndarray] = None,
 ) -> dict:
     """
-    Global client enrichment: mean(client in dense) / mean(client in dilute).
+    Global client partition coefficient:  K = (dense − bg) / (dilute − bg).
+
+    What "background" means here
+    ----------------------------
+    The only legitimate background to subtract is the **instrument / camera
+    offset** — the additive signal present in every pixel regardless of sample
+    (dark counts + read offset), measured from a genuinely fluorophore-free
+    region (outside the cell, or a dark/blank frame). It must be subtracted
+    because an additive offset b makes (C_dense+b)/(C_dilute+b) ≠ K and biases
+    the ratio toward 1.
+
+    The **dilute phase is NOT background.** In a cell the dilute phase (the
+    surrounding cyto/nucleoplasm) is real client signal and is the denominator
+    of the partition coefficient. Subtracting "the region outside the
+    condensate" as background would be subtracting the dilute phase from itself
+    and destroy the measurement. So supply `background`/`background_mask` only
+    from a truly signal-free region; leave it at 0 if you have no such region
+    (the dense and dilute means are then reported raw and you can subtract an
+    offset yourself).
 
     Parameters
     ----------
-    client_image : (H, W) intensity image of the client channel (B).
-    dense_mask : (H, W) binary/int mask of the condensates (from channel A).
+    client_image : (H, W) intensity image of the client channel.
+    dense_mask : (H, W) binary/int mask of the condensates.
     cell_mask : optional (H, W) mask bounding the dilute region. If None, the
         dilute region is everything outside the dense mask.
     dilute_dilation_px : if >0, the dilute region is a shell of this thickness
-        around each condensate (dense dilated minus dense), giving a LOCAL
-        background rather than the whole cell. 0 = use the full cell/outside.
-    background : constant to subtract from the client image before ratioing
-        (e.g. camera offset). Values are floored at 0 after subtraction.
+        around each condensate (local dilute) rather than the whole cell.
+    background : scalar instrument offset to subtract (used if background_mask
+        is None). 0 = no subtraction.
+    background_mask : optional (H, W) mask of a signal-free region; its mean is
+        used as the instrument offset (overrides `background`).
 
     Returns
     -------
-    dict with dense_mean, dilute_mean, enrichment, n_dense_px, n_dilute_px.
+    dict with dense_mean, dilute_mean (both background-subtracted),
+        dense_mean_raw, dilute_mean_raw (before subtraction), background,
+        enrichment (K), n_dense_px, n_dilute_px.
     """
-    img = np.asarray(client_image, dtype=float) - float(background)
-    img = np.clip(img, 0, None)
+    img = np.asarray(client_image, dtype=float)
     dense = np.asarray(dense_mask) > 0
+
+    # Instrument background: from a signal-free region if given, else the scalar.
+    if background_mask is not None:
+        bgm = np.asarray(background_mask) > 0
+        bg = float(img[bgm].mean()) if bgm.any() else float(background)
+    else:
+        bg = float(background)
 
     if dilute_dilation_px > 0:
         dilated = ndi.binary_dilation(dense, iterations=int(dilute_dilation_px))
@@ -89,11 +117,17 @@ def client_enrichment(
 
     n_dense = int(dense.sum())
     n_dilute = int(dilute.sum())
-    dense_mean = float(img[dense].mean()) if n_dense else np.nan
-    dilute_mean = float(img[dilute].mean()) if n_dilute else np.nan
-    enrichment = (dense_mean / dilute_mean) if (dilute_mean and dilute_mean > 0) else np.nan
-    return dict(dense_mean=dense_mean, dilute_mean=dilute_mean,
-                enrichment=enrichment, n_dense_px=n_dense, n_dilute_px=n_dilute)
+    # Means on the RAW image (no clipping — clipping negatives after background
+    # subtraction biases means that sit near the background level).
+    dense_raw = float(img[dense].mean()) if n_dense else np.nan
+    dilute_raw = float(img[dilute].mean()) if n_dilute else np.nan
+    dense_c = dense_raw - bg
+    dilute_c = dilute_raw - bg
+    enrichment = (dense_c / dilute_c) if (np.isfinite(dilute_c) and dilute_c > 0) else np.nan
+    return dict(dense_mean=dense_c, dilute_mean=dilute_c,
+                dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
+                background=bg, enrichment=enrichment,
+                n_dense_px=n_dense, n_dilute_px=n_dilute)
 
 
 def client_enrichment_per_condensate(
@@ -334,6 +368,12 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
                 'global_enrichment': glob['enrichment'],
                 'n_condensates': int(len(per_cond))})
 
+        try:
+            from pycat.toolbox.analysis_plots import plot_enrichment_distribution
+            if len(per_cond):
+                plot_enrichment_distribution(per_cond, interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] enrichment plot failed: {e}")
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
             overview = pd.DataFrame([{

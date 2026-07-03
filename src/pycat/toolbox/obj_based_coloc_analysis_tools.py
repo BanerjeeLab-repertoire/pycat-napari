@@ -592,6 +592,7 @@ class obcaDialog(QDialog):
         """
         section_layout = QVBoxLayout()
         section_label = QLabel(title)
+        section_label.setWordWrap(True)
         section_layout.addWidget(section_label)
 
         for option in options:

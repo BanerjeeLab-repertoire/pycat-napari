@@ -348,9 +348,13 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     method_layout.setContentsMargins(4, 4, 4, 4)
 
     rb_cellpose = QRadioButton("Cellpose  (deep learning, recommended)")
+    rb_cellpose.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_stardist = QRadioButton("StarDist  (star-convex, nuclei)")
+    rb_stardist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_rf       = QRadioButton("Random Forest  (pixel classifier)")
+    rb_rf.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_otsu     = QRadioButton("Multi-Otsu  (no seg. channel needed)")
+    rb_otsu.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     rb_cellpose.setChecked(True)
     rb_cellpose.setToolTip("Deep-learning cell/nuclei segmentation. Works on most image types.")
     rb_stardist.setToolTip("Star-convex shape model, optimized for round nuclei. Requires pip install stardist.")
@@ -368,6 +372,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     rf_ann_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     rf_ann_dd.setToolTip("Labels layer with annotated pixels for Random Forest training.")
     rf_ann_row_lbl = QLabel("RF annotation:")
+    rf_ann_row_lbl.setWordWrap(True)
     rf_ann_container = QWidget()
     rf_ann_row = QHBoxLayout(rf_ann_container)
     rf_ann_row.setContentsMargins(2,0,0,0)
@@ -399,6 +404,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
 
     # ── Upscaling ─────────────────────────────────────────────────────────
     upscale_check = QCheckBox("Upscale keyframes  (recommended for ≤512px)")
+    upscale_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     upscale_check.setChecked(False)
     upscale_check.setToolTip(
         "Upscale each keyframe before segmentation and rescale the\n"
@@ -418,6 +424,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
 
     # ── Max-projection ────────────────────────────────────────────────────
     max_proj_check = QCheckBox("Merge all keyframe masks (max-projection)")
+    max_proj_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     max_proj_check.setChecked(False)
     max_proj_check.setToolTip(
         "OFF (default): each frame uses the nearest keyframe mask —\n"
@@ -431,6 +438,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     progress_bar = QProgressBar()
     progress_bar.setVisible(False)
     progress_label = QLabel("")
+    progress_label.setWordWrap(True)
     progress_label.setVisible(False)
 
     run_btn = QPushButton("▶  Run Cell Segmentation")

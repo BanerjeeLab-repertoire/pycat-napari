@@ -1214,7 +1214,10 @@ class FileIOClass:
                 image_layer = imgs[-1]
             sb = self.viewer.scale_bar
             sb.visible = True
-            if from_meta and mpx_sq and abs(float(mpx_sq) - 1.0) > 1e-9:
+            # Show a µm bar whenever a real pixel size is known — from metadata
+            # OR entered by the user (e.g. via the pixel-size gate). Only fall
+            # back to pixels when no valid scale exists.
+            if mpx_sq and abs(float(mpx_sq) - 1.0) > 1e-9:
                 px = float(mpx_sq) ** 0.5
                 sc = list(image_layer.scale)
                 sc[-1] = px; sc[-2] = px

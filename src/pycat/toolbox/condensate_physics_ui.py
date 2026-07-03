@@ -72,16 +72,20 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     lag_spin = QSpinBox();       lag_spin.setRange(2, 500);    lag_spin.setValue(0)
     lag_spin.setToolTip("Max lag frames (0 = auto: n_frames/4)")
     min_len  = QSpinBox();       min_len.setRange(3, 50);      min_len.setValue(5)
+    min_len.setToolTip("Minimum trajectory length (frames). Shorter tracks are excluded from the MSD.")
     mf.addRow("Frame interval (s):", dt_spin)
     mf.addRow("Max lag frames (0=auto):", lag_spin)
     mf.addRow("Min track length:", min_len)
 
     per_track_cb = QCheckBox("Also fit per-track diffusion")
+    per_track_cb.setToolTip("Also fit D and α for each individual track (slower; adds a per-track table).")
+    per_track_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     per_track_cb.setChecked(True)
     mf.addRow(per_track_cb)
 
     prog_msd = QProgressBar(); prog_msd.setVisible(False)
     run_msd  = QPushButton("▶  Run MSD Analysis")
+    run_msd.setToolTip("Compute the ensemble MSD, fit anomalous diffusion (D, α), and plot the per-track and mean MSD curves.")
     run_msd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     mf.addRow(prog_msd); mf.addRow(run_msd)
 
@@ -110,6 +114,10 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
                                   min_track_length=min_len.value())
             fit    = fit_anomalous_diffusion(msd_df)
             res    = {'msd': msd_df, 'fit': fit}
+            from pycat.toolbox.condensate_physics_tools import per_track_msd_curves
+            res['track_curves'] = per_track_msd_curves(
+                tracks, frame_interval_s=dt_spin.value(),
+                min_track_length=min_len.value())
             if per_track_cb.isChecked():
                 res['per_track'] = msd_per_track(tracks, dt_spin.value(), min_len.value())
             return res
@@ -129,6 +137,13 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             if 'per_track' in res:
                 tables.append(("Per-track D and α", res['per_track'].round(4)))
                 dr['msd_per_track'] = res['per_track']
+            # Graph: MSD spaghetti (per-track faint + ensemble mean + fit).
+            try:
+                from pycat.toolbox.analysis_plots import plot_msd_trajectories
+                plot_msd_trajectories(res.get('track_curves'), res['msd'], fit,
+                                      title="Condensate MSD", interactive=True)
+            except Exception as e:
+                print(f"[PyCAT] MSD plot failed: {e}")
             show_dataframes_dialog("MSD Analysis", tables)
             napari_show_info(
                 f"MSD: D={fit.get('D_um2_per_s', np.nan):.4f} µm²/s, "
@@ -154,10 +169,12 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     hf.addRow("Labeled cell mask:", cell_dd)
 
     bins_spin = QSpinBox(); bins_spin.setRange(32, 512); bins_spin.setValue(256)
+    bins_spin.setToolTip("Histogram bins for the two-population (dilute vs dense) intensity fit.")
     hf.addRow("Histogram bins:", bins_spin)
 
     prog_hist = QProgressBar(); prog_hist.setVisible(False)
     run_hist  = QPushButton("▶  Fit Bimodal Intensity")
+    run_hist.setToolTip("Fit a two-Gaussian model per cell to separate dilute- and dense-phase intensities.")
     run_hist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     hf.addRow(prog_hist); hf.addRow(run_hist)
 
@@ -197,14 +214,27 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     # ── Tab 3: Kinetics ──────────────────────────────────────────────────
     kin_w = QWidget(); kf = QFormLayout(kin_w)
-    kf.addRow(QLabel("Coarsening kinetics — uses timeseries_condensate_df from TS Analysis."))
+    _wl = QLabel("Coarsening kinetics — uses timeseries_condensate_df from TS Analysis."); _wl.setWordWrap(True)
+    kf.addRow(_wl)
     dt_kin = QDoubleSpinBox(); dt_kin.setRange(0.01, 3600); dt_kin.setValue(1.0)
     kf.addRow("Frame interval (s):", dt_kin)
     run_coarse = QPushButton("▶  Fit Coarsening Kinetics")
+    run_coarse.setToolTip("Fit mean radius vs time to t^⅓ (Ostwald) and t^½ (coalescence); reports the preferred mechanism and confidence.")
     run_coarse.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    kf.addRow(run_coarse)
+
+    # Fusion relaxation controls
+    fus_stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
+    kf.addRow("Fusion mask stack (T,H,W):", fus_stack_dd)
+    fus_R = QDoubleSpinBox(); fus_R.setRange(0.0, 100.0); fus_R.setDecimals(3)
+    fus_R.setValue(0.0); fus_R.setSuffix(" µm")
+    fus_R.setToolTip("Characteristic droplet length R for η/γ = τ/R. "
+                     "0 = use the merged droplet's equivalent radius automatically.")
+    kf.addRow("Fusion length R:", fus_R)
     run_fusion = QPushButton("▶  Fit Fusion Relaxation (from merge events)")
+    run_fusion.setToolTip("Detect droplet merges, follow the merged droplet's aspect-ratio relaxation, and fit τ (and η/γ if R is set).")
     run_fusion.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    kf.addRow(run_coarse); kf.addRow(run_fusion)
+    kf.addRow(run_fusion)
 
     def _on_coarsen():
         from pycat.toolbox.condensate_physics_tools import fit_coarsening
@@ -218,20 +248,58 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         r_mean  = np.sqrt(summary.values / np.pi)
         res = fit_coarsening(time_s, r_mean)
         from pycat.ui.ui_utils import show_dataframes_dialog
-        df = pd.DataFrame([{k: v for k, v in res.items() if not hasattr(v,'__len__')}])
+        df = pd.DataFrame([{k: v for k, v in res.items() if not hasattr(v,'__len__') or isinstance(v, str)}])
         show_dataframes_dialog("Coarsening Kinetics", [("Coarsening fit", df.round(4))])
-        napari_show_info(f"Preferred mechanism: {res.get('preferred_mechanism','?')}")
+        try:
+            from pycat.toolbox.analysis_plots import plot_coarsening
+            plot_coarsening(time_s, r_mean, res, interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] coarsening plot failed: {e}")
+        mech = res.get('preferred_mechanism', '?')
+        conf = res.get('mechanism_confidence', '')
+        cav = res.get('mechanism_caveat', '')
+        msg = f"Preferred mechanism: {mech} (confidence: {conf})."
+        if cav:
+            msg += f" {cav}"
+        (napari_show_warning if conf == 'low' else napari_show_info)(msg)
 
     def _on_fusion():
-        from pycat.toolbox.condensate_physics_tools import fit_aspect_ratio_relaxation
-        from pycat.toolbox.dynamic_spatial_tools import detect_merge_fission
+        from pycat.toolbox.condensate_physics_tools import (
+            extract_fusion_relaxation, fit_aspect_ratio_relaxation)
         dr = ui_instance.central_manager.active_data_class.data_repository
-        ts_df = dr.get('timeseries_condensate_df')
-        if ts_df is None:
-            napari_show_warning("Run Time-Series Condensate Analysis first."); return
-        napari_show_info("Fusion relaxation fitting requires tracked condensate aspect ratios — "
-                         "use the Dynamic tab's trajectory data and fit manually or via the "
-                         "Advanced Analysis export.")
+        name = fus_stack_dd.currentText()
+        if name not in [l.name for l in ui_instance.viewer.layers]:
+            napari_show_warning("Select a labelled condensate mask stack first."); return
+        stack = np.asarray(ui_instance.viewer.layers[name].data)
+        if stack.ndim != 3:
+            napari_show_warning("Fusion needs a 3D (T,H,W) mask stack."); return
+        mpx = float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5
+        events = extract_fusion_relaxation(
+            stack, microns_per_pixel=mpx, frame_interval_s=dt_kin.value())
+        if not events:
+            napari_show_warning("No usable merge events found (need a merge that "
+                                "persists several frames)."); return
+        # Fit the event with the largest initial aspect ratio (clearest fusion).
+        ev = max(events, key=lambda e: float(np.max(e['aspect_ratio'])))
+        R = fus_R.value() if fus_R.value() > 0 else ev['R_um']
+        fit = fit_aspect_ratio_relaxation(
+            ev['time_s'], ev['aspect_ratio'], characteristic_length_um=R)
+        dr['fusion_relaxation_fit'] = fit
+        try:
+            from pycat.toolbox.analysis_plots import plot_fusion_relaxation
+            plot_fusion_relaxation(ev['time_s'], ev['aspect_ratio'], fit,
+                                   interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] fusion plot failed: {e}")
+        if fit.get('fit_success'):
+            eg = fit.get('eta_over_gamma_s_per_um', np.nan)
+            napari_show_info(
+                f"Fusion: τ={fit['tau_s']:.3g}s, R={R:.2g}µm, "
+                f"η/γ={eg:.3g} s/µm (R²={fit['r_squared']:.2f}); "
+                f"{len(events)} merge event(s) found.")
+        else:
+            napari_show_warning("Fusion fit did not converge — the merge may be "
+                                "too short or noisy.")
 
     run_coarse.clicked.connect(_on_coarsen)
     run_fusion.clicked.connect(_on_fusion)
@@ -280,6 +348,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     qf.addRow("Drift slope threshold:", drift_slope_spin)
 
     apply_cb = QCheckBox("Apply bleaching correction (adds corrected layer)")
+    apply_cb.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     apply_cb.setChecked(False)
     apply_cb.setToolTip(
         "When bleaching is detected, multiply each frame by the\n"
@@ -291,8 +360,10 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     prog_qc = QProgressBar(); prog_qc.setVisible(False)
     prog_qc.setFormat("Computing frame metrics… %p%")
     status_qc = QLabel("")
+    status_qc.setWordWrap(True)
     status_qc.setStyleSheet("color: #aaa; font-size: 9pt;")
     run_qc  = QPushButton("▶  Run QC Analysis")
+    run_qc.setToolTip("Compute per-frame quality metrics: mean intensity (bleaching), sharpness (focus), and drift.")
     run_qc.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     qf.addRow(prog_qc); qf.addRow(status_qc); qf.addRow(run_qc)
 
@@ -391,10 +462,13 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     # ── Survival analysis ─────────────────────────────────────────────────
     surv_w = QWidget(); sf = QFormLayout(surv_w)
-    sf.addRow(QLabel("Kaplan-Meier lifetime survival — uses dynamic tracking results."))
+    _wl = QLabel("Kaplan-Meier lifetime survival — uses dynamic tracking results."); _wl.setWordWrap(True)
+    sf.addRow(_wl)
     total_frames_spin = QSpinBox(); total_frames_spin.setRange(1,9999); total_frames_spin.setValue(600)
+    total_frames_spin.setToolTip("Total frames in the movie — condensates still present at the end are right-censored in the survival fit.")
     sf.addRow("Total frames in movie:", total_frames_spin)
     run_surv = QPushButton("▶  Kaplan-Meier Survival")
+    run_surv.setToolTip("Kaplan–Meier survival curve of condensate lifetimes (from dynamic tracking), with right-censoring.")
     run_surv.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     sf.addRow(run_surv)
 
@@ -407,6 +481,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         km = kaplan_meier_lifetimes(tracks, total_frames_spin.value())
         dr['km_survival'] = km
         from pycat.ui.ui_utils import show_dataframes_dialog
+        try:
+            from pycat.toolbox.analysis_plots import plot_km_survival
+            plot_km_survival(km, interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] KM plot failed: {e}")
         show_dataframes_dialog("Kaplan-Meier Survival", [("KM curve", km.round(4))])
         napari_show_info(
             f"KM: median lifetime = {km.attrs.get('median_lifetime_frames','?')} frames, "
