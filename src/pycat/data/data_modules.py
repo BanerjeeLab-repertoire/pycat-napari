@@ -101,6 +101,7 @@ class BaseDataClass:
             'cell_diameter': 100,
             'ball_radius': 75,
             'microns_per_pixel_sq': 1,
+            'pixel_size_from_metadata': False,
             'metadata': {},
             # Former AnalysisDataClass attributes
             'cell_df': pd.DataFrame(),
@@ -317,11 +318,14 @@ class BaseDataClass:
 
             if x_resolution is not None and y_resolution is not None:
                 self.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
+                # Provenance: a real physical pixel size came from the file.
+                self.data_repository['pixel_size_from_metadata'] = True
             else:
                 napari_show_warning(
                     "Resolution data incomplete, using default value of 1 (um/px)^2."
                 )
                 self.data_repository['microns_per_pixel_sq'] = 1
+                self.data_repository['pixel_size_from_metadata'] = False
 
             # Safely assign metadata
             if metadata:

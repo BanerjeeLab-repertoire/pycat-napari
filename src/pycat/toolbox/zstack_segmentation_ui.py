@@ -117,6 +117,7 @@ def _show(title, tables):
 def _add_zstack_bg_removal(ui, layout):
     grp  = QGroupBox("Step 2 \u2014 3D Background Removal")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Applies the standard 2D rolling-ball removal to each Z-slice "
@@ -195,6 +196,7 @@ def _add_zstack_bg_removal(ui, layout):
 def _add_zstack_cell_seg(ui, layout):
     grp  = QGroupBox("Step 3 \u2014 3D Cell Segmentation (optional)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Runs 2D Cellpose per Z-slice, then stitches labels into 3D "
@@ -263,6 +265,7 @@ def _add_zstack_cell_seg(ui, layout):
 def _add_zstack_condensate_seg(ui, layout):
     grp  = QGroupBox("Step 4 \u2014 3D Condensate Segmentation")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Runs the exact 2D condensate segmentation per Z-slice, then "
@@ -374,6 +377,7 @@ def sk_label(mask, connectivity):
 def _add_zstack_metrics(ui, layout):
     grp  = QGroupBox("Step 5 \u2014 3D Metrics")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     int_dd  = ui.create_layer_dropdown(napari.layers.Image)

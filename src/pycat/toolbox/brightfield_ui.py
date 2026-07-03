@@ -162,6 +162,7 @@ class BrightfieldCondensateUI:
 def _add_bf_preprocessing(ui, layout):
     grp  = QGroupBox("Step 2 — Preprocess Brightfield Image")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Brightfield image:", img_dd)
@@ -261,6 +262,7 @@ def _add_bf_preprocessing(ui, layout):
 def _add_bf_cell_segmentation(ui, layout):
     grp  = QGroupBox("Step 3 — Cell Segmentation (optional)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     note = QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
@@ -336,6 +338,7 @@ def _add_bf_cell_segmentation(ui, layout):
 def _add_bf_condensate_segmentation(ui, layout):
     grp  = QGroupBox("Step 4 — Segment Condensate Spots")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Enhanced BF image:", enh_dd)
@@ -407,6 +410,7 @@ def _add_bf_condensate_segmentation(ui, layout):
 def _add_bf_od_metrics(ui, layout):
     grp  = QGroupBox("Step 5 — Optical Density & Per-Condensate Metrics")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     note = QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
@@ -480,6 +484,7 @@ def _add_bf_od_metrics(ui, layout):
 def _add_bf_per_cell_summary(ui, layout):
     grp  = QGroupBox("Step 6 — Per-Cell Summary")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Aggregates per-condensate metrics to per-cell statistics.\n"
@@ -522,6 +527,7 @@ def _add_bf_per_cell_summary(ui, layout):
 def _add_bf_spatial(ui, layout):
     grp  = QGroupBox("Step 7 — Spatial Metrology")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "NND, Ripley's L, PCF, Voronoi, convex hull, etc.\n"
@@ -598,6 +604,7 @@ def _add_bf_spatial(ui, layout):
 def _add_bf_dynamics(ui, layout):
     grp  = QGroupBox("Step 8 — Tracking & Dynamics (time-series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Trajectory linking, MSD, coarsening, merge/fission.\n"
@@ -733,6 +740,7 @@ def _add_bf_dynamics(ui, layout):
 def _add_bf_texture(ui, layout):
     grp  = QGroupBox("Step 9 — OD Texture Features")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Entropy, kurtosis, skewness of the optical density distribution.\n"
@@ -783,6 +791,7 @@ def _add_bf_texture(ui, layout):
 def _add_bf_frame_qc(ui, layout):
     grp  = QGroupBox("Step 10 — Frame Quality (time-series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Focus and drift assessment for BF stacks.\n"

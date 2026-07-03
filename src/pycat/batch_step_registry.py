@@ -570,6 +570,35 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
           f"(layers: {selected})")
 
 
+def replay_calibration_correction(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Replay calibration-frame correction: reload the reference and apply it."""
+    import os
+    import numpy as np
+    from pycat.toolbox.image_processing_tools import (
+        apply_flatfield_correction, apply_background_subtraction)
+    calib = params.get('calibration_path', '')
+    if not calib or not os.path.exists(calib):
+        print('[PyCAT Batch]   Calibration correction skipped (reference file not found).')
+        return
+    import tifffile
+    ref = np.squeeze(np.asarray(tifffile.imread(calib), dtype=np.float32))
+    if ref.ndim == 3:
+        ref = np.median(ref, axis=0)
+    img = _normalize_to_float(state.get('preprocessed', state['image']))
+    if img.shape[-2:] != ref.shape[-2:]:
+        print(f'[PyCAT Batch]   Calibration correction skipped (shape {ref.shape} != image {img.shape[-2:]}).')
+        return
+    if params.get('method') == 'flatfield':
+        corrected = apply_flatfield_correction(img, ref)
+    else:
+        corrected = apply_background_subtraction(img, ref)
+    state['preprocessed'] = corrected
+    state['image'] = corrected
+    _save_array(corrected.astype(np.float32),
+                output_dir / f"{image_path.stem}_calibrated.tiff")
+    print(f"[PyCAT Batch]   Calibration correction ({params.get('method')}) applied.")
+
+
 def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay enhanced RB-Gaussian background removal on the preprocessed image."""
     from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
@@ -1066,6 +1095,7 @@ _STEP_MAP = {
     'upscaling':                replay_upscaling,
     'preprocessing':            replay_preprocessing,
     'background_removal':       replay_background_removal,
+    'calibration_correction':   replay_calibration_correction,
     'cellpose_segmentation':    replay_cellpose_segmentation,
     'cell_analysis':            replay_cell_analysis,
     'condensate_segmentation':  replay_condensate_segmentation,
@@ -1093,6 +1123,8 @@ _STEP_MAP = {
         '[PyCAT Batch]   IVF phase diagram skipped (dilution series; manual multi-condition input).'),
     'ivf_frame_qc':               lambda s,p,pa,o: print(
         '[PyCAT Batch]   IVF frame QC skipped (time-series; not a per-image batch step).'),
+    'msd_analysis':               lambda s,p,pa,o: print(
+        '[PyCAT Batch]   MSD / condensate biophysics skipped (time-series; not a per-image batch step).'),
     'ivbf_preprocess':            replay_ivbf_preprocess,
     'ivbf_segmentation':          replay_ivbf_segmentation,
     'zstack_bg_removal':              lambda s,p,pa,o: print(

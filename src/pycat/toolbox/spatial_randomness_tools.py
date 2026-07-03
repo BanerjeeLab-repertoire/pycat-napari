@@ -318,7 +318,7 @@ def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
 
     grp  = QGroupBox("Spatial Randomness (departure from noise)")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4)
+    form.setContentsMargins(4, 20, 4, 4)
     form.setSpacing(5)
 
     desc = QLabel(

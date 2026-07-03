@@ -1,3 +1,4 @@
+from PyQt5.QtWidgets import QSizePolicy
 """
 Labeled Mask and Binary Mask Module for PyCAT
 
@@ -545,6 +546,7 @@ class MeasurementDialog(QDialog):
         for prop in common_props:
             checkbox = QCheckBox(prop)
             textbox = QLineEdit()
+            textbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             textbox.setPlaceholderText(prop)
             self.common_layout.addRow(checkbox, textbox)
             self.checkboxes.append(checkbox)
@@ -567,6 +569,7 @@ class MeasurementDialog(QDialog):
             if prop not in common_props:
                 checkbox = QCheckBox(prop)
                 textbox = QLineEdit()
+                textbox.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
                 textbox.setPlaceholderText(prop)
                 self.scroll_layout.addRow(checkbox, textbox)
                 self.checkboxes.append(checkbox)

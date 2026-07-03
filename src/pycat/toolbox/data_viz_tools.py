@@ -1,3 +1,4 @@
+from PyQt5.QtWidgets import QSizePolicy
 """
 Data Visualization and Plotting Tools for PyCAT
 
@@ -243,7 +244,9 @@ class PlottingWidget(QWidget):
 
         # For X-limit and Y-limit
         self.x_limit = QLineEdit()
+        self.x_limit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.y_limit = QLineEdit()
+        self.y_limit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         limit_layout = QHBoxLayout()
         limit_layout.addWidget(QLabel("X-Limit:"))
         limit_layout.addWidget(self.x_limit)
@@ -328,7 +331,9 @@ class PlottingWidget(QWidget):
         self.hist_data_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
         # Create input fields for number of bins and bin width
         self.hist_bins_input = QLineEdit()
+        self.hist_bins_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.hist_bin_width_input = QLineEdit()
+        self.hist_bin_width_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
         # Radio buttons for 'cumulative' distribution function
         self.cumulative_true_radio = QRadioButton("True")

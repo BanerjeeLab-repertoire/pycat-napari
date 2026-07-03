@@ -939,8 +939,15 @@ class FileIOClass:
                     # Data is already in memory — wrap it directly (no disk copy).
                     wrapper = _ZarrTYX_generic(arr_ch)
                     self._stack_lazy_refs.append(arr_ch)
-                    self.viewer.add_image(wrapper, name=layer_name,
+                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
+                    # Show the current frame, not a projection — a stray
+                    # 'mean' projection mode averages the whole time-series
+                    # into a flat/black display.
+                    try:
+                        _stack_layer.projection_mode = 'none'
+                    except Exception:
+                        pass
                     napari_show_info(
                         f"Loaded {_ch_label}: {n_frames} frames "
                         f"{H}\u00d7{W}px → '{layer_name}'"
@@ -961,8 +968,15 @@ class FileIOClass:
                     dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
                     wrapper = _ZarrTYX_generic(dask_arr)
                     self._stack_lazy_refs.append((image, dask_arr))
-                    self.viewer.add_image(wrapper, name=layer_name,
+                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
+                    # Show the current frame, not a projection — a stray
+                    # 'mean' projection mode averages the whole time-series
+                    # into a flat/black display.
+                    try:
+                        _stack_layer.projection_mode = 'none'
+                    except Exception:
+                        pass
                     napari_show_info(
                         f"Loaded {_ch_label}{scene_suffix}: {n_t} frames "
                         f"{H}\u00d7{W}px → '{layer_name}' (lazy)"
@@ -974,8 +988,15 @@ class FileIOClass:
                     dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
                     wrapper = _ZarrTYX_generic(dask_arr)
                     self._stack_lazy_refs.append((image, dask_arr))
-                    self.viewer.add_image(wrapper, name=layer_name,
+                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
+                    # Show the current frame, not a projection — a stray
+                    # 'mean' projection mode averages the whole time-series
+                    # into a flat/black display.
+                    try:
+                        _stack_layer.projection_mode = 'none'
+                    except Exception:
+                        pass
                     napari_show_info(
                         f"Loaded {_ch_label}{scene_suffix} z-stack: {n_z} slices "
                         f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
@@ -999,8 +1020,15 @@ class FileIOClass:
                             z[t, zi] = np.asarray(dask_arr[t, zi]).astype(np.float32)
                     self._stack_zarr_paths.append(zarr_path)
                     wrapper = _ZarrTZYX_generic(_zarr.open(zarr_path, mode='r'))
-                    self.viewer.add_image(wrapper, name=layer_name,
+                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
                                           colormap=_ch_colormap)
+                    # Show the current frame, not a projection — a stray
+                    # 'mean' projection mode averages the whole time-series
+                    # into a flat/black display.
+                    try:
+                        _stack_layer.projection_mode = 'none'
+                    except Exception:
+                        pass
                     napari_show_info(
                         f"Loaded {_ch_label}{scene_suffix} T-Z stack: "
                         f"{n_t} timepoints \u00d7 {n_z} z-slices, "
@@ -1024,11 +1052,18 @@ class FileIOClass:
         dr['object_size']       = H // 20
         dr['cell_diameter']     = H // 8
         dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
+        # Provenance for the Set-Scale overwrite warning: a real microscope
+        # pixel size is essentially never exactly 1.0 µm/px, so treat 1.0 as the
+        # "no metadata" fallback and anything else as metadata-derived.
+        dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
 
         self.viewer.add_shapes(name='Object Diameter', shape_type='line',
                                edge_color='red', edge_width=2)
         self.viewer.add_shapes(name='Cell Diameter', shape_type='line',
                                edge_color='white', edge_width=5)
+
+        # Auto scale bar for the freshly-loaded stack.
+        self._enable_auto_scale_bar()
 
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
@@ -1156,6 +1191,47 @@ class FileIOClass:
             self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
     
 
+    def _enable_auto_scale_bar(self, image_layer=None):
+        """
+        Enable napari's scale bar for a freshly-loaded image.
+
+        - Real metadata pixel size  → µm bar: sets ``layer.scale`` (a display-only
+          transform that never touches ``layer.data`` or any calculation).
+        - No metadata               → pixel bar (scale left at 1).
+
+        NEVER sets ``layer.units`` — that is the confirmed cause of the black
+        canvas on lazy 3D stacks. The unit label comes from ``scale_bar.unit``.
+        """
+        try:
+            import napari.layers as _nl
+            dr = self.central_manager.active_data_class.data_repository
+            from_meta = bool(dr.get('pixel_size_from_metadata', False))
+            mpx_sq = dr.get('microns_per_pixel_sq', 1)
+            if image_layer is None:
+                imgs = [l for l in self.viewer.layers if isinstance(l, _nl.Image)]
+                if not imgs:
+                    return
+                image_layer = imgs[-1]
+            sb = self.viewer.scale_bar
+            sb.visible = True
+            if from_meta and mpx_sq and abs(float(mpx_sq) - 1.0) > 1e-9:
+                px = float(mpx_sq) ** 0.5
+                sc = list(image_layer.scale)
+                sc[-1] = px; sc[-2] = px
+                image_layer.scale = sc
+                label = 'um'
+            else:
+                label = 'px'
+            try:
+                import warnings as _w
+                with _w.catch_warnings():
+                    _w.simplefilter('ignore', FutureWarning)
+                    sb.unit = label
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[PyCAT] auto scale bar skipped: {e}")
+
     def load_into_viewer(self, data, name, is_mask=False):
         """
         Loads the given data into the Napari viewer, distinguishing between image and mask data, and applies appropriate 
@@ -1195,6 +1271,8 @@ class FileIOClass:
             data = dtype_conversion_func(data, 'float32')  # Ensure image data is correct float32 dtype
             # Add the image to the viewer
             add_image_with_default_colormap(data, self.viewer, name=name)
+            # Auto scale bar for the freshly-loaded 2D image.
+            self._enable_auto_scale_bar()
 
 
 

@@ -196,7 +196,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     """
     grp  = QGroupBox("Spatial Metrology")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4)
+    form.setContentsMargins(4, 20, 4, 4)
     form.setSpacing(5)
 
     desc = QLabel('Quantitative spatial analysis of condensate positions within cells.')
@@ -213,6 +213,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     # Analysis checkboxes
     checks_grp = QGroupBox("Analyses to run")
     checks_layout = QVBoxLayout(checks_grp)
+    checks_layout.setContentsMargins(9, 20, 9, 6)
     check_defs = [
         ('nnd',     'Nearest-neighbour distance (NND)'),
         ('radial',  'Radial localization profiling'),

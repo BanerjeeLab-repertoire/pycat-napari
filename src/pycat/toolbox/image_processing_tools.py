@@ -1866,3 +1866,57 @@ def run_pre_process_image(data_instance, viewer):
 
     # Add the pre-processed image to the viewer with a default colormap
     add_image_with_default_colormap(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}")
+
+
+# ---------------------------------------------------------------------------
+# Calibration-frame background correction
+# ---------------------------------------------------------------------------
+# Empirical correction using a separately-acquired reference (free dye / flat
+# field, or a clear no-condensate frame). The reference is specific to a
+# microscope + settings + sample combination, so it is loaded once and applied
+# to matching data rather than derived per-dataset.
+
+def apply_flatfield_correction(image, flat, dark=None):
+    """
+    Flat-field (illumination) correction for a free-dye / flat reference.
+
+    Removes MULTIPLICATIVE non-uniformity (vignetting, uneven excitation):
+
+        corrected = (image - dark) / (flat - dark) * mean(flat - dark)
+
+    The ``* mean(...)`` term restores the original intensity level so the result
+    stays in a comparable range. ``dark`` (a camera dark/offset frame) is
+    optional. Works on a single 2D image or a (T/Z, H, W) stack — the 2D
+    reference broadcasts across frames.
+    """
+    img = np.asarray(image, dtype=np.float32)
+    flt = np.asarray(flat, dtype=np.float32)
+    if dark is not None:
+        drk = np.asarray(dark, dtype=np.float32)
+        num = img - drk
+        den = flt - drk
+    else:
+        num = img
+        den = flt
+    den_mean = float(np.mean(den))
+    if den_mean == 0:
+        den_mean = 1.0
+    # Guard against divide-by-zero in dark pixels of the reference.
+    den_safe = np.where(np.abs(den) < 1e-6, den_mean, den)
+    corrected = num / den_safe * den_mean
+    return corrected.astype(np.float32)
+
+
+def apply_background_subtraction(image, background):
+    """
+    Additive background subtraction for a clear-frame (no-condensate) reference.
+
+        corrected = clip(image - background, 0, None)
+
+    Use when the background is additive (stray light, autofluorescence floor,
+    fixed-pattern offset). The 2D reference broadcasts across a (T/Z, H, W) stack.
+    """
+    img = np.asarray(image, dtype=np.float32)
+    bg = np.asarray(background, dtype=np.float32)
+    corrected = np.clip(img - bg, 0, None)
+    return corrected.astype(np.float32)

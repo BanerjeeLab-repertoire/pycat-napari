@@ -198,6 +198,7 @@ def _add_export_timeseries_video(ui_instance, layout=None, separate_widget=False
 
     settings_group = QGroupBox("Export Settings")
     form = QFormLayout(settings_group)
+    form.setContentsMargins(9, 20, 9, 6)
 
     colormap_dropdown = QComboBox()
     colormap_dropdown.addItems(AVAILABLE_COLORMAPS)

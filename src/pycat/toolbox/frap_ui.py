@@ -79,14 +79,14 @@ class FRAPUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setWidget(main_w); scroll.setMinimumWidth(320)
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="FRAP Analysis")
 
     # ── Step 2: ROI definition ─────────────────────────────────────────
     def _add_roi_definition(self, layout):
         grp  = QGroupBox("Step 2 — Define Bleach & Reference ROIs")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"
@@ -247,7 +247,7 @@ class FRAPUI:
     def _add_analysis(self, layout):
         grp  = QGroupBox("Step 3 — Analyze Recovery")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(1.0)

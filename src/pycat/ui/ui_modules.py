@@ -253,6 +253,16 @@ class BaseUIClass:
             The created dropdown widget populated with layers of the specified type.
         """
         dropdown = QComboBox()
+        # Don't let long layer names balloon the dropdown (and the whole form)
+        # past the dock width — size to a small minimum and let it shrink so the
+        # right side of rows (spinbox controls, buttons) stays visible.
+        from PyQt5.QtWidgets import QSizePolicy as _QSP
+        dropdown.setSizePolicy(_QSP.Ignored, _QSP.Fixed)
+        try:
+            dropdown.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            dropdown.setMinimumContentsLength(8)
+        except Exception:
+            pass
         # Prevent scroll wheel from accidentally changing the selection while
         # the user scrolls through the dock panel (event-filter based; the
         # older instance-attribute wheelEvent patch never fired under PyQt5).
@@ -680,9 +690,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(rescale_intensity_layout, 'Rescale Intensity', bold=True) # Add widget title label
         self.add_text_label(rescale_intensity_layout, 'Output Min') # Add a text label
         out_min_input = QLineEdit() # Create a text input
+        out_min_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rescale_intensity_layout.addWidget(out_min_input) # Add the text input to the layout
         self.add_text_label(rescale_intensity_layout, 'Output Max') # Add a text label
         out_max_input = QLineEdit() # Create a text input
+        out_max_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rescale_intensity_layout.addWidget(out_max_input) # Add the text input to the layout
         rescale_intensity_button = QPushButton("Rescale Intensity") # Create a button widget
         rescale_intensity_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -753,6 +765,101 @@ class ToolboxFunctionsUI(BaseUIClass):
         self._add_widget_to_layout_or_dock(remove_background_widget, layout, separate_widget, "Background Removal Dock")
 
 
+    def _add_run_calibration_correction(self, layout=None, separate_widget=False):
+        """
+        Calibration-frame background correction. Load a free-dye / flat-field OR
+        clear-frame reference once (it persists across images for the session),
+        pick the correction type, and apply it to the active image layer.
+        """
+        from PyQt5.QtWidgets import QComboBox, QFileDialog, QLabel
+        import os as _os
+        from napari.utils.notifications import show_warning as _warn, show_info as _info
+
+        lay = QVBoxLayout()
+        self.add_text_label(lay, 'Calibration Background Correction', bold=True)
+        info = QLabel(
+            "Load a flat-field (free-dye) or clear-frame reference, then apply it "
+            "to correct data. The calibration is specific to a microscope/settings/"
+            "sample and persists across images until you load a new one.")
+        info.setWordWrap(True); lay.addWidget(info)
+
+        method_dd = QComboBox()
+        method_dd.addItems(["Flat-field division (free-dye / illumination)",
+                            "Background subtraction (clear-frame)"])
+        method_dd.setToolTip(
+            "Flat-field: removes multiplicative non-uniformity (vignetting).\n"
+            "Subtraction: removes an additive background floor.")
+        lay.addWidget(QLabel("Correction method:")); lay.addWidget(method_dd)
+
+        status = QLabel("No calibration loaded.")
+        load_btn = QPushButton("Load Calibration Reference…")
+        def _on_load():
+            p, _ = QFileDialog.getOpenFileName(
+                None, "Load calibration reference (flat / clear frame)",
+                "", "Images (*.tif *.tiff *.png *.czi);;All Files (*)")
+            if not p:
+                return
+            try:
+                import numpy as _np
+                arr = None
+                try:
+                    from aicsimageio import AICSImage
+                    arr = _np.asarray(AICSImage(p).get_image_data("ZYX", C=0, T=0)).astype(_np.float32)
+                    arr = _np.squeeze(arr)
+                except Exception:
+                    import tifffile
+                    arr = tifffile.imread(p).astype(_np.float32)
+                arr = _np.squeeze(_np.asarray(arr, dtype=_np.float32))
+                if arr.ndim == 3:
+                    # Robust flat/clear reference from a stack: median across frames.
+                    arr = _np.median(arr, axis=0)
+                if arr.ndim != 2:
+                    _warn(f"Calibration must be a 2D image (got shape {arr.shape})."); return
+                self._calibration_ref = arr
+                self._calibration_path = p
+                status.setText(f"Loaded: {_os.path.basename(p)}  ({arr.shape[0]}\u00d7{arr.shape[1]})")
+                _info("Calibration reference loaded.")
+            except Exception as e:
+                _warn(f"Could not load calibration: {e}")
+        load_btn.clicked.connect(_on_load)
+        lay.addWidget(load_btn); lay.addWidget(status)
+
+        apply_btn = QPushButton("Apply to Active Layer")
+        def _on_apply():
+            import numpy as _np
+            ref = getattr(self, '_calibration_ref', None)
+            if ref is None:
+                _warn("Load a calibration reference first."); return
+            active = self.viewer.layers.selection.active
+            if active is None or not isinstance(active, napari.layers.Image):
+                _warn("Select an image layer to correct."); return
+            img = _np.asarray(active.data, dtype=_np.float32)
+            if img.shape[-2:] != ref.shape[-2:]:
+                _warn(f"Calibration shape {ref.shape} doesn't match image "
+                      f"{tuple(img.shape[-2:])} — use a reference from the same acquisition.")
+                return
+            from pycat.toolbox.image_processing_tools import (
+                apply_flatfield_correction, apply_background_subtraction)
+            if method_dd.currentIndex() == 0:
+                corrected = apply_flatfield_correction(img, ref); suffix = "flatfield-corrected"; mkey = "flatfield"
+            else:
+                corrected = apply_background_subtraction(img, ref); suffix = "bg-subtracted"; mkey = "subtraction"
+            self.viewer.add_image(corrected, name=f"{active.name} ({suffix})")
+            try:
+                self._record('calibration_correction', {
+                    'method': mkey,
+                    'calibration': _os.path.basename(getattr(self, '_calibration_path', '')),
+                    'calibration_path': getattr(self, '_calibration_path', ''),
+                    'layer': active.name})
+            except Exception:
+                pass
+            _info(f"Applied {suffix} using the loaded calibration.")
+        apply_btn.clicked.connect(_on_apply)
+        lay.addWidget(apply_btn)
+
+        w = QWidget(); w.setLayout(lay)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget, "Calibration Correction Dock")
+
     def _add_run_enhanced_rb_gaussian_bg_removal(self, layout=None, separate_widget=False):
         """Add a widget for rolling-ball and Gaussian background removal with edge enhancement, optionally in a separate dock."""
         remove_background_layout = QVBoxLayout()
@@ -786,10 +893,12 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(WBNS_layout, 'Wavelet BG and Noise Subtraction', bold=True) # Add widget title label
         self.add_text_label(WBNS_layout, 'Noise Level') # Add a text label
         WBNS_noise_input = QLineEdit() # Create a text input
+        WBNS_noise_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         WBNS_noise_input.setPlaceholderText('1') # Set a default text value
         WBNS_layout.addWidget(WBNS_noise_input) # Add the text input to the layout  
         self.add_text_label(WBNS_layout, 'PSF Size') # Add a text label
         WBNS_psf_input = QLineEdit() # Create a text input
+        WBNS_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         WBNS_psf_input.setPlaceholderText('3') # Set a default text value
         WBNS_layout.addWidget(WBNS_psf_input) # Add the text input to the layout
         WBNS_button = QPushButton("Run WBNS") # Create a button widget
@@ -807,10 +916,12 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(wavelet_layout, 'Wavelet Noise Subtraction', bold=True)# Add widget title label
         self.add_text_label(wavelet_layout, 'Noise Level') # Add a text label
         wavelet_noise_input = QLineEdit() # Create a text input
+        wavelet_noise_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         wavelet_noise_input.setPlaceholderText('1') # Set a default text value
         wavelet_layout.addWidget(wavelet_noise_input) # Add the text input to the layout
         self.add_text_label(wavelet_layout, 'PSF Size') # Add a text label
         wavelet_psf_input = QLineEdit() # Create a text input
+        wavelet_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         wavelet_psf_input.setPlaceholderText('3') # Set a default text value
         wavelet_layout.addWidget(wavelet_psf_input) # Add the text input to the layout
         wavelet_button = QPushButton("Run WNS") # Create a button widget
@@ -828,6 +939,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(bilateral_layout, 'Bilateral Filter', bold=True) # Add widget title label
         self.add_text_label(bilateral_layout, 'Filter Size') # Add a text label
         filter_size_input = QLineEdit() # Create a text input
+        filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bilateral_layout.addWidget(filter_size_input) # Add the text input to the layout
         bilateral_button = QPushButton("Apply Filter") # Create a button widget
         bilateral_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -848,11 +960,13 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(clahe_layout, 'Contrast-Limited Adapt. Hist. Equalization', bold=True) # Add widget title label
         self.add_text_label(clahe_layout, 'Clip Limit') # Add a text label
         clahe_clip_input = QLineEdit() # Create a text input
+        clahe_clip_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         clahe_clip_input.setPlaceholderText('0.0025') # Set a default text value
         clahe_layout.addWidget(clahe_clip_input) # Add the text input to the layout
         def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['cell_diameter']//4) # Calculate the default window size
         self.add_text_label(clahe_layout, 'Window Size') # Add a text label    
         clahe_window_size_input = QLineEdit() # Create a text input
+        clahe_window_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         clahe_window_size_input.setPlaceholderText(str(def_window_size)) # Set a default text value
         clahe_layout.addWidget(clahe_window_size_input) # Add the text input to the layout
         clahe_button = QPushButton("Run CLAHE") # Create a button widget
@@ -874,9 +988,11 @@ class ToolboxFunctionsUI(BaseUIClass):
             'high-frequency noise. Works on a 2D image or a whole stack.')
         self.add_text_label(fft_layout, 'Inner radius (low cutoff, px)')
         fft_low_input = QLineEdit(); fft_low_input.setPlaceholderText('3')
+        fft_low_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fft_layout.addWidget(fft_low_input)
         self.add_text_label(fft_layout, 'Outer radius (high cutoff, px)')
         fft_high_input = QLineEdit(); fft_high_input.setPlaceholderText('40')
+        fft_high_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fft_layout.addWidget(fft_high_input)
         fft_button = QPushButton("Run FFT Bandpass")
         fft_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -894,6 +1010,7 @@ class ToolboxFunctionsUI(BaseUIClass):
             'threshold → 1). Unlike Otsu/Li, the level is not auto-chosen.')
         self.add_text_label(bw_layout, 'Threshold value')
         bw_input = QLineEdit(); bw_input.setPlaceholderText('e.g. 0.5 or 128')
+        bw_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bw_layout.addWidget(bw_input)
         bw_button = QPushButton("Binarize")
         bw_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -943,6 +1060,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(gauss_filter_layout, 'Morphological Gaussian Filter', bold=True) # Add widget title label
         self.add_text_label(gauss_filter_layout, 'Filter Size') # Add a text label
         filter_size_input = QLineEdit() # Create a text input
+        filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         gauss_filter_layout.addWidget(filter_size_input) # Add the text input to the layout
         gauss_filter_button = QPushButton("Apply Filter") # Create a button widget
         gauss_filter_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -959,9 +1077,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(DPR_layout, 'Deblur by Pixel Reassignment', bold=True)# Add widget title label
         self.add_text_label(DPR_layout, 'Gain Level') # Add a text label
         DPR_gain_input = QLineEdit() # Create a text input
+        DPR_gain_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         DPR_layout.addWidget(DPR_gain_input) # Add the text input to the layout
         self.add_text_label(DPR_layout, 'PSF Size') # Add a text label
         DPR_psf_input = QLineEdit() # Create a text input
+        DPR_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         DPR_layout.addWidget(DPR_psf_input) # Add the text input to the layout
         DPR_button = QPushButton("Run DPR") # Create a button widget
         DPR_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -978,6 +1098,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(LoG_layout, 'Laplacian of Gaussian Filter', bold=True) # Add widget title label
         self.add_text_label(LoG_layout, 'Sigma Value') # Add a text label
         LoG_sigma_input = QLineEdit() # Create a text input
+        LoG_sigma_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         LoG_layout.addWidget(LoG_sigma_input) # Add the text input to the layout
         LoG_button = QPushButton("Apply LoG Filter") # Create a button widget
         LoG_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -997,12 +1118,15 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(fz_layout, 'Felsenszwalb Segmentation and Merging', bold=True) # Add a widget title label
         self.add_text_label(fz_layout, 'Scale') # Add a text label
         fz_scale_input = QLineEdit() # Create a text input
+        fz_scale_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_layout.addWidget(fz_scale_input) # Add the text input to the layout
         self.add_text_label(fz_layout, 'Sigma') # Add a text label
         fz_sigma_input = QLineEdit() # Create a text input
+        fz_sigma_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_layout.addWidget(fz_sigma_input) # Add the text input to the layout
         self.add_text_label(fz_layout, 'Min Size') # Add a text label
         fz_min_size_input = QLineEdit() # Create a text input
+        fz_min_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_layout.addWidget(fz_min_size_input) # Add the text input to the layout
         fz_button = QPushButton("Run Felsenszwalb Segmentation") # Create a button widget
         fz_button.clicked.connect(lambda: self.on_general_button_clicked(
@@ -1026,6 +1150,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         # ── Method selector (radio buttons) ─────────────────────────────
         method_group = QGroupBox("Segmentation method")
         method_row   = QVBoxLayout(method_group)
+        method_row.setContentsMargins(9, 20, 9, 6)
         rb_cellpose  = QRadioButton("Cellpose  (deep learning, recommended)")
         rb_stardist  = QRadioButton("StarDist  (star-convex, nucleus-optimised)")
         rb_rf        = QRadioButton("Random Forest  (pixel classifier, manual annotation)")
@@ -1247,6 +1372,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         # ── Refinement parameters ──────────────────────────────────────────
         params_group = QGroupBox("Refinement Parameters")
         params_layout = QFormLayout()
+        params_layout.setContentsMargins(9, 20, 9, 6)
         params_group.setLayout(params_layout)
 
         def _make_spinbox(min_val, max_val, default, step, decimals=2):
@@ -1413,9 +1539,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         # Create the QHBoxLayout for the range inputs
         range_layout = QHBoxLayout()
         lower_limit_input = QLineEdit()  # Create QLineEdit for the lower limit
+        lower_limit_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         range_layout.addWidget(lower_limit_input)  # Add the lower limit input to the layout
         self.add_text_label(range_layout, 'to')  # Add a text label
         upper_limit_input = QLineEdit()  # Create QLineEdit for the upper limit
+        upper_limit_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         range_layout.addWidget(upper_limit_input)  # Add the upper limit input to the layout
         ACF_layout.addLayout(range_layout)  # Add the range inputs layout to the main vertical layout
 
@@ -1586,6 +1714,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         self.add_text_label(label_layout, 'Change Label Values', bold=True) # Add widget title label
         self.add_text_label(label_layout, 'New Label or Increment Amount') # Add a text label
         new_label_input = QLineEdit() # Add a text input for new label value
+        new_label_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         label_layout.addWidget(new_label_input) # Add the text input to the layout
         # Radio buttons to select mode
         increment_mode = QRadioButton("Increment All Labels") # Add a radio button for increment mode
@@ -1658,9 +1787,11 @@ class ToolboxFunctionsUI(BaseUIClass):
         # Add input widgets for morphological operation parameters
         self.add_text_label(bmo_layout, 'Number of Iterations')
         bmo_iter_input = QLineEdit()
+        bmo_iter_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bmo_layout.addWidget(bmo_iter_input)
         self.add_text_label(bmo_layout, 'Structuring Element Size')
         bmo_elem_size_input = QLineEdit()
+        bmo_elem_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bmo_layout.addWidget(bmo_elem_size_input)
         self.add_text_label(bmo_layout, 'Structuring Element Shape')
         bmo_elem_shape_dropdown = QComboBox()
@@ -1866,7 +1997,7 @@ class AnalysisMethodsUI(BaseUIClass):
         self._switch_analysis(BaseDataClass, DropletFusionUI, *args, **kwargs)
 
     def _switch_to_temperature_analysis(self, *args, **kwargs):
-        """Switch to the Temperature-Dependent Condensate pipeline."""
+        """Switch to the Temperature-Dependent Microscopy pipeline."""
         self._switch_analysis(BaseDataClass, TemperatureDependentUI, *args, **kwargs)
 
     def _switch_to_fd_curve_analysis(self, *args, **kwargs):
@@ -2014,7 +2145,6 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.condensate_layout)
-        self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.condensate_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.condensate_layout)
@@ -2143,7 +2273,6 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(main_widget)
-        scroll_area.setMinimumWidth(310)
 
         self.viewer.window.add_dock_widget(
             scroll_area, name="Time-Series Condensate Analysis Dock"
@@ -2181,6 +2310,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         group = QGroupBox("Step 2 — Reference Frame & Analysis Range")
         form  = QFormLayout(group)
+        form.setContentsMargins(9, 20, 9, 6)
 
         stack_dropdown = self.central_manager.toolbox_functions_ui.create_layer_dropdown(
             napari.layers.Image
@@ -2579,7 +2709,6 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.object_coloc_layout)
-        self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.object_coloc_layout)
@@ -2665,7 +2794,6 @@ class PixelColocAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_rb_gaussian_background_removal(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_apply_rescale_intensity(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.pixel_coloc_layout)
-        self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_pwcca(layout=self.pixel_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_ccf_analysis(layout=self.pixel_coloc_layout)
@@ -2936,6 +3064,54 @@ class MenuManager:
         self.central_manager = central_manager
         self._setup_menu_bar()
 
+    def _home_fit_view(self):
+        """
+        Fit the camera to the selected Image / Labels / Shapes (ROI) layer.
+        For an arbitrary Points/line selection (or nothing selected), show a
+        brief notice and do nothing.
+        """
+        import numpy as np
+        from napari.utils.notifications import show_info as _info
+        layer = self.viewer.layers.selection.active
+        if layer is None:
+            _info("Select an image or ROI layer, then press Home.")
+            return
+        fittable = isinstance(
+            layer, (napari.layers.Image, napari.layers.Labels, napari.layers.Shapes))
+        if not fittable:
+            _info(f"'{layer.name}' isn't an image or ROI — nothing to fit to.")
+            return
+        try:
+            ext = np.asarray(layer.extent.world)      # (2, ndim): [mins, maxs]
+            mins, maxs = ext[0], ext[1]
+            nd = self.viewer.dims.ndisplay
+            dims = list(self.viewer.dims.displayed)[-nd:]
+            center = (mins + maxs) / 2.0
+            self.viewer.camera.center = tuple(float(center[d]) for d in dims)
+
+            # Zoom to fit: need the canvas size in pixels.
+            cw = ch = None
+            for accessor in ('qt_viewer', '_qt_viewer'):
+                try:
+                    sz = getattr(self.viewer.window, accessor).canvas.size
+                    cw, ch = float(sz[0]), float(sz[1])
+                    break
+                except Exception:
+                    continue
+            sizes = [float(maxs[d] - mins[d]) for d in dims]
+            if nd == 2 and cw and ch and all(s > 0 for s in sizes):
+                # displayed dims are [y, x]; canvas is (width=x, height=y)
+                zoom = min(ch / sizes[0], cw / sizes[1]) * 0.9   # 10% margin
+                self.viewer.camera.zoom = zoom
+            else:
+                # Couldn't compute a fit zoom — at least re-center via reset.
+                self.viewer.reset_view()
+        except Exception:
+            try:
+                self.viewer.reset_view()
+            except Exception:
+                pass
+
     def _setup_menu_bar(self):
         """
         Set up the main menu bar with specific menu items and their associated actions.
@@ -2962,6 +3138,15 @@ class MenuManager:
         self.clear_action.triggered.connect(
             lambda: self.central_manager.file_io.clear_all_without_saving(self.viewer, confirm=True))
         self.viewer.window._qt_window.menuBar().addAction(self.clear_action)
+
+        # Home / fill-view button: refit the camera to the selected layer if it
+        # is an Image or ROI (Shapes/Labels); does nothing for an arbitrary
+        # line/points selection. Useful when the image scrolls out of view.
+        self.home_action = QAction('\u2302 Home', self.viewer.window._qt_window)
+        self.home_action.setToolTip(
+            'Fit the view to the selected image or ROI layer.')
+        self.home_action.triggered.connect(self._home_fit_view)
+        self.viewer.window._qt_window.menuBar().addAction(self.home_action)
 
         # Route files dropped onto the napari window through PyCAT's openers
         # (napari's default drop bypasses PyCAT's channel-assignment pipeline).
@@ -3182,7 +3367,7 @@ class MenuManager:
             'Video Particle Tracking (Microrheology)': (self.central_manager.analysis_methods_ui._switch_to_vpt_analysis, {}),
             'FRAP (Fluorescence Recovery)': (self.central_manager.analysis_methods_ui._switch_to_frap_analysis, {}),
             'Droplet Fusion (C-Trap)': (self.central_manager.analysis_methods_ui._switch_to_fusion_analysis, {}),
-            'Temperature-Dependent Condensate': (self.central_manager.analysis_methods_ui._switch_to_temperature_analysis, {}),
+            'Temperature-Dependent Microscopy': (self.central_manager.analysis_methods_ui._switch_to_temperature_analysis, {}),
             'Force-Distance Curve (DNA Tethering)': (self.central_manager.analysis_methods_ui._switch_to_fd_curve_analysis, {}),
         }
         self._add_actions_to_menu(biophysics_dict, biophysics_submenu)
@@ -3232,6 +3417,7 @@ class MenuManager:
         background_noise_correction_actions = {
             'Rolling-Ball Gaussian Background Removal': (self.central_manager.toolbox_functions_ui._add_run_rb_gaussian_background_removal, {'separate_widget': True}),
             'Background Removal w/ Edge Enhancement': (self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal, {'separate_widget': True}),
+            'Calibration Correction (flat-field / clear-frame)': (self.central_manager.toolbox_functions_ui._add_run_calibration_correction, {'separate_widget': True}),
             'Wavelet BG and Noise Subtraction': (self.central_manager.toolbox_functions_ui._add_run_wbns, {'separate_widget': True}),
             'Wavelet Noise Reduction': (self.central_manager.toolbox_functions_ui._add_run_wavelet_noise_subtraction, {'separate_widget': True}), 
             'Bilateral Noise Reduction': (self.central_manager.toolbox_functions_ui._add_run_apply_bilateral_filter, {'separate_widget': True}),

@@ -210,7 +210,7 @@ def _add_intensity_profile(ui_instance, layout=None, separate_widget=False):
 
     grp  = QGroupBox("Intensity Profiles (line / radial)")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+    form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
     desc = QLabel(
         "Line-scan across a drawn line, or a radial profile outward from "

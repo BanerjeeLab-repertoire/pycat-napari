@@ -1,5 +1,5 @@
 """
-PyCAT Temperature-Dependent Condensate UI
+PyCAT Temperature-Dependent Microscopy Annotation & Processing UI
 ===========================================
 Synchronise a MicroManager time-lapse with a temperature CSV, annotate the
 temperature (and a scale bar) onto the movie, and detect the phase-separation
@@ -63,11 +63,9 @@ class TemperatureDependentUI:
         layout.setSpacing(8); layout.setContentsMargins(4, 4, 4, 4)
 
         header = QLabel(
-            "<b>Temperature-Dependent Condensate Analysis</b><br>"
+            "<b>Temperature-Dependent Microscopy Annotation &amp; Processing</b><br>"
             "<span style='color:#888;font-size:9pt;'>"
-            "Sync a MicroManager time-lapse with a temperature log, annotate "
-            "temperatures on the movie, and detect T_phase / T_clear from a "
-            "focus-corrected entropy turbidity curve.</span>")
+            "Sync a time-lapse to a temperature log and detect T_phase / T_clear.</span>")
         header.setWordWrap(True)
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
@@ -82,20 +80,18 @@ class TemperatureDependentUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setWidget(main_w); scroll.setMinimumWidth(320)
-        self.viewer.window.add_dock_widget(scroll, name="Temperature-Dependent Condensate")
+        scroll.setWidget(main_w)
+        self.viewer.window.add_dock_widget(scroll, name="Temperature-Dependent Microscopy")
 
     # ── Step 2: sync ───────────────────────────────────────────────────
     def _add_sync(self, layout):
         grp  = QGroupBox("Step 2 — Sync Temperatures to Frames")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"
-            "Select the loaded stack. Then either browse to the temperature CSV "
-            "directly, or point at the temperature-files parent folder and let "
-            "the tool find the CSV by the TIFF's date.</span>")
+            "Pick the stack, then a temperature CSV file or its folder.</span>")
         note.setWordWrap(True); form.addRow(note)
 
         self._stack_dd = self.create_layer_dropdown(napari.layers.Image)
@@ -104,27 +100,40 @@ class TemperatureDependentUI:
 
         tiff_row = QHBoxLayout()
         self._tiff_edit = QLineEdit(); self._tiff_edit.setPlaceholderText("path to .ome.tif (for metadata)")
+        self._tiff_edit.setMinimumWidth(40); self._tiff_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._tiff_edit.setToolTip("The TIFF file on disk — needed to read MicroManager timing metadata.")
         tiff_btn = QPushButton("Browse…"); tiff_btn.clicked.connect(self._browse_tiff)
         tiff_row.addWidget(self._tiff_edit); tiff_row.addWidget(tiff_btn)
         tw = QWidget(); tw.setLayout(tiff_row); form.addRow("TIFF file:", tw)
+        # Auto-fill the TIFF path from where the selected stack was loaded.
+        def _autofill_tiff(*_):
+            if not self._tiff_edit.text().strip():
+                p = getattr(self.central_manager.file_io, "filePath", "")
+                if p:
+                    self._tiff_edit.setText(str(p))
+        self._stack_dd.currentIndexChanged.connect(_autofill_tiff)
+        _autofill_tiff()
 
-        csv_row = QHBoxLayout()
-        self._csv_edit = QLineEdit(); self._csv_edit.setPlaceholderText("path to temperature CSV")
-        csv_btn = QPushButton("Browse…"); csv_btn.clicked.connect(self._browse_csv)
-        csv_row.addWidget(self._csv_edit); csv_row.addWidget(csv_btn)
-        cw = QWidget(); cw.setLayout(csv_row); form.addRow("Temperature CSV:", cw)
-
-        folder_row = QHBoxLayout()
-        self._tempfolder_edit = QLineEdit()
-        self._tempfolder_edit.setPlaceholderText("or: temperature-files parent folder (auto-find by date)")
-        folder_btn = QPushButton("Browse…"); folder_btn.clicked.connect(self._browse_tempfolder)
-        auto_btn = QPushButton("Find CSV by date"); auto_btn.clicked.connect(self._auto_find_csv)
-        folder_row.addWidget(self._tempfolder_edit); folder_row.addWidget(folder_btn)
-        fw = QWidget(); fw.setLayout(folder_row); form.addRow("Temp folder:", fw)
-        form.addRow(auto_btn)
+        # One flexible field: accepts either a temperature CSV file OR a folder
+        # (in which case the matching CSV is auto-located by the TIFF's date).
+        temp_row = QHBoxLayout()
+        self._temp_input = QLineEdit()
+        self._temp_input.setMinimumWidth(40); self._temp_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._temp_input.setPlaceholderText("temperature CSV file  —or—  its parent folder (auto-find by date)")
+        self._temp_input.setToolTip(
+            "Path to the temperature CSV, or to the folder containing it. "
+            "If you give a folder, the CSV is matched to the TIFF's date.")
+        file_btn = QPushButton("File…"); file_btn.clicked.connect(self._browse_csv)
+        fold_btn = QPushButton("Folder…"); fold_btn.clicked.connect(self._browse_tempfolder)
+        temp_row.addWidget(self._temp_input)
+        temp_row.addWidget(file_btn); temp_row.addWidget(fold_btn)
+        tcw = QWidget(); tcw.setLayout(temp_row); form.addRow("Temp CSV / folder:", tcw)
+        # Back-compat aliases so the rest of the code keeps working.
+        self._csv_edit = self._temp_input
+        self._tempfolder_edit = self._temp_input
 
         self._temp_col = QLineEdit("AI0 (°C)")
+        self._temp_col.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._temp_col.setToolTip("CSV column holding the temperature.")
         form.addRow("Temp column:", self._temp_col)
 
@@ -185,11 +194,24 @@ class TemperatureDependentUI:
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
         tiff = self._tiff_edit.text().strip()
-        csv  = self._csv_edit.text().strip()
+        temp = self._temp_input.text().strip()
         if not tiff or not os.path.exists(tiff):
             napari_show_warning("Set a valid TIFF path (needed for timing metadata)."); return
-        if not csv or not os.path.exists(csv):
-            napari_show_warning("Set a valid temperature CSV path."); return
+        if not temp or not os.path.exists(temp):
+            napari_show_warning("Set a valid temperature CSV file or its parent folder."); return
+        # Flexible input: a folder auto-locates the CSV by the TIFF's date;
+        # a file is used directly.
+        if os.path.isdir(temp):
+            from pycat.toolbox.temperature_tools import locate_temperature_csv
+            csv = locate_temperature_csv(tiff, temp)
+            if not csv:
+                napari_show_warning(
+                    "No matching temperature CSV found in that folder for the "
+                    "TIFF's date. Point to the CSV file directly, or check the folder.")
+                return
+            napari_show_info(f"Found temperature CSV: {os.path.basename(csv)}")
+        else:
+            csv = temp
 
         self._sync_prog.setVisible(True); self._sync_prog.setRange(0, 0)
         try:
@@ -209,6 +231,17 @@ class TemperatureDependentUI:
         self._dr()['temp_temperatures'] = temps
         self._dr()['temp_elapsed_s'] = elapsed_s
         self._tiff_path = tiff
+
+        # Auto-fill Step 5 (batch) from Step 2 paths when empty: the TIFF's
+        # parent folder, and the temperature file's folder.
+        try:
+            if hasattr(self, '_batch_tiff_root') and not self._batch_tiff_root.text().strip():
+                self._batch_tiff_root.setText(os.path.dirname(tiff))
+            if hasattr(self, '_batch_temp_root') and not self._batch_temp_root.text().strip():
+                temp_folder = temp if os.path.isdir(temp) else os.path.dirname(csv)
+                self._batch_temp_root.setText(temp_folder)
+        except Exception:
+            pass
 
         if self._add_text_layer.isChecked():
             self._make_text_layer(sname, temps, elapsed_s)
@@ -273,14 +306,29 @@ class TemperatureDependentUI:
     def _add_turbidity(self, layout):
         grp  = QGroupBox("Step 3 — Entropy Turbidity & Transitions")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._subtract_first = QCheckBox("Subtract first frame (remove static pattern)")
-        self._subtract_first.setChecked(True)
+        self._subtract_first.setChecked(False)
         self._subtract_first.setToolTip(
-            "Subtract the (assumed clear) first frame to remove the static "
+            "Subtract the (assumed clear) reference frame to remove the static "
             "illumination pattern before computing entropy.")
         form.addRow(self._subtract_first)
+
+        # Reference frame to subtract (default 0) + an entropy-based guesser.
+        ref_row = QHBoxLayout()
+        self._ref_frame = QSpinBox(); self._ref_frame.setRange(0, 100000)
+        self._ref_frame.setValue(0)
+        self._ref_frame.setToolTip(
+            "Which frame is the clear reference. For UCST/LCST samples the clear "
+            "frame may be at the end, not the start.")
+        guess_btn = QPushButton("Guess clear frame")
+        guess_btn.setToolTip(
+            "Pick the lowest-entropy frame and check it is genuinely flat. "
+            "Warns if no clear frame exists (condensates throughout).")
+        guess_btn.clicked.connect(self._on_guess_clear_frame)
+        ref_row.addWidget(self._ref_frame); ref_row.addWidget(guess_btn)
+        rw = QWidget(); rw.setLayout(ref_row); form.addRow("Reference frame:", rw)
 
         self._correct_focus = QCheckBox("Correct focal drift (recommended)")
         self._correct_focus.setChecked(True)
@@ -299,6 +347,28 @@ class TemperatureDependentUI:
         btn.clicked.connect(self._on_turbidity)
         form.addRow(self._turb_prog); form.addRow(btn)
         layout.addWidget(grp)
+
+    def _on_guess_clear_frame(self):
+        from pycat.toolbox.temperature_tools import guess_clear_frame
+        sname = self._stack_dd.currentText()
+        if sname not in [l.name for l in self.viewer.layers]:
+            napari_show_warning(f"Stack layer '{sname}' not found."); return
+        stack = np.asarray(self.viewer.layers[sname].data)
+        if stack.ndim != 3:
+            napari_show_warning("Reference-frame guessing needs a (T, H, W) stack."); return
+        res = guess_clear_frame(stack)
+        self._ref_frame.setValue(res['index'])
+        if res['is_clear']:
+            self._subtract_first.setChecked(True)
+            napari_show_info(
+                f"Clear frame ≈ {res['index']} (flat field, CoV={res['cov']:.3f}). "
+                "Enabled subtraction.")
+        else:
+            napari_show_warning(
+                f"Frame {res['index']} is the least-turbid frame but is NOT flat "
+                f"(CoV={res['cov']:.3f} > {res['threshold']:.2f}) — this stack may "
+                "have no clear reference. Subtraction left off; enable it only if "
+                "you trust this frame.")
 
     def _on_turbidity(self):
         from pycat.toolbox.temperature_tools import (
@@ -319,7 +389,8 @@ class TemperatureDependentUI:
                 stack, temps,
                 subtract_first_frame=self._subtract_first.isChecked(),
                 correct_focal_drift=self._correct_focus.isChecked(),
-                bins=self._entropy_bins.value())
+                bins=self._entropy_bins.value(),
+                reference_frame_index=self._ref_frame.value())
             sig_col = 'entropy_corrected' if self._correct_focus.isChecked() else 'entropy'
             trans = detect_transitions(df, sig_col)
         except Exception as e:
@@ -363,27 +434,16 @@ class TemperatureDependentUI:
     def _add_export(self, layout):
         grp  = QGroupBox("Step 4 — Scale Bar & Annotated Export")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
-        self._px_to_um = QDoubleSpinBox()
-        self._px_to_um.setRange(0.0, 1000); self._px_to_um.setValue(0.0)
-        self._px_to_um.setDecimals(4); self._px_to_um.setSingleStep(0.01)
-        self._px_to_um.setToolTip(
-            "Pixel size (µm/px) for the scale bar. Leave 0 to use the value "
-            "already stored from image loading, if any.")
-        form.addRow("Pixel size (µm/px):", self._px_to_um)
+        self._use_scalebar = QCheckBox("Burn a scale bar into the exported video")
+        self._use_scalebar.setChecked(True)
+        self._use_scalebar.setToolTip(
+            "Draw a scale bar on the MP4 using the image's pixel size "
+            "(set automatically on load, or via the Set Scale tool).")
+        form.addRow(self._use_scalebar)
 
-        self._scalebar_um = QDoubleSpinBox()
-        self._scalebar_um.setRange(0.1, 10000); self._scalebar_um.setValue(10.0)
-        self._scalebar_um.setDecimals(1)
-        self._scalebar_um.setToolTip("Length of the scale bar in µm.")
-        form.addRow("Scale bar length (µm):", self._scalebar_um)
-
-        sb_btn = QPushButton("Add / Update Scale Bar")
-        sb_btn.clicked.connect(self._on_scalebar)
-        form.addRow(sb_btn)
-
-        self._fps = QSpinBox(); self._fps.setRange(1, 60); self._fps.setValue(10)
+        self._fps = QSpinBox(); self._fps.setRange(1, 60); self._fps.setValue(30)
         self._fps.setToolTip("Playback frame rate of the exported MP4.")
         form.addRow("Video FPS:", self._fps)
 
@@ -394,58 +454,46 @@ class TemperatureDependentUI:
         layout.addWidget(grp)
 
     def _pixel_size(self):
-        px = self._px_to_um.value()
-        if px > 0:
-            return px
         stored = self._dr().get('microns_per_pixel_sq')
         return float(stored) ** 0.5 if stored else 1.0
 
     def _on_scalebar(self):
-        # napari has a built-in scale bar; set the layer scale + units and enable it.
+        # Drive the scale bar from the stack layer's SCALE only. Do NOT set
+        # lyr.units or scale_bar.unit: on this napari build, touching units on
+        # a 3D lazy stack triggers an "inconsistent units" refit that renders
+        # the layer black. Scale alone gives a correctly-sized bar; only the
+        # unit label is omitted.
         px = self._pixel_size()
         try:
-            # Apply the same spatial scale + 'um' units to every layer so the
-            # scale bar renders in µm (napari 0.7 needs consistent units) and
-            # overlays stay aligned (uniform scale preserves relative positions).
-            for lyr in self.viewer.layers:
-                try:
-                    nd = lyr.ndim
-                    if nd >= 2:
-                        sc = list(lyr.scale)
-                        sc[-1] = px; sc[-2] = px
-                        lyr.scale = sc
-                        lyr.units = tuple(['um'] * nd)
-                except Exception:
-                    pass
-
+            sname = self._stack_dd.currentText()
+            if sname in [l.name for l in self.viewer.layers]:
+                lyr = self.viewer.layers[sname]
+                sc = list(lyr.scale)
+                sc[-1] = px; sc[-2] = px
+                lyr.scale = sc
             sb = self.viewer.scale_bar
             sb.visible = True
-            # Pin the bar to the chosen reference length so its label doesn't
-            # jump to round numbers as you zoom (attribute name varies by
-            # napari version).
+            try:
+                import warnings as _w
+                with _w.catch_warnings():
+                    _w.simplefilter('ignore', FutureWarning)
+                    sb.unit = 'um'
+            except Exception:
+                pass
             for _attr in ('length', 'fixed_length'):
                 if hasattr(sb, _attr):
                     try:
-                        setattr(sb, _attr, float(self._scalebar_um.value()))
-                        break
+                        setattr(sb, _attr, None)
                     except Exception:
                         pass
-            # Older napari (<0.7) used scale_bar.unit; harmless where deprecated.
-            try:
-                sb.unit = "um"
-            except Exception:
-                pass
-
-            # After rescaling, the old camera zoom leaves the image tiny in a
-            # mostly-black canvas — refit the view so the image fills it again.
+            napari_show_info(
+                f"Scale bar enabled at {px:.4g} \u00b5m/px.")
+            # Scaling shrinks the image in world coords; refit so it fills the
+            # view instead of snapping to a tiny corner. (Safe: no units set.)
             try:
                 self.viewer.reset_view()
             except Exception:
                 pass
-
-            napari_show_info(
-                f"Scale bar enabled at {px:.4g} µm/px "
-                f"({self._scalebar_um.value():.0f} µm reference).")
         except Exception as e:
             napari_show_warning(f"Could not enable scale bar: {e}")
 
@@ -471,7 +519,7 @@ class TemperatureDependentUI:
             self._render_annotated_mp4(
                 stack, temps, elapsed_s, Path(out),
                 fps=self._fps.value(), pixel_um=self._pixel_size(),
-                scalebar_um=self._scalebar_um.value())
+                scalebar_um=(10.0 if self._use_scalebar.isChecked() else 0.0))
         except Exception as e:
             self._export_prog.setVisible(False)
             napari_show_warning(f"Export failed: {e}")
@@ -479,24 +527,23 @@ class TemperatureDependentUI:
         self._export_prog.setVisible(False)
         self._record('temperature_export_video', {
             'output': os.path.basename(out), 'fps': self._fps.value(),
-            'scalebar_um': self._scalebar_um.value()})
+            'scalebar_um': (10.0 if self._use_scalebar.isChecked() else 0.0)})
         napari_show_info(f"Exported annotated movie to {out}")
 
     # ── Step 5: batch ──────────────────────────────────────────────────
     def _add_batch(self, layout):
         grp  = QGroupBox("Step 5 — Batch (folder of TIFFs)")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"
-            "Process every TIFF under a folder (including nested subfolders), "
-            "auto-matching each to its temperature CSV by date, and tabulate "
-            "T_phase / T_clear for all of them.</span>")
+            "Process every TIFF in a folder; auto-matches each temperature CSV by date.</span>")
         note.setWordWrap(True); form.addRow(note)
 
         row1 = QHBoxLayout()
         self._batch_tiff_root = QLineEdit(); self._batch_tiff_root.setPlaceholderText("folder containing TIFFs")
+        self._batch_tiff_root.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         b1 = QPushButton("Browse…")
         b1.clicked.connect(lambda: self._browse_into(self._batch_tiff_root))
         row1.addWidget(self._batch_tiff_root); row1.addWidget(b1)
@@ -504,10 +551,18 @@ class TemperatureDependentUI:
 
         row2 = QHBoxLayout()
         self._batch_temp_root = QLineEdit(); self._batch_temp_root.setPlaceholderText("temperature-files parent folder")
+        self._batch_temp_root.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         b2 = QPushButton("Browse…")
         b2.clicked.connect(lambda: self._browse_into(self._batch_temp_root))
         row2.addWidget(self._batch_temp_root); row2.addWidget(b2)
         w2 = QWidget(); w2.setLayout(row2); form.addRow("Temp folder:", w2)
+
+        self._batch_export_mp4 = QCheckBox("Also export annotated MP4 for each TIFF (saved beside it)")
+        self._batch_export_mp4.setChecked(True)
+        self._batch_export_mp4.setToolTip(
+            "Render a temperature/time-annotated MP4 per TIFF, named from the "
+            "source file and written next to it.")
+        form.addRow(self._batch_export_mp4)
 
         self._batch_prog = QProgressBar(); self._batch_prog.setVisible(False)
         btn = QPushButton("▶  Run Batch Turbidity Analysis")
@@ -538,6 +593,10 @@ class TemperatureDependentUI:
                 correct_focal_drift=self._correct_focus.isChecked(),
                 temp_column=self._temp_col.text().strip() or 'AI0 (°C)',
                 csv_header=self._csv_header.value(),
+                export_mp4=self._batch_export_mp4.isChecked(),
+                fps=self._fps.value(),
+                pixel_um=self._pixel_size(),
+                scalebar_um=(10.0 if self._use_scalebar.isChecked() else 0.0),
                 progress_callback=lambda i, n: (
                     self._batch_prog.setRange(0, n), self._batch_prog.setValue(i)))
         except Exception as e:
@@ -558,59 +617,14 @@ class TemperatureDependentUI:
 
     def _render_annotated_mp4(self, stack, temps, elapsed_s, out_path,
                               fps, pixel_um, scalebar_um):
-        """Render frames with temperature text + scale bar burned in via matplotlib."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        import imageio.v3 as iio
-        from datetime import timedelta
-
-        n = stack.shape[0]
-        vmin, vmax = float(np.percentile(stack, 1)), float(np.percentile(stack, 99))
-        bar_px = scalebar_um / pixel_um if pixel_um > 0 else 0
-
-        frames = []
-        for i in range(n):
-            fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
-            ax.imshow(stack[i], cmap='gray', vmin=vmin, vmax=vmax)
-            ax.axis('off')
-            T = temps[i]
-            secs = int(elapsed_s[i]) if (elapsed_s is not None and np.isfinite(elapsed_s[i])) else 0
-            tc = f"{T:.2f} °C" if np.isfinite(T) else "-- °C"
-            ax.set_title(f"{tc}   |   {timedelta(seconds=secs)} (h:m:s)", fontsize=12)
-            # Scale bar in lower-right
-            if bar_px > 0:
-                H, W = stack.shape[1], stack.shape[2]
-                x0 = W * 0.95 - bar_px; y0 = H * 0.92
-                ax.plot([x0, x0 + bar_px], [y0, y0], '-', color='white', lw=3)
-                ax.text(x0 + bar_px / 2, y0 - H * 0.02, f"{scalebar_um:.0f} µm",
-                        color='white', ha='center', va='bottom', fontsize=10)
-            fig.canvas.draw()
-            buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-            buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))[:, :, :3]
-            frames.append(buf.copy())
-            plt.close(fig)
-            self._export_prog.setValue(i + 1)
-
-        arr = np.stack(frames)
-        # H.264 requires even width/height and yuv420p for broad player
-        # compatibility (VLC/QuickTime/browsers). Crop to even dims and pass an
-        # explicit codec — imageio's pyav plugin otherwise left the codec None
-        # ("expected bytes, NoneType found") and produced an unplayable file.
-        if arr.shape[1] % 2:
-            arr = arr[:, :-1, :, :]
-        if arr.shape[2] % 2:
-            arr = arr[:, :, :-1, :]
-        last_err = None
-        for _kwargs in ({'codec': 'libx264', 'out_pixel_format': 'yuv420p'},
-                        {'codec': 'libx264'},
-                        {'codec': 'mpeg4'},
-                        {}):
+        """Render annotated MP4 via the shared headless renderer; drive the UI
+        progress bar through its callback."""
+        from pycat.toolbox.temperature_tools import render_annotated_mp4
+        def _prog(i, n):
             try:
-                iio.imwrite(str(out_path), arr, fps=fps, **_kwargs)
-                last_err = None
-                break
-            except Exception as _e:
-                last_err = _e
-        if last_err is not None:
-            raise last_err
+                self._export_prog.setValue(i)
+            except Exception:
+                pass
+        return render_annotated_mp4(
+            stack, temps, elapsed_s, out_path, fps=fps, pixel_um=pixel_um,
+            scalebar_um=scalebar_um, progress_callback=_prog)

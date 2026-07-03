@@ -333,7 +333,7 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
 
     grp  = QGroupBox("Morphological Complexity")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+    form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
     desc = QLabel(
         "Shape-complexity metrics on a condensate mask: box-counting fractal "

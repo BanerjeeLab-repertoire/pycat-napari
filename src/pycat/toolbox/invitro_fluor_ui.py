@@ -135,6 +135,7 @@ def _show(title, tables):
 def _ivf_preprocessing(ui, layout):
     grp = QGroupBox("Step 2 — Preprocess Fluorescence Image")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Fluorescence image:", img_dd)
     ball_spin = QSpinBox(); ball_spin.setRange(2,200); ball_spin.setValue(15)
@@ -176,6 +177,7 @@ def _ivf_preprocessing(ui, layout):
 def _ivf_segmentation(ui, layout):
     grp  = QGroupBox("Step 3 — Segment Droplets (whole field, no cell mask)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     pre_dd  = ui.create_layer_dropdown(napari.layers.Image)
     raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Preprocessed image:", pre_dd)
@@ -284,6 +286,7 @@ def _ivf_segmentation(ui, layout):
 def _ivf_field_summary(ui, layout):
     grp  = QGroupBox("Step 4 — Field Summary & Partition Coefficient")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Volume fraction Φ, partition coefficient, bulk C_sat proxy, number density.</span>"
@@ -333,6 +336,7 @@ def _ivf_field_summary(ui, layout):
 def _ivf_size_distribution(ui, layout):
     grp  = QGroupBox("Step 5 — Size Distribution (lognormal / power-law)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask:", mask_dd)
     bins_sp = QSpinBox(); bins_sp.setRange(5,100); bins_sp.setValue(30)
@@ -368,6 +372,7 @@ def _ivf_size_distribution(ui, layout):
 def _ivf_spatial(ui, layout):
     grp  = QGroupBox("Step 6 — Spatial Metrology")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "NND, Ripley's L, PCF, Voronoi — identical to cellular analysis.</span>"
@@ -424,6 +429,7 @@ def _ivf_spatial(ui, layout):
 def _ivf_dynamics(ui, layout):
     grp  = QGroupBox("Step 7 — Dynamics & Coarsening (time-series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
     img_dd   = ui.create_layer_dropdown(napari.layers.Image)
@@ -569,6 +575,7 @@ def _ivf_dynamics(ui, layout):
 def _ivf_phase_diagram(ui, layout):
     grp  = QGroupBox("Step 8 — Phase Diagram / C_sat (dilution series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Enter total protein concentrations and measured volume fractions\n"
@@ -577,7 +584,9 @@ def _ivf_phase_diagram(ui, layout):
     ))
     from PyQt5.QtWidgets import QLineEdit
     conc_edit = QLineEdit(); conc_edit.setPlaceholderText("e.g. 1, 2, 5, 10, 20  (µM)")
+    conc_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     phi_edit  = QLineEdit(); conc_edit.setPlaceholderText("e.g. 0, 0, 0.05, 0.12, 0.21")
+    phi_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow("Concentrations (µM):", conc_edit)
     form.addRow("Volume fractions (Φ):", phi_edit)
     run = QPushButton("▶  Estimate C_sat")
@@ -613,6 +622,7 @@ def _ivf_phase_diagram(ui, layout):
 def _ivf_frame_qc(ui, layout):
     grp  = QGroupBox("Step 9 — Frame Quality (bleaching + focus)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     stack_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Fluorescence stack (T,H,W):", stack_dd)
     dt_sp  = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)

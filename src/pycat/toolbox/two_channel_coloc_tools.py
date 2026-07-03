@@ -234,6 +234,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     # ── Channel 1 inputs ─────────────────────────────────────────────────
     ch1_group = QGroupBox("Channel 1 (e.g. GFP)")
     ch1_form = QFormLayout(ch1_group)
+    ch1_form.setContentsMargins(9, 20, 9, 6)
     ch1_raw_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     ch1_proc_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     ch1_form.addRow("Raw image:", ch1_raw_dropdown)
@@ -243,6 +244,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     # ── Channel 2 inputs ─────────────────────────────────────────────────
     ch2_group = QGroupBox("Channel 2 (e.g. mCherry)")
     ch2_form = QFormLayout(ch2_group)
+    ch2_form.setContentsMargins(9, 20, 9, 6)
     ch2_raw_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     ch2_proc_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     ch2_form.addRow("Raw image:", ch2_raw_dropdown)
@@ -252,6 +254,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     # ── Shared cell mask ─────────────────────────────────────────────────
     mask_group = QGroupBox("Shared Cell Mask")
     mask_form = QFormLayout(mask_group)
+    mask_form.setContentsMargins(9, 20, 9, 6)
     cell_mask_dropdown = ui_instance.create_layer_dropdown(napari.layers.Labels)
     mask_form.addRow("Labeled cell mask:", cell_mask_dropdown)
     main_layout.addWidget(mask_group)
@@ -260,6 +263,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     def _build_refinement_group(title):
         grp = QGroupBox(title)
         form = QFormLayout(grp)
+        form.setContentsMargins(9, 20, 9, 6)
 
         def _dspin(lo, hi, val, step):
             sb = QDoubleSpinBox()
@@ -290,6 +294,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     # ── Colocalization methods ──────────────────────────────────────────
     methods_group = QGroupBox("Colocalization Metrics")
     methods_layout = QVBoxLayout(methods_group)
+    methods_layout.setContentsMargins(9, 20, 9, 6)
     method_checks = {
         "Jaccard Index": QCheckBox("Jaccard Index"),
         "Sorensen-Dice Coefficient": QCheckBox("Sorensen-Dice Coefficient"),

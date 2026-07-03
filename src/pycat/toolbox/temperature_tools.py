@@ -229,12 +229,59 @@ def frame_entropy(frame: np.ndarray, bins: int = 256) -> float:
     return float(-np.sum(p * np.log2(p)))
 
 
+def guess_clear_frame(stack: np.ndarray, flatness_cov_threshold: float = 0.15):
+    """
+    Propose the clearest reference frame and judge whether it is actually clear.
+
+    Selection uses the per-frame COEFFICIENT OF VARIATION (std / mean), which is
+    a direct, scale-independent measure of spatial flatness: a uniform/clear
+    field has low CoV, while condensates create bright structure that raises it.
+    The flattest frame (lowest CoV) is the candidate.
+
+    NB: this deliberately does NOT use the normalized histogram entropy from
+    ``frame_entropy`` — that normalizes each frame to [0,1] before histogramming,
+    which stretches a flat noisy field to look high-entropy and makes a bimodal
+    condensate field look low-entropy, i.e. the opposite of what we want here.
+
+    "Flattest available" is not the same as "clear" — some stacks have no clear
+    frame at all (condensates throughout). So the candidate is also checked
+    against an ABSOLUTE flatness threshold. If it fails, ``is_clear`` is False and
+    the caller should warn rather than use it as a background reference. This
+    handles UCST and LCST behavior, where the clear frame (if any) may sit at the
+    start OR the end of the ramp.
+
+    Returns
+    -------
+    dict with keys:
+        index      : int   — proposed frame index (flattest)
+        is_clear   : bool  — passed the absolute flatness test
+        cov        : float — coefficient of variation of the candidate frame
+        threshold  : float — the CoV threshold used
+    """
+    stack = np.asarray(stack, dtype=np.float32)
+    n = stack.shape[0]
+    covs = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        f = stack[i]
+        mean = float(f.mean())
+        covs[i] = (float(f.std()) / mean) if mean > 1e-9 else float('inf')
+    idx = int(np.argmin(covs))
+    cov = float(covs[idx])
+    return {
+        'index': idx,
+        'is_clear': bool(cov <= flatness_cov_threshold),
+        'cov': cov,
+        'threshold': float(flatness_cov_threshold),
+    }
+
+
 def entropy_turbidity_curve(
     stack: np.ndarray,
     temperatures: np.ndarray,
     subtract_first_frame: bool = True,
     correct_focal_drift: bool = True,
     bins: int = 256,
+    reference_frame_index: int = 0,
 ) -> pd.DataFrame:
     """
     Build the entropy-based turbidity curve for a temperature ramp.
@@ -261,7 +308,8 @@ def entropy_turbidity_curve(
     n = stack.shape[0]
 
     if subtract_first_frame:
-        bg = stack[0] - float(stack[0].min())
+        ref = int(np.clip(reference_frame_index, 0, n - 1))
+        bg = stack[ref] - float(stack[ref].min())
         work = stack - bg
     else:
         work = stack
@@ -416,6 +464,10 @@ def run_temperature_batch(
     temp_column: str = 'AI0 (°C)',
     csv_header: int = 6,
     progress_callback=None,
+    export_mp4: bool = False,
+    fps: int = 30,
+    pixel_um: float = 1.0,
+    scalebar_um: float = 10.0,
 ) -> pd.DataFrame:
     """
     Process every TIFF under `tiff_root` (recursively — files may sit directly
@@ -475,6 +527,19 @@ def run_temperature_batch(
                 'T_clear_C': trans['T_clear_C'],
                 'hysteresis_C': trans['hysteresis_C'],
             })
+
+            # Optional annotated MP4, named from the TIFF and saved beside it.
+            if export_mp4:
+                try:
+                    elapsed_s = elapsed_to_seconds(times['elapsed_ms'])
+                    base = os.path.splitext(os.path.basename(tiff))[0]
+                    mp4_path = os.path.join(os.path.dirname(tiff), f"{base}_annotated.mp4")
+                    render_annotated_mp4(
+                        stack, temps, elapsed_s, mp4_path, fps=fps,
+                        pixel_um=pixel_um, scalebar_um=scalebar_um)
+                    row['mp4'] = os.path.basename(mp4_path)
+                except Exception as _me:
+                    row['mp4'] = f'mp4 error: {_me}'
         except Exception as e:
             row['status'] = f'error: {e}'
         rows.append(row)
@@ -483,3 +548,68 @@ def run_temperature_batch(
 
     return pd.DataFrame(rows)
 
+
+
+def render_annotated_mp4(stack, temps, elapsed_s, out_path, fps=30,
+                         pixel_um=1.0, scalebar_um=10.0, progress_callback=None):
+    """
+    Render a stack to an annotated MP4 with per-frame temperature/time text and
+    an optional scale bar burned in. Headless (Agg backend); shared by the
+    interactive export and the batch runner.
+
+    scalebar_um <= 0 disables the scale bar.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import imageio.v3 as iio
+    from datetime import timedelta
+
+    stack = np.asarray(stack)
+    n = stack.shape[0]
+    vmin, vmax = float(np.percentile(stack, 1)), float(np.percentile(stack, 99))
+    bar_px = (scalebar_um / pixel_um) if (pixel_um > 0 and scalebar_um > 0) else 0
+
+    frames = []
+    for i in range(n):
+        fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
+        ax.imshow(stack[i], cmap='gray', vmin=vmin, vmax=vmax)
+        ax.axis('off')
+        T = temps[i] if temps is not None else np.nan
+        secs = int(elapsed_s[i]) if (elapsed_s is not None and np.isfinite(elapsed_s[i])) else 0
+        tc = f"{T:.2f} \u00b0C" if np.isfinite(T) else "-- \u00b0C"
+        ax.set_title(f"{tc}   |   {timedelta(seconds=secs)} (h:m:s)", fontsize=12)
+        if bar_px > 0:
+            H, W = stack.shape[1], stack.shape[2]
+            x0 = W * 0.95 - bar_px; y0 = H * 0.92
+            ax.plot([x0, x0 + bar_px], [y0, y0], '-', color='white', lw=3)
+            ax.text(x0 + bar_px / 2, y0 - H * 0.02, f"{scalebar_um:.0f} \u00b5m",
+                    color='white', ha='center', va='bottom', fontsize=10)
+        fig.canvas.draw()
+        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))[:, :, :3]
+        frames.append(buf.copy())
+        plt.close(fig)
+        if progress_callback:
+            progress_callback(i + 1, n)
+
+    arr = np.stack(frames)
+    # H.264 needs even dims + yuv420p for broad player compatibility.
+    if arr.shape[1] % 2:
+        arr = arr[:, :-1, :, :]
+    if arr.shape[2] % 2:
+        arr = arr[:, :, :-1, :]
+    last_err = None
+    for _kwargs in ({'codec': 'libx264', 'out_pixel_format': 'yuv420p'},
+                    {'codec': 'libx264'},
+                    {'codec': 'mpeg4'},
+                    {}):
+        try:
+            iio.imwrite(str(out_path), arr, fps=fps, **_kwargs)
+            last_err = None
+            break
+        except Exception as _e:
+            last_err = _e
+    if last_err is not None:
+        raise last_err
+    return str(out_path)

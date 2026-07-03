@@ -300,7 +300,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
 
     grp  = QGroupBox("Gaussian Spot Localization")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+    form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
     desc = QLabel(
         "Fits a 2D/3D Gaussian + background to each detected spot for sub-pixel "

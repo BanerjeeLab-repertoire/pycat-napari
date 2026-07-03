@@ -117,6 +117,7 @@ def _show(title, tables):
 def _ivbf_preprocessing(ui, layout):
     grp  = QGroupBox("Step 2 — Preprocess Brightfield Image")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
     ref_cb = QCheckBox("Use flat-field reference")
@@ -171,6 +172,7 @@ def _ivbf_preprocessing(ui, layout):
 def _ivbf_segmentation(ui, layout):
     grp  = QGroupBox("Step 3 — Segment Droplets (dark blobs on bright BG)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Enhanced BF image:", enh_dd)
     min_d = QDoubleSpinBox(); min_d.setRange(1,100); min_d.setValue(4.0)
@@ -212,6 +214,7 @@ def _ivbf_segmentation(ui, layout):
 def _ivbf_od_field(ui, layout):
     grp  = QGroupBox("Step 4 — Optical Density & Field Summary")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Raw BF image:", raw_dd)
@@ -250,6 +253,7 @@ def _ivbf_od_field(ui, layout):
 def _ivbf_size_contact(ui, layout):
     grp  = QGroupBox("Step 5 — Size Distribution & Contact Angle")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask:", mask_dd)
@@ -315,6 +319,7 @@ def _ivbf_size_contact(ui, layout):
 def _ivbf_spatial(ui, layout):
     grp  = QGroupBox("Step 6 — Spatial Metrology")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
@@ -362,6 +367,7 @@ def _ivbf_spatial(ui, layout):
 def _ivbf_dynamics(ui, layout):
     grp  = QGroupBox("Step 7 — Dynamics & Coarsening (time-series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask stack (T,H,W):", stack_dd)
     dt_sp   = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
@@ -449,6 +455,7 @@ def _ivbf_dynamics(ui, layout):
 def _ivbf_focus_qc(ui, layout):
     grp  = QGroupBox("Step 8 — Focus Quality (time-series)")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "BF focus QC using Brenner/Tenengrad/normalised variance.\n"

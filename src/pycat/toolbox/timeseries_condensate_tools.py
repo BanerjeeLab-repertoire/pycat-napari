@@ -551,6 +551,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
 
     grp = QGroupBox("Lazy Stack Pre-processing")
     form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
 
     stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     form.addRow("Raw stack layer:", stack_dropdown)
@@ -1659,6 +1660,7 @@ def _add_run_timeseries_condensate_analysis(
     # ── Options ───────────────────────────────────────────────────────────
     opts_group = QGroupBox("Options")
     opts_layout = QFormLayout(opts_group)
+    opts_layout.setContentsMargins(9, 20, 9, 6)
 
     ref_spin = QSpinBox()
     ref_spin.setRange(0, 9999)
@@ -1712,6 +1714,7 @@ def _add_run_timeseries_condensate_analysis(
     # ── Refinement parameters ────────────────────────────────────────────
     ref_group = QGroupBox("Refinement Parameters")
     ref_layout = QFormLayout(ref_group)
+    ref_layout.setContentsMargins(9, 20, 9, 6)
 
     def _dspin(lo, hi, val, step, tip=""):
         sb = QDoubleSpinBox()

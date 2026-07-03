@@ -250,7 +250,7 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
 
     grp  = QGroupBox("Molecular Counting by Photobleaching")
     form = QFormLayout(grp)
-    form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+    form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
     desc = QLabel(
         "Counts fluorophores per region from photobleaching step-noise "

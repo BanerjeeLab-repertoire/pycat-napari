@@ -86,14 +86,14 @@ class DropletFusionUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setWidget(main_w); scroll.setMinimumWidth(320)
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Droplet Fusion")
 
     # ── Step 1: data source ────────────────────────────────────────────
     def _add_data_source(self, layout):
         grp  = QGroupBox("Step 1 — Data Source")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         mode_row = QHBoxLayout()
         self._rb_force = QRadioButton("C-Trap force (.h5)")
@@ -170,7 +170,7 @@ class DropletFusionUI:
     def _add_signal_build(self, layout):
         grp  = QGroupBox("Step 2 — Build Fusion Signal")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._sample_rate = QDoubleSpinBox()
         self._sample_rate.setRange(0.0, 1e7); self._sample_rate.setValue(0.0)
@@ -234,7 +234,7 @@ class DropletFusionUI:
     def _add_fit(self, layout):
         grp  = QGroupBox("Step 3 — Fit Relaxation  S(t)=a·e⁻ᵗ/τ+b·t+d")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"

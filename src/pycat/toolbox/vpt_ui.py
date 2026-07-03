@@ -96,14 +96,14 @@ class VideoParticleTrackingUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setWidget(main_w); scroll.setMinimumWidth(320)
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Video Particle Tracking")
 
     # ── Step 2: host condensate segmentation + erosion ─────────────────
     def _add_host_segmentation(self, layout):
         grp  = QGroupBox("Step 2 — Segment Host Condensate")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"
@@ -180,7 +180,7 @@ class VideoParticleTrackingUI:
     def _add_bead_detection(self, layout):
         grp  = QGroupBox("Step 3 — Detect Beads")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"
@@ -343,7 +343,7 @@ class VideoParticleTrackingUI:
     def _add_tracking(self, layout):
         grp  = QGroupBox("Step 4 — Link Trajectories")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         method_grp = QGroupBox("Linker")
         ml = QVBoxLayout(method_grp)
@@ -480,7 +480,7 @@ class VideoParticleTrackingUI:
     def _add_microrheology(self, layout):
         grp  = QGroupBox("Step 5 — Microrheology (MSD → Viscosity)")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(0.1)

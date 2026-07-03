@@ -75,14 +75,14 @@ class FDCurveUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        scroll.setWidget(main_w); scroll.setMinimumWidth(320)
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Force-Distance Curve")
 
     # ── Step 1: load ───────────────────────────────────────────────────
     def _add_load(self, layout):
         grp  = QGroupBox("Step 1 — Load Lumicks .h5")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         load_btn = QPushButton("Load Lumicks C-Trap .h5…")
         load_btn.setToolTip("Open a Lumicks .h5 and read its Distance and Force channels.")
@@ -170,7 +170,7 @@ class FDCurveUI:
     def _add_segment(self, layout):
         grp  = QGroupBox("Step 2 — Unfold into Stretch/Relax Cycles")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._smooth = QCheckBox("Savitzky-Golay smooth force")
         self._smooth.setChecked(False)
@@ -237,7 +237,7 @@ class FDCurveUI:
     def _add_plot(self, layout):
         grp  = QGroupBox("Step 3 — Plot Loops & Export")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         self._show_wlc = QCheckBox("Overlay worm-like chain (dsDNA) reference")
         self._show_wlc.setChecked(True)
@@ -315,7 +315,7 @@ class FDCurveUI:
     def _add_rips(self, layout):
         grp  = QGroupBox("Step 4 — Detect Rips / Unzips (G-quadruplex unfolding)")
         form = QFormLayout(grp)
-        form.setContentsMargins(4, 4, 4, 4); form.setSpacing(5)
+        form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         note = QLabel(
             "<span style='color:#aaa;font-size:9pt;'>"

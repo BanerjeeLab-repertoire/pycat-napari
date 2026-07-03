@@ -128,6 +128,17 @@ def run_pycat_func():
 
     app = QApplication(sys.argv)  # sys.argv is necessary for proper app initialization
 
+    # On Windows, the taskbar groups by AppUserModelID; without an explicit one a
+    # Python-launched app shows the generic Python icon instead of our window
+    # icon. Set an explicit ID so the PyCAT logo appears in the taskbar.
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                'BanerjeeLab.PyCAT.napari')
+    except Exception:
+        pass
+
     try:
         # Use importlib.resources to get the path to the PyCAT logo
         logo_path = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
@@ -175,6 +186,104 @@ def run_pycat_func():
     cm._pycat_batch_processor = bp   # readable via central_manager in widgets
     bp._central_manager = cm          # so bp.record() can notify the checklist
     add_batch_toolbar_button(viewer, bp)
+
+    # Finalize the window after the event loop starts. The app-wide stylesheet
+    # (QGroupBox title spacing) triggers an async relayout that would re-show the
+    # window at default size, so it must run BEFORE the maximize — and the
+    # maximize is staggered a bit later so it lands after that relayout settles.
+    _GROUPBOX_QSS = """
+QGroupBox { margin-top: 16px; padding-top: 8px; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 8px; padding: 0 4px; }
+"""
+    def _apply_style():
+        try:
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.setStyleSheet((_app.styleSheet() or "") + _GROUPBOX_QSS)
+        except Exception:
+            pass
+    def _maximize():
+        try:
+            viewer.window._qt_window.showMaximized()
+        except Exception:
+            pass
+
+    def _brand_welcome():
+        """Replace napari's canvas welcome logo (a QLabel styled via a QSS
+        `image:` url, objectName 'logo_silhouette') with the PyCAT logo, keep the
+        hotkeys, and show 'PyCAT <ver> • napari <ver>'. Also set the window icon.
+        Best-effort and fully guarded — napari internals vary by version."""
+        from PyQt5.QtGui import QIcon
+        from PyQt5.QtWidgets import QLabel
+        try:
+            _lp = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
+            with resources.as_file(_lp) as _p:
+                logo_str = str(_p).replace('\\', '/')   # forward slashes for QSS url
+        except Exception:
+            logo_str = None
+        try:
+            from importlib.metadata import version as _pkgver
+            pycat_ver = _pkgver('pycat-napari')
+        except Exception:
+            pycat_ver = ''
+        try:
+            if logo_str:
+                viewer.window._qt_window.setWindowIcon(QIcon(logo_str))
+        except Exception:
+            pass
+        try:
+            qtv = (getattr(viewer.window, '_qt_viewer', None)
+                   or getattr(viewer.window, 'qt_viewer', None))
+            welcome = getattr(qtv, '_welcome_widget', qtv) if qtv is not None else None
+            if welcome is not None and logo_str:
+                for lbl in welcome.findChildren(QLabel):
+                    name = lbl.objectName()
+                    txt = lbl.text() or ''
+                    is_logo = ('logo' in name.lower() or 'silhouette' in name.lower()
+                               or (not txt and lbl.minimumWidth() >= 200))
+                    if is_logo:
+                        # Override the QSS image at matching specificity so it
+                        # wins over napari's themed logo rule.
+                        if name:
+                            lbl.setStyleSheet(f"#{name} {{ image: url('{logo_str}'); }}")
+                        else:
+                            lbl.setStyleSheet(f"image: url('{logo_str}');")
+                    elif (txt and 'napari' in txt.lower()
+                          and pycat_ver and 'PyCAT' not in txt):
+                        # PyCAT first, then napari.
+                        lbl.setText(f"PyCAT {pycat_ver}   \u2022   {txt}")
+                    elif txt and ('image.sc' in txt.lower() or 'forum' in txt.lower()):
+                        # Reword the help line to cover PyCAT as well as napari.
+                        lbl.setText(
+                            "PyCAT \u2022 napari  \u2014  For help with PyCAT visit "
+                            "github.com/BanerjeeLab-repertoire/pycat-napari, and for "
+                            "napari visit forum.image.sc/tag/napari.")
+        except Exception:
+            pass
+
+    try:
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, _apply_style)     # stylesheet first (triggers relayout)
+        QTimer.singleShot(60, _brand_welcome)  # brand once the welcome widget exists
+        QTimer.singleShot(120, _maximize)      # maximize after relayout settles
+    except Exception:
+        _apply_style(); _brand_welcome(); _maximize()
+
+    # Re-apply branding whenever the canvas returns to empty (napari regenerates
+    # the welcome screen when the last layer is removed), so the PyCAT logo/text
+    # don't revert to napari's defaults after a Clear.
+    def _rebrand_if_empty(*_a):
+        try:
+            if len(viewer.layers) == 0:
+                from PyQt5.QtCore import QTimer as _QT
+                _QT.singleShot(50, _brand_welcome)
+        except Exception:
+            pass
+    try:
+        viewer.layers.events.removed.connect(_rebrand_if_empty)
+        viewer.layers.events.inserted.connect(_rebrand_if_empty)
+    except Exception:
+        pass
 
     napari.run()
 
