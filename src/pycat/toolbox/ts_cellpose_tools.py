@@ -304,7 +304,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     Multi-Otsu thresholding provides a DNA-stain-free fallback.
     """
     from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy as _QSP
-    grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation (Keyframe)")
+    grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
     form  = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     form.setLabelAlignment(Qt.AlignLeft)
@@ -434,6 +434,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     progress_label.setVisible(False)
 
     run_btn = QPushButton("▶  Run Cell Segmentation")
+    run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     run_btn.setToolTip("Run keyframe cell segmentation using the selected method.")
 
     def _on_run():

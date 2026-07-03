@@ -658,6 +658,7 @@ def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
 
     # ── Run button ─────────────────────────────────────────────────────────
     run_button = QPushButton("Run SACF Analysis")
+    run_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
     def _on_run():
         btn_id = mode_group.checkedId()

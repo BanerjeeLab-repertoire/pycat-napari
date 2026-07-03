@@ -175,7 +175,7 @@ def _ivf_preprocessing(ui, layout):
 
 
 def _ivf_segmentation(ui, layout):
-    grp  = QGroupBox("Step 3 — Segment Droplets (whole field, no cell mask)")
+    grp  = QGroupBox("Step 3 — Segment Droplets")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     pre_dd  = ui.create_layer_dropdown(napari.layers.Image)
@@ -296,6 +296,7 @@ def _ivf_field_summary(ui, layout):
     form.addRow("Fluorescence image:", img_dd)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Compute Field Summary")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -334,7 +335,7 @@ def _ivf_field_summary(ui, layout):
 
 
 def _ivf_size_distribution(ui, layout):
-    grp  = QGroupBox("Step 5 — Size Distribution (lognormal / power-law)")
+    grp  = QGroupBox("Step 5 — Size Distribution")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
@@ -342,6 +343,7 @@ def _ivf_size_distribution(ui, layout):
     bins_sp = QSpinBox(); bins_sp.setRange(5,100); bins_sp.setValue(30)
     form.addRow("Histogram bins:", bins_sp)
     run = QPushButton("▶  Fit Size Distribution")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -380,6 +382,7 @@ def _ivf_spatial(ui, layout):
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -573,7 +576,7 @@ def _ivf_dynamics(ui, layout):
 
 
 def _ivf_phase_diagram(ui, layout):
-    grp  = QGroupBox("Step 8 — Phase Diagram / C_sat (dilution series)")
+    grp  = QGroupBox("Step 8 — Phase Diagram / C_sat")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
@@ -590,6 +593,7 @@ def _ivf_phase_diagram(ui, layout):
     form.addRow("Concentrations (µM):", conc_edit)
     form.addRow("Volume fractions (Φ):", phi_edit)
     run = QPushButton("▶  Estimate C_sat")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():

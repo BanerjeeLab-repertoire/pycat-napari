@@ -82,6 +82,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     prog_msd = QProgressBar(); prog_msd.setVisible(False)
     run_msd  = QPushButton("▶  Run MSD Analysis")
+    run_msd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     mf.addRow(prog_msd); mf.addRow(run_msd)
 
     def _on_msd():
@@ -157,6 +158,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     prog_hist = QProgressBar(); prog_hist.setVisible(False)
     run_hist  = QPushButton("▶  Fit Bimodal Intensity")
+    run_hist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     hf.addRow(prog_hist); hf.addRow(run_hist)
 
     def _on_hist():
@@ -199,7 +201,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     dt_kin = QDoubleSpinBox(); dt_kin.setRange(0.01, 3600); dt_kin.setValue(1.0)
     kf.addRow("Frame interval (s):", dt_kin)
     run_coarse = QPushButton("▶  Fit Coarsening Kinetics")
+    run_coarse.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     run_fusion = QPushButton("▶  Fit Fusion Relaxation (from merge events)")
+    run_fusion.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     kf.addRow(run_coarse); kf.addRow(run_fusion)
 
     def _on_coarsen():
@@ -289,6 +293,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     status_qc = QLabel("")
     status_qc.setStyleSheet("color: #aaa; font-size: 9pt;")
     run_qc  = QPushButton("▶  Run QC Analysis")
+    run_qc.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     qf.addRow(prog_qc); qf.addRow(status_qc); qf.addRow(run_qc)
 
     def _on_qc():
@@ -390,6 +395,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     total_frames_spin = QSpinBox(); total_frames_spin.setRange(1,9999); total_frames_spin.setValue(600)
     sf.addRow("Total frames in movie:", total_frames_spin)
     run_surv = QPushButton("▶  Kaplan-Meier Survival")
+    run_surv.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     sf.addRow(run_surv)
 
     def _on_surv():

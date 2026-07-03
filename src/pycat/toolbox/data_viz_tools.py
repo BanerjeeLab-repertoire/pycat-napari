@@ -1,4 +1,3 @@
-from PyQt5.QtWidgets import QSizePolicy
 """
 Data Visualization and Plotting Tools for PyCAT
 
@@ -20,7 +19,7 @@ Date
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButtonGroup, QGroupBox, QHBoxLayout, QLabel, QCheckBox, QScrollArea, QLineEdit, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButtonGroup, QGroupBox, QHBoxLayout, QLabel, QCheckBox, QScrollArea, QLineEdit, QPushButton, QSizePolicy
 from PyQt5.QtCore import Qt
 
 

@@ -170,7 +170,7 @@ def _ivbf_preprocessing(ui, layout):
 
 
 def _ivbf_segmentation(ui, layout):
-    grp  = QGroupBox("Step 3 — Segment Droplets (dark blobs on bright BG)")
+    grp  = QGroupBox("Step 3 — Segment Droplets")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
@@ -220,6 +220,7 @@ def _ivbf_od_field(ui, layout):
     form.addRow("Raw BF image:", raw_dd)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Compute OD & Field Summary")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -267,6 +268,7 @@ def _ivbf_size_contact(ui, layout):
     form.addRow("Size histogram bins:", bins_sp)
 
     run = QPushButton("▶  Fit Size Distribution & Contact Angle")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -323,6 +325,7 @@ def _ivbf_spatial(ui, layout):
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -468,6 +471,7 @@ def _ivbf_focus_qc(ui, layout):
     form.addRow("Frame interval (s):", dt_sp)
     form.addRow("Defocus threshold:", thr_sp)
     run = QPushButton("▶  Assess Focus")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():

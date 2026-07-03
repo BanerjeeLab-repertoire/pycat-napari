@@ -578,6 +578,7 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow(corr_label)
 
     check_corr_btn = QPushButton("Check Temporal Correlation")
+    check_corr_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(check_corr_btn)
 
     pseudo3d_temporal_cb = QCheckBox("Pseudo-3D temporal filtering (tri-planar across T)")
@@ -1805,6 +1806,7 @@ def _add_run_timeseries_condensate_analysis(
     ts_layout.addWidget(progress_bar)
 
     run_btn    = QPushButton("▶  Run Time-Series Analysis")
+    run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     cancel_btn = QPushButton("Cancel")
     cancel_btn.setVisible(False)
 

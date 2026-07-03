@@ -147,6 +147,7 @@ class TemperatureDependentUI:
 
         self._sync_prog = QProgressBar(); self._sync_prog.setVisible(False)
         btn = QPushButton("▶  Sync Temperatures")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_sync)
         form.addRow(self._sync_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -323,6 +324,7 @@ class TemperatureDependentUI:
             "Which frame is the clear reference. For UCST/LCST samples the clear "
             "frame may be at the end, not the start.")
         guess_btn = QPushButton("Guess clear frame")
+        guess_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         guess_btn.setToolTip(
             "Pick the lowest-entropy frame and check it is genuinely flat. "
             "Warns if no clear frame exists (condensates throughout).")
@@ -330,20 +332,41 @@ class TemperatureDependentUI:
         ref_row.addWidget(self._ref_frame); ref_row.addWidget(guess_btn)
         rw = QWidget(); rw.setLayout(ref_row); form.addRow("Reference frame:", rw)
 
-        self._correct_focus = QCheckBox("Correct focal drift (recommended)")
-        self._correct_focus.setChecked(True)
+        self._correct_focus = QCheckBox("Correct focal drift (off by default)")
+        self._correct_focus.setChecked(False)
         self._correct_focus.setToolTip(
-            "Regress the per-frame focus score out of the entropy signal. "
-            "Defocus broadens the histogram like turbidity does, so this "
-            "isolates the genuine phase-separation signal.")
+            "Regress the per-frame focus score out of the entropy signal. Use "
+            "ONLY if real focal drift is corrupting the curve. Caution: when "
+            "condensates themselves sharpen the focus metric, this subtracts real "
+            "turbidity signal (corrected entropy dips below baseline) — leave off "
+            "unless you know defocus is the problem.")
         form.addRow(self._correct_focus)
 
         self._entropy_bins = QSpinBox(); self._entropy_bins.setRange(16, 1024); self._entropy_bins.setValue(256)
         self._entropy_bins.setToolTip("Histogram bins for the entropy calculation.")
         form.addRow("Entropy bins:", self._entropy_bins)
 
+        # Transition-temperature definition — different conventions suit different
+        # samples, so let the user pick.
+        from PyQt5.QtWidgets import QRadioButton, QButtonGroup
+        self._method_baseline = QRadioButton("Baseline departure / return")
+        self._method_baseline.setChecked(True)
+        self._method_baseline.setToolTip(
+            "Report where the signal first leaves the baseline (cloud) and "
+            "returns to it (clear) — the onset/offset of the transition.")
+        self._method_midpoint = QRadioButton("Steepest point (midpoint)")
+        self._method_midpoint.setToolTip(
+            "Report the steepest point of the transition (temperature of maximum "
+            "|dS/dT|) — the transition midpoint.")
+        self._method_group = QButtonGroup(self._method_baseline.parent())
+        self._method_group.addButton(self._method_baseline)
+        self._method_group.addButton(self._method_midpoint)
+        form.addRow("Transition point:", self._method_baseline)
+        form.addRow("", self._method_midpoint)
+
         self._turb_prog = QProgressBar(); self._turb_prog.setVisible(False)
         btn = QPushButton("▶  Compute Turbidity & Detect Transitions")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_turbidity)
         form.addRow(self._turb_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -392,7 +415,8 @@ class TemperatureDependentUI:
                 bins=self._entropy_bins.value(),
                 reference_frame_index=self._ref_frame.value())
             sig_col = 'entropy_corrected' if self._correct_focus.isChecked() else 'entropy'
-            trans = detect_transitions(df, sig_col)
+            method = 'baseline' if self._method_baseline.isChecked() else 'midpoint'
+            trans = detect_transitions(df, sig_col, method=method)
         except Exception as e:
             self._turb_prog.setVisible(False)
             napari_show_warning(f"Turbidity analysis failed: {e}")
@@ -408,19 +432,11 @@ class TemperatureDependentUI:
             'hysteresis_C': trans['hysteresis_C']})
 
         try:
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            summary = pd.DataFrame([{
-                'T_phase (°C, cloud)':  round(trans['T_phase_C'], 2) if trans['T_phase_C']==trans['T_phase_C'] else None,
-                'T_clear (°C)':         round(trans['T_clear_C'], 2) if trans['T_clear_C']==trans['T_clear_C'] else None,
-                'hysteresis (°C)':      round(trans['hysteresis_C'], 2) if trans['hysteresis_C']==trans['hysteresis_C'] else None,
-                'branch split frame':   trans['loc'],
-                'focus corrected':      self._correct_focus.isChecked(),
-            }])
-            show_dataframes_dialog("Temperature Turbidity",
-                                   [('Transitions', summary),
-                                    ('Turbidity curve', df.round(4))])
-        except Exception:
-            pass
+            from pycat.toolbox.temperature_tools import plot_turbidity_transitions
+            plot_turbidity_transitions(df, trans, signal_column=sig_col,
+                                       interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] turbidity plot failed: {e}")
 
         tp = trans['T_phase_C']; tc = trans['T_clear_C']
         napari_show_info(
@@ -447,11 +463,46 @@ class TemperatureDependentUI:
         self._fps.setToolTip("Playback frame rate of the exported MP4.")
         form.addRow("Video FPS:", self._fps)
 
+        # Pattern-corrected (dust/scratch removed) stack option.
+        self._export_corrected = QCheckBox("Use pattern-corrected stack (dust / scratch removed)")
+        self._export_corrected.setChecked(False)
+        self._export_corrected.setToolTip(
+            "Remove the static brightfield pattern using the Step 3 reference "
+            "frame, preserving the gray baseline. The annotated MP4 is rendered "
+            "from the corrected stack when this is on.")
+        form.addRow(self._export_corrected)
+        corr_btn = QPushButton("Add Pattern-Corrected Stack as Layer")
+        corr_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        corr_btn.clicked.connect(self._on_add_corrected_layer)
+        form.addRow(corr_btn)
+
         self._export_prog = QProgressBar(); self._export_prog.setVisible(False)
         exp_btn = QPushButton("▶  Export Annotated MP4")
+        exp_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         exp_btn.clicked.connect(self._on_export)
         form.addRow(self._export_prog); form.addRow(exp_btn)
         layout.addWidget(grp)
+
+    def _corrected_stack(self):
+        """Return the pattern-corrected stack for the selected layer + reference
+        frame, or None if unavailable."""
+        from pycat.toolbox.temperature_tools import apply_static_pattern_correction
+        sname = self._stack_dd.currentText()
+        if sname not in [l.name for l in self.viewer.layers]:
+            napari_show_warning(f"Stack layer '{sname}' not found."); return None
+        stack = np.asarray(self.viewer.layers[sname].data)
+        if stack.ndim != 3:
+            napari_show_warning("Pattern correction needs a (T, H, W) stack."); return None
+        return apply_static_pattern_correction(stack, self._ref_frame.value())
+
+    def _on_add_corrected_layer(self):
+        corrected = self._corrected_stack()
+        if corrected is None:
+            return
+        self.viewer.add_image(
+            corrected, name=f"Pattern-Corrected (ref {self._ref_frame.value()})")
+        napari_show_info(
+            f"Added pattern-corrected stack (reference frame {self._ref_frame.value()}).")
 
     def _pixel_size(self):
         stored = self._dr().get('microns_per_pixel_sq')
@@ -514,6 +565,9 @@ class TemperatureDependentUI:
             return
 
         stack = np.asarray(self.viewer.layers[sname].data)
+        if self._export_corrected.isChecked():
+            from pycat.toolbox.temperature_tools import apply_static_pattern_correction
+            stack = apply_static_pattern_correction(stack, self._ref_frame.value())
         self._export_prog.setVisible(True); self._export_prog.setRange(0, stack.shape[0])
         try:
             self._render_annotated_mp4(
@@ -564,8 +618,16 @@ class TemperatureDependentUI:
             "source file and written next to it.")
         form.addRow(self._batch_export_mp4)
 
+        self._batch_export_corrected = QCheckBox("Also save pattern-corrected stack for each TIFF")
+        self._batch_export_corrected.setChecked(False)
+        self._batch_export_corrected.setToolTip(
+            "Save a dust/scratch-corrected TIFF (gray-preserving) per input, "
+            "named <file>_corrected.tif beside the source.")
+        form.addRow(self._batch_export_corrected)
+
         self._batch_prog = QProgressBar(); self._batch_prog.setVisible(False)
         btn = QPushButton("▶  Run Batch Turbidity Analysis")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_batch)
         form.addRow(self._batch_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -594,6 +656,7 @@ class TemperatureDependentUI:
                 temp_column=self._temp_col.text().strip() or 'AI0 (°C)',
                 csv_header=self._csv_header.value(),
                 export_mp4=self._batch_export_mp4.isChecked(),
+                export_corrected=self._batch_export_corrected.isChecked(),
                 fps=self._fps.value(),
                 pixel_um=self._pixel_size(),
                 scalebar_um=(10.0 if self._use_scalebar.isChecked() else 0.0),

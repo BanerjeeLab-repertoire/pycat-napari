@@ -91,6 +91,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_m = QProgressBar(); prog_m.setVisible(False)
     run_m  = QPushButton("▶  Run Morphological Analysis")
+    run_m.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     stop_m = QPushButton("■  Stop"); stop_m.setVisible(False)
     mf.addRow(prog_m); mf.addRow(run_m); mf.addRow(stop_m)
 
@@ -287,6 +288,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_d = QProgressBar(); prog_d.setVisible(False)
     run_d  = QPushButton("▶  Run Dynamic Analysis")
+    run_d.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     stop_d = QPushButton("■  Stop"); stop_d.setVisible(False)
     df.addRow(prog_d); df.addRow(run_d); df.addRow(stop_d)
 
@@ -458,6 +460,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
     prog_o = QProgressBar(); prog_o.setVisible(False)
     run_o  = QPushButton("▶  Run Organizational Metrics")
+    run_o.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     stop_o = QPushButton("■  Stop"); stop_o.setVisible(False)
     of.addRow(prog_o); of.addRow(run_o); of.addRow(stop_o)
 

@@ -259,6 +259,7 @@ def _add_intensity_profile(ui_instance, layout=None, separate_widget=False):
     form.addRow("Max radius (px):", rad_spin)
 
     btn = QPushButton("▶  Compute Profiles")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(btn)
 
     def _mpx():

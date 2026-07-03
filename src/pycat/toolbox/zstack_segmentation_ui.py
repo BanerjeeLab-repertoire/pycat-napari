@@ -393,6 +393,7 @@ def _add_zstack_metrics(ui, layout):
     form.addRow("Z-step (\u00b5m):", z_step_sp)
 
     run = QPushButton("\u25b6  Compute 3D Metrics")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():

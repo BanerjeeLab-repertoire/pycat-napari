@@ -138,6 +138,7 @@ class VideoParticleTrackingUI:
 
         self._host_prog = QProgressBar(); self._host_prog.setVisible(False)
         btn = QPushButton("▶  Segment Host & Erode")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_segment_host)
         form.addRow(self._host_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -237,6 +238,7 @@ class VideoParticleTrackingUI:
 
         self._bead_prog = QProgressBar(); self._bead_prog.setVisible(False)
         btn = QPushButton("▶  Detect Beads")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_detect_beads)
         form.addRow(self._bead_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -375,6 +377,7 @@ class VideoParticleTrackingUI:
 
         self._track_prog = QProgressBar(); self._track_prog.setVisible(False)
         btn = QPushButton("▶  Link Trajectories")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_link)
         form.addRow(self._track_prog); form.addRow(btn)
         layout.addWidget(grp)
@@ -507,6 +510,7 @@ class VideoParticleTrackingUI:
 
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_rheology)
         form.addRow(self._rheo_prog); form.addRow(btn)
         layout.addWidget(grp)

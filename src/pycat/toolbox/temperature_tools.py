@@ -275,6 +275,47 @@ def guess_clear_frame(stack: np.ndarray, flatness_cov_threshold: float = 0.15):
     }
 
 
+def apply_static_pattern_correction(stack, reference_index=0):
+    """
+    Remove the static brightfield pattern (dust, scratches, fixed optical
+    artifacts) captured in a reference frame, while preserving the gray baseline
+    so the result still looks like brightfield rather than going toward black:
+
+        corrected = frame - reference + mean(reference)
+
+    Subtracting the reference cancels the fixed pattern (present in every frame);
+    adding back mean(reference) restores the overall gray level. Each frame keeps
+    its own noise and any real content.
+
+    The reference frame minus itself would be flat, so it is replaced by the
+    average of its already-corrected neighbours — real neighbouring noise and
+    content rather than a synthetic fill — so it reads as a normal brightfield
+    frame instead of a flat outlier.
+
+    Returns a float32 (T, H, W) stack.
+    """
+    stack = np.asarray(stack, dtype=np.float32)
+    n = stack.shape[0]
+    ref = int(np.clip(reference_index, 0, n - 1))
+    reference = stack[ref]
+    mean_ref = float(reference.mean())
+
+    corrected = (stack - reference + mean_ref).astype(np.float32)
+
+    # The reference frame minus itself would be flat, so rebuild it from its
+    # already-corrected neighbours — real neighbouring noise and content rather
+    # than a synthetic fill. (Neighbours share the same static pattern, which is
+    # removed identically, so this stays gray-preserving.)
+    if n > 1:
+        if 0 < ref < n - 1:
+            corrected[ref] = 0.5 * (corrected[ref - 1] + corrected[ref + 1])
+        elif ref == 0:
+            corrected[ref] = corrected[1]
+        else:  # ref == n - 1
+            corrected[ref] = corrected[ref - 1]
+    return corrected
+
+
 def entropy_turbidity_curve(
     stack: np.ndarray,
     temperatures: np.ndarray,
@@ -309,14 +350,28 @@ def entropy_turbidity_curve(
 
     if subtract_first_frame:
         ref = int(np.clip(reference_frame_index, 0, n - 1))
-        bg = stack[ref] - float(stack[ref].min())
-        work = stack - bg
+        work = apply_static_pattern_correction(stack, ref)
     else:
         work = stack
 
     ent  = np.array([frame_entropy(work[i], bins) for i in range(n)])
     mean = np.array([float(work[i].mean()) for i in range(n)])
     foc  = focus_scores(stack)
+
+    if subtract_first_frame:
+        # The reference frame is a rebuilt (interpolated) frame, so its recomputed
+        # entropy can differ slightly from its neighbours. Make it inherit the
+        # neighbour average directly so it never shows up as an outlier on the
+        # curve or biases the transition detection.
+        r = int(np.clip(reference_frame_index, 0, n - 1))
+        if 0 < r < n - 1:
+            ent[r]  = 0.5 * (ent[r - 1]  + ent[r + 1])
+            mean[r] = 0.5 * (mean[r - 1] + mean[r + 1])
+            foc[r]  = 0.5 * (foc[r - 1]  + foc[r + 1])
+        elif r == 0 and n > 1:
+            ent[r], mean[r], foc[r] = ent[1], mean[1], foc[1]
+        elif r == n - 1 and n > 1:
+            ent[r], mean[r], foc[r] = ent[r - 1], mean[r - 1], foc[r - 1]
 
     ent_corr = ent.copy()
     if correct_focal_drift and np.isfinite(foc).all() and foc.std() > 0:
@@ -397,8 +452,70 @@ def _sigmoid_midpoint(temp: np.ndarray, signal: np.ndarray,
     return float(centers[np.argmax(ds)])
 
 
+def _baseline_onset(temp: np.ndarray, signal: np.ndarray,
+                    frac: float = 0.12, n_bins: int = 40) -> float:
+    """
+    Temperature at which the signal departs from (or returns to) its baseline.
+
+    Unlike the steepest-point midpoint, this reports the *onset* of the
+    transition — where turbidity first rises above the flat baseline — which is
+    where condensates begin to appear (cloud) or finish dissolving (clear).
+
+    The branch is binned by temperature and, scanning from low temperature, the
+    first crossing above ``baseline + frac * (peak - baseline)`` is returned
+    (linearly interpolated between bins). Works for either branch: sorted by
+    increasing temperature, both the heating and cooling branches sit low at low
+    T and high at high T, so the low-T crossing is the departure (heating →
+    cloud) or the return to baseline (cooling → clear).
+    """
+    t = np.asarray(temp, dtype=float)
+    s = np.asarray(signal, dtype=float)
+    good = np.isfinite(t) & np.isfinite(s)
+    t, s = t[good], s[good]
+    if len(t) < 6 or t.max() <= t.min():
+        return np.nan
+
+    edges = np.linspace(t.min(), t.max(), n_bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    binned = np.full(n_bins, np.nan)
+    for b in range(n_bins):
+        in_bin = (t >= edges[b]) & (t < edges[b + 1] if b < n_bins - 1 else t <= edges[b + 1])
+        if np.any(in_bin):
+            binned[b] = np.nanmean(s[in_bin])
+    valid = np.isfinite(binned)
+    if valid.sum() < 5:
+        return np.nan
+    binned = np.interp(centers, centers[valid], binned[valid])
+
+    # Light smoothing to suppress single-bin noise
+    k = max(3, n_bins // 10)
+    if k % 2 == 0:
+        k += 1
+    binned = np.convolve(binned, np.ones(k) / k, mode='same')
+
+    baseline = np.percentile(binned, 15)
+    peak = np.percentile(binned, 95)
+    if peak - baseline < 1e-9:
+        return np.nan
+    thr = baseline + frac * (peak - baseline)
+
+    above = binned >= thr
+    if not above.any():
+        return np.nan
+    idx = int(np.argmax(above))          # first bin above threshold (low-T side)
+    if idx == 0:
+        return float(centers[0])
+    # Linear interpolation of the crossing between idx-1 and idx.
+    s0, s1 = binned[idx - 1], binned[idx]
+    t0, t1 = centers[idx - 1], centers[idx]
+    if s1 == s0:
+        return float(t1)
+    return float(t0 + (thr - s0) / (s1 - s0) * (t1 - t0))
+
+
 def detect_transitions(turbidity_df: pd.DataFrame,
-                       signal_column: str = 'entropy_corrected') -> dict:
+                       signal_column: str = 'entropy_corrected',
+                       method: str = 'baseline') -> dict:
     """
     Split the turbidity curve into heating and cooling branches at the
     maximum-temperature frame and estimate the transition temperatures.
@@ -423,14 +540,37 @@ def detect_transitions(turbidity_df: pd.DataFrame,
     heating = df.iloc[:loc + 1]
     cooling = df.iloc[loc:]
 
-    T_phase = _sigmoid_midpoint(heating['temperature_C'].values,
-                                heating[signal_column].values) if len(heating) > 4 else np.nan
-    T_clear = _sigmoid_midpoint(cooling['temperature_C'].values,
-                                cooling[signal_column].values) if len(cooling) > 4 else np.nan
-    hyst = (T_phase - T_clear) if (np.isfinite(T_phase) and np.isfinite(T_clear)) else np.nan
+    _detect = _sigmoid_midpoint if method == 'midpoint' else _baseline_onset
+    h_mid = _detect(heating['temperature_C'].values,
+                    heating[signal_column].values) if len(heating) > 4 else np.nan
+    c_mid = _detect(cooling['temperature_C'].values,
+                    cooling[signal_column].values) if len(cooling) > 4 else np.nan
 
-    return dict(T_phase_C=T_phase, T_clear_C=T_clear, hysteresis_C=hyst,
-                loc=loc, heating_df=heating, cooling_df=cooling)
+    def _rises(s):
+        """True if the signal is higher at the end of the branch than the start."""
+        s = np.asarray(s, dtype=float); s = s[np.isfinite(s)]
+        if len(s) < 4:
+            return True
+        k = max(2, len(s) // 8)
+        return float(np.nanmean(s[-k:])) >= float(np.nanmean(s[:k]))
+
+    # Cloud point = where turbidity RISES (condensates appear); clear point =
+    # where it FALLS (condensates dissolve). Assign by the heating branch's
+    # direction so this works for both LCST (appear on heating) and UCST
+    # (appear on cooling) systems, rather than assuming a fixed branch.
+    if _rises(heating[signal_column].values):
+        T_cloud, cloud_branch = h_mid, 'heating'
+        T_clear, clear_branch = c_mid, 'cooling'
+    else:
+        T_clear, clear_branch = h_mid, 'heating'
+        T_cloud, cloud_branch = c_mid, 'cooling'
+
+    hyst = (abs(T_cloud - T_clear)
+            if (np.isfinite(T_cloud) and np.isfinite(T_clear)) else np.nan)
+
+    return dict(T_phase_C=T_cloud, T_clear_C=T_clear, hysteresis_C=hyst,
+                loc=loc, heating_df=heating, cooling_df=cooling,
+                cloud_branch=cloud_branch, clear_branch=clear_branch)
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +608,7 @@ def run_temperature_batch(
     fps: int = 30,
     pixel_um: float = 1.0,
     scalebar_um: float = 10.0,
+    export_corrected: bool = False,
 ) -> pd.DataFrame:
     """
     Process every TIFF under `tiff_root` (recursively — files may sit directly
@@ -540,6 +681,19 @@ def run_temperature_batch(
                     row['mp4'] = os.path.basename(mp4_path)
                 except Exception as _me:
                     row['mp4'] = f'mp4 error: {_me}'
+
+            # Optional pattern-corrected TIFF (auto-detect the clear frame).
+            if export_corrected:
+                try:
+                    import tifffile as _tf
+                    g = guess_clear_frame(stack)
+                    corrected = apply_static_pattern_correction(stack, g['index'])
+                    base = os.path.splitext(os.path.basename(tiff))[0]
+                    corr_path = os.path.join(os.path.dirname(tiff), f"{base}_corrected.tif")
+                    _tf.imwrite(corr_path, corrected.astype(np.float32))
+                    row['corrected'] = os.path.basename(corr_path)
+                except Exception as _ce:
+                    row['corrected'] = f'corrected error: {_ce}'
         except Exception as e:
             row['status'] = f'error: {e}'
         rows.append(row)
@@ -613,3 +767,78 @@ def render_annotated_mp4(stack, temps, elapsed_s, out_path, fps=30,
     if last_err is not None:
         raise last_err
     return str(out_path)
+
+
+def plot_turbidity_transitions(df, transitions, signal_column='entropy',
+                               interactive=True):
+    """
+    Plot the entropy-vs-temperature turbidity hysteresis with the heating branch
+    (temperature rising) in RED and the cooling branch (falling) in BLUE, and
+    annotate T_cloud (T_phase, on heating) and T_clear (on cooling).
+
+    The two temperature markers are staggered — one label above with a downward
+    pointer, one below with an upward pointer — so their text never overlaps even
+    when the two temperatures are close.
+
+    interactive=True shows a Qt window; False returns the Figure (headless).
+    """
+    import matplotlib
+    if not interactive:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    temp = df['temperature_C'].values
+    sig = df[signal_column].values
+    loc = int(np.nanargmax(temp))                 # split at peak temperature
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+
+    # Heating = rising T (red), cooling = falling T (blue).
+    ax.plot(temp[:loc + 1], sig[:loc + 1], '-o', color='#d62728', ms=3, lw=1.2,
+            label='heating (T\u2191)')
+    ax.plot(temp[loc:], sig[loc:], '-o', color='#1f77b4', ms=3, lw=1.2,
+            label='cooling (T\u2193)')
+
+    y0, y1 = ax.get_ylim()
+    yr = y1 - y0
+
+    def _annotate(T, label, going_up, color):
+        """Vertical guide at temperature T with a staggered, non-clipping label."""
+        if not np.isfinite(T):
+            return
+        ax.axvline(T, color=color, ls='--', lw=1.1, alpha=0.55)
+        # One label sits high with a downward arrow, the other low with an
+        # upward arrow, so nearby T values don't collide.
+        if going_up:
+            ytext = y1 - 0.06 * yr; va = 'top'
+        else:
+            ytext = y0 + 0.06 * yr; va = 'bottom'
+        ax.annotate(f"{label}\n{T:.2f} \u00b0C",
+                    xy=(T, (y0 + y1) / 2), xytext=(T, ytext),
+                    ha='center', va=va, fontsize=9, fontweight='bold',
+                    color='0.15',
+                    bbox=dict(boxstyle='round,pad=0.25', fc='white', ec=color,
+                              alpha=0.92),
+                    arrowprops=dict(arrowstyle='->', color=color, lw=1.0,
+                                    alpha=0.8))
+
+    _RED, _BLUE = '#d62728', '#1f77b4'
+    cloud_color = _RED if transitions.get('cloud_branch') == 'heating' else _BLUE
+    clear_color = _RED if transitions.get('clear_branch') == 'heating' else _BLUE
+    _annotate(transitions.get('T_phase_C'), 'T$_{cloud}$', going_up=True,
+              color=cloud_color)
+    _annotate(transitions.get('T_clear_C'), 'T$_{clear}$', going_up=False,
+              color=clear_color)
+
+    ax.set_xlabel('temperature (\u00b0C)')
+    ax.set_ylabel(signal_column.replace('_', ' '))
+    hy = transitions.get('hysteresis_C')
+    title = 'Turbidity transition'
+    if hy is not None and np.isfinite(hy):
+        title += f'   (hysteresis {hy:.2f} \u00b0C)'
+    ax.set_title(title)
+    ax.legend(loc='best', fontsize=9, framealpha=0.9)
+    fig.tight_layout()
+
+    if interactive:
+        plt.show(block=False)
+    return fig

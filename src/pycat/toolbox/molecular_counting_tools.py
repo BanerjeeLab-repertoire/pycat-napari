@@ -282,6 +282,7 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
 
     prog = QProgressBar(); prog.setVisible(False)
     btn  = QPushButton("▶  Count Molecules")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
 
     def _on_run():

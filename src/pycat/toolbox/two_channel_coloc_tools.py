@@ -313,6 +313,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     main_layout.addWidget(progress_bar)
 
     run_btn = QPushButton("▶  Run Two-Channel Colocalization")
+    run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     main_layout.addWidget(run_btn)
 
     def _on_run():

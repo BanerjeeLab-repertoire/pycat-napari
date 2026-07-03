@@ -357,6 +357,7 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
 
     prog = QProgressBar(); prog.setVisible(False)
     btn  = QPushButton("▶  Compute Complexity Metrics")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
 
     def _mpx():

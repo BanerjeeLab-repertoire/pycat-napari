@@ -356,6 +356,7 @@ def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
 
     prog = QProgressBar(); prog.setVisible(False)
     btn  = QPushButton("▶  Measure Departure from Randomness")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
 
     def _on_run():

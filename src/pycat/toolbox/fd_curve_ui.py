@@ -85,6 +85,7 @@ class FDCurveUI:
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
         load_btn = QPushButton("Load Lumicks C-Trap .h5…")
+        load_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         load_btn.setToolTip("Open a Lumicks .h5 and read its Distance and Force channels.")
         load_btn.clicked.connect(self._on_load)
         form.addRow(load_btn)
@@ -98,6 +99,7 @@ class FDCurveUI:
         form.addRow("Distance channel:", self._dist_dd)
 
         rebuild_btn = QPushButton("Use selected channels")
+        rebuild_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rebuild_btn.setToolTip("Re-read the trace using the channels chosen above.")
         rebuild_btn.clicked.connect(self._on_rechannel)
         form.addRow(rebuild_btn)
@@ -196,6 +198,7 @@ class FDCurveUI:
         form.addRow("Distance smooth window:", self._dist_smooth)
 
         btn = QPushButton("▶  Segment Cycles")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_segment)
         form.addRow(btn)
         layout.addWidget(grp)
@@ -259,10 +262,12 @@ class FDCurveUI:
         form.addRow("WLC stretch modulus (pN):", self._wlc_K0)
 
         plot_btn = QPushButton("▶  Plot FD Loops")
+        plot_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         plot_btn.clicked.connect(self._on_plot)
         form.addRow(plot_btn)
 
         export_btn = QPushButton("Export Per-Cycle Tables (CSV)")
+        export_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         export_btn.clicked.connect(self._on_export)
         form.addRow(export_btn)
         layout.addWidget(grp)
@@ -313,7 +318,7 @@ class FDCurveUI:
         return FigureCanvasQTAgg(fig)
 
     def _add_rips(self, layout):
-        grp  = QGroupBox("Step 4 — Detect Rips / Unzips (G-quadruplex unfolding)")
+        grp  = QGroupBox("Step 4 — Detect Rips / Unzips")
         form = QFormLayout(grp)
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
@@ -349,6 +354,7 @@ class FDCurveUI:
         form.addRow("Rise per nt (nm):", self._rise)
 
         btn = QPushButton("▶  Detect Rips (all stretches)")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_rips)
         form.addRow(btn)
         layout.addWidget(grp)

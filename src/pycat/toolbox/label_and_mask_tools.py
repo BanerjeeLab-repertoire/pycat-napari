@@ -1,4 +1,3 @@
-from PyQt5.QtWidgets import QSizePolicy
 """
 Labeled Mask and Binary Mask Module for PyCAT
 
@@ -24,7 +23,7 @@ import skimage as sk
 import cv2
 import napari
 from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QCheckBox, QLineEdit, QPushButton, QScrollArea, QWidget
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QCheckBox, QLineEdit, QPushButton, QScrollArea, QWidget, QSizePolicy
 
 # Local application imports
 from pycat.ui.ui_utils import show_dataframes_dialog, refresh_viewer_with_new_data

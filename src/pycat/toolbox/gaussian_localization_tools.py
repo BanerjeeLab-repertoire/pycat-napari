@@ -360,6 +360,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
 
     prog = QProgressBar(); prog.setVisible(False)
     btn  = QPushButton("▶  Localize Spots")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
 
     def _on_run():

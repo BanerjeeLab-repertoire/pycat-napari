@@ -97,6 +97,7 @@ class FRAPUI:
 
         # Lumicks .h5 direct load
         lumicks_btn = QPushButton("Load Lumicks C-Trap .h5…")
+        lumicks_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         lumicks_btn.setToolTip(
             "Open a Lumicks C-Trap FRAP .h5 directly via pylake — extracts the "
             "recovery scan, frame interval, and bleach→recovery lag automatically.")
@@ -129,6 +130,7 @@ class FRAPUI:
         form.addRow("ROI mode:", mw)
 
         add_shapes_btn = QPushButton("＋  Add ROI Drawing Layer")
+        add_shapes_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         add_shapes_btn.setToolTip(
             "Create a Shapes layer for drawing ROIs. Draw the bleached region "
             "first, then the reference region. Ellipse or rectangle both work.")
@@ -361,6 +363,7 @@ class FRAPUI:
 
         self._prog = QProgressBar(); self._prog.setVisible(False)
         btn = QPushButton("▶  Run FRAP Analysis")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_analyze)
         form.addRow(self._prog); form.addRow(btn)
         layout.addWidget(grp)

@@ -660,6 +660,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         pre_process_layout = QVBoxLayout()
         self.add_text_label(pre_process_layout, 'Image Pre-processing', bold=True) # Add a widget title label
         pre_process_button = QPushButton("Pre-process Image") # Create a button widget
+        pre_process_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_preprocess():
             # Capture the active layer BEFORE running — the operation adds a
             # new output layer to the viewer which napari may then select
@@ -697,6 +698,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         out_max_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rescale_intensity_layout.addWidget(out_max_input) # Add the text input to the layout
         rescale_intensity_button = QPushButton("Rescale Intensity") # Create a button widget
+        rescale_intensity_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rescale_intensity_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_apply_rescale_intensity, None, out_min_input, out_max_input, self.viewer))
         rescale_intensity_layout.addWidget(rescale_intensity_button) # Add the button to the layout
@@ -757,6 +759,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         eq_int_checkbox.setChecked(False) # Set the checkbox to unchecked by default
         remove_background_layout.addWidget(eq_int_checkbox) # Add the checkbox to the layout   
         remove_background_button = QPushButton("Remove Background") # Create a button widget
+        remove_background_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         remove_background_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_rb_gaussian_background_removal, None, eq_int_checkbox, self.central_manager.active_data_class, self.viewer))
         remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
@@ -793,6 +796,7 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         status = QLabel("No calibration loaded.")
         load_btn = QPushButton("Load Calibration Reference…")
+        load_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_load():
             p, _ = QFileDialog.getOpenFileName(
                 None, "Load calibration reference (flat / clear frame)",
@@ -825,6 +829,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         lay.addWidget(load_btn); lay.addWidget(status)
 
         apply_btn = QPushButton("Apply to Active Layer")
+        apply_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_apply():
             import numpy as _np
             ref = getattr(self, '_calibration_ref', None)
@@ -865,6 +870,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         remove_background_layout = QVBoxLayout()
         self.add_text_label(remove_background_layout, 'Enhanced RB-Gauss Background Removal', bold=True) # Add widget title label
         remove_background_button = QPushButton("Remove Background") # Create a button widget
+        remove_background_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_enhanced_bg_removal():
             # Capture BEFORE running — previously this read the active layer
             # AFTER the operation completed, by which point napari had often
@@ -1035,6 +1041,7 @@ class ToolboxFunctionsUI(BaseUIClass):
             "tenengrad: sharpest edges (Sobel gradient magnitude).")
         bs_layout.addWidget(bs_method)
         bs_button = QPushButton("Extract Best Slice")
+        bs_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bs_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_best_slice, None, bs_method, self.viewer))
         bs_layout.addWidget(bs_button)
@@ -1046,6 +1053,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         enhancement_layout = QVBoxLayout()
         self.add_text_label(enhancement_layout, 'Peak and Edge Enhancement', bold=True) # Add widget title label
         enhancement_button = QPushButton("Run Edge Enhancement") # Create a button widget
+        enhancement_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         enhancement_button.clicked.connect(lambda: self.on_general_button_clicked( 
             run_peak_and_edge_enhancement, None, self.central_manager.active_data_class, self.viewer))
         enhancement_layout.addWidget(enhancement_button) # Add the button to the layout
@@ -1129,6 +1137,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         fz_min_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_layout.addWidget(fz_min_size_input) # Add the text input to the layout
         fz_button = QPushButton("Run Felsenszwalb Segmentation") # Create a button widget
+        fz_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_fz_segmentation_and_merging, None, fz_scale_input, fz_sigma_input, fz_min_size_input, self.viewer))
         fz_layout.addWidget(fz_button) # Add the button to the layout
@@ -1350,6 +1359,7 @@ class ToolboxFunctionsUI(BaseUIClass):
                 'window_size': window_slider.value(),
             })
         local_thresh_button = QPushButton("Apply Thresholding")
+        local_thresh_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         local_thresh_button.clicked.connect(_on_local_thresh)
         local_thresh_layout.addWidget(local_thresh_button)
         sauvola_widget = QWidget()
@@ -1421,6 +1431,7 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         # ── Run button ────────────────────────────────────────────────────
         process_cells_button = QPushButton("Run Condensate Segmentation")
+        process_cells_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_condensate_seg():
             import functools
             # Partially apply the refinement params to run_segment_subcellular_objects
@@ -1473,6 +1484,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         cell_segmentation_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
         cell_segmentation_layout.addWidget(cell_segmentation_dropdown_images)
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
+        cell_analysis_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_cell_analysis():
             self.on_general_button_clicked(
                 run_cell_analysis_func, self.viewer,
@@ -1502,6 +1514,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         puncta_measure_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
         measure_puncta_layout.addWidget(puncta_measure_dropdown_images) # Add the dropdown to the layout
         puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
+        puncta_measure_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_puncta_analysis():
             self.on_general_button_clicked(
                 run_puncta_analysis_func, self.viewer,
@@ -1653,6 +1666,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         manders_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
         manders_layout.addWidget(manders_roi_dropdown) # Add the dropdown to the layout
         manders_button = QPushButton("Calculate Mander's Coefficient") # Create a button widget
+        manders_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         manders_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_manders_coloc, self.viewer, manders_image1_dropdown, manders_image2_dropdown, manders_roi_dropdown, self.central_manager.active_data_class))
         manders_layout.addWidget(manders_button) # Add the button to the layout
@@ -1674,6 +1688,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         convert_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
         convert_labels_layout.addWidget(convert_labels_dropdown) # Add the dropdown to the layout
         convert_labels_button = QPushButton("Convert Labels to Mask") # Create a button widget
+        convert_labels_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         convert_labels_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_convert_labels_to_mask, self.viewer, convert_labels_dropdown, self.viewer))
         convert_labels_layout.addWidget(convert_labels_button) # Add the button to the layout
@@ -1701,6 +1716,7 @@ class ToolboxFunctionsUI(BaseUIClass):
                 'image_layer': rp_dropdown_image.currentText(),
             })
         rp_button = QPushButton("Measure Region Properties")
+        rp_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         rp_button.clicked.connect(_on_rp)
         rp_layout.addWidget(rp_button)
         rp_widget = QWidget() 
@@ -1749,6 +1765,7 @@ class ToolboxFunctionsUI(BaseUIClass):
                 'mask_layer': label_mask_dropdown.currentText(),
             })
         label_mask_button = QPushButton("Label Binary Mask")
+        label_mask_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         label_mask_button.clicked.connect(_on_label_mask)
         label_mask_layout.addWidget(label_mask_button)
         label_mask_widget = QWidget()
@@ -1767,6 +1784,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         mbm_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
         mbm_layout.addWidget(mbm_dropdown_images) # Add the dropdown to the layout
         mbm_button = QPushButton("Measure Binary Mask") # Create a button widget
+        mbm_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         mbm_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_measure_binary_mask, self.viewer, mbm_dropdown_labels, mbm_dropdown_images, self.central_manager.active_data_class))
         mbm_layout.addWidget(mbm_button) # Add the button to the layout
@@ -1804,6 +1822,7 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         # Button to apply morphological operation
         bmo_button = QPushButton("Run Morphological Operation")
+        bmo_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         bmo_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_binary_morph_operation, self.viewer, bmo_roi_dropdown, bmo_iter_input, bmo_elem_size_input, bmo_elem_shape_dropdown.currentText(), bmo_mode_dropdown.currentText(), self.viewer))
         bmo_layout.addWidget(bmo_button)
@@ -1824,6 +1843,7 @@ class ToolboxFunctionsUI(BaseUIClass):
         simple_merge_mode_dropdown.addItems(['Additive', 'Mean', 'Max', 'Min']) # Add items to the dropdown
         simple_merge_layout.addWidget(simple_merge_mode_dropdown) # Add the dropdown to the layout
         simple_merge_button = QPushButton("Merge Active Layers") # Create a button widget
+        simple_merge_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         simple_merge_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_simple_multi_merge, None, simple_merge_mode_dropdown.currentText(), self.viewer))
         simple_merge_layout.addWidget(simple_merge_button) # Add the button to the layout
@@ -2454,6 +2474,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
                 roi_shapes_dd.setCurrentIndex(idx)
 
         add_roi_btn = QPushButton("＋  Add ROI Drawing Layer")
+        add_roi_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         add_roi_btn.setToolTip(
             "Creates a Shapes layer pre-configured for rectangle drawing "
             "and activates Rectangle mode — just click and drag to define "
@@ -2524,6 +2545,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
             return None
 
         extract_btn = QPushButton("Apply ROI / Range & Extract Reference Frame")
+        extract_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         extract_btn.setToolTip(
             "Extracts the reference frame (cropped if ROI is set) as a 2D layer\n"
             "and stores the frame range and XY crop so all downstream steps\n"

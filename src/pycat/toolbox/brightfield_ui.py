@@ -196,6 +196,7 @@ def _add_bf_preprocessing(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Preprocess")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():
@@ -282,6 +283,7 @@ def _add_bf_cell_segmentation(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Segment Cells (Cellpose BF)")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():
@@ -359,6 +361,7 @@ def _add_bf_condensate_segmentation(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Segment Condensates")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():
@@ -408,7 +411,7 @@ def _add_bf_condensate_segmentation(ui, layout):
 # ---------------------------------------------------------------------------
 
 def _add_bf_od_metrics(ui, layout):
-    grp  = QGroupBox("Step 5 — Optical Density & Per-Condensate Metrics")
+    grp  = QGroupBox("Step 5 — OD & Per-Condensate Metrics")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
@@ -428,6 +431,7 @@ def _add_bf_od_metrics(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Compute OD Metrics")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():
@@ -494,6 +498,7 @@ def _add_bf_per_cell_summary(ui, layout):
     cell_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Cell mask:", cell_dd)
     run = QPushButton("▶  Summarise Per Cell")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -540,6 +545,7 @@ def _add_bf_spatial(ui, layout):
     form.addRow("Cell mask:", cell_dd)
 
     run = QPushButton("▶  Run Spatial Metrology")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -627,6 +633,7 @@ def _add_bf_dynamics(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Run Dynamics")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():
@@ -755,6 +762,7 @@ def _add_bf_texture(ui, layout):
     form.addRow("Cell mask (optional):", cell_dd)
 
     run = QPushButton("▶  Compute OD Texture")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(run)
 
     def _on_run():
@@ -813,6 +821,7 @@ def _add_bf_frame_qc(ui, layout):
 
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Assess Frame Quality")
+    run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(run)
 
     def _on_run():

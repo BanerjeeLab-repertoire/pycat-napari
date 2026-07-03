@@ -263,6 +263,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     form.addRow(prog_bar)
 
     run_btn = QPushButton("▶  Run Spatial Metrology")
+    run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
     def _on_run():
         # Get layers

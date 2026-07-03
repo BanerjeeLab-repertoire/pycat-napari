@@ -113,6 +113,7 @@ class DropletFusionUI:
         fc = QFormLayout(self._force_container)
         fc.setContentsMargins(0, 0, 0, 0); fc.setSpacing(4)
         load_btn = QPushButton("Load Lumicks C-Trap .h5…")
+        load_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         load_btn.setToolTip("Open a Lumicks .h5 and read Force 1x/1y/2x/2y traces.")
         load_btn.clicked.connect(self._on_load_forces)
         fc.addRow(load_btn)
@@ -187,6 +188,7 @@ class DropletFusionUI:
         form.addRow("Frame interval (s):", self._frame_dt)
 
         btn = QPushButton("▶  Build Signal")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_build_signal)
         form.addRow(btn)
         layout.addWidget(grp)
@@ -232,7 +234,7 @@ class DropletFusionUI:
 
     # ── Step 3: fit ────────────────────────────────────────────────────
     def _add_fit(self, layout):
-        grp  = QGroupBox("Step 3 — Fit Relaxation  S(t)=a·e⁻ᵗ/τ+b·t+d")
+        grp  = QGroupBox("Step 3 — Fit Relaxation")
         form = QFormLayout(grp)
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
@@ -253,6 +255,7 @@ class DropletFusionUI:
         form.addRow("Fit end (s):", self._t_end)
 
         btn = QPushButton("▶  Fit Fusion Relaxation")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_fit)
         form.addRow(btn)
         layout.addWidget(grp)
