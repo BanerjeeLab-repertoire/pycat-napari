@@ -81,12 +81,20 @@ def run_simple_multi_merge(mode, viewer):
     #normalized_layer_list = np.stack(normalized_layer_list, axis=0)
     #merged_data = merge_functions[mode](normalized_layer_list)
     layer_list = [layer.data for layer in layers]
-    layer_list = np.stack(layer_list, axis=0)
+    layer_list = np.stack(layer_list, axis=0).astype(np.float32)
     merged_data = merge_functions[mode](layer_list)
 
-    # Normalize the merged data for to avoid clipping from additive mode
-    normalized_data = (merged_data - np.min(merged_data)) / (np.max(merged_data) - np.min(merged_data) + np.finfo(np.float32).eps).astype(np.float32)
-    normalized_data = dtype_conversion_func(normalized_data, output_bit_depth=input_dtype) # Convert back to original data type
+    # NOTE (fixes "Mean and Additive look identical" bug): the previous code
+    # used per-result min-max normalisation, which cancelled the ÷N factor
+    # between Mean and Additive, making them byte-identical. Now we clip to the
+    # input dtype's valid range and scale by that fixed maximum so each mode
+    # keeps its own scale (Additive can saturate; Mean/Max/Min stay distinct).
+    if np.issubdtype(input_dtype, np.integer):
+        _max = float(np.iinfo(input_dtype).max)
+    else:
+        _max = float(np.nanmax(merged_data)) or 1.0
+    clipped = np.clip(merged_data, 0.0, _max)
+    normalized_data = dtype_conversion_func(clipped / _max, output_bit_depth=input_dtype)
 
     # Add the merged image to the viewer with a default colormap
     add_image_with_default_colormap(normalized_data, viewer, name=f"{mode} Merged Image")

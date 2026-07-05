@@ -885,3 +885,79 @@ def split_touching_objects(binary_mask, sigma=3.5):
     refined_split_mask = binary_morph_operation(common_edges_mask, iterations=7, element_size=1, element_shape='Disk', mode='Opening')
 
     return refined_split_mask
+
+def run_expand_labels(labels_layer, distance, viewer):
+    """
+    Grow labeled regions outward by a fixed distance without merging touching
+    labels, using ``skimage.segmentation.expand_labels``. Each label is dilated
+    up to ``distance`` pixels into the background; expansion stops at the midpoint
+    between two labels so distinct objects never merge.
+    """
+    labels = np.asarray(labels_layer.data)
+    try:
+        dist = float(distance)
+    except (TypeError, ValueError):
+        from napari.utils.notifications import show_warning as napari_show_warning
+        napari_show_warning("Expand labels: distance must be a number.")
+        return
+    if dist <= 0:
+        from napari.utils.notifications import show_warning as napari_show_warning
+        napari_show_warning("Expand labels: distance must be greater than 0.")
+        return
+    expanded = sk.segmentation.expand_labels(labels, distance=dist).astype(int)
+    viewer.add_labels(expanded, name=f"Expanded {labels_layer.name}")
+
+
+def run_mask_logic_merge(mask_layer1, mask_layer2, mode, viewer):
+    """
+    Combine two binary masks with a boolean set operation (AND / OR / XOR).
+    AND keeps overlap, OR keeps the union, XOR keeps the symmetric difference.
+    Inputs are binarized (!=0) before the operation; shapes must match.
+    """
+    from napari.utils.notifications import show_warning as napari_show_warning
+    m1 = np.asarray(mask_layer1.data)
+    m2 = np.asarray(mask_layer2.data)
+    if m1.shape != m2.shape:
+        napari_show_warning(
+            f"Mask logic merge: shapes differ ({m1.shape} vs {m2.shape}) — "
+            "masks must match.")
+        return
+    b1 = m1 != 0
+    b2 = m2 != 0
+    key = str(mode).strip().upper()
+    ops = {'AND': np.logical_and, 'OR': np.logical_or, 'XOR': np.logical_xor}
+    if key not in ops:
+        napari_show_warning(
+            f"Mask logic merge: unknown mode '{mode}' (use AND, OR, or XOR).")
+        return
+    merged = ops[key](b1, b2).astype(int)
+    viewer.add_labels(
+        merged, name=f"{key} ({mask_layer1.name} · {mask_layer2.name})")
+
+
+def run_expand_labels(labels_layer, distance, viewer):
+    """Grow labels outward by distance px without merging touching labels."""
+    labels = np.asarray(labels_layer.data)
+    try:
+        dist = float(distance)
+    except (TypeError, ValueError):
+        from napari.utils.notifications import show_warning as _w; _w("Expand labels: distance must be a number."); return
+    if dist <= 0:
+        from napari.utils.notifications import show_warning as _w; _w("Expand labels: distance must be greater than 0."); return
+    expanded = sk.segmentation.expand_labels(labels, distance=dist).astype(int)
+    viewer.add_labels(expanded, name=f"Expanded {labels_layer.name}")
+
+
+def run_mask_logic_merge(mask_layer1, mask_layer2, mode, viewer):
+    """Combine two binary masks with AND / OR / XOR. Inputs are binarized first."""
+    from napari.utils.notifications import show_warning as _w
+    m1 = np.asarray(mask_layer1.data); m2 = np.asarray(mask_layer2.data)
+    if m1.shape != m2.shape:
+        _w(f"Mask logic merge: shapes differ ({m1.shape} vs {m2.shape})."); return
+    b1 = m1 != 0; b2 = m2 != 0
+    key = str(mode).strip().upper()
+    ops = {'AND': np.logical_and, 'OR': np.logical_or, 'XOR': np.logical_xor}
+    if key not in ops:
+        _w(f"Mask logic merge: unknown mode '{mode}' (use AND, OR, or XOR)."); return
+    viewer.add_labels(ops[key](b1, b2).astype(int),
+                      name=f"{key} ({mask_layer1.name} · {mask_layer2.name})")

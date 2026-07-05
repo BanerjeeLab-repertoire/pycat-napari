@@ -37,7 +37,7 @@ class _AnalysisWidgetsMixin:
         cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Labeled Cell Mask')
         cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
-        cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image)
+        cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image, name_hint='Upscaled Fluorescence')
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
         cell_analysis_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_cell_analysis():
@@ -76,7 +76,7 @@ class _AnalysisWidgetsMixin:
             napari.layers.Labels, name_hint='Refined Puncta')
         puncta_measure_dropdown_images = self._layer_row(
             measure_puncta_layout, 'Select Image for Puncta Measurement:',
-            napari.layers.Image)
+            napari.layers.Image, name_hint='Upscaled Fluorescence')
         puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
         puncta_measure_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_puncta_analysis():

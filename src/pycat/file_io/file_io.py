@@ -47,6 +47,32 @@ def _suppress_ims_chunk_prints():
 
 # Third party imports
 import numpy as np
+
+
+def _ims_indices(selector, size):
+    """Return concrete indices for an int/slice/list selector against an IMS axis."""
+    if isinstance(selector, slice):
+        return list(range(*selector.indices(size)))
+    if selector is Ellipsis or selector is None:
+        return list(range(size))
+    if isinstance(selector, (list, tuple, np.ndarray)):
+        return [int(i) for i in selector]
+    return [int(selector)]
+
+
+def _ims_frame_2d(raw):
+    """Normalize imaris_ims_file_reader output to exactly (Y, X).
+
+    With squeeze_output=False, direct IMS reads may retain singleton T/C/Z axes
+    even when indexed with integers. Napari expects a 2-D plane after slicing a
+    (T, Y, X) layer, so leaving those singleton axes in place causes
+    ValueError: axes don't match array during napari transpose.
+    """
+    arr = np.asarray(raw).astype(np.float32, copy=False)
+    arr = np.squeeze(arr)
+    if arr.ndim != 2:
+        raise ValueError(f"Expected IMS plane to reduce to 2-D (Y, X), got shape {arr.shape}")
+    return arr
 import skimage as sk
 from aicsimageio import AICSImage
 from pycat.utils.channel_naming import (
@@ -352,6 +378,127 @@ class _ZarrTYX:
 
     def transpose(self, *axes):
         return np.asarray(self.__getitem__(0))[np.newaxis]
+
+
+class _ImsReaderTYX:
+    """Lazy (T, Y, X) IMS view backed directly by imaris_ims_file_reader.ims."""
+    def __init__(self, reader, c, suppress_ctx=None):
+        self._reader = reader
+        self._c = c
+        self._ctx = suppress_ctx or _suppress_ims_chunk_prints
+        T, _, _, Y, X = reader.shape
+        self.shape = (T, Y, X)
+        self.dtype = np.dtype('float32')
+        self.ndim = 3
+
+    def _read_frame(self, t):
+        with self._ctx():
+            raw = self._reader[int(t), self._c, 0, :, :]
+        return _ims_frame_2d(raw)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            t_sel = idx[0] if len(idx) > 0 else slice(None)
+            yx_sel = idx[1:] if len(idx) > 1 else (slice(None), slice(None))
+        else:
+            t_sel = idx
+            yx_sel = (slice(None), slice(None))
+        t_indices = _ims_indices(t_sel, self.shape[0])
+        frames = [self._read_frame(t)[yx_sel] for t in t_indices]
+        if isinstance(t_sel, (int, np.integer)):
+            return frames[0]
+        return np.stack(frames, axis=0)
+
+    def __array__(self, dtype=None):
+        arr = np.stack([self._read_frame(t) for t in range(self.shape[0])], axis=0)
+        return arr if dtype is None else arr.astype(dtype)
+
+    def __len__(self):
+        return self.shape[0]
+
+
+class _ImsReaderZYX:
+    """Lazy (Z, Y, X) IMS view backed directly by imaris_ims_file_reader.ims."""
+    def __init__(self, reader, c, t=0, suppress_ctx=None):
+        self._reader = reader
+        self._c = c
+        self._t = t
+        self._ctx = suppress_ctx or _suppress_ims_chunk_prints
+        _, _, Z, Y, X = reader.shape
+        self.shape = (Z, Y, X)
+        self.dtype = np.dtype('float32')
+        self.ndim = 3
+
+    def _read_plane(self, z):
+        with self._ctx():
+            raw = self._reader[self._t, self._c, int(z), :, :]
+        return _ims_frame_2d(raw)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            z_sel = idx[0] if len(idx) > 0 else slice(None)
+            yx_sel = idx[1:] if len(idx) > 1 else (slice(None), slice(None))
+        else:
+            z_sel = idx
+            yx_sel = (slice(None), slice(None))
+        z_indices = _ims_indices(z_sel, self.shape[0])
+        planes = [self._read_plane(z)[yx_sel] for z in z_indices]
+        if isinstance(z_sel, (int, np.integer)):
+            return planes[0]
+        return np.stack(planes, axis=0)
+
+    def __array__(self, dtype=None):
+        arr = np.stack([self._read_plane(z) for z in range(self.shape[0])], axis=0)
+        return arr if dtype is None else arr.astype(dtype)
+
+    def __len__(self):
+        return self.shape[0]
+
+
+class _ImsReaderTZYX:
+    """Lazy (T, Z, Y, X) IMS view backed directly by imaris_ims_file_reader.ims."""
+    def __init__(self, reader, c, suppress_ctx=None):
+        self._reader = reader
+        self._c = c
+        self._ctx = suppress_ctx or _suppress_ims_chunk_prints
+        T, _, Z, Y, X = reader.shape
+        self.shape = (T, Z, Y, X)
+        self.dtype = np.dtype('float32')
+        self.ndim = 4
+
+    def _read_plane(self, t, z):
+        with self._ctx():
+            raw = self._reader[int(t), self._c, int(z), :, :]
+        return _ims_frame_2d(raw)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            t_sel = idx[0] if len(idx) > 0 else slice(None)
+            z_sel = idx[1] if len(idx) > 1 else slice(None)
+            yx_sel = idx[2:] if len(idx) > 2 else (slice(None), slice(None))
+        else:
+            t_sel, z_sel, yx_sel = idx, slice(None), (slice(None), slice(None))
+        t_indices = _ims_indices(t_sel, self.shape[0])
+        z_indices = _ims_indices(z_sel, self.shape[1])
+        arr = np.stack([
+            np.stack([self._read_plane(t, z)[yx_sel] for z in z_indices], axis=0)
+            for t in t_indices
+        ], axis=0)
+        # Squeeze out scalar-selected axes in reverse order (Z first, then T)
+        # so that arr[0, 0] returns (Y, X), arr[0, :] returns (Z, Y, X), etc.
+        if isinstance(z_sel, (int, np.integer)):
+            arr = arr[:, 0]   # (T, 1, Y, X) -> (T, Y, X) -- squeeze Z
+        if isinstance(t_sel, (int, np.integer)):
+            arr = arr[0]      # (T, ...) -> squeeze T (now leading axis)
+        return arr
+
+    def __array__(self, dtype=None):
+        arr = self[:, :, :, :]
+        return arr if dtype is None else arr.astype(dtype)
+
+    def __len__(self):
+        return self.shape[0]
+
 
 class _ZarrTYX_generic:
     """
@@ -718,6 +865,9 @@ class FileIOClass:
     def _open_stack_ims(self, file_path: str):
         """IMS loader — zarr-native lazy reading, unchanged from open_ims_file."""
         try:
+            # Importing hdf5plugin registers bundled HDF5 compression filters.
+            # Some IMS files read metadata without it but fail on pixel data.
+            import hdf5plugin  # noqa: F401
             from imaris_ims_file_reader.ims import ims as ImsReader
             import zarr
         except ImportError as _ie:
@@ -814,17 +964,34 @@ class FileIOClass:
                     channel_data = frame
 
                 elif n_z == 1:
-                    # Pure time series (T, Y, X) — existing lazy path, unchanged.
+                    # Pure time series (T, Y, X) — direct reader path, bypasses
+                    # the zarr-store adapter that can raise KeyError on valid chunks.
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{pos_suffix}"
-                    zarr_store = ImsReader(pos_path, aszarr=True)
-                    z_full = zarr.open(zarr_store, mode='r')
-                    lazy_tyx = _ZarrTYX(z_full, channel_idx,
-                                        suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_tyx))
+                    lazy_tyx = _ImsReaderTYX(pos_reader, channel_idx,
+                                             suppress_ctx=_suppress_ims_chunk_prints)
+                    self._ims_zarr_refs.append((pos_reader, None, lazy_tyx))
                     if channel_idx == 0 and pos_path == file_path:
-                        channel_data = lazy_tyx[0]
-                        self._ims_zarr_store = zarr_store
-                        self._ims_zarr_array = z_full
+                        # Probe-read the first frame to populate channel_data (used
+                        # only for default object/cell diameter estimates). Wrapped
+                        # defensively: Box Drive, file locks, or partial HDF5 syncs
+                        # can raise OSError/KeyError at this point; if so we fall back
+                        # to a dummy array of the correct spatial size so the layer
+                        # still loads — the user gets a warning with the likely cause.
+                        try:
+                            channel_data = lazy_tyx[0]
+                        except (KeyError, OSError, Exception) as _probe_err:
+                            from napari.utils.notifications import show_warning as _sw
+                            _sw(
+                                f"IMS: could not pre-read the first frame of "
+                                f"'{self.base_file_name}' ({_probe_err}). "
+                                "The layer will still be added lazily. "
+                                "If the file lives on Box Drive or a network share, "
+                                "ensure it is fully downloaded locally (right-click → "
+                                "'Make Available Offline' in Box Drive) before opening. "
+                                "Also check that Imaris is not holding the file open."
+                            )
+                            channel_data = np.zeros((H, W), dtype=np.float32)
+                        self._ims_reader_array = pos_reader
                         self._ims_lazy_tyx   = lazy_tyx
                     self.viewer.add_image(lazy_tyx, name=layer_name,
                                          colormap=_ch_colormap)
@@ -836,13 +1003,22 @@ class FileIOClass:
                 elif n_t == 1:
                     # Pure z-stack (Z, Y, X), no time dimension — lazy, on demand.
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{pos_suffix}"
-                    zarr_store = ImsReader(pos_path, aszarr=True)
-                    z_full = zarr.open(zarr_store, mode='r')
-                    lazy_zyx = _ZarrZYX(z_full, channel_idx, t=0,
-                                        suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_zyx))
+                    lazy_zyx = _ImsReaderZYX(pos_reader, channel_idx, t=0,
+                                             suppress_ctx=_suppress_ims_chunk_prints)
+                    self._ims_zarr_refs.append((pos_reader, None, lazy_zyx))
                     if channel_idx == 0 and pos_path == file_path:
-                        channel_data = lazy_zyx[0]
+                        try:
+                            channel_data = lazy_zyx[0]
+                        except (KeyError, OSError, Exception) as _probe_err:
+                            from napari.utils.notifications import show_warning as _sw
+                            _sw(
+                                f"IMS: could not pre-read the first z-slice of "
+                                f"'{self.base_file_name}' ({_probe_err}). "
+                                "The layer will still be added lazily. "
+                                "If the file is on Box Drive or a network share, "
+                                "ensure it is fully downloaded locally before opening."
+                            )
+                            channel_data = np.zeros((H, W), dtype=np.float32)
                     self.viewer.add_image(lazy_zyx, name=layer_name,
                                          colormap=_ch_colormap)
                     napari_show_info(
@@ -859,15 +1035,12 @@ class FileIOClass:
                     # adds both a T slider and a Z slider — no data lost,
                     # nothing materialised until the user scrubs to it.
                     layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{pos_suffix}"
-                    zarr_store = ImsReader(pos_path, aszarr=True)
-                    z_full = zarr.open(zarr_store, mode='r')
-                    lazy_tzyx = _ZarrTZYX(z_full, channel_idx,
-                                          suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((zarr_store, z_full, lazy_tzyx))
+                    lazy_tzyx = _ImsReaderTZYX(pos_reader, channel_idx,
+                                               suppress_ctx=_suppress_ims_chunk_prints)
+                    self._ims_zarr_refs.append((pos_reader, None, lazy_tzyx))
                     if channel_idx == 0 and pos_path == file_path:
                         channel_data = lazy_tzyx[0, 0]
-                        self._ims_zarr_store = zarr_store
-                        self._ims_zarr_array = z_full
+                        self._ims_reader_array = pos_reader
                         self._ims_lazy_tzyx  = lazy_tzyx
                     self.viewer.add_image(lazy_tzyx, name=layer_name,
                                          colormap=_ch_colormap)
@@ -1133,6 +1306,42 @@ class FileIOClass:
 
         # Auto scale bar for the freshly-loaded stack.
         self._enable_auto_scale_bar()
+
+        # Zoom the canvas to fit the newly loaded image using the same approach
+        # as the Home button: set camera.center and camera.zoom directly from
+        # the known image dimensions (H, W). reset_view() is unreliable when
+        # called programmatically because it may fire before napari has computed
+        # the layer extent, silently doing nothing. By computing the zoom from
+        # H and W (which we already have) we avoid that timing dependency.
+        def _fit_camera():
+            try:
+                import warnings as _warn
+                cw = ch = None
+                with _warn.catch_warnings():
+                    _warn.simplefilter('ignore', FutureWarning)
+                    for _acc in ('_qt_viewer', 'qt_viewer'):
+                        try:
+                            _sz = getattr(self.viewer.window, _acc).canvas.size
+                            cw, ch = float(_sz[0]), float(_sz[1])
+                            break
+                        except Exception:
+                            continue
+                if cw and ch and cw > 0 and ch > 0 and H > 0 and W > 0:
+                    self.viewer.camera.center = (H / 2.0, W / 2.0)
+                    zoom = min(ch / H, cw / W) * 0.9   # 10% margin
+                    self.viewer.camera.zoom = zoom
+                else:
+                    self.viewer.reset_view()
+            except Exception:
+                try:
+                    self.viewer.reset_view()
+                except Exception:
+                    pass
+        try:
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, _fit_camera)
+        except Exception:
+            _fit_camera()
 
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
@@ -1439,10 +1648,30 @@ class FileIOClass:
             df_names = list(self.central_manager.active_data_class.get_dataframes().keys())
         except Exception:
             df_names = []
+        _persist = getattr(self.central_manager, 'persist_measurements', False)
+        _dr = self.central_manager.active_data_class.data_repository
+        _saved = {}
+        if _persist:
+            _saved = {k: _dr.get(k) for k in
+                      ('ball_radius', 'object_size', 'cell_diameter')
+                      if _dr.get(k) is not None}
         viewer.layers.select_all()
         viewer.layers.remove_selected()
         self.central_manager.active_data_class.reset_values(
             clear_all=True, df_names_to_reset=df_names)
+        # Dismiss any lingering napari notifications from the previous session.
+        try:
+            from napari.utils.notifications import notification_manager
+            notification_manager.records.clear()
+        except Exception:
+            pass
+        if _persist and _saved:
+            _dr2 = self.central_manager.active_data_class.data_repository
+            for k, v in _saved.items():
+                try:
+                    _dr2[k] = v
+                except Exception:
+                    pass
         # Reset the workflow checklist so the next dataset starts from step 1.
         try:
             wc = getattr(self.central_manager, 'workflow_checklist', None)
@@ -1559,11 +1788,28 @@ class FileIOClass:
                 if df_name in selected_dataframes:
                     df_value.to_csv(save_name + f'_{df_name}.csv', index=True)
 
-        # Clear all layers and dataframes from the viewer and data instance
+        # Clear all layers and dataframes from the viewer and data instance.
+        # If "Remember measurements across clears" is on, preserve the measured
+        # sizes so the user doesn't need to re-measure for a second image.
         if clear_all:
+            _persist = getattr(self.central_manager, 'persist_measurements', False)
+            _dr = self.central_manager.active_data_class.data_repository
+            _saved = {}
+            if _persist:
+                _saved = {k: _dr.get(k) for k in
+                          ('ball_radius', 'object_size', 'cell_diameter')
+                          if _dr.get(k) is not None}
             self.viewer.layers.select_all()
             self.viewer.layers.remove_selected()
-            self.central_manager.active_data_class.reset_values(clear_all=True, df_names_to_reset=clear_dfs_list)
+            self.central_manager.active_data_class.reset_values(
+                clear_all=True, df_names_to_reset=clear_dfs_list)
+            if _persist and _saved:
+                _dr2 = self.central_manager.active_data_class.data_repository
+                for k, v in _saved.items():
+                    try:
+                        _dr2[k] = v
+                    except Exception:
+                        pass
         # Clear only the saved layers and dataframes
         else:
             for layer_name in selected_layers:

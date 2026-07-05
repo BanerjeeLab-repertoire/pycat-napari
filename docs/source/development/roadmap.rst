@@ -7,6 +7,74 @@ This document outlines the desired features, improvements, and issues to address
 Basic plans/outlines are included where I have done some brainstorming, and additional information/references are included where I have found relevant resources.
 
 
+Recently Completed (as of v1.5.x)
+---------------------------------
+
+Many items originally listed below have since shipped and are noted here so the
+open sections stay accurate:
+
+* **Video / time-series & particle tracking** — VPT (Video Particle Tracking) with
+  trajectory linking and MSD/microrheology; dedicated time-series condensate workflow
+  with lazy (zarr-backed) stack preprocessing and keyframe Cellpose.
+* **Batch / video processing framework** — configurable step registry and batch
+  processor that replays a workflow across a folder or a stack.
+* **3D / Z-stack support** — 3D background removal, 3D cell + condensate segmentation,
+  and 3D metrics.
+* **Watershed splitting** — ``split_touching_objects`` separates touching objects.
+* **Top-hat filters** — white/black top-hat available in image processing.
+* **Cell segmentation model selection** — Cellpose model dropdown plus StarDist and a
+  Random Forest pixel classifier as alternative methods.
+* **Progress bars & background threading** — long analyses run on worker threads with
+  progress indicators, keeping the UI responsive.
+* **Expand Labels** — grow labels without merging touching objects
+  (``skimage.segmentation.expand_labels``); Toolbox → Labeled Mask Tools.
+* **Mask Layer Operations (AND / OR / XOR)** — boolean set operations on two masks;
+  Toolbox → Layer Operations. (Image merge modes were also fixed so Mean and Additive
+  are no longer identical.)
+* **Workflow scaffolding** — per-workflow step checklists (with required/optional
+  status colouring), enumerated step titles, a disappearing pixel-size gate, and
+  status circles on required/optional inputs and actions.
+* **SpIDA** — spatial intensity distribution analysis (density, quantal brightness,
+  oligomeric state) for confocal data; an exact port of the reference MATLAB with a
+  monomer calibration, acquisition-modality guardrails, and ground-truth validation.
+  Toolbox → Advanced Analysis → Molecular Counting.
+* **Number & Brightness (N&B)** — the camera / time-series counterpart to SpIDA
+  (Digman 2008) for widefield / TIRF / sCMOS data: per-pixel number and brightness
+  maps plus an ROI summary, with scalar gain/offset/read-variance detector correction
+  and a global bleaching detrend. Toolbox → Advanced Analysis → Molecular Counting.
+
+
+Outstanding & Noted (near-term, worth tackling)
+------------------------------------------------
+
+Concrete, mostly self-contained items surfaced during recent audits:
+
+* **Status-marker completion** — a few action buttons were left unmarked because their
+  required/optional status was ambiguous: the Z-Stack per-section generic run button
+  (built dynamically with a reused label), any single "Run" button that spans multiple
+  analyses (Dynamics / phase-diagram / frame-quality style), and the per-workflow
+  Spatial Metrology sub-run-buttons inside the standalone workflows. These need a
+  required-vs-optional decision, then wrapping with ``button_with_circle``.
+* **Step-title enumeration for the remaining built-in workflows** — Condensate is the
+  completed reference; time-series, colocalization, general, and fibril still need the
+  ``_stage_step`` treatment against their pipeline numbering. (Note: the mechanism must
+  handle both title styles — ``add_text_label(bold=True)`` and ``QGroupBox``-titled
+  builders via ``_consume_step_label``.)
+* **BioIO migration** — still on AICSImageIO (see the File I/O section below); a larger
+  infrastructure change, best triggered by a concrete new-format need.
+* **Image Quality Advisor / QC module** — an in-app quality assessment layer that
+  reports *interpretation and recommendation*, not just raw metrics (dynamic range,
+  noise, focus/PSF, illumination uniformity, photobleaching, segmentation readiness).
+  A ``pycat/qc/`` module could back both a batch scanner and the live advisor from one
+  source of truth, doubling the labelled examples as golden-master test fixtures.
+* **3D volume rendering presets** — expose/configure napari's native 3D view
+  (volume/MIP/iso-surface, clipping planes, rotation-movie export) with
+  publication-oriented presets; mostly configuration plus PyCAT value-adds.
+* **Analysis-aware kymographs** — beyond classic line-scan: colocalization,
+  object-tracking (diameter/intensity/partition vs time), FRAP, and phase-boundary
+  kymographs for maturation / non-equilibrium dynamics.
+
+
 Core Functionalities
 --------------------
 
@@ -118,7 +186,7 @@ Add inputs for
 
   * Make the condensate/object filter a separate, configurable function and base its local region on the size of the objects (e.g., small objects look at 1 or 2 pixel perimeter, large condensates maybe 3-5 px).
 
-**Expand Labels**
+**Expand Labels**  *(DONE — Toolbox → Labeled Mask Tools → Expand Labels)*
 
 * Utilize ``skimage.segmentation.expand_labels`` for efficient label growth.
 * Example usage - ``skimage.segmentation.expand_labels(label_image, distance=1)``
@@ -371,9 +439,9 @@ Miscellaneous Enhancements
 
 * Default layer and DataFrame names could be passed to ``LayerDataframeSelectionDialog`` (for Save and Clear) based on the analysis method chosen.
 
-**Mask Layer Operations Merging Functions (and, or, xor)**
+**Mask Layer Operations Merging Functions (and, or, xor)**  *(DONE — Toolbox → Layer Operations → Mask Operations (AND/OR/XOR))*
 
-* Make Mask merging functions similar to image merging operations (then rename the old ones Image Layer Operations, the new ones Mask Layer Operations) for combining masks using AND, OR, XOR methods.
+* Make Mask merging functions similar to image merging operations for combining masks using AND, OR, XOR methods.
 
 Future Features & Research Integration
 --------------------------------------
@@ -381,9 +449,11 @@ Future Features & Research Integration
 Advanced Methods
 ^^^^^^^^^^^^^^^^
 
-**SpIDA (Spatial Intensity Distribution Analysis)**
+**SpIDA (Spatial Intensity Distribution Analysis)**  *(DONE — Toolbox → Advanced Analysis → Molecular Counting → SpIDA)*
 
-* Incorporate advanced colocalization analysis methods like SpIDA.
+* Implemented as a direct port of the authors' reference MATLAB model, with a
+  monomer-calibration step, oligomeric-state readout, and acquisition-assumption
+  guardrails. Validated against reference-simulated images (R^2 ~0.99, <10% error).
 * `PNAS Article <https://www.pnas.org/doi/10.1073/pnas.1018658108>`_
 
 **Support for Advanced Analysis Types**
@@ -449,9 +519,58 @@ Documentation & User Support
 Known Issues
 ------------
 
-**run_simple_multi_merge**
+**run_simple_multi_merge**  *(FIXED in v1.5.171)*
 
-* Mean and Additive produce the same result for some unknown reason.
+* Mean and Additive previously produced the same result — the per-result min-max
+  normalization cancelled the ÷N factor between them. Now the merged result is clipped
+  to the input dtype range and scaled by that fixed maximum, so the modes stay distinct.
+
+**IMS / large-file lazy loading from USB HDDs — frame-scrub latency**
+
+* Scrubbing through Z or T sliders on lazily-loaded IMS (or large TIFF/HDF5) files is
+  noticeably laggy when the file lives on a USB-attached spinning hard drive at USB 2.0
+  speeds (~25–40 MB/s sustained). Each slider step triggers a read of one
+  uncompressed 2048×2048 uint16 plane (~8 MB), so the per-frame latency tracks USB
+  bandwidth directly:
+
+  * **USB 2.0 (~30 MB/s):** ~250–300 ms per frame — perceptible lag, effectively
+    unusable for rapid scrubbing.
+  * **USB 3.0 (~300 MB/s):** ~25–30 ms per frame — near-interactive.
+  * **USB 3.1/3.2 or NVMe (~500 MB/s+):** <10 ms — indistinguishable from local SSD.
+
+  This is a physical I/O constraint, not a PyCAT bug — the data simply cannot arrive
+  faster than the bus allows. Workarounds and guidance to surface to users:
+
+  1. **Check the port first.** USB 3.0 ports are often labeled with a blue insert or
+     "SS" (SuperSpeed). Plugging a USB 3.0 drive into a USB 2.0 port silently caps
+     throughput; a single port swap can give a 10× improvement.
+  2. **Copy the file locally before opening.** Even a short analysis session is faster
+     if the file is on an internal SSD first. PyCAT's lazy loading is optimised for
+     local NVMe/SSD storage.
+  3. **Pre-load the relevant range.** If only a few Z slices or timepoints are needed,
+     load and materialise just those via the Z-stack tools rather than lazy-loading
+     the full volume.
+  4. **Future: LRU frame cache.** A thin in-memory cache keyed on ``(t, c, z)`` in the
+     ``_ImsReaderTYX`` / ``_ImsReaderTZYX`` classes (see existing Known Issue above)
+     would make repeated scrubbing of already-visited frames instantaneous regardless
+     of storage speed. This is the primary software-side mitigation; it is already on
+     the roadmap.
+
+  **Recommended user guidance:** for live analysis, keep data on an internal SSD or
+  networked fast storage; external USB HDDs are fine for archiving and transfer but not
+  for interactive Z/T scrubbing of large volumes.
+
+* As of v1.5.182, IMS files are loaded via the imaris_ims_file_reader ``ims`` object
+  directly (bypassing the zarr-store adapter that caused ``KeyError: '0.0.0.0.0'`` on
+  files from Box Drive / network shares). The direct-reader path has no internal chunk
+  cache — the zarr adapter previously cached decoded chunks across reads of the same
+  frame, which could benefit tight loops that re-read frames rapidly (e.g. batch
+  processing that scrubs all timepoints in a loop). For interactive use this is
+  imperceptible (napari caches rendered frames). For batch workflows processing many
+  frames repeatedly from large IMS files, this may add I/O overhead.
+  **Roadmap:** add a thin LRU frame-cache to ``_ImsReaderTYX`` / ``_ImsReaderTZYX``
+  (keyed on ``(t, c, z)``) so repeated reads of the same frame hit memory rather than
+  disk, matching the behaviour of the old zarr adapter without restoring the broken path.
 
 
 

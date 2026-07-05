@@ -314,7 +314,7 @@ def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
     import napari
     from PyQt5.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QPushButton, QProgressBar,
-        QComboBox)
+        QComboBox, QSizePolicy)
 
     grp  = QGroupBox("Spatial Randomness (departure from noise)")
     form = QFormLayout(grp)

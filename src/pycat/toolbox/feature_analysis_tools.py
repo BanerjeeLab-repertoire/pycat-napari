@@ -739,11 +739,15 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
 
     # Create a side-by-side image of the original image and an overlay of the segmented puncta mask and the image
     cell_mask = (labeled_cells > 0).astype(bool)
-    green_channel = dtype_conversion_func(image, output_bit_depth='uint16')
+    # Use _to_uint16_safe: img_as_uint clips float outside [-1,1] producing a
+    # flat array that renders as a green stripe when hstacked.
+    from pycat.toolbox.segmentation_tools import _to_uint16_safe
+    green_channel = _to_uint16_safe(np.asarray(image, dtype=np.float32))
     green_channel = apply_rescale_intensity(green_channel)
     sbs_overlay = create_overlay_image(green_channel, puncta_masks * cell_mask, alpha=0.65)
-    sbs_overlay = dtype_conversion_func(sbs_overlay, output_bit_depth='uint16')
-    viewer.add_image(sbs_overlay, name=f"Overlay Image")
+    # create_overlay_image already returns uint8 RGB — do NOT apply dtype_conversion_func
+    # (img_as_uint on a uint8 RGB array rescales to 0-65535 and destroys the colors).
+    viewer.add_image(sbs_overlay, name="Overlay Image")
 
     # Retrieve the updated puncta and cell DataFrames from the data repository
     cell_df = data_instance.data_repository['cell_df']

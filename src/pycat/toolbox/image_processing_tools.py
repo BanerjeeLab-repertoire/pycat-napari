@@ -25,6 +25,7 @@ import numpy as np
 import skimage as sk
 import napari
 from napari.utils.notifications import show_warning as napari_show_warning
+from napari.utils.notifications import show_info as napari_show_info
 import scipy.ndimage as ndi
 from scipy.interpolate import RectBivariateSpline
 from pywt import wavedecn, waverecn 
@@ -1230,50 +1231,49 @@ def background_inpainting_func(image, mask, ball_radius):
 
 def compute_rolling_ball_background(image, ball_radius):
     """
-    Compute rolling ball background with automatic GPU/CPU routing.
+    Compute a background estimate via morphological opening (grey erosion
+    followed by grey dilation with a disk of radius ``ball_radius``) -- GPU
+    accelerated when a CUDA GPU is available, identical algorithm on CPU.
 
-    GPU path (CuPy, when available):
-        Morphological opening (erosion + dilation with disk radius) — a fast
-        approximation to the rolling ball that is valid for small radii (2–6px)
-        used in condensate imaging.  Typically 10–20× faster than the CPU path
-        on a CUDA GPU.  Uses the gpu_rolling_ball_background function from
-        gpu_utils.py (already integrated into PyCAT's GPU acceleration layer).
-
-    CPU path (skimage, fallback):
-        Exact rolling ball algorithm unchanged.
+    IMPORTANT: both hardware paths now run the SAME algorithm. An earlier
+    version routed CPU calls through skimage's exact ``rolling_ball`` while
+    GPU calls used this morphological-opening approximation. Those are
+    genuinely different algorithms (rolling_ball treats intensity as a literal
+    extra spatial dimension coupled to the same radius used for the spatial
+    footprint, so it is sensitive to the image's numeric range in a way plain
+    erosion/dilation is not) and were confirmed to produce different
+    segmentation outcomes on identical data depending on which hardware path
+    ran. Using one algorithm on both paths removes that inconsistency.
 
     Returns the BACKGROUND image (not background-subtracted).
     """
     input_dtype = str(image.dtype)
     image_f32   = dtype_conversion_func(image, output_bit_depth='float32')
 
-    # Try GPU path via existing gpu_utils
+    bg = None
     try:
         from pycat.toolbox.gpu_utils import GPU_AVAILABLE, gpu_grey_erosion, gpu_grey_dilation
         if GPU_AVAILABLE:
-            # gpu_rolling_ball_background returns background-SUBTRACTED image;
-            # we need just the background, so compute it manually using the
-            # gpu erosion/dilation functions
             bg = gpu_grey_erosion(image_f32, radius=ball_radius)
             bg = gpu_grey_dilation(bg.astype(np.float32), radius=ball_radius)
-            bg = ndi.gaussian_filter(bg, sigma=ball_radius // 2)
-            bg = ndi.grey_dilation(bg, footprint=sk.morphology.disk(1))
-            bg = ndi.grey_erosion(bg, footprint=sk.morphology.disk(1))
-            return dtype_conversion_func(bg.astype(np.float32), input_dtype)
     except Exception:
-        pass  # Fall through to CPU
+        bg = None  # Fall through to CPU
 
-    # CPU path (exact rolling ball)
-    image_u16 = dtype_conversion_func(image, output_bit_depth='uint16')
-    if image_u16.ndim == 2:
-        rb_background = sk.restoration.rolling_ball(image_u16, radius=ball_radius)
-    else:
-        kernel = sk.restoration.ellipsoid_kernel((2*ball_radius, 2*ball_radius), 3)
-        rb_background = sk.restoration.rolling_ball(image_u16, kernel=kernel)
+    if bg is None:
+        # CPU path: identical morphological-opening algorithm, no GPU needed.
+        selem = sk.morphology.disk(ball_radius)
+        bg = ndi.grey_erosion(image_f32, footprint=selem)
+        bg = ndi.grey_dilation(bg, footprint=selem)
 
-    rb_background = ndi.grey_dilation(rb_background, footprint=sk.morphology.disk(1))
-    rb_background = ndi.grey_erosion(rb_background, footprint=sk.morphology.disk(1))
-    return dtype_conversion_func(rb_background.astype(np.float32), input_dtype)
+    # NOTE: no smoothing here. rb_gaussian_background_removal (the caller)
+    # already applies ndi.gaussian_filter(bg, sigma=ball_radius//2) right
+    # after calling this function. Smoothing here too would blur the
+    # background estimate twice with the same sigma before the caller's own
+    # two-stage subtraction ever runs, spreading the estimate into real
+    # signal and over-subtracting it.
+    bg = ndi.grey_dilation(bg, footprint=sk.morphology.disk(1))
+    bg = ndi.grey_erosion(bg, footprint=sk.morphology.disk(1))
+    return dtype_conversion_func(bg.astype(np.float32), input_dtype)
 
 def subtract_background(image, background, bg_scaling_factor=0.75, equalize_intensity=False, window_size=None):
     """

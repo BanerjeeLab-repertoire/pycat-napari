@@ -56,6 +56,9 @@ from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
 from pycat.toolbox.video_export_tools import _add_export_timeseries_video
 from pycat.toolbox.ts_cellpose_tools import _add_run_ts_cellpose
 from pycat.toolbox.spatial_metrology_ui import _add_spatial_metrology
+from pycat.toolbox.spida_ui import _add_spida
+from pycat.toolbox.nb_ui import _add_number_and_brightness
+from pycat.toolbox.fibril_ui import _add_fibril_analysis
 from pycat.toolbox.spatial_randomness_tools import _add_spatial_randomness
 from pycat.toolbox.fft_bandpass_tools import run_fft_bandpass, run_im2bw
 from pycat.toolbox.brightfield_tools import run_best_slice
@@ -80,7 +83,8 @@ from pycat.toolbox.zstack_segmentation_ui import ZStackSegmentationUI
 from pycat.toolbox.correlation_func_analysis_tools import run_ccf_analysis, run_autocorrelation_analysis
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels, run_label_binary_mask, 
-    run_measure_binary_mask, run_binary_morph_operation) 
+    run_measure_binary_mask, run_binary_morph_operation,
+    run_expand_labels, run_mask_logic_merge)
 from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_layer_merge
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.data.data_modules import BaseDataClass
@@ -718,6 +722,24 @@ class BaseUIClass:
                 circle._set(init_color, init_tip)
         dd.currentIndexChanged.connect(_update_circle)
         _update_circle()
+        # Also hook into the inserted event to re-evaluate when a new layer
+        # lands (auto-selection via name_hint may not fire currentIndexChanged
+        # if the index doesn't change, so call _update_circle explicitly).
+        original_on_inserted = None
+        for conn in getattr(self.viewer.layers.events.inserted, '_slots', []):
+            pass  # can't easily introspect; instead we patch via a wrapper below
+
+        def _on_inserted_with_circle_refresh(event):
+            # Let create_layer_dropdown's own _on_inserted run first (already
+            # connected above), then refresh the circle state. We use a short
+            # deferred call so the dropdown has already updated its index.
+            try:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(0, _update_circle)
+            except Exception:
+                _update_circle()
+
+        self.viewer.layers.events.inserted.connect(_on_inserted_with_circle_refresh)
         return dd
 
     def _add_workflow_header(self, layout, include_pixel_gate=False,
@@ -781,6 +803,9 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
         self._add_run_ts_cellpose = lambda **kw: _add_run_ts_cellpose(self, **kw)
         self._add_spatial_metrology = lambda **kw: _add_spatial_metrology(self, **kw)
+        self._add_spida = lambda **kw: _add_spida(self, **kw)
+        self._add_number_and_brightness = lambda **kw: _add_number_and_brightness(self, **kw)
+        self._add_fibril_analysis = lambda **kw: _add_fibril_analysis(self, **kw)
         self._add_spatial_randomness = lambda **kw: _add_spatial_randomness(self, **kw)
         self._add_molecular_counting = lambda **kw: _add_molecular_counting(self, **kw)
         self._add_gaussian_localization = lambda **kw: _add_gaussian_localization(self, **kw)
@@ -867,6 +892,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
 
     def _add_measure_line(self, layout=None, separate_widget=False):
         """Add a widget for measuring object diameters with drawn lines, optionally in a separate dock."""
+        from PyQt5.QtWidgets import QCheckBox
         measure_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(measure_layout, 'Measure Object Diameters', bold=True) # Add widget title label
         measure_button = QPushButton("Measure Line(s)") # Create a button widget
@@ -884,8 +910,27 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             measure_layout.addWidget(button_with_circle(measure_button))  # red (mandatory)
         except Exception:
             measure_layout.addWidget(measure_button)
+
+        # Persist checkbox — same pattern as "Keep this pixel size for the session".
+        # Off by default: Clear returns to true blank state. When ticked, ball_radius,
+        # object_size, and cell_diameter are preserved across Save & Clear so the user
+        # doesn't need to re-measure when running a second image of the same experiment.
+        persist_cb = QCheckBox("Remember measurements across clears")
+        persist_cb.setChecked(
+            getattr(self.central_manager, 'persist_measurements', False))
+        persist_cb.setToolTip(
+            "When on, the measured object size, cell diameter, and ball radius are "
+            "preserved after Save & Clear, so you don't need to re-measure when "
+            "loading a second image from the same experiment.\n"
+            "Leave off to return to a completely blank state after each clear.")
+        def _on_persist_toggled(checked):
+            self.central_manager.persist_measurements = bool(checked)
+        persist_cb.toggled.connect(_on_persist_toggled)
+        measure_layout.addWidget(persist_cb)
+
         measure_widget = QWidget() # Create a main widget to contain the input widget
         measure_widget.setLayout(measure_layout) # Set the layout for the widget
+        self._add_widget_to_layout_or_dock(measure_widget, layout, separate_widget, "Measure Line Dock") # Add widget to layout or dock
         self._add_widget_to_layout_or_dock(measure_widget, layout, separate_widget, "Measure Line Dock") # Add widget to layout or dock
     
 
@@ -2858,6 +2903,7 @@ class MenuManager:
         label_tools_actions = {
             'Label Updater': (self.central_manager.toolbox_functions_ui._add_run_update_labels, {'separate_widget': True}),
             'Convert Labels to Mask': (self.central_manager.toolbox_functions_ui._add_run_convert_labels_to_mask, {'separate_widget': True}),
+            'Expand Labels': (self.central_manager.toolbox_functions_ui._add_run_expand_labels, {'separate_widget': True}),
             'Measure Region Properties': (self.central_manager.toolbox_functions_ui._add_run_measure_region_props, {'separate_widget': True})
         }
         self._add_actions_to_menu(label_tools_actions, label_tools_sub_submenu)
@@ -2866,7 +2912,8 @@ class MenuManager:
         layer_operations_submenu = self.toolbox_menu.addMenu('Layer Operations')
         layer_operations_actions = {
             'Simple Multi-Layer Merge': (self.central_manager.toolbox_functions_ui._add_run_simple_multi_merge, {'separate_widget': True}),
-            'Advanced 2-Layer Merge': (self.central_manager.toolbox_functions_ui._add_run_advanced_two_layer_merge, {'separate_widget': True})
+            'Advanced 2-Layer Merge': (self.central_manager.toolbox_functions_ui._add_run_advanced_two_layer_merge, {'separate_widget': True}),
+            'Mask Operations (AND/OR/XOR)': (self.central_manager.toolbox_functions_ui._add_run_mask_logic_merge, {'separate_widget': True})
         }
         self._add_actions_to_menu(layer_operations_actions, layer_operations_submenu)
 
@@ -2912,6 +2959,7 @@ class MenuManager:
             'Spatial Randomness (noise vs. clustering)': (self.central_manager.toolbox_functions_ui._add_spatial_randomness, {'separate_widget': True}),
             'Intensity Profiles (line / radial)': (self.central_manager.toolbox_functions_ui._add_intensity_profile, {'separate_widget': True}),
             'Morphological Complexity (fractal, lacunarity…)': (self.central_manager.toolbox_functions_ui._add_morphological_complexity, {'separate_widget': True}),
+            'Fibril Analysis (beads, morphometry, graph)': (self.central_manager.toolbox_functions_ui._add_fibril_analysis, {'separate_widget': True}),
         }
         self._add_actions_to_menu(spatial_metrology_actions, spatial_metrology_submenu)
 
@@ -2920,9 +2968,17 @@ class MenuManager:
         advanced_analysis_actions = {
             'Dynamic Spatial Phenotyping / Tracking': (self.central_manager.toolbox_functions_ui._add_advanced_analysis, {'separate_widget': True}),
             'Condensate Biophysics (MSD, C_sat, Kinetics…)': (self.central_manager.toolbox_functions_ui._add_condensate_physics, {'separate_widget': True}),
-            'Molecular Counting (Photobleaching)': (self.central_manager.toolbox_functions_ui._add_molecular_counting, {'separate_widget': True}),
         }
         self._add_actions_to_menu(advanced_analysis_actions, advanced_analysis_submenu)
+
+        # ── Molecular Counting (quantitative density / stoichiometry) ───────────
+        molecular_counting_submenu = advanced_analysis_submenu.addMenu('Molecular Counting')
+        molecular_counting_actions = {
+            'Photobleaching Step Counting': (self.central_manager.toolbox_functions_ui._add_molecular_counting, {'separate_widget': True}),
+            'SpIDA (density & oligomeric state)': (self.central_manager.toolbox_functions_ui._add_spida, {'separate_widget': True}),
+            'Number & Brightness (camera / time-series)': (self.central_manager.toolbox_functions_ui._add_number_and_brightness, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(molecular_counting_actions, molecular_counting_submenu)
 
         # ── Brightfield Tools ──────────────────────────────────────────────────
         brightfield_submenu = self.toolbox_menu.addMenu('Brightfield Tools')

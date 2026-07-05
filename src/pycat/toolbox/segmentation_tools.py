@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Image Segmentation and Analysis Module for PyCAT 
 
@@ -39,7 +40,7 @@ from pycat.utils.general_utils import dtype_conversion_func, check_contrast_func
 from pycat.utils.math_utils import remove_outliers_iqr
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity, rb_gaussian_bg_removal_with_edge_enhancement
 
-# Cache GPU availability at module load time — avoids re-initializing the
+# Cache GPU availability at module load time  --  avoids re-initializing the
 # CUDA context on every Cellpose call. The actual check is deferred until
 # first use so module import stays fast.
 _CELLPOSE_USE_GPU = None
@@ -61,6 +62,24 @@ def _refine_debug_enabled():
     import os
     return os.environ.get('PYCAT_REFINE_DEBUG', '') not in ('', '0', 'false', 'False')
 
+
+def _to_uint16_safe(image):
+    """Convert any image to uint16 without clipping float values outside [-1, 1].
+
+    ``sk.util.img_as_uint`` requires float input in [-1, 1] and raises or clips
+    outside that range. Background-removed and CLAHE-processed images are often
+    float32 with values well outside that range. This helper normalises the input
+    to [0, 1] first so the uint16 conversion is always valid, preserving relative
+    intensity differences (which is all the refinement filter needs for kurtosis,
+    std-dev, and SNR checks).
+    """
+    arr = np.asarray(image, dtype=np.float32)
+    mn, mx = float(arr.min()), float(arr.max())
+    if mx - mn < 1e-12:
+        return np.zeros_like(arr, dtype=np.uint16)
+    normed = (arr - mn) / (mx - mn)
+    return sk.util.img_as_uint(normed)
+
 def _get_cellpose_gpu():
     global _CELLPOSE_USE_GPU
     if _CELLPOSE_USE_GPU is None:
@@ -73,7 +92,7 @@ def _get_cellpose_gpu():
 
 
 # ---------------------------------------------------------------------------
-# Cellpose version awareness — cyto2 (Cellpose <4 CNN) vs cpsam (Cellpose >=4)
+# Cellpose version awareness  --  cyto2 (Cellpose <4 CNN) vs cpsam (Cellpose >=4)
 # ---------------------------------------------------------------------------
 # Cellpose 4 (Cellpose-SAM) removed the legacy cyto/cyto2/cyto3 weights: passing
 # pretrained_model='cyto2' there is silently ignored and cpsam is loaded instead
@@ -314,8 +333,9 @@ def apply_watershed_labeling(original_image, binary_mask, sigma=1.5):
     >>> labeled_segments = apply_watershed_labeling(original_image, binary_mask, sigma=1.5)
     """
     
-    # Convert the original image to 16-bit unsigned integers for processing
-    image = dtype_conversion_func(original_image, output_bit_depth='uint16')
+    # Convert the original image to 16-bit unsigned integers for processing.
+    # Use _to_uint16_safe to handle float images outside [-1,1] correctly.
+    image = _to_uint16_safe(original_image)
     
     # Ensure the binary mask is a boolean array
     binary_mask = np.asarray(binary_mask).astype(bool)
@@ -747,7 +767,7 @@ def cellpose_segmentation(image, object_diameter, model_name=None):
         model_name = default_cellpose_model()
     model = _build_cellpose_model(model_name)
 
-    # Warn CPU-only users once per session — Cellpose is much slower without a
+    # Warn CPU-only users once per session  --  Cellpose is much slower without a
     # CUDA GPU, and the large Cellpose-SAM (cpsam) model on Cellpose >= 4 can
     # take minutes per image on CPU.
     global _WARNED_CPU
@@ -756,7 +776,7 @@ def cellpose_segmentation(image, object_diameter, model_name=None):
         if _cellpose_major_version() >= 4:
             napari_show_warning(
                 "Cellpose is running on CPU (no CUDA GPU detected). The "
-                "Cellpose-SAM model is very slow on CPU — expect minutes per "
+                "Cellpose-SAM model is very slow on CPU  --  expect minutes per "
                 "image. For speed, install CUDA PyTorch or switch to the cyto2 "
                 "model (cellpose<4). See the README GPU section.")
         else:
@@ -1029,9 +1049,13 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     - Ellipticity to remove objects that are too long and narrow.
     - Gradient and SNR conditions to ensure objects stand out from their background and are not indistinguishable from noise.
     """
-    # Convert images to 16-bit for consistent intensity analysis
-    original_image_16 = dtype_conversion_func(original_img, output_bit_depth='uint16')
-    processed_image_16 = dtype_conversion_func(processed_img, output_bit_depth='uint16')
+    # Convert images to uint16 for consistent intensity analysis.
+    # Use _to_uint16_safe which normalises float images to [0,1] first;
+    # dtype_conversion_func/img_as_uint clips float outside [-1,1] to extremes,
+    # collapsing background-removed images to a flat array and causing false
+    # std_dev<2 / kurtosis failures on all objects.
+    original_image_16  = _to_uint16_safe(original_img)
+    processed_image_16 = _to_uint16_safe(processed_img)
     
     refined_puncta_mask = puncta_mask.copy()
 
@@ -1177,8 +1201,8 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
     windowed. See ``puncta_refinement_filtering_func`` for the meaning of each
     condition.
     """
-    original_image_16 = dtype_conversion_func(original_img, output_bit_depth='uint16')
-    processed_image_16 = dtype_conversion_func(processed_img, output_bit_depth='uint16')
+    original_image_16 = _to_uint16_safe(original_img)
+    processed_image_16 = _to_uint16_safe(processed_img)
 
     refined_puncta_mask = puncta_mask.copy()
 
@@ -1514,8 +1538,8 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     # main speedup for multi-cell images: with N cells each occupying a fraction
     # of the frame, whole-frame-per-cell processing is ~N× redundant.
     #
-    # The context-dependent operations — Gaussian background removal
-    # (σ≈2·ball_radius, ~3σ support) and CLAHE (kernel≈4·ball_radius) — need
+    # The context-dependent operations  --  Gaussian background removal
+    # (σ≈2·ball_radius, ~3σ support) and CLAHE (kernel≈4·ball_radius)  --  need
     # enough surrounding pixels to match whole-image results near the cell edge.
     # A margin of 6·ball_radius makes the cropped result numerically IDENTICAL to
     # whole-image inside the cell (verified on real data: max diff 0.0, corr
@@ -1550,7 +1574,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     # Perform background removal on the cropped ROI.
     # If the pre-processed image already has a sparse, peaked intensity
     # distribution (median of non-zero pixels < 0.05 after normalisation),
-    # the input has already been LoG/DoG enhanced and CLAHE normalised —
+    # the input has already been LoG/DoG enhanced and CLAHE normalised  -- 
     # running rb_gaussian_bg_removal on top would subtract the nucleoplasm
     # baseline and collapse the noise floor to zero (NaN SNR). In that case
     # we use the preprocessed image directly, as it is already optimal for
@@ -1563,7 +1587,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
         _nz = _proc_norm[(_proc_norm > 0.001) & mask_crop]
         _already_enhanced = (len(_nz) > 10 and float(np.median(_nz)) < 0.05)
         if _already_enhanced:
-            # Input is LoG/CLAHE preprocessed — background is already near-zero.
+            # Input is LoG/CLAHE preprocessed  --  background is already near-zero.
             # Apply a light CLAHE pass only to ensure consistent dynamic range
             # for Felzenszwalb, without any subtractive background removal.
             from pycat.toolbox.image_processing_tools import _safe_equalize_adapthist
@@ -1613,21 +1637,29 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
     data_instance : object
         An instance containing a data repository with necessary parameters such as ball_radius.
     viewer : napari.Viewer
-        The napari viewer instance used for adding the segmentation results as new layers.
-
-    Raises
-    ------
-    Warning
-        If the 'Labeled Cell Mask' layer is not present in the viewer, a warning is issued as the function
-        is intended to be used after running the Cell Analyzer. If the layer is absent, the function will
-        run on the entire image, which may lead to unintended behavior.
-
-    Notes
-    -----
-    The function iterates over all cells, segments subcellular objects, and refines the segmentation.
-    It relies on cell-specific metrics if available. The final segmentation masks for all cells are
-    combined and added to the napari viewer as new layers for visualization and further analysis.
     """
+    # Guard: if ball_radius is still at the hardcoded default (75) it almost
+    # certainly means the user has not run Step 2 (Measure Line) since the last
+    # Save & Clear. A default ball_radius of 75 is correct only for objects
+    # ~100 px in diameter; for typical condensates (~5-20 px) it makes the CLAHE
+    # kernel and local threshold window so large relative to the objects that
+    # segmentation returns 0 objects. Warn and abort so the user knows what to do
+    # rather than getting a confusing "0 objects after refinement" message.
+    _br = data_instance.data_repository.get('ball_radius', 75)
+    _os = data_instance.data_repository.get('object_size', 50)
+    _DEFAULT_BR = 75
+    _DEFAULT_OS = 50
+    if abs(_br - _DEFAULT_BR) < 1 and abs(_os - _DEFAULT_OS) < 1:
+        napari_show_warning(
+            "Condensate segmentation: ball_radius is still at the default value "
+            f"({_DEFAULT_BR} px), which means Step 2  --  Measure Line has not been run "
+            "since the last Save & Clear.\n\n"
+            "Please draw lines over a condensate and a cell in the viewer and click "
+            "'Measure Line(s)' (Step 2) before segmenting. Using the default "
+            f"ball_radius={_DEFAULT_BR} on small condensates will produce 0 objects."
+        )
+        return
+
     # Retrieve the data from the image layers and data instance
     original_image = original_image_layer.data
     pre_processed_image = pre_processed_image_layer.data
@@ -1685,7 +1717,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
 
     # Count DISTINCT objects via connected components, not the boolean max.
     # total_refined_puncta_mask is a boolean OR-accumulation across cells, so its
-    # .max() is always 1 when any object exists — it reports "at least one pixel
+    # .max() is always 1 when any object exists  --  it reports "at least one pixel
     # set", not the object count. Label the mask to count and to give each object
     # a unique id for downstream analysis.
     labeled_total_puncta = sk.measure.label(total_puncta_mask.astype(bool))
@@ -1695,10 +1727,10 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
         napari_show_warning(
             "Condensate segmentation found 0 objects after refinement filtering.\n"
             "Possible causes:\n"
-            "  • The image has not been preprocessed — run Pre-process and Background Removal first.\n"
-            "  • Thresholds are too strict for this image — try lowering Kurtosis threshold (e.g. -5),\n"
+            "  • The image has not been preprocessed  --  run Pre-process and Background Removal first.\n"
+            "  • Thresholds are too strict for this image  --  try lowering Kurtosis threshold (e.g. -5),\n"
             "    Local/Global SNR thresholds (e.g. 0.5), or the Intensity scale (e.g. 0.8).\n"
-            "  • The wrong image layer is selected in the dropdown — check both dropdowns point to\n"
+            "  • The wrong image layer is selected in the dropdown  --  check both dropdowns point to\n"
             "    the correct pre-processed and raw layers.\n"
             "No mask layers were added to avoid cluttering the viewer with empty results."
         )
@@ -1744,8 +1776,8 @@ def compare_segmentation_speed(pre_processed_image_layer, original_image_layer, 
                                kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2):
     """
-    Run condensate segmentation twice — once with the original refinement filter,
-    once with the windowed (fast) filter — timing each and checking the refined
+    Run condensate segmentation twice  --  once with the original refinement filter,
+    once with the windowed (fast) filter  --  timing each and checking the refined
     masks are identical. Adds the fast-path result layers and reports timings and
     equivalence via a napari notification and stdout. For the Segmentation Speed
     Comparison widget.
@@ -1762,7 +1794,7 @@ def compare_segmentation_speed(pre_processed_image_layer, original_image_layer, 
         cell_masks = np.ones_like(original_image).astype(int)
         cell_masks[0:2, 0:2] = 0
         cell_df = pd.DataFrame()
-        napari_show_warning("No 'Labeled Cell Mask' — comparison will run on the whole image.")
+        napari_show_warning("No 'Labeled Cell Mask'  --  comparison will run on the whole image.")
 
     kw = dict(kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
               global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,

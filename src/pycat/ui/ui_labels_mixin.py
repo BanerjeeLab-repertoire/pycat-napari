@@ -22,9 +22,11 @@ from PyQt5.QtWidgets import (
 
 from pycat.toolbox.label_and_mask_tools import (
     run_convert_labels_to_mask, run_measure_region_props, run_update_labels,
-    run_label_binary_mask, run_measure_binary_mask, run_binary_morph_operation)
+    run_label_binary_mask, run_measure_binary_mask, run_binary_morph_operation,
+    run_expand_labels, run_mask_logic_merge)
 from pycat.toolbox.layer_tools import (
     run_simple_multi_merge, run_advanced_two_layer_merge)
+from pycat.ui.field_status import button_with_circle as _bwc
 
 
 class _LabelsMasksWidgetsMixin:
@@ -45,6 +47,58 @@ class _LabelsMasksWidgetsMixin:
         convert_labels_widget = QWidget()
         convert_labels_widget.setLayout(convert_labels_layout)
         self._add_widget_to_layout_or_dock(convert_labels_widget, layout, separate_widget, "Labels to Mask Converter")
+
+    def _add_run_expand_labels(self, layout=None, separate_widget=False):
+        """Grow labels outward by a fixed distance without merging touching labels."""
+        from PyQt5.QtWidgets import QSpinBox, QLabel as _QLabel
+        expand_layout = QVBoxLayout()
+        self.add_text_label(expand_layout, 'Expand Labels', bold=True)
+        self.add_text_label(expand_layout,
+                            'Grow each label outward without merging touching objects.')
+        self.add_text_label(expand_layout, 'Select Labels Layer to Expand')
+        expand_dropdown = self.create_layer_dropdown(napari.layers.Labels)
+        expand_layout.addWidget(expand_dropdown)
+        dist_row = QWidget(); dist_h = QHBoxLayout(dist_row)
+        dist_h.setContentsMargins(0, 0, 0, 0); dist_h.setSpacing(4)
+        dist_spin = QSpinBox(); dist_spin.setRange(1, 1000); dist_spin.setValue(1)
+        dist_spin.setSuffix(" px")
+        dist_h.addWidget(_QLabel("Expansion distance:")); dist_h.addWidget(dist_spin, 1)
+        expand_layout.addWidget(dist_row)
+        expand_button = QPushButton("Expand Labels")
+        expand_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        expand_button.clicked.connect(lambda: self.on_general_button_clicked(
+            run_expand_labels, self.viewer, expand_dropdown, dist_spin.value(),
+            self.viewer))
+        expand_layout.addWidget(_bwc(expand_button, watch_dropdowns=[expand_dropdown]))
+        expand_widget = QWidget(); expand_widget.setLayout(expand_layout)
+        self._add_widget_to_layout_or_dock(expand_widget, layout, separate_widget, "Expand Labels")
+
+    def _add_run_mask_logic_merge(self, layout=None, separate_widget=False):
+        """Combine two binary masks with AND / OR / XOR."""
+        from PyQt5.QtWidgets import QComboBox
+        logic_layout = QVBoxLayout()
+        self.add_text_label(logic_layout, 'Mask Layer Operations (AND / OR / XOR)', bold=True)
+        self.add_text_label(logic_layout,
+                            'AND keeps overlap, OR keeps the union, XOR keeps the '
+                            'symmetric difference (regions in exactly one mask).')
+        self.add_text_label(logic_layout, 'Select Mask Layer 1')
+        mask1_dropdown = self.create_layer_dropdown(napari.layers.Labels)
+        logic_layout.addWidget(mask1_dropdown)
+        self.add_text_label(logic_layout, 'Select Mask Layer 2')
+        mask2_dropdown = self.create_layer_dropdown(napari.layers.Labels)
+        logic_layout.addWidget(mask2_dropdown)
+        mode_dropdown = QComboBox(); mode_dropdown.addItems(['AND', 'OR', 'XOR'])
+        logic_layout.addWidget(mode_dropdown)
+        logic_button = QPushButton("Combine Masks")
+        logic_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        logic_button.clicked.connect(lambda: self.on_general_button_clicked(
+            run_mask_logic_merge, self.viewer, mask1_dropdown, mask2_dropdown,
+            mode_dropdown.currentText(), self.viewer))
+        logic_layout.addWidget(_bwc(logic_button,
+                                    watch_dropdowns=[mask1_dropdown, mask2_dropdown]))
+        logic_widget = QWidget(); logic_widget.setLayout(logic_layout)
+        self._add_widget_to_layout_or_dock(logic_widget, layout, separate_widget,
+                                           "Mask Layer Operations")
 
                
     def _add_run_measure_region_props(self, layout=None, separate_widget=False):

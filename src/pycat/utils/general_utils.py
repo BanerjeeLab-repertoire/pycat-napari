@@ -233,17 +233,24 @@ def check_contrast_func(image):
     The return value is True for error conditions (no contrast), which might seem counterintuitive but follows
     a specific pattern where checking functions return True to indicate the presence of the condition they check for.
     """
-    # Convert the input image to uint16, if there is no contrast at that resolution, likely nothing in the image
-    image = dtype_conversion_func(image, output_bit_depth='uint16')
-    # Calculate the minimum and maximum pixel values in the image
-    min_val, max_val = np.min(image), np.max(image)
-    contrast_range = max_val - min_val
-    # Ensure there's variation in the image to avoid division by zero
-    if contrast_range <= 2:
-        # Indicate an error condition due to lack of variation in the image
-        #print("The image has no contrast.")
+    # Check contrast on the actual pixel values, not via uint16 conversion.
+    # img_as_uint assumes float input is in [-1, 1] and clips anything outside
+    # that range — background-removed float32 images with values e.g. [0, 1500]
+    # get collapsed to a flat array, triggering a false "no contrast" result.
+    # Instead: compare min/max on the raw array; if the image is integer convert
+    # to float first so the comparison is in a consistent scale.
+    arr = np.asarray(image, dtype=np.float64)
+    if arr.size == 0:
         return True
-
+    min_val = float(np.min(arr))
+    max_val = float(np.max(arr))
+    contrast_range = max_val - min_val
+    # Relative threshold: flag as no-contrast if range < 0.1% of max magnitude,
+    # which is equivalent to the old uint16 "<=2" rule but works across dtypes
+    # and float ranges (preserving the original intent without the clipping bug).
+    magnitude = max(abs(max_val), abs(min_val), 1e-12)
+    if contrast_range / magnitude < 0.001:
+        return True
     return False
 
 

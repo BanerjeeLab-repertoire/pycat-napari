@@ -4,6 +4,339 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.188] - 2026-07-05
+### Fixed (auto-home on image load — direct camera set instead of reset_view)
+- **Images now reliably fill the canvas on load.** The 1.5.184 implementation used
+  `viewer.reset_view()` via a 150ms QTimer, which silently did nothing if napari had
+  not yet finished computing the layer extent. The new implementation uses the same
+  direct camera-set approach as the Home button: reads the canvas pixel dimensions
+  from ``viewer.window._qt_viewer.canvas.size``, computes
+  ``zoom = min(ch/H, cw/W) * 0.9`` from the known image H and W, then sets
+  ``viewer.camera.center`` and ``viewer.camera.zoom`` directly. This is independent
+  of napari's internal extent computation timing and matches exactly what pressing
+  Home does. Falls back to ``reset_view()`` if the canvas size cannot be read.
+
+## [1.5.187] - 2026-07-05
+### Fixed (hardware-dependent segmentation — GPU/CPU algorithm inconsistency)
+- **`compute_rolling_ball_background` now uses the same algorithm on GPU and CPU.**
+  Previously, the GPU path used morphological opening (grey erosion + dilation with a
+  disk footprint of radius ``ball_radius``) while the CPU path used
+  ``skimage.restoration.rolling_ball`` — a genuinely different algorithm that treats
+  pixel intensity as a literal extra spatial dimension and is sensitive to the image's
+  numeric range in a way plain morphological opening is not. This caused different
+  segmentation outcomes on identical data depending on which hardware ran, a silent
+  reproducibility failure confirmed by a user on CPU-only hardware. Both paths now use
+  the same morphological-opening algorithm (disk of radius ``ball_radius``). Also
+  removed the redundant ``ndi.gaussian_filter`` inside this function: the caller
+  ``rb_gaussian_bg_removal_with_edge_enhancement`` already applies the same Gaussian
+  to the background estimate, so the previous code was smoothing twice with the same
+  sigma, spreading the background estimate into real signal and causing over-subtraction.
+- **Reverted the 1.5.183 change** (``bg_removed_crop = proc_crop`` fallback). The
+  zeros fallback is correct — the algorithm-consistency fix above is what actually
+  resolves the segmentation failure on CPU-only machines.
+
+## [1.5.186] - 2026-07-05
+### Documentation
+- Added "USB HDD lazy-loading latency" to Known Issues in roadmap. Lazy-loading IMS
+  or large TIFF/HDF5 files from a USB 2.0 spinning HDD causes ~250–300 ms per-frame
+  lag when scrubbing Z/T sliders (~8 MB/frame at ~30 MB/s). Documented the per-bus
+  bandwidth breakdown (USB 2.0 / 3.0 / 3.1), three immediate workarounds (check port
+  colour/SS label, copy locally first, pre-load the relevant range), and noted that the
+  planned LRU frame cache (already on the roadmap) is the primary software-side
+  mitigation for repeated scrubbing of already-visited frames.
+
+## [1.5.185] - 2026-07-05
+### Fixed (IMS loading — singleton axis squeeze + robust indexing)
+- **`_ImsReaderTYX/ZYX/TZYX`: singleton axes from `imaris_ims_file_reader` now
+  stripped correctly.** With `squeeze_output=False`, direct reads such as
+  `reader[0, c, 0, :, :]` may return shape `(1, 1, 1, Y, X)` instead of `(Y, X)`,
+  causing `ValueError: axes don't match array` in napari. New helper `_ims_frame_2d`
+  calls `np.squeeze` and validates the result is exactly 2-D before returning.
+- **Robust `__getitem__` for all three classes.** New `_ims_indices` helper converts
+  any selector (int, slice, list, Ellipsis) to a concrete list; each class reads
+  frame-by-frame and stacks, returning a scalar-indexed plane or a stacked array
+  exactly as napari expects.
+- **`_ImsReaderTZYX` z-squeeze fix over the submitted patch.** The patch's original
+  `arr[:, 0]` squeeze for a scalar Z selector on a `(1, 1, Y, X)` array after T-squeeze
+  produced `(1, X)` instead of `(Y, X)`. Fixed to squeeze Z before T, so all three
+  indexing modes (`[t, z]` → (Y,X), `[t, :]` → (Z,Y,X), `[:, :]` → (T,Z,Y,X))
+  produce the correct shapes. Validated numerically.
+
+## [1.5.184] - 2026-07-05
+### Fixed (five UX issues from user report)
+- **Overlay image rendered as a green stripe.** Two compounding bugs: (1) the green
+  channel was converted with `dtype_conversion_func(..., 'uint16')` which calls
+  `img_as_uint` on a float32 image with values outside [-1,1], collapsing it to a
+  flat array; (2) the final `dtype_conversion_func(sbs_overlay, 'uint16')` ran on the
+  uint8 RGB output of `create_overlay_image`, rescaling 0–255 to 0–65535 and
+  destroying the composite. Both fixed: `_to_uint16_safe` is now used for the green
+  channel, and the second conversion is removed entirely.
+- **Images open small — no auto-zoom.** `_finalise_stack_load` now calls
+  `viewer.reset_view()` (deferred 150 ms via QTimer so the layer extent is computed
+  first), equivalent to pressing the Home button after every file open.
+- **Napari notifications persist through Clear.** `_clear_everything` now clears the
+  notification manager's record list so stale "Processing cell 3 of 3" messages from
+  the previous session don't persist into the next.
+- **Status circles (red/yellow) don't turn green when a layer is selected via
+  auto-populate.** `_layer_row` now also connects `_update_circle` to the
+  `layers.events.inserted` signal (deferred via QTimer so the dropdown index has
+  already updated). Previously, if auto-selection via `name_hint` landed on index 0
+  with no index change, Qt suppressed `currentIndexChanged` and the circle stayed red.
+- **Dropdown auto-population corrected per step:**
+  - Step 6 (Cellpose): hints to `'Upscaled Segmentation'` image
+  - Step 7 (Cell Analyzer): hints to `'Upscaled Fluorescence'` image
+  - Step 8 pre-processed input: hints to `'Enhanced Background Removed'`
+  - Step 8 fluorescence input: hints to `'Upscaled Fluorescence'`
+  - Step 9 puncta image: hints to `'Upscaled Fluorescence'`
+
+## [1.5.183] - 2026-07-05
+### Fixed ("Cell X has low contrast" on dim images even after 1.5.179)
+- **Root cause: `perform_bg_removal = False` set `bg_removed_crop` to a zero array.**
+  When the Cell Analyzer measures a cell's `gaussian_snr_estimate < 1.0` (common on dim
+  images such as the GFP test image with int16 max ~1280), the segmentation code skipped
+  background removal and assigned `bg_removed_crop = np.zeros_like(orig_crop)`. A zero
+  array trivially passes `check_contrast_func` as "no contrast", producing "Cell X has
+  low contrast, likely has no puncta" and 0 objects — even when real condensates are
+  visible. Fixed: when background removal is skipped due to low SNR, `bg_removed_crop`
+  now falls back to `proc_crop.astype(float32)` (the pre-processed image directly),
+  matching what the `_already_enhanced` branch already does. This gives Felzenszwalb
+  segmentation a real signal to work with rather than zeros, preserving any genuine
+  puncta in dim cells.
+
+## [1.5.182] - 2026-07-05
+### Fixed (IMS loading — direct reader replaces broken zarr-store adapter)
+- **IMS files now load via the direct ``imaris_ims_file_reader.ims`` reader for all
+  three lazy cases (T,Y,X / Z,Y,X / T,Z,Y,X), bypassing the zarr-store adapter
+  entirely.** The adapter's ``__getitem__`` could raise ``KeyError: '0.0.0.0.0'`` for
+  valid IMS chunk keys when the file lives on Box Drive, a network share, or is held
+  open by Imaris (via ``h5py`` raising ``OSError: Can't synchronously read data``).
+  New classes — ``_ImsReaderTYX``, ``_ImsReaderZYX``, ``_ImsReaderTZYX`` — have the
+  same external interface (shape, dtype, ndim, __getitem__, __len__, __array__,
+  transpose) so napari treats them identically and laziness is fully preserved: only
+  the frame the user scrubs to is read from disk. Patch authored externally; applied
+  on top of the defensive wrapper added in v1.5.177.
+- Added ``import hdf5plugin`` before ImsReader instantiation, registering bundled HDF5
+  compression filters needed by some IMS files to decode pixel data.
+### Known issue noted
+- The direct-reader path has no internal chunk cache (the zarr adapter had one). For
+  interactive use this is imperceptible; for batch workflows that re-read the same
+  frames in a tight loop it may add I/O overhead. Flagged in roadmap as a future
+  LRU-cache addition to the ``_ImsReader*`` classes.
+
+## [1.5.181] - 2026-07-05
+### Fixed (SyntaxError preventing startup)
+- **`segmentation_tools.py` caused a SyntaxError on startup in Python 3.12 on
+  Windows.** Two issues combined: (1) em-dash characters (`—`) in comments and
+  docstrings are valid UTF-8 but Python 3.12's default tokeniser on Windows rejected
+  them without an explicit encoding declaration; added `# -*- coding: utf-8 -*-` to
+  the file header. (2) An earlier str_replace that inserted the `run_segment_subcellular
+  _objects` guard block only replaced the function signature line, leaving the old
+  docstring body (Parameters / Raises / Notes sections) orphaned as unreachable text
+  *after* a `return` statement, with its closing `"""` creating an unmatched
+  triple-quote that caused an "unterminated triple-quoted string literal" SyntaxError
+  detectable only at runtime. Both issues now fixed; full tree compiles clean.
+
+## [1.5.180] - 2026-07-05
+### Changed (Clear now returns to true blank state; opt-in measurement persistence)
+- **Clear and Save & Clear now restore the true initialization state** — ball_radius,
+  object_size, and cell_diameter reset to their constructor defaults (75, 50, 100)
+  exactly as `_initialize_repository` specifies. The 1.5.178 unconditional
+  measurement-preservation was reverted; it was addressing the wrong root cause
+  (the real bug was the `img_as_uint` clipping fixed in 1.5.179).
+- **"Remember measurements across clears" checkbox added to the Measure Line widget.**
+  Off by default (true reset). When ticked, ball_radius, object_size, and cell_diameter
+  are preserved across Save & Clear and Clear, so users processing a batch of images
+  from the same experiment don't need to re-measure each time. The flag lives on
+  CentralManager (survives individual clears, resets on restart), following the same
+  pattern as "Keep this pixel size for the session" on the pixel-size gate.
+
+## [1.5.179] - 2026-07-05
+### Fixed (connected bugs: "Cell X has low contrast" + "0 objects after refinement" on second run)
+- **Root cause: `sk.util.img_as_uint` clips float32 values outside [-1, 1].** Background-
+  removed and CLAHE-processed images are float32 with values e.g. [0, 1500] — well outside
+  the [-1,1] range `img_as_uint` requires. When passed through `dtype_conversion_func(...,
+  'uint16')`, all values collapse to the uint16 floor/ceiling, producing a flat array.
+  Three downstream effects all trace to this single root cause:
+  1. **`check_contrast_func`** received the flat uint16 array → `max - min ≤ 2` → returned
+     `True` (no contrast) → `"Cell X has low contrast, likely has no puncta"` even on images
+     with clear condensates. **Fixed**: `check_contrast_func` now works directly on the raw
+     float values with a relative contrast threshold (range < 0.1% of magnitude), never
+     calling `img_as_uint`.
+  2. **`puncta_refinement_filtering_func`** and **`_fast` variant** built `original_image_16`
+     / `processed_image_16` with the same broken conversion → `np.std(local_pixels) < 2` →
+     every object dropped before kurtosis/SNR checks even ran → 0 objects. **Fixed**: a new
+     `_to_uint16_safe` helper normalises any float image to [0, 1] before conversion,
+     preserving relative intensity differences while satisfying `img_as_uint`'s contract.
+     Verified: `std` goes from ~0 to ~24 000 on a [0, 1500] float image.
+  3. **`apply_watershed_labeling`** had the same broken conversion. **Fixed** with
+     `_to_uint16_safe`.
+- Both reported symptoms — "Cell 3 is a low contrast image" on a new image after Clear,
+  and "0 objects after refinement filtering" on a second run of the same image — are the
+  same bug hitting at different stages depending on how early the flat array is encountered.
+
+## [1.5.178] - 2026-07-05
+### Fixed (condensate segmentation fails with 0 objects after Save & Clear)
+- **Root cause identified and fixed: `ball_radius` resets to 75 after Save & Clear,
+  which is ~10× too large for typical condensates.** `reset_values(clear_all=True)`
+  restores `ball_radius=75`, `object_size=50`, `cell_diameter=100` — the hardcoded
+  constructor defaults. When the user re-runs Step 8 (Condensate Segmentation) on a
+  second image without first re-doing Step 2 (Measure Line), the CLAHE kernel
+  (`4 × ball_radius = 300 px`) and local threshold window (`ball_radius = 75 px`) are
+  tuned for objects ~100 px in diameter — ~10× larger than real condensates — causing
+  the segmentation to produce 0 objects before refinement even runs. The
+  "0 objects after refinement filtering" warning then lists threshold tuning as the
+  likely cause, which is misleading when the real issue is an un-reset ball_radius.
+  Two fixes:
+  1. **`ball_radius`, `object_size`, `cell_diameter`, `microns_per_pixel_sq`, and
+     `pixel_size_from_metadata` are now preserved across Save & Clear and Clear.**
+     These are measurement-derived and should persist when loading a second image
+     from the same experiment, so re-measuring is no longer required each time.
+  2. **Guard in `run_segment_subcellular_objects`**: if both `ball_radius` and
+     `object_size` are exactly at their constructor defaults (75 and 50), the function
+     aborts with a clear actionable message pointing to Step 2 (Measure Line) rather
+     than running and producing 0 objects with a misleading threshold-tuning suggestion.
+  Reported by user running the `In Cell 1-GFP.tif` test image a second time after
+  Save & Clear: first run segmented correctly, second run produced 0 objects.
+
+## [1.5.177] - 2026-07-05
+### Fixed (IMS loader — Box Drive / network share read failure)
+- **IMS files on Box Drive or network shares no longer crash the loader.** The probe
+  read (`lazy_tyx[0]`, `lazy_zyx[0]`) that was done eagerly at load time to set
+  default diameter estimates could raise an `OSError: Can't synchronously read data`
+  (h5py) → `KeyError: '0.0.0.0.0'` (imaris_ims_file_reader) when the HDF5 file is
+  not fully materialised locally (Box Drive stub), held open by Imaris, or on a slow
+  network share. Previously this aborted the entire load and showed the opaque message
+  `"Failed to open stack: '0.0.0.0.0'"` — the layer never appeared at all.
+  Now: the probe read is wrapped in a try/except; on failure a clear warning is shown
+  (`"ensure it is fully downloaded locally — right-click → Make Available Offline in
+  Box Drive"`) and `channel_data` falls back to a zero array of the correct spatial
+  size (derived from IMS metadata, which always loads first). The napari layer is still
+  added lazily and will load correctly when the user scrubs to a frame. Reported by
+  Shamli Manasvi (file: T=5, C=4, Z=1, 2048×2048 IMS on Box Drive).
+
+## [1.5.176] - 2026-07-05
+### Fixed (missing patches applied to uploaded 1.5.175 base)
+- **ImportError on startup** — `spida_tools.py` and `spida_ui.py` were missing
+  from the repository while `ui_modules.py` imported them; PyCAT would not start.
+  Both files now present.
+- **NameError `QSizePolicy` in `spatial_randomness_tools.py:359`** — used but not
+  in the local import block. Added.
+- **NameError `napari_show_info` in `image_processing_tools.py:619`** — only
+  `show_warning` was imported; upscaling success notification would crash.
+  Added `from napari.utils.notifications import show_info`.
+- **Mean and Additive multi-merge produce identical results** (`layer_tools.py`) —
+  per-result min-max normalisation cancelled the ÷N factor. Fixed to clip to the
+  input dtype's range and scale by a fixed maximum.
+- **Missing builder methods** `_add_run_expand_labels` and `_add_run_mask_logic_merge`
+  in `ui_labels_mixin.py` — both were in the Labeled Mask Tools menu but no builder
+  existed, causing an AttributeError when opened. Added builders; added
+  `run_expand_labels` and `run_mask_logic_merge` to the label_and_mask_tools import.
+### Added (features carried from the audit session)
+- **Fibril Analysis** (`fibril_tools.py` + `fibril_ui.py`): four-panel analysis
+  (bead-on-fibril detection, morphometry, before/after registration, crossing-node
+  graph theory). Added to Toolbox → Spatial Metrology menu.
+
+## [1.5.175] - 2026-07-05
+### Added (Number & Brightness — camera / widefield counterpart to SpIDA)
+- **New molecular-counting method: Number & Brightness (N&B)** (Toolbox → Advanced
+  Analysis → Molecular Counting → Number & Brightness). The camera/time-series
+  counterpart to SpIDA (Digman et al., Biophys. J. 94:2320, 2008), for
+  widefield / TIRF / spinning-disk / sCMOS data where SpIDA's confocal assumptions
+  don't hold.
+  - `nb_tools.py`: per-pixel temporal mean/variance → brightness (ε = σ²/⟨I⟩) and
+    number (n = ⟨I⟩²/σ²) maps, with scalar detector correction
+    (ε = (σ²−σ²_read)/(S·(⟨I⟩−offset))). Validated against synthetic time-series:
+    <2% recovery of known number and brightness.
+  - **Global bleaching detrend** (multiplicative frame rescaling that preserves
+    per-pixel fluctuations — the correct N&B correction, not per-pixel subtraction).
+    No-bleach control recovers exactly; mild bleaching within ~10%.
+  - Outputs per-pixel **brightness and number maps** as new layers plus an ROI (or
+    whole-frame) summary, with optional oligomeric-state readout against a monomer
+    reference. Scalar gain/offset/read-variance now (suited to the lab's Kinetix
+    sCMOS); a per-pixel variance-map correction is a documented future extension.
+  - Guardrails: warns on 2D (non-time-series) input, too few frames, and apparent-
+    (uncorrected) brightness; notes the exchange-between-frames and bleaching
+    assumptions.
+
+## [1.5.174] - 2026-07-05
+### Added (SpIDA modality guardrail)
+- **SpIDA now has an acquisition-modality selector and guardrail.** A "Acquisition
+  modality" dropdown (Confocal / TIRF / Widefield) drives `check_modality()`:
+  widefield raises a strong warning that SpIDA's density/brightness are not valid on
+  unsectioned camera data (no beam focal volume, out-of-focus light distorts the fit
+  variance, PMT noise model doesn't apply) and points to Number & Brightness as the
+  camera/time-series alternative; TIRF is allowed with a camera-noise caveat. A
+  data-driven heuristic also flags a high flat background floor (typical of widefield
+  haze) even when confocal is selected. Modality warnings are echoed into the result
+  summary.
+
+## [1.5.173] - 2026-07-05
+### Added (SpIDA — Spatial Intensity Distribution Analysis)
+- **New molecular-counting method: SpIDA** (Toolbox → Advanced Analysis →
+  Molecular Counting → SpIDA). Estimates fluorescent particle **density** (N,
+  particles/beam-area) and **quantal brightness** (epsilon) from the pixel-intensity
+  histogram of a confocal-image ROI, and — after a monomer calibration — reports the
+  **oligomeric state** (epsilon / epsilon_0; ~1 monomer, ~2 dimer).
+  - `spida_tools.py`: the histogram model is a direct port of the authors' reference
+    MATLAB implementation (Godin et al. 2011, `SpIDA_Functions.m`) with its three
+    numerical regimes (Gaussian for N>70, generalized-Poisson for N>6, blended 6–7)
+    and the moment-based fit initialisation from `fit_SpIDA_histo.m`
+    (epsilon0 ≈ var/mean, N0 ≈ mean²/var). Validated against images simulated by the
+    reference method: R² 0.99 and <10% recovery error on N and epsilon; a 2×-brightness
+    sample is correctly identified as a dimer (state 1.90×).
+  - **Calibration step** measures the monomeric reference epsilon_0 from a control ROI;
+    without it, density and brightness are still reported but no oligomeric state
+    (rather than a misleading number).
+  - **Assumption guardrails** (`check_assumptions`): warns on small ROI / undersampling,
+    saturation-clipping (linear-response violation), and low signal-to-background —
+    surfacing conditions that make the numbers untrustworthy instead of returning them
+    silently. Reporting is Image → Assessment → Interpretation, per PyCAT's
+    anti-black-box philosophy.
+  - New "Molecular Counting" submenu under Advanced Analysis groups SpIDA with the
+    existing Photobleaching Step Counting tool.
+
+## [1.5.172] - 2026-07-05
+### Added (roadmap items)
+- **Expand Labels** (Toolbox → Labeled Mask Tools → Expand Labels): grows each label
+  outward by a chosen pixel distance using `skimage.segmentation.expand_labels`, which
+  preserves label identity and does NOT merge touching objects — addresses the
+  roadmap's "segments too small" item. New `run_expand_labels` in
+  `label_and_mask_tools`.
+- **Mask Layer Operations (AND / OR / XOR)** (Toolbox → Layer Operations → Mask
+  Operations): boolean set operations on two masks — AND = overlap, OR = union,
+  XOR = symmetric difference. Inputs are binarized so both binary and labeled masks
+  work. New `run_mask_logic_merge`. Verified numerically.
+### Changed (documentation)
+- Pruned `roadmap.rst`: added a "Recently Completed" section (VPT, batch, 3D/Z-stack,
+  time-series, watershed, top-hat, Cellpose model selection, progress bars/threading,
+  the two new label ops, and the workflow scaffolding), an "Outstanding & Noted"
+  section (status-marker completion, remaining step enumeration, BioIO migration, QC
+  advisor, 3D rendering presets, kymographs), and marked the individual shipped items
+  and the fixed merge Known Issue inline.
+
+## [1.5.171] - 2026-07-05
+### Fixed (code audit)
+- **`NameError: QSizePolicy` in `spatial_randomness_tools._add_spatial_randomness`.**
+  `QSizePolicy` was used (line ~359) but omitted from the local PyQt5 import; the widget
+  would crash when built. Added it to the import. (Same moved/missing-import class the
+  mixin guard catches.)
+- **`NameError: napari_show_info` in `image_processing_tools.run_upscaling_func`.** Only
+  `show_warning` was imported; the success-notification path called an unimported
+  `napari_show_info`. Added `from napari.utils.notifications import show_info as
+  napari_show_info`.
+- **Known Issue resolved — "Mean and Additive multi-merge produce identical results."**
+  `run_simple_multi_merge` min-max-normalized the result per-merge; since Mean =
+  Additive / N, that normalization cancelled the constant and made the two modes
+  byte-identical. Now the merged result is clipped to the input dtype's range and
+  scaled by that fixed maximum, so Additive can saturate (its intent) while
+  Mean/Max/Min keep distinct scales. Verified numerically (Additive max 0.766 vs Mean
+  0.383 on the same inputs).
+### Changed (consistency)
+- Consolidated the 27 scattered inline `from pycat.ui.field_status import
+  button_with_circle as _bwc` statements (added across the status-marker rollout) into a
+  single top-level import per file, removing the awkward mid-line
+  `form.addRow(prog); from ...` imports.
+
 ## [1.5.170] - 2026-07-03
 ### Fixed / Added
 - **Status markers are now painted circles.** Replaced the CSS-styled dot (which a

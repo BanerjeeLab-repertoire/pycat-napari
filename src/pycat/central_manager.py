@@ -70,6 +70,12 @@ class CentralManager:
         # gates that must re-evaluate whether the new data has a scale).
         self._data_switch_callbacks = []
 
+        # Session-level flag: if True, ball_radius / object_size / cell_diameter
+        # are preserved across Save & Clear so the user doesn't need to re-measure
+        # when processing a second image from the same experiment. Controlled by the
+        # "Remember measurements across clears" checkbox in the Measure Line widget.
+        self.persist_measurements = False
+
         # Initialize the component responsible for file input/output operations
         self.file_io = FileIOClass(self.viewer, self)
         

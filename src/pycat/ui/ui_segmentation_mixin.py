@@ -104,7 +104,7 @@ class _SegmentationWidgetsMixin:
         seg_layout.addWidget(cp_model_group)
 
         # ── Shared image dropdown ────────────────────────────────────────
-        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image)
+        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image, name_hint='Upscaled Segmentation')
 
         # ── RF-only extras (annotation layer) — shown/hidden by selection ──
         rf_extra = QWidget()
@@ -299,8 +299,8 @@ class _SegmentationWidgetsMixin:
         from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QFormLayout, QGroupBox
         process_cells_layout = QVBoxLayout()
         self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
-        process_cells_image1_dropdown = self._layer_row(process_cells_layout, 'Select Pre-Processed Image to Segment:', napari.layers.Image, name_hint='Pre-Processed')
-        process_cells_image2_dropdown = self._layer_row(process_cells_layout, 'Select Fluorescence Image to Process:', napari.layers.Image)
+        process_cells_image1_dropdown = self._layer_row(process_cells_layout, 'Select Pre-Processed Image to Segment:', napari.layers.Image, name_hint='Enhanced Background Removed')
+        process_cells_image2_dropdown = self._layer_row(process_cells_layout, 'Select Fluorescence Image to Process:', napari.layers.Image, name_hint='Upscaled Fluorescence')
 
         # ── Refinement parameters ──────────────────────────────────────────
         params_group = QGroupBox("Refinement Parameters")
