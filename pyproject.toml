@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.118"
+version = "1.5.170"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = {file = "LICENSE"}
 include-package-data = true
 authors = [
-    {name = "Christian Neureuter", email = "cneureut@buffalo.edu"},
-    {name = "Gable Wadsworth", email = "gablewad@buffalo.edu"}
+    {name = "Gable Wadsworth", email = "gablewad@buffalo.edu"},
+    {name = "Christian Neureuter", email = "cneureut@buffalo.edu"}
 ]
 
 keywords = [

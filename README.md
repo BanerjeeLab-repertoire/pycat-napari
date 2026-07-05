@@ -226,6 +226,30 @@ model dropdown will show `cyto2` (and `cyto`, `nuclei`) on Cellpose < 4, or
 the environment that has the Cellpose version you want.
 
 
+### Dependency Version Constraints (why NumPy < 2 and Zarr < 3)
+
+PyCAT pins `numpy>=1.22,<2.0` and `zarr>=2.12,<3.0`. These caps are intentional and
+load-bearing; they are not stale pins waiting to be bumped.
+
+- **`numpy<2.0`** follows from the deliberate `cellpose<4` choice above. Cellpose 3.x
+  (which provides the fast `cyto2` weights) requires NumPy 1.x, and the numba version
+  used for PyCAT's accelerated routines has its own NumPy ceiling. PyCAT's own code is
+  NumPy-2.0-clean (it uses no APIs removed in NumPy 2.0, and its numeric routines run
+  unchanged and at full speed under NumPy 2.x), so the cap exists only because of the
+  Cellpose 3 / numba stack — not because of PyCAT itself. As long as the fast `cyto2`
+  model is the default, NumPy stays below 2.0. A separate Cellpose-SAM environment (see
+  above) can move to newer NumPy.
+- **`zarr<3.0`** is required by PyCAT's own time-series/lazy-loading cache, which uses
+  `zarr.storage.DirectoryStore`. Zarr 3.0 removed `DirectoryStore` (replaced by
+  `LocalStore`) and reorganized its storage API. Migrating is a small, self-contained
+  change and would have **no performance impact** — PyCAT stores one Y,X plane per chunk
+  on local disk with the default codec, which is the same physical I/O under either
+  store class, so only the thin Python wrapper differs. The migration is deferred
+  simply because it provides no benefit while the environment is held at NumPy 1.x by
+  Cellpose 3; it becomes worthwhile only once the stack moves to the NumPy-2 / Zarr-3
+  era.
+
+
 ### Alternative Installation Methods
 
 If you encounter issues with the standard installation, use our tested environment files located in the config/ folder. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request) to provide you with the same environment we developed and ran in. To use these environment files, just download the yaml file from the config folder on the github repo, then cd to the location of the downloaded file in your terminal, then run:
@@ -581,13 +605,13 @@ See [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) for details about depen
 
 ## Citation
 
-This program was developed by Christian Neureuter as part of the Condensate Biophysics Lab (Banerjee Lab) at SUNY at Buffalo. This is just a placeholder citation until it is submitted for publication.
+This program was developed by Gable Wadsworth and Christian Neureuter as part of the Condensate Biophysics Lab (Banerjee Lab) at SUNY at Buffalo. This is just a placeholder citation until it is submitted for publication.
 
 If you use PyCAT-Napari in your research, please cite:
 
 ```bibtex
-@software{neureuter2024pycat,
-  author = {Neureuter, Christian},
+@software{wadsworth2024pycat,
+  author = {Wadsworth, Gable and Neureuter, Christian},
   title = {PyCAT-Napari: Python Condensate Analysis Toolbox},
   year = {2024},
   publisher = {GitHub},
@@ -706,7 +730,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ## Acknowledgments
 
-This project was developed by Christian Neureuter in the Condensate Biophysics Lab (Banerjee Lab) at SUNY Buffalo.
+This project was developed by Gable Wadsworth and Christian Neureuter in the Condensate Biophysics Lab (Banerjee Lab) at SUNY Buffalo.
 
 ### Key Dependencies
 - [napari](https://napari.org/) - Image visualization

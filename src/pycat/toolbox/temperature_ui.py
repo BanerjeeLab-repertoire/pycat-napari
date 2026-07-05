@@ -90,7 +90,8 @@ class TemperatureDependentUI:
         add_step1_file_io(self.viewer, layout, self._registry,
                           on_change=self._registry.refresh)
         self._pixel_gate_refresh = add_pixel_size_gate(
-            layout, self._dr, on_set=self._on_pixel_size_set)
+            layout, self._dr, on_set=self._on_pixel_size_set,
+            central_manager=self.central_manager)
 
         self._add_sync(layout)
         self._add_turbidity(layout)

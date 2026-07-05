@@ -296,7 +296,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
     import napari
     from PyQt5.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
-        QProgressBar, QCheckBox)
+        QProgressBar, QCheckBox, QSizePolicy)
 
     grp  = QGroupBox("Gaussian Spot Localization")
     form = QFormLayout(grp)
@@ -459,7 +459,7 @@ def _add_gaussian_localization(ui_instance, layout=None, separate_widget=False):
     if layout is not None and not separate_widget:
         layout.addWidget(grp)
     else:
-        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea, QSizePolicy
+        from PyQt5.QtWidgets import QVBoxLayout, QWidget, QScrollArea
         w = QWidget(); vl = QVBoxLayout(w); vl.addWidget(grp)
         w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         try:

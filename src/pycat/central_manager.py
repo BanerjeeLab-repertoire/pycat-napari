@@ -66,6 +66,10 @@ class CentralManager:
         self.active_data_class = BaseDataClass()
         #print("CentralManager initial data class id:", id(self.active_data_class))
 
+        # Listeners fired when the active data class is switched (e.g. pixel-size
+        # gates that must re-evaluate whether the new data has a scale).
+        self._data_switch_callbacks = []
+
         # Initialize the component responsible for file input/output operations
         self.file_io = FileIOClass(self.viewer, self)
         
@@ -80,6 +84,15 @@ class CentralManager:
         # Workflow checklist — activated when user switches to an analysis mode
         self.workflow_checklist = WorkflowChecklistManager(self.viewer)
 
+    def register_data_switch_callback(self, cb):
+        """Register a zero-arg callable fired whenever the active data class is
+        switched. Used by pixel-size gates to re-check the new data's scale."""
+        lst = getattr(self, '_data_switch_callbacks', None)
+        if lst is None:
+            lst = self._data_switch_callbacks = []
+        if cb not in lst:
+            lst.append(cb)
+
     def set_active_data_class(self, data_class):
         """
         Sets the active data class instance, allowing for dynamic changes in data management strategies
@@ -93,3 +106,10 @@ class CentralManager:
         #print("CentralManager setting data class id:", id(data_class))
         if isinstance(data_class, BaseDataClass):
             self.active_data_class = data_class
+            # Notify any registered listeners (e.g. pixel-size gates) that the
+            # active data changed, so they can re-evaluate visibility/scale.
+            for cb in list(getattr(self, '_data_switch_callbacks', [])):
+                try:
+                    cb()
+                except Exception:
+                    pass

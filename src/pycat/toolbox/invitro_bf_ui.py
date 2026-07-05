@@ -86,8 +86,25 @@ class InVitroBFUI:
             "Dark droplets on bright buffer background — no cell segmentation.</span>"
         )
         header.setWordWrap(True)
+
+        header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
+
+        # ── Step 1: load (status marker + load instruction) ────────────────
+        try:
+            from pycat.ui.field_status import add_step1_file_io, add_pixel_size_gate
+            add_step1_file_io(
+                self.viewer, layout,
+                instruction_html=(
+                    "Load a brightfield image via "
+                    "<b>Open/Save File(s)</b>, or drag one onto the canvas."))
+            self._pixel_gate_refresh = add_pixel_size_gate(
+                layout,
+                lambda: self.central_manager.active_data_class.data_repository,
+                central_manager=self.central_manager)
+        except Exception:
+            pass
 
         _ivbf_preprocessing(self, layout)
         _ivbf_segmentation(self, layout)
@@ -101,7 +118,14 @@ class InVitroBFUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); scroll.setWidget(main_w)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); main_w.setMinimumWidth(0)
+        try:
+            from pycat.ui.ui_modules import _relax_min_widths, _apply_scroll_guard
+            _relax_min_widths(main_w)      # let long buttons/labels shrink to dock width (fixes right-edge clipping)
+            _apply_scroll_guard(main_w)    # scroll the panel, not the control under the cursor
+        except Exception:
+            pass
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="In Vitro Brightfield Analysis")
 
 
@@ -225,7 +249,8 @@ def _ivbf_od_field(ui, layout):
     form.addRow("Droplet mask:", mask_dd)
     run = QPushButton("▶  Compute OD & Field Summary")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_condensate_metrics
@@ -273,7 +298,8 @@ def _ivbf_size_contact(ui, layout):
 
     run = QPushButton("▶  Fit Size Distribution & Contact Angle")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.invitro_tools import (
@@ -330,7 +356,8 @@ def _ivbf_spatial(ui, layout):
     form.addRow(label_with_circle("Droplet mask:", dropdown=mask_dd), mask_dd)
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         from pycat.toolbox.spatial_metrology_tools import (

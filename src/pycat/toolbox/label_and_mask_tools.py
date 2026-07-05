@@ -784,12 +784,20 @@ def opencv_contour_func(input_mask, min_area=1, max_area=1024**2, border_size=3)
     contours, _ = cv2.findContours(mask_with_border, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     for contour in contours:
-        # Draw each contour on the mask if its area is greater than or equal to the specified minimum area.
-        # Contours are filled in (thickness=-1) with white (value=255).
-        contour_area = cv2.contourArea(contour)
+        # Measure area by FILLED PIXEL COUNT, not cv2.contourArea (enclosed polygon
+        # area). Local (Niblack/Sauvola) thresholding hollows out large bright flat
+        # cores into rings; cv2.contourArea then reports the whole enclosed disc,
+        # over-estimating the object's true size and wrongly tripping max_area —
+        # dropping or partially filling genuine bright condensates. Rasterising the
+        # filled contour and counting pixels makes the area gate consistent with how
+        # area is measured elsewhere (pixel sums), and pairs with the solid fill
+        # (thickness=-1) so hollow cores become complete objects.
+        single = np.zeros_like(contour_mask, dtype=np.uint8)
+        cv2.drawContours(single, [contour], 0, 1, -1)  # filled rasterisation
+        contour_area = int(single.sum())               # true filled pixel area
         if contour_area >= min_area and contour_area <= max_area:
-            #cv2.drawContours(mask_with_border, [contour], contourIdx=0, intensity=1, thickness=-1)
-            cv2.drawContours(contour_mask, [contour], 0, 1, -1)  # Draw filled-in contour on mask  
+            # Composite this object's filled pixels into the output mask.
+            contour_mask |= single
 
 
     # Remove the padding from the mask to match the size of the original input image.

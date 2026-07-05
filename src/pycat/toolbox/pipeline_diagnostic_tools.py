@@ -51,45 +51,34 @@ def preprocess_steps_current(image, ball_radius, window_size):
         img = img / m
     steps.append(("PP [1] /max normalised [0,1]", img.copy()))
 
-    # Step 1: White top-hat — SQUARE footprint (current)
-    try:
-        selem = sk.morphology.footprint_rectangle((ball_radius*2+1, ball_radius*2+1))
-    except AttributeError:
-        selem = sk.morphology.square(ball_radius*2+1)
-    wth = ndi.white_tophat(img, footprint=selem)
-    steps.append(("PP [2] White top-hat (square)", wth.copy()))
-
-    rescaled_th = apply_rescale_intensity(wth, out_min=0.3, out_max=1.0)
-    top_hat_enh = rescaled_th * img
-    steps.append(("PP [3] Top-hat × image", top_hat_enh.copy()))
-
-    # Step 2: DoG blob enhancement (fixed sigmas — CURRENT)
-    d_lo = ndi.gaussian_filter(img, sigma=2.0)
-    d_hi = ndi.gaussian_filter(img, sigma=3.2)
-    inv_log = np.clip(d_lo - d_hi, 0, None).astype(np.float32)
+    # Blob enhancement: LoG with sigma scaled to ball_radius (new pipeline)
+    _log_sigma = max(1.0, ball_radius * 0.27)
+    inv_log = -ndi.gaussian_laplace(img.astype(np.float64),
+                                     sigma=_log_sigma).astype(np.float32)
+    inv_log = np.clip(inv_log, 0, None)
     if inv_log.max() > 0:
         inv_log /= inv_log.max()
-    steps.append(("PP [4] DoG (σ=2.0,3.2) normalised", inv_log.copy()))
+    steps.append((f"PP [2] LoG (σ={_log_sigma:.1f}, ball_r×0.27)", inv_log.copy()))
 
-    log_enh = inv_log * top_hat_enh
-    steps.append(("PP [5] DoG × top-hat (WBNS input)", log_enh.copy()))
+    log_enh = inv_log   # direct LoG — no top-hat multiplication
+    steps.append(("PP [3] LoG normalised (WBNS input)", log_enh.copy()))
 
     # Step 3: WBNS
     wbns, _ = wbns_func(log_enh, 4, 1)
-    steps.append(("PP [6] After WBNS", wbns.copy()))
+    steps.append(("PP [4] After WBNS", wbns.copy()))
 
     # Step 4: Erosion + dilation
     img2 = ndi.grey_erosion(wbns, footprint=sk.morphology.disk(1))
     img2 = ndi.grey_dilation(img2, footprint=sk.morphology.disk(1))
-    steps.append(("PP [7] After erosion+dilation", img2.copy()))
+    steps.append(("PP [5] After erosion+dilation", img2.copy()))
 
     # Step 5: Gaussian smooth
     img2 = ndi.gaussian_filter(img2, 1)
-    steps.append(("PP [8] After Gaussian smooth", img2.copy()))
+    steps.append(("PP [6] After Gaussian smooth", img2.copy()))
 
     # Step 6: CLAHE
     img2 = _safe_clahe(img2, kernel_size=math.ceil(window_size), clip_limit=0.0025)
-    steps.append(("PP [9] After CLAHE (final output)", img2.copy()))
+    steps.append(("PP [7] After CLAHE (final output)", img2.copy()))
 
     return steps
 
@@ -155,52 +144,57 @@ def preprocess_steps_v100(image, ball_radius, window_size):
 # ---------------------------------------------------------------------------
 
 def bg_removal_steps_current(image, ball_radius, roi_mask=None):
-    """Step-by-step layers for the CURRENT rb_gaussian_bg_removal_with_edge_enhancement."""
+    """Step-by-step layers showing what segment_subcellular_objects receives
+    when fed the LoG-preprocessed image.
+
+    As of 1.5.125, segment_subcellular_objects detects whether its input is
+    already LoG/CLAHE preprocessed (median of non-zero pixels < 0.05) and
+    bypasses rb_gaussian_bg_removal_with_edge_enhancement entirely, applying
+    only a light CLAHE pass for Felzenszwalb. This diagnostic shows both
+    paths so the bypass logic is visible.
+    """
     from pycat.toolbox.image_processing_tools import (
         subtract_background, compute_rolling_ball_background,
-        background_inpainting_func, peak_and_edge_enhancement_func)
+        background_inpainting_func, _safe_equalize_adapthist)
+    import math
 
     steps = []
 
-    img = _to_float_raw(image)
-    steps.append(("BGR [0] raw float32 (/65535)", img.copy()))
+    # What segment_subcellular_objects actually receives:
+    # pre_process_image output = /max → LoG → WBNS → morph → Gauss → CLAHE
+    img_raw = _to_float_raw(image)
+    m = float(img_raw.max())
+    img = img_raw / m if m > 0 else img_raw
+    steps.append(("BGR [0] /max normalised (pp input)", img.copy()))
 
-    # 1.5.116 /max normalisation
-    m = float(img.max())
-    if m > 0:
-        img = img / m
-    steps.append(("BGR [1] /max normalised [0,1]", img.copy()))
+    # LoG enhancement (same as pre_process_image)
+    _log_sigma = max(1.0, ball_radius * 0.27)
+    log_img = -ndi.gaussian_laplace(img.astype(np.float64),
+                                     sigma=_log_sigma).astype(np.float32)
+    log_img = np.clip(log_img, 0, None)
+    if log_img.max() > 0: log_img /= log_img.max()
+    steps.append((f"BGR [1] LoG(σ={_log_sigma:.1f}) — pp output fed to seg", log_img.copy()))
 
-    # ROI mask
-    if roi_mask is not None:
-        roi_mask = roi_mask.astype(bool)
-        img *= roi_mask
-        bg_img = background_inpainting_func(img, roi_mask, ball_radius)
-    else:
-        bg_img = img.copy()
-    steps.append(("BGR [2] After mask/inpaint", bg_img.copy()))
+    # Light CLAHE (what the bypass applies)
+    _ks = max(8, math.ceil(ball_radius * 4))
+    pp_clahe = _safe_equalize_adapthist(log_img, kernel_size=_ks,
+                                         clip_limit=0.005).astype(np.float32)
+    steps.append(("BGR [2] CLAHE only (bypass path — used by seg)", pp_clahe.copy()))
 
-    # Rolling ball
-    rb_bg = compute_rolling_ball_background(bg_img, ball_radius)
+    # Old path for comparison: rb_gaussian_bg_removal on the LoG output
+    rb_bg = compute_rolling_ball_background(log_img, ball_radius)
     rb_bg = ndi.gaussian_filter(rb_bg, sigma=ball_radius // 2)
-    steps.append(("BGR [3] Rolling-ball background", rb_bg.copy()))
+    steps.append(("BGR [3] RB background on LoG output", rb_bg.copy()))
 
-    rb_sub = subtract_background(img, rb_bg, bg_scaling_factor=0.75,
+    rb_sub = subtract_background(log_img, rb_bg, bg_scaling_factor=0.75,
                                   equalize_intensity=False)
-    steps.append(("BGR [4] After RB subtraction", rb_sub.copy()))
+    steps.append(("BGR [4] After RB sub on LoG (DESTROYS signal)", rb_sub.copy()))
 
-    # Gaussian BG
     gauss_bg = ndi.gaussian_filter(rb_sub, sigma=(ball_radius * 2))
-    steps.append(("BGR [5] Gaussian background", gauss_bg.copy()))
-
     gauss_sub = subtract_background(rb_sub, gauss_bg, bg_scaling_factor=0.75,
                                      equalize_intensity=True,
                                      window_size=ball_radius * 4)
-    steps.append(("BGR [6] After Gaussian subtraction (rb_gauss out)", gauss_sub.copy()))
-
-    # Peak and edge enhancement
-    enh = peak_and_edge_enhancement_func(gauss_sub, ball_radius)
-    steps.append(("BGR [7] After peak+edge enhancement (final output)", enh.copy()))
+    steps.append(("BGR [5] After Gauss sub (old final — NaN SNR)", gauss_sub.copy()))
 
     return steps
 

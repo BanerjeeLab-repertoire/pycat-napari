@@ -19,6 +19,53 @@ Date
 import numpy as np
 import skimage as sk
 
+# Standard library
+import os as _os
+import traceback as _traceback
+
+
+def _pycat_debug_enabled():
+    """True when verbose PyCAT debugging is requested via the PYCAT_DEBUG env var
+    (any value other than empty/0/false). Mirrors the PYCAT_REFINE_DEBUG /
+    PYCAT_FORCE_CPU env-var convention used elsewhere in the codebase."""
+    return _os.environ.get('PYCAT_DEBUG', '') not in ('', '0', 'false', 'False')
+
+
+def debug_log(context, exc=None):
+    """Surface an otherwise-silent swallowed exception.
+
+    Call this inside an ``except Exception`` block that would normally just
+    ``pass``, so that when PYCAT_DEBUG=1 the failure is printed (with traceback)
+    instead of vanishing — turning invisible failures into diagnosable ones —
+    while staying completely silent in normal use.
+
+    Parameters
+    ----------
+    context : str
+        Short description of what was being attempted, e.g.
+        "file_io: reading physical pixel size".
+    exc : Exception, optional
+        The caught exception; if omitted the current traceback is used.
+
+    Notes
+    -----
+    This does NOT change control flow — the caller still decides whether to
+    ``pass``, ``continue``, ``return``, or fall back. It only makes the swallow
+    observable. No-op unless PYCAT_DEBUG is set, so it is safe to sprinkle into
+    hot paths.
+    """
+    if not _pycat_debug_enabled():
+        return
+    try:
+        if exc is not None:
+            print(f"[PyCAT DEBUG] {context}: {type(exc).__name__}: {exc}")
+        else:
+            print(f"[PyCAT DEBUG] {context}:")
+        _traceback.print_exc()
+    except Exception:
+        # The logger itself must never raise into a caller's except block.
+        pass
+
 
 def dtype_conversion_func(image, output_bit_depth='uint16'):
     """

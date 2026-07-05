@@ -601,6 +601,38 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     save_action.triggered.connect(_make_save_handler(processor))
     toolbar.addAction(save_action)
 
+    # Show/hide-all-layers eye toggle. As layers accumulate, toggling each layer's
+    # eye in the layer list is tedious; this flips every layer's visibility in one
+    # click. The icon/tooltip reflect the action that the next click performs.
+    eye_action = QAction("👁  Layers", main_window)
+    eye_action.setToolTip("Show / hide all layers (toggles every layer at once)")
+
+    def _toggle_all_layers():
+        try:
+            layers = list(viewer.layers)
+            if not layers:
+                return
+            # If any layer is currently visible, hide all; otherwise show all.
+            any_visible = any(getattr(l, 'visible', False) for l in layers)
+            new_state = not any_visible
+            for l in layers:
+                try:
+                    l.visible = new_state
+                except Exception:
+                    pass
+            # Reflect the state that the NEXT click will produce.
+            if new_state:
+                eye_action.setText("🚫  Layers")
+                eye_action.setToolTip("Hide all layers")
+            else:
+                eye_action.setText("👁  Layers")
+                eye_action.setToolTip("Show all layers")
+        except Exception as e:
+            print(f"[PyCAT] Show/hide all layers failed: {e}")
+
+    eye_action.triggered.connect(_toggle_all_layers)
+    toolbar.addAction(eye_action)
+
     main_window.addToolBar(Qt.TopToolBarArea, toolbar)
     print("[PyCAT Batch] Batch toolbar added.")
 

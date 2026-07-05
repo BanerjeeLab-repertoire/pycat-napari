@@ -89,8 +89,25 @@ class ZStackSegmentationUI:
             "timepoint\u2014this dock analyses one 3D volume at a time.</span>"
         )
         header.setWordWrap(True)
+
+        header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
+
+        # ── Step 1: load (status marker + stack-load instruction) ──────────
+        try:
+            from pycat.ui.field_status import add_step1_file_io, add_pixel_size_gate
+            add_step1_file_io(
+                self.viewer, layout,
+                instruction_html=(
+                    "Open a (Z,H,W) or (T,Z,H,W) stack via "
+                    "<b>Open/Save File(s) → Open Image Stack (T/Z / IMS)</b>."))
+            self._pixel_gate_refresh = add_pixel_size_gate(
+                layout,
+                lambda: self.central_manager.active_data_class.data_repository,
+                central_manager=self.central_manager)
+        except Exception:
+            pass
 
         _add_zstack_bg_removal(self, layout)
         _add_zstack_cell_seg(self, layout)
@@ -101,7 +118,14 @@ class ZStackSegmentationUI:
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); scroll.setWidget(main_w)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); main_w.setMinimumWidth(0)
+        try:
+            from pycat.ui.ui_modules import _relax_min_widths, _apply_scroll_guard
+            _relax_min_widths(main_w)      # let long buttons/labels shrink to dock width (fixes right-edge clipping)
+            _apply_scroll_guard(main_w)    # scroll the panel, not the control under the cursor
+        except Exception:
+            pass
+        scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Z-Stack (3D) Condensate Analysis")
 
 
@@ -399,7 +423,8 @@ def _add_zstack_metrics(ui, layout):
 
     run = QPushButton("\u25b6  Compute 3D Metrics")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.zstack_segmentation_tools import condensate_metrics_3d

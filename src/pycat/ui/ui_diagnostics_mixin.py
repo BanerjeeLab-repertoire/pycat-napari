@@ -1,0 +1,647 @@
+"""
+Diagnostics & tuner widgets mixin for ToolboxFunctionsUI.
+
+This mixin holds the self-contained diagnostic and calibration widgets — pipeline
+SNR analysis, pipeline step diagnostics, the foreground-suppression tuner, the
+segmentation speed comparison, the chromatin topology map, the nucleolus/void
+estimator, and display diagnostics. It was split out of the (very large)
+ui_modules.ToolboxFunctionsUI class to make that file navigable; the methods are
+moved verbatim and inherited via the mixin, so behaviour is unchanged.
+
+These methods rely on attributes/methods provided by BaseUIClass and
+ToolboxFunctionsUI at runtime (self.viewer, self.central_manager,
+self.add_text_label, self.create_layer_dropdown, self._add_widget_to_layout_or_dock,
+etc.). The mixin is only ever combined into ToolboxFunctionsUI, which provides them.
+"""
+
+import math
+
+import napari
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
+    QComboBox, QSlider, QScrollArea, QSizePolicy)
+
+
+class _DiagnosticsWidgetsMixin:
+    """Diagnostic and tuner widget builders for ToolboxFunctionsUI (mixin)."""
+
+    def _add_pipeline_snr_analysis(self, layout=None, separate_widget=False):
+        """Delegate to pipeline_snr_tools._add_pipeline_snr_analysis."""
+        from pycat.toolbox.pipeline_snr_tools import _add_pipeline_snr_analysis
+        _add_pipeline_snr_analysis(self, layout=layout, separate_widget=separate_widget)
+
+    def _add_pipeline_diagnostics(self, layout=None, separate_widget=False):
+        """Two diagnostic panels in one dock:
+          (A) CURRENT pipeline — a layer for every step of pre_process_image
+              and rb_gaussian_bg_removal_with_edge_enhancement.
+          (B) v1.0.0 pipeline — identical input, identical output labelling,
+              but following the original 1.0.0 code exactly (disk footprint,
+              LoG not DoG, no /max normalisation).
+        Run each panel independently to compare step-by-step.
+        """
+        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QTabWidget, QWidget, QVBoxLayout
+        import napari
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Pipeline Step Diagnostics', bold=True)
+        self.add_text_label(outer,
+            'Runs every sub-step and adds a named layer for each. '
+            'Compare current vs v1.0.0 to find where the pipelines diverge.')
+
+        tabs = QTabWidget()
+
+        def _make_panel(label, run_fn):
+            from PyQt5.QtWidgets import QProgressBar as _QProgressBar
+            grp_w = QWidget(); vb = QVBoxLayout(grp_w)
+            form = QFormLayout()
+            form.setContentsMargins(4, 8, 4, 4)
+            img_dd = self.create_layer_dropdown(napari.layers.Image)
+            form.addRow("Image layer:", img_dd)
+            vb.addLayout(form)
+
+            run_btn = QPushButton(f"▶  Run {label}")
+            run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            prog = _QProgressBar(); prog.setRange(0, 0); prog.setVisible(False)
+            vb.addWidget(run_btn); vb.addWidget(prog)
+
+            def _run():
+                import numpy as np
+
+                name = img_dd.currentText()
+                if not name or name.lower() in ('none', 'select', '--'):
+                    from napari.utils.notifications import show_warning
+                    show_warning("Select an image layer first."); return
+                try:
+                    layer = self.viewer.layers[name]
+                    img = np.asarray(layer.data)
+                except Exception as e:
+                    from napari.utils.notifications import show_warning
+                    show_warning(f"Could not read layer: {e}"); return
+
+                dr = self.central_manager.active_data_class.data_repository
+                ball_radius = int(dr.get('ball_radius', 50))
+                window_size = int(dr.get('cell_diameter', 100)) // 2
+
+                prog.setVisible(True); run_btn.setEnabled(False)
+                try:
+                    steps = run_fn(img, ball_radius, window_size)
+                    for step_name, arr in steps:
+                        from pycat.ui.ui_utils import add_image_with_default_colormap
+                        add_image_with_default_colormap(
+                            arr.astype(np.float32), self.viewer, name=step_name)
+                    from napari.utils.notifications import show_info
+                    show_info(f"{label}: {len(steps)} step layers added.")
+                except Exception as e:
+                    from napari.utils.notifications import show_warning
+                    show_warning(f"{label} failed: {e}")
+                    import traceback; traceback.print_exc()
+                finally:
+                    prog.setVisible(False); run_btn.setEnabled(True)
+
+            run_btn.clicked.connect(_run)
+            return grp_w
+
+        # ── Tab A: Current full pipeline ──────────────────────────────────
+        from pycat.toolbox.pipeline_diagnostic_tools import (
+            preprocess_steps_current, bg_removal_steps_current,
+            preprocess_steps_v100, bg_removal_steps_v100)
+
+        def _run_current(img, br, ws):
+            return preprocess_steps_current(img, br, ws) +                    bg_removal_steps_current(img, br)
+
+        def _run_v100(img, br, ws):
+            return preprocess_steps_v100(img, br, ws) +                    bg_removal_steps_v100(img, br)
+
+        tab_curr = _make_panel("Current pipeline", _run_current)
+        tab_v100 = _make_panel("v1.0.0 pipeline", _run_v100)
+
+        tabs.addTab(tab_curr, "Current (1.5.x)")
+        tabs.addTab(tab_v100, "v1.0.0 reference")
+
+        # Description of known differences — shown as a note below tabs
+        outer.addWidget(tabs)
+        note = QLabel(
+            "<b>Key differences (current vs v1.0.0):</b><br>"
+            "① Current normalises to [0,1] (/actual max) before any processing; "
+            "v1.0.0 passes the raw /65535 float (dim images arrive at ~0.046 max).<br>"
+            "② Structuring element: current uses <b>square(2r+1)</b>; "
+            "v1.0.0 uses <b>disk(r)</b> — same radius, much larger area.<br>"
+            "③ Blob detection: current uses <b>DoG(σ=2.0, 3.2)</b> fixed sigmas; "
+            "v1.0.0 uses <b>LoG(σ=3)</b> — DoG sigmas don't scale with ball_radius."
+        )
+        note.setWordWrap(True)
+
+        note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+        note.setStyleSheet("font-size:10px; color:#aaa; padding:4px;")
+        outer.addWidget(note)
+
+        w = QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Pipeline Step Diagnostics")
+
+    def _add_foreground_suppression_tuner(self, layout=None, separate_widget=False):
+        """Live tuner for the four foreground-suppression parameters.
+
+        Pick a preprocessed image layer, drag the sliders, and a 'Suppression
+        Preview [name]' layer updates in place so you can dial in the
+        keep-vs-attenuate boundary against your own ground truth. A button copies
+        the current values into the session defaults so the next Pre-process /
+        batch run uses them.
+        """
+        from PyQt5.QtWidgets import (QSlider, QLabel as _QLabel, QWidget as _QWidget,
+                                     QFormLayout, QHBoxLayout as _QHBoxLayout)
+        from PyQt5.QtCore import Qt
+        import napari
+        from pycat.toolbox.image_processing_tools import (
+            FOREGROUND_SUPPRESSION_DEFAULTS, soft_foreground_suppression)
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Foreground Suppression Tuner', bold=True)
+        self.add_text_label(
+            outer,
+            'Attenuates noise-like foreground while preserving real puncta and '
+            'the nucleoplasm baseline. Select a preprocessed layer, tune, then '
+            'apply the values as the session default.')
+
+        form = QFormLayout()
+        img_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Preprocessed layer:", img_dd)
+        outer.addLayout(form)
+
+        d = FOREGROUND_SUPPRESSION_DEFAULTS
+        # If the session already has overrides, start from those.
+        dr0 = self.central_manager.active_data_class.data_repository
+        sp0 = dr0.get('foreground_suppression_params', None) or {}
+        init = {
+            'strength': float(sp0.get('strength', d['strength'])),
+            'log_p':    float(sp0.get('log_p', d['log_p'])),
+            'con_p':    float(sp0.get('con_p', d['con_p'])),
+            'min_area': int(sp0.get('min_area', d['min_area'])),
+            'border_grow': int(sp0.get('border_grow', d['border_grow'])),
+        }
+
+        def _mk(minv, maxv, val, scale):
+            s = QSlider(Qt.Horizontal)
+            s.setMinimum(int(minv * scale)); s.setMaximum(int(maxv * scale))
+            s.setValue(int(val * scale)); return s
+
+        strength_sl = _mk(0.0, 1.0, init['strength'], 100)
+        logp_sl     = _mk(0.0, 95.0, init['log_p'], 1)
+        conp_sl     = _mk(0.0, 95.0, init['con_p'], 1)
+        minarea_sl  = _mk(1, 30, init['min_area'], 1)
+        border_sl   = _mk(0, 10, init['border_grow'], 1)
+
+        strength_lbl = _QLabel(f"{init['strength']:.2f}")
+        logp_lbl     = _QLabel(f"{int(init['log_p'])}")
+        conp_lbl     = _QLabel(f"{int(init['con_p'])}")
+        minarea_lbl  = _QLabel(f"{int(init['min_area'])}")
+        border_lbl   = _QLabel(f"{int(init['border_grow'])}")
+
+        sform = QFormLayout()
+        def _row(text, slider, label):
+            row = _QWidget(); rl = _QHBoxLayout(row); rl.setContentsMargins(0, 0, 0, 0)
+            rl.addWidget(slider); rl.addWidget(label)
+            sform.addRow(text, row)
+        _row("strength", strength_sl, strength_lbl)
+        _row("log_p (blob)", logp_sl, logp_lbl)
+        _row("con_p (contrast)", conp_sl, conp_lbl)
+        _row("min_area (px)", minarea_sl, minarea_lbl)
+        _row("border_grow (px)", border_sl, border_lbl)
+        outer.addLayout(sform)
+
+        def _current():
+            return {
+                'strength': strength_sl.value() / 100.0,
+                'log_p':    float(logp_sl.value()),
+                'con_p':    float(conp_sl.value()),
+                'min_area': int(minarea_sl.value()),
+                'border_grow': int(border_sl.value()),
+            }
+
+        def _preview():
+            import numpy as np
+            strength_lbl.setText(f"{strength_sl.value()/100.0:.2f}")
+            logp_lbl.setText(f"{logp_sl.value()}")
+            conp_lbl.setText(f"{conp_sl.value()}")
+            minarea_lbl.setText(f"{minarea_sl.value()}")
+            border_lbl.setText(f"{border_sl.value()}")
+
+            name = img_dd.currentText()
+            if not name or name.lower() in ('none', 'select', '--'):
+                return
+            try:
+                src = np.asarray(self.viewer.layers[name].data)
+            except Exception:
+                return
+            dr = self.central_manager.active_data_class.data_repository
+            ball_radius = int(dr.get('ball_radius', 50))
+            p = _current()
+            try:
+                out = soft_foreground_suppression(
+                    src, ball_radius, strength=p['strength'], log_p=p['log_p'],
+                    con_p=p['con_p'], min_area=p['min_area'],
+                    border_grow=p['border_grow'])
+            except Exception as e:
+                from napari.utils.notifications import show_warning
+                show_warning(f"Suppression preview failed: {e}"); return
+            pname = f"Suppression Preview {name}"
+            if pname in self.viewer.layers:
+                self.viewer.layers[pname].data = out
+            else:
+                from pycat.ui.ui_utils import add_image_with_default_colormap
+                add_image_with_default_colormap(out, self.viewer, name=pname)
+
+        for _s in (strength_sl, logp_sl, conp_sl, minarea_sl, border_sl):
+            _s.valueChanged.connect(_preview)
+        img_dd.currentTextChanged.connect(lambda *_: _preview())
+
+        preview_btn = QPushButton("Preview")
+        preview_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        preview_btn.clicked.connect(_preview)
+        outer.addWidget(preview_btn)
+
+        apply_btn = QPushButton("Apply as session default")
+        apply_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        def _apply_default():
+            dr = self.central_manager.active_data_class.data_repository
+            dr['foreground_suppression_params'] = _current()
+            dr['suppress_foreground'] = True
+            from napari.utils.notifications import show_info
+            p = _current()
+            show_info(
+                f"Suppression default set: strength={p['strength']:.2f} "
+                f"log_p={int(p['log_p'])} con_p={int(p['con_p'])} "
+                f"min_area={p['min_area']} border_grow={p['border_grow']}. "
+                f"Applied on next Pre-process / batch.")
+        apply_btn.clicked.connect(_apply_default)
+        outer.addWidget(apply_btn)
+
+        reset_btn = QPushButton("Reset to tuned defaults")
+        reset_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        def _reset():
+            strength_sl.setValue(int(d['strength'] * 100))
+            logp_sl.setValue(int(d['log_p']))
+            conp_sl.setValue(int(d['con_p']))
+            minarea_sl.setValue(int(d['min_area']))
+            border_sl.setValue(int(d['border_grow']))
+            dr = self.central_manager.active_data_class.data_repository
+            dr['foreground_suppression_params'] = None
+        reset_btn.clicked.connect(_reset)
+        outer.addWidget(reset_btn)
+
+        w = QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Foreground Suppression Tuner")
+
+    def _add_segmentation_speed_comparison(self, layout=None, separate_widget=False):
+        """A/B widget: run condensate segmentation with the original vs the
+        windowed (fast) refinement filter, timing each and verifying the refined
+        masks are identical. Reports timings, speedup, and equivalence.
+        """
+        from PyQt5.QtWidgets import QFormLayout, QWidget as _QWidget, QVBoxLayout as _QVBoxLayout
+        import napari
+
+        outer = _QVBoxLayout()
+        self.add_text_label(outer, 'Segmentation Speed Comparison', bold=True)
+        self.add_text_label(
+            outer,
+            'Runs condensate segmentation twice — original vs fast refinement — '
+            'and reports timing, speedup, and whether the masks are identical. '
+            'Adds the fast result layers (and a DIFF layer if they differ).')
+
+        form = QFormLayout()
+        pp_dd = self.create_layer_dropdown(napari.layers.Image)
+        orig_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Pre-processed image:", pp_dd)
+        form.addRow("Original image:", orig_dd)
+        outer.addLayout(form)
+
+        run_btn = QPushButton("▶  Run comparison")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        result_lbl = QLabel("")
+        result_lbl.setWordWrap(True)
+        result_lbl.setStyleSheet("font-size:11px; padding:4px;")
+
+        def _run():
+            from napari.utils.notifications import show_warning
+            pp_name = pp_dd.currentText(); orig_name = orig_dd.currentText()
+            if (not pp_name or pp_name.lower() in ('none', 'select', '--') or
+                    not orig_name or orig_name.lower() in ('none', 'select', '--')):
+                show_warning("Select both a pre-processed and an original image layer.")
+                return
+            try:
+                pp_layer = self.viewer.layers[pp_name]
+                orig_layer = self.viewer.layers[orig_name]
+            except Exception as e:
+                show_warning(f"Could not read layers: {e}"); return
+
+            dr = self.central_manager.active_data_class.data_repository
+            from pycat.toolbox.segmentation_tools import compare_segmentation_speed
+            run_btn.setEnabled(False); result_lbl.setText("Running… (this runs segmentation twice)")
+            self.viewer.window._qt_window.repaint()
+            try:
+                res = compare_segmentation_speed(
+                    pp_layer, orig_layer, self.central_manager.active_data_class, self.viewer)
+                result_lbl.setText(
+                    f"original: {res['t_slow']:.2f} s ({res['n_slow']} obj)\n"
+                    f"fast: {res['t_fast']:.2f} s ({res['n_fast']} obj)\n"
+                    f"speedup: {res['speedup']:.1f}×\n"
+                    f"masks identical: {res['identical']}")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                result_lbl.setText(f"Comparison failed: {e}")
+            finally:
+                run_btn.setEnabled(True)
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+        outer.addWidget(result_lbl)
+
+        w = _QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Segmentation Speed Comparison")
+
+    def _add_chromatin_topology(self, layout=None, separate_widget=False):
+        """Widget for the chromatin/nucleoplasm topology envelope. Computes the
+        smoothed structural envelope (rolling-ball or gaussian) of a chosen
+        channel, adds raw + normalised layers, and — if a Labeled Cell Mask
+        exists — writes per-cell topology metrics into cell_df.
+        """
+        from PyQt5.QtWidgets import (QFormLayout, QComboBox, QDoubleSpinBox,
+                                     QWidget as _QWidget, QVBoxLayout as _QVBoxLayout)
+        import napari
+
+        outer = _QVBoxLayout()
+        self.add_text_label(outer, 'Chromatin Topology Map', bold=True)
+        self.add_text_label(
+            outer,
+            'Smoothed structural envelope of a nuclear/other channel (the '
+            'rolling-ball background, which traces chromatin topology). Adds raw '
+            'and mask-normalised layers; writes per-cell metrics if a Labeled '
+            'Cell Mask is present.')
+
+        form = QFormLayout()
+        img_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Channel:", img_dd)
+
+        mode_dd = QComboBox()
+        mode_dd.addItems(["rolling_ball", "gaussian"])
+        form.addRow("Envelope mode:", mode_dd)
+
+        pct_sb = QDoubleSpinBox()
+        pct_sb.setRange(1.0, 99.0); pct_sb.setValue(50.0); pct_sb.setSingleStep(5.0)
+        form.addRow("Connectivity percentile:", pct_sb)
+        outer.addLayout(form)
+
+        run_btn = QPushButton("Compute topology map")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        def _run():
+            from napari.utils.notifications import show_warning
+            name = img_dd.currentText()
+            if not name or name.lower() in ('none', 'select', '--'):
+                show_warning("Select a channel to analyse."); return
+            try:
+                img_layer = self.viewer.layers[name]
+            except Exception as e:
+                show_warning(f"Could not read layer: {e}"); return
+            from pycat.toolbox.topology_tools import run_chromatin_topology
+            run_btn.setEnabled(False)
+            try:
+                run_chromatin_topology(
+                    img_layer, self.central_manager.active_data_class, self.viewer,
+                    mode=mode_dd.currentText(),
+                    connectivity_percentile=float(pct_sb.value()))
+                self._record('chromatin_topology', {
+                    'channel': name, 'mode': mode_dd.currentText(),
+                    'connectivity_percentile': float(pct_sb.value()),
+                })
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                show_warning(f"Topology computation failed: {e}")
+            finally:
+                run_btn.setEnabled(True)
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+
+        w = _QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Chromatin Topology Map")
+
+    def _add_nucleolus_void_estimator(self, layout=None, separate_widget=False):
+        """Live tuner for chromatin-void / nucleolus estimation. Detects rounded
+        DNA-excluding voids in a DAPI channel from its chromatin-density envelope,
+        classifies each as nucleolus-like vs irregular, and (with a condensate
+        channel) infers partition vs exclusion. Calibrate the knobs against real
+        data like the foreground-suppression tuner, then the defaults can be baked.
+        """
+        from PyQt5.QtWidgets import (QFormLayout, QComboBox, QSlider, QLabel as _QLabel,
+                                     QWidget as _QWidget, QVBoxLayout as _QVBoxLayout,
+                                     QHBoxLayout as _QHBoxLayout)
+        from PyQt5.QtCore import Qt
+        import napari
+        from pycat.toolbox.topology_tools import VOID_DETECTION_DEFAULTS
+
+        d = VOID_DETECTION_DEFAULTS
+        outer = _QVBoxLayout()
+        self.add_text_label(outer, 'Nucleolus / Void Estimator', bold=True)
+        self.add_text_label(
+            outer,
+            'Finds rounded DNA-excluding voids (nucleolus-like) in DAPI from the '
+            'chromatin-density envelope. Weak inference: round voids are *likely* '
+            'nucleoli. With a condensate channel, infers partition vs exclusion.')
+
+        form = QFormLayout()
+        dapi_dd = self.create_layer_dropdown(napari.layers.Image)
+        cond_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("DAPI channel:", dapi_dd)
+        form.addRow("Condensate channel (optional):", cond_dd)
+        outer.addLayout(form)
+
+        sliders = {}
+        def _slider(key, lo, hi, init, scale, label):
+            row = _QHBoxLayout()
+            s = QSlider(Qt.Horizontal)
+            s.setMinimum(int(lo * scale)); s.setMaximum(int(hi * scale))
+            s.setValue(int(init * scale))
+            val = _QLabel(f"{init:g}")
+            s.valueChanged.connect(lambda v, l=val, sc=scale: l.setText(f"{v/sc:g}"))
+            row.addWidget(_QLabel(label)); row.addWidget(s); row.addWidget(val)
+            outer.addLayout(row)
+            sliders[key] = (s, scale)
+
+        _slider('density_percentile', 10, 60, d['density_percentile'], 1, "density %ile")
+        _slider('circularity_min', 0.3, 0.95, d['circularity_min'], 100, "circularity min")
+        _slider('solidity_min', 0.5, 0.99, d['solidity_min'], 100, "solidity min")
+        _slider('envelope_sigma_scale', 0.3, 1.5, d['envelope_sigma_scale'], 100, "envelope sigma×br")
+        _slider('min_void_area', 10, 300, d['min_void_area'], 1, "min area (px)")
+
+        run_btn = QPushButton("Detect voids")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        result_lbl = _QLabel(""); result_lbl.setWordWrap(True)
+        result_lbl.setStyleSheet("font-size:11px; padding:4px;")
+
+        def _run():
+            from napari.utils.notifications import show_warning
+            dn = dapi_dd.currentText()
+            if not dn or dn.lower() in ('none', 'select', '--'):
+                show_warning("Select a DAPI channel."); return
+            try:
+                dapi_layer = self.viewer.layers[dn]
+            except Exception as e:
+                show_warning(f"Could not read DAPI layer: {e}"); return
+            cn = cond_dd.currentText()
+            cond_layer = None
+            if cn and cn.lower() not in ('none', 'select', '--') and cn != dn:
+                try:
+                    cond_layer = self.viewer.layers[cn]
+                except Exception:
+                    cond_layer = None
+            params = {k: (s.value() / sc) for k, (s, sc) in sliders.items()}
+            params['min_void_area'] = int(params['min_void_area'])
+            # Remove any prior void layers so re-runs don't stack.
+            for nm in list(self.viewer.layers):
+                if 'Voids' in getattr(nm, 'name', ''):
+                    try: self.viewer.layers.remove(nm)
+                    except Exception: pass
+            from pycat.toolbox.topology_tools import run_chromatin_void_detection
+            run_btn.setEnabled(False)
+            try:
+                res = run_chromatin_void_detection(
+                    dapi_layer, self.viewer, self.central_manager.active_data_class,
+                    condensate_layer=cond_layer, params=params)
+                n_nuc = sum(1 for v in res['voids'] if v['class'] == 'nucleolus-like')
+                n_irr = len(res['voids']) - n_nuc
+                lines = [f"{n_nuc} nucleolus-like, {n_irr} irregular voids"]
+                for v in res['voids'][:8]:
+                    part = f" {v.get('partition_call')}" if cond_layer else ""
+                    lines.append(f"  #{v['id']} {v['class']} a={v['area']} "
+                                 f"circ={v['circularity']}{part}")
+                result_lbl.setText("\n".join(lines))
+                self._record('chromatin_void_detection', {
+                    'dapi': dn, 'condensate': cn if cond_layer else None, 'params': params})
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                result_lbl.setText(f"Detection failed: {e}")
+            finally:
+                run_btn.setEnabled(True)
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn); outer.addWidget(result_lbl)
+        w = _QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Nucleolus / Void Estimator")
+
+    def _add_display_diagnostics(self, layout=None, separate_widget=False):
+        """Diagnostic for 'layer controls (contrast/gamma) do nothing'. Reports,
+        for the active layer, the facts that distinguish the likely causes:
+        layer type/dtype, data min/max, current contrast_limits and their range,
+        colormap, RGB flag, visibility, and whether it is the top visible layer.
+        Also does a live probe: nudges contrast_limits and checks the change
+        actually registers on the layer object.
+        """
+        from PyQt5.QtWidgets import QWidget as _QWidget, QVBoxLayout as _QVBoxLayout, QTextEdit
+        import numpy as _np
+
+        outer = _QVBoxLayout()
+        self.add_text_label(outer, 'Display Diagnostics', bold=True)
+        self.add_text_label(
+            outer,
+            'Select an image layer, then click. Reports why layer controls may '
+            'appear to do nothing (wrong layer on top, RGB layer, pinned range, '
+            'napari version). Copy the output if reporting an issue.')
+
+        report = QTextEdit(); report.setReadOnly(True)
+        report.setStyleSheet("font-family:monospace; font-size:10px;")
+        report.setMinimumHeight(220)
+
+        run_btn = QPushButton("Inspect active layer")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        def _run():
+            import napari
+            lines = []
+            try:
+                import napari as _n
+                lines.append(f"napari version: {_n.__version__}")
+            except Exception:
+                lines.append("napari version: <unknown>")
+
+            active = self.viewer.layers.selection.active
+            if active is None:
+                lines.append("No active layer selected.")
+                report.setPlainText("\n".join(lines)); return
+
+            lines.append(f"active layer: {active.name!r}")
+            lines.append(f"  type: {type(active).__name__}")
+            lines.append(f"  visible: {getattr(active, 'visible', '?')}")
+            lines.append(f"  opacity: {getattr(active, 'opacity', '?')}")
+            lines.append(f"  blending: {getattr(active, 'blending', '?')}")
+
+            # Is this the top visible image layer? Controls adjust the SELECTED
+            # layer, but if a different layer is drawn opaque on top, you won't
+            # see the change.
+            imgs = [l for l in self.viewer.layers
+                    if isinstance(l, napari.layers.Image)]
+            top_visible = None
+            for l in reversed(list(self.viewer.layers)):
+                if getattr(l, 'visible', False):
+                    top_visible = l; break
+            _tv_name = repr(top_visible.name) if top_visible else None
+            lines.append(f"  top visible layer: {_tv_name}")
+            if top_visible is not None and top_visible is not active:
+                lines.append("  ** NOTE: the selected layer is NOT the top visible "
+                             "layer — contrast changes to it may be hidden behind "
+                             f"{top_visible.name!r}.")
+
+            if isinstance(active, napari.layers.Image):
+                data = _np.asarray(active.data)
+                lines.append(f"  dtype: {data.dtype}  shape: {data.shape}")
+                try:
+                    lines.append(f"  data min/max: {float(data.min()):.4g} / "
+                                 f"{float(data.max()):.4g}")
+                except Exception:
+                    pass
+                lines.append(f"  rgb: {getattr(active, 'rgb', '?')}")
+                lines.append(f"  colormap: {getattr(active.colormap, 'name', active.colormap)}")
+                try:
+                    lines.append(f"  contrast_limits: {active.contrast_limits}")
+                    lines.append(f"  contrast_limits_range: {active.contrast_limits_range}")
+                except Exception as e:
+                    lines.append(f"  contrast_limits: <error {e}>")
+
+                # Live probe: change contrast_limits and confirm it took.
+                try:
+                    before = list(active.contrast_limits)
+                    lo, hi = active.contrast_limits_range
+                    mid = lo + 0.5 * (hi - lo)
+                    active.contrast_limits = [lo, max(mid, lo + 1e-6)]
+                    after = list(active.contrast_limits)
+                    took = not _np.allclose(before, after)
+                    lines.append(f"  probe: set CL to [{lo:.4g}, {mid:.4g}] -> "
+                                 f"now {after}  (changed on object: {took})")
+                    active.contrast_limits = before  # restore
+                    if took:
+                        lines.append("  => the layer OBJECT accepts contrast "
+                                     "changes. If the canvas still doesn't update, "
+                                     "the issue is rendering (GPU/OpenGL) or the "
+                                     "top-visible-layer note above, not the data.")
+                    else:
+                        lines.append("  => the layer object REJECTED the change — "
+                                     "likely an RGB layer or a napari-version issue.")
+                except Exception as e:
+                    lines.append(f"  probe failed: {e}")
+
+            report.setPlainText("\n".join(lines))
+            print("[PyCAT Display Diagnostics]\n" + "\n".join(lines))
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+        outer.addWidget(report)
+
+        w = _QWidget(); w.setLayout(outer)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
+                                            "Display Diagnostics")
+

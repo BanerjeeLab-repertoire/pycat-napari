@@ -60,7 +60,7 @@ from napari.utils.notifications import show_warning as napari_show_warning
 
 # Local application imports
 from pycat.ui.ui_utils import add_image_with_default_colormap
-from pycat.utils.general_utils import dtype_conversion_func
+from pycat.utils.general_utils import dtype_conversion_func, debug_log
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
@@ -431,6 +431,15 @@ class FileIOClass:
         try:
             self.viewer.layers.events.inserted.connect(
                 lambda e: self._align_layer_scales())
+        except Exception:
+            pass
+        # Update the scale bar whenever the active layer selection changes.
+        # This ensures that switching to an upscaled layer (whose scale is
+        # source_scale / 2) shows the correct physical bar length, rather than
+        # remaining frozen at the value set when the original was loaded.
+        try:
+            self.viewer.layers.selection.events.changed.connect(
+                lambda e: self._update_scale_bar_for_active_layer())
         except Exception:
             pass
 
@@ -934,12 +943,16 @@ class FileIOClass:
             try:
                 px = image.physical_pixel_sizes
                 microns_per_pixel = float(px.Y) if px.Y else 1.0
-            except Exception:
+            except Exception as _e:
+                debug_log("file_io: reading physical pixel size (falling back to "
+                          "1.0 µm/px — micron measurements may be wrong)", _e)
                 pass
 
             self.central_manager.active_data_class.update_metadata(image)
 
-        except Exception:
+        except Exception as _e:
+            debug_log("file_io: AICSImage load failed, falling back to direct "
+                      "tifffile read (scene/T/Z metadata unavailable)", _e)
             use_aicsimage = False
             scenes_to_load = [None]
             # Fallback: tifffile direct read (no scene/T/Z metadata available)
@@ -1324,6 +1337,51 @@ class FileIOClass:
                 self._align_layer_scales()
         except Exception as e:
             print(f"[PyCAT] auto scale bar skipped: {e}")
+
+    def _update_scale_bar_for_active_layer(self):
+        """Update the napari scale bar to reflect the physical pixel size of
+        whichever Image layer is currently active (top of the selection).
+
+        This fires on viewer.layers.selection.events.changed so switching to
+        an upscaled layer (scale = source_scale / 2) shows the correct bar.
+
+        Scale bar logic:
+          • layer.scale[-1] is the physical size of one pixel in µm.
+          • The bar length in world units is unchanged — what changes is the
+            label. If the upscaled layer has scale 0.085 µm/px and the bar
+            spans 588 pixels, it correctly shows ~50 µm, the same FOV as the
+            original 294-px image at 0.17 µm/px. So the bar length is right;
+            we just need to make sure the unit is 'um' when any valid µm scale
+            is set on the active layer.
+        """
+        try:
+            import napari.layers as _nl
+            import numpy as _np
+            import warnings as _w
+            # Find the topmost selected Image layer
+            sel = [l for l in self.viewer.layers.selection
+                   if isinstance(l, _nl.Image)]
+            if not sel:
+                return
+            # napari puts the most-recently-selected layer last in the set
+            active = sel[-1]
+            sc = [float(v) for v in active.scale]
+            if not sc:
+                return
+            px = sc[-1]   # µm per pixel on the active layer
+            sb = self.viewer.scale_bar
+            if _np.isfinite(px) and px > 0 and abs(px - 1.0) > 1e-9:
+                # Valid µm scale — show µm bar
+                with _w.catch_warnings():
+                    _w.simplefilter('ignore', FutureWarning)
+                    sb.unit = 'um'
+            else:
+                # Unit or pixel scale — show px bar
+                with _w.catch_warnings():
+                    _w.simplefilter('ignore', FutureWarning)
+                    sb.unit = 'px'
+        except Exception:
+            pass
 
     def load_into_viewer(self, data, name, is_mask=False):
         """

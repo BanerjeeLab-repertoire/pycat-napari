@@ -706,68 +706,151 @@ def run_temperature_batch(
 
 
 
+def _load_font(px):
+    """Load a TrueType font at the given pixel size, trying common Windows/Linux
+    faces, falling back to PIL's bitmap default (which ignores size but always
+    works). Returns (font, is_truetype)."""
+    from PIL import ImageFont
+    candidates = [
+        "arial.ttf", "Arial.ttf",                       # Windows
+        "DejaVuSans.ttf",                                # common everywhere
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    for c in candidates:
+        try:
+            return ImageFont.truetype(c, px), True
+        except Exception:
+            continue
+    return ImageFont.load_default(), False
+
+
 def render_annotated_mp4(stack, temps, elapsed_s, out_path, fps=30,
-                         pixel_um=1.0, scalebar_um=10.0, progress_callback=None):
+                         pixel_um=1.0, scalebar_um=10.0, colormap='gray',
+                         progress_callback=None):
     """
     Render a stack to an annotated MP4 with per-frame temperature/time text and
-    an optional scale bar burned in. Headless (Agg backend); shared by the
-    interactive export and the batch runner.
+    an optional scale bar burned in.
 
+    Annotations are composited directly onto the RGB pixel array with PIL — no
+    matplotlib figure — so the image is edge-to-edge with NO white figure padding
+    or title band. Frames are streamed one at a time (never holding the whole RGB
+    stack in memory).
+
+    Layout
+    ------
+    - Temperature/time text: TOP-LEFT, black text on a white box. The box's
+      top-left corner is inset from the top and left edges by an equal margin
+      (squared-off corner).
+    - Scale bar: BOTTOM-RIGHT, solid white bar with the "N µm" label centred
+      above it. The bar's bottom-right corner is inset from the right and bottom
+      edges by an equal margin (squared-off corner).
+
+    Parameters
+    ----------
+    colormap : str
+        Matplotlib colormap name applied to the (grayscale) stack before
+        annotation. 'gray' reproduces the previous look.
     scalebar_um <= 0 disables the scale bar.
     """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
     import imageio.v3 as iio
+    import matplotlib as mpl
     from datetime import timedelta
+    from PIL import Image, ImageDraw
 
-    stack = np.asarray(stack)
     n = stack.shape[0]
-    vmin, vmax = float(np.percentile(stack, 1)), float(np.percentile(stack, 99))
+    H, W = int(stack.shape[1]), int(stack.shape[2])
+
+    # Global contrast from a sample (robust percentiles), like the clean exporter.
+    sample_idx = sorted(set([0, n // 4, n // 2, 3 * n // 4, n - 1]))
+    sample_idx = [i for i in sample_idx if 0 <= i < n]
+    samp = np.concatenate([np.asarray(stack[i]).ravel() for i in sample_idx])
+    vmin, vmax = float(np.percentile(samp, 1)), float(np.percentile(samp, 99))
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    try:
+        cmap = mpl.colormaps[colormap]
+    except Exception:
+        cmap = mpl.colormaps['gray']
+
+    # Margin used for BOTH squared-off corners; font sizes scale with image.
+    margin = max(6, int(round(0.03 * min(H, W))))
+    text_px = max(12, int(round(0.045 * min(H, W))))
+    label_px = max(10, int(round(0.035 * min(H, W))))
+    font_text, _ = _load_font(text_px)
+    font_label, _ = _load_font(label_px)
+
     bar_px = (scalebar_um / pixel_um) if (pixel_um > 0 and scalebar_um > 0) else 0
+    bar_px = min(bar_px, W - 2 * margin)  # never wider than the image
+    bar_h = max(3, int(round(0.012 * min(H, W))))
 
-    frames = []
-    for i in range(n):
-        fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
-        ax.imshow(stack[i], cmap='gray', vmin=vmin, vmax=vmax)
-        ax.axis('off')
+    def _annotate(rgb, i):
+        img = Image.fromarray(rgb)
+        draw = ImageDraw.Draw(img)
+
+        # ── Top-left text box (black on white, corner squared to top+left) ──
         T = temps[i] if temps is not None else np.nan
-        secs = int(elapsed_s[i]) if (elapsed_s is not None and np.isfinite(elapsed_s[i])) else 0
+        secs = int(elapsed_s[i]) if (elapsed_s is not None
+                                     and i < len(elapsed_s)
+                                     and np.isfinite(elapsed_s[i])) else 0
         tc = f"{T:.2f} \u00b0C" if np.isfinite(T) else "-- \u00b0C"
-        ax.set_title(f"{tc}   |   {timedelta(seconds=secs)} (h:m:s)", fontsize=12)
-        if bar_px > 0:
-            H, W = stack.shape[1], stack.shape[2]
-            x0 = W * 0.95 - bar_px; y0 = H * 0.92
-            ax.plot([x0, x0 + bar_px], [y0, y0], '-', color='white', lw=3)
-            ax.text(x0 + bar_px / 2, y0 - H * 0.02, f"{scalebar_um:.0f} \u00b5m",
-                    color='white', ha='center', va='bottom', fontsize=10)
-        fig.canvas.draw()
-        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))[:, :, :3]
-        frames.append(buf.copy())
-        plt.close(fig)
-        if progress_callback:
-            progress_callback(i + 1, n)
-
-    arr = np.stack(frames)
-    # H.264 needs even dims + yuv420p for broad player compatibility.
-    if arr.shape[1] % 2:
-        arr = arr[:, :-1, :, :]
-    if arr.shape[2] % 2:
-        arr = arr[:, :, :-1, :]
-    last_err = None
-    for _kwargs in ({'codec': 'libx264', 'out_pixel_format': 'yuv420p'},
-                    {'codec': 'libx264'},
-                    {'codec': 'mpeg4'},
-                    {}):
+        text = f"{tc}   |   {timedelta(seconds=secs)}"
         try:
-            iio.imwrite(str(out_path), arr, fps=fps, **_kwargs)
-            last_err = None
-            break
-        except Exception as _e:
-            last_err = _e
-    if last_err is not None:
-        raise last_err
+            l, t, r, b = draw.textbbox((0, 0), text, font=font_text)
+            tw, th = r - l, b - t
+        except Exception:
+            tw, th = draw.textlength(text, font=font_text), text_px
+        pad = max(3, margin // 3)
+        box_x0, box_y0 = margin, margin           # squared to top+left
+        box_x1 = box_x0 + tw + 2 * pad
+        box_y1 = box_y0 + th + 2 * pad
+        draw.rectangle([box_x0, box_y0, box_x1, box_y1], fill=(255, 255, 255))
+        draw.text((box_x0 + pad, box_y0 + pad), text, fill=(0, 0, 0), font=font_text)
+
+        # ── Bottom-right scale bar (white bar, label above; corner squared) ──
+        if bar_px > 0:
+            # bar bottom-right corner inset equally from right and bottom edges
+            bx1 = W - margin
+            by1 = H - margin
+            bx0 = bx1 - bar_px
+            by0 = by1 - bar_h
+            draw.rectangle([bx0, by0, bx1, by1], fill=(255, 255, 255))
+            lbl = f"{scalebar_um:.0f} \u00b5m"
+            try:
+                l, t, r, b = draw.textbbox((0, 0), lbl, font=font_label)
+                lw, lh = r - l, b - t
+            except Exception:
+                lw, lh = draw.textlength(lbl, font=font_label), label_px
+            # centre the label above the bar
+            lx = bx0 + (bar_px - lw) / 2
+            ly = by0 - lh - max(2, margin // 4)
+            # thin dark outline behind label so it reads on light regions too
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                draw.text((lx + dx, ly + dy), lbl, fill=(0, 0, 0), font=font_label)
+            draw.text((lx, ly), lbl, fill=(255, 255, 255), font=font_label)
+
+        return np.asarray(img)
+
+    # Even dims for H.264 / yuv420p.
+    out_w = W - (W % 2)
+    out_h = H - (H % 2)
+
+    written = 0
+    with iio.imopen(str(out_path), "w", plugin="pyav") as writer:
+        writer.init_video_stream("libx264", fps=fps)
+        for i in range(n):
+            frame = np.asarray(stack[i]).astype(np.float32)
+            norm = np.clip((frame - vmin) / (vmax - vmin), 0, 1)
+            rgb = (cmap(norm)[..., :3] * 255).astype(np.uint8)
+            rgb = _annotate(rgb, i)
+            if rgb.shape[0] != out_h or rgb.shape[1] != out_w:
+                rgb = rgb[:out_h, :out_w, :]
+            writer.write_frame(np.ascontiguousarray(rgb))
+            written += 1
+            if progress_callback:
+                progress_callback(i + 1, n)
+
     return str(out_path)
 
 

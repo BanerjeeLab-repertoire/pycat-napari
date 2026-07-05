@@ -52,6 +52,29 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     """
     outer = QVBoxLayout()
     ui_instance.add_text_label(outer, 'Advanced Condensate Analysis', bold=True)
+
+    # Fully-optional block: hidden by default behind an off-by-default checkbox.
+    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    show_cb = _QCheckBox("Show advanced analysis (optional)")
+    show_cb.setChecked(False)
+    show_cb.setToolTip(
+        "Morphological complexity, dynamic spatial phenotyping, and organizational "
+        "metrics. Optional — enable only if you need these analyses.")
+    outer.addWidget(show_cb)
+
+    # Detect whether any loaded layer is a (T,H,W) time stack. The dynamic spatial
+    # phenotyping tab only applies to time-series data, so it is hidden when the
+    # input has no time channel.
+    def _has_time_stack():
+        try:
+            for lyr in ui_instance.viewer.layers:
+                data = getattr(lyr, 'data', None)
+                if data is not None and getattr(data, 'ndim', 0) >= 3:
+                    return True
+        except Exception:
+            pass
+        return False
+
     tabs = QTabWidget()
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
@@ -459,7 +482,9 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         worker.start()
 
     run_d.clicked.connect(_on_dynamic)
-    tabs.addTab(dyn_widget, "Dynamic")
+    # Dynamic Spatial Phenotyping applies only to (T,H,W) time-series data.
+    # The tab is added/removed dynamically by _sync_dynamic_tab() based on
+    # whether a time stack is loaded (handled below), so it is NOT added here.
 
     # ── Tab 3: Organizational Metrics ───────────────────────────────────
     org_widget = QWidget()
@@ -609,6 +634,39 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     tabs.addTab(org_widget, "Organizational")
 
     outer.addWidget(tabs)
+    # Hidden until the user ticks "Show advanced analysis".
+    tabs.setVisible(False)
+
+    def _sync_dynamic_tab():
+        # Add/remove the Dynamic tab to match current time-stack presence, so it
+        # appears if a (T,H,W) stack is loaded after this widget was built, and
+        # stays hidden for plain 2D data.
+        idx = tabs.indexOf(dyn_widget)
+        if _has_time_stack():
+            if idx == -1:
+                # insert Dynamic between Morphological (0) and Organizational (last)
+                tabs.insertTab(1, dyn_widget, "Dynamic")
+        else:
+            if idx != -1:
+                tabs.removeTab(idx)
+
+    def _toggle_tabs(checked):
+        if checked:
+            _sync_dynamic_tab()
+        tabs.setVisible(bool(checked))
+        if checked:
+            _fit_tab_height()
+    show_cb.toggled.connect(_toggle_tabs)
+
+    # Keep the Dynamic tab in sync if layers change while the block is visible.
+    try:
+        ui_instance.viewer.layers.events.inserted.connect(
+            lambda *_: (tabs.isVisible() and _sync_dynamic_tab()))
+        ui_instance.viewer.layers.events.removed.connect(
+            lambda *_: (tabs.isVisible() and _sync_dynamic_tab()))
+    except Exception:
+        pass
+
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     widget.setLayout(outer)

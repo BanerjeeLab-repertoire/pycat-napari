@@ -344,7 +344,7 @@ def refresh_viewer_with_new_data(viewer, active_layer, new_data=None):
     layer_name = active_layer.name  # Preserve the name of the active layer
     if isinstance(active_layer, napari.layers.Image):
         viewer.layers.remove(active_layer)
-        add_image_with_default_colormap(viewer, updated_data, name=layer_name)
+        add_image_with_default_colormap(updated_data, viewer, name=layer_name)
     elif isinstance(active_layer, napari.layers.Labels):
         viewer.layers.remove(active_layer)  # Remove the old layer
         viewer.add_labels(updated_data, name=layer_name)  # Re-add the layer with the updated data

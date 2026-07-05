@@ -94,6 +94,9 @@ from PyQt5.QtGui import QIcon
 
 # Local application imports
 from pycat.central_manager import CentralManager
+from pycat.utils.logging_utils import get_logger
+
+log = get_logger(__name__)
 
 
 
@@ -109,15 +112,16 @@ def _prewarm_cellpose_model():
         from pathlib import Path
         model_cache = Path.home() / '.cellpose' / 'models' / 'cyto2'
         if model_cache.exists():
-            print("Cellpose model already cached, skipping download.")
+            log.info("Cellpose model already cached, skipping download.")
             return
-        print("Cellpose model not found in cache — downloading now (one-time setup, may take a minute)...")
+        log.info("Cellpose model not found in cache — downloading now "
+                 "(one-time setup, may take a minute)...")
         from cellpose import models
         models.CellposeModel(gpu=False, pretrained_model='cyto2')  # GPU init done separately in background
-        print("Cellpose model downloaded and cached successfully.")
+        log.info("Cellpose model downloaded and cached successfully.")
     except Exception as e:
-        print(f"Warning: Could not pre-cache Cellpose model: {e}")
-        print("Cellpose will attempt to download the model on first use instead.")
+        log.warning("Could not pre-cache Cellpose model: %s", e)
+        log.warning("Cellpose will attempt to download the model on first use instead.")
 
 
 def run_pycat_func():
@@ -127,6 +131,18 @@ def run_pycat_func():
     _prewarm_cellpose_model()  # Cache Cellpose model before GUI opens to avoid silent hang on first use
 
     app = QApplication(sys.argv)  # sys.argv is necessary for proper app initialization
+
+    # Global UI font: a sans-serif family (Arial/Segoe/DejaVu depending on OS) at a
+    # slightly larger base size, so default text reads at the larger scale the
+    # step headers use rather than the small Qt default.
+    try:
+        from PyQt5.QtGui import QFont
+        _ui_font = QFont("Arial")
+        _ui_font.setStyleHint(QFont.SansSerif)   # fall back to any sans-serif if Arial absent
+        _ui_font.setPointSize(10)                # larger base than the Qt default (~8-9pt)
+        app.setFont(_ui_font)
+    except Exception:
+        pass
 
     # On Windows, the taskbar groups by AppUserModelID; without an explicit one a
     # Python-launched app shows the generic Python icon instead of our window
@@ -146,13 +162,13 @@ def run_pycat_func():
             icon_path_str = str(icon_path)
         app.setWindowIcon(QIcon(icon_path_str))  # Set PyCAT logo as window icon
     except FileNotFoundError:
-        print("The PyCAT logo file was not found.")
+        log.warning("The PyCAT logo file was not found.")
     except ModuleNotFoundError:
-        print("The specified module 'pycat' was not found.")
+        log.warning("The specified module 'pycat' was not found.")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        log.warning("An unexpected error occurred setting the window icon: %s", e)
 
-    print("Running PyCAT")  # Print message to console
+    log.info("Running PyCAT")  # Print message to console
 
     # Pre-compile Numba JIT kernels and check GPU in background thread
     # so the GUI opens instantly without waiting for CUDA initialization
@@ -192,8 +208,8 @@ def run_pycat_func():
     # window at default size, so it must run BEFORE the maximize — and the
     # maximize is staggered a bit later so it lands after that relayout settles.
     _GROUPBOX_QSS = """
-QGroupBox { margin-top: 16px; padding-top: 8px; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; }
-QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 8px; padding: 0 4px; }
+QGroupBox { margin-top: 22px; padding-top: 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 8px; top: 2px; padding: 0 4px; }
 """
     def _apply_style():
         try:
@@ -202,9 +218,41 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
                 _app.setStyleSheet((_app.styleSheet() or "") + _GROUPBOX_QSS)
         except Exception:
             pass
+    # ── Robust maximize (event-driven, not a timing race) ────────────────
+    # History: maximize has repeatedly re-broken because it was done either
+    # synchronously before the event loop (ignored — the startup relayout
+    # re-shows the window at default size) or on a fixed timer delay (whichever
+    # delay was chosen eventually lost the race as later UI changes lengthened
+    # the startup relayout). The durable fix is to stop guessing a delay: assert
+    # maximized after the loop starts, then WATCH the window state for a short
+    # settling period and re-assert if any late relayout un-maximizes it. The
+    # watcher disconnects itself once the state is stable, so there is no ongoing
+    # cost and no fixed delay to out-grow.
+    _maximize_state = {'deadline_ms': 2500, 'elapsed': 0, 'timer': None}
+
     def _maximize():
         try:
             viewer.window._qt_window.showMaximized()
+        except Exception:
+            pass
+
+    def _is_maximized():
+        try:
+            return bool(viewer.window._qt_window.isMaximized())
+        except Exception:
+            return True  # can't tell → assume fine, stop watching
+
+    def _ensure_maximized():
+        """Re-assert maximize if a startup relayout dropped it; stop once the
+        state has been stable through the settling window."""
+        try:
+            if not _is_maximized():
+                _maximize()
+            _maximize_state['elapsed'] += 100
+            if _maximize_state['elapsed'] >= _maximize_state['deadline_ms']:
+                t = _maximize_state.get('timer')
+                if t is not None:
+                    t.stop()
         except Exception:
             pass
 
@@ -264,13 +312,24 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         except Exception:
             pass
 
+    # Assert maximize AFTER the event loop starts (a pre-loop showMaximized() is
+    # silently discarded by the startup relayout), then poll-and-reassert briefly
+    # so any late relayout can't leave the window un-maximized. This replaces the
+    # old fixed-delay single-shot that kept getting out-grown by UI changes.
     try:
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(0, _apply_style)     # stylesheet first (triggers relayout)
-        QTimer.singleShot(60, _brand_welcome)  # brand once the welcome widget exists
-        QTimer.singleShot(120, _maximize)      # maximize after relayout settles
+        QTimer.singleShot(0, _maximize)        # first maximize once loop is live
+        QTimer.singleShot(80, _brand_welcome)  # brand once the welcome widget exists
+        # Settling watcher: every 100ms, re-assert maximize if it dropped, until
+        # the state has been stable for the deadline. Self-stops.
+        _mx_timer = QTimer()
+        _mx_timer.setInterval(100)
+        _mx_timer.timeout.connect(_ensure_maximized)
+        _maximize_state['timer'] = _mx_timer
+        _mx_timer.start()
     except Exception:
-        _apply_style(); _brand_welcome(); _maximize()
+        _apply_style(); _maximize(); _brand_welcome()
 
     # Re-apply branding whenever the canvas returns to empty (napari regenerates
     # the welcome screen when the last layer is removed), so the PyCAT logo/text

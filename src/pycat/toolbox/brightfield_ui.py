@@ -92,6 +92,8 @@ class BrightfieldCondensateUI:
     def _add_label(self, layout, text, bold=False):
         lbl = QLabel(f"<b>{text}</b>" if bold else text)
         lbl.setWordWrap(True)
+
+        lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         layout.addWidget(lbl)
 
     def _get_image(self, dropdown):
@@ -131,8 +133,25 @@ class BrightfieldCondensateUI:
             "Open your brightfield image via File → Open Image first.</span>"
         )
         header.setWordWrap(True)
+
+        header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
+
+        # ── Step 1: load (status marker + load instruction) ────────────────
+        try:
+            from pycat.ui.field_status import add_step1_file_io, add_pixel_size_gate
+            add_step1_file_io(
+                self.viewer, layout,
+                instruction_html=(
+                    "Open an image via <b>Open/Save File(s)</b>, or drag one "
+                    "onto the canvas."))
+            self._pixel_gate_refresh = add_pixel_size_gate(
+                layout,
+                lambda: self.central_manager.active_data_class.data_repository,
+                central_manager=self.central_manager)
+        except Exception:
+            pass
 
         _add_bf_preprocessing(self, layout)
         _add_bf_cell_segmentation(self, layout)
@@ -153,6 +172,7 @@ class BrightfieldCondensateUI:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_w.setMinimumWidth(0)
         scroll.setWidget(main_w)
 
         self.viewer.window.add_dock_widget(
@@ -203,7 +223,8 @@ def _add_bf_preprocessing(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Preprocess")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import preprocess_brightfield
@@ -278,6 +299,8 @@ def _add_bf_cell_segmentation(ui, layout):
         "Skip if working with the whole image field.</span>"
     )
     note.setWordWrap(True)
+
+    note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
     form.addRow(note)
 
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
@@ -290,7 +313,8 @@ def _add_bf_cell_segmentation(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Segment Cells (Cellpose BF)")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         try:
@@ -368,7 +392,8 @@ def _add_bf_condensate_segmentation(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Segment Condensates")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import segment_bf_condensates
@@ -438,7 +463,8 @@ def _add_bf_od_metrics(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Compute OD Metrics")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_condensate_metrics
@@ -505,7 +531,8 @@ def _add_bf_per_cell_summary(ui, layout):
     form.addRow(label_with_circle("Cell mask:", dropdown=cell_dd), cell_dd)
     run = QPushButton("▶  Summarise Per Cell")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_per_cell_summary
@@ -552,7 +579,8 @@ def _add_bf_spatial(ui, layout):
 
     run = QPushButton("▶  Run Spatial Metrology")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         from pycat.toolbox.spatial_metrology_tools import (
@@ -642,7 +670,8 @@ def _add_bf_dynamics(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Run Dynamics")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
@@ -771,7 +800,8 @@ def _add_bf_texture(ui, layout):
 
     run = QPushButton("▶  Compute OD Texture")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(run)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import (
@@ -830,7 +860,8 @@ def _add_bf_frame_qc(ui, layout):
     prog = QProgressBar(); prog.setVisible(False)
     run  = QPushButton("▶  Assess Frame Quality")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    form.addRow(prog); form.addRow(run)
+    form.addRow(prog); from pycat.ui.field_status import button_with_circle as _bwc
+    form.addRow(_bwc(run, optional=True))
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality

@@ -21,6 +21,8 @@ from typing import Optional
 
 import numpy as np
 
+from pycat.utils.general_utils import debug_log
+
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
 
@@ -96,14 +98,18 @@ def load_lumicks_frap(
         t0 = ts[0][0][0] if np.ndim(ts) >= 3 else ts[0]
         t1 = ts[1][0][0] if np.ndim(ts) >= 3 else ts[1]
         frame_interval_s = abs(float(t1) - float(t0)) / 1e9
-    except Exception:
+    except Exception as _e:
+        debug_log("frap_io: reading frame interval from timestamps "
+                  "(recovery timing may be off)", _e)
         pass
 
     center_um = (np.nan, np.nan)
     try:
         cp = scan.center_point_um
         center_um = (float(cp['x']), float(cp['y']))
-    except Exception:
+    except Exception as _e:
+        debug_log("frap_io: reading bleach center_point_um "
+                  "(ROI placement may be off)", _e)
         pass
 
     return dict(

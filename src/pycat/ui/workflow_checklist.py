@@ -231,24 +231,35 @@ class _StepPill(QPushButton):
         "  padding: 0px; border: 2px solid;"
         "}"
     )
-    _DONE    = _BASE + "QPushButton { background:#2d6a2d; color:#b8f0b8; border-color:#5cb85c; }"
-    _CURRENT = _BASE + "QPushButton { background:#7a4800; color:#ffe0a0; border-color:#f0a500; }"
-    _FUTURE  = _BASE + "QPushButton { background:#3a3a3a; color:#888; border-color:#555; }"
+    _DONE     = _BASE + "QPushButton { background:#2d6a2d; color:#b8f0b8; border-color:#5cb85c; }"
+    _CURRENT  = _BASE + "QPushButton { background:#7a4800; color:#ffe0a0; border-color:#f0a500; }"
+    _FUTURE   = _BASE + "QPushButton { background:#3a3a3a; color:#888; border-color:#555; }"
+    # Required-but-not-yet-done and available (previous step complete): red,
+    # matching the red/yellow/green/blue status logic of the workflow boxes.
+    _REQUIRED = _BASE + "QPushButton { background:#6a2d2d; color:#f0b8b8; border-color:#b85c5c; }"
+    # Optional step that has been done/used: blue.
+    _OPTIONAL = _BASE + "QPushButton { background:#2d4a6a; color:#b8d8f0; border-color:#5c8cb8; }"
 
     def __init__(self, number: str, label: str, parent=None):
         super().__init__(str(number), parent)
         self._number = number
         self._label  = label
+        # A step is optional if its label is tagged [opt] / [optional].
+        self._optional = ('[opt]' in label.lower())
         self.setToolTip(label)
         self.setFlat(True)
         self.setCursor(Qt.ArrowCursor)
         self.set_future()
 
     def set_done(self):
-        self.setStyleSheet(self._DONE)
+        # Optional steps that have been used turn blue; required ones green.
+        self.setStyleSheet(self._OPTIONAL if self._optional else self._DONE)
 
     def set_current(self):
         self.setStyleSheet(self._CURRENT)
+
+    def set_required(self):
+        self.setStyleSheet(self._REQUIRED)
 
     def set_future(self):
         self.setStyleSheet(self._FUTURE)
@@ -391,7 +402,11 @@ class WorkflowChecklist(QWidget):
             if self._done[i]:
                 lbl.setStyleSheet("font-size:9pt; color:#5cb85c; text-decoration:line-through;")
             else:
-                current = next((j for j, d in enumerate(self._done) if not d), None)
+                # Highlight the current REQUIRED step (optional steps don't gate).
+                current = next(
+                    (j for j, d in enumerate(self._done)
+                     if not d and not getattr(self._pills[j], '_optional', False)),
+                    None)
                 if i == current:
                     lbl.setStyleSheet("font-size:9pt; color:#f0a500; font-weight:bold;")
                 else:
@@ -400,14 +415,35 @@ class WorkflowChecklist(QWidget):
     # ── Pill refresh ───────────────────────────────────────────────────
 
     def _refresh_pills(self):
-        current_idx = next((i for i, d in enumerate(self._done) if not d), None)
+        # Progress advances along the REQUIRED steps only. The "current" (red)
+        # marker is the first incomplete *required* step — optional steps in
+        # between are skipped and do not gate progress. Optional steps carry
+        # their own state independently: blue if done/used, grey if untouched.
+        # A required step becomes available (not grey) once all *required* steps
+        # before it are done, regardless of any optional steps in between.
+        def _is_opt(i):
+            return getattr(self._pills[i], '_optional', False)
+
+        # index of the first incomplete required step (the active required step)
+        current_req = next(
+            (i for i, d in enumerate(self._done) if not d and not _is_opt(i)),
+            None)
+        # have all required steps up to index i been completed?
+        def _required_prefix_done(i):
+            return all(self._done[j] for j in range(i) if not _is_opt(j))
+
         for i, pill in enumerate(self._pills):
             if self._done[i]:
-                pill.set_done()
-            elif i == current_idx:
-                pill.set_current()
-            else:
+                pill.set_done()                     # green (required) / blue (optional)
+            elif _is_opt(i):
+                # Optional & not yet used. Available (neutral) once the required
+                # chain has reached it; otherwise locked grey. Never red, never
+                # gates the required progression.
                 pill.set_future()
+            elif i == current_req:
+                pill.set_required()                 # next required step → red
+            else:
+                pill.set_future()                   # later required step → grey (locked)
         if self._detail_visible:
             self._update_detail_labels()
 
@@ -480,6 +516,8 @@ class WorkflowChecklistManager(QObject):
                 self._widget.mark_step('open_image')
         except Exception:
             pass
+
+    def on_step_recorded(self, step_key: str):
         if self._widget is not None:
             self._widget.mark_step(step_key)
 

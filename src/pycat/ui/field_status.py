@@ -53,19 +53,31 @@ _TIPS = {
 
 
 class StatusCircle(QLabel):
-    """A small coloured dot with a colour-specific tooltip."""
+    """A small coloured dot with a colour-specific tooltip. Painted directly
+    (not via CSS border-radius) so a global stylesheet can never flatten it into
+    a square."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(14, 14)
-        self.setAlignment(Qt.AlignCenter)
+        self._color = _COLORS['red']
         self._set('red', _TIPS['red'])
 
     def _set(self, color_key, tip):
-        c = _COLORS.get(color_key, '#888')
-        self.setStyleSheet(
-            f"background:{c}; border-radius:7px; border:1px solid rgba(0,0,0,0.35);")
+        self._color = _COLORS.get(color_key, '#888')
         self.setToolTip(tip)
+        self.update()
+
+    def paintEvent(self, _event):
+        from PyQt5.QtGui import QPainter, QColor, QBrush, QPen
+        from PyQt5.QtCore import Qt as _Qt
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setBrush(QBrush(QColor(self._color)))
+        p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        # inset by 1px so the border isn't clipped
+        p.drawEllipse(1, 1, self.width() - 3, self.height() - 3)
+        p.end()
 
 
 # ── per-widget value helpers ────────────────────────────────────────────────
@@ -229,15 +241,40 @@ def status_row(form, registry, label, widget, role, default=None,
 
 # ── Step 1 (file I/O) + pixel-size gate ─────────────────────────────────────
 
-from PyQt5.QtWidgets import QGroupBox, QFormLayout, QDoubleSpinBox, QPushButton
+from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QDoubleSpinBox, QPushButton,
+                             QSizePolicy)
 
 
-def add_step1_file_io(viewer, layout, registry=None, on_change=None):
+def add_step1_file_io(viewer, layout, registry=None, on_change=None,
+                      instruction_html=None):
     """Add a standard 'Step 1 — Load Image' block that auto-completes when an
     image is already loaded (e.g. the user opened a file, then opened the
-    workflow) and un-completes when the canvas is cleared."""
+    workflow) and un-completes when the canvas is cleared.
+
+    If ``instruction_html`` is given, it replaces the generic "Open an image via
+    the Open/Save File(s) menu…" note with a workflow-specific instruction
+    (e.g. "Open/Save File(s) → Open Image Stack (T/Z / IMS)"), rendered BELOW the
+    red/green status marker so every workflow shows one consistent Step 1: the
+    status marker on top, the load instruction beneath it."""
     import napari
-    grp = QGroupBox("Step 1 — Load Image / File")
+
+    # Step-header label rendered the SAME way as the enumerated steps below
+    # (rich text, "Step N —" prefix emphasized), so Step 1 matches by construction
+    # instead of relying on the QGroupBox-title mechanism (which sized differently).
+    header = QLabel(
+        "<span style='font-weight:800;'>Step 1 —</span> "
+        "<span style='font-weight:600;'>Load Image / File</span>")
+    header.setTextFormat(Qt.RichText)
+    header.setStyleSheet("font-size: 14px; margin-top: 4px;")
+    header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+    layout.addWidget(header)
+
+    # The groupbox now carries a short grey description of what this block does,
+    # in the title position, instead of repeating the step name.
+    grp = QGroupBox("Load an image to begin — completes automatically")
+    grp.setStyleSheet(
+        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left;"
+        " left: 8px; top: 2px; padding: 0 4px; color:#888; font-style: italic; }")
     form = QFormLayout(grp)
     form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
@@ -248,11 +285,15 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None):
     hb.addWidget(circle); hb.addWidget(status_lbl); hb.addStretch(1)
     form.addRow(row)
 
-    note = QLabel("Open an image via the <b>Open/Save File(s)</b> menu, or drag "
-                  "one onto the canvas. This step completes automatically once "
-                  "an image is loaded.")
+    if instruction_html:
+        note = QLabel(instruction_html)
+    else:
+        note = QLabel("Open an image via the <b>Open/Save File(s)</b> menu, or drag "
+                      "one onto the canvas. This step completes automatically once "
+                      "an image is loaded.")
     note.setWordWrap(True)
     note.setStyleSheet("color:#888; font-size:9pt;")
+    note.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
     form.addRow(note)
 
     def _has_image():
@@ -281,14 +322,24 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None):
     return grp
 
 
-def add_pixel_size_gate(layout, get_dr, on_set=None):
+def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     """Add a pixel-size input that is shown ONLY when the image metadata did not
     provide a real scale, and hides itself once a valid scale exists.
 
-    Returns a callable ``refresh()`` to re-evaluate visibility (call it after a
-    file loads or a scale is set elsewhere).
+    Includes an off-by-default "Keep this pixel size for the session" checkbox:
+    when checked and a valid pixel size has been entered, switching to other data
+    that lacks a scale re-applies the remembered value automatically instead of
+    re-prompting. When unchecked (default), switching to unscaled data re-shows
+    the gate so the user sets the scale for that data explicitly.
+
+    If ``central_manager`` is given, the gate registers itself to re-evaluate
+    whenever the active data class is switched (so it reappears for new unscaled
+    data, or auto-applies the remembered value when persist is on).
+
+    Returns a callable ``refresh()`` to re-evaluate visibility/state (call it
+    after a file loads, a scale is set elsewhere, or the active data switches).
     """
-    grp = QGroupBox("Pixel size (no scale in metadata)")
+    grp = QGroupBox("Pixel size")
     form = QFormLayout(grp)
     form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
@@ -302,6 +353,18 @@ def add_pixel_size_gate(layout, get_dr, on_set=None):
     hb.addWidget(circle); hb.addWidget(QLabel("Pixel size:")); hb.addStretch(1)
     form.addRow(row, field)
 
+    persist_cb = QCheckBox("Keep this pixel size for the session")
+    persist_cb.setChecked(False)
+    persist_cb.setToolTip(
+        "When on, the pixel size you enter is remembered and automatically "
+        "re-applied to other data you switch to that has no scale of its own, "
+        "instead of asking again. Off by default so each dataset's scale is set "
+        "explicitly.")
+    form.addRow(persist_cb)
+
+    # Remembered value across data switches (only used when persist is on).
+    state = {'remembered': None}
+
     def _valid_scale():
         dr = get_dr() or {}
         return bool(dr.get('microns_per_pixel_sq')) and \
@@ -311,34 +374,64 @@ def add_pixel_size_gate(layout, get_dr, on_set=None):
         dr = get_dr() or {}
         return bool(dr.get('pixel_size_from_metadata'))
 
-    def refresh(*_a):
-        # Hide entirely once metadata supplied a scale, or a valid scale exists.
-        if _from_metadata() and _valid_scale():
-            grp.setVisible(False)
-            return
-        grp.setVisible(True)
-        if field.value() > 0:
-            circle._set('green', "Done — pixel size set.")
-        elif _valid_scale():
-            circle._set('green', "Scale already set.")
-            grp.setVisible(False)
-        else:
-            circle._set('red', "Required — no scale in metadata; enter the pixel size.")
-
-    def _on_edit(v):
-        if v > 0:
-            dr = get_dr()
-            if dr is not None:
-                dr['microns_per_pixel_sq'] = float(v) ** 2
-                dr['pixel_size_from_metadata'] = False
+    def _apply_value(v):
+        dr = get_dr()
+        if dr is not None and v and v > 0:
+            dr['microns_per_pixel_sq'] = float(v) ** 2
+            dr['pixel_size_from_metadata'] = False
             if on_set:
                 try:
                     on_set(v)
                 except Exception:
                     pass
+
+    def refresh(*_a):
+        # If persist is on, we have a remembered scale, and the current data has
+        # no scale of its own, re-apply the remembered value instead of prompting.
+        if (persist_cb.isChecked() and state['remembered']
+                and not _valid_scale() and not _from_metadata()):
+            _apply_value(state['remembered'])
+            # reflect it in the field without retriggering _on_edit recursively
+            field.blockSignals(True)
+            field.setValue(state['remembered'])
+            field.blockSignals(False)
+
+        # Hide entirely once metadata supplied a scale, or a valid scale exists.
+        if _from_metadata() and _valid_scale():
+            grp.setVisible(False)
+            return
+        if _valid_scale():
+            circle._set('green', "Scale already set.")
+            grp.setVisible(False)
+            return
+        grp.setVisible(True)
+        if field.value() > 0:
+            circle._set('green', "Done — pixel size set.")
+        else:
+            circle._set('red', "Required — no scale in metadata; enter the pixel size.")
+
+    def _on_edit(v):
+        if v > 0:
+            _apply_value(v)
+            if persist_cb.isChecked():
+                state['remembered'] = float(v)
+        refresh()
+
+    def _on_persist_toggle(checked):
+        # Turning persist on remembers the current field value (if any).
+        if checked and field.value() > 0:
+            state['remembered'] = float(field.value())
         refresh()
 
     field.valueChanged.connect(_on_edit)
+    persist_cb.toggled.connect(_on_persist_toggle)
+    # Re-evaluate whenever the active data class switches (reappear for new
+    # unscaled data, or auto-apply the remembered value when persist is on).
+    if central_manager is not None:
+        try:
+            central_manager.register_data_switch_callback(refresh)
+        except Exception:
+            pass
     refresh()
     layout.addWidget(grp)
     return refresh
@@ -382,4 +475,36 @@ def label_with_circle(text, optional=False, dropdown=None):
             c._set(init if bad else 'green',
                    tip if bad else 'Layer selected.')
         dropdown.currentIndexChanged.connect(_upd); _upd()
+    return w
+
+
+def button_with_circle(button, optional=False, watch_dropdowns=None):
+    """Return a QWidget containing [● circle][button] — a status square to the
+    left of an action button. Red (required) or yellow (optional). If
+    *watch_dropdowns* is given (a list of QComboBox), the circle turns green once
+    all of them have a real (non-placeholder) selection, so the square reflects
+    whether the action is ready to run. Returns the wrapper widget; add it to a
+    layout in place of the bare button."""
+    from PyQt5.QtWidgets import QWidget, QHBoxLayout
+    w = QWidget(); hb = QHBoxLayout(w)
+    hb.setContentsMargins(0, 0, 0, 0); hb.setSpacing(4)
+    c = StatusCircle()
+    init = 'yellow' if optional else 'red'
+    tip = ('Optional step.' if optional else 'Required — run this step to continue.')
+    c._set(init, tip)
+    hb.addWidget(c)
+    hb.addWidget(button, 1)
+    dds = list(watch_dropdowns or [])
+    if dds:
+        def _upd(*_):
+            def _ok(dd):
+                t = (dd.currentText() or '').strip().lower()
+                return t and not t.startswith(
+                    ('select', 'none', '--', '—', 'no ', 'choose'))
+            ready = all(_ok(dd) for dd in dds)
+            c._set('green' if ready else init,
+                   'Ready to run.' if ready else tip)
+        for dd in dds:
+            dd.currentIndexChanged.connect(_upd)
+        _upd()
     return w

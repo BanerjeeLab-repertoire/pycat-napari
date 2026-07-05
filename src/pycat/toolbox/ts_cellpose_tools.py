@@ -345,7 +345,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     method_grp = QGroupBox("Method")
     method_layout = QVBoxLayout(method_grp)
     method_layout.setSpacing(3)
-    method_layout.setContentsMargins(4, 4, 4, 4)
+    method_layout.setContentsMargins(4, 20, 4, 4)
 
     rb_cellpose = QRadioButton("Cellpose  (deep learning, recommended)")
     rb_cellpose.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -502,9 +502,16 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
                 frame = stack_np[i]
                 try:
                     thresholds = threshold_multiotsu(frame, classes=n_classes)
-                    # Merge the two brightest classes as 'cell'
-                    binary = frame >= thresholds[-1]
-                    mask_arr[i] = _sk.measure.label(binary).astype(np.uint16)
+                    # Use the LOWEST threshold to capture the full cell body
+                    # (cytoplasm + nucleus). thresholds[-1] was wrong — that
+                    # selects only the brightest class (condensates/puncta),
+                    # giving a cell mask that matches condensate spots rather
+                    # than cell boundaries.
+                    from pycat.toolbox.batch_roi_tools import multi_otsu_cell_mask
+                    _cell_diam = dr.get('cell_diameter', 100)
+                    mask_arr[i] = multi_otsu_cell_mask(
+                        frame, n_classes=n_classes,
+                        cell_diameter=int(_cell_diam)).astype(np.uint16)
                 except Exception:
                     pass
             ts_mask_name = f"TS Cell Masks [{layer_name}]"

@@ -202,7 +202,27 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     Requires condensate analysis to have run first (needs puncta masks +
     labeled cell mask in the viewer).
     """
-    grp  = QGroupBox("Spatial Metrology")
+    # If a step label was staged (e.g. "Step 10 — "), render it as a rich-text
+    # header above the box, matching the other enumerated step titles. The
+    # groupbox title then carries a short description instead of the plain name.
+    _prefix = ''
+    try:
+        _prefix = ui_instance._consume_step_label()
+    except Exception:
+        _prefix = ''
+    _step_hdr = None
+    if _prefix:
+        from PyQt5.QtWidgets import QLabel as _QLabel
+        from PyQt5.QtCore import Qt as _Qt
+        _step_hdr = _QLabel(
+            f"<span style='font-weight:800;'>{_prefix.strip()}</span> "
+            f"<span style='font-weight:600;'>Spatial Metrology</span>")
+        _step_hdr.setTextFormat(_Qt.RichText)
+        _step_hdr.setStyleSheet("font-size: 14px; margin-top: 4px;")
+        _step_hdr.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+        grp = QGroupBox("Spatial analysis of condensate positions within cells")
+    else:
+        grp = QGroupBox("Spatial Metrology")
     form = QFormLayout(grp)
     form.setContentsMargins(4, 20, 4, 4)
     form.setSpacing(5)
@@ -212,11 +232,12 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     desc.setStyleSheet("font-size:10px; color:#aaa; padding-bottom:4px;")
     form.addRow(desc)
 
-    # Layer selectors
+    # Layer selectors — optional (yellow) status squares that turn green on select.
+    from pycat.ui.field_status import label_with_circle, button_with_circle
     puncta_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     cell_dd   = ui_instance.create_layer_dropdown(napari.layers.Labels)
-    form.addRow("Condensate mask:", puncta_dd)
-    form.addRow("Labeled cell mask:", cell_dd)
+    form.addRow(label_with_circle("Condensate mask:", optional=True, dropdown=puncta_dd), puncta_dd)
+    form.addRow(label_with_circle("Labeled cell mask:", optional=True, dropdown=cell_dd), cell_dd)
 
     # Analysis checkboxes
     checks_grp = QGroupBox("Analyses to run")
@@ -374,13 +395,25 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
         worker.start()
 
     run_btn.clicked.connect(_on_run)
-    form.addRow("", run_btn)
+    form.addRow("", button_with_circle(run_btn, optional=True,
+                                       watch_dropdowns=[puncta_dd, cell_dd]))
 
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     outer  = QVBoxLayout(widget)
     outer.setSpacing(6)
     outer.setContentsMargins(2, 2, 2, 2)
+    if _step_hdr is not None:
+        outer.addWidget(_step_hdr)
+    # Optional block: reveal checkbox (off by default) shows/hides the analysis box.
+    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    _reveal_cb = _QCheckBox("Show spatial metrology (optional)")
+    _reveal_cb.setChecked(False)
+    _reveal_cb.setToolTip("Optional spatial statistics on condensate positions. "
+                          "Enable to configure and run.")
+    outer.addWidget(_reveal_cb)
+    grp.setVisible(False)
+    _reveal_cb.toggled.connect(grp.setVisible)
     outer.addWidget(grp)
     ui_instance._add_widget_to_layout_or_dock(
         widget, layout, separate_widget, "Spatial Metrology"

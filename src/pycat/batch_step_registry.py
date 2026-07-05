@@ -253,9 +253,18 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     window_size = int(params.get('window_size',
                       _get_data(data_instance, 'cell_diameter', 100) // 2))
 
+    # Foreground suppression: replay exactly what was recorded. Legacy configs
+    # (no keys) default to suppression ON with tuned defaults, matching the
+    # interactive default behaviour.
+    suppress_foreground = bool(params.get('suppress_foreground', True))
+    suppression_params = params.get('foreground_suppression_params', None)
+
     # Preprocess segmentation channel (used for Cellpose)
     seg_image = _normalize_to_float(state['image'])
-    preprocessed = pre_process_image(seg_image, ball_radius, window_size)
+    preprocessed = pre_process_image(
+        seg_image, ball_radius, window_size,
+        suppress_foreground=suppress_foreground,
+        suppression_params=suppression_params)
     state['preprocessed'] = np.asarray(preprocessed).astype(np.float32)
 
     _save_array(state['preprocessed'],
@@ -265,7 +274,10 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     fluor = state.get('fluorescence_image')
     if fluor is not None and not np.array_equal(fluor, state['image']):
         fluor_norm = _normalize_to_float(fluor)
-        fluor_proc = pre_process_image(fluor_norm, ball_radius, window_size)
+        fluor_proc = pre_process_image(
+            fluor_norm, ball_radius, window_size,
+            suppress_foreground=suppress_foreground,
+            suppression_params=suppression_params)
         state['preprocessed_fluorescence'] = np.asarray(fluor_proc).astype(np.float32)
         _save_array(state['preprocessed_fluorescence'],
                     output_dir / f"{image_path.stem}_preprocessed_fluor.tiff")
@@ -600,8 +612,16 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
 
 
 def replay_background_removal(state: dict, image_path: Path, params: dict, output_dir: Path):
-    """Replay enhanced RB-Gaussian background removal on the preprocessed image."""
-    from pycat.toolbox.image_processing_tools import rb_gaussian_bg_removal_with_edge_enhancement
+    """Replay enhanced RB-Gaussian background removal on the preprocessed image.
+
+    Matches the interactive `run_enhanced_rb_gaussian_bg_removal`: if the input is
+    already preprocessed (sparse, peaked distribution), it applies the
+    non-destructive `soft_foreground_suppression` using the session's suppression
+    params rather than the destructive rolling-ball subtraction, so batch and GUI
+    produce the same 'Enhanced Background Removed' result.
+    """
+    from pycat.toolbox.image_processing_tools import (
+        rb_gaussian_bg_removal_with_edge_enhancement, soft_foreground_suppression)
     import math
 
     preprocessed = state.get('preprocessed')
@@ -612,22 +632,34 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     data_instance = state['data_instance']
     ball_radius = math.ceil(int(params.get('ball_radius',
                                 _get_data(data_instance, 'ball_radius', 50))))
+    sp = params.get('foreground_suppression_params', None) or {}
+
+    def _enhance(img):
+        img = _normalize_to_float(img)
+        # Detect already-preprocessed input (same heuristic as the GUI runner).
+        n = img.astype(np.float32)
+        m = float(n.max())
+        if m > 0:
+            n = n / m
+        nz = n[n > 0.001]
+        already = (nz.size > 10 and float(np.median(nz)) < 0.05)
+        if already:
+            return soft_foreground_suppression(
+                img, ball_radius,
+                strength=sp.get('strength'), log_p=sp.get('log_p'),
+                con_p=sp.get('con_p'), min_area=sp.get('min_area'),
+                border_grow=sp.get('border_grow')).astype(np.float32)
+        return rb_gaussian_bg_removal_with_edge_enhancement(img, ball_radius).astype(np.float32)
 
     # Background remove segmentation channel
-    bg_removed = rb_gaussian_bg_removal_with_edge_enhancement(
-        _normalize_to_float(preprocessed), ball_radius
-    )
-    state['preprocessed'] = bg_removed.astype(np.float32)
+    state['preprocessed'] = _enhance(preprocessed)
     _save_array(state['preprocessed'],
                 output_dir / f"{image_path.stem}_bg_removed.tiff")
 
     # Background remove fluorescence channel if separate
     fluor_proc = state.get('preprocessed_fluorescence')
     if fluor_proc is not None and fluor_proc is not preprocessed:
-        bg_fluor = rb_gaussian_bg_removal_with_edge_enhancement(
-            _normalize_to_float(fluor_proc), ball_radius
-        )
-        state['preprocessed_fluorescence'] = bg_fluor.astype(np.float32)
+        state['preprocessed_fluorescence'] = _enhance(fluor_proc)
         _save_array(state['preprocessed_fluorescence'],
                     output_dir / f"{image_path.stem}_bg_removed_fluor.tiff")
     else:
@@ -820,7 +852,9 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
         # Generate a pseudo-cell mask from multi-Otsu for downstream steps
         # that expect a labeled_cells array (condensate_segmentation, analysis)
         if state.get('labeled_cells') is None:
-            otsu_mask = multi_otsu_cell_mask(image, n_classes=n_classes)
+            _cdiam = params.get('cell_diameter', 100)
+            otsu_mask = multi_otsu_cell_mask(image, n_classes=n_classes,
+                                              cell_diameter=int(_cdiam))
             state['cellpose_mask'] = otsu_mask
             state['labeled_cells'] = otsu_mask
             print(f"[PyCAT Batch]   Multi-Otsu cell mask: "

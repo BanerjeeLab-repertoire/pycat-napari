@@ -53,9 +53,37 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     outer = QVBoxLayout()
     outer.setSpacing(6)
     outer.setContentsMargins(2, 2, 2, 2)
-    ui_instance.add_text_label(outer, 'Condensate Biophysics', bold=True)
+    # Top-level section header sized to match the enumerated step titles (14px).
+    # Not a numbered checklist step, so no "Step N —" prefix — just the name.
+    from PyQt5.QtWidgets import QLabel as _QLabel
+    _cp_hdr = _QLabel("<span style='font-weight:700;'>Condensate Biophysics</span>")
+    from PyQt5.QtCore import Qt as _Qt
+    _cp_hdr.setTextFormat(_Qt.RichText)
+    _cp_hdr.setStyleSheet("font-size: 14px; margin-top: 4px;")
+    _cp_hdr.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+    outer.addWidget(_cp_hdr)
+    # Optional block: reveal checkbox (off by default) shows/hides the analyses.
+    from PyQt5.QtWidgets import QCheckBox as _CPCheckBox
+    _cp_reveal = _CPCheckBox("Show condensate biophysics (optional)")
+    _cp_reveal.setChecked(False)
+    _cp_reveal.setToolTip("Optional MSD/diffusion, intensity decomposition, "
+                          "kinetics, and QC analyses. Enable to configure and run.")
+    outer.addWidget(_cp_reveal)
     tabs = QTabWidget()
     tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+    # Most biophysics tabs (MSD, Kinetics, QC/Bleach, Survival) need a (T,H,W)
+    # time stack; only Intensity/Csat is static. Time tabs are added/removed
+    # dynamically based on whether a time stack is loaded.
+    def _has_time_stack():
+        try:
+            for lyr in ui_instance.viewer.layers:
+                data = getattr(lyr, 'data', None)
+                if data is not None and getattr(data, 'ndim', 0) >= 3:
+                    return True
+        except Exception:
+            pass
+        return False
     _fit_tab_height(tabs)
 
     # ── Tab 1: MSD / Diffusion ───────────────────────────────────────────
@@ -87,7 +115,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_msd  = QPushButton("▶  Run MSD Analysis")
     run_msd.setToolTip("Compute the ensemble MSD, fit anomalous diffusion (D, α), and plot the per-track and mean MSD curves.")
     run_msd.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    mf.addRow(prog_msd); mf.addRow(run_msd)
+    mf.addRow(prog_msd)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    mf.addRow(_bwc(run_msd, optional=True))
 
     def _on_msd():
         from pycat.toolbox.condensate_physics_tools import (
@@ -158,7 +188,8 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
     run_msd.clicked.connect(_on_msd)
-    tabs.addTab(msd_w, "MSD / Diffusion")
+    # MSD, Kinetics, QC/Bleach, Survival are time-dependent — added by
+    # _sync_time_tabs() below only when a (T,H,W) stack is present.
 
     # ── Tab 2: Intensity decomposition ───────────────────────────────────
     hist_w = QWidget(); hf = QFormLayout(hist_w)
@@ -176,7 +207,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_hist  = QPushButton("▶  Fit Bimodal Intensity")
     run_hist.setToolTip("Fit a two-Gaussian model per cell to separate dilute- and dense-phase intensities.")
     run_hist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    hf.addRow(prog_hist); hf.addRow(run_hist)
+    hf.addRow(prog_hist)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    hf.addRow(_bwc(run_hist, optional=True))
 
     def _on_hist():
         from pycat.toolbox.condensate_physics_tools import intensity_decomposition_per_cell
@@ -221,7 +254,8 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_coarse = QPushButton("▶  Fit Coarsening Kinetics")
     run_coarse.setToolTip("Fit mean radius vs time to t^⅓ (Ostwald) and t^½ (coalescence); reports the preferred mechanism and confidence.")
     run_coarse.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    kf.addRow(run_coarse)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    kf.addRow(_bwc(run_coarse, optional=True))
 
     # Fusion relaxation controls
     fus_stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
@@ -234,7 +268,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_fusion = QPushButton("▶  Fit Fusion Relaxation (from merge events)")
     run_fusion.setToolTip("Detect droplet merges, follow the merged droplet's aspect-ratio relaxation, and fit τ (and η/γ if R is set).")
     run_fusion.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    kf.addRow(run_fusion)
+    kf.addRow(_bwc(run_fusion, optional=True))
 
     def _on_coarsen():
         from pycat.toolbox.condensate_physics_tools import fit_coarsening
@@ -303,7 +337,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     run_coarse.clicked.connect(_on_coarsen)
     run_fusion.clicked.connect(_on_fusion)
-    tabs.addTab(kin_w, "Kinetics")
+    # (time-dependent — added by _sync_time_tabs when a time stack is present)
 
     # ── Tab 4: Quality Control ───────────────────────────────────────────
     # Uses analyse_frame_quality() which computes 4 metrics per frame:
@@ -365,7 +399,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_qc  = QPushButton("▶  Run QC Analysis")
     run_qc.setToolTip("Compute per-frame quality metrics: mean intensity (bleaching), sharpness (focus), and drift.")
     run_qc.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    qf.addRow(prog_qc); qf.addRow(status_qc); qf.addRow(run_qc)
+    qf.addRow(prog_qc); qf.addRow(status_qc)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    qf.addRow(_bwc(run_qc, optional=True))
 
     def _on_qc():
         from pycat.toolbox.condensate_physics_tools import (
@@ -458,7 +494,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
     run_qc.clicked.connect(_on_qc)
-    tabs.addTab(qc_w, "QC / Bleach")
+    # (time-dependent — added by _sync_time_tabs when a time stack is present)
 
     # ── Survival analysis ─────────────────────────────────────────────────
     surv_w = QWidget(); sf = QFormLayout(surv_w)
@@ -470,7 +506,8 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_surv = QPushButton("▶  Kaplan-Meier Survival")
     run_surv.setToolTip("Kaplan–Meier survival curve of condensate lifetimes (from dynamic tracking), with right-censoring.")
     run_surv.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    sf.addRow(run_surv)
+    from pycat.ui.field_status import button_with_circle as _bwc
+    sf.addRow(_bwc(run_surv, optional=True))
 
     def _on_surv():
         from pycat.toolbox.condensate_physics_tools import kaplan_meier_lifetimes
@@ -492,9 +529,29 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             f"mean = {km.attrs.get('mean_lifetime_frames',np.nan):.1f} frames")
 
     run_surv.clicked.connect(_on_surv)
-    tabs.addTab(surv_w, "Survival")
+    # (time-dependent — added by _sync_time_tabs when a time stack is present)
+
+    def _sync_time_tabs():
+        # Add/remove the time-dependent tabs to match time-stack presence.
+        has_t = _has_time_stack()
+        specs = [(msd_w, "MSD / Diffusion"), (kin_w, "Kinetics"),
+                 (qc_w, "QC / Bleach"), (surv_w, "Survival")]
+        for w, name in specs:
+            idx = tabs.indexOf(w)
+            if has_t and idx == -1:
+                tabs.addTab(w, name)
+            elif not has_t and idx != -1:
+                tabs.removeTab(idx)
+    _sync_time_tabs()
+    try:
+        ui_instance.viewer.layers.events.inserted.connect(lambda *_: _sync_time_tabs())
+        ui_instance.viewer.layers.events.removed.connect(lambda *_: _sync_time_tabs())
+    except Exception:
+        pass
 
     outer.addWidget(tabs)
+    tabs.setVisible(False)
+    _cp_reveal.toggled.connect(tabs.setVisible)
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     widget.setLayout(outer)

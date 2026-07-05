@@ -148,30 +148,85 @@ def multi_otsu_foreground_bbox(
 def multi_otsu_cell_mask(
     image: np.ndarray,
     n_classes: int = 3,
+    cell_diameter: int = 100,
 ) -> np.ndarray:
     """
-    Generate a binary cell mask via multi-Otsu thresholding.
-    Returns a (H, W) boolean array: True = cell body or brighter.
+    Generate a labeled cell mask via multi-Otsu thresholding + distance
+    transform watershed.
 
-    Used as a fallback cell mask when Cellpose has not run yet, so
-    condensate segmentation has some spatial context.
+    Intended as a fallback cell segmentation for fluorescence channels
+    (GFP, RFP, etc.) when no dedicated nuclear stain (DAPI) or Cellpose
+    result is available.  Works because fluorophores are weakly persistent
+    in the cytoplasm / nucleus, creating a meaningful intensity hierarchy:
+      class 0 (below t[0]): outside cell — background
+      class 1 (t[0]–t[1]):  cytoplasm / nucleoplasm
+      class 2 (above t[1]): bright condensates / puncta
+
+    The lowest threshold t[0] captures the full cell body (both cytoplasm
+    and nucleus), which is the appropriate boundary for cell segmentation.
+    Individual cells are separated by watershed on the distance transform,
+    seeded from local maxima spaced by half the expected cell diameter —
+    matching the output format of Cellpose (integer-labeled regions).
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2-D fluorescence image (any dtype).
+    n_classes : int
+        Number of intensity classes for multi-Otsu (default 3).
+    cell_diameter : int
+        Expected cell diameter in pixels, used to set the minimum object
+        size filter and the watershed seed spacing (default 100 px).
+
+    Returns
+    -------
+    labeled : np.ndarray (uint16, H×W)
+        Integer-labeled cell mask (0 = background, 1…N = cells).
     """
     import skimage as sk
-    from scipy import ndimage
+    from scipy import ndimage as _ndi
+    from skimage.feature import peak_local_max
 
     img = np.asarray(image).astype(np.float32)
+
+    # Pre-smooth to suppress condensate puncta before thresholding — we want
+    # the cell body boundary, not individual bright spots driving the histogram
+    sigma = max(1.0, cell_diameter * 0.1)
+    img_smooth = _ndi.gaussian_filter(img, sigma=sigma)
+
     try:
-        thresholds = sk.filters.threshold_multiotsu(img, classes=n_classes)
+        thresholds = sk.filters.threshold_multiotsu(img_smooth, classes=n_classes)
     except Exception:
-        thresholds = [sk.filters.threshold_otsu(img)]
+        thresholds = [sk.filters.threshold_otsu(img_smooth)]
 
-    mask = img >= thresholds[0]
-    mask = sk.morphology.remove_small_objects(mask, min_size=64)
-    mask = ndimage.binary_fill_holes(mask)
+    # Use lowest threshold: captures entire cell body (cytoplasm + nucleus)
+    mask = img_smooth >= thresholds[0]
 
-    # Label connected components as individual "cells" for downstream steps
-    labeled = sk.measure.label(mask)
-    return labeled
+    # Remove objects smaller than a quarter of one cell area
+    min_size = max(16, int((cell_diameter / 2) ** 2))
+    mask = sk.morphology.remove_small_objects(mask, max_size=min_size)
+    mask = _ndi.binary_fill_holes(mask)
+
+    if not mask.any():
+        return np.zeros(image.shape[:2], dtype=np.uint16)
+
+    # Distance transform → watershed to separate touching cells
+    dist = _ndi.distance_transform_edt(mask)
+
+    # Seed spacing = half the cell diameter; at least 10px
+    min_seed_dist = max(10, cell_diameter // 2)
+    coords = peak_local_max(dist, min_distance=min_seed_dist, labels=mask)
+
+    if len(coords) == 0:
+        # Fallback: one seed at the global distance maximum
+        coords = np.array([np.unravel_index(dist.argmax(), dist.shape)])
+
+    seeds = np.zeros_like(mask, dtype=bool)
+    seeds[tuple(coords.T)] = True
+    seed_labels = sk.measure.label(seeds)
+    labeled = sk.segmentation.watershed(-dist, seed_labels, mask=mask)
+
+    return labeled.astype(np.uint16)
 
 
 # ---------------------------------------------------------------------------

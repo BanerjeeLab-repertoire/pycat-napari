@@ -44,6 +44,12 @@ from pycat.toolbox.segmentation_tools import (
     run_local_thresholding, run_segment_subcellular_objects)
 from pycat.toolbox.feature_analysis_tools import (
     run_cell_analysis_func, run_puncta_analysis_func)
+from pycat.ui.ui_diagnostics_mixin import _DiagnosticsWidgetsMixin
+from pycat.ui.ui_filtering_mixin import _FilteringWidgetsMixin
+from pycat.ui.ui_segmentation_mixin import _SegmentationWidgetsMixin
+from pycat.ui.ui_analysis_mixin import _AnalysisWidgetsMixin
+from pycat.ui.ui_labels_mixin import _LabelsMasksWidgetsMixin
+from pycat.ui.ui_imageops_mixin import _ImageOpsWidgetsMixin
 from pycat.toolbox.pixel_wise_corr_analysis_tools import run_pwcca
 from pycat.toolbox.obj_based_coloc_analysis_tools import run_manders_coloc, run_obca
 from pycat.toolbox.two_channel_coloc_tools import _add_run_two_channel_coloc
@@ -185,6 +191,38 @@ class _FileDropFilter(QObject):
                 show_warning(f"PyCAT could not open dropped file(s): {e}")
             except Exception:
                 print(f"[PyCAT] Drop-open error: {e}")
+
+
+def _relax_min_widths(widget):
+    """
+    Recursively relax minimum widths so a dock's content can shrink to the dock
+    width instead of being clipped when the horizontal scrollbar is disabled.
+
+    Buttons, combo boxes, line edits and labels with long text otherwise report a
+    wide minimum-size hint, forcing the row wider than the dock and pushing
+    controls off the right edge. Setting a small minimum width and allowing labels
+    to elide/wrap lets the layout compress gracefully. Call once on the root widget
+    of any dock that lives inside a horizontal-scroll-disabled QScrollArea.
+    """
+    from PyQt5.QtWidgets import (QPushButton, QComboBox as _QCB, QLineEdit,
+                                  QLabel as _QLbl)
+    for w in widget.findChildren((QPushButton, _QCB, QLineEdit)):
+        try:
+            w.setMinimumWidth(0)
+            # Preferred (not Ignored): respects the size hint when there is room,
+            # but allows shrinking below it when the dock is narrow, rather than
+            # forcing the row wider than the dock and clipping.
+            sp = w.sizePolicy()
+            sp.setHorizontalPolicy(QSizePolicy.Preferred)
+            w.setSizePolicy(sp)
+        except Exception:
+            pass
+    for lbl in widget.findChildren(_QLbl):
+        try:
+            lbl.setMinimumWidth(0)
+            lbl.setWordWrap(True)  # wrap long labels instead of forcing width
+        except Exception:
+            pass
 
 
 def _apply_scroll_guard(widget):
@@ -340,9 +378,38 @@ class BaseUIClass:
         if restored_index != -1:
             dropdown.setCurrentIndex(restored_index)
 
+    def _consume_step_label(self):
+        """Return the staged 'Step N — ' prefix (and clear it), or '' if none.
+        For builders that render their title via QGroupBox(...) or a bare button
+        rather than add_text_label(bold=True); they can prepend the returned
+        string to their title so _stage_step works uniformly across mechanisms."""
+        pending = getattr(self, '_pending_step_label', None)
+        if pending:
+            self._pending_step_label = None
+            return pending
+        return ''
+
+    def _stage_step(self, step_label):
+        """Stage a 'Step N — ' prefix to be prepended to the next shared widget
+        builder's bold title. Set on the toolbox_functions_ui instance, since that
+        is the object whose _add_* builders render the titles. No-op if the
+        toolbox UI isn't available yet."""
+        try:
+            tfu = self.central_manager.toolbox_functions_ui
+            tfu._pending_step_label = step_label
+        except Exception:
+            pass
+
     def add_text_label(self, layout, text, font_size=10, bold=False):
         """
         Adds a text label above a dropdown widget in the given layout, with an option to make the text bold.
+
+        If a step label has been staged via ``self._pending_step_label`` (set by a
+        workflow just before calling a shared widget builder), it is prepended to
+        the FIRST bold label rendered and then cleared — this is how the built-in
+        workflows enumerate shared widgets ("Step 4 — Pre-process image") without
+        hardcoding a number into the reusable builder, since the same builder
+        appears at different step numbers in different pipelines.
 
         Parameters
         ----------
@@ -355,12 +422,33 @@ class BaseUIClass:
         bold : bool, optional
             If True, the label text will be bold.
         """
+        stepped = False
+        if bold:
+            pending = getattr(self, '_pending_step_label', None)
+            if pending:
+                # Render the "Step N — " prefix in a stronger emphasis than the
+                # title, and use rich text so the two weights show. The stepped
+                # section titles also get a larger font so they read as primary
+                # section headers (matching the Step 1 block), not sub-labels.
+                prefix = pending.strip()
+                # normalise trailing dash/spacing for consistent rendering
+                title = text
+                text = (f"<span style='font-weight:800;'>{prefix}</span> "
+                        f"<span style='font-weight:600;'>{title}</span>")
+                stepped = True
+                self._pending_step_label = None
         label = QLabel(text)
         label.setWordWrap(True)
-        label.setWordWrap(True)
-        # Conditionally set font-weight based on the `bold` argument
-        font_weight = "bold" if bold else "normal"
-        label.setStyleSheet(f"font-size: {font_size}px; font-weight: {font_weight};")
+        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+        if stepped:
+            label.setTextFormat(Qt.RichText)
+            # 14px to match the QGroupBox::title size (Step 1's block), so all
+            # section headers read at the same scale.
+            label.setStyleSheet("font-size: 14px; margin-top: 4px;")
+        else:
+            # Conditionally set font-weight based on the `bold` argument
+            font_weight = "bold" if bold else "normal"
+            label.setStyleSheet(f"font-size: {font_size}px; font-weight: {font_weight};")
         layout.addWidget(label)
 
 
@@ -494,6 +582,51 @@ class BaseUIClass:
             The name of the dock widget if creating a separate one.
         """
         if separate_widget==True:
+            # Prevent opening a second instance of the same toolbox widget. If a
+            # dock with this name is already open, warn (OK) and don't add another.
+            # Uses the same public/fallback access pattern as clear_dock().
+            container = getattr(self.viewer.window, 'dock_widgets', None)
+            if container is None:
+                container = getattr(self.viewer.window, '_dock_widgets', {})
+            already_open = False
+            # napari's dock_widgets is a dict keyed by dock name — check keys first.
+            try:
+                if dock_name in container:
+                    already_open = True
+            except Exception:
+                pass
+            if not already_open:
+                try:
+                    _dws = list(container.values())
+                except AttributeError:
+                    _dws = list(container)
+                except Exception:
+                    _dws = []
+                for dw in _dws:
+                    try:
+                        name_attr = getattr(dw, 'name', None)
+                        title = ''
+                        if hasattr(dw, 'windowTitle'):
+                            try:
+                                title = dw.windowTitle()
+                            except Exception:
+                                title = ''
+                        if name_attr == dock_name or title == dock_name:
+                            already_open = True
+                            break
+                    except Exception:
+                        continue
+            if already_open:
+                try:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        None, "Already open",
+                        f"\u201c{dock_name}\u201d is already open.\n\n"
+                        "Close the existing one first if you want a fresh copy.",
+                        QMessageBox.Ok)
+                except Exception:
+                    pass
+                return
             # Create a new layout for the separate widget
             dock_layout = QVBoxLayout()
             dock_layout.addWidget(widget)
@@ -501,12 +634,20 @@ class BaseUIClass:
             # Create a main widget to contain the input widget
             main_widget = QWidget()
             main_widget.setLayout(dock_layout)
+            # Allow the dock content to shrink to the dock width instead of forcing
+            # a minimum width that gets clipped (horizontal scroll is disabled).
+            # Matches the main analysis docks, which all set this.
+            main_widget.setMinimumWidth(0)
 
             # Guard all spin boxes / sliders / combos in this widget against
             # accidental wheel-scroll value changes (covers every toolbox tool
             # that goes through this common docking path).
             try:
                 _apply_scroll_guard(main_widget)
+            except Exception:
+                pass
+            try:
+                _relax_min_widths(main_widget)
             except Exception:
                 pass
 
@@ -552,20 +693,21 @@ class BaseUIClass:
             self.add_text_label(layout, label_text)
             layout.addWidget(dd)
             return dd
-        row_w = QWidget()
-        row_h = QHBoxLayout(row_w)
-        row_h.setContentsMargins(0, 0, 0, 0); row_h.setSpacing(4)
         circle = StatusCircle()
         init_color = 'yellow' if optional else 'red'
         init_tip = ('Optional — a default will be used.' if optional
                     else 'Required — select a layer to continue.')
         circle._set(init_color, init_tip)
-        row_h.addWidget(circle)
-        row_h.addWidget(QLabel(label_text))
-        row_h.addStretch(1)
-        layout.addWidget(row_w)
+        # Label on its own row (no marker), then the marker sits inline to the
+        # LEFT of the dropdown it applies to.
+        self.add_text_label(layout, label_text)
         dd = self.create_layer_dropdown(layer_type, name_hint)
-        layout.addWidget(dd)
+        row_w = QWidget()
+        row_h = QHBoxLayout(row_w)
+        row_h.setContentsMargins(0, 0, 0, 0); row_h.setSpacing(4)
+        row_h.addWidget(circle)
+        row_h.addWidget(dd, 1)
+        layout.addWidget(row_w)
         def _update_circle(*_):
             txt = (dd.currentText() or '').strip().lower()
             is_placeholder = (not txt or txt.startswith(
@@ -578,7 +720,8 @@ class BaseUIClass:
         _update_circle()
         return dd
 
-    def _add_workflow_header(self, layout, include_pixel_gate=False):
+    def _add_workflow_header(self, layout, include_pixel_gate=False,
+                             instruction_html=None):
         """Add the Step 1 file-I/O status block to a workflow layout.
         The 'Image loaded' indicator turns green once a file is open.
         Pass include_pixel_gate=True only for imaging pipelines that need a
@@ -589,7 +732,8 @@ class BaseUIClass:
                 FieldRegistry, add_step1_file_io, add_pixel_size_gate)
             reg = FieldRegistry()
             self._field_registry = reg
-            add_step1_file_io(self.viewer, layout, reg)
+            add_step1_file_io(self.viewer, layout, reg,
+                              instruction_html=instruction_html)
             if include_pixel_gate:
                 def _on_px(v):
                     try:
@@ -600,11 +744,11 @@ class BaseUIClass:
                 add_pixel_size_gate(
                     layout,
                     lambda: self.central_manager.active_data_class.data_repository,
-                    on_set=_on_px)
+                    on_set=_on_px, central_manager=self.central_manager)
         except Exception:
             pass
 
-class ToolboxFunctionsUI(BaseUIClass):
+class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidgetsMixin, _SegmentationWidgetsMixin, _AnalysisWidgetsMixin, _LabelsMasksWidgetsMixin, _ImageOpsWidgetsMixin):
     """
     Provides a user interface for various toolbox functions within a Napari viewer.
 
@@ -701,6 +845,9 @@ class ToolboxFunctionsUI(BaseUIClass):
     def _add_save_and_clear(self, layout=None, separate_widget=False):
         """Add a widget for saving and clearing all data, optionally in a separate dock."""
         save_and_clear_layout = QVBoxLayout()
+        # Title via add_text_label so a staged "Step N — " prefix (e.g. Step 14)
+        # is applied and styled like the other enumerated step headers.
+        self.add_text_label(save_and_clear_layout, "Save & Clear", bold=True)
         save_and_clear_button = QPushButton("Save and Clear") # Create a button widget
         def _on_save_and_clear():
             self.on_general_button_clicked(
@@ -708,7 +855,11 @@ class ToolboxFunctionsUI(BaseUIClass):
             # save_and_clear_all records the step internally after dialogs
             # close, capturing the actual layer and dataframe selections made.
         save_and_clear_button.clicked.connect(_on_save_and_clear)
-        save_and_clear_layout.addWidget(save_and_clear_button) # Add the button to the layout
+        try:
+            from pycat.ui.field_status import button_with_circle
+            save_and_clear_layout.addWidget(button_with_circle(save_and_clear_button))  # red
+        except Exception:
+            save_and_clear_layout.addWidget(save_and_clear_button) # Add the button to the layout
         save_and_clear_widget = QWidget()
         save_and_clear_widget.setLayout(save_and_clear_layout)
         self._add_widget_to_layout_or_dock(save_and_clear_widget, layout, separate_widget, "Save and Clear Dock")
@@ -728,7 +879,11 @@ class ToolboxFunctionsUI(BaseUIClass):
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius'),
             })
         measure_button.clicked.connect(_on_measure_line)
-        measure_layout.addWidget(measure_button) # Add the button to the layout
+        try:
+            from pycat.ui.field_status import button_with_circle
+            measure_layout.addWidget(button_with_circle(measure_button))  # red (mandatory)
+        except Exception:
+            measure_layout.addWidget(measure_button)
         measure_widget = QWidget() # Create a main widget to contain the input widget
         measure_widget.setLayout(measure_layout) # Set the layout for the widget
         self._add_widget_to_layout_or_dock(measure_widget, layout, separate_widget, "Measure Line Dock") # Add widget to layout or dock
@@ -738,27 +893,154 @@ class ToolboxFunctionsUI(BaseUIClass):
 
 
     def _add_pre_process(self, layout=None, separate_widget=False):
-        """Add a widget for running the image pre-processing function, optionally in a separate dock."""
+        """Add a widget for running image pre-processing, optionally in a separate dock.
+
+        As of 1.5.136 this single "Pre-process Image" button produces BOTH the
+        "Pre-Processed [name]" layer and the "Enhanced Background Removed [name]"
+        layer in one click (previously two separate buttons). Preprocessing always
+        applies foreground suppression using the tuned defaults; the unchecked
+        "Adjust foreground suppression" checkbox reveals five editable sliders
+        (strength, log_p, con_p, min_area, border_grow) that override the defaults.
+        Both the 'preprocessing' and 'background_removal' batch steps are recorded
+        so replay reproduces both layers.
+        """
+        from PyQt5.QtWidgets import QCheckBox, QSlider, QLabel as _QLabel, QWidget as _QWidget, QFormLayout
+        from PyQt5.QtCore import Qt
+        from pycat.toolbox.image_processing_tools import FOREGROUND_SUPPRESSION_DEFAULTS
+
         pre_process_layout = QVBoxLayout()
         self.add_text_label(pre_process_layout, 'Image Pre-processing', bold=True) # Add a widget title label
         pre_process_button = QPushButton("Pre-process Image") # Create a button widget
         pre_process_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        # ── Foreground-suppression controls (collapsed by default) ───────────
+        adjust_cb = QCheckBox("Adjust foreground suppression")
+        adjust_cb.setChecked(False)
+
+        # Container holding the four sliders; hidden until the box is checked.
+        params_container = _QWidget()
+        params_form = QFormLayout(params_container)
+        params_form.setContentsMargins(8, 4, 4, 4)
+
+        d = FOREGROUND_SUPPRESSION_DEFAULTS
+
+        # (slider, scale) — sliders are int-only, so float params are scaled.
+        def _mk_slider(minv, maxv, init, scale):
+            s = QSlider(Qt.Horizontal)
+            s.setMinimum(int(minv * scale)); s.setMaximum(int(maxv * scale))
+            s.setValue(int(init * scale))
+            return s
+
+        strength_sl = _mk_slider(0.0, 1.0, d['strength'], 100)  # 0.00–1.00
+        logp_sl     = _mk_slider(0.0, 95.0, d['log_p'], 1)       # 0–95
+        conp_sl     = _mk_slider(0.0, 95.0, d['con_p'], 1)       # 0–95
+        minarea_sl  = _mk_slider(1, 30, d['min_area'], 1)        # 1–30 px
+        border_sl   = _mk_slider(0, 10, d['border_grow'], 1)     # 0–10 px
+
+        strength_lbl = _QLabel(f"{d['strength']:.2f}")
+        logp_lbl     = _QLabel(f"{int(d['log_p'])}")
+        conp_lbl     = _QLabel(f"{int(d['con_p'])}")
+        minarea_lbl  = _QLabel(f"{int(d['min_area'])}")
+        border_lbl   = _QLabel(f"{int(d['border_grow'])}")
+
+        def _row(text, slider, label):
+            row = _QWidget(); rl = QHBoxLayout(row); rl.setContentsMargins(0, 0, 0, 0)
+            rl.addWidget(slider); rl.addWidget(label)
+            params_form.addRow(text, row)
+
+        _row("strength", strength_sl, strength_lbl)
+        _row("log_p (blob)", logp_sl, logp_lbl)
+        _row("con_p (contrast)", conp_sl, conp_lbl)
+        _row("min_area (px)", minarea_sl, minarea_lbl)
+        _row("border_grow (px)", border_sl, border_lbl)
+        params_container.setVisible(False)
+
+        def _store_params():
+            """Push current slider values into the data repository."""
+            dr = self.central_manager.active_data_class.data_repository
+            if adjust_cb.isChecked():
+                params = {
+                    'strength': strength_sl.value() / 100.0,
+                    'log_p':    float(logp_sl.value()),
+                    'con_p':    float(conp_sl.value()),
+                    'min_area': int(minarea_sl.value()),
+                    'border_grow': int(border_sl.value()),
+                }
+                dr['foreground_suppression_params'] = params
+            else:
+                # Unchecked -> use defaults (clear any override).
+                dr['foreground_suppression_params'] = None
+            dr['suppress_foreground'] = True
+
+        def _on_slider():
+            strength_lbl.setText(f"{strength_sl.value()/100.0:.2f}")
+            logp_lbl.setText(f"{logp_sl.value()}")
+            conp_lbl.setText(f"{conp_sl.value()}")
+            minarea_lbl.setText(f"{minarea_sl.value()}")
+            border_lbl.setText(f"{border_sl.value()}")
+            _store_params()
+
+        for _s in (strength_sl, logp_sl, conp_sl, minarea_sl, border_sl):
+            _s.valueChanged.connect(_on_slider)
+
+        def _on_toggle(checked):
+            params_container.setVisible(bool(checked))
+            _store_params()
+
+        adjust_cb.toggled.connect(_on_toggle)
+
         def _on_preprocess():
             # Capture the active layer BEFORE running — the operation adds a
             # new output layer to the viewer which napari may then select
             # as active, making post-hoc capture unreliable.
+            _store_params()  # ensure repo reflects current slider state
             active = self.viewer.layers.selection.active
             active_name = active.name if active is not None else ''
+
+            # Step 1: pre-processing → adds "Pre-Processed {name}" (suppression baked in).
             self.on_general_button_clicked(
                 run_pre_process_image, None, self.central_manager.active_data_class, self.viewer)
             dr = self.central_manager.active_data_class.data_repository
-            self._record('preprocessing', {
+            rec = {
                 'active_layer': active_name,
                 'ball_radius':  int(dr.get('ball_radius', 50)),
                 'window_size':  int(dr.get('cell_diameter', 100)) // 2,
-            })
+                'suppress_foreground': bool(dr.get('suppress_foreground', True)),
+            }
+            # Only record suppression params when the user has overridden defaults,
+            # so unmodified configs stay clean and forward-compatible.
+            sp = dr.get('foreground_suppression_params', None)
+            if sp:
+                rec['foreground_suppression_params'] = dict(sp)
+            self._record('preprocessing', rec)
+
+            # Step 2: enhanced background removal on the just-created Pre-Processed
+            # layer → adds "Enhanced Background Removed Pre-Processed {name}".
+            # run_pre_process_image selects its new layer as active, so the BG
+            # removal (which operates on the active layer) targets it directly.
+            pp_name = f"Pre-Processed {active_name}" if active_name else None
+            try:
+                if pp_name and pp_name in self.viewer.layers:
+                    self.viewer.layers.selection.active = self.viewer.layers[pp_name]
+                self.on_general_button_clicked(
+                    run_enhanced_rb_gaussian_bg_removal, None,
+                    self.central_manager.active_data_class, self.viewer)
+                self._record('background_removal', {
+                    'active_layer': pp_name or active_name,
+                    'ball_radius': int(dr.get('ball_radius', 50)),
+                })
+            except Exception as e:
+                from napari.utils.notifications import show_warning
+                show_warning(f"Background removal step failed: {e}")
+
         pre_process_button.clicked.connect(_on_preprocess)
-        pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
+        try:
+            from pycat.ui.field_status import button_with_circle
+            pre_process_layout.addWidget(button_with_circle(pre_process_button))  # red (mandatory)
+        except Exception:
+            pre_process_layout.addWidget(pre_process_button) # Add the button to the layout
+        pre_process_layout.addWidget(adjust_cb)
+        pre_process_layout.addWidget(params_container)
         pre_process_widget = QWidget()
         pre_process_widget.setLayout(pre_process_layout)
         self._add_widget_to_layout_or_dock(pre_process_widget, layout, separate_widget, "Pre-process Image Dock")
@@ -766,88 +1048,6 @@ class ToolboxFunctionsUI(BaseUIClass):
 
     # Image Adjustment Functions 
 
-
-    def _add_run_apply_rescale_intensity(self, layout=None, separate_widget=False):
-        """Add a widget for rescaling image intensity values, optionally in a separate dock."""
-        rescale_intensity_layout = QVBoxLayout()
-        self.add_text_label(rescale_intensity_layout, 'Rescale Intensity', bold=True) # Add widget title label
-        self.add_text_label(rescale_intensity_layout, 'Output Min') # Add a text label
-        out_min_input = QLineEdit() # Create a text input
-        out_min_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rescale_intensity_layout.addWidget(out_min_input) # Add the text input to the layout
-        self.add_text_label(rescale_intensity_layout, 'Output Max') # Add a text label
-        out_max_input = QLineEdit() # Create a text input
-        out_max_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rescale_intensity_layout.addWidget(out_max_input) # Add the text input to the layout
-        rescale_intensity_button = QPushButton("Rescale Intensity") # Create a button widget
-        rescale_intensity_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rescale_intensity_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_apply_rescale_intensity, None, out_min_input, out_max_input, self.viewer))
-        rescale_intensity_layout.addWidget(rescale_intensity_button) # Add the button to the layout
-        rescale_intensity_widget = QWidget()
-        rescale_intensity_widget.setLayout(rescale_intensity_layout)
-        self._add_widget_to_layout_or_dock(rescale_intensity_widget, layout, separate_widget, "Rescale Intensity Dock")
-
-
-    def _add_run_invert_image(self, layout=None, separate_widget=False):
-        """Add a widget for inverting image intensity values, optionally in a separate dock."""
-        invert_image_layout = QVBoxLayout()
-        self.add_text_label(invert_image_layout, 'Invert Image', bold=True) # Add widget title label
-        invert_image_button = QPushButton("Invert Image") # Create a button widget
-        invert_image_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_invert_image, None, self.viewer))
-        invert_image_layout.addWidget(invert_image_button) # Add the button to the layout
-        invert_image_widget = QWidget()
-        invert_image_widget.setLayout(invert_image_layout)
-        self._add_widget_to_layout_or_dock(invert_image_widget, layout, separate_widget, "Invert Image Dock")
-
-
-    def _add_run_upscaling(self, layout=None, separate_widget=False):
-        """Add a widget for upscaling images, optionally in a separate dock."""
-        upscaling_layout = QVBoxLayout()
-        self.add_text_label(upscaling_layout, 'Upscale Images', bold=True) # Add widget title label
-        upscaling_checkbox = QCheckBox("Update Data Class") # Add a checkbox for updating the data class
-        upscaling_checkbox.setChecked(True) # Set the checkbox to checked by default
-        upscaling_layout.addWidget(upscaling_checkbox) # Add the checkbox to the layout
-        upscaling_button = QPushButton("Run Upscaling") # Create a button widget
-        def _on_upscaling():
-            # run_upscaling_func operates on viewer.layers.selection (the
-            # highlighted set), not just the single active layer — record
-            # all selected layer names so replay knows what was upscaled.
-            selected_names = [l.name for l in self.viewer.layers.selection
-                              if l is not None]
-            self.on_general_button_clicked(
-                run_upscaling_func, None, upscaling_checkbox,
-                self.central_manager.active_data_class, self.viewer)
-            self._record('upscaling', {
-                'update_data_class': upscaling_checkbox.isChecked(),
-                'selected_layers': selected_names,
-            })
-        upscaling_button.clicked.connect(_on_upscaling)
-        upscaling_layout.addWidget(upscaling_button) # Add the button to the layout
-        upscaling_widget = QWidget()
-        upscaling_widget.setLayout(upscaling_layout)
-        self._add_widget_to_layout_or_dock(upscaling_widget, layout, separate_widget, "Upscaling Dock")
-
-
-    # Background and Noise Correction Functions
-
-
-    def _add_run_rb_gaussian_background_removal(self, layout=None, separate_widget=False):
-        """Add a widget for rolling-ball and Gaussian background removal, optionally in a separate dock."""
-        remove_background_layout = QVBoxLayout()
-        self.add_text_label(remove_background_layout, 'RB-Gauss Background Removal', bold=True) # Add widget title label
-        eq_int_checkbox = QCheckBox("Equalize Intensity") # Add a checkbox for equalizing intensity
-        eq_int_checkbox.setChecked(False) # Set the checkbox to unchecked by default
-        remove_background_layout.addWidget(eq_int_checkbox) # Add the checkbox to the layout   
-        remove_background_button = QPushButton("Remove Background") # Create a button widget
-        remove_background_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        remove_background_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_rb_gaussian_background_removal, None, eq_int_checkbox, self.central_manager.active_data_class, self.viewer))
-        remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
-        remove_background_widget = QWidget()
-        remove_background_widget.setLayout(remove_background_layout)
-        self._add_widget_to_layout_or_dock(remove_background_widget, layout, separate_widget, "Background Removal Dock")
 
 
     def _add_run_calibration_correction(self, layout=None, separate_widget=False):
@@ -878,6 +1078,8 @@ class ToolboxFunctionsUI(BaseUIClass):
 
         status = QLabel("No calibration loaded.")
         status.setWordWrap(True)
+
+        status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         load_btn = QPushButton("Load Calibration Reference…")
         load_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_load():
@@ -950,1139 +1152,21 @@ class ToolboxFunctionsUI(BaseUIClass):
 
 
 
-    def _add_pipeline_diagnostics(self, layout=None, separate_widget=False):
-        """Two diagnostic panels in one dock:
-          (A) CURRENT pipeline — a layer for every step of pre_process_image
-              and rb_gaussian_bg_removal_with_edge_enhancement.
-          (B) v1.0.0 pipeline — identical input, identical output labelling,
-              but following the original 1.0.0 code exactly (disk footprint,
-              LoG not DoG, no /max normalisation).
-        Run each panel independently to compare step-by-step.
-        """
-        from PyQt5.QtWidgets import QGroupBox, QFormLayout, QTabWidget, QWidget, QVBoxLayout
-        import napari
-
-        outer = QVBoxLayout()
-        self.add_text_label(outer, 'Pipeline Step Diagnostics', bold=True)
-        self.add_text_label(outer,
-            'Runs every sub-step and adds a named layer for each. '
-            'Compare current vs v1.0.0 to find where the pipelines diverge.')
-
-        tabs = QTabWidget()
-
-        def _make_panel(label, run_fn):
-            grp_w = QWidget(); vb = QVBoxLayout(grp_w)
-            form = QFormLayout()
-            form.setContentsMargins(4, 8, 4, 4)
-            img_dd = self.create_layer_dropdown(napari.layers.Image)
-            form.addRow("Image layer:", img_dd)
-            vb.addLayout(form)
-
-            run_btn = QPushButton(f"▶  Run {label}")
-            run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-            prog = QProgressBar(); prog.setRange(0, 0); prog.setVisible(False)
-            vb.addWidget(run_btn); vb.addWidget(prog)
-
-            def _run():
-                name = img_dd.currentText()
-                if not name or name.lower() in ('none', 'select', '--'):
-                    from napari.utils.notifications import show_warning
-                    show_warning("Select an image layer first."); return
-                try:
-                    layer = self.viewer.layers[name]
-                    img = np.asarray(layer.data)
-                except Exception as e:
-                    from napari.utils.notifications import show_warning
-                    show_warning(f"Could not read layer: {e}"); return
-
-                dr = self.central_manager.active_data_class.data_repository
-                ball_radius = int(dr.get('ball_radius', 50))
-                window_size = int(dr.get('cell_diameter', 100)) // 2
-
-                prog.setVisible(True); run_btn.setEnabled(False)
-                try:
-                    steps = run_fn(img, ball_radius, window_size)
-                    for step_name, arr in steps:
-                        from pycat.ui.ui_utils import add_image_with_default_colormap
-                        add_image_with_default_colormap(
-                            arr.astype(np.float32), self.viewer, name=step_name)
-                    from napari.utils.notifications import show_info
-                    show_info(f"{label}: {len(steps)} step layers added.")
-                except Exception as e:
-                    from napari.utils.notifications import show_warning
-                    show_warning(f"{label} failed: {e}")
-                    import traceback; traceback.print_exc()
-                finally:
-                    prog.setVisible(False); run_btn.setEnabled(True)
-
-            run_btn.clicked.connect(_run)
-            return grp_w
-
-        # ── Tab A: Current full pipeline ──────────────────────────────────
-        from pycat.toolbox.pipeline_diagnostic_tools import (
-            preprocess_steps_current, bg_removal_steps_current,
-            preprocess_steps_v100, bg_removal_steps_v100)
-
-        def _run_current(img, br, ws):
-            return preprocess_steps_current(img, br, ws) +                    bg_removal_steps_current(img, br)
-
-        def _run_v100(img, br, ws):
-            return preprocess_steps_v100(img, br, ws) +                    bg_removal_steps_v100(img, br)
-
-        tab_curr = _make_panel("Current pipeline", _run_current)
-        tab_v100 = _make_panel("v1.0.0 pipeline", _run_v100)
-
-        tabs.addTab(tab_curr, "Current (1.5.x)")
-        tabs.addTab(tab_v100, "v1.0.0 reference")
-
-        # Description of known differences — shown as a note below tabs
-        outer.addWidget(tabs)
-        note = QLabel(
-            "<b>Key differences (current vs v1.0.0):</b><br>"
-            "① Current normalises to [0,1] (/actual max) before any processing; "
-            "v1.0.0 passes the raw /65535 float (dim images arrive at ~0.046 max).<br>"
-            "② Structuring element: current uses <b>square(2r+1)</b>; "
-            "v1.0.0 uses <b>disk(r)</b> — same radius, much larger area.<br>"
-            "③ Blob detection: current uses <b>DoG(σ=2.0, 3.2)</b> fixed sigmas; "
-            "v1.0.0 uses <b>LoG(σ=3)</b> — DoG sigmas don't scale with ball_radius."
-        )
-        note.setWordWrap(True)
-        note.setStyleSheet("font-size:10px; color:#aaa; padding:4px;")
-        outer.addWidget(note)
-
-        w = QWidget(); w.setLayout(outer)
-        self._add_widget_to_layout_or_dock(w, layout, separate_widget,
-                                            "Pipeline Step Diagnostics")
-
-    def _add_run_enhanced_rb_gaussian_bg_removal(self, layout=None, separate_widget=False):
-        """Add a widget for rolling-ball and Gaussian background removal with edge enhancement, optionally in a separate dock."""
-        remove_background_layout = QVBoxLayout()
-        self.add_text_label(remove_background_layout, 'Enhanced RB-Gauss Background Removal', bold=True) # Add widget title label
-        remove_background_button = QPushButton("Remove Background") # Create a button widget
-        remove_background_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        def _on_enhanced_bg_removal():
-            # Capture BEFORE running — previously this read the active layer
-            # AFTER the operation completed, by which point napari had often
-            # auto-selected the newly created output layer instead of the
-            # input layer that was actually processed.
-            active = self.viewer.layers.selection.active
-            active_name = active.name if active is not None else ''
-            self.on_general_button_clicked(
-                run_enhanced_rb_gaussian_bg_removal, None,
-                self.central_manager.active_data_class, self.viewer)
-            dr = self.central_manager.active_data_class.data_repository
-            self._record('background_removal', {
-                'active_layer': active_name,
-                'ball_radius':  int(dr.get('ball_radius', 50)),
-            })
-        remove_background_button.clicked.connect(_on_enhanced_bg_removal)
-        remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
-        remove_background_widget = QWidget()
-        remove_background_widget.setLayout(remove_background_layout)
-        self._add_widget_to_layout_or_dock(remove_background_widget, layout, separate_widget, "Enhanced Background Removal Dock")
-
-
-    def _add_run_wbns(self, layout=None, separate_widget=False):
-        """Add a widget for wavelet background and noise subtraction, optionally in a separate dock."""
-        WBNS_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(WBNS_layout, 'Wavelet BG and Noise Subtraction', bold=True) # Add widget title label
-        self.add_text_label(WBNS_layout, 'Noise Level') # Add a text label
-        WBNS_noise_input = QLineEdit() # Create a text input
-        WBNS_noise_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        WBNS_noise_input.setPlaceholderText('1') # Set a default text value
-        WBNS_layout.addWidget(WBNS_noise_input) # Add the text input to the layout  
-        self.add_text_label(WBNS_layout, 'PSF Size') # Add a text label
-        WBNS_psf_input = QLineEdit() # Create a text input
-        WBNS_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        WBNS_psf_input.setPlaceholderText('3') # Set a default text value
-        WBNS_layout.addWidget(WBNS_psf_input) # Add the text input to the layout
-        WBNS_button = QPushButton("Run WBNS") # Create a button widget
-        WBNS_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            run_wbns, None, WBNS_psf_input, WBNS_noise_input, self.viewer)) # function, viewer, *args
-        WBNS_layout.addWidget(WBNS_button) # Add the button to the layout
-        WBNS_widget = QWidget() # Create a main widget to contain the input widget
-        WBNS_widget.setLayout(WBNS_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(WBNS_widget, layout, separate_widget, "WBNS Dock") # Add widget to layout or dock
-
-
-    def _add_run_wavelet_noise_subtraction(self, layout=None, separate_widget=False):
-        """Add a widget for wavelet noise subtraction, optionally in a separate dock."""
-        wavelet_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(wavelet_layout, 'Wavelet Noise Subtraction', bold=True)# Add widget title label
-        self.add_text_label(wavelet_layout, 'Noise Level') # Add a text label
-        wavelet_noise_input = QLineEdit() # Create a text input
-        wavelet_noise_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        wavelet_noise_input.setPlaceholderText('1') # Set a default text value
-        wavelet_layout.addWidget(wavelet_noise_input) # Add the text input to the layout
-        self.add_text_label(wavelet_layout, 'PSF Size') # Add a text label
-        wavelet_psf_input = QLineEdit() # Create a text input
-        wavelet_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        wavelet_psf_input.setPlaceholderText('3') # Set a default text value
-        wavelet_layout.addWidget(wavelet_psf_input) # Add the text input to the layout
-        wavelet_button = QPushButton("Run WNS") # Create a button widget
-        wavelet_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            run_wavelet_noise_subtraction, None, wavelet_psf_input, wavelet_noise_input, self.viewer)) # function, viewer, *args
-        wavelet_layout.addWidget(wavelet_button) # Add the button to the layout
-        wavelet_widget = QWidget() # Create a main widget to contain the input widget
-        wavelet_widget.setLayout(wavelet_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(wavelet_widget, layout, separate_widget, "WNS Dock") # Add widget to layout or dock
-
-
-    def _add_run_apply_bilateral_filter(self, layout=None, separate_widget=False):
-        """Add a widget for applying a bilateral filter, optionally in a separate dock."""
-        bilateral_layout = QVBoxLayout()
-        self.add_text_label(bilateral_layout, 'Bilateral Filter', bold=True) # Add widget title label
-        self.add_text_label(bilateral_layout, 'Filter Size') # Add a text label
-        filter_size_input = QLineEdit() # Create a text input
-        filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bilateral_layout.addWidget(filter_size_input) # Add the text input to the layout
-        bilateral_button = QPushButton("Apply Filter") # Create a button widget
-        bilateral_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_apply_bilateral_filter, None, filter_size_input, self.viewer))
-        bilateral_layout.addWidget(bilateral_button) # Add the button to the layout
-        bilateral_widget = QWidget()
-        bilateral_widget.setLayout(bilateral_layout)
-        self._add_widget_to_layout_or_dock(bilateral_widget, layout, separate_widget, "Bilateral Filter Dock")
-
-
-
-    # Image Enhancement and Filter Functions
-
-
-    def _add_run_clahe(self, layout=None, separate_widget=False):
-        """Add a widget for contrast-limited adaptive histogram equalization, optionally in a separate dock."""
-        clahe_layout = QVBoxLayout()
-        self.add_text_label(clahe_layout, 'Contrast-Limited Adapt. Hist. Equalization', bold=True) # Add widget title label
-        self.add_text_label(clahe_layout, 'Clip Limit') # Add a text label
-        clahe_clip_input = QLineEdit() # Create a text input
-        clahe_clip_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        clahe_clip_input.setPlaceholderText('0.0025') # Set a default text value
-        clahe_layout.addWidget(clahe_clip_input) # Add the text input to the layout
-        def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['cell_diameter']//4) # Calculate the default window size
-        self.add_text_label(clahe_layout, 'Window Size') # Add a text label    
-        clahe_window_size_input = QLineEdit() # Create a text input
-        clahe_window_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        clahe_window_size_input.setPlaceholderText(str(def_window_size)) # Set a default text value
-        clahe_layout.addWidget(clahe_window_size_input) # Add the text input to the layout
-        clahe_button = QPushButton("Run CLAHE") # Create a button widget
-        clahe_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_clahe, None, clahe_clip_input, clahe_window_size_input,  self.viewer))
-        clahe_layout.addWidget(clahe_button) # Add the button to the layout
-        clahe_widget = QWidget()
-        clahe_widget.setLayout(clahe_layout)
-        self._add_widget_to_layout_or_dock(clahe_widget, layout, separate_widget, "CLAHE Dock")
-
-
-    def _add_run_fft_bandpass(self, layout=None, separate_widget=False):
-        """FFT bandpass filter — annular frequency mask for background/feature isolation."""
-        fft_layout = QVBoxLayout()
-        self.add_text_label(fft_layout, 'FFT Bandpass Filter', bold=True)
-        self.add_text_label(fft_layout,
-            'Annular frequency mask: keeps spatial frequencies between the '
-            'inner and outer radii. Removes low-frequency background and '
-            'high-frequency noise. Works on a 2D image or a whole stack.')
-        self.add_text_label(fft_layout, 'Inner radius (low cutoff, px)')
-        fft_low_input = QLineEdit(); fft_low_input.setPlaceholderText('3')
-        fft_low_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fft_layout.addWidget(fft_low_input)
-        self.add_text_label(fft_layout, 'Outer radius (high cutoff, px)')
-        fft_high_input = QLineEdit(); fft_high_input.setPlaceholderText('40')
-        fft_high_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fft_layout.addWidget(fft_high_input)
-        fft_button = QPushButton("Run FFT Bandpass")
-        fft_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_fft_bandpass, None, fft_low_input, fft_high_input, self.viewer))
-        fft_layout.addWidget(fft_button)
-        fft_widget = QWidget(); fft_widget.setLayout(fft_layout)
-        self._add_widget_to_layout_or_dock(fft_widget, layout, separate_widget, "FFT Bandpass Dock")
-
-    def _add_run_im2bw(self, layout=None, separate_widget=False):
-        """MATLAB-style manual threshold binarization (absolute intensity cutoff)."""
-        bw_layout = QVBoxLayout()
-        self.add_text_label(bw_layout, 'Manual Threshold (im2bw)', bold=True)
-        self.add_text_label(bw_layout,
-            'Binarize on an absolute intensity value you supply (pixels ≥ '
-            'threshold → 1). Unlike Otsu/Li, the level is not auto-chosen.')
-        self.add_text_label(bw_layout, 'Threshold value')
-        bw_input = QLineEdit(); bw_input.setPlaceholderText('e.g. 0.5 or 128')
-        bw_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bw_layout.addWidget(bw_input)
-        bw_button = QPushButton("Binarize")
-        bw_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_im2bw, None, bw_input, self.viewer))
-        bw_layout.addWidget(bw_button)
-        bw_widget = QWidget(); bw_widget.setLayout(bw_layout)
-        self._add_widget_to_layout_or_dock(bw_widget, layout, separate_widget, "Manual Threshold Dock")
-
-    def _add_run_best_slice(self, layout=None, separate_widget=False):
-        """Extract the best (most-informative/sharpest) slice of a Z/T-stack."""
-        bs_layout = QVBoxLayout()
-        self.add_text_label(bs_layout, 'Best Slice Selector', bold=True)
-        self.add_text_label(bs_layout,
-            'Reduce a Z- or T-stack to a single representative 2D plane — the '
-            'most informative slice (max std) or the sharpest (Brenner / '
-            'Tenengrad). Useful before 2D segmentation of a nuclear/DAPI stack.')
-        self.add_text_label(bs_layout, 'Selection metric')
-        bs_method = QComboBox(); bs_method.addItems(['std', 'brenner', 'tenengrad'])
-        bs_method.setToolTip(
-            "std: maximum intensity spread (max-information plane).\n"
-            "brenner: sharpest focus (Brenner gradient).\n"
-            "tenengrad: sharpest edges (Sobel gradient magnitude).")
-        bs_layout.addWidget(bs_method)
-        bs_button = QPushButton("Extract Best Slice")
-        bs_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bs_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_best_slice, None, bs_method, self.viewer))
-        bs_layout.addWidget(bs_button)
-        bs_widget = QWidget(); bs_widget.setLayout(bs_layout)
-        self._add_widget_to_layout_or_dock(bs_widget, layout, separate_widget, "Best Slice Dock")
-
-    def _add_run_peak_and_edge_enhancement(self, layout=None, separate_widget=False):
-        """Add a widget for peak and edge enhancement, optionally in a separate dock."""
-        enhancement_layout = QVBoxLayout()
-        self.add_text_label(enhancement_layout, 'Peak and Edge Enhancement', bold=True) # Add widget title label
-        enhancement_button = QPushButton("Run Edge Enhancement") # Create a button widget
-        enhancement_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        enhancement_button.clicked.connect(lambda: self.on_general_button_clicked( 
-            run_peak_and_edge_enhancement, None, self.central_manager.active_data_class, self.viewer))
-        enhancement_layout.addWidget(enhancement_button) # Add the button to the layout
-        enhancement_widget = QWidget() 
-        enhancement_widget.setLayout(enhancement_layout)
-        self._add_widget_to_layout_or_dock(enhancement_widget, layout, separate_widget, "Peak and Edge Enhancement Dock")
-
-
-    def _add_run_morphological_gaussian_filter(self, layout=None, separate_widget=False):
-        """Add a widget for morphological Gaussian filtering, optionally in a separate dock."""
-        gauss_filter_layout = QVBoxLayout()
-        self.add_text_label(gauss_filter_layout, 'Morphological Gaussian Filter', bold=True) # Add widget title label
-        self.add_text_label(gauss_filter_layout, 'Filter Size') # Add a text label
-        filter_size_input = QLineEdit() # Create a text input
-        filter_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        gauss_filter_layout.addWidget(filter_size_input) # Add the text input to the layout
-        gauss_filter_button = QPushButton("Apply Filter") # Create a button widget
-        gauss_filter_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_morphological_gaussian_filter, None, filter_size_input, self.viewer))
-        gauss_filter_layout.addWidget(gauss_filter_button) # Add the button to the layout
-        gauss_filter_widget = QWidget()
-        gauss_filter_widget.setLayout(gauss_filter_layout)
-        self._add_widget_to_layout_or_dock(gauss_filter_widget, layout, separate_widget, "Morphological Gaussian Dock")
-
-
-    def _add_run_dpr(self, layout=None, separate_widget=False):
-        """Add a widget for deblur by pixel reassignment, optionally in a separate dock."""
-        DPR_layout = QVBoxLayout()
-        self.add_text_label(DPR_layout, 'Deblur by Pixel Reassignment', bold=True)# Add widget title label
-        self.add_text_label(DPR_layout, 'Gain Level') # Add a text label
-        DPR_gain_input = QLineEdit() # Create a text input
-        DPR_gain_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        DPR_layout.addWidget(DPR_gain_input) # Add the text input to the layout
-        self.add_text_label(DPR_layout, 'PSF Size') # Add a text label
-        DPR_psf_input = QLineEdit() # Create a text input
-        DPR_psf_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        DPR_layout.addWidget(DPR_psf_input) # Add the text input to the layout
-        DPR_button = QPushButton("Run DPR") # Create a button widget
-        DPR_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_dpr, None, DPR_psf_input, DPR_gain_input, self.central_manager.active_data_class, self.viewer))
-        DPR_layout.addWidget(DPR_button) # Add the button to the layout
-        DPR_widget = QWidget() # Create a main widget to contain the input widget
-        DPR_widget.setLayout(DPR_layout)
-        self._add_widget_to_layout_or_dock(DPR_widget, layout, separate_widget, "DPR Dock")
-
-
-    def _add_run_apply_laplace_of_gauss_filter(self, layout=None, separate_widget=False):
-        """Add a widget for applying a Laplacian of Gaussian filter, optionally in a separate dock."""
-        LoG_layout = QVBoxLayout()
-        self.add_text_label(LoG_layout, 'Laplacian of Gaussian Filter', bold=True) # Add widget title label
-        self.add_text_label(LoG_layout, 'Sigma Value') # Add a text label
-        LoG_sigma_input = QLineEdit() # Create a text input
-        LoG_sigma_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        LoG_layout.addWidget(LoG_sigma_input) # Add the text input to the layout
-        LoG_button = QPushButton("Apply LoG Filter") # Create a button widget
-        LoG_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_apply_laplace_of_gauss_filter, None, LoG_sigma_input, self.viewer))
-        LoG_layout.addWidget(LoG_button) # Add the button to the layout
-        LoG_widget = QWidget()
-        LoG_widget.setLayout(LoG_layout)
-        self._add_widget_to_layout_or_dock(LoG_widget, layout, separate_widget, "LoG Filter Dock")
 
 
     #### Image Segmentation Functions #### 
 
 
-    def _add_run_fz_segmentation_and_merging(self, layout=None, separate_widget=False):
-        """Add a widget for Felsenszwalb segmentation and region merging, optionally in a separate dock."""
-        fz_layout = QVBoxLayout()
-        self.add_text_label(fz_layout, 'Felsenszwalb Segmentation and Merging', bold=True) # Add a widget title label
-        self.add_text_label(fz_layout, 'Scale') # Add a text label
-        fz_scale_input = QLineEdit() # Create a text input
-        fz_scale_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fz_layout.addWidget(fz_scale_input) # Add the text input to the layout
-        self.add_text_label(fz_layout, 'Sigma') # Add a text label
-        fz_sigma_input = QLineEdit() # Create a text input
-        fz_sigma_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fz_layout.addWidget(fz_sigma_input) # Add the text input to the layout
-        self.add_text_label(fz_layout, 'Min Size') # Add a text label
-        fz_min_size_input = QLineEdit() # Create a text input
-        fz_min_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fz_layout.addWidget(fz_min_size_input) # Add the text input to the layout
-        fz_button = QPushButton("Run Felsenszwalb Segmentation") # Create a button widget
-        fz_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        fz_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_fz_segmentation_and_merging, None, fz_scale_input, fz_sigma_input, fz_min_size_input, self.viewer))
-        fz_layout.addWidget(fz_button) # Add the button to the layout
-        fz_widget = QWidget()
-        fz_widget.setLayout(fz_layout)
-        self._add_widget_to_layout_or_dock(fz_widget, layout, separate_widget, "FZ Segmentation Dock")
-
-
-    def _add_run_cellpose_segmentation(self, layout=None, separate_widget=False):
-        """
-        Unified cell segmentation widget with a method selector.
-        Defaults to Cellpose; offers StarDist and Random Forest as alternatives.
-        """
-        from PyQt5.QtWidgets import QButtonGroup, QRadioButton, QStackedWidget, QGroupBox
-
-        seg_layout = QVBoxLayout()
-        self.add_text_label(seg_layout, 'Cell Segmentation', bold=True)
-
-        # ── Method selector (radio buttons) ─────────────────────────────
-        method_group = QGroupBox("Segmentation method")
-        method_row   = QVBoxLayout(method_group)
-        method_row.setContentsMargins(9, 20, 9, 6)
-        rb_cellpose  = QRadioButton("Cellpose  (deep learning, recommended)")
-        rb_cellpose.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rb_stardist  = QRadioButton("StarDist  (star-convex, nucleus-optimised)")
-        rb_stardist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rb_rf        = QRadioButton("Random Forest  (pixel classifier, manual annotation)")
-        rb_rf.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rb_cellpose.setChecked(True)
-        for rb in (rb_cellpose, rb_stardist, rb_rf):
-            method_row.addWidget(rb)
-        seg_layout.addWidget(method_group)
-
-        # ── Cellpose model selector (version-aware) ──────────────────────
-        from pycat.toolbox.segmentation_tools import (
-            available_cellpose_models, default_cellpose_model)
-        cp_model_group = QWidget()
-        cp_model_row = QVBoxLayout(cp_model_group)
-        cp_model_row.setContentsMargins(2, 0, 0, 0)
-        self.add_text_label(cp_model_row, 'Cellpose model:')
-        cp_model_dropdown = QComboBox()
-        try:
-            _models = available_cellpose_models()
-        except Exception:
-            _models = ['cyto2']
-        cp_model_dropdown.addItems(_models)
-        _default = default_cellpose_model() if _models else 'cyto2'
-        _idx = cp_model_dropdown.findText(_default)
-        if _idx >= 0:
-            cp_model_dropdown.setCurrentIndex(_idx)
-        cp_model_dropdown.setToolTip(
-            "cyto2 = fast Cellpose <4 CNN (default). cpsam = Cellpose-SAM "
-            "(Cellpose >=4 only; much slower on CPU). Only models supported by "
-            "your installed Cellpose version are shown.")
-        cp_model_row.addWidget(cp_model_dropdown)
-        seg_layout.addWidget(cp_model_group)
-
-        # ── Shared image dropdown ────────────────────────────────────────
-        image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image)
-
-        # ── RF-only extras (annotation layer) — shown/hidden by selection ──
-        rf_extra = QWidget()
-        rf_row   = QVBoxLayout(rf_extra)
-        rf_row.setContentsMargins(2, 0, 0, 0)
-        self.add_text_label(rf_row, 'Select annotation layer (for RF training):')
-        rf_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels)
-        rf_row.addWidget(rf_labels_dropdown)
-        rf_extra.setVisible(False)
-        seg_layout.addWidget(rf_extra)
-
-        def _on_method_changed():
-            rf_extra.setVisible(rb_rf.isChecked())
-            cp_model_group.setVisible(rb_cellpose.isChecked())
-
-        rb_cellpose.toggled.connect(_on_method_changed)
-        rb_stardist.toggled.connect(_on_method_changed)
-        rb_rf.toggled.connect(_on_method_changed)
-        _on_method_changed()
-
-        # ── Run button ───────────────────────────────────────────────────
-        run_btn = QPushButton("Run Segmentation")
-
-        def _on_run():
-            layer_name = image_dropdown.currentText()
-            dr = self.central_manager.active_data_class.data_repository
-
-            if rb_cellpose.isChecked():
-                dr['cellpose_model'] = cp_model_dropdown.currentText()
-                self.on_general_button_clicked(
-                    run_cellpose_segmentation, self.viewer, image_dropdown,
-                    self.central_manager.active_data_class, self.viewer)
-                self._record('cellpose_segmentation', {
-                    'method': 'cellpose',
-                    'cellpose_model': cp_model_dropdown.currentText(),
-                    'image_layer': layer_name,
-                    'cell_diameter': dr.get('cell_diameter', 100),
-                    'ball_radius':   dr.get('ball_radius', 50),
-                })
-
-            elif rb_stardist.isChecked():
-                self._run_stardist_segmentation(layer_name)
-                self._record('cellpose_segmentation', {
-                    'method': 'stardist',
-                    'image_layer': layer_name,
-                    'cell_diameter': dr.get('cell_diameter', 100),
-                })
-
-            else:  # Random Forest
-                self.on_general_button_clicked(
-                    run_train_and_apply_rf_classifier, self.viewer,
-                    image_dropdown, rf_labels_dropdown,
-                    self.central_manager.active_data_class, self.viewer)
-                self._record('cellpose_segmentation', {
-                    'method': 'random_forest',
-                    'image_layer': layer_name,
-                    'annotation_layer': rf_labels_dropdown.currentText(),
-                })
-
-        run_btn.clicked.connect(_on_run)
-        seg_layout.addWidget(run_btn)
-
-        seg_widget = QWidget()
-        seg_widget.setLayout(seg_layout)
-        self._add_widget_to_layout_or_dock(seg_widget, layout, separate_widget,
-                                            "Cell Segmentation")
-
-    def _run_stardist_segmentation(self, layer_name: str):
-        """Run StarDist 2D segmentation on the named layer."""
-        try:
-            from stardist.models import StarDist2D
-            from csbdeep.utils import normalize as csbdeep_normalize
-        except ImportError:
-            from napari.utils.notifications import show_warning as w
-            w("StarDist not installed. Run: pip install stardist")
-            return
-
-        import numpy as np
-        try:
-            image = self.viewer.layers[layer_name].data
-        except KeyError:
-            from napari.utils.notifications import show_warning as w
-            w(f"Layer '{layer_name}' not found.")
-            return
-
-        from napari.utils.notifications import show_info as napari_show_info
-        napari_show_info("Running StarDist — please wait…")
-
-        img = np.asarray(image).astype(np.float32)
-        img = csbdeep_normalize(img, 1, 99.8)
-
-        model = StarDist2D.from_pretrained('2D_versatile_fluo')
-        labels, _ = model.predict_instances(img)
-        labels = labels.astype(np.uint16)
-
-        dr = self.central_manager.active_data_class.data_repository
-        cell_diameter = float(dr.get('cell_diameter', 100))
-        layer_out = f"StarDist Segmentation on {layer_name}"
-        self.viewer.add_labels(labels, name=layer_out)
-
-        # Also create Labeled Cell Mask for downstream compatibility
-        self.viewer.add_labels(labels.copy(), name="Labeled Cell Mask")
-
-        dr['stardist_labels'] = labels
-        napari_show_info(
-            f"StarDist complete: {labels.max()} cells detected → '{layer_out}'")
-
-    def _add_run_train_and_apply_rf_classifier(self, layout=None, separate_widget=False):
-        """Kept for backward compatibility — RF is now in the unified segmentation widget."""
-        self._add_run_cellpose_segmentation(layout=layout,
-                                            separate_widget=separate_widget)
-
-
-    def _add_run_local_thresholding(self, layout=None, separate_widget=False):
-        """Add a widget for applying local thresholding, optionally in a separate dock."""
-        local_thresh_layout = QVBoxLayout()
-        self.add_text_label(local_thresh_layout, 'Local Thresholding', bold=True) # Add widget title label
-        self.add_text_label(local_thresh_layout, 'Select Thresholding Method') # Add a text label
-        local_thresh_mode_dropdown = QComboBox() # Create a dropdown widget
-        local_thresh_mode_dropdown.addItems(['Sauvola', 'Niblack', 'AND', 'OR']) # Add items to the dropdown
-        local_thresh_layout.addWidget(local_thresh_mode_dropdown) # Add the dropdown to the layout
-
-        # k_value slider
-        k_label = QLabel("Threshold k value:") # Add a text label
-        k_label.setWordWrap(True)
-        k_slider = QSlider(Qt.Horizontal) # Create a slider widget
-        guard_wheel(k_slider)
-        k_slider.setRange(0, 100)  # 100 steps from 0 to 100
-        k_slider.setValue(50)  # default is 0
-        k_slider.setSingleStep(1)  # Adjust for 0.01 steps
-        k_label_value = QLabel("0.0") 
-        k_label_value.setWordWrap(True)
-        def update_k_label(val):
-            # Convert slider integer value to float
-            float_val = (val / 50.0) - 1 # Convert slider value to float range from -1 to 1 in 0.01 steps
-            k_label_value.setText(str(round(float_val, 2))) # Update the label number text
-        k_slider.valueChanged.connect(update_k_label) # Connect the slider to the update function
-        local_thresh_layout.addWidget(k_label) # Add the text label to the layout
-        local_thresh_layout.addWidget(k_slider) # Add the slider to the layout
-        local_thresh_layout.addWidget(k_label_value) # Add the label value to the layout
-
-        # window_size slider
-        def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['ball_radius']) # Calculate the default window size  
-        window_label = QLabel(f"Window Size:") # Add a text label
-        window_label.setWordWrap(True)
-        window_slider = QSlider(Qt.Horizontal) # Create a slider widget
-        guard_wheel(window_slider)
-        window_slider.setRange(10, 250) # 100 steps from 10 to 250
-        window_slider.setValue(def_window_size) # Set the default value
-        window_label_value = QLabel(str(def_window_size)) # Set the default value
-        window_label_value.setWordWrap(True)
-        window_slider.valueChanged.connect(lambda val: window_label_value.setText(str(val))) # Connect the slider to the update function
-        local_thresh_layout.addWidget(window_label) # Add the text label to the layout
-        local_thresh_layout.addWidget(window_slider) # Add the slider to the layout
-        local_thresh_layout.addWidget(window_label_value) # Add the slider value to the layout
-
-        # Button to apply thresholding
-        def _on_local_thresh():
-            self.on_general_button_clicked(
-                run_local_thresholding, None, k_slider, window_slider,
-                local_thresh_mode_dropdown.currentText(), self.viewer)
-            self._record('local_thresholding', {
-                'method': local_thresh_mode_dropdown.currentText(),
-                'k_value': round((k_slider.value() / 50.0) - 1, 2),
-                'window_size': window_slider.value(),
-            })
-        local_thresh_button = QPushButton("Apply Thresholding")
-        local_thresh_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        local_thresh_button.clicked.connect(_on_local_thresh)
-        local_thresh_layout.addWidget(local_thresh_button)
-        sauvola_widget = QWidget()
-        sauvola_widget.setLayout(local_thresh_layout)
-        self._add_widget_to_layout_or_dock(sauvola_widget, layout, separate_widget, "Local Thresholding Dock")
-
-
-    def _add_run_segment_subcellular_objects(self, layout=None, separate_widget=False):
-        """Add a widget for subcellular object segmentation, optionally in a separate dock."""
-        from PyQt5.QtWidgets import QDoubleSpinBox, QSpinBox, QFormLayout, QGroupBox
-        process_cells_layout = QVBoxLayout()
-        self.add_text_label(process_cells_layout, 'Subcellular Object Segmentation', bold=True)
-        process_cells_image1_dropdown = self._layer_row(process_cells_layout, 'Select Pre-Processed Image to Segment:', napari.layers.Image, name_hint='Pre-Processed')
-        process_cells_image2_dropdown = self._layer_row(process_cells_layout, 'Select Fluorescence Image to Process:', napari.layers.Image)
-
-        # ── Refinement parameters ──────────────────────────────────────────
-        params_group = QGroupBox("Refinement Parameters")
-        params_layout = QFormLayout()
-        params_layout.setContentsMargins(9, 20, 9, 6)
-        params_group.setLayout(params_layout)
-
-        def _make_spinbox(min_val, max_val, default, step, decimals=2):
-            sb = QDoubleSpinBox()
-            sb.setRange(min_val, max_val)
-            sb.setValue(default)
-            sb.setSingleStep(step)
-            sb.setDecimals(decimals)
-            return sb
-
-        # Min spot radius — minimum puncta size in pixels
-        min_spot_spin = QDoubleSpinBox()
-        min_spot_spin.setRange(1, 20)
-        min_spot_spin.setValue(2)
-        min_spot_spin.setSingleStep(0.5)
-        min_spot_spin.setDecimals(1)
-        min_spot_spin.setToolTip("Minimum puncta radius in pixels. Increase to exclude small noise specks.")
-        params_layout.addRow("Min spot radius (px):", min_spot_spin)
-
-        # Kurtosis threshold — how peaked the intensity distribution must be
-        kurtosis_spin = _make_spinbox(-10.0, 0.0, -3.0, 0.5)
-        kurtosis_spin.setToolTip("Kurtosis threshold. More negative = keep flatter distributions (more permissive). Default -3.0. Try -5.0 to -8.0 if too many puncta are rejected.")
-        params_layout.addRow("Kurtosis threshold:", kurtosis_spin)
-
-        # Local SNR threshold
-        local_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
-        local_snr_spin.setToolTip("Local SNR threshold. Lower = keep dimmer puncta. Default 1.0. Try 0.5 if puncta in bright regions are being lost.")
-        params_layout.addRow("Local SNR threshold:", local_snr_spin)
-
-        # Global SNR threshold
-        global_snr_spin = _make_spinbox(0.0, 5.0, 1.0, 0.1)
-        global_snr_spin.setToolTip("Global SNR threshold relative to whole-cell background. Default 1.0. Lower to retain puncta in high-background cells.")
-        params_layout.addRow("Global SNR threshold:", global_snr_spin)
-
-        # Intensity scale (HWHM multiplier)
-        hwhm_spin = _make_spinbox(0.0, 5.0, 1.17, 0.1)
-        hwhm_spin.setToolTip("Intensity threshold scale (multiples of local background SD). Default 1.17 (HWHM). Lower = keep puncta closer to background intensity.")
-        params_layout.addRow("Intensity scale (×SD):", hwhm_spin)
-
-        # Max area fraction
-        max_area_spin = _make_spinbox(0.01, 1.0, 0.25, 0.05)
-        max_area_spin.setToolTip("Maximum puncta area as a fraction of cell area. Default 0.25. Increase if large condensates are being excluded.")
-        params_layout.addRow("Max area (fraction of cell):", max_area_spin)
-
-        process_cells_layout.addWidget(params_group)
-
-        # ── Run button ────────────────────────────────────────────────────
-        process_cells_button = QPushButton("Run Condensate Segmentation")
-        process_cells_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        def _on_condensate_seg():
-            import functools
-            # Partially apply the refinement params to run_segment_subcellular_objects
-            fn = functools.partial(
-                run_segment_subcellular_objects,
-                kurtosis_threshold=kurtosis_spin.value(),
-                local_snr_threshold=local_snr_spin.value(),
-                global_snr_threshold=global_snr_spin.value(),
-                intensity_hwhm_scale=hwhm_spin.value(),
-                max_area_fraction=max_area_spin.value(),
-                min_spot_radius=min_spot_spin.value(),
-            )
-            fn.__name__ = 'run_segment_subcellular_objects'
-            self.on_general_button_clicked(
-                fn, self.viewer,
-                process_cells_image1_dropdown, process_cells_image2_dropdown,
-                self.central_manager.active_data_class, self.viewer)
-            self._record('condensate_segmentation', {
-                'seg_image_layer': process_cells_image1_dropdown.currentText(),
-                'measure_image_layer': process_cells_image2_dropdown.currentText(),
-                'kurtosis_threshold': kurtosis_spin.value(),
-                'local_snr_threshold': local_snr_spin.value(),
-                'global_snr_threshold': global_snr_spin.value(),
-                'intensity_hwhm_scale': hwhm_spin.value(),
-                'max_area_fraction': max_area_spin.value(),
-                'min_spot_radius': min_spot_spin.value(),
-            })
-        process_cells_button.clicked.connect(_on_condensate_seg)
-        process_cells_layout.addWidget(process_cells_button)
-        process_cells_widget = QWidget()
-        process_cells_widget.setLayout(process_cells_layout)
-        self._add_widget_to_layout_or_dock(process_cells_widget, layout, separate_widget, "Condensate Segmentation Dock")
 
 
     #### Image Feature Analysis Functions ####
 
 
-    def _add_run_cell_analysis_func(self, layout=None, separate_widget=False):
-        """Add a widget for cell analysis, optionally in a separate dock."""
-        cell_segmentation_layout = QVBoxLayout()
-        self.add_text_label(cell_segmentation_layout, 'Cell/Nuclei Analysis', bold=True) # Add widget title label
-        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Labeled Cell Mask')
-        cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
-        cell_segmentation_dropdown_omit.insertItem(0, "None")
-        cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image)
-        cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
-        cell_analysis_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        def _on_cell_analysis():
-            self.on_general_button_clicked(
-                run_cell_analysis_func, self.viewer,
-                cell_segmentation_dropdown_labels, cell_segmentation_dropdown_omit,
-                cell_segmentation_dropdown_images,
-                self.central_manager.active_data_class, self.viewer)
-            self._record('cell_analysis', {
-                'labels_layer': cell_segmentation_dropdown_labels.currentText(),
-                'omit_layer': cell_segmentation_dropdown_omit.currentText(),
-                'image_layer': cell_segmentation_dropdown_images.currentText(),
-            })
-        cell_analysis_button.clicked.connect(_on_cell_analysis)
-        cell_segmentation_layout.addWidget(cell_analysis_button) # Add the button to the layout
-        cell_segmentation_widget = QWidget()
-        cell_segmentation_widget.setLayout(cell_segmentation_layout)
-        self._add_widget_to_layout_or_dock(cell_segmentation_widget, layout, separate_widget, "Cell Analysis Dock")
-
-
-    def _add_run_puncta_analysis_func(self, layout=None, separate_widget=False):
-        """Add a widget for puncta analysis, optionally in a separate dock."""
-        measure_puncta_layout = QVBoxLayout()
-        self.add_text_label(measure_puncta_layout, 'Condensate Analysis', bold=True) # Add widget title label
-        self.add_text_label(measure_puncta_layout, 'Select Puncta Mask for Measurement') # Add a text label
-        puncta_measure_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels, name_hint='Refined Puncta')
-        measure_puncta_layout.addWidget(puncta_measure_dropdown_labels)
-        self.add_text_label(measure_puncta_layout, 'Select Image for Puncta Measurement')
-        puncta_measure_dropdown_images = self.create_layer_dropdown(napari.layers.Image)
-        measure_puncta_layout.addWidget(puncta_measure_dropdown_images) # Add the dropdown to the layout
-        puncta_measure_button = QPushButton("Run Condensate Analyzer") # Create a button widget
-        puncta_measure_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        def _on_puncta_analysis():
-            self.on_general_button_clicked(
-                run_puncta_analysis_func, self.viewer,
-                puncta_measure_dropdown_labels, puncta_measure_dropdown_images,
-                self.central_manager.active_data_class, self.viewer)
-            self._record('condensate_analysis', {
-                'labels_layer': puncta_measure_dropdown_labels.currentText(),
-                'image_layer': puncta_measure_dropdown_images.currentText(),
-            })
-        puncta_measure_button.clicked.connect(_on_puncta_analysis)
-        measure_puncta_layout.addWidget(puncta_measure_button) # Add the button to the layout
-        measure_puncta_widget = QWidget()
-        measure_puncta_widget.setLayout(measure_puncta_layout)
-        self._add_widget_to_layout_or_dock(measure_puncta_widget, layout, separate_widget, "Condensate Analysis Dock")
-
-
-    #### Colocalization Analysis Functions ####
-
-
-    # Pixel-Wise Correlation Functions 
-
-    def _add_run_autocorrelation_analysis(self, layout=None, separate_widget=False):
-        """Add a widget for autocorrelation analysis, optionally in a separate dock."""
-        ACF_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(ACF_layout, 'Auto-Correlation Function Analysis', bold=True) # Add widget title label
-        self.add_text_label(ACF_layout, 'Select Image for Analysis') # Add a dropdown text label
-        ACF_image_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        ACF_layout.addWidget(ACF_image_dropdown) # Add the dropdown to the layout
-        self.add_text_label(ACF_layout, 'Select ROI Mask') # Add a dropdown text label
-        ACF_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        ACF_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        ACF_layout.addWidget(ACF_roi_dropdown) # Add the dropdown to the layout 
-
-        self.add_text_label(ACF_layout, 'Set range to fit data (px)')  # Add a label for range inputs
-        # Create the QHBoxLayout for the range inputs
-        range_layout = QHBoxLayout()
-        lower_limit_input = QLineEdit()  # Create QLineEdit for the lower limit
-        lower_limit_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        range_layout.addWidget(lower_limit_input)  # Add the lower limit input to the layout
-        self.add_text_label(range_layout, 'to')  # Add a text label
-        upper_limit_input = QLineEdit()  # Create QLineEdit for the upper limit
-        upper_limit_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        range_layout.addWidget(upper_limit_input)  # Add the upper limit input to the layout
-        ACF_layout.addLayout(range_layout)  # Add the range inputs layout to the main vertical layout
-
-        def _on_acf():
-            self.on_general_button_clicked(
-                run_autocorrelation_analysis, self.viewer, ACF_image_dropdown,
-                ACF_roi_dropdown, lower_limit_input, upper_limit_input,
-                self.central_manager.active_data_class)
-            self._record('sacf_analysis', {
-                'image_layer': ACF_image_dropdown.currentText(),
-                'roi_layer': ACF_roi_dropdown.currentText(),
-                'lower_limit': lower_limit_input.text(),
-                'upper_limit': upper_limit_input.text(),
-            })
-        ACF_button = QPushButton("Calculate ACF")
-        ACF_button.clicked.connect(_on_acf)
-        ACF_layout.addWidget(ACF_button)
-        ACF_widget = QWidget() # Create a main widget to contain the input widget
-        ACF_widget.setLayout(ACF_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(ACF_widget, layout, separate_widget, "ACF Dock") # Add widget to layout or dock
-
-        
-    def _add_run_ccf_analysis(self, layout=None, separate_widget=False):
-        """Add a widget for cross-correlation function analysis, optionally in a separate dock."""
-        CCF_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(CCF_layout, 'Cross-Correlation Function Analysis', bold=True) # Add widget title label
-        self.add_text_label(CCF_layout, 'Select Image 1') # Add a dropdown text label
-        CCF_image1_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        CCF_layout.addWidget(CCF_image1_dropdown) # Add the dropdown to the layout
-        self.add_text_label(CCF_layout, 'Select Image 2') # Add a dropdown text label
-        CCF_image2_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        CCF_layout.addWidget(CCF_image2_dropdown) # Add the dropdown to the layout
-        self.add_text_label(CCF_layout, 'Select ROI Mask') # Add a dropdown text label
-        CCF_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        CCF_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        CCF_layout.addWidget(CCF_roi_dropdown) # Add the dropdown to the layout
-        CCF_button = QPushButton("Calculate CCF") # Create a button widget
-        CCF_button.clicked.connect(lambda: self.on_general_button_clicked( # Connect the button to the function
-            run_ccf_analysis, self.viewer, CCF_image1_dropdown, CCF_image2_dropdown, CCF_roi_dropdown, self.central_manager.active_data_class))
-        CCF_layout.addWidget(CCF_button) # Add the button to the layout
-        CCF_widget = QWidget() # Create a main widget to contain the input widget
-        CCF_widget.setLayout(CCF_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(CCF_widget, layout, separate_widget, "CCF Dock")
-
-
-    def _add_run_pwcca(self, layout=None, separate_widget=False):
-        """Add a widget for pixel-wise correlation coefficient analysis, optionally in a separate dock."""
-        PWCCA_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(PWCCA_layout, 'Pixel-Wise Correlation Coefficient Analysis', bold=True) # Add widget title label
-        self.add_text_label(PWCCA_layout, 'Select Image 1') # Add a dropdown text label
-        PWCCA_image1_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        PWCCA_layout.addWidget(PWCCA_image1_dropdown) # Add the dropdown to the layout
-        self.add_text_label(PWCCA_layout, 'Select Image 2') # Add a dropdown text label
-        PWCCA_image2_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        PWCCA_layout.addWidget(PWCCA_image2_dropdown) # Add the dropdown to the layout
-        PWCCA_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        self.add_text_label(PWCCA_layout, 'Select ROI Mask') # Add a dropdown text label
-        PWCCA_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        PWCCA_layout.addWidget(PWCCA_roi_dropdown) # Add the dropdown to the layout
-        PWCCA_button = QPushButton("Calculate PWCCA") # Create a button widget
-        PWCCA_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_pwcca, self.viewer, PWCCA_image1_dropdown, PWCCA_image2_dropdown, PWCCA_roi_dropdown, self.central_manager.active_data_class, self.viewer))
-        PWCCA_layout.addWidget(PWCCA_button) # Add the button to the layout
-        PWCCA_widget = QWidget() # Create a main widget to contain the input widget
-        PWCCA_widget.setLayout(PWCCA_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(PWCCA_widget, layout, separate_widget, "PWCCA Dock")
-
-
-    # Object-Based Colocalization Functions
-        
-
-    def _add_run_obca(self, layout=None, separate_widget=False):
-        """Add a widget for object-based colocalization analysis, optionally in a separate dock."""
-        OBCA_layout = QVBoxLayout() # Create a vertical layout widget
-        self.add_text_label(OBCA_layout, 'Object-Based Colocalization Analysis', bold=True) # Add widget title label
-        self.add_text_label(OBCA_layout, 'Select Image 1') # Add a dropdown text label
-        OBCA_mask1_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        OBCA_layout.addWidget(OBCA_mask1_dropdown) # Add the dropdown to the layout
-        self.add_text_label(OBCA_layout, 'Select Image 2') # Add a dropdown text label
-        OBCA_mask2_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        OBCA_layout.addWidget(OBCA_mask2_dropdown) # Add the dropdown to the layout
-        self.add_text_label(OBCA_layout, 'Select ROI Mask') # Add a dropdown text label
-        OBCA_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        OBCA_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        OBCA_layout.addWidget(OBCA_roi_dropdown) # Add the dropdown to the layout
-        OBCA_button = QPushButton("Calculate OBCA") # Create a button widget
-        OBCA_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_obca, self.viewer, OBCA_mask1_dropdown, OBCA_mask2_dropdown, OBCA_roi_dropdown, self.central_manager.active_data_class))
-        OBCA_layout.addWidget(OBCA_button) # Add the button to the layout
-        OBCA_widget = QWidget() # Create a main widget to contain the input widget
-        OBCA_widget.setLayout(OBCA_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(OBCA_widget, layout, separate_widget, "OBCA Dock")
-
-
-    def _add_run_manders_coloc(self, layout=None, separate_widget=False):
-        """Add a widget for Mander's colocalization coefficient analysis, optionally in a separate dock."""
-        manders_layout = QVBoxLayout()
-        self.add_text_label(manders_layout, "Mander's Coloc Coefficient Analysis", bold=True) # Add widget title label
-        self.add_text_label(manders_layout, 'Select Image 1') # Add a dropdown text label
-        manders_image1_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        manders_layout.addWidget(manders_image1_dropdown) # Add the dropdown to the layout
-        self.add_text_label(manders_layout, 'Select Mask 2') # Add a dropdown text label
-        manders_image2_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        manders_layout.addWidget(manders_image2_dropdown) # Add the dropdown to the layout
-        self.add_text_label(manders_layout, 'Select ROI Mask') # Add a dropdown text label
-        manders_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        manders_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        manders_layout.addWidget(manders_roi_dropdown) # Add the dropdown to the layout
-        manders_button = QPushButton("Calculate Mander's Coefficient") # Create a button widget
-        manders_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        manders_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_manders_coloc, self.viewer, manders_image1_dropdown, manders_image2_dropdown, manders_roi_dropdown, self.central_manager.active_data_class))
-        manders_layout.addWidget(manders_button) # Add the button to the layout
-        manders_widget = QWidget()
-        manders_widget.setLayout(manders_layout)
-        self._add_widget_to_layout_or_dock(manders_widget, layout, separate_widget, "Manders Coefficient Dock")
-     
 
     #### Label and Mask Tools ####
 
 
     # Labeleled Mask Tools 
-
-    def _add_run_convert_labels_to_mask(self, layout=None, separate_widget=False):
-        """Add a widget for converting labels to binary masks, optionally in a separate dock."""
-        convert_labels_layout = QVBoxLayout()
-        self.add_text_label(convert_labels_layout, 'Convert Labels to Binary Mask', bold=True) # Add widget title label
-        self.add_text_label(convert_labels_layout, 'Select Labels Layer to Convert') # Add a text label
-        convert_labels_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        convert_labels_layout.addWidget(convert_labels_dropdown) # Add the dropdown to the layout
-        convert_labels_button = QPushButton("Convert Labels to Mask") # Create a button widget
-        convert_labels_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        convert_labels_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_convert_labels_to_mask, self.viewer, convert_labels_dropdown, self.viewer))
-        convert_labels_layout.addWidget(convert_labels_button) # Add the button to the layout
-        convert_labels_widget = QWidget()
-        convert_labels_widget.setLayout(convert_labels_layout)
-        self._add_widget_to_layout_or_dock(convert_labels_widget, layout, separate_widget, "Labels to Mask Converter")
-
-               
-    def _add_run_measure_region_props(self, layout=None, separate_widget=False):
-        """Add a widget for measuring region properties, optionally in a separate dock."""
-        rp_layout = QVBoxLayout()
-        self.add_text_label(rp_layout, 'Labeled Region Properties Measurement', bold=True) # Add widget title label
-        self.add_text_label(rp_layout, 'Select Labeled Mask to Measure') # Add a text label
-        rp_dropdown_layers = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        rp_layout.addWidget(rp_dropdown_layers) # Add the dropdown to the layout
-        self.add_text_label(rp_layout, 'Select Intensity Image to Measure') # Add a text label
-        rp_dropdown_image = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        rp_layout.addWidget(rp_dropdown_image) # Add the dropdown to the layout
-        def _on_rp():
-            self.on_general_button_clicked(
-                run_measure_region_props, self.viewer, rp_dropdown_layers,
-                rp_dropdown_image, self.central_manager.active_data_class)
-            self._record('measure_region_props', {
-                'mask_layer': rp_dropdown_layers.currentText(),
-                'image_layer': rp_dropdown_image.currentText(),
-            })
-        rp_button = QPushButton("Measure Region Properties")
-        rp_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        rp_button.clicked.connect(_on_rp)
-        rp_layout.addWidget(rp_button)
-        rp_widget = QWidget() 
-        rp_widget.setLayout(rp_layout)
-        self._add_widget_to_layout_or_dock(rp_widget, layout, separate_widget, "Region Properties Dock")
-
-
-    def _add_run_update_labels(self, layout=None, separate_widget=False):
-        """Add a widget for updating label values, optionally in a separate dock."""
-        label_layout = QVBoxLayout()
-        self.add_text_label(label_layout, 'Change Label Values', bold=True) # Add widget title label
-        self.add_text_label(label_layout, 'New Label or Increment Amount') # Add a text label
-        new_label_input = QLineEdit() # Add a text input for new label value
-        new_label_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        label_layout.addWidget(new_label_input) # Add the text input to the layout
-        # Radio buttons to select mode
-        increment_mode = QRadioButton("Increment All Labels") # Add a radio button for increment mode
-        specific_label_mode = QRadioButton("Change Specific Label") # Add a radio button for specific label mode
-        increment_mode.setChecked(True) # Set the increment mode as the default
-        label_layout.addWidget(increment_mode) # Add the radio button to the layout
-        label_layout.addWidget(specific_label_mode) # Add the radio button to the layout
-        # Button to apply changes
-        update_button = QPushButton("Update Labels") # Create a button widget
-        update_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_update_labels, None, new_label_input, increment_mode, self.viewer))
-        label_layout.addWidget(update_button) # Add the button to the layout
-        label_widget = QWidget()
-        label_widget.setLayout(label_layout)
-        self._add_widget_to_layout_or_dock(label_widget, layout, separate_widget, "Label Updater Dock")
-
-
-    # Binary Mask Tools 
-
-
-    def _add_run_label_binary_mask(self, layout=None, separate_widget=False):
-        """Add a widget for labeling binary masks, optionally in a separate dock."""
-        label_mask_layout = QVBoxLayout()
-        self.add_text_label(label_mask_layout, 'Binary Mask Labeling', bold=True) # Add widget title label
-        self.add_text_label(label_mask_layout, 'Select Binary Mask to Label') # Add a text label
-        label_mask_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        label_mask_layout.addWidget(label_mask_dropdown) # Add the dropdown to the layout
-        def _on_label_mask():
-            self.on_general_button_clicked(
-                run_label_binary_mask, self.viewer, label_mask_dropdown, self.viewer)
-            self._record('label_binary_mask', {
-                'mask_layer': label_mask_dropdown.currentText(),
-            })
-        label_mask_button = QPushButton("Label Binary Mask")
-        label_mask_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        label_mask_button.clicked.connect(_on_label_mask)
-        label_mask_layout.addWidget(label_mask_button)
-        label_mask_widget = QWidget()
-        label_mask_widget.setLayout(label_mask_layout)
-        self._add_widget_to_layout_or_dock(label_mask_widget, layout, separate_widget, "Binary Mask Labeler")
-
-
-    def _add_run_measure_binary_mask(self, layout=None, separate_widget=False):
-        """Add a widget for measuring binary masks, optionally in a separate dock."""
-        mbm_layout = QVBoxLayout()
-        self.add_text_label(mbm_layout, 'Binary Mask Measurement', bold=True) # Add widget title label
-        self.add_text_label(mbm_layout, 'Select Binary Mask to Measure') # Add a text label
-        mbm_dropdown_labels = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        mbm_layout.addWidget(mbm_dropdown_labels) # Add the dropdown to the layout
-        self.add_text_label(mbm_layout, 'Select Intensity Image to Measure') # Add a text label
-        mbm_dropdown_images = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        mbm_layout.addWidget(mbm_dropdown_images) # Add the dropdown to the layout
-        mbm_button = QPushButton("Measure Binary Mask") # Create a button widget
-        mbm_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        mbm_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_measure_binary_mask, self.viewer, mbm_dropdown_labels, mbm_dropdown_images, self.central_manager.active_data_class))
-        mbm_layout.addWidget(mbm_button) # Add the button to the layout
-        mbm_widget = QWidget()
-        mbm_widget.setLayout(mbm_layout)
-        self._add_widget_to_layout_or_dock(mbm_widget, layout, separate_widget, "Binary Mask Measurement")
-
-
-    def _add_run_binary_morph_operation(self, layout=None, separate_widget=False):
-        """Add a widget for binary morphological operations, optionally in a separate dock."""
-        bmo_layout = QVBoxLayout()
-        self.add_text_label(bmo_layout, 'Binary Morphological Operations', bold=True) # Add widget title label
-        self.add_text_label(bmo_layout, 'Select ROI Mask') # Add a text label
-        bmo_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
-        bmo_roi_dropdown.insertItem(0, "None") # Add a None option to the dropdown
-        bmo_layout.addWidget(bmo_roi_dropdown)
-
-        # Add input widgets for morphological operation parameters
-        self.add_text_label(bmo_layout, 'Number of Iterations')
-        bmo_iter_input = QLineEdit()
-        bmo_iter_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bmo_layout.addWidget(bmo_iter_input)
-        self.add_text_label(bmo_layout, 'Structuring Element Size')
-        bmo_elem_size_input = QLineEdit()
-        bmo_elem_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bmo_layout.addWidget(bmo_elem_size_input)
-        self.add_text_label(bmo_layout, 'Structuring Element Shape')
-        bmo_elem_shape_dropdown = QComboBox()
-        bmo_elem_shape_dropdown.addItems(['Disk', 'Diamond', 'Square', 'Star', 'Cross'])
-        bmo_layout.addWidget(bmo_elem_shape_dropdown)   
-        self.add_text_label(bmo_layout, 'Morphological Operation')
-        bmo_mode_dropdown = QComboBox()
-        bmo_mode_dropdown.addItems(['Erosion', 'Dilation', 'Opening', 'Closing', 'Fill Holes'])
-        bmo_layout.addWidget(bmo_mode_dropdown)
-
-        # Button to apply morphological operation
-        bmo_button = QPushButton("Run Morphological Operation")
-        bmo_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        bmo_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_binary_morph_operation, self.viewer, bmo_roi_dropdown, bmo_iter_input, bmo_elem_size_input, bmo_elem_shape_dropdown.currentText(), bmo_mode_dropdown.currentText(), self.viewer))
-        bmo_layout.addWidget(bmo_button)
-        bmo_widget = QWidget()
-        bmo_widget.setLayout(bmo_layout)
-        self._add_widget_to_layout_or_dock(bmo_widget, layout, separate_widget, "Binary Morphological Operation")
-
-
-    #### Layer Operations ####
-
-
-    def _add_run_simple_multi_merge(self, layout=None, separate_widget=False):
-        """Add a widget for simple multi-layer merging, optionally in a separate dock."""
-        simple_merge_layout = QVBoxLayout()
-        self.add_text_label(simple_merge_layout, 'Simple Multi-Layer Merging', bold=True) # Add widget title label
-        self.add_text_label(simple_merge_layout, 'Select Blending Mode') # Add a text label
-        simple_merge_mode_dropdown = QComboBox() # Create a dropdown widget
-        simple_merge_mode_dropdown.addItems(['Additive', 'Mean', 'Max', 'Min']) # Add items to the dropdown
-        simple_merge_layout.addWidget(simple_merge_mode_dropdown) # Add the dropdown to the layout
-        simple_merge_button = QPushButton("Merge Active Layers") # Create a button widget
-        simple_merge_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        simple_merge_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_simple_multi_merge, None, simple_merge_mode_dropdown.currentText(), self.viewer))
-        simple_merge_layout.addWidget(simple_merge_button) # Add the button to the layout
-        simple_merge_widget = QWidget()
-        simple_merge_widget.setLayout(simple_merge_layout)
-        self._add_widget_to_layout_or_dock(simple_merge_widget, layout, separate_widget, "Simple Multi-Layer Merging")
-
-
-    def _add_run_advanced_two_layer_merge(self, layout=None, separate_widget=False):
-        """Add a widget for advanced two-layer merging, optionally in a separate dock."""
-        advanced_merge_layout = QVBoxLayout()
-        self.add_text_label(advanced_merge_layout, 'Advanced 2-Layer Merging', bold=True) # Add widget title label
-        self.add_text_label(advanced_merge_layout, 'Select Base Layer for Merging') # Add a text label
-        layer1_merge_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        advanced_merge_layout.addWidget(layer1_merge_dropdown) # Add the dropdown to the layout
-        self.add_text_label(advanced_merge_layout, 'Select Blend Layer for Merging') # Add a text label
-        layer2_merge_dropdown = self.create_layer_dropdown(napari.layers.Image) # Create a dropdown widget
-        advanced_merge_layout.addWidget(layer2_merge_dropdown) # Add the dropdown to the layout
-        self.add_text_label(advanced_merge_layout, 'Select Blending Mode') # Add a text label
-        advanced_merge_mode_dropdown = QComboBox() # Create a dropdown widget
-        advanced_merge_mode_dropdown.addItems(['Subtractive', 'Screen_blending', 'Abs_difference', 'Alpha_blending', 'Blend'])
-        advanced_merge_layout.addWidget(advanced_merge_mode_dropdown)
-        
-        # Alpha/Blend Slider
-        slider_label = QLabel("Alpha/Blend Value:") # Add a text label
-        slider_label.setWordWrap(True)
-        alpha_blend_slider = QSlider(Qt.Horizontal) # Create a slider widget
-        guard_wheel(alpha_blend_slider)
-        alpha_blend_slider.setRange(0, 10)  # 100 steps from 0 to 100
-        alpha_blend_slider.setValue(5)  # default is 0.5
-        alpha_blend_slider.setSingleStep(1)  # Adjust for 0.01 steps
-        slider_label_value = QLabel("0.5") 
-        slider_label_value.setWordWrap(True)
-        def update_slider_label(val):
-            # Convert slider integer value to float
-            float_val = val * 0.1
-            slider_label_value.setText(str(round(float_val, 2))) # Update the label number text
-        alpha_blend_slider.valueChanged.connect(update_slider_label) # Connect the slider to the update function
-        advanced_merge_layout.addWidget(slider_label) # Add the text label to the layout
-        advanced_merge_layout.addWidget(alpha_blend_slider) # Add the slider to the layout
-        advanced_merge_layout.addWidget(slider_label_value) # Add the slider value to the layout
-
-        # Button to apply merging
-        advanced_merge_button = QPushButton("Merge Layers")
-        advanced_merge_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_advanced_two_layer_merge, self.viewer, layer1_merge_dropdown, layer2_merge_dropdown, advanced_merge_mode_dropdown.currentText(), alpha_blend_slider, self.viewer))
-        advanced_merge_layout.addWidget(advanced_merge_button)
-        # Create a main widget to contain the input widget
-        advanced_merge_widget = QWidget()
-        advanced_merge_widget.setLayout(advanced_merge_layout)
-        self._add_widget_to_layout_or_dock(advanced_merge_widget, layout, separate_widget, "Advanced 2-Layer Merging")
- 
-
-    #### Data Visualization Functions ####
-        
 
     def _add_plotting_widget(self, layout=None, separate_widget=False):
         """Add a widget for plotting data, optionally in a separate dock."""
@@ -2344,23 +1428,38 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         except Exception:
             pass
 
-        # Add analysis and processing steps to the layout
-        # Each method call adds a specific UI component for condensate analysis
+        # Add analysis and processing steps to the layout, each staged with its
+        # checklist step number (see CONDENSATE_PIPELINE). _stage_step prepends
+        # "Step N — " to the next shared builder's title.
         self._add_workflow_header(self.condensate_layout, include_pixel_gate=True)
+        self._stage_step("Step 2 — ")
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.condensate_layout)
+        self._stage_step("Step 3 — ")
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.condensate_layout)
+        # Pre-process produces both the pre-processed and background-removed
+        # layers in one click (merged 1.5.136), covering checklist steps 4 & 5.
+        self._stage_step("Steps 4–5 — ")
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.condensate_layout)
-        self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.condensate_layout)
+        # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
+        self._stage_step("Step 6 — ")
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.condensate_layout)
+        self._stage_step("Step 7 — ")
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.condensate_layout)
+        self._stage_step("Step 8 — ")
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.condensate_layout)
+        self._stage_step("Step 9 — ")
         self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func(layout=self.condensate_layout)
 
         # ── Spatial Metrology ───────────────────────────────────────────────
+        self._stage_step("Step 10 — ")
         self.central_manager.toolbox_functions_ui._add_spatial_metrology(
             layout=self.condensate_layout)
 
         # ── Advanced Analysis (Morphological / Dynamic / Organizational) ──
+        # Advanced Analysis bundles checklist steps 11–13 (Morphological
+        # Complexity, Dynamic Spatial Phenotyping, Organizational Metrics) into
+        # one tabbed, optional block.
+        self._stage_step("Steps 11–13 — ")
         self.central_manager.toolbox_functions_ui._add_advanced_analysis(
             layout=self.condensate_layout)
 
@@ -2368,6 +1467,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_condensate_physics(
             layout=self.condensate_layout)
 
+        self._stage_step("Step 14 — ")
         self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.condensate_layout)
         # ... Add other components in the order you want ...
 
@@ -2379,6 +1479,11 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)  # Make the scroll area resizable
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)  # Set the main widget as the scroll area's content
 
         # Add the scroll area to the viewer as a dockable widget for condensate analysis
@@ -2429,19 +1534,16 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
     def setup_ui(self):
         tfu = self.central_manager.toolbox_functions_ui
 
-        # ── Step 1: instruction label ─────────────────────────────────────
-        from PyQt5.QtWidgets import QLabel, QFrame
-        instr = QLabel(
-            "<b>Step 1:</b> Load your time-series via<br>"
-            "<i>★ Open/Save File(s) → Open Image Stack (T/Z / IMS)</i>"
-        )
-        instr.setWordWrap(True)
-        instr.setStyleSheet("padding: 6px; background: #2a2a2a; border-radius: 4px;")
-        self.ts_layout.addWidget(instr)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        self.ts_layout.addWidget(sep)
+        # ── Step 1: load (hybrid — status marker + stack-load instruction) ──
+        # Single Step 1 block: the red/green "image loaded" marker on top, and
+        # the time-series-specific load instruction below it. Previously there
+        # were two competing Step 1s (a standalone instruction label AND the
+        # workflow header's file-I/O block); merged into one here.
+        self._add_workflow_header(
+            self.ts_layout, include_pixel_gate=True,
+            instruction_html=(
+                "Load your time-series via "
+                "<i>★ Open/Save File(s) → Open Image Stack (T/Z / IMS)</i>"))
 
         # ── Step 2: Reference frame selector ─────────────────────────────
         self._add_reference_frame_selector(self.ts_layout)
@@ -2449,7 +1551,6 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # ── Steps 3-4: measurement lines and lazy stack preprocessing ──────
         # Lazy preprocessing builds dask-backed layers so frames are
         # processed one at a time on demand rather than all upfront.
-        self._add_workflow_header(self.ts_layout, include_pixel_gate=True)
         tfu._add_measure_line(layout=self.ts_layout)
         tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
 
@@ -2482,6 +1583,11 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)
 
         self.viewer.window.add_dock_widget(
@@ -2563,6 +1669,8 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         range_info = QLabel("")
         range_info.setWordWrap(True)
+
+        range_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         range_info.setStyleSheet("color: #aaa; font-size: 9pt;")
         form.addRow("", range_info)
 
@@ -2643,7 +1751,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         roi_grp = _QGB("XY Region of Interest")
         roi_grp.setFlat(True)
         roi_grp_layout = QVBoxLayout(roi_grp)
-        roi_grp_layout.setContentsMargins(4, 8, 4, 4)
+        roi_grp_layout.setContentsMargins(4, 20, 4, 4)
 
         # ── GUI interactive mode ──────────────────────────────────────────
         roi_check = QCheckBox("Restrict to drawn rectangle (interactive)")
@@ -2721,6 +1829,8 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
 
         roi_info = QLabel("")
         roi_info.setWordWrap(True)
+
+        roi_info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         roi_info.setStyleSheet("color: #aaa; font-size: 9pt;")
         roi_grp_layout.addWidget(roi_info)
 
@@ -2938,11 +2048,16 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         """
         # Sequentially add UI components for object colocalization analysis
         # Each method enriches the UI with functional capabilities tailored to the analysis needs
-        self._add_workflow_header(self.object_coloc_layout)
+        # Activate the workflow checklist for this pipeline
+        try:
+            self.central_manager.workflow_checklist.activate('coloc')
+        except Exception:
+            pass
+        self._add_workflow_header(self.object_coloc_layout, include_pixel_gate=True)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.object_coloc_layout)
-        self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.object_coloc_layout)
+        # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
         self.central_manager.toolbox_functions_ui._add_run_cellpose_segmentation(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.object_coloc_layout)
         self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects(layout=self.object_coloc_layout)
@@ -2961,6 +2076,11 @@ class ObjectColocAnalysisUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)  # Assign the main widget as the scroll area's content
 
         # Integrate the scroll area into the viewer as a dockable widget
@@ -3045,6 +2165,11 @@ class PixelColocAnalysisUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)  # Assign the main widget as the scroll area's content
 
         # Integrate the scroll area into the viewer as a dockable widget
@@ -3109,7 +2234,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.general_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.general_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.general_layout)
-        self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.general_layout)
+        # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
         self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.general_layout)
         self.central_manager.toolbox_functions_ui._add_run_local_thresholding(layout=self.general_layout)   
         self.central_manager.toolbox_functions_ui._add_run_label_binary_mask(layout=self.general_layout)  
@@ -3126,6 +2251,11 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
@@ -3220,7 +2350,7 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_apply_bilateral_filter(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.fibril_layout)
-        self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal(layout=self.fibril_layout)
+        # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
         self.central_manager.toolbox_functions_ui._add_run_peak_and_edge_enhancement(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_morphological_gaussian_filter(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.fibril_layout)
@@ -3246,6 +2376,11 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
@@ -3464,6 +2599,8 @@ class MenuManager:
         prog_bar    = QProgressBar(); prog_bar.setVisible(False)
         status_lbl  = QLabel("")
         status_lbl.setWordWrap(True)
+
+        status_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         vl.addWidget(prog_bar)
         vl.addWidget(status_lbl)
 
@@ -3650,6 +2787,12 @@ class MenuManager:
         image_processing_actions = {
             'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True}),
             'Pipeline Step Diagnostics': (self.central_manager.toolbox_functions_ui._add_pipeline_diagnostics, {'separate_widget': True}),
+            'Pipeline SNR Analysis': (self.central_manager.toolbox_functions_ui._add_pipeline_snr_analysis, {'separate_widget': True}),
+            'Foreground Suppression Tuner': (self.central_manager.toolbox_functions_ui._add_foreground_suppression_tuner, {'separate_widget': True}),
+            'Segmentation Speed Comparison': (self.central_manager.toolbox_functions_ui._add_segmentation_speed_comparison, {'separate_widget': True}),
+            'Chromatin Topology Map': (self.central_manager.toolbox_functions_ui._add_chromatin_topology, {'separate_widget': True}),
+            'Nucleolus / Void Estimator': (self.central_manager.toolbox_functions_ui._add_nucleolus_void_estimator, {'separate_widget': True}),
+            'Display Diagnostics': (self.central_manager.toolbox_functions_ui._add_display_diagnostics, {'separate_widget': True}),
         }
         self._add_actions_to_menu(image_processing_actions, image_processing_submenu)
 

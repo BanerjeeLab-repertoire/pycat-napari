@@ -87,8 +87,25 @@ class VideoParticleTrackingUI:
             "condensate to measure viscosity via the Stokes-Einstein relation."
             "</span>")
         header.setWordWrap(True)
+
+        header.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         header.setStyleSheet("padding:6px; background:#2a2a2a; border-radius:4px;")
         layout.addWidget(header)
+
+        # ── Step 1: load (status marker + load instruction) ────────────────
+        try:
+            from pycat.ui.field_status import add_step1_file_io, add_pixel_size_gate
+            add_step1_file_io(
+                self.viewer, layout,
+                instruction_html=(
+                    "Open a multichannel image via <b>Open/Save File(s)</b>, "
+                    "or drag one onto the canvas."))
+            self._pixel_gate_refresh = add_pixel_size_gate(
+                layout,
+                lambda: self.central_manager.active_data_class.data_repository,
+                central_manager=self.central_manager)
+        except Exception:
+            pass
 
         self._add_host_segmentation(layout)
         self._add_bead_detection(layout)
@@ -100,6 +117,7 @@ class VideoParticleTrackingUI:
         from pycat.ui.ui_modules import _apply_scroll_guard
         _apply_scroll_guard(main_w)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_w.setMinimumWidth(0)
         scroll.setWidget(main_w)
         self.viewer.window.add_dock_widget(scroll, name="Video Particle Tracking")
 
@@ -144,7 +162,8 @@ class VideoParticleTrackingUI:
         btn = QPushButton("▶  Segment Host & Erode")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_segment_host)
-        form.addRow(self._host_prog); form.addRow(btn)
+        form.addRow(self._host_prog); from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
     def _seg_method_name(self):
@@ -247,7 +266,8 @@ class VideoParticleTrackingUI:
         btn = QPushButton("▶  Detect Beads")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_detect_beads)
-        form.addRow(self._bead_prog); form.addRow(btn)
+        form.addRow(self._bead_prog); from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
     def _on_detect_beads(self):
@@ -387,7 +407,8 @@ class VideoParticleTrackingUI:
         btn = QPushButton("▶  Link Trajectories")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_link)
-        form.addRow(self._track_prog); form.addRow(btn)
+        form.addRow(self._track_prog); from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
     def _linker_name(self):
@@ -520,7 +541,8 @@ class VideoParticleTrackingUI:
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_rheology)
-        form.addRow(self._rheo_prog); form.addRow(btn)
+        form.addRow(self._rheo_prog); from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
     def _on_rheology(self):

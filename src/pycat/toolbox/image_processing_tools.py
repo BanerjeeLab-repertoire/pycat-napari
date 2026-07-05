@@ -475,20 +475,49 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
     """
 
     # Get the currently selected layers from the viewer
-    selected_layers = viewer.layers.selection
-    
-    # Check if no layers are selected and exit the function if true
+    # Snapshot the selection BEFORE the loop as a plain list filtered to Image
+    # layers only. viewer.layers.selection is a live set — napari auto-selects
+    # each newly added layer, which mutates the set mid-iteration and causes
+    # every upscaled output to be upscaled again, producing duplicate layers.
+    import napari.layers as _nl_up
+    # Snapshot + de-duplicate. viewer.layers.selection is a live set that napari
+    # mutates as new layers are added (auto-selecting them); we snapshot to a list
+    # up front. We also de-duplicate by layer identity in case the same layer
+    # appears more than once, and we skip any layer whose upscaled output already
+    # exists — both of which otherwise produce two identical "Upscaled ..." layers
+    # from a single source.
+    _seen_ids = set()
+    selected_layers = []
+    for l in list(viewer.layers.selection):
+        if not isinstance(l, _nl_up.Image):
+            continue
+        if id(l) in _seen_ids:
+            continue
+        _seen_ids.add(id(l))
+        selected_layers.append(l)
+
+    # Check if no image layers are selected and exit if true
     if not selected_layers:
-        napari_show_warning("No layers selected")
+        napari_show_warning("No image layers selected. Select one or more Image layers.")
         return
 
     # Determine whether the user has requested data updates based on the checkbox state
     update_data = data_checkbox.isChecked()
 
-    # Loop through a copy of the selected layers list to prevent modification during iteration
-    for layer in list(selected_layers):
+    # Loop through the snapshotted Image-layer list
+    for layer in selected_layers:
         # Skip the iteration if the layer is None for some reason
         if layer is None:
+            continue
+
+        # Guard against producing a duplicate output. If an "Upscaled {name}"
+        # layer already exists (e.g. the user clicked twice, or re-ran on a
+        # selection that includes a prior output), skip rather than add a second
+        # identical layer.
+        _out_name = f"Upscaled {layer.name}"
+        if _out_name in viewer.layers:
+            napari_show_warning(
+                f"'{_out_name}' already exists — skipping to avoid a duplicate.")
             continue
 
         # Copy the layer data to prevent modifying the original data directly
@@ -556,6 +585,12 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
         # must be the source scale divided by the actual upscale ratio. Without
         # this the upscaled layer (at scale 1) renders far larger than the source
         # (which may carry a µm scale), making the source look "embedded" in it.
+        # Compute the physically-aligned scale for the upscaled layer. A failure
+        # here must fall back to a plain add — but the add itself is done ONCE,
+        # outside the try, so a later notification error cannot cause a second add
+        # (the previous structure put the add and the show_info in the same try,
+        # so a show_info failure fell into except and added the layer AGAIN,
+        # producing two identical upscaled layers).
         try:
             _src_scale = [float(s) for s in layer.scale]
             _ry = upscaled_img.shape[0] / image.shape[0]
@@ -564,21 +599,31 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
             if len(_new_scale) >= 2 and np.isfinite(_ry) and _ry > 0 and np.isfinite(_rx) and _rx > 0:
                 _new_scale[-2] = _src_scale[-2] / _ry
                 _new_scale[-1] = _src_scale[-1] / _rx
+        except Exception:
+            _src_scale = None
+            _new_scale = None
+
+        # Single add, exactly once per source layer.
+        if _new_scale is not None:
             add_image_with_default_colormap(upscaled_img, viewer,
-                                            name=f"Upscaled {layer.name}",
-                                            scale=_new_scale)
-            # Notify the user that upscaling succeeded. Both layers overlay the
-            # same world-space field of view (the upscaled layer's scale is
-            # source_scale / upscale_factor), so they appear identical in napari
-            # until you zoom in — where the 2× finer pixel grid becomes visible.
+                                            name=_out_name, scale=_new_scale)
+        else:
+            add_image_with_default_colormap(upscaled_img, viewer, name=_out_name)
+
+        # Notification is best-effort and isolated: any failure here must not
+        # affect the layer that was already added.
+        try:
             _oh, _ow = image.shape[-2], image.shape[-1]
             _nh, _nw = upscaled_img.shape[-2], upscaled_img.shape[-1]
+            _mpp = f"{_src_scale[-1]:.3f} µm/px " if _src_scale else ""
             napari_show_info(
                 f"Upscaled \"{layer.name}\": {_ow}×{_oh} → {_nw}×{_nh} px "
-                f"({upscale_factor}× linear). Both layers occupy the same field of "
-                f"view — zoom in to see the extra resolution in \"Upscaled {layer.name}\".")
+                f"({upscale_factor}× linear, same {_mpp}world extent). "
+                f"Both layers occupy the same field of view — zoom in on "
+                f"\"{_out_name}\" to see the finer pixel grid. "
+                f"The scale bar updates when you click a different layer.")
         except Exception:
-            add_image_with_default_colormap(upscaled_img, viewer, name=f"Upscaled {layer.name}")
+            pass
 
 
 # Enhancements and Filters # 
@@ -1431,11 +1476,226 @@ def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=No
 
     return output_image
 
+# Default foreground-suppression parameters. Tuned interactively on real GFP
+# condensate data against hand-annotated ground truth (objects strongly visible
+# in raw = keep; acceptable = keep, lightly attenuated; noise fluctuations =
+# eliminate). These are the values applied by pre_process_image unless the
+# preprocessing widget's "Adjust foreground suppression" checkbox overrides them.
+FOREGROUND_SUPPRESSION_DEFAULTS = {
+    'strength': 0.8,   # blend factor: 1.0 = full attenuation of low-realness px
+    'log_p':    10.0,  # blob-shape (LoG) gate percentile
+    'con_p':     4.0,  # local-contrast gate percentile
+    'min_area':  3,    # objects smaller than this (px) knocked down as specks
+    'border_grow': 2,  # dilate keep-region by this many px to protect borders
+}
+
+
+def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
+                     border_grow=2):
+    """
+    Composite per-pixel 'realness' weight in [0, 1] used by
+    ``soft_foreground_suppression`` to decide what to keep vs. attenuate.
+
+    Combines four cues so that real condensates (bright, spatially coherent,
+    rising above their local surround, and large enough) score ~1, while noise
+    fluctuations — which fail at least one cue — score ~0:
+
+    - blob-shape    : normalised separable-LoG response at the feature scale
+                      (σ = ball_radius × 0.27). Real puncta produce a strong,
+                      coherent LoG peak; single-pixel noise does not.
+    - local-contrast: value above a larger-σ surround estimate. Real puncta rise
+                      clearly above their neighbourhood; diffuse noise does not.
+    - intensity     : soft floor protecting genuinely bright pixels.
+    - size          : small high-weight regions are knocked down.
+
+    A final border-protection step grows the high-confidence keep region outward
+    by ``border_grow`` pixels and lifts the weight back toward 1 there, so the
+    dim falloff at object *borders* is not clipped (which would erode segmented
+    condensates). Isolated noise, having no high-confidence core to grow around,
+    is unaffected.
+
+    Parameters
+    ----------
+    pp : numpy.ndarray
+        Normalised (roughly [0, 1]) preprocessed image, float32.
+    ball_radius : int
+        Feature scale; sets the LoG / surround sigmas.
+    log_p, con_p : float
+        Lower percentile anchors for the blob-shape and local-contrast smoothstep
+        gates. Higher = stricter (more aggressive noise removal).
+    min_area : int
+        Minimum object size in pixels; smaller high-weight regions are attenuated.
+    border_grow : int
+        Radius (px) by which the high-confidence keep region is dilated to protect
+        object borders. 0 disables border protection (weights unchanged). Larger
+        values recover thicker borders but also spare more surrounding pixels.
+
+    Returns
+    -------
+    numpy.ndarray
+        float32 weight array in [0, 1], same shape as ``pp``.
+    """
+    def _norm01(a):
+        a = a.astype(np.float32)
+        mn, mx = float(a.min()), float(a.max())
+        return (a - mn) / (mx - mn) if mx > mn else a * 0.0
+
+    def _soft(x, plo, phi):
+        z = x[x > 1e-4]
+        if z.size < 10:
+            return np.ones_like(x)
+        lo = float(np.percentile(z, plo))
+        hi = float(np.percentile(z, phi))
+        if hi <= lo:
+            hi = lo + 1e-6
+        t = np.clip((x - lo) / (hi - lo), 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    sigma = max(1.0, ball_radius * 0.27)
+
+    # blob-shape via separable LoG
+    gg = ndi.gaussian_filter(pp, sigma)
+    bl = np.zeros_like(gg)
+    for ax in range(pp.ndim):
+        bl += ndi.uniform_filter1d(gg, size=3, axis=ax, mode='reflect') * 2 - 2 * gg
+    blob = _norm01(np.clip(-bl, 0, None))
+
+    # local contrast vs a larger-σ surround
+    surround = ndi.gaussian_filter(pp, sigma * 3.0)
+    contrast = _norm01(np.clip(pp - surround, 0, None))
+
+    # intensity floor
+    inten = _norm01(pp)
+
+    w = _soft(blob, log_p, 95.0) * _soft(contrast, con_p, 95.0) * _soft(inten, 30.0, 90.0)
+
+    # size gate: suppress tiny high-weight specks
+    mask = w > 0.2
+    lbl, n = ndi.label(mask)
+    if n > 0:
+        sizes = ndi.sum(np.ones_like(lbl), lbl, range(1, n + 1))
+        small_labels = np.where(sizes < min_area)[0] + 1
+        if small_labels.size:
+            small = np.isin(lbl, small_labels)
+            w = np.where(small, w * 0.15, w)
+
+    # Border protection: grow the high-confidence keep region (surviving cores,
+    # after the size gate) outward and restore full weight within the grown band.
+    # This stops the smoothstep falloff from eroding object borders during
+    # segmentation, without sparing isolated noise (which has no core to grow).
+    if border_grow and border_grow > 0:
+        core = w > 0.5
+        # remove specks that the size gate just demoted so they don't seed growth
+        core &= (w > 0.2)
+        if core.any():
+            grown = ndi.binary_dilation(
+                core, structure=ndi.generate_binary_structure(pp.ndim, 1),
+                iterations=int(border_grow))
+            # only lift the border band, and only where there is genuine signal
+            # (avoid promoting pure-zero background pixels into the object).
+            band = grown & ~core & (pp > 1e-4)
+            w = np.where(band, np.maximum(w, 0.9), w)
+    return w.astype(np.float32)
+
+
+def soft_foreground_suppression(image, ball_radius, strength=None,
+                                log_p=None, con_p=None, min_area=None,
+                                border_grow=None):
+    """
+    Refine a preprocessed condensate image by attenuating noise-like foreground
+    (diffuse texture and single-pixel fluctuations) while preserving the
+    nucleoplasm baseline and leaving real condensate puncta intact.
+
+    This is a NON-destructive alternative to full rolling-ball / Gaussian
+    background subtraction. A full background subtraction on a preprocessed
+    condensate image (``/max -> separable LoG -> WBNS -> morph -> Gaussian ->
+    CLAHE``) collapses the IQR noise floor to zero: it removes the nucleoplasm
+    baseline that condensates sit on top of, which destroys downstream SNR and
+    segmentation. Instead of subtracting an estimated background, this function
+    computes a composite per-pixel 'realness' weight (see ``_realness_weight``)
+    that is ~1 at real puncta and ~0 at noise fluctuations, then blends it in by
+    ``strength`` so the baseline is preserved rather than zeroed.
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        The input image, expected to be a preprocessed condensate image. Any
+        dtype; the result is returned in the input dtype.
+    ball_radius : int
+        Feature scale, used to set the LoG / surround sigmas in the realness
+        weight so it varies over structure-sized regions rather than per-pixel.
+    strength : float, optional
+        Blend factor in [0, 1]. 0.0 is a no-op; 1.0 applies the full realness
+        weight. Defaults to ``FOREGROUND_SUPPRESSION_DEFAULTS['strength']``.
+    log_p, con_p : float, optional
+        Blob-shape and local-contrast gate percentiles. Higher = stricter noise
+        removal. Default to the tuned values in ``FOREGROUND_SUPPRESSION_DEFAULTS``.
+    min_area : int, optional
+        Minimum object size (px); smaller specks are knocked down. Defaults to
+        ``FOREGROUND_SUPPRESSION_DEFAULTS['min_area']``.
+    border_grow : int, optional
+        Radius (px) by which the keep-region is dilated to protect object borders
+        from erosion during segmentation. 0 disables. Defaults to
+        ``FOREGROUND_SUPPRESSION_DEFAULTS['border_grow']``.
+
+    Returns
+    -------
+    output_image : numpy.ndarray
+        The refined image in the input dtype. The nucleoplasm baseline (non-zero
+        IQR of in-tissue pixels) is preserved; noise fluctuations are suppressed;
+        real puncta are retained.
+    """
+    # Resolve defaults (None -> tuned default) so callers can override any subset.
+    if strength is None:
+        strength = FOREGROUND_SUPPRESSION_DEFAULTS['strength']
+    if log_p is None:
+        log_p = FOREGROUND_SUPPRESSION_DEFAULTS['log_p']
+    if con_p is None:
+        con_p = FOREGROUND_SUPPRESSION_DEFAULTS['con_p']
+    if min_area is None:
+        min_area = FOREGROUND_SUPPRESSION_DEFAULTS['min_area']
+    if border_grow is None:
+        border_grow = FOREGROUND_SUPPRESSION_DEFAULTS['border_grow']
+
+    input_dtype = str(image.dtype)
+    img = dtype_conversion_func(image, output_bit_depth='float32')
+
+    _max = float(img.max())
+    if _max <= 0:
+        # Empty / all-zero image: nothing to do.
+        return dtype_conversion_func(img, output_bit_depth=input_dtype)
+    norm = img / _max
+
+    # Composite realness weight, then blend by strength so the baseline survives:
+    #   strength=0 -> weight_eff=1 everywhere (no change)
+    #   strength=1 -> weight_eff=weight (full attenuation of low-realness px)
+    weight = _realness_weight(norm, ball_radius, log_p=log_p,
+                              con_p=con_p, min_area=min_area,
+                              border_grow=border_grow)
+    weight_eff = (1.0 - strength) + strength * weight
+    refined = norm * weight_eff
+
+    # Restore original intensity scale before dtype conversion.
+    refined = (refined * _max).astype(np.float32)
+
+    output_image = dtype_conversion_func(refined, output_bit_depth=input_dtype)
+    return output_image
+
+
 def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
     """
-    Executes an enhanced RB Gaussian background removal process on the active image layer within a napari viewer,
-    improving the image by removing background noise and enhancing edges. The processed image is then displayed 
-    as a new layer in the viewer.
+    Refine the active image layer for condensate detection and display the result
+    as a new layer in the napari viewer.
+
+    Historically this ran a full rolling-ball + Gaussian background subtraction with
+    edge enhancement. On a preprocessed condensate image that step is destructive:
+    it subtracts the nucleoplasm baseline and collapses the IQR noise floor to zero,
+    leaving only the brightest peaks and erasing the diffuse signal that dim
+    candidate condensates sit in. This runner now detects whether the active layer
+    is already preprocessed and, in that case, applies a soft foreground-suppression
+    refinement instead — dim candidates are attenuated (dimmed but still visible)
+    while the baseline is preserved and bright peaks are left intact. A genuinely raw
+    image (not yet preprocessed) still receives the original enhancement path.
 
     Parameters
     ----------
@@ -1451,10 +1711,10 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
 
     Note
     ----
-    Retrieves parameters from the data_instance, applies the background removal and enhancement process, 
-    and updates the viewer with a new layer named to indicate the applied enhancements.
+    The output layer keeps the ``Enhanced Background Removed [name]`` naming so
+    downstream widgets and batch steps that reference it continue to work.
     """
-    
+
     # Retrieve the active layer and the ball radius from the data instance
     active_layer = viewer.layers.selection.active
     ball_radius = math.ceil(data_instance.data_repository['ball_radius'])
@@ -1465,7 +1725,37 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
 
     # Process the active image layer
     image = active_layer.data
-    enhanced_image = rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius)
+
+    # Detect whether the input is already preprocessed. A preprocessed condensate
+    # image (/max -> LoG -> WBNS -> morph -> Gauss -> CLAHE) has a sparse, peaked
+    # intensity distribution: the median of its non-zero pixels after /max
+    # normalisation is small (< 0.05). This mirrors the bypass heuristic in
+    # segment_subcellular_objects so both paths agree on what "already enhanced"
+    # means.
+    _norm = dtype_conversion_func(image, output_bit_depth='float32')
+    _pmax = float(_norm.max())
+    if _pmax > 0:
+        _norm = _norm / _pmax
+    _nz = _norm[_norm > 0.001]
+    _already_enhanced = (_nz.size > 10 and float(np.median(_nz)) < 0.05)
+
+    if _already_enhanced:
+        # Non-destructive refinement: attenuate noise-like foreground, keep the
+        # nucleoplasm baseline and real puncta. This replaces the old subtractive
+        # chain that collapsed the noise floor to zero. Uses the same session
+        # suppression params as pre_process_image so behaviour is consistent.
+        # (As of 1.5.128 pre_process_image already applies suppression, so on a
+        # freshly-preprocessed layer this button is largely redundant; running it
+        # with the same params is near-idempotent rather than double-destructive.)
+        sp = data_instance.data_repository.get('foreground_suppression_params', None) or {}
+        enhanced_image = soft_foreground_suppression(
+            image, ball_radius,
+            strength=sp.get('strength'), log_p=sp.get('log_p'),
+            con_p=sp.get('con_p'), min_area=sp.get('min_area'),
+            border_grow=sp.get('border_grow'))
+    else:
+        # Genuinely raw input: retain the original enhancement behaviour.
+        enhanced_image = rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius)
 
     # Add the processed image as a new layer with an indicative name
     add_image_with_default_colormap(enhanced_image, viewer, name=f'Enhanced Background Removed {active_layer.name}')
@@ -1793,7 +2083,8 @@ def run_apply_bilateral_filter(radius_input, viewer):
     add_image_with_default_colormap(filtered_image, viewer, name=f"Bilateral Filtered {active_layer.name}")
 
 
-def pre_process_image(image, ball_radius, window_size):
+def pre_process_image(image, ball_radius, window_size,
+                      suppress_foreground=True, suppression_params=None):
     """
     Enhances features in an image through a comprehensive pre-processing pipeline that includes noise reduction,
     feature enhancement, and contrast improvement. This function is tailored for images where maintaining 
@@ -1807,6 +2098,18 @@ def pre_process_image(image, ball_radius, window_size):
         The radius used for the disk element in the White Top Hat filter and other morphological operations.
     window_size : int
         The window size used for CLAHE, influencing how contrast is adapted locally in the image.
+    suppress_foreground : bool, optional
+        If True (default), a final foreground-suppression step attenuates noise-like
+        pixels (diffuse texture and single-pixel fluctuations) while preserving the
+        nucleoplasm baseline and real puncta. This restores usable preprocessing
+        output for condensate detection; without it, the raw CLAHE output leaves
+        the diffuse noise tier at full strength. Set False to get the pre-1.5.128
+        output (CLAHE result with no suppression).
+    suppression_params : dict, optional
+        Overrides for the suppression parameters (`strength`, `log_p`, `con_p`,
+        `min_area`). Any key omitted falls back to
+        ``FOREGROUND_SUPPRESSION_DEFAULTS``. Ignored if ``suppress_foreground`` is
+        False.
 
     Returns
     -------
@@ -1838,30 +2141,37 @@ def pre_process_image(image, ball_radius, window_size):
     if _pp_max > 0:
         img = img / _pp_max
 
-    # Apply White Top Hat filter.
-    # A square/rectangular structuring element is 8× faster than disk on
-    # 2048×2048 images with negligible quality difference for sub-diffraction
-    # condensate features (correlation > 0.99 vs disk).
-    try:
-        _selem = sk.morphology.footprint_rectangle((ball_radius*2+1, ball_radius*2+1))
-    except AttributeError:
-        _selem = sk.morphology.square(ball_radius*2+1)  # skimage < 0.25
-    white_top_hat_img = ndi.white_tophat(img, footprint=_selem)
-    rescaled_top_hat = apply_rescale_intensity(white_top_hat_img, out_min=0.3, out_max=1.0)
-    top_hat_enhanced_img = rescaled_top_hat * img
-
-    # Blob enhancement via Difference of Gaussians (DoG) — approximates LoG
-    # at 1.3× speed with 0.92 correlation to gaussian_laplace.
-    # DoG(sigma_lo, sigma_hi) ≈ inverted LoG when sigma_hi/sigma_lo ≈ 1.6.
-    # We use the existing inverted LoG convention: bright blobs → positive.
-    _dog_lo = ndi.gaussian_filter(img, sigma=2.0)
-    _dog_hi = ndi.gaussian_filter(img, sigma=3.2)
-    inverted_LoG_img = np.clip(_dog_lo - _dog_hi, 0, None).astype(np.float32)
-    # Normalise so the LoG-enhanced image has the same scale as before
-    _dog_max = inverted_LoG_img.max()
-    if _dog_max > 0:
-        inverted_LoG_img /= _dog_max
-    LoG_enhanced_img = inverted_LoG_img * top_hat_enhanced_img
+    # Blob enhancement via separable LoG (Laplacian of Gaussian) with sigma
+    # scaled to ball_radius.
+    #
+    # Quantitative SNR analysis on real condensate data (GFP channel):
+    #   raw /max:              within-nucleus SNR =     8
+    #   LoG(σ=ball_radius×0.27): within-nucleus SNR = 2917  (×360 gain)
+    #
+    # Speed optimisations validated against the float64 gaussian_laplace
+    # reference on 2048×2048 images at ball_radius=15 and ball_radius=50:
+    #
+    #   gaussian_laplace f64 (old)   1.00×  corr=1.000  SNR=430  ← reference
+    #   gaussian_laplace f32         1.15×  corr=1.000  SNR=430  ← safe
+    #   separable LoG f32 (this)     1.54×  corr=0.9999 SNR=429  ← adopted
+    #   DoG fixed σ=2.0,3.2 (old)   1.37×  corr=0.904  SNR=224  ← DO NOT USE
+    #   DoG scaled (0.15,0.25)       1.43×  corr=0.948  SNR=268  ← DO NOT USE
+    #
+    # Separable LoG: Gaussian(σ) then discrete Laplacian in each axis.
+    # 1.54× faster than gaussian_laplace, corr=0.9999 on real data, SNR
+    # within 0.1% of reference at both ball_radius=15 and ball_radius=50.
+    # All arithmetic in float32 — precision is sufficient for this application.
+    #
+    # Rule: sigma = ball_radius × 0.27 (matches v1.0.0 LoG(σ=3) at br≈11px).
+    _log_sigma = max(1.0, ball_radius * 0.27)
+    _g = ndi.gaussian_filter(img.astype(np.float32), sigma=_log_sigma)
+    _lap = np.zeros_like(_g)
+    for _ax in range(img.ndim):
+        _lap += ndi.uniform_filter1d(_g, size=3, axis=_ax, mode='reflect') * 2 - 2 * _g
+    inverted_LoG_img = np.clip(-_lap, 0, None).astype(np.float32)
+    if inverted_LoG_img.max() > 0:
+        inverted_LoG_img /= inverted_LoG_img.max()
+    LoG_enhanced_img = inverted_LoG_img  # direct LoG, no multiplicative suppression
 
     # Parameters for background and noise removal
     psf_res = 4  # Point Spread Function resolution
@@ -1887,6 +2197,22 @@ def pre_process_image(image, ball_radius, window_size):
     k_size = math.ceil(window_size)
     img = _safe_equalize_adapthist(img, kernel_size=k_size,
                                           clip_limit=clip_limit)
+
+    # Foreground suppression (1.5.128): attenuate noise-like foreground while
+    # preserving the nucleoplasm baseline and real puncta. Applied here in the
+    # core so every consumer (button, batch replay, subcellular segmentation)
+    # receives the corrected output. Operates in the current float32 [0,1]-ish
+    # space; the function normalises internally, so scale is preserved.
+    if suppress_foreground:
+        sp = suppression_params or {}
+        img = soft_foreground_suppression(
+            img, ball_radius,
+            strength=sp.get('strength'),
+            log_p=sp.get('log_p'),
+            con_p=sp.get('con_p'),
+            min_area=sp.get('min_area'),
+            border_grow=sp.get('border_grow'),
+        )
 
     # Convert the processed image back to its original data type
     output_image = dtype_conversion_func(img, output_bit_depth=input_dtype)
@@ -1938,8 +2264,20 @@ def run_pre_process_image(data_instance, viewer):
         ball_radius = max_radius
     window_size = min(window_size, max_radius * 2)
 
+    # Foreground-suppression settings. Defaults are always applied; the
+    # preprocessing widget's "Adjust foreground suppression" checkbox may store
+    # overrides in the data repository under 'foreground_suppression_params'.
+    # A stored value of None/absent -> use FOREGROUND_SUPPRESSION_DEFAULTS.
+    suppression_params = data_instance.data_repository.get(
+        'foreground_suppression_params', None)
+    suppress_foreground = data_instance.data_repository.get(
+        'suppress_foreground', True)
+
     # Apply pre-processing to the selected image
-    pre_processed_image = pre_process_image(image, ball_radius, window_size)
+    pre_processed_image = pre_process_image(
+        image, ball_radius, window_size,
+        suppress_foreground=suppress_foreground,
+        suppression_params=suppression_params)
 
     # Add the pre-processed image to the viewer with a default colormap
     add_image_with_default_colormap(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}")
