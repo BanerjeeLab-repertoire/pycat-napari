@@ -321,7 +321,11 @@ def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, ou
 
     if method == 'cellpose':
         from pycat.toolbox.segmentation_tools import cellpose_segmentation
-        cell_masks = cellpose_segmentation(image, object_diameter)
+        _refine = bool(params.get('cellpose_refine', False))
+        _model = params.get('cellpose_model', None)
+        cell_masks = cellpose_segmentation(image, object_diameter,
+                                           model_name=_model,
+                                           postprocess=_refine)
         cell_masks = np.asarray(cell_masks).astype(np.uint16)
         print(f"[PyCAT Batch]   Cellpose done: {cell_masks.max()} cells found.")
 

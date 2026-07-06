@@ -17,7 +17,7 @@ import napari
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QLineEdit, QWidget,
-    QComboBox, QSlider, QScrollArea, QSizePolicy)
+    QComboBox, QSlider, QScrollArea, QSizePolicy, QCheckBox)
 
 from pycat.toolbox.segmentation_tools import (
     run_fz_segmentation_and_merging, run_cellpose_segmentation,
@@ -101,6 +101,24 @@ class _SegmentationWidgetsMixin:
             "(Cellpose >=4 only; much slower on CPU). Only models supported by "
             "your installed Cellpose version are shown.")
         cp_model_row.addWidget(cp_model_dropdown)
+
+        # Refine-masks toggle. When ON, Cellpose's masks are post-processed
+        # (binary → watershed split → morphological opening → relabel + edge
+        # extension) — the legacy behaviour the 2D pipeline was validated with.
+        # When OFF, Cellpose's instance masks are used directly, which preserves
+        # its learned per-object boundaries and is usually better on images
+        # Cellpose already segments well. Defaults to ON here to preserve the
+        # existing validated 2D result; untick it to compare against raw Cellpose.
+        cp_refine_cb = QCheckBox("Refine masks (watershed + morphology cleanup)")
+        cp_refine_cb.setChecked(True)
+        cp_refine_cb.setToolTip(
+            "ON (default): apply PyCAT's watershed-split + morphological-opening\n"
+            "cleanup to Cellpose's masks (the legacy 2D behaviour). Can split\n"
+            "erroneously-merged blobs, but may erode thin/dim/touching cells and\n"
+            "degrade otherwise-good Cellpose boundaries.\n"
+            "OFF: use Cellpose's masks as-is — usually best when Cellpose already\n"
+            "segments the image well.")
+        cp_model_row.addWidget(cp_refine_cb)
         seg_layout.addWidget(cp_model_group)
 
         # ── Shared image dropdown ────────────────────────────────────────
@@ -134,12 +152,14 @@ class _SegmentationWidgetsMixin:
 
             if rb_cellpose.isChecked():
                 dr['cellpose_model'] = cp_model_dropdown.currentText()
+                dr['cellpose_refine'] = bool(cp_refine_cb.isChecked())
                 self.on_general_button_clicked(
                     run_cellpose_segmentation, self.viewer, image_dropdown,
                     self.central_manager.active_data_class, self.viewer)
                 self._record('cellpose_segmentation', {
                     'method': 'cellpose',
                     'cellpose_model': cp_model_dropdown.currentText(),
+                    'cellpose_refine': bool(cp_refine_cb.isChecked()),
                     'image_layer': layer_name,
                     'cell_diameter': dr.get('cell_diameter', 100),
                     'ball_radius':   dr.get('ball_radius', 50),

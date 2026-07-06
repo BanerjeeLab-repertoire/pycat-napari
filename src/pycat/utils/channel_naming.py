@@ -47,34 +47,42 @@ from typing import Optional
 # fluorophore/channel name string, display label, spectral bucket)
 
 _FLUOROPHORE_PATTERNS = [
+    # Boundaries use (?:^|[^a-z0-9]) ... (?:[^a-z0-9]|$) rather than \b, because
+    # real channel names embed the fluorophore between underscores/digits
+    # (e.g. "488_GFP_CF40um_z", "594_mCherry_CF40") where \b does NOT fire
+    # (underscore is a word char). This matches the token wherever it sits.
     # UV / blue (nuclear stains)
     (r"dapi",                              "DAPI",      "blue"),
     (r"hoechst",                           "Hoechst",   "blue"),
-    (r"\bdraq5?\b",                        "DRAQ",      "blue"),
+    (r"(?:^|[^a-z])draq5?(?:[^a-z]|$)",    "DRAQ",      "blue"),
 
     # Green
-    (r"\begfp\b|\bgfp\b",                  "EGFP",      "green"),
-    (r"\balexa\s*488\b|\baf488\b",         "Alexa488",  "green"),
-    (r"\bfitc\b",                          "FITC",      "green"),
-    (r"\bgreen\b",                         "Green",     "green"),
+    (r"(?:^|[^a-z])egfp(?:[^a-z]|$)|(?:^|[^a-z])gfp(?:[^a-z]|$)", "EGFP", "green"),
+    (r"(?:^|[^a-z0-9])alexa\s*488(?:[^0-9]|$)|(?:^|[^a-z])af488(?:[^0-9]|$)", "Alexa488", "green"),
+    (r"(?:^|[^a-z])fitc(?:[^a-z]|$)",      "FITC",      "green"),
+    (r"(?:^|[^a-z])green(?:[^a-z]|$)",     "Green",     "green"),
 
     # Red / orange
-    (r"\bmcherry\b",                       "mCherry",   "red"),
-    (r"\brfp\b",                           "RFP",       "red"),
-    (r"\balexa\s*568\b|\baf568\b",         "Alexa568",  "red"),
-    (r"\balexa\s*594\b|\baf594\b",         "Alexa594",  "red"),
-    (r"\btexas\s*red\b",                   "TexasRed",  "red"),
-    (r"\btritc\b",                         "TRITC",     "red"),
-    (r"\bred\b",                           "Red",       "red"),
+    (r"(?:^|[^a-z])mcherry(?:[^a-z]|$)",   "mCherry",   "red"),
+    (r"(?:^|[^a-z])mscarlet(?:[^a-z]|$)",  "mScarlet",  "red"),
+    (r"(?:^|[^a-z])tdtomato(?:[^a-z]|$)",  "tdTomato",  "red"),
+    (r"(?:^|[^a-z])rfp(?:[^a-z]|$)",       "RFP",       "red"),
+    (r"(?:^|[^a-z0-9])alexa\s*568(?:[^0-9]|$)|(?:^|[^a-z])af568(?:[^0-9]|$)", "Alexa568", "red"),
+    (r"(?:^|[^a-z0-9])alexa\s*594(?:[^0-9]|$)|(?:^|[^a-z])af594(?:[^0-9]|$)", "Alexa594", "red"),
+    (r"texas\s*red",                       "TexasRed",  "red"),
+    (r"(?:^|[^a-z])tritc(?:[^a-z]|$)",     "TRITC",     "red"),
+    (r"(?:^|[^a-z])red(?:[^a-z]|$)",       "Red",       "red"),
 
     # Far-red
-    (r"\bcy5\b",                           "Cy5",       "far_red"),
-    (r"\balexa\s*647\b|\baf647\b",         "Alexa647",  "far_red"),
-    (r"\bapc\b",                           "APC",       "far_red"),
-    (r"\bfar\s*red\b",                     "FarRed",    "far_red"),
+    (r"(?:^|[^a-z])cy5(?:[^a-z]|$)",       "Cy5",       "far_red"),
+    (r"(?:^|[^a-z0-9])alexa\s*647(?:[^0-9]|$)|(?:^|[^a-z])af647(?:[^0-9]|$)", "Alexa647", "far_red"),
+    (r"(?:^|[^a-z])apc(?:[^a-z]|$)",       "APC",       "far_red"),
+    (r"far\s*red",                         "FarRed",    "far_red"),
 
-    # Transmitted / brightfield / DIC — not fluorescence
-    (r"\bdic\b|\bphase\b|brightfield|\bpmt\b|\btransmit",
+    # Transmitted / brightfield / DIC — not fluorescence. BFPreAm / BFPreAmp
+    # is the Andor/Fusion brightfield-pre-amplifier channel name.
+    (r"(?:^|[^a-z])dic(?:[^a-z]|$)|(?:^|[^a-z])phase(?:[^a-z]|$)|brightfield|"
+     r"bfpreamp?|(?:^|[^a-z])bf(?:[^a-z]|$)|(?:^|[^a-z])pmt(?:[^a-z]|$)|transmit",
                                             "Transmitted", "transmitted"),
 ]
 
@@ -194,6 +202,7 @@ def identify_channel(
         "source": source,
         "bucket": bucket,
         "layer_name": layer_name,
+        "raw_name": channel_name or fluorophore_name,
     }
 
 
@@ -291,28 +300,62 @@ def extract_channel_info_from_ims(reader, channel_index: int) -> dict:
     emission   = None
     excitation = None
 
-    try:
-        meta = getattr(reader, "metaData", None) or {}
-        # metaData keys are often tuples like (channel_idx, 'ChannelName')
-        # or nested dicts — try several common access patterns defensively.
-        for key, value in meta.items():
-            key_str = str(key).lower()
-            if str(channel_index) not in key_str:
-                continue
-            if "name" in key_str and chan_name is None:
-                chan_name = str(value)
-            elif "emission" in key_str and emission is None:
-                try:
-                    emission = float(re.findall(r"[\d.]+", str(value))[0])
-                except (IndexError, ValueError):
-                    pass
-            elif "excitation" in key_str and excitation is None:
-                try:
-                    excitation = float(re.findall(r"[\d.]+", str(value))[0])
-                except (IndexError, ValueError):
-                    pass
-    except Exception:
-        pass
+    def _decode(v):
+        try:
+            if hasattr(v, 'tobytes'):
+                v = v.tobytes()
+            if isinstance(v, (bytes, bytearray)):
+                v = v.decode('ascii', errors='ignore')
+            s = str(v).strip().strip('\x00').strip()
+            return s or None
+        except Exception:
+            return None
+
+    def _first_float(v):
+        s = _decode(v)
+        if not s:
+            return None
+        m = re.findall(r"[\d.]+", s)
+        try:
+            return float(m[0]) if m else None
+        except (IndexError, ValueError):
+            return None
+
+    # Primary: read directly from the HDF5 DataSetInfo/Channel N group attributes.
+    # This is where Imaris/Fusion actually store per-channel Name (e.g.
+    # '488_GFP_CF40um_z', '594_mCherry_CF40', 'BFPreAm') and
+    # LSMExcitation/LSMEmissionWavelength. The reader.metaData dict is unreliable
+    # and often omits these, which forced the positional fallback.
+    hf = getattr(reader, "hf", None)
+    if hf is not None:
+        try:
+            grp = hf["DataSetInfo"][f"Channel {channel_index}"]
+            attrs = grp.attrs
+            chan_name = _decode(attrs.get("Name"))
+            emission = (_first_float(attrs.get("LSMEmissionWavelength"))
+                        or _first_float(attrs.get("EmissionWavelength")))
+            excitation = (_first_float(attrs.get("LSMExcitationWavelength"))
+                          or _first_float(attrs.get("ExcitationWavelength")))
+        except Exception:
+            pass
+
+    # Fallback: the older reader.metaData dict scan, for readers that expose
+    # metadata that way but not via a usable h5py handle.
+    if chan_name is None and emission is None and excitation is None:
+        try:
+            meta = getattr(reader, "metaData", None) or {}
+            for key, value in meta.items():
+                key_str = str(key).lower()
+                if str(channel_index) not in key_str:
+                    continue
+                if "name" in key_str and chan_name is None:
+                    chan_name = str(value)
+                elif "emission" in key_str and emission is None:
+                    emission = _first_float(value)
+                elif "excitation" in key_str and excitation is None:
+                    excitation = _first_float(value)
+        except Exception:
+            pass
 
     return identify_channel(
         channel_index=channel_index,

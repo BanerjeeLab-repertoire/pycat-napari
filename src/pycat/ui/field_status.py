@@ -483,8 +483,15 @@ def button_with_circle(button, optional=False, watch_dropdowns=None):
     left of an action button. Red (required) or yellow (optional). If
     *watch_dropdowns* is given (a list of QComboBox), the circle turns green once
     all of them have a real (non-placeholder) selection, so the square reflects
-    whether the action is ready to run. Returns the wrapper widget; add it to a
-    layout in place of the bare button."""
+    whether the action is ready to run.
+
+    The button's own click also marks completion: after the user runs the action,
+    the circle goes GREEN for a required step or BLUE for an optional step (blue =
+    "you did this optional thing"). A ``reset()`` method is attached to the
+    wrapper so a per-step / whole-workflow Clear can revert it to its initial
+    red/yellow. Returns the wrapper widget; add it to a layout in place of the
+    bare button.
+    """
     from PyQt5.QtWidgets import QWidget, QHBoxLayout
     w = QWidget(); hb = QHBoxLayout(w)
     hb.setContentsMargins(0, 0, 0, 0); hb.setSpacing(4)
@@ -494,9 +501,19 @@ def button_with_circle(button, optional=False, watch_dropdowns=None):
     c._set(init, tip)
     hb.addWidget(c)
     hb.addWidget(button, 1)
+
+    state = {'done': False}
     dds = list(watch_dropdowns or [])
-    if dds:
-        def _upd(*_):
+
+    def _refresh():
+        if state['done']:
+            # Completed: blue for an optional action, green for a required one.
+            if optional:
+                c._set('blue', 'Done — you ran this optional step.')
+            else:
+                c._set('green', 'Done — this step has been run.')
+            return
+        if dds:
             def _ok(dd):
                 t = (dd.currentText() or '').strip().lower()
                 return t and not t.startswith(
@@ -504,7 +521,29 @@ def button_with_circle(button, optional=False, watch_dropdowns=None):
             ready = all(_ok(dd) for dd in dds)
             c._set('green' if ready else init,
                    'Ready to run.' if ready else tip)
-        for dd in dds:
-            dd.currentIndexChanged.connect(_upd)
-        _upd()
+        else:
+            c._set(init, tip)
+
+    def _mark_done(*_):
+        state['done'] = True
+        _refresh()
+
+    def reset():
+        state['done'] = False
+        _refresh()
+
+    # Clicking the button marks the step done (after its own handler runs).
+    try:
+        button.clicked.connect(_mark_done)
+    except Exception:
+        pass
+    for dd in dds:
+        try:
+            dd.currentIndexChanged.connect(lambda *_: _refresh())
+        except Exception:
+            pass
+    _refresh()
+    # Expose reset + circle for per-step Clear wiring.
+    w.reset = reset
+    w._status_circle = c
     return w

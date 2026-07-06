@@ -22,6 +22,7 @@ Date
 """
 
 # Third party imports
+import os
 import numpy as np
 import pandas as pd
 import skimage as sk
@@ -737,17 +738,94 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     # Update the viewer with new layers showing the results of the puncta analysis
     viewer.add_labels(cell_labeled_puncta.astype(int), name="Cell Labeled Puncta Mask")
 
-    # Create a side-by-side image of the original image and an overlay of the segmented puncta mask and the image
+    # Create the in-viewer "Overlay Image" exactly as in v1.0.0. This sequence
+    # is byte-for-byte the released code that rendered correctly for years:
+    # the KEY detail is that the (H, 2W, 3) uint8 array from create_overlay_image
+    # is converted to uint16 and added WITHOUT rgb=True. napari auto-detects a
+    # (H,W,3) *uint8* array as RGB but does NOT auto-RGB a *uint16* one, so the
+    # uint16 array is treated as a plain multi-plane 2-D image and displays at
+    # correct proportions. (An earlier "fix" in this line — dropping the uint16
+    # conversion and adding rgb=True — is what produced the stretched stripe;
+    # this restores the original behaviour.)
     cell_mask = (labeled_cells > 0).astype(bool)
-    # Use _to_uint16_safe: img_as_uint clips float outside [-1,1] producing a
-    # flat array that renders as a green stripe when hstacked.
-    from pycat.toolbox.segmentation_tools import _to_uint16_safe
-    green_channel = _to_uint16_safe(np.asarray(image, dtype=np.float32))
+    green_channel = dtype_conversion_func(image, output_bit_depth='uint16')
     green_channel = apply_rescale_intensity(green_channel)
     sbs_overlay = create_overlay_image(green_channel, puncta_masks * cell_mask, alpha=0.65)
-    # create_overlay_image already returns uint8 RGB — do NOT apply dtype_conversion_func
-    # (img_as_uint on a uint8 RGB array rescales to 0-65535 and destroys the colors).
-    viewer.add_image(sbs_overlay, name="Overlay Image")
+    # Add as an explicit RGB image (uint8, rgb=True). The array is (H, 2W, 3):
+    # a side-by-side of the plain image and the red-overlaid image. Its pixels
+    # are the SAME physical size as the source image_layer's pixels — the hstack
+    # just adds more columns — so it must inherit the source's per-pixel scale.
+    # Setting it explicitly (a) prevents the side-by-side being squished into one
+    # image's field of view in X, and (b) marks the layer as already-scaled so
+    # _align_layer_scales leaves it alone.
+    sbs_overlay = np.asarray(sbs_overlay, dtype=np.uint8)
+    _ov_kwargs = {'name': 'Overlay Image', 'rgb': True}
+    try:
+        _isc = [float(s) for s in getattr(image_layer, 'scale', [])]
+        if len(_isc) >= 2 and all(np.isfinite(_isc)) and any(abs(s - 1.0) > 1e-9 for s in _isc[-2:]):
+            _ov_kwargs['scale'] = _isc[-2:]
+    except Exception:
+        pass
+    viewer.add_image(sbs_overlay, **_ov_kwargs)
+
+    # --- Enhancement 1: bring the Step 9 fluorescence image and the puncta mask
+    # to the top of the layer list (mask on top, both visible) for a quick
+    # mask-over-image view using napari's own compositing.
+    try:
+        for _nm in (image_layer.name, puncta_mask_layer.name):
+            if _nm in viewer.layers:
+                _lyr = viewer.layers[_nm]
+                _lyr.visible = True
+                _src = list(viewer.layers).index(_lyr)
+                viewer.layers.move(_src, len(viewer.layers) - 1)
+    except Exception as _re:
+        if os.environ.get('PYCAT_DEBUG'):
+            print(f"[PyCAT overlay] layer reorder failed: {_re}")
+
+    # --- Enhancement 2: write a flat merged grayscale+red PNG to the source
+    # folder as a shareable overlay on disk (contrast-stretched so dim data is
+    # visible; puncta blended red). This is a file, so napari never renders it.
+    try:
+        _img2d = np.squeeze(np.asarray(image))
+        if _img2d.ndim != 2:
+            _img2d = _img2d[tuple(0 for _ in range(_img2d.ndim - 2))]
+        _m2d = np.squeeze(np.asarray(puncta_masks * cell_mask))
+        if _m2d.shape != _img2d.shape:
+            _m2d = np.zeros(_img2d.shape, dtype=bool)
+        _m2d = _m2d > 0
+        _f = np.asarray(_img2d, dtype=np.float32)
+        # Contrast-stretch. Most of the frame is black background, which drags a
+        # global percentile down and blows out the bright cell. Compute the
+        # window over the SIGNAL pixels (non-near-zero), and use a high upper
+        # percentile (99.8) so bright detail isn't clipped.
+        _signal = _f[_f > (_f.max() * 0.02)] if _f.max() > 0 else _f
+        if _signal.size < 100:
+            _signal = _f
+        _lo = float(np.percentile(_signal, 2.0))
+        _hi = float(np.percentile(_signal, 99.8))
+        if _hi <= _lo:
+            _lo, _hi = float(_f.min()), float(_f.max())
+        if _hi <= _lo:
+            _hi = _lo + 1.0
+        _gray = (np.clip((_f - _lo) / (_hi - _lo), 0.0, 1.0) * 255).astype(np.uint8)
+        _rgb = np.stack([_gray, _gray, _gray], axis=-1)
+        if _m2d.any():
+            _a = 0.6
+            _red = np.array([255, 0, 0], dtype=np.float32)
+            _rgb[_m2d] = ((1 - _a) * _rgb[_m2d].astype(np.float32)
+                          + _a * _red).astype(np.uint8)
+        _src_path = (data_instance.data_repository.get('file_path')
+                     or getattr(data_instance, 'filePath', '') or '')
+        _base = (data_instance.data_repository.get('base_file_name')
+                 or getattr(data_instance, 'base_file_name', '') or 'analysis')
+        _out_dir = os.path.dirname(_src_path) if _src_path else os.getcwd()
+        _out_png = os.path.join(_out_dir, f"{_base}_puncta_overlay.png")
+        from skimage.io import imsave as _imsave
+        _imsave(_out_png, _rgb)
+        napari_show_warning(f"Overlay PNG saved: {_out_png}")
+    except Exception as _pe:
+        if os.environ.get('PYCAT_DEBUG'):
+            print(f"[PyCAT overlay] PNG export failed: {_pe}")
 
     # Retrieve the updated puncta and cell DataFrames from the data repository
     cell_df = data_instance.data_repository['cell_df']

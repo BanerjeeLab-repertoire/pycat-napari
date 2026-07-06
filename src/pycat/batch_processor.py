@@ -633,6 +633,44 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     eye_action.triggered.connect(_toggle_all_layers)
     toolbar.addAction(eye_action)
 
+    # Colormap reset: flip every IMAGE layer between gray and viridis in one
+    # click. IMS/multichannel loads assign per-channel colors (blue/green/red/
+    # magenta) which some users find harder to read than a neutral map. Labels
+    # and mask layers are left untouched (their colormaps are categorical).
+    cmap_action = QAction("\U0001F3A8  Gray", main_window)
+    cmap_action.setToolTip(
+        "Set all image layers to grayscale (click again for viridis).")
+    cmap_action._pycat_next = 'gray'   # the colormap the NEXT click will apply
+
+    def _reset_colormaps():
+        try:
+            import napari
+            target = getattr(cmap_action, '_pycat_next', 'gray')
+            n = 0
+            for lyr in viewer.layers:
+                if isinstance(lyr, napari.layers.Image):
+                    try:
+                        lyr.colormap = target
+                        n += 1
+                    except Exception:
+                        pass
+            # Flip for next click and update the button label.
+            if target == 'gray':
+                cmap_action._pycat_next = 'viridis'
+                cmap_action.setText("\U0001F3A8  Viridis")
+                cmap_action.setToolTip(
+                    "Set all image layers to viridis (click again for gray).")
+            else:
+                cmap_action._pycat_next = 'gray'
+                cmap_action.setText("\U0001F3A8  Gray")
+                cmap_action.setToolTip(
+                    "Set all image layers to grayscale (click again for viridis).")
+        except Exception as e:
+            print(f"[PyCAT] Colormap reset failed: {e}")
+
+    cmap_action.triggered.connect(_reset_colormaps)
+    toolbar.addAction(cmap_action)
+
     main_window.addToolBar(Qt.TopToolBarArea, toolbar)
     print("[PyCAT Batch] Batch toolbar added.")
 

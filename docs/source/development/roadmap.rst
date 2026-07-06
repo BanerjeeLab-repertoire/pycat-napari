@@ -49,6 +49,93 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: Platform consolidation (external architecture review, 2026-07)
+
+An external review found PyCAT has crossed from "condensate segmentation tool" to
+"quantitative microscopy workbench," and that the remaining work is consolidation, not
+new features: the implementation is ahead of the architecture. The unifying insight is
+that three separately-diagnosed problems are the same refactor — **make analysis modules
+self-describing.** A module that declares
+``name -> category -> required layers -> parameters -> run function -> output schema ->
+replay function`` in one place simultaneously resolves the UI monolith, the batch-registry
+monolith, and the output-schema gap. Sequenced by cost and dependency:
+
+* **[DO NOW, cheap] Spatial Phenotyping menu family.** Group the five spatial modules
+  (``spatial_metrology``, ``spatial_acf``, ``organizational_metrics``,
+  ``dynamic_spatial``, ``morphological_complexity``) under one visible conceptual
+  category in the UI and manuscript. Files stay separate (correct modular design); this
+  is a naming/grouping and discoverability fix only. Caveat: group them as "methods that
+  characterise spatial organisation," NOT as interchangeable — SACF (correlation length),
+  Ripley's K (clustering), and fractal dimension (boundary roughness) answer different
+  biological questions. UX grouping good; implying equivalence in the paper is wrong.
+
+* **[DO NOW, cheap] Stability tiers in README/docs.** Label every module
+  Validated / Experimental / Developer preview. Maps directly to test coverage:
+  known-answer regression tests (Pearson, FRAP, partition K, refinement bit-identical)
+  mark Validated; no-numerical-validation modules are Experimental; anything added
+  without golden-master fixtures (e.g. fibril suite) is Developer preview until tested.
+  Protects against overclaiming — the failure mode reviewers punish.
+
+* **[DO NOW, ongoing] Biological-relevance tooltips.** Most analysis widgets lack tooltips
+  explaining the biological use case. A tooltip must answer *what question does this
+  answer / what does the output mean / when NOT to use it* — not restate the method name.
+  Consistent with PyCAT's anti-black-box teaching philosophy. Author as structured text
+  (dict/docstring convention) not inline ``setToolTip`` strings, so the same content
+  feeds the future module registry's ``description`` field. Domain writing only the
+  authors can do; runs parallel to the manuscript (same use-case articulation as the
+  methods section). Not a blocker.
+
+* **[START NOW, foundational] Shared output schema — highest-value item.** Standardise a
+  long/tidy results format so every phenotyping axis merges into one "phenotype
+  fingerprint":
+  ``file_id | condition | channel | frame | z | cell_id | object_id | metric_name |
+  metric_value | unit | module | parameters_hash``.
+  Long format (one row per measurement) not wide, so a new metric never forces a schema
+  change. ``parameters_hash`` should key into the batch JSON record — closing the loop
+  between output schema and batch replay. Add a documented pivot to widen it into a
+  per-object feature matrix for stats/clustering (the fingerprint is the pivot, not the
+  tall CSV). This is the foundation the registry stands on (schema is the hard part,
+  dispatch is easy once outputs are uniform) and a strong standalone manuscript
+  reproducibility claim.
+
+* **[DEFER to post-publication] Self-describing module registry.** Replace the two
+  monoliths (``ui_modules.py`` widget hub, ``batch_step_registry.py`` replay hub) with a
+  registry where each module declares GUI action + headless replay + parameter schema +
+  output schema in one place. Correct mature-platform architecture, but a large invasive
+  refactor with no user-visible payoff — wrong to attempt right before the Nature Methods
+  submission. The completed mixin split was the correct intermediate step. Build the
+  output schema (above) first; it is the registry's hardest prerequisite.
+
+.. rubric:: Test expansion (highest-value next tests)
+
+The external reviewer could not complete a full suite run (GUI/scientific-stack imports
+stall without a display — expected; also motivates a headless CI config with
+``QT_QPA_PLATFORM=offscreen``). Highest-value additions, several of which double as
+manuscript evidence:
+
+* Lazy IMS frame-access correctness (``[0,0]`` -> (Y,X), ``[0,:]`` -> (Z,Y,X),
+  ``[:,:]`` -> (T,Z,Y,X)). We fixed the singleton-axis bug this cycle; a golden-master
+  test would prevent regression and reuses the validation logic already written.
+* Batch JSON replay == GUI output — tests the reproducibility guarantee directly; this
+  test *is* the evidence for the replayable-workflow claim.
+* Bounding-box segmentation == whole-image reference (we assert max diff 0.0 at
+  6·ball_radius pad but have no standing test).
+* QC metrics on synthetic pass/warn/fail images — doubles as the "bad data gallery"
+  fixtures.
+* Spatial metrics on known centroid arrangements (regular grid -> known Ripley's K;
+  Poisson field -> known SACF).
+* Video export produces a valid MP4 from a lazy stack.
+
+.. rubric:: Release hygiene (FIXED in v1.5.190)
+
+* The hand-zipped working snapshots contained ``.git/``, ``__pycache__/``, ``.coverage``,
+  ``.DS_Store``, ``dist/``, ``PKG-INFO`` etc. Root cause: the project migrated to
+  **hatchling**, which ignores ``MANIFEST.in`` (a setuptools mechanism) — so the careful
+  ``global-exclude`` rules there were dead. Fixed by adding an explicit
+  ``[tool.hatch.build.targets.sdist]`` section with ``include``/``exclude`` lists, so
+  every ``python -m build`` now produces a clean tarball by construction. The wheel was
+  already clean. Verify the GitHub release tarball is clean before the paper release.
+
 * **Status-marker completion** — a few action buttons were left unmarked because their
   required/optional status was ambiguous: the Z-Stack per-section generic run button
   (built dynamically with a reused label), any single "Run" button that spans multiple
@@ -60,6 +147,13 @@ Concrete, mostly self-contained items surfaced during recent audits:
   ``_stage_step`` treatment against their pipeline numbering. (Note: the mechanism must
   handle both title styles — ``add_text_label(bold=True)`` and ``QGroupBox``-titled
   builders via ``_consume_step_label``.)
+* **Toolbar / menu-bar redesign (candidate)** -- PyCAT's menus (Analysis Methods,
+  Toolbox, Open/Save, Clear, Home, Metadata) currently live on napari's native menu bar
+  with a "PyCAT" section marker as the divider (v1.5.195). A fuller redesign could move
+  them onto a dedicated PyCAT toolbar (one already exists for Batch Run / Save Config /
+  Layers in batch_processor.py) for cleaner separation, and reconsider whether the three
+  dropdowns should become something other than popup menus. Low urgency; the marker
+  resolves the immediate confusion.
 * **BioIO migration** — still on AICSImageIO (see the File I/O section below); a larger
   infrastructure change, best triggered by a concrete new-format need.
 * **Image Quality Advisor / QC module** — an in-app quality assessment layer that
@@ -73,6 +167,72 @@ Concrete, mostly self-contained items surfaced during recent audits:
 * **Analysis-aware kymographs** — beyond classic line-scan: colocalization,
   object-tracking (diameter/intensity/partition vs time), FRAP, and phase-boundary
   kymographs for maturation / non-equilibrium dynamics.
+
+.. rubric:: Super-resolution data processing workflows
+
+Super-resolution (SR) is a natural extension: for the image-based methods the input
+contract and lazy-loading infrastructure are largely shared with PyCAT's existing raster
+pipeline. **The critical distinction — and the thing to get right so this doesn't
+reproduce the incoherence the naming/methods audits target — is that "super-resolution"
+spans two fundamentally different data models.** They must be handled as two separate
+categories, not lumped together:
+
+**Category A — image-based / raster-grid SR (drop-in compatible).**
+These consume a conventional diffraction-limited image *sequence* on a pixel grid and
+produce an *enhanced image on a (usually finer) pixel grid*. The output is still a raster
+image, so it flows into every downstream PyCAT tool (segmentation, phenotyping, spatial
+metrology) unchanged — it is simply better-resolved. Candidates:
+
+* **Deconvolution** (Richardson-Lucy, Wiener) — PSF-based sharpening of a single image or
+  stack. The lowest-barrier entry point; no blinking or special probes required. A good
+  first SR feature because it is broadly applicable and the algorithm is well-established.
+* **SRRF (Super-Resolution Radial Fluctuations)** — computes radial symmetry
+  ("radiality") per frame across a short sequence of *conventional* fluorophores, then
+  temporally analyses the stack. Works on standard dyes/FPs and standard widefield/TIRF
+  hardware, which makes it attractive for condensate work where photoswitchable probes are
+  impractical. Output is a super-resolved raster image. Reference: NanoJ-SRRF (Henriques
+  lab).
+* **SOFI (Super-resolution Optical Fluctuation Imaging)** — computes higher-order temporal
+  cross-cumulants of independently blinking emitters over the image sequence as a whole.
+  Tolerates high labelling density and needs far fewer frames than localization methods
+  (hundreds–thousands vs tens of thousands), at the cost of lower ultimate resolution.
+  nth-order cumulant narrows the effective PSF by ~sqrt(n). Output is a raster image.
+* **Structured Illumination (SIM) reconstruction** — if raw SIM stacks are ever a target;
+  reconstruction produces a raster image. Lower priority (needs specific acquisition).
+
+For Category A the PyCAT-side work is mostly: an SR-reconstruction step that takes an
+image/stack layer and emits an enhanced image layer, wired through the same batch-record /
+replay and cache infrastructure as any other preprocessing step. These are, in effect,
+advanced preprocessing methods.
+
+**Category B — localization-table SR (genuinely different data model).**
+PALM / STORM / (d)STORM and the PAINT family (DNA-PAINT, and PAINT variants) do NOT
+produce images. They analyse a long sequence of frames in which sparse single molecules
+blink, fit each to sub-pixel precision, and emit a *localization table* — a list of
+``(x, y, [z], intensity, uncertainty, frame, ...)`` coordinates. Treating this table as an
+image is a category error: rendering to a pixel grid is a *visualization choice* applied
+*after* the fact, not the native representation. Supporting this well means:
+
+* A localization-table data type (import from common formats — ThunderSTORM CSV, Picasso
+  HDF5, etc.), distinct from the image layer type.
+* Localization-native operations: drift correction, filtering by uncertainty/photons,
+  grouping/merging of repeated localizations, and cluster analysis (DBSCAN, Ripley's K on
+  points) — which connects naturally to PyCAT's existing spatial-phenotyping suite, since
+  those spatial statistics are *already point-based* and would apply directly to
+  localizations.
+* Rendering to a raster image (histogram or Gaussian-blur render) as an *export/
+  visualization* path, at which point the result can re-enter Category A's raster pipeline
+  if desired.
+
+**Sequencing and scope note.** Category A (especially deconvolution, then SRRF/SOFI) is the
+low-friction, high-value near-term target: it reuses the existing raster pipeline, lazy
+loading, and batch/replay machinery, and directly benefits condensate imaging with
+conventional probes. Category B is a larger architectural addition (a new data model plus
+its own operations) and should be scoped separately — likely post-publication, and only if
+a real user presents localization data, mirroring the OME-Zarr "conditional future add"
+stance. The spatial-phenotyping overlap is the strongest argument for eventually
+supporting Category B, because PyCAT's point-based spatial statistics are already most of
+what localization-cluster analysis needs.
 
 
 Core Functionalities

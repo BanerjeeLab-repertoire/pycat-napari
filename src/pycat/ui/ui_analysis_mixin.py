@@ -34,7 +34,7 @@ class _AnalysisWidgetsMixin:
         """Add a widget for cell analysis, optionally in a separate dock."""
         cell_segmentation_layout = QVBoxLayout()
         self.add_text_label(cell_segmentation_layout, 'Cell/Nuclei Analysis', bold=True) # Add widget title label
-        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Labeled Cell Mask')
+        cell_segmentation_dropdown_labels = self._layer_row(cell_segmentation_layout, 'Select Mask Layer for Cell Analysis:', napari.layers.Labels, name_hint='Cellpose Segmentation')
         cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
         cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image, name_hint='Upscaled Fluorescence')
@@ -68,7 +68,7 @@ class _AnalysisWidgetsMixin:
     def _add_run_puncta_analysis_func(self, layout=None, separate_widget=False):
         """Add a widget for puncta analysis, optionally in a separate dock."""
         measure_puncta_layout = QVBoxLayout()
-        self.add_text_label(measure_puncta_layout, 'Condensate Analysis', bold=True) # Add widget title label
+        self.add_text_label(measure_puncta_layout, 'Object Analysis', bold=True) # Add widget title label
         # Required dropdowns get a red status square (via _layer_row) that turns
         # green once a real layer is selected.
         puncta_measure_dropdown_labels = self._layer_row(
@@ -99,7 +99,7 @@ class _AnalysisWidgetsMixin:
             measure_puncta_layout.addWidget(puncta_measure_button) # Add the button to the layout
         measure_puncta_widget = QWidget()
         measure_puncta_widget.setLayout(measure_puncta_layout)
-        self._add_widget_to_layout_or_dock(measure_puncta_widget, layout, separate_widget, "Condensate Analysis Dock")
+        self._add_widget_to_layout_or_dock(measure_puncta_widget, layout, separate_widget, "Object Analysis Dock")
 
 
     #### Colocalization Analysis Functions ####

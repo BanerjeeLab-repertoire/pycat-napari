@@ -83,7 +83,9 @@ class _ImageOpsWidgetsMixin:
         upscaling_button.clicked.connect(_on_upscaling)
         try:
             from pycat.ui.field_status import button_with_circle
-            upscaling_layout.addWidget(button_with_circle(upscaling_button, optional=True))  # yellow
+            _ups_wrapped = button_with_circle(upscaling_button, optional=True)  # yellow → blue on run
+            self._upscaling_status = _ups_wrapped
+            upscaling_layout.addWidget(_ups_wrapped)
         except Exception:
             upscaling_layout.addWidget(upscaling_button) # Add the button to the layout
         upscaling_widget = QWidget()

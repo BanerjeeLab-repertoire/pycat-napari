@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.188"
+version = "1.5.220"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -121,6 +121,46 @@ run-pycat = "pycat.run_pycat:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pycat"]
 exclude = ["build", "dist", "*.egg-info", "tests"]
+
+[tool.hatch.build.targets.sdist]
+# Hatchling ignores MANIFEST.in (that's a setuptools mechanism), so the sdist
+# contents must be controlled here. Include only source, docs, and metadata;
+# explicitly exclude VCS, caches, build artifacts, and OS cruft so the released
+# tarball is clean (no .git/, __pycache__/, .DS_Store, .pytest_cache/, dist/, etc.).
+include = [
+    "src/pycat",
+    "docs",
+    "config",
+    "notebooks",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "THIRD_PARTY_LICENSES.txt",
+    "pyproject.toml",
+]
+exclude = [
+    ".git",
+    ".gitignore",
+    ".github",
+    "**/__pycache__",
+    "**/*.py[cod]",
+    "**/*.so",
+    "**/*.dylib",
+    "**/*.dll",
+    "**/.DS_Store",
+    "**/*.swp",
+    "**/*.swo",
+    ".vscode",
+    ".mypy_cache",
+    ".pytest_cache",
+    "**/.ipynb_checkpoints",
+    ".coverage",
+    "build",
+    "dist",
+    "*.egg-info",
+    "PKG-INFO",
+]
 
 [tool.hatch.build.targets.wheel.package-data]
 pycat = [

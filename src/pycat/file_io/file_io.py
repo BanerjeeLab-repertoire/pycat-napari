@@ -73,6 +73,146 @@ def _ims_frame_2d(raw):
     if arr.ndim != 2:
         raise ValueError(f"Expected IMS plane to reduce to 2-D (Y, X), got shape {arr.shape}")
     return arr
+
+
+def _lazy_contrast_limits(lazy_layer, prefetched=None):
+    """Compute (lo, hi) contrast limits from the FIRST plane of a lazy layer.
+
+    Passing explicit contrast_limits to viewer.add_image stops napari from
+    auto-estimating them by calling np.asarray() on the whole lazy array, which
+    would trigger __array__ and load every frame from disk — the real cause of
+    multi-second stalls on USB-HDD IMS stacks (e.g. when adding an ROI layer
+    forces a layer-list/thumbnail refresh). ``prefetched`` lets callers reuse a
+    first plane they already read. Returns (lo, hi) or None if unavailable.
+    """
+    try:
+        import numpy as _np
+        plane = prefetched if prefetched is not None else lazy_layer[0]
+        plane = _np.asarray(plane)
+        lo, hi = float(plane.min()), float(plane.max())
+        return (lo, hi) if hi > lo else None
+    except Exception:
+        return None
+
+
+def _ims_pixel_size_um(reader, width_px):
+    """Read physical pixel size (um/px) from an IMS file's spatial extents.
+
+    Imaris .ims files store the physical bounding box as DataSetInfo/Image
+    attributes ExtMin0/ExtMax0 (X), ExtMin1/ExtMax1 (Y), ExtMin2/ExtMax2 (Z),
+    each as a FIXED-LENGTH ASCII CHAR ARRAY (e.g. b'-42107.8'). Pixel size is
+    (ExtMax0 - ExtMin0) / width. The values can be negative (stage coordinates),
+    which is why a naive parse can fail -- we decode the char array to a string
+    and float() it explicitly.
+
+    Prefers reading the h5py handle directly (reader.hf) because the reader's
+    own accessor name and behaviour vary across imaris_ims_file_reader versions
+    and it silently mishandles some char-array attributes.
+
+    Returns um/px as a float, or None if the extents can't be read.
+    """
+    def _to_float(raw):
+        if raw is None:
+            return None
+        try:
+            if hasattr(raw, 'tobytes'):
+                raw = raw.tobytes()
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode('ascii', errors='ignore')
+            s = str(raw).strip().strip('\x00').strip()
+            return float(s) if s else None
+        except Exception:
+            return None
+
+    ext_min = ext_max = None
+
+    hf = getattr(reader, 'hf', None)
+    if hf is not None:
+        try:
+            img_attrs = hf['DataSetInfo']['Image'].attrs
+            ext_min = _to_float(img_attrs.get('ExtMin0'))
+            ext_max = _to_float(img_attrs.get('ExtMax0'))
+        except Exception:
+            ext_min = ext_max = None
+
+    if ext_min is None or ext_max is None:
+        for _meth in ('read_numerical_dataset_attr', 'read_attribute'):
+            fn = getattr(reader, _meth, None)
+            if fn is None:
+                continue
+            try:
+                ext_max = _to_float(fn('ExtMax0'))
+                ext_min = _to_float(fn('ExtMin0'))
+                if ext_min is not None and ext_max is not None:
+                    break
+            except Exception:
+                continue
+
+    if ext_min is None or ext_max is None:
+        return None
+    extent = abs(ext_max - ext_min)
+    if extent <= 0 or width_px <= 0:
+        return None
+    microns_per_pixel = extent / float(width_px)
+    if not (1e-4 < microns_per_pixel < 1e4):
+        return None
+    return microns_per_pixel
+
+
+def _tiff_pixel_size_um(file_path):
+    """Read physical pixel size (µm/px) from baseline TIFF resolution tags.
+
+    AICSImage's physical_pixel_sizes only reads OME-XML and ImageJ metadata; it
+    does not fall back to the standard TIFF XResolution/YResolution/ResolutionUnit
+    tags. Many microscope-exported TIFFs (and channel-split exports) store pixel
+    size ONLY in those baseline tags, so AICSImage reports None and PyCAT wrongly
+    falls back to 1.0 µm/px. This helper reads the tags directly.
+
+    XResolution/YResolution are RATIONAL (numerator, denominator) = pixels per
+    ResolutionUnit. ResolutionUnit: 2 = inch, 3 = centimeter (1 = none/unitless).
+
+    Returns µm/px as a float, or None if no usable resolution metadata is present.
+    """
+    try:
+        import tifffile
+    except Exception:
+        return None
+    try:
+        with tifffile.TiffFile(file_path) as t:
+            page = t.pages[0]
+            xres_tag = page.tags.get('XResolution')
+            unit_tag = page.tags.get('ResolutionUnit')
+            if xres_tag is None or xres_tag.value is None:
+                return None
+            val = xres_tag.value
+            # Rational (num, den) -> pixels per unit
+            if isinstance(val, (tuple, list)) and len(val) == 2 and val[1] != 0:
+                pixels_per_unit = float(val[0]) / float(val[1])
+            else:
+                pixels_per_unit = float(val)
+            if pixels_per_unit <= 0:
+                return None
+            # ResolutionUnit: 3 = cm, 2 = inch. Default to inch if absent (TIFF spec default).
+            # NOTE: tifffile returns an enum; RESUNIT.NONE (value 1) is falsy, so test
+            # `is not None` explicitly rather than truthiness (which would misread NONE).
+            if unit_tag is not None and unit_tag.value is not None:
+                unit = int(unit_tag.value)
+            else:
+                unit = 2
+            if unit == 3:      # centimeters
+                microns_per_unit = 10000.0        # 1 cm = 10 000 µm
+            elif unit == 2:    # inches
+                microns_per_unit = 25400.0        # 1 inch = 25 400 µm
+            else:              # unit == 1 (none): tags are unitless, not a physical size
+                return None
+            microns_per_pixel = microns_per_unit / pixels_per_unit
+            # Guard against absurd values (a bad tag shouldn't set a nonsense scale).
+            if not (1e-4 < microns_per_pixel < 1e4):
+                return None
+            return microns_per_pixel
+    except Exception:
+        return None
+
 import skimage as sk
 from aicsimageio import AICSImage
 from pycat.utils.channel_naming import (
@@ -627,11 +767,22 @@ class FileIOClass:
                         continue   # already scaled — don't override
                     if isinstance(l, (_nl.Shapes, _nl.Points)):
                         new_yx = ref_scale[-2:]     # pixel-coordinate overlay
+                    elif (isinstance(l, _nl.Image) and getattr(l, 'rgb', False)):
+                        # RGB overlays (e.g. the side-by-side "Overlay Image",
+                        # which is (H, 2W, 3)) are built at the SAME per-pixel
+                        # resolution as the reference — they just have more pixels
+                        # (two panels wide). Fit them to the reference field of
+                        # view would compress the extra width into one image's
+                        # worth of world units (the "overlay looks squished in X"
+                        # symptom). Instead give them the reference's per-pixel
+                        # scale so each overlay pixel matches a reference pixel.
+                        new_yx = ref_scale[-2:]
                     else:
                         shp = np.asarray(getattr(l, 'data').shape, float)
                         if shp.size < 2:
                             continue
-                        new_yx = ref_fov / shp[-2:]
+                        spatial_shape = shp[-2:]
+                        new_yx = ref_fov / spatial_shape
                     if not (np.all(np.isfinite(new_yx)) and np.all(new_yx > 0)):
                         continue
                     new_scale = list(np.asarray(l.scale, float))
@@ -677,6 +828,14 @@ class FileIOClass:
             # Setting the filePath variable and base file name
             self.filePath = file_path  
             self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Also stash on the data class so downstream analysis (e.g. the puncta
+            # overlay PNG export) can resolve the original source folder/name.
+            try:
+                _dc = self.central_manager.active_data_class
+                _dc.data_repository['file_path'] = file_path
+                _dc.data_repository['base_file_name'] = self.base_file_name
+            except Exception:
+                pass
 
             # Open the image using AICSImage.
             # We detect NumPy 2.0 newbyteorder errors lazily — only reading
@@ -735,6 +894,14 @@ class FileIOClass:
 
             image = AICSImage(file_path)
             self.central_manager.active_data_class.update_metadata(image)
+            # Also store the normalised metadata record for the metadata widget
+            # and results export.
+            try:
+                from pycat.file_io.metadata_extract import extract_metadata
+                _md = extract_metadata(file_path, image=image)
+                self.central_manager.active_data_class.data_repository['file_metadata'] = _md
+            except Exception as _mde:
+                debug_log("file_io: metadata extraction failed", _mde)
             
             # Get the number of pages and channels in the image
             num_pages = getattr(image.dims, 'S', 1)
@@ -795,6 +962,18 @@ class FileIOClass:
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
                 'channel_assignment': getattr(self, '_last_channel_assignment', None),
             })
+
+        # Fit the canvas to the freshly-loaded 2-D image. This path (open_2d_image
+        # → load_into_viewer) previously never called the fit — only the stack
+        # path (_finalise_stack_load) did — so 2-D TIFFs opened tiny and pressing
+        # Home was the only way to fill the canvas. Deferred so the scale bar and
+        # the diameter-annotation layer inserts (which fire scale-alignment) have
+        # settled before the fit reads layer.extent.world.
+        try:
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(400, lambda: self._fit_view_to_layer())
+        except Exception:
+            self._fit_view_to_layer()
 
 
 
@@ -893,11 +1072,19 @@ class FileIOClass:
 
         microns_per_pixel = 1.0
         try:
-            ext_x = (reader.read_numerical_dataset_attr('ExtMax0') -
-                     reader.read_numerical_dataset_attr('ExtMin0'))
-            microns_per_pixel = float(ext_x) / float(W)
-        except Exception:
-            pass
+            microns_per_pixel = _ims_pixel_size_um(reader, W) or 1.0
+        except Exception as _e:
+            debug_log("file_io: IMS pixel-size read failed, using 1.0 µm/px", _e)
+
+        # Extract and store the full normalised metadata record (IMS metadata
+        # was previously discarded entirely — update_metadata is only called on
+        # the AICSImage path).
+        try:
+            from pycat.file_io.metadata_extract import extract_metadata
+            md = extract_metadata(file_path, reader=reader, width_px=W)
+            self.central_manager.active_data_class.data_repository['file_metadata'] = md
+        except Exception as _e:
+            debug_log("file_io: IMS metadata extraction failed", _e)
 
         channels_to_load = list(range(n_c))
         self._ims_reader    = reader
@@ -954,6 +1141,9 @@ class FileIOClass:
                     _ch_info = extract_channel_info_from_ims(pos_reader, channel_idx)
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
+                debug_log(f"file_io: IMS channel {channel_idx} -> "
+                          f"name='{_ch_info.get('raw_name')}' label='{_ch_label}' "
+                          f"bucket='{_ch_info.get('bucket')}'")
 
                 if n_t == 1 and n_z == 1:
                     # Single 2D frame — no lazy wrapper needed
@@ -993,8 +1183,20 @@ class FileIOClass:
                             channel_data = np.zeros((H, W), dtype=np.float32)
                         self._ims_reader_array = pos_reader
                         self._ims_lazy_tyx   = lazy_tyx
-                    self.viewer.add_image(lazy_tyx, name=layer_name,
-                                         colormap=_ch_colormap)
+                    # Compute contrast limits from the FIRST frame only and pass
+                    # them explicitly. Without this, napari auto-estimates contrast
+                    # (and builds the thumbnail) by calling np.asarray() on the
+                    # layer — which for a lazy (T,Y,X) wrapper triggers __array__
+                    # and loads EVERY frame from disk. On a USB-HDD IMS stack that
+                    # is the real cause of the multi-second stalls (e.g. when adding
+                    # an ROI layer forces a layer-list refresh). One frame is already
+                    # cheap to read; the user can still adjust contrast afterwards.
+                    _prefetched = channel_data if (channel_idx == 0 and pos_path == file_path) else None
+                    _clim = _lazy_contrast_limits(lazy_tyx, prefetched=_prefetched)
+                    _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    self.viewer.add_image(lazy_tyx, **_add_kwargs)
                     napari_show_info(
                         f"Lazy-loaded IMS {_ch_label}{pos_suffix}: {n_t} frames "
                         f"{H}\u00d7{W}px (frames read on demand)"
@@ -1019,8 +1221,12 @@ class FileIOClass:
                                 "ensure it is fully downloaded locally before opening."
                             )
                             channel_data = np.zeros((H, W), dtype=np.float32)
-                    self.viewer.add_image(lazy_zyx, name=layer_name,
-                                         colormap=_ch_colormap)
+                    _prefetched = channel_data if (channel_idx == 0 and pos_path == file_path) else None
+                    _clim = _lazy_contrast_limits(lazy_zyx, prefetched=_prefetched)
+                    _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    self.viewer.add_image(lazy_zyx, **_add_kwargs)
                     napari_show_info(
                         f"Lazy-loaded IMS z-stack {_ch_label}{pos_suffix}: "
                         f"{n_z} slices {H}\u00d7{W}px (slices read on demand)"
@@ -1042,8 +1248,18 @@ class FileIOClass:
                         channel_data = lazy_tzyx[0, 0]
                         self._ims_reader_array = pos_reader
                         self._ims_lazy_tzyx  = lazy_tzyx
-                    self.viewer.add_image(lazy_tzyx, name=layer_name,
-                                         colormap=_ch_colormap)
+                    # First (t=0, z=0) plane for contrast — reuse the prefetched
+                    # one for channel 0, else read a single plane.
+                    try:
+                        _plane0 = (channel_data if (channel_idx == 0 and pos_path == file_path)
+                                   else lazy_tzyx[0, 0])
+                    except Exception:
+                        _plane0 = None
+                    _clim = _lazy_contrast_limits(lazy_tzyx, prefetched=_plane0)
+                    _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    self.viewer.add_image(lazy_tzyx, **_add_kwargs)
                     napari_show_info(
                         f"Lazy-loaded IMS T-Z stack {_ch_label}{pos_suffix}: "
                         f"{n_t} timepoints \u00d7 {n_z} z-slices, "
@@ -1121,7 +1337,25 @@ class FileIOClass:
                           "1.0 µm/px — micron measurements may be wrong)", _e)
                 pass
 
+            # Fallback: AICSImage's physical_pixel_sizes only reads OME-XML and
+            # ImageJ metadata, not the baseline TIFF resolution tags. If it came
+            # back empty (== 1.0), try reading XResolution/ResolutionUnit directly.
+            if abs(microns_per_pixel - 1.0) < 1e-9:
+                _tag_px = _tiff_pixel_size_um(file_path)
+                if _tag_px is not None:
+                    microns_per_pixel = _tag_px
+                    debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
+                              "from TIFF resolution tags (AICSImage missed it)")
+
             self.central_manager.active_data_class.update_metadata(image)
+            # Also store the normalised metadata record for the metadata widget
+            # and results export.
+            try:
+                from pycat.file_io.metadata_extract import extract_metadata
+                _md = extract_metadata(file_path, image=image)
+                self.central_manager.active_data_class.data_repository['file_metadata'] = _md
+            except Exception as _mde:
+                debug_log("file_io: metadata extraction failed", _mde)
 
         except Exception as _e:
             debug_log("file_io: AICSImage load failed, falling back to direct "
@@ -1139,6 +1373,12 @@ class FileIOClass:
             H, W = arr.shape[1], arr.shape[2]
             n_c = 1
             n_t, n_z = n_frames, 1
+            # Recover pixel size from baseline resolution tags in this branch too.
+            _tag_px = _tiff_pixel_size_um(file_path)
+            if _tag_px is not None:
+                microns_per_pixel = _tag_px
+                debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
+                          "from TIFF resolution tags (direct tifffile branch)")
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
@@ -1290,6 +1530,82 @@ class FileIOClass:
 
     # ── Shared post-load logic ───────────────────────────────────────────────
 
+    def _fit_view_to_layer(self, layer=None, margin=0.9, attempt=0):
+        """Fit the napari camera to an image layer, mirroring the (working)
+        Home button exactly.
+
+        The Home button reads ``layer.extent.world`` — the transform-aware extent
+        napari actually renders with — and it fits correctly. An earlier version
+        of this auto-fit recomputed ``shape × scale`` by hand, which can disagree
+        with the real extent right after load: the µm/px scale was just assigned
+        and napari's transform/extent cache may not have caught up at the moment
+        the deferred fit fires, so the image opened tiny even though pressing Home
+        afterwards fit it fine. Using ``extent.world`` here makes auto-fit behave
+        identically to Home. Retries with growing delays until the canvas has a
+        real size (it can be 0 while the dock is still laying out after load).
+        """
+        try:
+            import numpy as np
+            import napari.layers as _nl
+
+            if layer is None:
+                imgs = [l for l in self.viewer.layers if isinstance(l, _nl.Image)]
+                if not imgs:
+                    return
+                layer = imgs[-1]
+
+            cw = ch = None
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter('ignore', FutureWarning)
+                for accessor in ('_qt_viewer', 'qt_viewer'):
+                    try:
+                        sz = getattr(self.viewer.window, accessor).canvas.size
+                        cw, ch = float(sz[0]), float(sz[1])
+                        break
+                    except Exception:
+                        continue
+
+            # Canvas not laid out yet → retry shortly (up to ~6 attempts).
+            if (not cw or not ch or cw <= 1 or ch <= 1) and attempt < 6:
+                from PyQt5.QtCore import QTimer as _QT
+                _QT.singleShot(120 * (attempt + 1),
+                               lambda: self._fit_view_to_layer(layer, margin, attempt + 1))
+                return
+
+            # Transform-aware world extent — same source of truth as Home.
+            ext = np.asarray(layer.extent.world)     # (2, ndim): [mins, maxs]
+            mins, maxs = ext[0], ext[1]
+            nd = self.viewer.dims.ndisplay
+            dims = list(self.viewer.dims.displayed)[-nd:]
+            sizes = [float(maxs[d] - mins[d]) for d in dims]
+
+            center = (mins + maxs) / 2.0
+            self.viewer.camera.center = tuple(float(center[d]) for d in dims)
+
+            if nd == 2 and cw and ch and all(s > 0 for s in sizes):
+                # displayed dims are [y, x]; canvas is (width=x, height=y).
+                _z = min(ch / sizes[0], cw / sizes[1]) * margin
+                _z_before = float(self.viewer.camera.zoom)
+                self.viewer.camera.zoom = _z
+                if os.environ.get('PYCAT_DEBUG'):
+                    print(f"[PyCAT fit] layer='{layer.name}' extent_world_size(yx)={sizes} "
+                          f"canvas(w,h)=({cw},{ch}) zoom {_z_before:.4f} -> {_z:.4f} "
+                          f"(attempt {attempt})")
+                    from PyQt5.QtCore import QTimer as _QTd
+                    _QTd.singleShot(600, lambda: print(
+                        f"[PyCAT fit] zoom 600ms later = {float(self.viewer.camera.zoom):.4f} "
+                        f"(if changed, something reset it)"))
+            else:
+                self.viewer.reset_view()
+        except Exception as e:
+            try:
+                self.viewer.reset_view()
+            except Exception:
+                pass
+            if os.environ.get('PYCAT_DEBUG'):
+                print(f"[PyCAT] fit view skipped: {e}")
+
     def _finalise_stack_load(self, H, W, microns_per_pixel, channels_to_load,
                               n_t, n_z, file_path, source='generic'):
         """Update data repository and record batch step after any stack load."""
@@ -1307,41 +1623,15 @@ class FileIOClass:
         # Auto scale bar for the freshly-loaded stack.
         self._enable_auto_scale_bar()
 
-        # Zoom the canvas to fit the newly loaded image using the same approach
-        # as the Home button: set camera.center and camera.zoom directly from
-        # the known image dimensions (H, W). reset_view() is unreliable when
-        # called programmatically because it may fire before napari has computed
-        # the layer extent, silently doing nothing. By computing the zoom from
-        # H and W (which we already have) we avoid that timing dependency.
-        def _fit_camera():
-            try:
-                import warnings as _warn
-                cw = ch = None
-                with _warn.catch_warnings():
-                    _warn.simplefilter('ignore', FutureWarning)
-                    for _acc in ('_qt_viewer', 'qt_viewer'):
-                        try:
-                            _sz = getattr(self.viewer.window, _acc).canvas.size
-                            cw, ch = float(_sz[0]), float(_sz[1])
-                            break
-                        except Exception:
-                            continue
-                if cw and ch and cw > 0 and ch > 0 and H > 0 and W > 0:
-                    self.viewer.camera.center = (H / 2.0, W / 2.0)
-                    zoom = min(ch / H, cw / W) * 0.9   # 10% margin
-                    self.viewer.camera.zoom = zoom
-                else:
-                    self.viewer.reset_view()
-            except Exception:
-                try:
-                    self.viewer.reset_view()
-                except Exception:
-                    pass
+        # Fit the canvas to the newly-loaded image. Deferred long enough that the
+        # scale bar has been applied and all layer-insert scale-alignment events
+        # have flushed — otherwise the fit reads a stale extent and the image
+        # opens tiny (whereas pressing Home later, once settled, fits correctly).
         try:
             from PyQt5.QtCore import QTimer
-            QTimer.singleShot(100, _fit_camera)
+            QTimer.singleShot(400, lambda: self._fit_view_to_layer())
         except Exception:
-            _fit_camera()
+            self._fit_view_to_layer()
 
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
@@ -1376,7 +1666,15 @@ class FileIOClass:
         for file_path in file_paths:
             # Setting the filePath variable and base file name
             self.filePath = file_path  
-            self.base_file_name = os.path.splitext(os.path.basename(file_path))[0] 
+            self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Also stash on the data class so downstream analysis (e.g. the puncta
+            # overlay PNG export) can resolve the original source folder/name.
+            try:
+                _dc = self.central_manager.active_data_class
+                _dc.data_repository['file_path'] = file_path
+                _dc.data_repository['base_file_name'] = self.base_file_name
+            except Exception:
+                pass 
 
             # Open the mask using AICSImage package
             mask = AICSImage(file_path)
@@ -1680,6 +1978,28 @@ class FileIOClass:
         except Exception:
             pass
 
+        # Reset the "Measure Line(s)" status circle back to red on clear, UNLESS
+        # the user asked to remember measurements across clears (then the
+        # measurement — and its done state — carries over).
+        try:
+            if not _persist:
+                tb = getattr(self.central_manager, 'toolbox_functions_ui', None)
+                mls = getattr(tb, '_measure_line_status', None)
+                if mls is not None and hasattr(mls, 'reset'):
+                    mls.reset()
+        except Exception:
+            pass
+
+        # Reset the optional "Run Upscaling" status circle on clear (its upscaled
+        # output layers are removed, so the step is no longer "done").
+        try:
+            tb = getattr(self.central_manager, 'toolbox_functions_ui', None)
+            ups = getattr(tb, '_upscaling_status', None)
+            if ups is not None and hasattr(ups, 'reset'):
+                ups.reset()
+        except Exception:
+            pass
+
     def clear_all_without_saving(self, viewer, confirm=True):
         """
         Clear all layers and data without saving, resetting the workspace to the
@@ -1787,6 +2107,17 @@ class FileIOClass:
                 clear_dfs_list.append(df_name)
                 if df_name in selected_dataframes:
                     df_value.to_csv(save_name + f'_{df_name}.csv', index=True)
+
+            # Export the file's normalised acquisition metadata alongside the
+            # results, for provenance/reproducibility. Written once per save.
+            try:
+                _md = self.central_manager.active_data_class.data_repository.get('file_metadata')
+                if _md:
+                    import json as _json
+                    with open(save_name + '_metadata.json', 'w', encoding='utf-8') as _mf:
+                        _json.dump(_md, _mf, indent=2, default=str)
+            except Exception as _mde:
+                debug_log("file_io: metadata JSON export failed", _mde)
 
         # Clear all layers and dataframes from the viewer and data instance.
         # If "Remember measurements across clears" is on, preserve the measured

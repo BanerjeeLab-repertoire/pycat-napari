@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pycat-napari
-Version: 1.5.188
+Version: 1.5.220
 Summary: Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis
 Project-URL: Homepage, https://github.com/BanerjeeLab-repertoire/pycat-napari
 Project-URL: Repository, https://github.com/BanerjeeLab-repertoire/pycat-napari

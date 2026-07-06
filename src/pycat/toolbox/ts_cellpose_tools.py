@@ -124,6 +124,7 @@ def run_keyframe_cellpose(
     keyframe_interval: int,
     progress_callback=None,
     upscale_factor: int = 1,
+    model_name=None,
 ) -> tuple[np.ndarray, list[int]]:
     """
     Run Cellpose on keyframes and return a (T, H, W) label stack with
@@ -178,14 +179,16 @@ def run_keyframe_cellpose(
             frame_up = _sktr.rescale(frame, _uf, order=1,
                                      anti_aliasing=True,
                                      preserve_range=True).astype(np.float32)
-            mask_up = cellpose_segmentation(frame_up, cell_diameter * _uf)
+            mask_up = cellpose_segmentation(frame_up, cell_diameter * _uf,
+                                            model_name=model_name)
             mask = _sktr.rescale(mask_up.astype(np.float32), 1.0 / _uf,
                                   order=0, anti_aliasing=False,
                                   preserve_range=True).astype(np.uint16)
             # Re-label after downscale to guarantee contiguous integer labels
             mask = _sk.measure.label(mask > 0).astype(np.uint16)
         else:
-            mask = cellpose_segmentation(frame, cell_diameter)
+            mask = cellpose_segmentation(frame, cell_diameter,
+                                         model_name=model_name)
         keyframe_masks[t] = mask.astype(np.uint16)
         if progress_callback:
             progress_callback(i + 1, len(keyframe_indices))
@@ -258,13 +261,14 @@ class _KeyframeCellposeWorker(QThread):
     error    = pyqtSignal(str)
 
     def __init__(self, stack, cell_diameter, interval, parent=None,
-                 upscale_factor=1, use_stardist=False):
+                 upscale_factor=1, use_stardist=False, model_name=None):
         super().__init__(parent)
         self._stack       = stack
         self._diameter    = cell_diameter
         self._interval    = interval
         self._upscale     = upscale_factor
         self._use_stardist = use_stardist
+        self._model_name  = model_name
 
     def run(self):
         try:
@@ -279,6 +283,7 @@ class _KeyframeCellposeWorker(QThread):
                 mask_stack, kf = run_keyframe_cellpose(
                     self._stack, self._diameter, self._interval, _cb,
                     upscale_factor=self._upscale,
+                    model_name=self._model_name,
                 )
             self.finished.emit(mask_stack, kf)
         except Exception:
@@ -399,8 +404,25 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     def _on_method():
         rf_ann_container.setVisible(rb_rf.isChecked())
         otsu_container.setVisible(rb_otsu.isChecked())
+        nuclei_check.setVisible(rb_cellpose.isChecked())
     for rb in (rb_cellpose, rb_stardist, rb_rf, rb_otsu):
         rb.toggled.connect(lambda _: _on_method())
+
+    # Cellpose nuclei-model checkbox — the default Cellpose model (cyto2/cpsam)
+    # is a CYTOPLASM model. On a nuclear stain like DAPI it tends to merge all
+    # nuclei into one giant region because there's no cytoplasm structure to
+    # bound them. Ticking this uses Cellpose's dedicated 'nuclei' model, which
+    # is the correct choice for DAPI/Hoechst. Only meaningful for Cellpose
+    # (Cellpose <4); shown only when Cellpose is the selected method.
+    nuclei_check = QCheckBox("Use nuclei model  (for DAPI / Hoechst)")
+    nuclei_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    nuclei_check.setChecked(False)
+    nuclei_check.setToolTip(
+        "Use Cellpose's dedicated 'nuclei' model instead of the default\n"
+        "cytoplasm model. Recommended when the segmentation channel is a\n"
+        "nuclear stain (DAPI, Hoechst) — the cytoplasm model tends to merge\n"
+        "nuclei into one blob. Applies to Cellpose only.")
+    method_layout.addWidget(nuclei_check)
 
     # ── Upscaling ─────────────────────────────────────────────────────────
     upscale_check = QCheckBox("Upscale keyframes  (recommended for ≤512px)")
@@ -596,10 +618,12 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
         run_btn.setEnabled(False)
 
         upscale = upscale_spin.value() if upscale_check.isChecked() else 1
+        _cp_model = 'nuclei' if (rb_cellpose.isChecked() and nuclei_check.isChecked()) else None
         worker = _KeyframeCellposeWorker(
             stack_np, cell_diameter, interval,
             upscale_factor=upscale,
             use_stardist=rb_stardist.isChecked(),
+            model_name=_cp_model,
         )
         ui_instance._ts_cellpose_worker = worker
 

@@ -4,6 +4,557 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.208] - 2026-07-05
+### Fixed (overlay stripe — the ACTUAL root cause: a scale mismatch)
+- **The Overlay Image now inherits the source image layer's scale.** Confirmed via git
+  diff that in v1.0.0 the "Upscaled Fluorescence Image" was added with NO scale (default
+  1.0), and the overlay (also no scale) matched it — so the (H, 2W) side-by-side rendered
+  correctly. A later change gave the upscaled layer an explicit physical µm/px `scale`
+  (~0.049) to align it with its source, but the overlay was never updated to match, so it
+  stayed at scale 1.0 — a ~20× coordinate mismatch that rendered the overlay as a giant
+  stripe extending far past the scaled data (the "µm at the data, mm at the overlay"
+  scale-bar symptom). The overlay is now added with the same scale as its source image
+  layer, putting both back in one coordinate space. This is the real fix; the previous
+  reverts addressed the wrong layer of the problem.
+### Improved
+- **Overlay PNG contrast.** The exported `_puncta_overlay.png` blew out the bright cell
+  body because the percentile stretch was computed over the whole frame (mostly black
+  background, dragging the window down). It now computes the stretch window over the
+  signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
+  detail instead of clipping it to white.
+
+## [1.5.220] - 2026-07-05
+### Added (Cellpose "Refine masks" checkbox — raw vs refined, user's choice)
+- **The 2D Cellpose segmentation (Cell Segmentation widget, used by Cellular Object Analysis
+  and the colocalization pipelines) now has a "Refine masks" checkbox.** The same
+  destructive post-processing found in the time-series audit (binarize → watershed →
+  morphological opening → relabel) was also running on the 2D / coloc Cellpose output.
+  Rather than change validated behaviour silently, it's now a toggle:
+  - **ON (default)** — legacy refine pipeline; preserves the existing validated 2D result.
+  - **OFF** — use Cellpose's instance masks directly (usually better when Cellpose already
+    segments the image well).
+  The choice is stored (`cellpose_refine`), recorded in the batch step, and honoured by the
+  headless batch replay so runs reproduce. Untick it to compare raw Cellpose against the
+  refined output on your own data.
+### Unchanged (deliberately)
+- Time-series Cellpose stays raw (`postprocess=False`, from 1.5.219). Z-stack Cellpose stays
+  refined (no checkbox yet — a candidate for the same toggle later). The `cellpose_segmentation`
+  function default remains `postprocess=True` so any caller not passing the flag is unchanged.
+
+## [1.5.219] - 2026-07-05
+### Fixed (time-series Cellpose segmentation — audit)
+- **Time-series Cellpose now uses Cellpose's masks directly instead of destroying them.**
+  `cellpose_segmentation` post-processed every result by binarizing (`masks > 0`, throwing
+  away Cellpose's instance labels), re-splitting with a generic watershed, applying **7
+  iterations of morphological opening**, and relabeling — which demolishes Cellpose's
+  learned per-object boundaries and degrades otherwise-good output. Added a
+  `postprocess=True` parameter; the time-series path now passes `postprocess=False` to use
+  Cellpose's instance masks as-is. The legacy 2D path keeps `postprocess=True` (unchanged,
+  its downstream steps expect the refined masks).
+- **Instance labels are preserved through the upscale/downscale round-trip.** The upscaled
+  branch previously did `measure.label(mask > 0)` after downscaling, re-binarizing and
+  merging touching cells Cellpose had separated. It now downscales the label image with
+  nearest-neighbour interpolation, keeping each cell's Cellpose ID.
+- **Removed the misleading segmentation-channel hint.** The "Seg. channel" dropdown hinted
+  `Enhanced Background Removed` (a condensate-optimized layer) while its own tooltip says a
+  DAPI/nuclear channel is preferred — nudging users toward the wrong layer for cell
+  segmentation. The hint is now cleared so it doesn't auto-pick the processed condensate
+  image.
+- **Keyframe progress count is now correct.** `n_kf` didn't include the final frame that
+  gets appended as an extra keyframe when it isn't a natural interval boundary, so the
+  progress read "x / N" against a too-small N. Both count sites now include the appended
+  last frame.
+### Not changed (flagged, needs separate testing)
+- The 2D path's 7-iteration morphological opening is left as-is; reducing it (as suggested)
+  would affect the validated 2D condensate workflow and should be tested independently.
+- StarDist and Random-Forest time-series paths still `label(> 0)`; the audit targeted the
+  Cellpose path only.
+
+## [1.5.218] - 2026-07-05
+### Fixed (menu label rendering)
+- **"Cell & Object Analysis" → "Cell and Object Analyses".** In Qt menus an ``&`` marks the
+  next character as a keyboard mnemonic and isn't rendered, which made the label display
+  oddly. Spelling out "and" avoids the mnemonic entirely. Applied to both the Analysis
+  Methods submenu and the matching Toolbox submenu (the latter also dropped "Condensate").
+
+## [1.5.217] - 2026-07-05
+### Fixed (method-1 status markers — second pass, items 6–9)
+- **Step 2 — "Measure Line(s)" now turns green when run** and reverts to red on Clear,
+  unless "Remember measurements across clears" is on (then the measurement and its done
+  state carry over). Uses the new `button_with_circle` completion state.
+- **Step 3 — "Run Upscaling" now turns blue when run** (it's an optional step, so blue =
+  "you did this optional thing"), and reverts to yellow on Clear since its upscaled output
+  layers are removed.
+- **Step 7 — the cell-analysis mask dropdown now auto-greens correctly.** Its name hint was
+  `Labeled Cell Mask`, but that layer is this step's *output*; the layer that actually
+  feeds it is the Cellpose segmentation, named `Cellpose Segmentation on …`. The hint is
+  now `Cellpose Segmentation`, so auto-population turns the circle green. Dropdown circles
+  also now distinguish GREEN (selection matches the suggested/auto-filled layer) from BLUE
+  (you deliberately picked a different layer, or set an optional no-hint dropdown like
+  "Select Mask Layer to Omit" away from its default) — previously a user override showed
+  green instead of blue.
+- **Step 1 — the pixel-size marker now updates with image load/clear.** The "Image loaded"
+  marker was wired to layer events, but the pixel-size gate only re-evaluated on field
+  edit / data switch, so its status went stale on load/clear. Its refresh is now also
+  wired to layer insert/remove, so both Step 1 markers update together.
+
+## [1.5.216] - 2026-07-05
+### Changed (method-1 UI naming + layer auto-selection — first pass)
+- **Dropped "Condensate" from the analysis method titles** for branding and accuracy (these
+  workflows apply to membrane-bound objects and objects from processes other than
+  condensation). Analysis Methods menu: submenu "Condensate & Cell Analysis" → "Cell &
+  Object Analysis"; the five entries "Cellular/In Vitro/Time-Series/Z-Stack Condensate
+  Analysis" → "… Object Analysis". Method-1 panel: section "Condensate Analysis" → "Object
+  Analysis" and its dock "Condensate Analysis Dock" → "Object Analysis Dock". The top
+  "Cell/Nuclei Analysis" section title is unchanged. These are display-label changes only;
+  internal wiring/keys are untouched.
+- **Steps 7–9 now auto-select the plain "Upscaled Fluorescence Image", not a derivative.**
+  After pre-processing, dropdowns that want the plain upscaled image were auto-populating
+  with "Pre-Processed Upscaled Fluorescence Image" because the `Upscaled Fluorescence`
+  name-hint substring-matched the longer derived name. `_hint_matches` now also rejects the
+  `pre-processed`/`preprocessed` leading prefixes (alongside the background-removed ones),
+  so the "Select Image for Cell Analysis" (step 7), "Select Fluorescence Image to Process"
+  (step 8), and "Select Image for Puncta Measurement" (step 9) dropdowns pick the plain
+  upscaled image, while step 8's pre-processing dropdown (whose hint names the modifier)
+  still matches its intended layer.
+- **Step 2 simplified to just "Measure Line(s)".** Removed the separate "Draw Line(s)"
+  button; line drawing now auto-arms when the step is shown (the diameter Shapes layer is
+  activated in add-line mode), so there's one button instead of two.
+### Added (status-marker groundwork)
+- `button_with_circle` can now reflect completion: a required action turns its circle green
+  once run, an optional action turns it blue, and it exposes `reset()` for per-step / Clear
+  reversion. (Wiring this into specific steps' run/clear behaviour — steps 2, 3, 7 — and
+  the step-1 marker resets is the next pass.)
+
+## [1.5.215] - 2026-07-05
+### Fixed (images open tiny — the REAL cause: the 2-D load path never called the fit)
+- **`open_2d_image` now calls the auto-fit.** The debug build (1.5.213) printed nothing
+  because the fit was never invoked for 2-D images: `open_2d_image` → `load_into_viewer`
+  enables the scale bar but never called `_fit_view_to_layer` — only the stack path
+  (`_finalise_stack_load`) did. So plain 2-D TIFFs opened tiny and Home was the only way to
+  fill the canvas, and all the earlier scale-aware fit work (1.5.210–1.5.213) simply didn't
+  run for them. The fit is now called at the end of `open_2d_image` (deferred 400 ms, after
+  the channel-assignment dialog and diameter-layer inserts settle), matching the stack
+  path. Both single- and multi-channel 2-D loads are covered (the channel dialog is modal,
+  so channels are in the viewer before the fit fires).
+
+## [1.5.214] - 2026-07-05
+### Docs
+- **Recorded the scale-bar migration as a known issue + low-priority backlog item**
+  (``docs/source/development/roadmap.rst``). Captures that the main image/stack load path
+  uses napari's built-in ``viewer.scale_bar`` (via ``scale_bar.unit``), which works only
+  because the code avoids the ``Layer.units`` call that black-outs the canvas — and that
+  this is fragile against napari's ``scale_bar.unit`` deprecation (PR #9007, which moves
+  the unit to ``Layer.units``) and is coupled to the auto-fit machinery. The self-contained
+  ``draw_custom_scale_bar`` (a Shapes rectangle in data coords, immune to both) already
+  exists but is wired only into the temperature/movie workflow; unifying on it across the
+  load path is deferred as low priority, to be done before adopting a napari version that
+  removes ``scale_bar.unit``.
+
+## [1.5.213] - 2026-07-05
+### Diagnostic (image-opens-small — instrument the fit)
+- **Added `PYCAT_DEBUG=1` logging to the auto-fit.** Prior fixes (world-extent math, longer
+  delay, mirroring Home) didn't resolve the image opening small, so the fit now logs the
+  layer name, its transform-aware world extent, the canvas size, the zoom before/after the
+  fit, and — via a 600 ms follow-up — whether the zoom gets changed back afterwards. This
+  will show definitively whether the fit is computing the wrong zoom, not running, or being
+  reset by a later event (e.g. a scale-alignment or napari auto-reset on layer insert),
+  rather than guessing. No behavioural change.
+### Note
+- Clarified for reference: a plain 2-D image load uses napari's built-in `viewer.scale_bar`
+  (via `_enable_auto_scale_bar`); the custom Shapes-based `draw_custom_scale_bar` is used
+  only by the temperature/movie-export workflow.
+
+## [1.5.212] - 2026-07-05
+### Fixed (auto-fit at load — now matches the working Home button)
+- **Images open fitted, not tiny.** Key diagnostic: the manual Home button fit the image
+  correctly, but the auto-fit at load did not — so the math was fine and the problem was
+  timing/state. The auto-fit recomputed the extent by hand (`shape × scale`), which can
+  disagree with napari's real extent right after load (the µm/px scale was just assigned
+  and the transform/extent cache may not have updated when the deferred fit fires).
+  `_fit_view_to_layer` now reads `layer.extent.world` — the exact transform-aware extent
+  the Home button uses — and the fit is deferred a little longer (400 ms) so the scale bar
+  and all layer-insert scale-alignment events have settled first. Auto-fit and Home now
+  behave identically.
+
+## [1.5.211] - 2026-07-05
+### Fixed (overlay X-compression — side-by-side squished into one image's width)
+- **The side-by-side Overlay Image now renders at true proportions.** After the stripe
+  fix, the overlay (an (H, 2W, 3) side-by-side of the plain and red-overlaid image) was
+  being fit to the *reference image's* field of view, which compressed its 2W pixels into
+  one image's worth of world width — squishing it ~2× in X. The overlay's pixels are the
+  same physical size as the source image's (the hstack just adds columns), so it now
+  inherits the source layer's per-pixel scale explicitly at creation, and
+  `_align_layer_scales` gives RGB overlays the reference per-pixel scale (not FOV/shape) as
+  a fallback. Each half of the side-by-side now aligns 1:1 with the data pixel size.
+
+## [1.5.210] - 2026-07-05
+### Fixed (images open tiny — auto-fit ignored the layer's µm/px scale)
+- **Newly-opened images now fill the canvas.** Same class of bug as the overlay stripe:
+  PyCAT sets each image layer's scale to µm/px, so a 2048-px image at 0.098 µm/px has a
+  world extent of only ~201 units — but the auto-fit computed zoom from the raw 2048 pixel
+  count, ending up ~10× too zoomed out (the image spanned ~88 px on a ~900 px canvas). A
+  new `_fit_view_to_layer` fits from the WORLD extent (shape × scale), handles RGB layers
+  (channel axis excluded), and retries until the canvas is laid out. It replaces the old
+  pixel-based fit in `_finalise_stack_load`, so images open at a sensible size without
+  needing to press Home. (The manual Home button was already scale-correct — it fits from
+  `layer.extent.world` — so it's unchanged.)
+
+## [1.5.209] - 2026-07-05
+### Fixed (overlay stripe — the TRUE root cause: RGB channel axis treated as spatial)
+- **`_align_layer_scales()` no longer treats an RGB image's channel axis as a spatial
+  dimension.** This is the actual cause of the stretched "Overlay Image", found by
+  analysing the scale-alignment pass rather than the overlay array (which was always
+  correct). The overlay is `(H, 2W, 3)`; the alignment code used `shape[-2:]` = `(2W, 3)`,
+  so it treated the 3-channel axis as X and assigned the overlay a massive x-scale
+  (~16.7 world-units/px vs the data's ~0.024 — a ~680× blow-up), rendering it as a long
+  stripe extending far past the data. The alignment now detects RGB/RGBA image layers
+  (`layer.rgb` with a trailing axis of 3 or 4) and uses the two axes *before* the channel
+  axis as the spatial shape. This function didn't exist in v1.0.0, which is why the
+  overlay rendered correctly then — the overlay code was never the problem.
+- The overlay is now added as `uint8` with `rgb=True`, so napari and the alignment pass
+  both unambiguously recognise it as a colour image.
+### Improved
+- **Overlay PNG contrast** (carried from the in-progress 1.5.208): the exported
+  `_puncta_overlay.png` computes its contrast-stretch window over the signal pixels
+  (non-near-zero) with a high upper percentile (99.8), so the bright cell body keeps its
+  detail instead of blowing out to white.
+
+## [1.5.207] - 2026-07-05
+### Fixed (overlay stripe — root cause found via git diff against 1.0.0, and reverted)
+- **Restored the v1.0.0 "Overlay Image" code exactly.** A git diff of the overlay path
+  against the 1.0.0 release showed `create_overlay_image` and the caller were UNCHANGED in
+  the committed code — the stretched-stripe regression was introduced *during this
+  session's* earlier "green stripe" fix, which dropped the final
+  `dtype_conversion_func(sbs_overlay, 'uint16')` conversion and added `rgb=True`. The
+  original sequence converts the (H, 2W, 3) uint8 array to uint16 and adds it WITHOUT
+  `rgb=True`; napari auto-detects a (H,W,3) *uint8* array as RGB but not a *uint16* one, so
+  the uint16 array renders as a normal multi-plane 2-D image at correct proportions.
+  Reverting to the exact 1.0.0 lines fixes the stripe.
+### Kept
+- The two requested enhancements remain on top of the restored overlay: after analysis the
+  Step 9 fluorescence image and the puncta mask are brought to the top of the layer list
+  (mask on top, both visible), and a flat merged grayscale+red PNG is written to the source
+  folder as `<base_name>_puncta_overlay.png`.
+
+## [1.5.206] - 2026-07-05
+### Changed (replaced the in-viewer Overlay Image with layer reordering + PNG export)
+- **No more "Overlay Image" layer.** Every attempt to add a blended overlay as a napari
+  image layer mis-rendered as a stretched strip (napari's RGB/axis handling), so the
+  in-viewer overlay is gone. Instead, after Condensate Analysis:
+  - **The two relevant layers are brought to the top of the layer list**, both made
+    visible: the Step 9 "Select Image for Puncta Measurement" fluorescence image, with the
+    selected puncta mask directly above it. This reproduces the mask-over-image overlay
+    using napari's own compositing (no custom RGB layer), which always aligns and scales
+    correctly.
+  - **A merged grayscale + red-puncta PNG is written to the source folder** as
+    `<base_name>_puncta_overlay.png` — a flat, shareable overlay (image contrast-stretched
+    so dim data is visible, puncta blended in red). This is a file, so napari never renders
+    it and the stretch bug can't recur.
+- File path and base name are now stored in the data repository at load time so the export
+  lands next to the original image.
+
+## [1.5.205] - 2026-07-05
+### Fixed (overlay image — replaced the side-by-side with an in-place overlay)
+- **The Overlay Image is now a single same-size (H, W) RGB layer** with puncta painted
+  red directly on the fluorescence image, instead of the old side-by-side `np.hstack`
+  that produced an (H, 2W) layer. The doubled-width layer sat in napari's shared
+  coordinate space alongside all the (H, W) layers and stuck out past them — the "green
+  stripe extending beyond the data" that no amount of squeezing fixed, because the shape
+  was working as (mis)designed. The new overlay shares the exact footprint of every other
+  layer, so it aligns on the data and toggles cleanly.
+- **The overlay is now visible on dim images.** The source "Upscaled Fluorescence Image"
+  can be a float scaled by 1/65535 (max ≈ 0.02), which rendered nearly black. The overlay
+  now contrast-stretches on the 1st–99th percentile before display, so the cell structure
+  is visible with the puncta highlighted. The old `create_overlay_image` (side-by-side)
+  is no longer used by the puncta workflow.
+
+## [1.5.204] - 2026-07-05
+### Diagnostic (overlay "green stripe" — instrumenting the real cause)
+- **Added `PYCAT_DEBUG=1` logging to the overlay path.** Pixel-level analysis of the
+  reported screenshot showed the overlay is actually ~2:1 aspect (a correct side-by-side
+  shape), NOT the 4-D "stripe" the earlier squeeze fix targeted — the visible content is
+  mostly black with a bright green horizontal band, which points to the *input image*
+  being wrong (e.g. an over-subtracted/near-black layer, or a green-channel normalisation
+  blow-out) rather than a dimensional bug. The overlay now logs the image layer name, raw
+  and squeezed shapes, dtype, min/max, and non-zero fraction, plus the mask non-zero
+  count, so the next run pins down exactly what is being visualised. No behavioural change
+  to the overlay itself.
+
+## [1.5.203] - 2026-07-05
+### Fixed (line/ROI drawing does nothing when the layer is hidden)
+- **Arming line or ROI drawing now makes the target layer visible first.** napari silently
+  ignores the drawing tool on a hidden Shapes layer, so after toggling layers off the
+  "Draw Line(s)" / "Add ROI Drawing Layer" actions appeared to do nothing. Both now set
+  `layer.visible = True` (and restore a usable opacity for the diameter layer) before
+  activating draw mode.
+### Added (nuclei segmentation model for Step 5)
+- **"Use nuclei model" checkbox under Cellpose in the time-series Step 5.** The default
+  Cellpose model (cyto2 / cpsam) is a CYTOPLASM model; on a nuclear stain like DAPI it
+  merges all nuclei into one giant region because there's no cytoplasm structure to bound
+  them (the reported "DAPI segments into one giant area"). The checkbox routes Cellpose to
+  its dedicated 'nuclei' model, which is the correct choice for DAPI/Hoechst. Threaded
+  through `run_keyframe_cellpose` → `cellpose_segmentation(model_name='nuclei')`. Shown
+  only when Cellpose is the selected method; diameter is unchanged for now (test the model
+  effect in isolation first). On Cellpose 4 (where the nuclei CNN doesn't exist as a
+  separate model) the user is warned and the default model is used, with a pointer to
+  install cellpose<4 for a dedicated nuclei model.
+### Notes
+- The GFP channel returning no segmentation on untransfected cells is expected biology,
+  not a bug: GFP only marks transfected cells, so a GFP-based segmentation can only find
+  those. Segment on a channel that labels all cells (a nuclear stain, or brightfield) to
+  capture every cell.
+
+## [1.5.202] - 2026-07-05
+### Fixed (four issues from user testing)
+- **Home / fit-to-view at file open now works reliably.** The auto camera-fit fired once
+  at a fixed 100 ms delay; if the canvas wasn't laid out yet (dock still arranging) it
+  read a zero size and fell back to `reset_view()`, which the code itself notes is
+  unreliable — so the image often opened not fitted. It now retries with growing delays
+  until the canvas has a real size, calls `reset_view()` first (correct for 2D and 3D/T
+  stacks), then tightens center/zoom from the known spatial dimensions.
+- **Overlay "wide green stripe" is now impossible to add.** In addition to the earlier
+  squeeze fix, the overlay is now added with `rgb=True` (so napari treats the last axis
+  as RGB channels, never as a 3-slice stack) and a final shape guard: if the composited
+  array isn't a clean `(H, W, 3/4)` image it is skipped with a warning rather than added
+  as a malformed layer. Analysis results are unaffected either way.
+- **Downstream dropdowns no longer grab the wrong derived layer.** Auto-selection matched
+  `name_hint` as a plain substring, so a hint of `Upscaled Fluorescence` also matched
+  `Enhanced Background Removed Upscaled Fluorescence Image` — causing the
+  background-removed layer to auto-populate dropdowns that wanted the plain upscaled
+  image. New `_hint_matches` rejects a layer that carries an EXTRA leading modifier prefix
+  (`Enhanced Background Removed`, `Background Removed`) the hint didn't ask for, while
+  still matching when the hint itself names that modifier.
+- **Status circles no longer turn green prematurely.** A dropdown defaults to its first
+  item (a real layer), which made the row's status circle read as satisfied before the
+  user chose anything — and green on the wrong layer via the substring bug above. The
+  circle now turns green only when the selection actually matches the row's `name_hint`
+  OR the user deliberately picked an item (tracked via `QComboBox.activated`, which
+  doesn't fire on the implicit index-0 default). Dropdowns without a hint are unchanged.
+
+## [1.5.201] - 2026-07-05
+### Fixed (real cause of the multi-second stall when adding an ROI layer to a lazy IMS stack)
+- **Lazy IMS layers are now added with explicit `contrast_limits` computed from their
+  first frame.** The stall was NOT the world-extent recompute (that's cheap shape
+  arithmetic and never touches pixels). It was napari auto-estimating contrast limits and
+  building the layer thumbnail by calling `np.asarray()` on the lazy `(T,Y,X)` wrapper,
+  which triggers `__array__` and loads EVERY frame from disk — slow on a USB-HDD IMS
+  stack, and re-triggered whenever the layer list refreshes (such as when an ROI Shapes
+  layer is added). Passing `contrast_limits` up front (from the single first frame, which
+  is already read) stops napari from probing the whole stack. Applied to all three lazy
+  IMS paths (T,Y,X / Z,Y,X / T,Z,Y,X). The first frame is reused from the existing
+  probe-read for channel 0, so no extra disk reads for that channel. Users can still
+  adjust contrast normally afterwards.
+### Notes
+- Deliberately did NOT change the wrappers' `__array__` to return a single frame: that
+  method loading the full stack is *correct* for genuine full-array operations, and
+  short-circuiting it would silently make real analyses operate on one frame. The fix
+  targets only the incidental thumbnail/contrast probe, via `contrast_limits`.
+
+## [1.5.200] - 2026-07-05
+### Fixed (line drawing tool becomes unusable after clicking elsewhere)
+- **Added a "✏ Draw Line(s)" button that re-arms line drawing.** Clicking an image
+  layer's eye icon (napari default) makes that image the active layer, which silently
+  disables line drawing on the diameter Shapes layer even though it still looks selected
+  in the layer list — `update_tool` only sets `add_line` mode on a selection *change*, so
+  re-selecting doesn't always re-fire. The new button deterministically activates the
+  correct diameter Shapes layer (preferring one with no lines drawn yet) and sets
+  `add_line` mode, so drawing is always one click away regardless of what selection
+  detour happened.
+### Improved
+- **"Add ROI Drawing Layer" no longer freezes on the button press.** On a large lazy IMS
+  stack, adding a Shapes layer makes napari recompute the world extent, which took a
+  noticeable moment mid-click. The layer creation is now deferred by one event-loop tick
+  with a wait cursor, so the click feels responsive. (The extent recompute itself is
+  napari-internal; this removes the frozen-button feel rather than the underlying cost.)
+### Housekeeping
+- Removed a duplicated `_add_widget_to_layout_or_dock` call in `_add_measure_line` that
+  added the measure widget twice.
+
+## [1.5.199] - 2026-07-05
+### Fixed (overlay image rendered as a wide green stripe — the real root cause)
+- **The overlay now squeezes its input to 2-D before compositing.** The 1.5.184 fix
+  addressed float-clipping (`img_as_uint`) but not the actual cause of the stripe on
+  processed data: the "Upscaled Fluorescence Image" layer carries a leading singleton
+  axis (shape `(1, H, W)`) from the loader's T/C dimension handling. Passing that to
+  `create_overlay_image` produced a 4-D array `(1, H, 2W, 3)`, which napari renders as a
+  wide, short green stripe instead of a side-by-side overlay. `run_puncta_analysis_func`
+  now `np.squeeze`s the image (and the puncta·cell mask) to a plain 2-D plane first,
+  falling back to the first plane for any genuine multi-frame input and to a zero mask on
+  a post-squeeze shape mismatch. Validated: `(1,1024,1024)` input now yields a correct
+  `(1024, 2048, 3)` overlay instead of the malformed 4-D stripe.
+
+## [1.5.198] - 2026-07-05
+### Fixed (RuntimeError spam: "wrapped C/C++ object of type QComboBox has been deleted")
+- **Layer dropdowns no longer fire callbacks after their widget is destroyed.**
+  `_layer_row` (status-circle rows) and `create_layer_dropdown` both connect handlers to
+  the viewer-level `layers.events.inserted` / `removed` signals, which outlive the
+  dropdown. When a workflow was torn down and its `QComboBox` deleted, a subsequent layer
+  insertion/removal still invoked those handlers against the dead C++ object, raising
+  `RuntimeError: wrapped C/C++ object of type QComboBox has been deleted` — repeatedly,
+  flooding the console. Fixed two ways (belt and suspenders): (1) each dropdown now
+  disconnects its viewer-signal handlers on `destroyed`, and (2) `_update_circle`,
+  `_on_inserted`, and `update_dropdown_items` guard their `QComboBox` access with
+  `except RuntimeError` so any stale call that still slips through is a harmless no-op.
+  Also removed dead introspection code (`for conn in ...events.inserted._slots: pass`)
+  left in `_layer_row`.
+
+## [1.5.197] - 2026-07-05
+### Added
+- **Colormap reset toggle on the PyCAT toolbar.** A new "🎨 Gray / Viridis" button
+  flips every image layer between grayscale and viridis in one click. IMS/multichannel
+  loads assign per-channel colors (blue/green/red/magenta) which are harder to read for
+  intensity inspection; this gives a one-click neutral view. Label and mask layers are
+  left untouched (their colormaps are categorical). The button label reflects the
+  colormap the next click will apply.
+
+## [1.5.196] - 2026-07-05
+### Fixed (IMS channel names fell back to generic positional colors)
+- **IMS channel identity now read from the HDF5 `DataSetInfo/Channel N` group
+  attributes.** `extract_channel_info_from_ims` previously scanned the unreliable
+  `reader.metaData` dict, which for real Fusion/Imaris files omits per-channel info —
+  so every IMS channel fell through to the positional fallback (C0-blue, C1-green,
+  C2-red, C3-far_red), which is wrong whenever the acquisition order isn't the standard
+  blue/green/red/far-red. It now reads each channel's stored `Name` (e.g.
+  `405_DAPI_CF40um_z`, `488_GFP_CF40um_z`, `594_mCherry_CF40`, `BFPreAm`) and
+  `LSMExcitation/LSMEmissionWavelength` directly from the h5py handle, per index, then
+  runs them through the existing three-tier identifier. Falls back to the metaData scan
+  and then position only if the handle read yields nothing.
+- **Channel-name matching fixed for underscore/digit-delimited names.** The fluorophore
+  patterns used `\b` word boundaries, which do NOT fire between an underscore and a
+  letter (underscore is a word char) — so `488_GFP_CF40um_z` and `594_mCherry_CF40`
+  matched nothing. Patterns now use non-letter delimiters `(?:^|[^a-z])…(?:[^a-z]|$)`,
+  correctly matching the fluorophore token wherever it sits in the name. Added
+  `BFPreAm`/`BFPreAmp` and bare `BF` as brightfield/transmitted patterns, plus mScarlet
+  and tdTomato.
+- Added `raw_name` to the channel-identification result and a debug log line
+  (`PYCAT_DEBUG=1`) reporting the resolved name/label/bucket per IMS channel, so a
+  name↔index mismatch (stored acquisition name not matching the physical sample) can be
+  diagnosed vs. a PyCAT parsing bug.
+
+## [1.5.195] - 2026-07-05
+### Changed (menu-bar clarity — distinguish PyCAT menus from napari's)
+- **Added a bold "◆ PyCAT ▸" section marker** on the menu bar, immediately before
+  PyCAT's menus (Analysis Methods, Toolbox, ★ Open/Save File(s), Clear, Home, Metadata).
+  PyCAT's menus are appended to napari's native menu bar (File/View/Plugins/Window/Help),
+  and without a visual break users couldn't tell where napari ended and PyCAT began. The
+  marker is a non-clickable, bold, accent-coloured divider so everything to its right
+  reads clearly as PyCAT. The menus themselves are unchanged (kept as dropdowns), so no
+  wiring is affected. Noted as a candidate for a fuller toolbar redesign later.
+
+## [1.5.194] - 2026-07-05
+### Added (unified metadata extraction, viewer widget, and results export)
+- **New `pycat/file_io/metadata_extract.py`** — a single normalisation layer that
+  extracts acquisition metadata from any supported format (TIFF/OME-TIFF via tifffile,
+  CZI/OME via AICSImage, IMS via HDF5 attributes) into a consistent record with a
+  curated `common` block (pixel size + source, dimensions, bit depth, channels,
+  timepoints, Z, objective, numerical aperture, modality, excitation/emission
+  wavelengths, acquisition date, software) and a `raw` block containing every
+  key/value the file exposes. Every extractor is defensive — missing fields yield
+  None rather than raising.
+- **IMS metadata is no longer discarded.** Previously `update_metadata` was only
+  called on the AICSImage path, so all IMS acquisition metadata (objective, NA,
+  modality, wavelengths, recording date, gain) was thrown away. Both load paths now
+  store a normalised record in `data_repository['file_metadata']`. On the multichannel
+  IMS test file this recovers 63x objective, NA 1.4, Spinning Disk Confocal, 521 nm
+  ex/em, 0.0957 µm/px.
+- **Metadata viewer** — a new "ⓘ Metadata" menu-bar action opens a dialog showing the
+  curated fields, with a "Show all raw metadata" checkbox that reveals the full dump,
+  and an "Export JSON…" button.
+- **Metadata exported with results.** `save_and_clear_all` now writes
+  `<name>_metadata.json` alongside the results CSVs, tying acquisition provenance to
+  every analysis output (supports the reproducibility story).
+### Housekeeping
+- Removed stray `file_io.py.orig` / `file_io.py.rej` patch artifacts that were sitting
+  in the source tree.
+
+## [1.5.193] - 2026-07-05
+### Fixed (IMS pixel size not read from spatial extents)
+- **Pixel size is now recovered robustly from IMS `ExtMax0`/`ExtMin0` extents.** The
+  old code called `reader.read_numerical_dataset_attr('ExtMax0')` inside a bare
+  `except: pass`, which silently swallowed failures — including on files whose extents
+  are stored as fixed-length ASCII char arrays with negative stage coordinates (e.g.
+  `b'-42107.8'`), a case the reader's accessor mishandles. New helper
+  `_ims_pixel_size_um` reads the `DataSetInfo/Image` extents directly from the h5py
+  handle (`reader.hf`), decodes the char array to a float explicitly, and computes
+  `(ExtMax0 - ExtMin0) / width`, falling back to the reader accessor only if the handle
+  route fails. On the multichannel time-series test file this correctly recovers
+  0.0957 µm/px (196 µm across 2048 px). Unitless/absurd values are rejected.
+### Notes
+- Confirmed the time-series condensate analysis and the 2D condensate method share the
+  same segmentation engine (`segment_subcellular_objects`) and the same preprocessing
+  (`pre_process_image` + `rb_gaussian_bg_removal_with_edge_enhancement`) — the science
+  has not forked. The one intentional difference is that the time-series path passes
+  `cell_df=None` (so the per-cell low-SNR background-removal-skip branch never fires;
+  every cell gets background removal). A fuller methods-coherence review of this
+  difference is deferred to the planned methods audit.
+
+## [1.5.192] - 2026-07-05
+### Fixed (TIFF pixel size not read from resolution tags)
+- **Pixel size is now recovered from baseline TIFF resolution tags when AICSImage
+  misses it.** AICSImage's `physical_pixel_sizes` reads only OME-XML and ImageJ
+  metadata, not the standard `XResolution`/`YResolution`/`ResolutionUnit` tags. Many
+  microscope-exported TIFFs (confirmed on real GFP/DAPI test files) store pixel size
+  ONLY in those baseline tags, so AICSImage returned None and PyCAT fell back to
+  1.0 µm/px, forcing the user to enter the scale manually in the pixel-size gate. New
+  helper `_tiff_pixel_size_um` reads the tags directly: XResolution is a RATIONAL
+  (pixels per unit), ResolutionUnit 3 = cm / 2 = inch. On the real test files this
+  correctly recovers 0.097656 µm/px (a 50 µm field of view across 512 px). Wired into
+  both the AICSImage path (as a fallback when it returns 1.0) and the direct-tifffile
+  fallback path. Unitless tags (ResolutionUnit = 1) and absurd values are rejected so a
+  bad tag can't set a nonsense scale.
+
+## [1.5.191] - 2026-07-05
+### Documentation
+- Added a super-resolution data processing workflows section to the roadmap. Structured
+  around the critical scientific distinction that "super-resolution" spans two different
+  data models: **Category A — image-based / raster-grid SR** (deconvolution, SRRF, SOFI,
+  SIM reconstruction) that consumes an image sequence and emits an enhanced raster image,
+  which is drop-in compatible with PyCAT's existing pipeline as advanced preprocessing;
+  and **Category B — localization-table SR** (PALM/STORM/dSTORM, DNA-PAINT/PAINT family)
+  that emits a coordinate list, not an image, and needs its own data type and
+  localization-native operations. Notes the sequencing (Category A near-term, especially
+  deconvolution then SRRF/SOFI, reusing lazy loading + batch/replay; Category B a larger
+  post-publication addition scoped only if a real user presents localization data) and the
+  strongest integration argument (PyCAT's point-based spatial-phenotyping statistics
+  already cover most of what localization-cluster analysis needs).
+
+## [1.5.190] - 2026-07-05
+### Fixed (release hygiene — clean sdist)
+- **Source tarballs no longer include VCS/cache/build cruft.** The project uses hatchling,
+  which ignores `MANIFEST.in` (a setuptools mechanism) — so the `global-exclude` rules
+  there (`.DS_Store`, `.pytest_cache/`, `__pycache__/`, etc.) were never applied to the
+  sdist. Added an explicit `[tool.hatch.build.targets.sdist]` section with `include` and
+  `exclude` lists, so `python -m build` now produces a clean tarball by construction
+  (no `.git/`, `__pycache__/`, `.coverage`, `.DS_Store`, `dist/`, `PKG-INFO`). The wheel
+  was already clean.
+### Documentation
+- Recorded the external architecture review (2026-07) in the roadmap: platform
+  consolidation sequencing (spatial-phenotyping menu grouping, stability tiers,
+  biological-relevance tooltips, shared output schema, deferred module registry), the
+  highest-value test additions, and this release-hygiene fix. Key insight: the UI
+  monolith, batch-registry monolith, and output-schema gap are one refactor —
+  self-describing modules — and the shared output schema is the foundational piece to
+  build first.
+
+## [1.5.189] - 2026-07-05
+### Fixed (macOS support — Apple Silicon GPU + platform-aware messages)
+- **Cellpose now uses the Apple Silicon GPU (Metal/MPS) when available.**
+  `_get_cellpose_gpu()` previously checked only `torch.cuda.is_available()`, which is
+  always False on M1/M2/M3 Macs, forcing CPU even when a Metal-capable PyTorch was
+  installed. It now also checks `torch.backends.mps.is_available()` and returns True
+  for MPS, so `CellposeModel(gpu=True)` is passed on Apple Silicon and Cellpose uses
+  the GPU automatically. The detected backend ('cuda' / 'mps' / None) is cached in
+  `_CELLPOSE_GPU_BACKEND`.
+- **CPU-fallback warning is now platform-aware.** On Mac it no longer tells users to
+  `pip install torch --index-url .../cu118` (a Windows/Linux-only CUDA wheel that does
+  not exist for macOS). Mac users are instead told that installing an MPS-capable
+  PyTorch enables the Apple GPU automatically, and that there is no CUDA on Mac.
+### Notes (Mac install guidance — no code change)
+- On Apple Silicon, install via conda-forge rather than pure pip: `simpleitk` and
+  `numba` (llvmlite) arm64 wheels are on conda-forge but not reliably on PyPI, so a
+  pip-only install can fail at dependency resolution before PyCAT ever runs.
+
 ## [1.5.188] - 2026-07-05
 ### Fixed (auto-home on image load — direct camera set instead of reset_view)
 - **Images now reliably fill the canvas on load.** The 1.5.184 implementation used

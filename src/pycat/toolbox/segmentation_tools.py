@@ -44,6 +44,7 @@ from pycat.toolbox.image_processing_tools import apply_rescale_intensity, rb_gau
 # CUDA context on every Cellpose call. The actual check is deferred until
 # first use so module import stays fast.
 _CELLPOSE_USE_GPU = None
+_CELLPOSE_GPU_BACKEND = None   # 'cuda', 'mps', or None — set by _get_cellpose_gpu
 _WARNED_CPU = False
 
 # Diagnostic flag for puncta-refinement rejection logging. Set to True here, or
@@ -81,11 +82,27 @@ def _to_uint16_safe(image):
     return sk.util.img_as_uint(normed)
 
 def _get_cellpose_gpu():
-    global _CELLPOSE_USE_GPU
+    """Return True if Cellpose should run on a GPU (CUDA or Apple MPS).
+
+    Checks CUDA first (NVIDIA), then Apple Metal (MPS) on Apple Silicon Macs.
+    Cellpose 3.x accepts gpu=True and uses whichever accelerator torch exposes.
+    The detected backend is cached in the module-level _CELLPOSE_GPU_BACKEND so
+    the CPU-warning message can name the right install path per platform.
+    """
+    global _CELLPOSE_USE_GPU, _CELLPOSE_GPU_BACKEND
     if _CELLPOSE_USE_GPU is None:
+        _CELLPOSE_GPU_BACKEND = None
         try:
             import torch
-            _CELLPOSE_USE_GPU = torch.cuda.is_available()
+            if torch.cuda.is_available():
+                _CELLPOSE_USE_GPU = True
+                _CELLPOSE_GPU_BACKEND = 'cuda'
+            elif getattr(torch.backends, 'mps', None) is not None and torch.backends.mps.is_available():
+                # Apple Silicon Metal Performance Shaders backend.
+                _CELLPOSE_USE_GPU = True
+                _CELLPOSE_GPU_BACKEND = 'mps'
+            else:
+                _CELLPOSE_USE_GPU = False
         except Exception:
             _CELLPOSE_USE_GPU = False
     return _CELLPOSE_USE_GPU
@@ -143,6 +160,17 @@ def _build_cellpose_model(model_name):
     if _cellpose_major_version() >= 4:
         # Cellpose 4+: legacy names don't exist; fall back to cpsam explicitly.
         name = model_name if model_name in available_cellpose_models() else 'cpsam'
+        if model_name == 'nuclei' and name != 'nuclei':
+            # The dedicated nuclei CNN doesn't exist in Cellpose 4 (SAM is a
+            # single unified model). Tell the user rather than silently ignoring.
+            try:
+                napari_show_warning(
+                    "The Cellpose 'nuclei' model isn't available in Cellpose 4 "
+                    "(Cellpose-SAM is a single unified model). Using the default "
+                    "model instead. For a dedicated nuclei model, install "
+                    "cellpose<4 (pip install 'cellpose<4').")
+            except Exception:
+                pass
         model = models.CellposeModel(gpu=gpu, pretrained_model=name)
     else:
         # Cellpose <4: builtin CNNs are selected via model_type.
@@ -727,7 +755,7 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
     return boolean_mask
 
 
-def cellpose_segmentation(image, object_diameter, model_name=None):
+def cellpose_segmentation(image, object_diameter, model_name=None, postprocess=True):
     """
     Perform cell segmentation on an image using Cellpose, a deep-learning-based method for cell/nucleus segmentation.
 
@@ -773,18 +801,35 @@ def cellpose_segmentation(image, object_diameter, model_name=None):
     global _WARNED_CPU
     if not _get_cellpose_gpu() and not _WARNED_CPU:
         _WARNED_CPU = True
+        import sys as _sys
+        _is_mac = _sys.platform == 'darwin'
         if _cellpose_major_version() >= 4:
-            napari_show_warning(
-                "Cellpose is running on CPU (no CUDA GPU detected). The "
-                "Cellpose-SAM model is very slow on CPU  --  expect minutes per "
-                "image. For speed, install CUDA PyTorch or switch to the cyto2 "
-                "model (cellpose<4). See the README GPU section.")
+            if _is_mac:
+                napari_show_warning(
+                    "Cellpose is running on CPU. The Cellpose-SAM model is very "
+                    "slow on CPU -- expect minutes per image. On Apple Silicon, "
+                    "install a PyTorch build with MPS support and PyCAT will use "
+                    "the Apple GPU automatically; or switch to the faster cyto2 "
+                    "model (cellpose<4). See the README GPU section.")
+            else:
+                napari_show_warning(
+                    "Cellpose is running on CPU (no CUDA GPU detected). The "
+                    "Cellpose-SAM model is very slow on CPU -- expect minutes per "
+                    "image. For speed, install CUDA PyTorch or switch to the cyto2 "
+                    "model (cellpose<4). See the README GPU section.")
         else:
-            napari_show_warning(
-                "Cellpose is running on CPU (no CUDA GPU detected). Segmentation "
-                "will be slower than on GPU. To enable GPU acceleration, install "
-                "CUDA PyTorch: pip install torch torchvision --index-url "
-                "https://download.pytorch.org/whl/cu118")
+            if _is_mac:
+                napari_show_warning(
+                    "Cellpose is running on CPU. Segmentation will be slower than "
+                    "on GPU. On Apple Silicon, install a PyTorch build with MPS "
+                    "support (the default recent torch wheels include it) and PyCAT "
+                    "will use the Apple GPU automatically. There is no CUDA on Mac.")
+            else:
+                napari_show_warning(
+                    "Cellpose is running on CPU (no CUDA GPU detected). Segmentation "
+                    "will be slower than on GPU. To enable GPU acceleration, install "
+                    "CUDA PyTorch: pip install torch torchvision --index-url "
+                    "https://download.pytorch.org/whl/cu118")
 
     # Preprocess the image to improve segmentation quality.
     img = dtype_conversion_func(image, 'float32') # Convert image to float32 for processing
@@ -799,6 +844,17 @@ def cellpose_segmentation(image, object_diameter, model_name=None):
         masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter)
     else:
         masks, flows, styles = model.eval(image_preprocessed, diameter=object_diameter, channels=[0,0])
+
+    # When postprocess=False, return Cellpose's instance labels UNCHANGED. The
+    # post-processing below (binarize → generic watershed → 7× morphological
+    # opening → relabel) discards Cellpose's learned per-object boundaries and
+    # replaces them with a harsh generic morphology pipeline — which degrades
+    # otherwise-good Cellpose output. The time-series path passes postprocess=False
+    # so it uses Cellpose's masks as-is. The legacy 2D path keeps postprocess=True
+    # for backward compatibility (its downstream steps expect the refined masks).
+    masks = np.asarray(masks).astype(np.uint16)
+    if not postprocess:
+        return masks
 
     # Post-process segmentation masks to improve results.
     binary_mask = masks > 0  # Binary version for morphological operations
@@ -835,9 +891,15 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
     image = image_layer.data
     object_diameter = data_instance.data_repository['cell_diameter']
     model_name = data_instance.data_repository.get('cellpose_model', None)
+    # Refine (post-process) Cellpose masks only if the user opted in. Default
+    # False → use Cellpose's instance masks directly (preserves learned
+    # boundaries); True → legacy watershed + morphology cleanup.
+    refine = bool(data_instance.data_repository.get('cellpose_refine', False))
 
     # Perform cell segmentation using Cellpose.
-    cell_masks = cellpose_segmentation(image, object_diameter, model_name=model_name)
+    cell_masks = cellpose_segmentation(image, object_diameter,
+                                       model_name=model_name,
+                                       postprocess=refine)
     
     # Add the segmentation results as a new label layer to the viewer.
     viewer.add_labels(cell_masks, name=f"Cellpose Segmentation on {image_layer.name}")

@@ -271,6 +271,43 @@ class BaseUIClass:
         """
         self.viewer = viewer
 
+    def _hint_matches(self, name_hint, layer_name):
+        """Return True if layer_name is the intended target of name_hint.
+
+        Plain substring matching is wrong: a hint of 'Upscaled Fluorescence'
+        substring-matches derived layers like 'Pre-Processed Upscaled
+        Fluorescence Image' or 'Enhanced Background Removed Upscaled Fluorescence
+        Image', causing a derived layer to auto-populate a dropdown that wants the
+        plain upscaled image. We reject a match when the layer name carries an
+        EXTRA leading modifier prefix that the hint does not — i.e. the layer is a
+        more-derived version than the dropdown asked for. A hint that itself names
+        the modifier still matches (e.g. hint 'Pre-Processed' matches the
+        pre-processed layer).
+        """
+        if not name_hint:
+            return False
+        hl = name_hint.lower().strip()
+        nl = layer_name.lower().strip()
+        if hl not in nl:
+            return False
+        # Leading modifier prefixes that mark a DERIVED layer. Any of these at the
+        # START of a layer name means the layer is a processed derivative; if the
+        # hint doesn't itself mention the modifier, that layer is not what the
+        # dropdown asked for. Longest-first so multi-word prefixes match.
+        _modifiers = (
+            'enhanced background removed',
+            'background removed',
+            'pre-processed',
+            'preprocessed',
+        )
+        for mod in _modifiers:
+            # If the layer name STARTS with this modifier but the hint neither
+            # starts with nor contains it, the layer is a derived version the
+            # dropdown didn't ask for — reject.
+            if nl.startswith(mod) and mod not in hl:
+                return False
+        return True
+
     def create_layer_dropdown(self, layer_type, name_hint: str = ''):
         """
         Creates a dropdown (QComboBox) widget that lists layers of a specific type.
@@ -315,28 +352,61 @@ class BaseUIClass:
         self.update_dropdown_items(dropdown, layer_type)
 
         def _on_inserted(event):
-            self.update_dropdown_items(dropdown, layer_type)
+            # Performance: only rebuild if the inserted layer is of this
+            # dropdown's type. Adding one Shapes ROI layer would otherwise
+            # trigger a full rebuild of EVERY dropdown in the dock (dozens on the
+            # time-series/condensate docks), each looping all layers — the cause
+            # of the multi-second lag when clicking "Add ROI Drawing Layer" on a
+            # large lazy IMS stack.
+            try:
+                inserted_layer = getattr(event, 'value', None)
+                if inserted_layer is not None and not isinstance(inserted_layer, layer_type):
+                    return
+            except Exception:
+                pass
+            try:
+                self.update_dropdown_items(dropdown, layer_type)
+            except RuntimeError:
+                return  # dropdown deleted
             # Auto-select: if a name_hint was given and the new layer matches,
             # switch to it so the user doesn't have to manually find it.
             if name_hint:
                 try:
                     new_name = event.value.name if hasattr(event, 'value') else ''
-                    if not new_name:
-                        # fallback: check the most-recently added matching layer
+                    if not new_name or not self._hint_matches(name_hint, new_name):
+                        # fallback: most-recently added layer that truly matches
+                        new_name = ''
                         for layer in reversed(self.viewer.layers):
-                            if isinstance(layer, layer_type) and name_hint.lower() in layer.name.lower():
+                            if isinstance(layer, layer_type) and self._hint_matches(name_hint, layer.name):
                                 new_name = layer.name
                                 break
-                    if new_name and name_hint.lower() in new_name.lower():
+                    if new_name and self._hint_matches(name_hint, new_name):
                         idx = dropdown.findText(new_name)
                         if idx != -1:
                             dropdown.setCurrentIndex(idx)
+                except RuntimeError:
+                    return
                 except Exception:
                     pass
 
         self.viewer.layers.events.inserted.connect(_on_inserted)
-        self.viewer.layers.events.removed.connect(
-            lambda e: self.update_dropdown_items(dropdown, layer_type))
+        _removed_handler = lambda e: self.update_dropdown_items(dropdown, layer_type)
+        self.viewer.layers.events.removed.connect(_removed_handler)
+
+        # Disconnect both viewer-level handlers when the dropdown is destroyed,
+        # so a later insert/remove doesn't fire a callback that touches a deleted
+        # QComboBox (RuntimeError: wrapped C/C++ object has been deleted).
+        def _disconnect(*_):
+            for _sig, _h in ((self.viewer.layers.events.inserted, _on_inserted),
+                             (self.viewer.layers.events.removed, _removed_handler)):
+                try:
+                    _sig.disconnect(_h)
+                except Exception:
+                    pass
+        try:
+            dropdown.destroyed.connect(_disconnect)
+        except Exception:
+            pass
         return dropdown
 
     def update_dropdown_items(self, dropdown, layer_type):
@@ -359,8 +429,13 @@ class BaseUIClass:
         layer_type : type
             The type of layer to include in the dropdown.
         """
-        # Remember what was selected before rebuilding
-        previous_selection = dropdown.currentText()
+        # Remember what was selected before rebuilding. If the dropdown's C++
+        # object has already been deleted (its parent workflow was torn down but
+        # a viewer-level layer signal still references it), bail out silently.
+        try:
+            previous_selection = dropdown.currentText()
+        except RuntimeError:
+            return
 
         # Check if 'None' option exists and store its state
         none_option_exists = dropdown.findText("None") != -1
@@ -712,27 +787,79 @@ class BaseUIClass:
         row_h.addWidget(circle)
         row_h.addWidget(dd, 1)
         layout.addWidget(row_w)
+        # Track whether the user has DELIBERATELY picked an item. QComboBox.activated
+        # fires only on user interaction (not on programmatic setCurrentIndex or the
+        # implicit index-0 default), so we use it to distinguish a real choice from
+        # the dropdown merely defaulting to the first layer.
+        _user_picked = [False]
+        def _mark_user_picked(*_):
+            _user_picked[0] = True
+        try:
+            dd.activated.connect(_mark_user_picked)
+        except Exception:
+            pass
+
         def _update_circle(*_):
-            txt = (dd.currentText() or '').strip().lower()
-            is_placeholder = (not txt or txt.startswith(
+            # The layers.events.inserted signal (connected below) outlives this
+            # widget: after a workflow is torn down and its dropdown deleted, a
+            # later layer insertion would still fire this callback with a stale
+            # `dd`, raising "wrapped C/C++ object of type QComboBox has been
+            # deleted". Guard every access so a stale call is a harmless no-op.
+            try:
+                txt = (dd.currentText() or '').strip()
+            except RuntimeError:
+                return  # dd was deleted; nothing to update
+            txt_l = txt.lower()
+            is_placeholder = (not txt_l or txt_l.startswith(
                 ('select', 'none', '--', '—', 'no ', 'choose')))
-            if not is_placeholder:
-                circle._set('green', 'Layer selected.')
-            else:
-                circle._set(init_color, init_tip)
+            try:
+                if is_placeholder:
+                    # Nothing chosen → back to the initial required/optional state.
+                    circle._set(init_color, init_tip)
+                    return
+                # A real layer is selected. Distinguish:
+                #   GREEN  — the selection matches the name hint (the auto-filled /
+                #            suggested layer), or a required field with no hint is
+                #            now satisfied.
+                #   BLUE   — the user deliberately picked a non-suggested layer, OR
+                #            an OPTIONAL field with no hint was set to a real value
+                #            (i.e. changed away from its 'None'/default).
+                if name_hint:
+                    matches_hint = self._hint_matches(name_hint, txt)
+                    if matches_hint:
+                        circle._set('green', 'Done — using the suggested layer.')
+                    elif _user_picked[0]:
+                        circle._set('blue', 'Changed — you picked a different '
+                                            'layer than the suggested one.')
+                    else:
+                        circle._set(init_color, init_tip)
+                else:
+                    # No hint: a required field is simply satisfied (green); an
+                    # optional field with a real value has been changed from its
+                    # default (blue).
+                    if optional:
+                        circle._set('blue', 'Changed — you set this optional layer.')
+                    else:
+                        circle._set('green', 'Done — layer selected.')
+            except RuntimeError:
+                return
         dd.currentIndexChanged.connect(_update_circle)
         _update_circle()
-        # Also hook into the inserted event to re-evaluate when a new layer
-        # lands (auto-selection via name_hint may not fire currentIndexChanged
-        # if the index doesn't change, so call _update_circle explicitly).
-        original_on_inserted = None
-        for conn in getattr(self.viewer.layers.events.inserted, '_slots', []):
-            pass  # can't easily introspect; instead we patch via a wrapper below
 
+        # Also re-evaluate when a new layer lands (auto-selection via name_hint
+        # may not fire currentIndexChanged if the index doesn't change). This
+        # connects to the viewer-level inserted signal, which outlives the
+        # dropdown — so we disconnect it when the dropdown is destroyed to avoid
+        # leaking stale callbacks (see the guard in _update_circle above).
         def _on_inserted_with_circle_refresh(event):
-            # Let create_layer_dropdown's own _on_inserted run first (already
-            # connected above), then refresh the circle state. We use a short
-            # deferred call so the dropdown has already updated its index.
+            # Only react to layers of this row's type (see perf note in
+            # create_layer_dropdown._on_inserted).
+            try:
+                inserted_layer = getattr(event, 'value', None)
+                if inserted_layer is not None and not isinstance(inserted_layer, layer_type):
+                    return
+            except Exception:
+                pass
             try:
                 from PyQt5.QtCore import QTimer
                 QTimer.singleShot(0, _update_circle)
@@ -740,6 +867,17 @@ class BaseUIClass:
                 _update_circle()
 
         self.viewer.layers.events.inserted.connect(_on_inserted_with_circle_refresh)
+
+        def _disconnect_on_destroy(*_):
+            try:
+                self.viewer.layers.events.inserted.disconnect(
+                    _on_inserted_with_circle_refresh)
+            except Exception:
+                pass
+        try:
+            dd.destroyed.connect(_disconnect_on_destroy)
+        except Exception:
+            pass
         return dd
 
     def _add_workflow_header(self, layout, include_pixel_gate=False,
@@ -763,10 +901,23 @@ class BaseUIClass:
                         self.central_manager.file_io._enable_auto_scale_bar()
                     except Exception:
                         pass
-                add_pixel_size_gate(
+                _px_refresh = add_pixel_size_gate(
                     layout,
                     lambda: self.central_manager.active_data_class.data_repository,
                     on_set=_on_px, central_manager=self.central_manager)
+                # The pixel-size gate only re-evaluated on field edit / data
+                # switch, so its status marker went stale when an image loaded
+                # (metadata scale detected) or the canvas was cleared. Wire its
+                # refresh to layer insert/remove so it updates in lock-step with
+                # the "Image loaded" marker.
+                if callable(_px_refresh):
+                    try:
+                        self.viewer.layers.events.inserted.connect(
+                            lambda e: _px_refresh())
+                        self.viewer.layers.events.removed.connect(
+                            lambda e: _px_refresh())
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -896,6 +1047,47 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         measure_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(measure_layout, 'Measure Object Diameters', bold=True) # Add widget title label
         measure_button = QPushButton("Measure Line(s)") # Create a button widget
+        def _arm_line_drawing():
+            """Activate a diameter Shapes layer in add_line mode so the user can
+            draw. Clicking an image layer's eyeball (napari default) steals the
+            active layer, silently disabling line drawing even though the Shapes
+            layer still looks selected; this re-arms it deterministically."""
+            try:
+                import numpy as _np
+                target = None
+                for _nm in ('Object Diameter', 'Cell Diameter'):
+                    if _nm in self.viewer.layers:
+                        lyr = self.viewer.layers[_nm]
+                        # Count real (non-seed) lines: the seed is a ~0-length
+                        # line at the origin used to keep the extent finite.
+                        n_real = 0
+                        for d in getattr(lyr, 'data', []) or []:
+                            try:
+                                if _np.ptp(_np.asarray(d), axis=0).max() > 1e-2:
+                                    n_real += 1
+                            except Exception:
+                                pass
+                        # Prefer the first layer that has no real lines yet.
+                        if target is None or n_real == 0:
+                            target = lyr
+                            if n_real == 0:
+                                break
+                if target is not None:
+                    # A Shapes layer that is hidden cannot be drawn on — napari
+                    # silently ignores the drawing tool. Make it visible (and
+                    # ensure a usable opacity) before activating add_line mode.
+                    try:
+                        target.visible = True
+                        if getattr(target, 'opacity', 1.0) < 0.05:
+                            target.opacity = 0.7
+                    except Exception:
+                        pass
+                    self.viewer.layers.selection.active = target
+                    target.mode = 'add_line'
+            except Exception as _e:
+                import os as _os
+                if _os.environ.get('PYCAT_DEBUG'):
+                    print(f"[PyCAT] arm line drawing failed: {_e}")
         def _on_measure_line():
             self.on_general_button_clicked(
                 self.central_manager.active_data_class.calculate_length, None, self.viewer)
@@ -905,11 +1097,30 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius'),
             })
         measure_button.clicked.connect(_on_measure_line)
+
+        # "Measure Line(s)" is the only button here — drawing happens directly on
+        # the diameter Shapes layer (armed by _arm_line_drawing when the widget is
+        # shown / the layer is selected). The circle is required (red) and turns
+        # green once Measure Line(s) has been run.
         try:
             from pycat.ui.field_status import button_with_circle
-            measure_layout.addWidget(button_with_circle(measure_button))  # red (mandatory)
+            _measure_wrapped = button_with_circle(measure_button)  # red → green on run
+            self._measure_line_status = _measure_wrapped
+            measure_layout.addWidget(_measure_wrapped)
         except Exception:
             measure_layout.addWidget(measure_button)
+
+        # Arm line drawing automatically so the diameter Shapes layer is ready to
+        # draw on as soon as this step is shown — no separate "Draw" button needed.
+        # Deferred so the layer exists and the dock has finished building.
+        try:
+            from PyQt5.QtCore import QTimer as _QTarm
+            _QTarm.singleShot(0, _arm_line_drawing)
+        except Exception:
+            try:
+                _arm_line_drawing()
+            except Exception:
+                pass
 
         # Persist checkbox — same pattern as "Keep this pixel size for the session".
         # Off by default: Clear returns to true blank state. When ticked, ball_radius,
@@ -930,7 +1141,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
 
         measure_widget = QWidget() # Create a main widget to contain the input widget
         measure_widget.setLayout(measure_layout) # Set the layout for the widget
-        self._add_widget_to_layout_or_dock(measure_widget, layout, separate_widget, "Measure Line Dock") # Add widget to layout or dock
         self._add_widget_to_layout_or_dock(measure_widget, layout, separate_widget, "Measure Line Dock") # Add widget to layout or dock
     
 
@@ -1532,7 +1742,7 @@ class CondensateAnalysisUI(AnalysisMethodsUI):
         scroll_area.setWidget(main_widget)  # Set the main widget as the scroll area's content
 
         # Add the scroll area to the viewer as a dockable widget for condensate analysis
-        self.viewer.window.add_dock_widget(scroll_area, name="Condensate Analysis Dock")
+        self.viewer.window.add_dock_widget(scroll_area, name="Object Analysis Dock")
 
         # Set the size policy to make the widget and scroll area expand with the window
         main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1815,26 +2025,42 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # Rectangle mode immediately so the user can draw straight away.
         def _add_roi_shapes_layer():
             roi_name = "Draw XY ROI Here"
-            # Reuse existing layer if already present
-            if roi_name not in [l.name for l in self.viewer.layers]:
-                import napari.layers as _nl
-                roi_layer = self.viewer.add_shapes(
-                    name=roi_name,
-                    shape_type='rectangle',
-                    face_color='transparent',
-                    edge_color='#f0a500',
-                    edge_width=3,
-                )
-            else:
-                roi_layer = self.viewer.layers[roi_name]
-            self.viewer.layers.selection.active = roi_layer
-            self.viewer.layers.selection.active.mode = 'add_rectangle'
-            # Update the shapes dropdown to reflect the new layer
-            self.central_manager.toolbox_functions_ui.update_dropdown_items(
-                roi_shapes_dd, napari.layers.Shapes)
-            idx = roi_shapes_dd.findText(roi_name)
-            if idx != -1:
-                roi_shapes_dd.setCurrentIndex(idx)
+            # Adding a Shapes layer to a viewer showing a large lazy IMS stack
+            # makes napari recompute the combined world extent, which can take a
+            # noticeable moment. Show a wait cursor and defer the heavy work by
+            # one event-loop tick so the button click feels instant instead of
+            # freezing mid-press.
+            from PyQt5.QtCore import QTimer, Qt as _Qt
+            from PyQt5.QtWidgets import QApplication as _QApp
+
+            def _do_add():
+                try:
+                    _QApp.setOverrideCursor(_Qt.WaitCursor)
+                    if roi_name not in [l.name for l in self.viewer.layers]:
+                        roi_layer = self.viewer.add_shapes(
+                            name=roi_name,
+                            shape_type='rectangle',
+                            face_color='transparent',
+                            edge_color='#f0a500',
+                            edge_width=3,
+                        )
+                    else:
+                        roi_layer = self.viewer.layers[roi_name]
+                    try:
+                        roi_layer.visible = True
+                    except Exception:
+                        pass
+                    self.viewer.layers.selection.active = roi_layer
+                    self.viewer.layers.selection.active.mode = 'add_rectangle'
+                    self.central_manager.toolbox_functions_ui.update_dropdown_items(
+                        roi_shapes_dd, napari.layers.Shapes)
+                    idx = roi_shapes_dd.findText(roi_name)
+                    if idx != -1:
+                        roi_shapes_dd.setCurrentIndex(idx)
+                finally:
+                    _QApp.restoreOverrideCursor()
+
+            QTimer.singleShot(0, _do_add)
 
         add_roi_btn = QPushButton("＋  Add ROI Drawing Layer")
         add_roi_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -2547,6 +2773,29 @@ class MenuManager:
         and file I/O operations, populating them with the relevant actions.
         """
         # Setup and populate the "Analysis Methods" menu
+        # ── PyCAT section marker ─────────────────────────────────────────────
+        # PyCAT's menus are appended to napari's own menu bar (File/View/Plugins/
+        # Window/Help). Without a visual break, users can't tell where napari ends
+        # and PyCAT begins. Insert a bold, non-clickable marker as an obvious
+        # divider so everything to its right reads as "PyCAT".
+        from PyQt5.QtGui import QFont as _QFont, QColor as _QColor
+        _menubar = self.viewer.window._qt_window.menuBar()
+        self._pycat_marker_action = QAction('◆ PyCAT ▸', self.viewer.window._qt_window)
+        self._pycat_marker_action.setEnabled(False)   # non-clickable divider
+        _mfont = _QFont()
+        _mfont.setBold(True)
+        _mfont.setPointSize(_mfont.pointSize() + 1)
+        self._pycat_marker_action.setFont(_mfont)
+        # Make the disabled action's text render in an accent colour rather than
+        # the greyed-out default, so it reads as a heading not a dead menu.
+        try:
+            _menubar.setStyleSheet(
+                _menubar.styleSheet() +
+                "\nQMenuBar::item:disabled { color: #2d7dd2; font-weight: bold; }")
+        except Exception:
+            pass
+        _menubar.addAction(self._pycat_marker_action)
+
         self.analysis_methods_menu = self.viewer.window._qt_window.menuBar().addMenu('Analysis Methods')
         self._add_analysis_methods_to_menu()
 
@@ -2576,6 +2825,15 @@ class MenuManager:
         self.home_action.triggered.connect(self._home_fit_view)
         self.viewer.window._qt_window.menuBar().addAction(self.home_action)
 
+        # Metadata viewer: shows the curated acquisition metadata for the loaded
+        # file, with a toggle to reveal the full raw metadata dump.
+        self.metadata_action = QAction('\u24d8 Metadata', self.viewer.window._qt_window)
+        self.metadata_action.setToolTip(
+            'View acquisition metadata (pixel size, objective, wavelengths, '
+            'dimensions, date) for the loaded file.')
+        self.metadata_action.triggered.connect(self._show_metadata_dialog)
+        self.viewer.window._qt_window.menuBar().addAction(self.metadata_action)
+
         # Route files dropped onto the napari window through PyCAT's openers
         # (napari's default drop bypasses PyCAT's channel-assignment pipeline).
         try:
@@ -2587,6 +2845,119 @@ class MenuManager:
             self.viewer.window._qt_window.setAcceptDrops(True)
         except Exception as _e:
             print(f"[PyCAT] Could not install file-drop handler: {_e}")
+
+    def _show_metadata_dialog(self):
+        """Show acquisition metadata for the loaded file.
+
+        Displays the curated 'common' fields by default, with a checkbox that
+        reveals the full raw metadata dump. Also offers a JSON export button.
+        """
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                      QLabel, QPushButton, QCheckBox,
+                                      QTableWidget, QTableWidgetItem, QHeaderView,
+                                      QFileDialog)
+        from napari.utils.notifications import (show_info as _info,
+                                                show_warning as _warn)
+        dr = self.central_manager.active_data_class.data_repository
+        md = dr.get('file_metadata')
+        if not md or not isinstance(md, dict):
+            _warn("No metadata available — open an image first.")
+            return
+
+        common = md.get('common', {}) or {}
+        raw = md.get('raw', {}) or {}
+
+        dialog = QDialog(self.viewer.window._qt_window)
+        dialog.setWindowTitle("File Metadata")
+        dialog.resize(560, 620)
+        layout = QVBoxLayout(dialog)
+
+        fname = common.get('file_name') or 'Unknown file'
+        header = QLabel(f"<b>{fname}</b>")
+        layout.addWidget(header)
+
+        table = QTableWidget()
+        table.setColumnCount(2)
+        table.setHorizontalHeaderLabels(['Field', 'Value'])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(table)
+
+        # Curated-field display order and labels.
+        _labels = [
+            ('file_type', 'File type'),
+            ('dimensions', 'Dimensions (T,C,Z,Y,X)'),
+            ('pixel_size_um', 'Pixel size (µm/px)'),
+            ('pixel_size_source', 'Pixel size source'),
+            ('bit_depth', 'Bit depth'),
+            ('n_channels', 'Channels'),
+            ('n_timepoints', 'Timepoints'),
+            ('n_z', 'Z slices'),
+            ('objective', 'Objective'),
+            ('numerical_aperture', 'Numerical aperture'),
+            ('modality', 'Modality'),
+            ('excitation_nm', 'Excitation (nm)'),
+            ('emission_nm', 'Emission (nm)'),
+            ('acquisition_date', 'Acquisition date'),
+            ('software', 'Software'),
+        ]
+
+        def _fmt(v):
+            if v is None:
+                return '—'
+            if isinstance(v, dict):
+                return ', '.join(f"{k.upper()}={v.get(k)}" for k in ('t', 'c', 'z', 'y', 'x')
+                                 if v.get(k) is not None)
+            if isinstance(v, float):
+                return f"{v:.6g}"
+            return str(v)
+
+        def _populate(show_raw):
+            rows = [(lbl, _fmt(common.get(key))) for key, lbl in _labels]
+            if show_raw and raw:
+                rows.append(('— raw metadata —', ''))
+                for k in sorted(raw.keys()):
+                    rows.append((k, _fmt(raw.get(k))))
+            table.setRowCount(len(rows))
+            for i, (k, v) in enumerate(rows):
+                table.setItem(i, 0, QTableWidgetItem(str(k)))
+                table.setItem(i, 1, QTableWidgetItem(str(v)))
+
+        _populate(False)
+
+        controls = QHBoxLayout()
+        raw_check = QCheckBox("Show all raw metadata")
+        raw_check.toggled.connect(_populate)
+        controls.addWidget(raw_check)
+        controls.addStretch(1)
+
+        export_btn = QPushButton("Export JSON…")
+
+        def _export():
+            import json
+            path, _ = QFileDialog.getSaveFileName(
+                dialog, "Export metadata as JSON",
+                (common.get('file_name') or 'metadata') + '_metadata.json',
+                "JSON Files (*.json)")
+            if path:
+                try:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        json.dump(md, f, indent=2, default=str)
+                    _info(f"Metadata exported to {path}")
+                except Exception as e:
+                    _warn(f"Export failed: {e}")
+
+        export_btn.clicked.connect(_export)
+        controls.addWidget(export_btn)
+        layout.addLayout(controls)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec_()
 
     def _open_session_loader(self):
         """Open a folder browser to select a PyCAT output directory and reload."""
@@ -2781,13 +3152,13 @@ class MenuManager:
         """
         # Imaging/morphometric pipelines — agnostic to whether the system has a
         # membrane (cellular or in vitro), hence "Condensate & Cell Analysis".
-        condensate_cell_analysis_submenu = self.analysis_methods_menu.addMenu('Condensate & Cell Analysis')
+        condensate_cell_analysis_submenu = self.analysis_methods_menu.addMenu('Cell and Object Analyses')
         condensate_cell_analysis_dict = {
-            'Cellular Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'In Vitro Condensate Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
-            'In Vitro Condensate Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
-            'Time-Series Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'Z-Stack (3D) Condensate Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
+            'Cellular Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'In Vitro Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
+            'In Vitro Object Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
+            'Time-Series Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Z-Stack (3D) Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
         }
         self._add_actions_to_menu(condensate_cell_analysis_dict, condensate_cell_analysis_submenu)
 
@@ -2942,8 +3313,8 @@ class MenuManager:
         }
         self._add_actions_to_menu(obj_coloc_tools_actions, obj_coloc_tools_sub_submenu)
 
-        # ── Condensate & Cell Analysis ─────────────────────────────────────────
-        condensate_analysis_submenu = self.toolbox_menu.addMenu('Condensate & Cell Analysis')
+        # ── Cell and Object Analyses ───────────────────────────────────────────
+        condensate_analysis_submenu = self.toolbox_menu.addMenu('Cell and Object Analyses')
         condensate_analysis_actions = {
             'Cell Analyzer': (self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func, {'separate_widget': True}),
             'Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects, {'separate_widget': True}),
