@@ -1801,7 +1801,7 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     else:
         # Segment and refine on the cropped ROI
         puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
-        refined_puncta_mask_crop = puncta_refinement_func(orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=2, fast=refine_fast)
+        refined_puncta_mask_crop = puncta_refinement_func(orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=min_spot_radius, fast=refine_fast)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)

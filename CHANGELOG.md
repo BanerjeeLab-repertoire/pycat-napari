@@ -23,6 +23,202 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.241] - 2026-07-06
+### Fixed (time-series puncta segmentation now matches the 2D fluorescence path)
+Puncta detection in the time-series workflow was weaker than the validated 2D path because two
+steps differed. Both are now aligned (segmentation correctness before speed):
+- **Per-cell contrast stretching (`cell_mask_stretching`) is now applied in the time-series
+  path**, as it is in 2D. The 2D puncta pipeline computes
+  `CMS_img = cell_mask_stretching(preprocessed, cell_masks)` and segments puncta on that
+  stretched image; the time-series path was passing the plain preprocessed frame instead. Both
+  the parallel and serial time-series workers now compute the same per-cell stretched image per
+  frame (using the per-frame cell mask) and pass it to `segment_subcellular_objects`, so puncta
+  detection matches 2D.
+- **`min_spot_radius` is no longer ignored during refinement.** `segment_subcellular_objects`
+  accepted a `min_spot_radius` argument but then called `puncta_refinement_func(...,
+  min_spot_radius=2)` with a hardcoded 2, so the UI/parameter value was silently dropped during
+  the refinement step. It now passes the actual `min_spot_radius` through. **This is
+  output-preserving at the default:** every UI ships `min_spot_radius = 2`, and passing 2
+  through is byte-for-byte identical to the old hardcoded 2 (verified across all four internal
+  uses — the two Gaussian sigmas, the gradient-magnitude sigma, and the min-area computation;
+  int 2 and float 2.0 give identical results). Behavior only changes for users who deliberately
+  set a non-default value, where the parameter now takes effect as intended (this applies to
+  both 2D and time-series).
+### Notes
+- This deliberately does NOT re-enable the earlier "make TS refinement like 2D" change or touch
+  Cellpose model handling. The cell/body mask path (e.g. cyto2 without refinement) is unchanged;
+  only the puncta path was aligned. Cellpose is not used for puncta.
+- Drift-correction vs per-frame-mask interaction and transfection-filter ordering are noted for
+  follow-up but not changed here.
+
+## [1.5.240] - 2026-07-06
+### Fixed (time-series: per-frame normalization erased/inverted intensity trends)
+- **Time-series frames are now normalized against ONE global range, not per-frame.** The
+  per-frame min/max normalization in `_read_source_frame` made a growing focus appear to
+  plateau or decay: as foci brighten over time, the per-frame max (the normalization
+  denominator) rises, shrinking the normalized value of a focus even as its raw intensity
+  increases. On real data (diffuse mCherry that condenses into foci which grow brighter/bigger)
+  this produced a spurious "peak at frame 3, decay in frames 4–5" instead of the true monotonic
+  increase.
+  - Added `_compute_stack_global_range()` (reads one frame at a time — never holds the whole
+    stack in RAM) and a `global_range=` option on `_read_source_frame()`.
+  - The source-zarr materialization (feeding preprocessing → background removal → analysis),
+    the general stack→zarr helper, and the upscale step now all normalize against the stack's
+    global min/max, preserving true intensity trends over time.
+  - Verified on a simulated growing focus: per-frame normalization flattened it to a constant;
+    global normalization recovered the correct increasing trend.
+  - Frame-to-frame temporal-correlation reads are left per-frame (correlation is scale-invariant
+    there, so it's unaffected).
+
+## [1.5.239] - 2026-07-06
+### Fixed (time-series "Check if upscaling is needed" crash + plot event-loop warning)
+- **"Check if upscaling is needed" no longer crashes** with ``AttributeError: 'ToolboxFunctionsUI'
+  object has no attribute '_dr'``. The upscale step (added in 1.5.229) used ``ui._dr()`` /
+  ``ui._mpx()`` helpers that only exist on the in-vitro UI classes, but in the time-series flow
+  the UI is ``ToolboxFunctionsUI``. Switched to the correct
+  ``central_manager.active_data_class.data_repository`` access (and read
+  ``microns_per_pixel_sq`` from there for the upscaled layer's scale). The check, factor
+  recommendation, and lazy upscale now work in the time-series workflow.
+- **Quieted the "QCoreApplication::exec: The event loop is already running" warning** from the
+  time-series condensate-fraction plot: ``plt.show()`` → ``plt.show(block=False)`` so it doesn't
+  try to start a second Qt event loop inside napari's running one.
+### Note
+- The ``RuntimeWarning: Mean of empty slice`` / ``invalid value in divide`` messages during
+  analysis are benign — they come from cells with no puncta (the "low contrast, likely has no
+  puncta" cells), where per-cell statistics are legitimately NaN. The analysis completes
+  correctly; these are console noise, not errors.
+
+## [1.5.238] - 2026-07-06
+### Fixed (pixel-size gate appeared on Clear with no image)
+- **The pixel-size gate no longer pops up after Clear when no image is loaded.** The gate is
+  only meaningful when an image lacking scale metadata is present; after a Clear there are no
+  image layers, so it now stays hidden. The gate checks the viewer for any Image layer before
+  showing (failing open if it can't determine, so it never hides when actually needed).
+
+## [1.5.237] - 2026-07-06
+### Changed (recording toggle — colored status circle)
+- **The batch recording toggle now shows a colored circle** reflecting its state: 🔴
+  "Record" when idle (off, ready to start) and 🟢 "Recording" when actively capturing steps.
+
+## [1.5.236] - 2026-07-06
+### Changed (batch recording toggle moved to the PyCAT toolbar)
+- **The start/stop recording toggle is now in the PyCAT toolbar** (left of "Save Config"),
+  not buried in the Batch dialog — so you can turn recording on before clicking through your
+  workflow. It shows "⏺ Record" when off and "⏺ Recording" (checked) when on, and stays in
+  sync after a Save & Clear resets recording to off.
+- **The PyCAT toolbar is now grouped into labelled sections**: a **Batch:** section (Batch
+  Run, Record, Save Config) is separated from a **Layers:** section (show/hide Layers, Gray/
+  Viridis colormap toggle) by a divider, so the batch controls are visually distinct from the
+  layer-view controls.
+
+## [1.5.235] - 2026-07-06
+### Changed (batch recording — off by default, opt-in)
+- **Batch recording now starts OFF** and is opt-in via the start/stop toggle, so exploratory
+  clicking isn't captured before the user decides to record a workflow. Recording also resets
+  to OFF after a Save & Clear (dataset boundary) — the user re-enables it with the toggle when
+  they want to record again. (Matches the normal usage of recording a workflow once per
+  session, then batch-replaying it.)
+### Added (Recorded Steps viewer)
+- **New "☰ Recorded Steps" menu-bar panel** (next to Metadata). Shows the batch workflow
+  recorded so far as an expandable tree: each step (number, name, timestamp) expands to reveal
+  the layers/parameters it captured, with the internal layer-snapshots shown separately at the
+  end. Includes a recording-status indicator and expand/collapse-all controls, so the user can
+  review exactly what will be replayed before running a batch.
+
+## [1.5.234] - 2026-07-06
+### Fixed (Save & Clear crash — UnboundLocalError, regression from 1.5.225)
+- **Save & Clear (and saving images generally) no longer crashes** with
+  ``UnboundLocalError: cannot access local variable 'QFileDialog'``. The batch export-prompt
+  added in 1.5.225 did a local ``from PyQt5.QtWidgets import QFileDialog`` inside
+  ``save_and_clear_all``; because Python scopes that name as local for the whole function, the
+  earlier ``QFileDialog.Options()`` call failed before the local import ran. Removed the
+  redundant local imports (``QFileDialog``, ``QMessageBox``, ``QCheckBox`` are all imported at
+  module level), restoring Save & Clear and image saving.
+### Added (batch recording start/stop toggle)
+- **Start/stop recording toggle in the Batch dialog.** A button pauses/resumes step recording
+  without clearing what's already recorded — useful for skipping exploratory steps that
+  shouldn't be part of the saved workflow. Reflects and drives the existing
+  ``recording_enabled`` flag (which ``record()`` already honors).
+
+## [1.5.233] - 2026-07-06
+### Added (In Vitro Brightfield — "Invert + reconcile" segmentation)
+- **New "Invert + reconcile" method** for the dense/out-of-focus regime, from a tester's
+  suggestion to invert the image before processing. Brightfield/phase condensates flip contrast
+  depending on which side of focus they're on — some are bright-centred, others dark-centred —
+  so a single polarity misses roughly half. This method runs a polarity-specific detector
+  (white top-hat) on BOTH the image and its inversion, **unions** the two masks to catch
+  condensates of either contrast, watershed-splits, then **drops oversized objects** (merged
+  background/debris) using the Max diameter setting.
+  - Verified on real dense brightfield data: the inverted polarity surfaced ~27% additional
+    droplet area that the original polarity missed entirely.
+  - Note: the texture (local-std) and DoG methods are already polarity-invariant (variance /
+    |difference| based), so inversion doesn't change them — the reconcile trick specifically
+    helps the intensity/top-hat family, which is what this method uses.
+
+## [1.5.232] - 2026-07-06
+### Fixed (In Vitro Fluorescence — absurd per-droplet partition coefficients)
+- **Per-droplet partition coefficients no longer blow up to ~1e8.** `partition_coefficient_field`
+  estimated the bulk (dilute-phase) intensity as the 10th percentile of background, which
+  collapses to ~0 on dark fluorescence backgrounds; every per-droplet partition was then
+  `intensity / ~0`. It now uses a robust bulk (falls back to the background mean when the
+  percentile is degenerate, with a final divide-by-zero floor), putting per-droplet values on
+  the same sensible scale as the field-level partition (which already used the mean).
+
+### Changed (In Vitro Brightfield — segmentation consistency)
+- **Texture method now uses a LOCAL-ADAPTIVE threshold** instead of a single global Otsu on the
+  texture map. The global threshold made segmentation inconsistent across regions of identical
+  texture — dense areas fused into one giant blob while others dropped out entirely. A local
+  threshold judges each neighbourhood against its own surroundings, so uniform-texture regions
+  break into individual droplets consistently. (No more giant merged blobs on the test image.)
+- **New "Blob detection (DoG)" method.** Difference-of-Gaussians responds to individual
+  droplet-scale blobs rather than thresholding connected high-texture regions, so it cannot
+  produce the "one giant blob" undersegmentation and gives the most consistent per-droplet
+  output. Sigmas scale with the expected droplet radius.
+- Both texture and DoG share watershed splitting for touching droplets.
+### Fixed (deprecation)
+- **`remove_small_objects` no longer triggers the `min_size` deprecation warning.** A
+  version-compatible helper uses the new `max_size` argument (skimage ≥ 0.26) with a fallback
+  to `min_size` for older versions.
+### Docs
+- Recorded the brightfield-segmentation cross-regime generalization task (sparse+large,
+  small+sparse, large+dense semi-overlapping, fractal/irregular aggregates) and the planned
+  "guess the condition" button in the roadmap — to be implemented only once representative test
+  data is supplied per regime.
+
+## [1.5.231] - 2026-07-06
+### Added (In Vitro Brightfield — texture-based segmentation for dense/defocused droplets)
+- **New "Texture (edges/rings)" segmentation method for brightfield droplets**, optimized
+  against real dense small-condensate data. Brightfield/phase droplets — especially
+  out-of-focus ones — appear as rings (dark rim + bright centre) with little net brightness
+  difference from the mid-grey background, so the legacy intensity threshold merges background
+  or misses them (measured median solidity ~0.6 with one giant merged-background blob). The
+  texture method segments by local intensity variation (local standard deviation): high
+  wherever there's a droplet edge/ring, thresholded, hole-filled (ring → disc), and optionally
+  watershed-split for dense touching droplets. On the test image this gave clean per-droplet
+  masks (median solidity ~0.92) capturing both in-focus spots and defocused rings.
+  - New `segment_bf_condensates(method='texture'|'intensity', texture_window, split_touching)`;
+    default in the UI is now **Texture** (Intensity remains available for preprocessed
+    bright-blob images).
+  - UI: method dropdown in Step 3 with texture window + watershed-split controls (shown only
+    for the texture method).
+### Note
+- Optimized on a single dense-defocused-droplet image; the texture method is the better
+  default for that regime, but the intensity method is kept for images where droplets are
+  uniformly brighter than background after preprocessing.
+
+## [1.5.230] - 2026-07-06
+### Fixed (pixel-size gate — premature hide + no reappear after Clear)
+- **The pixel-size gate no longer vanishes mid-entry.** It previously auto-applied and hid the
+  instant a valid number appeared, so it disappeared while you were still typing (e.g. at
+  "0.0" before you finished "0.0957"). It now shows a confirmation — "Is xx.xx µm/px the
+  correct scale?" — with the value editable, and only hides after you press **Confirm pixel
+  size**. Changing the value after confirming re-arms the prompt so the new value must be
+  reconfirmed. The "Keep this pixel size for the session" checkbox remains in the panel.
+- **The pixel-size gate reappears after Clear.** Clearing wipes the scale from the data
+  repository, but the gate wasn't re-evaluating, so it stayed hidden. Clear now resets the
+  gate: with "keep for session" unchecked it reappears for the next dataset; with it checked
+  the remembered value is re-applied and the gate stays hidden (as intended).
+
 ## [1.5.229] - 2026-07-06
 ### Added (time-series: standalone early upscale step)
 - **The time-series workflow now has an optional early "Upscale Stack" step**, placed before

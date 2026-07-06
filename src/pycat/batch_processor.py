@@ -512,7 +512,10 @@ class BatchProcessor:
         self.viewer = viewer
         self.config: Dict = _empty_config()
         self.step_registry: Dict[str, Callable] = {}
-        self.recording_enabled: bool = True
+        # Recording is OFF by default at startup — the user opts in with the
+        # Batch dialog's start/stop toggle. This prevents exploratory clicking
+        # from being captured into a workflow before the user decides to record.
+        self.recording_enabled: bool = False
         # Dirty = there are recorded steps not yet written to a config file.
         # Used to prompt for export before a save-and-clear wipes the recording.
         self._dirty: bool = False
@@ -559,11 +562,21 @@ class BatchProcessor:
             pass
 
     def clear_recording(self):
-        """Reset the session recording and re-enable recording for the next dataset."""
+        """Reset the session recording. Recording returns to OFF (opt-in) — the
+        user re-enables it with the toggle when they want to record the next
+        dataset's workflow."""
         self.config = _empty_config()
-        self.recording_enabled = True
+        self.recording_enabled = False
         self._dirty = False
-        print("[PyCAT Batch] Session recording reset.")
+        # Keep the toolbar toggle in sync (recording just went OFF).
+        try:
+            sync = getattr(self, '_toolbar_record_sync', None)
+            if sync is not None:
+                sync()
+        except Exception:
+            pass
+        print("[PyCAT Batch] Session recording reset (recording OFF — use the "
+              "toggle to start recording again).")
 
     def has_unsaved_steps(self) -> bool:
         """True if there are recorded steps not yet written to a config file."""
@@ -695,6 +708,11 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     toolbar = QToolBar("PyCAT Batch", main_window)
     toolbar.setObjectName("pycat_batch_toolbar")
 
+    # ── Batch section label ────────────────────────────────────────────────
+    _batch_lbl = QAction("Batch:", main_window)
+    _batch_lbl.setEnabled(False)   # non-clickable section label
+    toolbar.addAction(_batch_lbl)
+
     action = QAction("⚡  Batch Run", main_window)
     action.setToolTip(
         "Save the current analysis config and/or run the recorded\n"
@@ -703,11 +721,53 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     action.triggered.connect(processor.open_batch_dialog)
     toolbar.addAction(action)
 
+    # ── Start/stop recording toggle (Batch section) ────────────────────────
+    # Recording is OFF at startup and opt-in: the user turns it on before
+    # clicking through the workflow they want to capture. Placed left of Save
+    # Config, in the Batch section.
+    record_action = QAction(main_window)
+    record_action.setCheckable(True)
+
+    def _sync_record_action():
+        on = bool(getattr(processor, 'recording_enabled', False))
+        record_action.setChecked(on)
+        if on:
+            # Green circle = actively recording.
+            record_action.setText("\U0001F7E2  Recording")
+            record_action.setToolTip(
+                "Batch recording is ON — steps are being captured. Click to "
+                "pause (already-recorded steps are kept).")
+        else:
+            # Red circle = idle / ready to record.
+            record_action.setText("\U0001F534  Record")
+            record_action.setToolTip(
+                "Batch recording is OFF. Click to start recording your workflow "
+                "steps into a batch config.")
+
+    def _toggle_record():
+        processor.recording_enabled = not bool(
+            getattr(processor, 'recording_enabled', False))
+        _sync_record_action()
+        state = "ON" if processor.recording_enabled else "OFF"
+        print(f"[PyCAT Batch] Recording {state}.")
+
+    record_action.triggered.connect(_toggle_record)
+    _sync_record_action()
+    # Expose so other code (e.g. after Save & Clear resets recording) can resync.
+    processor._toolbar_record_sync = _sync_record_action
+    toolbar.addAction(record_action)
+
     # Also add a quick "Save Config" action for convenience
     save_action = QAction("💾  Save Config", main_window)
     save_action.setToolTip("Save the current session's recorded steps to a JSON config file.")
     save_action.triggered.connect(_make_save_handler(processor))
     toolbar.addAction(save_action)
+
+    # ── Separator: Batch section (above) | Layers section (below) ──────────
+    toolbar.addSeparator()
+    _layers_lbl = QAction("Layers:", main_window)
+    _layers_lbl.setEnabled(False)   # non-clickable section label
+    toolbar.addAction(_layers_lbl)
 
     # Show/hide-all-layers eye toggle. As layers accumulate, toggling each layer's
     # eye in the layer list is tedious; this flips every layer's visibility in one

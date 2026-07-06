@@ -91,7 +91,7 @@ def _session_zarr_dir():
     return _session_zarr_dir._path
 
 
-def _read_source_frame(stack_data, t):
+def _read_source_frame(stack_data, t, global_range=None):
     """
     Read frame t from any stack type (numpy, zarr, _ZarrTYX, dask) and
     normalize to [0, 1] float32.
@@ -101,16 +101,52 @@ def _read_source_frame(stack_data, t):
     (0–255).  Normalizing here ensures every consumer — preprocessing,
     background removal, and analysis — receives correctly scaled data,
     matching what dtype_conversion_func does in the standard 2D pipeline.
+
+    global_range : (min, max) or None
+        If given, normalise against this FIXED range (shared across every
+        frame of the stack) instead of the frame's own min/max. This is
+        essential for time-series intensity analysis: per-frame min/max
+        normalisation makes a growing focus appear to plateau or decay,
+        because the rising per-frame max (the denominator) shrinks the
+        normalised value of a focus even as its raw intensity increases.
+        Using one global range preserves the true intensity trend over time.
     """
     frame = stack_data[t]
     if hasattr(frame, 'compute'):
         frame = frame.compute()
     arr = np.asarray(frame).astype(np.float32)
-    # Normalize to [0, 1] if outside that range
+    if global_range is not None:
+        gmn, gmx = float(global_range[0]), float(global_range[1])
+        if gmx > gmn:
+            arr = (arr - gmn) / (gmx - gmn + 1e-8)
+            arr = np.clip(arr, 0.0, 1.0)
+        return arr
+    # Fallback: per-frame normalisation (used only where a single frame is
+    # read in isolation and cross-frame comparison isn't involved).
     mn, mx = arr.min(), arr.max()
     if mx > 1.0:
         arr = (arr - mn) / (mx - mn + 1e-8)
     return arr
+
+
+def _compute_stack_global_range(stack_data, n_t):
+    """Compute (min, max) across ALL frames of a stack, read one frame at a
+    time so the whole stack is never held in RAM. Used to normalise a
+    time-series against one fixed scale (preserving the intensity trend)."""
+    gmn, gmx = np.inf, -np.inf
+    for t in range(n_t):
+        frame = stack_data[t]
+        if hasattr(frame, 'compute'):
+            frame = frame.compute()
+        a = np.asarray(frame, dtype=np.float32)
+        fmn, fmx = float(a.min()), float(a.max())
+        if fmn < gmn:
+            gmn = fmn
+        if fmx > gmx:
+            gmx = fmx
+    if not np.isfinite(gmn) or not np.isfinite(gmx):
+        return (0.0, 1.0)
+    return (gmn, gmx)
 
 
 def _get_zarr_dir_path(stack_like) -> Optional[str]:
@@ -156,8 +192,11 @@ def _materialize_stack_to_zarr(stack_like, n_frames: int, H: int, W: int,
     z_out = _zarr.open(tmp_path, mode='w',
                        shape=(n_frames, H, W), chunks=(1, H, W),
                        dtype=np.float32)
+    # One global range across all frames so intensity trends over time are
+    # preserved (per-frame min/max distorts a growing/decaying signal).
+    g_range = _compute_stack_global_range(stack_like, n_frames)
     for t in range(n_frames):
-        z_out[t] = _read_source_frame(stack_like, t)
+        z_out[t] = _read_source_frame(stack_like, t, global_range=g_range)
     return tmp_path
 
 
@@ -420,8 +459,12 @@ class _StackProcessWorker(QThread):
                            shape=(self._n_t, self._H, self._W),
                            chunks=(1, self._H, self._W),
                            dtype=np.float32)
+        # Normalise every frame against ONE global range so intensity trends
+        # across time are preserved (per-frame min/max would make growing foci
+        # appear to plateau/decay as the per-frame max rises).
+        g_range = _compute_stack_global_range(src, self._n_t)
         for t in range(self._n_t):
-            frame = _read_source_frame(src, t)  # already normalises to [0,1]
+            frame = _read_source_frame(src, t, global_range=g_range)
             z_out[t] = frame
             self.progress.emit(t + 1, self._n_t * 2)  # first half of progress
         return tmp_path
@@ -565,8 +608,10 @@ def upscale_stack_to_zarr(stack_like, factor, progress_cb=None):
     z_out = _zarr.open(out_dir, mode='w',
                        shape=(n_t, Hs, Ws), chunks=(1, Hs, Ws),
                        dtype=np.float32)
+    # Global range so the upscaled stack keeps its true intensity trend.
+    _g_range = _compute_stack_global_range(stack_like, n_t)
     for t in range(n_t):
-        frame = _read_source_frame(stack_like, t).astype(np.float32)
+        frame = _read_source_frame(stack_like, t, global_range=_g_range).astype(np.float32)
         if f == 1:
             up = frame
         else:
@@ -619,7 +664,8 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
         # Compare the current expected cell diameter (px) against Cellpose's
         # preferred minimum. If already comfortably above it, upscaling isn't
         # needed; otherwise recommend a factor to reach it.
-        cell_d = float(ui_instance._dr().get('cell_diameter', 0) or 0)
+        _dr = ui_instance.central_manager.active_data_class.data_repository
+        cell_d = float(_dr.get('cell_diameter', 0) or 0)
         target = _cellpose_min_diameter_px()
         if cell_d <= 0:
             advice.setText("<span style='color:#f0a500;font-size:9pt;'>Set the "
@@ -683,12 +729,13 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
         def _done(out, f):
             prog.setVisible(False); run_btn.setEnabled(True)
             new_name = f"Upscaled {f}x [{name}]"
-            _cl = float(np.sqrt(ui_instance._mpx())) if ui_instance._mpx() else 1.0
+            dr = ui_instance.central_manager.active_data_class.data_repository
+            _mpx_sq = float(dr.get('microns_per_pixel_sq', 0) or 0)
+            _cl = float(np.sqrt(_mpx_sq)) if _mpx_sq > 0 else 0.0
             ui_instance.viewer.add_image(
                 out, name=new_name,
                 scale=(_cl / f, _cl / f) if _cl else None)
             # Downstream cell_diameter/ball_radius scale with the upscale factor.
-            dr = ui_instance._dr()
             if dr.get('cell_diameter'):    dr['cell_diameter'] = float(dr['cell_diameter']) * f
             if dr.get('ball_radius'):      dr['ball_radius']   = float(dr['ball_radius']) * f
             ui_instance._record('ts_upscale_stack', {
@@ -1350,6 +1397,19 @@ def _ts_analyze_frame_worker(args):
     records = []
     _mpx = float(microns_per_pixel_sq ** 0.5)
 
+    # Match the 2D fluorescence puncta path: it applies per-cell contrast
+    # stretching (cell_mask_stretching) to the PREPROCESSED image before puncta
+    # segmentation, and passes that stretched image (CMS_img) into
+    # segment_subcellular_objects. The time-series path previously passed the
+    # plain preprocessed frame, so puncta detection was weaker than 2D. Compute
+    # the same stretched image once per frame (over the whole labeled mask),
+    # then hand each cell its slice — identical to the 2D behaviour.
+    from pycat.toolbox.segmentation_tools import cell_mask_stretching
+    try:
+        frame_cms = cell_mask_stretching(frame_proc, labeled_cell_mask)
+    except Exception:
+        frame_cms = frame_proc   # fall back to plain preprocessed frame
+
     for cell_label in cell_labels:
         cell_binary_mask = (labeled_cell_mask == cell_label)
         # A cell in the union label set may have zero pixels in this frame's
@@ -1378,7 +1438,7 @@ def _ts_analyze_frame_worker(args):
             _frame_raw_seg = frame_raw
 
         refined, _ = segment_subcellular_objects(
-            _frame_raw_seg, frame_proc, cell_binary_mask, int(cell_label),
+            _frame_raw_seg, frame_cms, cell_binary_mask, int(cell_label),
             ball_radius, cell_df=None,
             kurtosis_threshold=kurtosis_threshold,
             local_snr_threshold=local_snr_threshold,
@@ -1673,6 +1733,15 @@ def run_timeseries_condensate_analysis(
             # provided; identical every frame for a propagated 2D mask).
             _frame_mask = np.asarray(mask_stack[t])
 
+            # Match the 2D puncta path: contrast-stretch the preprocessed frame
+            # per cell before puncta segmentation (see the parallel worker for
+            # the full rationale).
+            from pycat.toolbox.segmentation_tools import cell_mask_stretching
+            try:
+                frame_cms = cell_mask_stretching(frame_proc, _frame_mask)
+            except Exception:
+                frame_cms = frame_proc
+
             for cell_label in cell_labels:
                 cell_binary_mask = (_frame_mask == cell_label)
                 # A cell in the union label set may have zero pixels in this
@@ -1696,7 +1765,7 @@ def run_timeseries_condensate_analysis(
                     _frame_raw_seg = frame_raw
 
                 refined, _ = segment_subcellular_objects(
-                    _frame_raw_seg, frame_proc,
+                    _frame_raw_seg, frame_cms,
                     cell_binary_mask, int(cell_label),
                     ball_radius, cell_df=None,
                     kurtosis_threshold=kurtosis_threshold,
@@ -2316,4 +2385,7 @@ def _plot_condensate_fraction(results_df: pd.DataFrame):
     ax.legend(fontsize=8, loc='upper right')
     ax.minorticks_on()
     plt.tight_layout()
-    plt.show()
+    # Non-blocking show: napari's Qt event loop is already running, so a blocking
+    # plt.show() triggers "QCoreApplication::exec: The event loop is already
+    # running". block=False lets the figure display without starting a second loop.
+    plt.show(block=False)

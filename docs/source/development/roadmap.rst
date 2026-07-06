@@ -49,6 +49,30 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: In-vitro brightfield segmentation — generalize across regimes (awaiting test data)
+
+The texture (local-std + watershed) method added in v1.5.231 was optimized against ONE
+image regime: dense small condensates, some out-of-focus and ring-like. Brightfield
+condensate images span several regimes that need testing before we commit a segmentation
+strategy for each. Do NOT implement until representative test data is supplied for each:
+
+* **Sparse + large droplets** — likely fine with either intensity or texture; verify the
+  texture window and watershed don't over-fragment big smooth droplets.
+* **Small + sparse** — verify sensitivity (texture threshold) doesn't miss faint droplets.
+* **Large + dense, semi-overlapping due to focus** — the hard case; watershed splitting and
+  ring-fill behaviour need tuning so overlapping defocused droplets separate correctly
+  without either merging or shattering.
+* **Fractal structures / irregular aggregates** — round-object and circularity assumptions
+  break here; these need a different acceptance filter (the current min-circularity /
+  solidity gates would reject legitimate irregular aggregates). Probably a separate
+  "irregular / aggregate" mode that keeps connected components without imposing roundness.
+
+* **"Guess the condition" button** (planned): inspect the image and recommend a
+  method + parameter preset (sparse/dense × small/large × regular/irregular). Candidate
+  signals: object density, size distribution, defocus/ring fraction, and
+  texture-energy vs intensity-contrast ratio. Build only after the per-regime methods are
+  validated on real data for each condition.
+
 .. rubric:: Platform consolidation (external architecture review, 2026-07)
 
 An external review found PyCAT has crossed from "condensate segmentation tool" to

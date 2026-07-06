@@ -362,8 +362,18 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
         "explicitly.")
     form.addRow(persist_cb)
 
+    # Confirmation row: the gate does NOT auto-hide the instant a valid number
+    # appears while typing (which made it vanish mid-entry). Instead the user
+    # presses Confirm once the value is right, and only then does it hide.
+    confirm_lbl = QLabel("")
+    confirm_lbl.setWordWrap(True)
+    form.addRow(confirm_lbl)
+    confirm_btn = QPushButton("Confirm pixel size")
+    confirm_btn.setToolTip("Apply this pixel size and hide the panel.")
+    form.addRow(confirm_btn)
+
     # Remembered value across data switches (only used when persist is on).
-    state = {'remembered': None}
+    state = {'remembered': None, 'confirmed': False}
 
     def _valid_scale():
         dr = get_dr() or {}
@@ -373,6 +383,19 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     def _from_metadata():
         dr = get_dr() or {}
         return bool(dr.get('pixel_size_from_metadata'))
+
+    def _image_present():
+        # The gate only makes sense when an image is actually loaded. After a
+        # Clear there are no image layers, so the gate must stay hidden even
+        # though there's no scale. Check the viewer for any Image layer.
+        try:
+            import napari
+            viewer = getattr(central_manager, 'viewer', None)
+            if viewer is None:
+                return True   # can't tell — don't suppress
+            return any(isinstance(l, napari.layers.Image) for l in viewer.layers)
+        except Exception:
+            return True   # fail open — don't hide if we can't determine
 
     def _apply_value(v):
         dr = get_dr()
@@ -386,44 +409,71 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
                     pass
 
     def refresh(*_a):
+        # No image loaded (e.g. after Clear) → the gate is irrelevant; hide it.
+        if not _image_present():
+            grp.setVisible(False)
+            return
+
         # If persist is on, we have a remembered scale, and the current data has
         # no scale of its own, re-apply the remembered value instead of prompting.
         if (persist_cb.isChecked() and state['remembered']
                 and not _valid_scale() and not _from_metadata()):
             _apply_value(state['remembered'])
-            # reflect it in the field without retriggering _on_edit recursively
             field.blockSignals(True)
             field.setValue(state['remembered'])
             field.blockSignals(False)
+            state['confirmed'] = True
 
-        # Hide entirely once metadata supplied a scale, or a valid scale exists.
+        # Hide entirely once metadata supplied a scale.
         if _from_metadata() and _valid_scale():
             grp.setVisible(False)
             return
-        if _valid_scale():
-            circle._set('green', "Scale already set.")
+        # Hide once the user has CONFIRMED a valid scale (not merely typed one).
+        if _valid_scale() and state['confirmed']:
+            circle._set('green', "Scale set.")
             grp.setVisible(False)
             return
+
+        # Otherwise stay visible so the user can enter / adjust / confirm.
         grp.setVisible(True)
-        if field.value() > 0:
-            circle._set('green', "Done — pixel size set.")
+        v = field.value()
+        if v > 0:
+            circle._set('yellow', "Review the pixel size, then Confirm.")
+            confirm_lbl.setText(
+                f"<span style='color:#f0a500;font-size:9pt;'>Is <b>{v:.4f} µm/px</b> "
+                f"the correct scale? Adjust the value above if not, then press "
+                f"Confirm.</span>")
+            confirm_btn.setEnabled(True)
         else:
             circle._set('red', "Required — no scale in metadata; enter the pixel size.")
+            confirm_lbl.setText(
+                "<span style='color:#d9534f;font-size:9pt;'>No scale found in the "
+                "image metadata — enter the pixel size (µm/px).</span>")
+            confirm_btn.setEnabled(False)
 
     def _on_edit(v):
-        if v > 0:
-            _apply_value(v)
-            if persist_cb.isChecked():
-                state['remembered'] = float(v)
+        # Typing updates the preview/prompt but does NOT hide the panel. It also
+        # invalidates any prior confirmation so a changed value must be re-confirmed.
+        state['confirmed'] = False
+        refresh()
+
+    def _on_confirm():
+        v = field.value()
+        if v <= 0:
+            return
+        _apply_value(v)
+        if persist_cb.isChecked():
+            state['remembered'] = float(v)
+        state['confirmed'] = True
         refresh()
 
     def _on_persist_toggle(checked):
-        # Turning persist on remembers the current field value (if any).
         if checked and field.value() > 0:
             state['remembered'] = float(field.value())
         refresh()
 
     field.valueChanged.connect(_on_edit)
+    confirm_btn.clicked.connect(_on_confirm)
     persist_cb.toggled.connect(_on_persist_toggle)
     # Re-evaluate whenever the active data class switches (reappear for new
     # unscaled data, or auto-apply the remembered value when persist is on).
@@ -433,6 +483,16 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
         except Exception:
             pass
     refresh()
+
+    # Expose a reset so Clear can re-show the gate for the next dataset.
+    def _reset_gate():
+        state['confirmed'] = False
+        field.blockSignals(True); field.setValue(0.0); field.blockSignals(False)
+        if not persist_cb.isChecked():
+            state['remembered'] = None
+        refresh()
+    refresh._reset_gate = _reset_gate
+    return refresh
     layout.addWidget(grp)
     return refresh
 

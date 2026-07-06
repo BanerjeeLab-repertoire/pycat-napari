@@ -272,59 +272,201 @@ def preprocess_brightfield(
 # 2. Brightfield condensate segmentation
 # ---------------------------------------------------------------------------
 
+def _remove_small(binary, min_area):
+    """Version-compatible remove_small_objects.
+
+    scikit-image 0.26 deprecated ``min_size`` in favour of ``max_size`` (which
+    removes objects whose size is <= the value). Older versions only accept
+    ``min_size``. Try the new signature first, fall back to the old one, so the
+    deprecation warning doesn't fire on new skimage while old skimage still works.
+    """
+    if int(min_area) <= 0:
+        return binary
+    try:
+        # New API (skimage >= 0.26): removes objects with size <= max_size,
+        # so pass max_size = min_area - 1 to match the old "< min_area" removal.
+        return sk.morphology.remove_small_objects(binary, max_size=int(min_area) - 1)
+    except TypeError:
+        return sk.morphology.remove_small_objects(binary, min_size=int(min_area))
+
+
+def _watershed_split(binary, min_diameter_px, split_touching, _skfeat, _skseg):
+    """Label a binary mask, optionally watershed-splitting touching objects on
+    the distance transform. Shared by the texture and DoG methods."""
+    if not split_touching:
+        return sk.measure.label(binary)
+    dist = ndimage.distance_transform_edt(binary)
+    try:
+        coords = _skfeat.peak_local_max(
+            dist, min_distance=max(2, int(min_diameter_px)), labels=binary)
+        seeds = np.zeros(dist.shape, dtype=bool)
+        seeds[tuple(coords.T)] = True
+        markers = sk.measure.label(seeds)
+        return _skseg.watershed(-dist, markers, mask=binary)
+    except Exception:
+        return sk.measure.label(binary)
+
+
 def segment_bf_condensates(
     enhanced_image: np.ndarray,
     min_diameter_px: float = 3.0,
     max_diameter_px: float = 50.0,
     threshold_method: str = 'multi_otsu',
     min_circularity: float = 0.5,
+    method: str = 'intensity',
+    texture_window: int = 9,
+    split_touching: bool = True,
 ) -> np.ndarray:
     """
     Segment condensate spots from a brightfield-preprocessed image.
 
-    Works on the enhanced (background-subtracted, halo-corrected) image
-    where condensates appear as bright blobs.
+    Two segmentation strategies:
+
+    - ``method='intensity'`` (default, legacy): threshold the enhanced image,
+      where condensates appear as bright blobs. Works when preprocessing has
+      made droplets uniformly brighter than background.
+    - ``method='texture'``: segment by LOCAL INTENSITY VARIATION rather than
+      absolute intensity. Brightfield/phase droplets — especially out-of-focus
+      ones — appear as rings (dark rim + bright centre) with little net
+      brightness difference from the mid-grey background, so intensity
+      thresholding merges background or misses them. The local standard
+      deviation is high wherever there's a droplet edge/ring; thresholding it,
+      filling holes (ring → disk), and optionally watershed-splitting dense
+      touching droplets segments these robustly. Best for dense fields of small
+      defocused condensates.
 
     Parameters
     ----------
-    enhanced_image : (H, W) float32 — output of preprocess_brightfield()['enhanced']
-    min_diameter_px : minimum condensate diameter in pixels
-    max_diameter_px : maximum condensate diameter in pixels
-    threshold_method : 'multi_otsu' (robust, recommended) or 'otsu'
-    min_circularity : minimum circularity (4π·A/P²) to accept.
-        Filters out debris and scratches.  0.5 = moderately elongated objects
-        are accepted.  Increase toward 1.0 for rounder condensates only.
+    enhanced_image : (H, W) float32
+        For 'intensity': the enhanced image from preprocess_brightfield.
+        For 'texture': works directly on the raw/enhanced brightfield image.
+    min_diameter_px, max_diameter_px : accepted object diameter range (px).
+    threshold_method : 'multi_otsu' or 'otsu' (intensity method only).
+    min_circularity : minimum 4π·A/P² to accept (filters debris/scratches).
+    method : 'intensity', 'texture', 'dog', or 'invert_reconcile'.
+    texture_window : local-std window in px (texture method).
+    split_touching : watershed-split touching droplets (texture method).
 
     Returns
     -------
     (H, W) int32 labeled mask (0 = background, 1..N = condensates)
     """
     img = enhanced_image.astype(np.float32)
-
-    # Threshold
-    if threshold_method == 'multi_otsu':
-        try:
-            thresholds = sk.filters.threshold_multiotsu(img, classes=3)
-            thresh = thresholds[0]   # background / dim / bright — take first
-        except Exception:
-            thresh = sk.filters.threshold_otsu(img)
-    else:
-        thresh = sk.filters.threshold_otsu(img)
-
-    binary = img > thresh
-
-    # Morphological cleanup
-    binary = ndimage.binary_fill_holes(binary)
     min_area = int(np.pi * (min_diameter_px / 2)**2)
     max_area = int(np.pi * (max_diameter_px / 2)**2)
 
-    try:
-        binary = sk.morphology.remove_small_objects(binary, min_size=min_area)
-    except TypeError:
-        binary = sk.morphology.remove_small_objects(binary, min_size=min_area)
+    if method == 'texture':
+        import skimage.feature as _skfeat
+        import skimage.segmentation as _skseg
+        # Normalize, then local standard deviation (texture / edge energy).
+        _lo, _hi = float(img.min()), float(img.max())
+        imn = (img - _lo) / (_hi - _lo) if _hi > _lo else img
+        w = max(3, int(texture_window))
+        local_mean = ndimage.uniform_filter(imn, w)
+        local_sqm  = ndimage.uniform_filter(imn**2, w)
+        local_std  = np.sqrt(np.maximum(local_sqm - local_mean**2, 0.0))
+        # LOCAL-ADAPTIVE threshold on the texture map, not a single global Otsu.
+        # A global threshold made the method inconsistent across regions of the
+        # SAME texture: dense areas fused into one giant blob (over-threshold)
+        # while others of identical texture dropped out entirely (under). A
+        # local threshold judges each neighbourhood against its own surroundings
+        # so uniform-texture regions break into individual droplets consistently.
+        try:
+            block = max(31, int(w) * 8 | 1)   # odd block ~ several droplet widths
+            lt = sk.filters.threshold_local(local_std, block_size=block,
+                                            method='gaussian')
+            binary = local_std > lt
+        except Exception:
+            try:
+                binary = local_std > sk.filters.threshold_otsu(local_std)
+            except Exception:
+                binary = local_std > float(local_std.mean())
+        binary = sk.morphology.binary_closing(binary, sk.morphology.disk(1))
+        binary = ndimage.binary_fill_holes(binary)   # rings → filled discs
+        binary = _remove_small(binary, max(4, min_area))
+        labeled = _watershed_split(binary, min_diameter_px, split_touching,
+                                   _skfeat, _skseg)
 
-    # Label connected components
-    labeled = sk.measure.label(binary)
+    elif method == 'dog':
+        import skimage.feature as _skfeat
+        import skimage.segmentation as _skseg
+        # Difference-of-Gaussians blob detection: responds to individual
+        # droplet-scale blobs (local extrema at a target size) rather than
+        # thresholding connected high-texture regions, so it CANNOT produce the
+        # "one giant blob" undersegmentation and stays consistent across regions
+        # of the same texture. Best for dense fields where per-droplet output is
+        # wanted. sigmas scaled to the expected droplet radius.
+        _lo, _hi = float(img.min()), float(img.max())
+        imn = (img - _lo) / (_hi - _lo) if _hi > _lo else img
+        r = max(1.0, float(min_diameter_px) / 2.0)
+        sig_lo = max(0.8, r * 0.6)
+        sig_hi = sig_lo * 2.2
+        dog = np.abs(sk.filters.gaussian(imn, sig_lo) -
+                     sk.filters.gaussian(imn, sig_hi))
+        try:
+            t = sk.filters.threshold_otsu(dog)
+        except Exception:
+            t = float(dog.mean())
+        binary = dog > t
+        binary = ndimage.binary_fill_holes(binary)
+        binary = _remove_small(binary, max(4, min_area))
+        labeled = _watershed_split(binary, min_diameter_px, split_touching,
+                                   _skfeat, _skseg)
+
+    elif method == 'invert_reconcile':
+        import skimage.feature as _skfeat
+        import skimage.segmentation as _skseg
+        # Brightfield/phase condensates flip contrast depending on which side of
+        # focus they're on: some are bright-centred, others dark-centred. A
+        # single polarity misses roughly half. This method runs a polarity-
+        # SPECIFIC detector (white top-hat = bright features smaller than the
+        # structuring element) on BOTH the image and its inversion, unions the
+        # two masks to catch condensates of either contrast, then drops anything
+        # too large (merged background / debris) via max_diameter_px.
+        _lo, _hi = float(img.min()), float(img.max())
+        imn = (img - _lo) / (_hi - _lo) if _hi > _lo else img
+        radius = max(3, int(min_diameter_px * 2))
+
+        def _tophat_mask(a):
+            th = sk.morphology.white_tophat(a, sk.morphology.disk(radius))
+            try:
+                t = sk.filters.threshold_otsu(th)
+            except Exception:
+                t = float(th.mean())
+            m = th > t
+            m = ndimage.binary_fill_holes(m)
+            return _remove_small(m, max(4, min_area))
+
+        m_bright = _tophat_mask(imn)          # bright-centred droplets
+        m_dark   = _tophat_mask(1.0 - imn)    # dark-centred droplets (inverted)
+        binary = m_bright | m_dark            # reconcile both polarities
+        labeled = _watershed_split(binary, min_diameter_px, split_touching,
+                                   _skfeat, _skseg)
+        # "Drop anything too large": remove objects above the max diameter, which
+        # are merged-background regions rather than real condensates.
+        _keep = np.zeros_like(labeled)
+        _nl = 1
+        for _p in sk.measure.regionprops(labeled):
+            if _p.area < 5 or _p.area > max_area:
+                continue
+            _keep[labeled == _p.label] = _nl
+            _nl += 1
+        labeled = _keep
+
+    else:
+        # Intensity thresholding (legacy path).
+        if threshold_method == 'multi_otsu':
+            try:
+                thresholds = sk.filters.threshold_multiotsu(img, classes=3)
+                thresh = thresholds[0]
+            except Exception:
+                thresh = sk.filters.threshold_otsu(img)
+        else:
+            thresh = sk.filters.threshold_otsu(img)
+        binary = img > thresh
+        binary = ndimage.binary_fill_holes(binary)
+        binary = _remove_small(binary, min_area)
+        labeled = sk.measure.label(binary)
 
     # Filter by area, circularity, and roundness
     final = np.zeros_like(labeled)

@@ -905,6 +905,12 @@ class BaseUIClass:
                     layout,
                     lambda: self.central_manager.active_data_class.data_repository,
                     on_set=_on_px, central_manager=self.central_manager)
+                # Store the gate refresh (which carries a ._reset_gate) so Clear
+                # can re-show the gate for the next dataset.
+                try:
+                    self.central_manager._pixel_gate_refresh = _px_refresh
+                except Exception:
+                    pass
                 # The pixel-size gate only re-evaluated on field edit / data
                 # switch, so its status marker went stale when an image loaded
                 # (metadata scale detected) or the canvas was cleared. Wire its
@@ -2837,6 +2843,16 @@ class MenuManager:
         self.metadata_action.triggered.connect(self._show_metadata_dialog)
         self.viewer.window._qt_window.menuBar().addAction(self.metadata_action)
 
+        # Recorded-steps viewer: shows the batch workflow recorded so far, with
+        # each step expandable to reveal the layers/parameters it used.
+        self.recorded_steps_action = QAction('\u2630 Recorded Steps',
+                                             self.viewer.window._qt_window)
+        self.recorded_steps_action.setToolTip(
+            'View the batch workflow recorded so far — each step and the '
+            'layers/parameters it used.')
+        self.recorded_steps_action.triggered.connect(self._show_recorded_steps_dialog)
+        self.viewer.window._qt_window.menuBar().addAction(self.recorded_steps_action)
+
         # Route files dropped onto the napari window through PyCAT's openers
         # (napari's default drop bypasses PyCAT's channel-assignment pipeline).
         try:
@@ -3077,6 +3093,89 @@ class MenuManager:
 
         load_btn.clicked.connect(_on_load)
         dlg.exec_()
+
+    def _show_recorded_steps_dialog(self):
+        """Show the batch workflow recorded so far.
+
+        Top-level rows are the recorded steps (number, name, timestamp). Each
+        step expands to reveal the layers/parameters it captured, so the user
+        can review exactly what will be replayed.
+        """
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                      QPushButton, QTreeWidget, QTreeWidgetItem,
+                                      QHeaderView)
+        from napari.utils.notifications import show_info as _info
+
+        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+        steps = (bp.config.get('steps', []) if bp and getattr(bp, 'config', None)
+                 else [])
+        rec_on = bool(getattr(bp, 'recording_enabled', False)) if bp else False
+
+        dialog = QDialog(self.viewer.window._qt_window)
+        dialog.setWindowTitle("Recorded Batch Steps")
+        dialog.resize(620, 640)
+        layout = QVBoxLayout(dialog)
+
+        status = ("<span style='color:#5cb85c;'>● Recording ON</span>" if rec_on
+                  else "<span style='color:#aaa;'>○ Recording off</span>")
+        header = QLabel(f"<b>{len(steps)} step(s) recorded</b> &nbsp; {status}")
+        layout.addWidget(header)
+
+        if not steps:
+            layout.addWidget(QLabel(
+                "<span style='color:#aaa;'>No steps recorded yet. Turn on "
+                "recording in the Batch dialog, then run your workflow.</span>"))
+
+        tree = QTreeWidget()
+        tree.setColumnCount(2)
+        tree.setHeaderLabels(['Step', 'Value'])
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(tree)
+
+        # Parameter keys that are internal debugging snapshots — shown last and
+        # de-emphasised rather than as primary parameters.
+        _debug_keys = {'_active_layer_at_record', '_all_layers_at_record'}
+
+        def _fmt(v):
+            if v is None:
+                return '—'
+            if isinstance(v, (list, tuple)):
+                return ', '.join(str(x) for x in v) if v else '(none)'
+            if isinstance(v, float):
+                return f"{v:.4g}"
+            return str(v)
+
+        for i, step in enumerate(steps, 1):
+            name = step.get('step', '?')
+            ts = step.get('timestamp', '')
+            params = step.get('params', {}) or {}
+            top = QTreeWidgetItem([f"{i}.  {name}", ts])
+            tree.addTopLevelItem(top)
+            # Primary params first, debug snapshots last.
+            primary = [(k, v) for k, v in params.items() if k not in _debug_keys]
+            debug   = [(k, v) for k, v in params.items() if k in _debug_keys]
+            for k, v in primary:
+                top.addChild(QTreeWidgetItem([str(k), _fmt(v)]))
+            for k, v in debug:
+                child = QTreeWidgetItem([f"{k}  (snapshot)", _fmt(v)])
+                top.addChild(child)
+        tree.expandToDepth(0)  # show steps collapsed; user expands to see params
+
+        btn_row = QHBoxLayout()
+        expand_btn = QPushButton("Expand all")
+        expand_btn.clicked.connect(tree.expandAll)
+        collapse_btn = QPushButton("Collapse all")
+        collapse_btn.clicked.connect(lambda: tree.collapseAll())
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        btn_row.addWidget(expand_btn)
+        btn_row.addWidget(collapse_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        dialog.exec_()
 
     def make_lambda(self, action_method, kwargs):
         """

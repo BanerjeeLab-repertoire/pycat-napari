@@ -2004,6 +2004,17 @@ class FileIOClass:
         except Exception:
             pass
 
+        # Re-show the pixel-size gate for the next dataset. Clearing wipes the
+        # scale from the data repository, but the gate only re-evaluates on its
+        # own triggers — call its reset so it reappears (honoring the persist /
+        # "keep for session" checkbox, which retains the remembered value).
+        try:
+            pxr = getattr(self.central_manager, '_pixel_gate_refresh', None)
+            if pxr is not None and hasattr(pxr, '_reset_gate'):
+                pxr._reset_gate()
+        except Exception:
+            pass
+
     def clear_all_without_saving(self, viewer, confirm=True):
         """
         Clear all layers and data without saving, resetting the workspace to the
@@ -2170,7 +2181,6 @@ class FileIOClass:
                 # isn't lost when the recorder resets.
                 if (bp.has_unsaved_steps()
                         and not getattr(bp, '_export_prompt_silenced', False)):
-                    from PyQt5.QtWidgets import QMessageBox, QCheckBox
                     box = QMessageBox(self.viewer.window._qt_window
                                       if hasattr(self.viewer.window, '_qt_window') else None)
                     box.setIcon(QMessageBox.Question)
@@ -2187,7 +2197,6 @@ class FileIOClass:
                     if _dont_ask.isChecked():
                         bp._export_prompt_silenced = True
                     if choice == QMessageBox.Save:
-                        from PyQt5.QtWidgets import QFileDialog
                         from pathlib import Path as _Path
                         path, _ = QFileDialog.getSaveFileName(
                             None, "Save Batch Config", "", "JSON (*.json)")

@@ -30,7 +30,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
-    QScrollArea, QSizePolicy,
+    QScrollArea, QSizePolicy, QComboBox,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 try:
@@ -203,6 +203,24 @@ def _ivbf_segmentation(ui, layout):
     form.setContentsMargins(9, 20, 9, 6)
     enh_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow(label_with_circle("Enhanced BF image:", dropdown=enh_dd), enh_dd)
+
+    method_dd = QComboBox()
+    method_dd.addItems(["Texture (edges/rings — local adaptive)",
+                        "Blob detection (DoG — consistent per-droplet)",
+                        "Invert + reconcile (both focus polarities)",
+                        "Intensity threshold (bright blobs)"])
+    method_dd.setToolTip(
+        "Texture: local-adaptive threshold on local intensity variation — good "
+        "for dense small droplets and rings; adaptive so regions of the same "
+        "texture segment consistently.\n"
+        "Blob (DoG): detects individual droplet-scale blobs — most consistent "
+        "per-droplet output, cannot fuse a region into one giant blob.\n"
+        "Invert + reconcile: detects bright- AND dark-centred droplets (runs on "
+        "the image and its inversion, unions both, drops oversized objects) — "
+        "catches condensates on either side of focus.\n"
+        "Intensity: thresholds a preprocessed bright-blob image (legacy).")
+    form.addRow("Method:", method_dd)
+
     min_d = QDoubleSpinBox(); min_d.setRange(1,100); min_d.setValue(4.0)
     max_d = QDoubleSpinBox(); max_d.setRange(5,1000); max_d.setValue(200.0)
     circ  = QDoubleSpinBox(); circ.setRange(0.1,1.0);  circ.setValue(0.5)
@@ -210,17 +228,43 @@ def _ivbf_segmentation(ui, layout):
     form.addRow("Min diameter (px):", min_d)
     form.addRow("Max diameter (px):", max_d)
     form.addRow("Min circularity:", circ)
+
+    tex_win = QSpinBox(); tex_win.setRange(3,51); tex_win.setSingleStep(2); tex_win.setValue(9)
+    tex_win.setToolTip("Local-std window (px) for the texture method. ~ droplet edge width.")
+    tex_win_lbl = QLabel("Texture window (px):")
+    form.addRow(tex_win_lbl, tex_win)
+    split_cb = QCheckBox("Split touching droplets (watershed)")
+    split_cb.setChecked(True)
+    form.addRow("", split_cb)
+
+    def _on_method():
+        _mi = method_dd.currentIndex()
+        is_tex = (_mi == 0)              # texture window only for texture
+        is_split = (_mi in (0, 1, 2))   # texture + dog + invert_reconcile split
+        tex_win.setVisible(is_tex); tex_win_lbl.setVisible(is_tex)
+        split_cb.setVisible(is_split)
+    method_dd.currentIndexChanged.connect(_on_method)
+    _on_method()
+
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import segment_bf_condensates
         try: enh = ui._img(enh_dd)
         except KeyError as e: napari_show_warning(str(e)); return
+        _mi = method_dd.currentIndex()
+        _method = ('texture' if _mi == 0 else 'dog' if _mi == 1
+                   else 'invert_reconcile' if _mi == 2 else 'intensity')
+        _tw = tex_win.value(); _split = split_cb.isChecked()
+        _mind = min_d.value(); _maxd = max_d.value(); _circ = circ.value()
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
         def _task():
-            return segment_bf_condensates(enh, min_diameter_px=min_d.value(),
-                                           max_diameter_px=max_d.value(),
-                                           min_circularity=circ.value())
+            return segment_bf_condensates(enh, min_diameter_px=_mind,
+                                           max_diameter_px=_maxd,
+                                           min_circularity=_circ,
+                                           method=_method,
+                                           texture_window=_tw,
+                                           split_touching=_split)
         worker = _IVBFWorker(_task)
         ui._ivbf_seg_worker = worker
         def _done(labeled):
@@ -229,8 +273,10 @@ def _ivbf_segmentation(ui, layout):
             ui.viewer.add_labels(labeled, name=f"IVBF Droplet Mask ({n} droplets)")
             ui._dr()['ivbf_droplet_mask'] = labeled
             ui._record('ivbf_segmentation', {'enhanced_layer': enh_dd.currentText(),
-                                              'min_d': min_d.value(), 'max_d': max_d.value()})
-            napari_show_info(f"In vitro BF: {n} droplets segmented.")
+                                              'method': _method,
+                                              'texture_window': _tw, 'split': _split,
+                                              'min_d': _mind, 'max_d': _maxd})
+            napari_show_info(f"In vitro BF: {n} droplets segmented ({_method}).")
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
             napari_show_warning("Segmentation error."); print(f"[PyCAT IVBF Seg] {msg}")

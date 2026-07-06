@@ -340,17 +340,37 @@ def partition_coefficient_field(
     bg_mask   = labeled_droplets == 0
     cond_mask = labeled_droplets > 0
 
-    bulk   = float(np.percentile(image[bg_mask], percentile_bulk)) if bg_mask.sum() > 0 else 0.0
+    # Bulk (dilute-phase) intensity estimate. The 10th percentile of background
+    # can collapse to ~0 on dark fluorescence backgrounds (many near-zero
+    # pixels), which then made per-droplet partition = intensity / ~0 explode to
+    # ~1e8. Use a ROBUST bulk: the percentile, but floored to the background MEAN
+    # if the percentile is degenerate (<=0 or a tiny fraction of the mean). This
+    # keeps the per-droplet partition on the same scale as the field-level one.
+    if bg_mask.sum() > 0:
+        bg_vals   = image[bg_mask]
+        bulk_pct  = float(np.percentile(bg_vals, percentile_bulk))
+        bulk_mean = float(bg_vals.mean())
+        # If the percentile is ~0 (dark background) fall back to the mean, which
+        # is what the field-level summary uses.
+        if bulk_pct <= 0 or (bulk_mean > 0 and bulk_pct < 0.05 * bulk_mean):
+            bulk = bulk_mean
+        else:
+            bulk = bulk_pct
+    else:
+        bulk = 0.0
+    # Final safety floor: never divide by (near-)zero.
+    bulk_div = bulk if bulk > 1e-6 else (float(image.mean()) if image.mean() > 1e-6 else 1.0)
+
     dense  = float(image[cond_mask].mean()) if cond_mask.sum() > 0 else np.nan
-    part   = dense / max(bulk, 1e-9)
-    enrich = (dense - bulk) / max(bulk, 1e-9)
+    part   = dense / bulk_div
+    enrich = (dense - bulk) / bulk_div
 
     rows = []
     for prop in sk.measure.regionprops(labeled_droplets, intensity_image=image):
         rows.append({
             'droplet_label':     prop.label,
             'mean_intensity':    float(prop.intensity_mean),
-            'partition_coeff':   float(prop.intensity_mean / max(bulk, 1e-9)),
+            'partition_coeff':   float(prop.intensity_mean / bulk_div),
             'area_um2':          np.nan,  # caller can fill from microns_per_pixel
         })
 
