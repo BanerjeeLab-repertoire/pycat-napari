@@ -47,7 +47,8 @@ from napari.utils.notifications import (
 )
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
-    QFormLayout, QSpinBox, QProgressBar, QLabel, QCheckBox, QRadioButton,
+    QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
+    QRadioButton,
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
@@ -180,15 +181,18 @@ def run_keyframe_cellpose(
                                      anti_aliasing=True,
                                      preserve_range=True).astype(np.float32)
             mask_up = cellpose_segmentation(frame_up, cell_diameter * _uf,
-                                            model_name=model_name)
+                                            model_name=model_name,
+                                            postprocess=False)
+            # Downscale the LABEL image with nearest-neighbour (order=0) so each
+            # cell keeps its Cellpose instance ID. Do NOT binarize+relabel here —
+            # that would merge touching cells that Cellpose correctly separated.
             mask = _sktr.rescale(mask_up.astype(np.float32), 1.0 / _uf,
                                   order=0, anti_aliasing=False,
                                   preserve_range=True).astype(np.uint16)
-            # Re-label after downscale to guarantee contiguous integer labels
-            mask = _sk.measure.label(mask > 0).astype(np.uint16)
         else:
             mask = cellpose_segmentation(frame, cell_diameter,
-                                         model_name=model_name)
+                                         model_name=model_name,
+                                         postprocess=False)
         keyframe_masks[t] = mask.astype(np.uint16)
         if progress_callback:
             progress_callback(i + 1, len(keyframe_indices))
@@ -295,6 +299,86 @@ class _KeyframeCellposeWorker(QThread):
 # UI widget
 # ---------------------------------------------------------------------------
 
+def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=2.0,
+                                 bg_percentile=25.0):
+    """Split a labeled cell mask into transfected / untransfected cells by
+    per-cell fluorescence SNR on a single (reference) frame.
+
+    This is a coarse "is this cell worth analysing" gate for transiently
+    transfected samples — NOT puncta segmentation. For each cell it computes
+    SNR = mean(cell intensity) / background, where background is a robust low
+    percentile of the whole frame's intensity (a stand-in for the camera/optical
+    floor). Cells with SNR >= threshold are considered transfected.
+
+    Parameters
+    ----------
+    labeled_mask : (H, W) int array
+        Integer-labeled cell mask (e.g. one keyframe of the cell mask stack).
+    fluor_frame : (H, W) array
+        The fluorescence/condensate channel frame the transfection is judged on
+        (the SAME channel that will be analysed, e.g. mCherry / EGFP).
+    snr_threshold : float
+        Minimum mean-cell / background ratio to count a cell as transfected.
+    bg_percentile : float
+        Percentile of the whole frame used as the background level.
+
+    Returns
+    -------
+    kept_labels : list[int]      cell labels judged transfected
+    dropped_labels : list[int]   cell labels judged untransfected
+    stats_df : pandas.DataFrame  per-cell: label, mean_intensity, snr, transfected
+    efficiency : float           fraction of cells transfected (0..1)
+    """
+    import numpy as _np
+    import pandas as _pd
+
+    lab = _np.asarray(labeled_mask)
+    img = _np.asarray(fluor_frame, dtype=_np.float32)
+    if lab.shape != img.shape:
+        raise ValueError(
+            f"mask shape {lab.shape} != fluorescence frame shape {img.shape}")
+
+    bg = float(_np.percentile(img, bg_percentile))
+    if bg <= 0:
+        bg = float(max(img[img > 0].min(), 1e-6)) if _np.any(img > 0) else 1.0
+
+    labels = _np.unique(lab)
+    labels = labels[labels != 0]
+
+    rows = []
+    kept, dropped = [], []
+    for lb in labels:
+        cell_px = img[lab == lb]
+        if cell_px.size == 0:
+            continue
+        mean_int = float(cell_px.mean())
+        snr = mean_int / bg if bg > 0 else 0.0
+        transfected = snr >= snr_threshold
+        rows.append({'cell_label': int(lb),
+                     'mean_intensity': mean_int,
+                     'background': bg,
+                     'snr': snr,
+                     'transfected': bool(transfected)})
+        (kept if transfected else dropped).append(int(lb))
+
+    stats_df = _pd.DataFrame(rows)
+    n = len(labels)
+    efficiency = (len(kept) / n) if n > 0 else 0.0
+    return kept, dropped, stats_df, efficiency
+
+
+def apply_transfection_filter_to_stack(mask_stack, kept_labels):
+    """Return a copy of a (T,H,W) or (H,W) label mask keeping only kept_labels
+    (all other labels zeroed). The input is not modified."""
+    import numpy as _np
+    keep = set(int(k) for k in kept_labels)
+    arr = _np.asarray(mask_stack)
+    out = arr.copy()
+    mask_keep = _np.isin(out, list(keep) if keep else [])
+    out[~mask_keep] = 0
+    return out
+
+
 def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     """
     Time-series cell segmentation with keyframe interpolation.
@@ -327,7 +411,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
 
     stack_dropdown = ui_instance.create_layer_dropdown(
         napari.layers.Image,
-        name_hint='Enhanced Background Removed')
+        name_hint=None)
     stack_dropdown.setToolTip(
         "Image stack to segment cells from.\n"
         "• Preferred: a DAPI / nuclear stain channel (separate raw stack).\n"
@@ -457,6 +541,52 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     )
     form.addRow("", max_proj_check)
 
+    # ── Transfection filter (for transiently transfected samples) ──────────
+    # Optional. When on, after cell segmentation each cell is scored by
+    # fluorescence SNR on the reference frame of a chosen fluorescence channel,
+    # and cells below threshold are dropped from the analysis mask (the full
+    # mask is preserved separately). Off by default because some experiments
+    # (e.g. Csat estimation) deliberately leverage low/untransfected cells.
+    transfect_check = QCheckBox("Filter untransfected cells (transient transfection)")
+    transfect_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    transfect_check.setChecked(False)
+    transfect_check.setToolTip(
+        "OFF (default): keep every segmented cell.\n"
+        "ON: after segmentation, score each cell by fluorescence SNR on the\n"
+        "reference frame and drop cells below the threshold, so only cells with\n"
+        "adequate signal are analysed. The full mask is kept separately, and a\n"
+        "kept-vs-dropped comparison table + transfection-efficiency estimate are\n"
+        "produced. Leave OFF for Csat-type experiments that need the low/\n"
+        "untransfected cells.")
+    form.addRow("", transfect_check)
+
+    transfect_fluor_dd = ui_instance.create_layer_dropdown(napari.layers.Image)
+    transfect_fluor_dd.setToolTip(
+        "Fluorescence channel used to judge transfection — the SAME channel you\n"
+        "will analyse (e.g. mCherry / EGFP). SNR is measured on this channel's\n"
+        "reference frame, not the segmentation (DAPI) channel.")
+    transfect_snr_spin = QDoubleSpinBox()
+    transfect_snr_spin.setRange(1.0, 50.0)
+    transfect_snr_spin.setSingleStep(0.5)
+    transfect_snr_spin.setValue(2.0)
+    transfect_snr_spin.setToolTip(
+        "Minimum mean-cell / background intensity ratio for a cell to count as\n"
+        "transfected. Higher = stricter. 2.0 is a reasonable starting point.")
+    _tf_container = QWidget()
+    _tf_row = QVBoxLayout(_tf_container)
+    _tf_row.setContentsMargins(2, 0, 0, 0)
+    _tf_lbl = QLabel("Fluorescence channel for transfection:")
+    _tf_lbl.setWordWrap(True)
+    _tf_row.addWidget(_tf_lbl)
+    _tf_row.addWidget(transfect_fluor_dd)
+    _tf_snr_lbl = QLabel("Min SNR:")
+    _tf_row.addWidget(_tf_snr_lbl)
+    _tf_row.addWidget(transfect_snr_spin)
+    _tf_container.setVisible(False)
+    form.addRow(_tf_container)
+    transfect_check.stateChanged.connect(
+        lambda s: _tf_container.setVisible(bool(s)))
+
     progress_bar = QProgressBar()
     progress_bar.setVisible(False)
     progress_label = QLabel("")
@@ -561,7 +691,10 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
                 return
             from pycat.toolbox.segmentation_tools import train_rf_segmenter, apply_rf_segmenter
             import skimage as _sk
-            n_kf = len(range(0, stack_np.shape[0], interval))
+            kf_indices_preview = list(range(0, stack_np.shape[0], interval))
+            if (stack_np.shape[0] - 1) not in kf_indices_preview:
+                kf_indices_preview.append(stack_np.shape[0] - 1)
+            n_kf = len(kf_indices_preview)
             progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
             progress_bar.setVisible(True)
             progress_label.setText(f"Training RF on annotation layer…")
@@ -609,7 +742,10 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
             return
 
         # ── Cellpose or StarDist: use background worker ───────────────
-        n_kf = len(range(0, stack_np.shape[0], interval))
+        kf_indices_preview = list(range(0, stack_np.shape[0], interval))
+        if (stack_np.shape[0] - 1) not in kf_indices_preview:
+            kf_indices_preview.append(stack_np.shape[0] - 1)
+        n_kf = len(kf_indices_preview)
         progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
         progress_bar.setVisible(True)
         method_name = "StarDist" if rb_stardist.isChecked() else "Cellpose"
@@ -688,6 +824,65 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
                 f"{n_t} total frames, {n_cells} cells (best keyframe: {best_kf}). "
                 f"Mask stack → '{ts_mask_name}'"
             )
+
+            # ── Optional transfection filter ──────────────────────────────
+            # Score each cell by fluorescence SNR on the reference frame and
+            # drop untransfected cells into a SEPARATE "Transfected Cells" mask
+            # (the full mask above is preserved). Builds a kept-vs-dropped stats
+            # table + efficiency estimate. Off by default (Csat experiments want
+            # the low/untransfected cells).
+            if transfect_check.isChecked():
+                try:
+                    _fl_name = transfect_fluor_dd.currentText()
+                    _fl_layer = ui_instance.viewer.layers[_fl_name]
+                    _fl_data = np.asarray(_fl_layer.data)
+                    # Reference frame of the fluorescence channel, matched to the
+                    # best keyframe used for the representative 2D mask.
+                    if _fl_data.ndim == 3:
+                        _ref_idx = min(best_kf, _fl_data.shape[0] - 1)
+                        _fl_frame = np.asarray(_fl_data[_ref_idx]).astype(np.float32)
+                    else:
+                        _fl_frame = _fl_data.astype(np.float32)
+                    _ref_mask = np.asarray(mask_stack[best_kf])
+                    if _fl_frame.shape != _ref_mask.shape:
+                        napari_show_warning(
+                            "Transfection filter skipped: fluorescence frame "
+                            f"{_fl_frame.shape} doesn't match mask "
+                            f"{_ref_mask.shape}.")
+                    else:
+                        kept, dropped, stats_df, eff = filter_cells_by_transfection(
+                            _ref_mask, _fl_frame,
+                            snr_threshold=float(transfect_snr_spin.value()))
+                        filtered_stack = apply_transfection_filter_to_stack(
+                            mask_stack, kept)
+                        tf_name = f"Transfected Cells [{layer_name}]"
+                        ui_instance.viewer.add_labels(
+                            np.asarray(filtered_stack).copy(), name=tf_name)
+                        data_inst.data_repository['transfected_cell_mask_stack'] = filtered_stack
+                        data_inst.data_repository['transfection_stats'] = stats_df
+                        data_inst.data_repository['transfection_efficiency'] = eff
+                        napari_show_info(
+                            f"Transfection filter: {len(kept)} transfected / "
+                            f"{len(kept) + len(dropped)} cells "
+                            f"({eff:.0%} efficiency, SNR ≥ "
+                            f"{transfect_snr_spin.value():.1f}). "
+                            f"Kept cells → '{tf_name}'. "
+                            f"Per-cell stats in data repository "
+                            f"('transfection_stats').")
+                        ui_instance._record('ts_transfection_filter', {
+                            'fluor_layer': _fl_name,
+                            'snr_threshold': float(transfect_snr_spin.value()),
+                            'reference_frame': int(best_kf),
+                            'n_kept': len(kept), 'n_dropped': len(dropped),
+                            'efficiency': float(eff),
+                        })
+                except KeyError:
+                    napari_show_warning(
+                        "Transfection filter skipped: select a valid "
+                        "fluorescence channel.")
+                except Exception as _tf_e:
+                    napari_show_warning(
+                        f"Transfection filter failed: {_tf_e}")
 
             # Record for batch
             ui_instance._record('ts_cellpose_keyframe', {

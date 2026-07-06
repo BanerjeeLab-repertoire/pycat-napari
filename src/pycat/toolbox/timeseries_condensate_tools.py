@@ -1341,8 +1341,9 @@ def run_timeseries_condensate_analysis(
     preprocessed_stack : np.ndarray, shape (T, H, W) or (H, W)
         Pre-processed image stack.  If 2D, the same preprocessed image
         is used for every frame (useful when only the reference was processed).
-    labeled_cell_mask : np.ndarray, shape (H, W)
-        Integer-labeled cell mask from the reference frame.
+    labeled_cell_mask : np.ndarray, shape (H, W) or (T, H, W)
+        Integer-labeled cell mask. A (T, H, W) stack applies each frame's own
+        mask (tracks moving cells); a 2D (H, W) mask is propagated to all frames.
     ball_radius : float
         Rolling-ball radius for background subtraction (from data_instance).
     microns_per_pixel_sq : float
@@ -1387,7 +1388,31 @@ def run_timeseries_condensate_analysis(
     if preprocessed_stack.ndim == 2:
         preprocessed_stack = np.stack([preprocessed_stack] * n_frames, axis=0)
 
-    cell_labels = np.unique(labeled_cell_mask)
+    # Normalise the cell mask to a per-frame (T, H, W) stack.
+    #   - A (T, H, W) mask (e.g. keyframe-Cellpose output) is used as-is: each
+    #     frame's own mask is applied to that frame, correctly tracking cells
+    #     that move over time.
+    #   - A 2D (H, W) mask is propagated to every frame (the caller is expected
+    #     to have warned the user this assumes a temporally-stationary sample).
+    _mask_arr = np.asarray(labeled_cell_mask)
+    if _mask_arr.ndim == 2:
+        mask_stack = np.broadcast_to(_mask_arr, (n_frames,) + _mask_arr.shape)
+    elif _mask_arr.ndim == 3:
+        if _mask_arr.shape[0] != n_frames:
+            # Frame-count mismatch (e.g. mask stack from a different range):
+            # fall back to the reference frame's mask propagated to all frames.
+            _ref = _mask_arr[min(reference_frame, _mask_arr.shape[0] - 1)]
+            mask_stack = np.broadcast_to(_ref, (n_frames,) + _ref.shape)
+        else:
+            mask_stack = _mask_arr
+    else:
+        raise ValueError(
+            f"labeled_cell_mask must be 2D (H,W) or 3D (T,H,W); got shape "
+            f"{_mask_arr.shape}")
+
+    # Cell labels = union of all labels present across frames, so a cell that
+    # only appears in some frames is still analysed where it exists.
+    cell_labels = np.unique(mask_stack)
     cell_labels = cell_labels[cell_labels != 0]
 
     reference_raw = stack[reference_frame]
@@ -1414,7 +1439,8 @@ def run_timeseries_condensate_analysis(
             preprocessed_stack, n_frames, H, W, prefix='ts_analysis_proc')
 
         tasks = [
-            (t, raw_zarr_path, proc_zarr_path, labeled_cell_mask, cell_labels,
+            (t, raw_zarr_path, proc_zarr_path,
+             np.asarray(mask_stack[t]), cell_labels,
              reference_raw, use_drift_correction, reference_frame,
              ball_radius, microns_per_pixel_sq,
              kurtosis_threshold, local_snr_threshold, global_snr_threshold,
@@ -1468,8 +1494,12 @@ def run_timeseries_condensate_analysis(
             total_refined = np.zeros((H, W), dtype=bool)
             _mpx = float(microns_per_pixel_sq ** 0.5)
 
+            # Per-frame cell mask (tracks moving cells when a (T,H,W) mask was
+            # provided; identical every frame for a propagated 2D mask).
+            _frame_mask = np.asarray(mask_stack[t])
+
             for cell_label in cell_labels:
-                cell_binary_mask = (labeled_cell_mask == cell_label)
+                cell_binary_mask = (_frame_mask == cell_label)
 
                 if per_frame_normalize:
                     _cpx = frame_raw[cell_binary_mask]
@@ -1854,8 +1884,26 @@ def _add_run_timeseries_condensate_analysis(
         proc_data   = proc_layer.data
         mask_data   = mask_layer.data
 
-        if mask_data.ndim != 2:
-            napari_show_warning("Time-Series: Labels layer must be 2D.")
+        # The cell mask may be either a 2D (H,W) mask or a (T,H,W) mask stack.
+        # A (T,H,W) mask (e.g. from keyframe Cellpose) is preferred — it applies
+        # each frame's own mask, correctly following cells that move over time.
+        # A 2D mask is accepted but assumes the sample is stationary in time.
+        if mask_data.ndim == 2:
+            napari_show_warning(
+                "Time-Series: 2D cell mask — assuming your sample is stationary "
+                "in time (the same mask is applied to every frame). For moving "
+                "cells, run keyframe cell segmentation to get a (T,H,W) mask.")
+        elif mask_data.ndim == 3:
+            if mask_data.shape[0] != stack_data.shape[0]:
+                napari_show_warning(
+                    f"Time-Series: mask stack has {mask_data.shape[0]} frames but "
+                    f"the image has {stack_data.shape[0]}; the reference frame's "
+                    "mask will be used for all frames.")
+            # else: matching (T,H,W) — used per-frame downstream.
+        else:
+            napari_show_warning(
+                f"Time-Series: cell mask must be 2D (H,W) or a (T,H,W) stack; "
+                f"got shape {mask_data.shape}.")
             return
 
         data_instance = ui_instance.central_manager.active_data_class

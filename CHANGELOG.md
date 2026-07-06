@@ -23,6 +23,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.224] - 2026-07-06
+### Fixed (1.5.222 regression — ImportError on startup)
+- **Restored `_add_run_ts_cellpose`**, which was accidentally deleted when the transfection
+  filter functions were added before it in 1.5.222 (the insertion consumed the function's
+  `def` line, leaving an orphaned body). The file still compiled — valid syntax — so the
+  missing symbol only surfaced at import time as
+  ``ImportError: cannot import name '_add_run_ts_cellpose'`` when launching. The function is
+  back at module scope alongside the transfection helpers; verified by AST symbol check, not
+  just a compile check.
+
+## [1.5.223] - 2026-07-06
+### Fixed (hollow "donut" segmentation of very large condensates — contributed by Christian Neureuter)
+- **Large condensates (e.g. SS18 PLD) are no longer segmented as hollow rings.** The
+  upstream ball_radius-scale enhancement is a band-pass that suppresses the flat interior of
+  condensates much larger than the puncta scale, leaving only a fragmented rim; local
+  Niblack/Sauvola thresholding then captured only a broken "necklace" ring. Four coordinated
+  changes (merged from Christian's updated ``segmentation_tools.py`` +
+  ``image_processing_tools.py``, both based on the current tree so no recent work was
+  reverted):
+  - **Absolute-brightness rescue** in ``fz_segmentation_and_binarization``: an Otsu
+    whole-image threshold is OR-combined with the local threshold to recover the flat,
+    saturated interior of large condensates that local contrast-based thresholding misses.
+    OR-only, so it never reduces small/medium puncta sensitivity.
+  - **Rim bridging**: a small, FIXED-scale morphological closing (``rim_close_radius=5``,
+    deliberately NOT scaled with ball_radius) bridges the fragmented rim into a continuous
+    ring so hole-filling can recover the full object — gated by ``rim_close_min_result_area``
+    (150 px) so it only applies to genuinely large bridged rims and never fuses nearby small
+    puncta.
+  - **Permissive max area**: the hard 25% cap is relaxed to 90%, so genuine large condensates
+    aren't rejected purely for size.
+  - **Solidity-aware rejection** in ``puncta_refinement_filtering_func`` (serial + parallel):
+    large objects are rejected only if they're *also* irregular (solidity < 0.85), which
+    catches erroneous merges while keeping real compact large blobs.
+  - **Large-object rescue** in the foreground-suppression pass
+    (``image_processing_tools.py``): sufficiently large, contiguous, clearly-bright regions
+    have their realness weight forced to 1, so the puncta-scale peakiness gates stop
+    progressively dimming and dropping large coarsened condensates.
+
+## [1.5.222] - 2026-07-05
+### Added (transfection filter for transiently-transfected time-series)
+- **Optional per-cell transfection filter in the time-series cell-segmentation step.** For
+  transiently transfected samples, not every Cellpose-detected cell has usable signal. When
+  the new "Filter untransfected cells" checkbox is on, after segmentation each cell is
+  scored by fluorescence SNR (mean cell intensity ÷ background) on the reference frame of a
+  chosen fluorescence channel — the same channel that will be analysed, not the DAPI
+  segmentation channel. Cells below the SNR threshold are dropped.
+  - Produces a separate **"Transfected Cells"** mask (the full mask is preserved).
+  - Reports a **transfection-efficiency** estimate (fraction of cells above threshold) and
+    stores a per-cell kept-vs-dropped stats table (`transfection_stats`) in the data
+    repository for comparison/histograms.
+  - **Off by default** — Csat-type experiments deliberately leverage low/untransfected
+    cells, so the filter is opt-in. Threshold and fluorescence channel are user-selectable.
+  - This is a coarse "is this cell worth analysing" gate, not puncta segmentation.
+
+## [1.5.221] - 2026-07-05
+### Fixed (time-series condensate analysis rejected the (T,H,W) cell mask)
+- **Time-series condensate analysis now accepts a (T,H,W) cell-mask stack**, not just a 2D
+  mask. The step hard-rejected anything non-2D with "Labels layer must be 2D" — but the
+  keyframe Cellpose step correctly produces a (T,H,W) mask so that each frame's own cell
+  boundaries (which move over time) are used. The analysis now:
+  - Uses a (T,H,W) mask per-frame (each frame analysed against its own mask), in both the
+    parallel and serial paths.
+  - Accepts a 2D mask and propagates it to all frames, with a warning that this assumes the
+    sample is temporally stationary.
+  - Computes the cell-label set from the union across frames, so a cell present in only some
+    frames is still analysed where it exists.
+  - Warns (rather than failing) if a (T,H,W) mask's frame count doesn't match the image,
+    falling back to the reference frame's mask.
+
 ## [1.5.220] - 2026-07-05
 ### Added (Cellpose "Refine masks" checkbox — raw vs refined, user's choice)
 - **The 2D Cellpose segmentation (Cell Segmentation widget, used by Cellular Object Analysis

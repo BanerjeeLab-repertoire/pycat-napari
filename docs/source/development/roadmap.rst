@@ -168,6 +168,36 @@ manuscript evidence:
   object-tracking (diameter/intensity/partition vs time), FRAP, and phase-boundary
   kymographs for maturation / non-equilibrium dynamics.
 
+.. rubric:: Known issues
+
+* **Scale bar uses napari's built-in overlay on the main load path (low priority).**
+  On image/stack load, ``_enable_auto_scale_bar`` turns on napari's built-in
+  ``viewer.scale_bar`` and sets its unit via ``scale_bar.unit``. This works today only
+  because the code deliberately avoids the one call (``Layer.units``) that used to black
+  out the canvas on lazy stacks. Two forces make this fragile long-term:
+
+  1. **Deprecation.** napari is deprecating ``scale_bar.unit`` (PR #9007); the unit label
+     is moving to being derived from ``Layer.units`` — which is exactly the API that
+     triggered the black-canvas refit here. So the supported path forward reintroduces the
+     risk category PyCAT is currently side-stepping.
+  2. **Coupling to auto-fit.** The built-in path assigns ``layer.scale`` and fires
+     alignment/units events on load, which has repeatedly interfered with the
+     open-to-fit-canvas camera logic (see the auto-fit troubleshooting, versions
+     1.5.210–1.5.213).
+
+  PyCAT already ships a self-contained alternative, ``draw_custom_scale_bar``
+  (``ui_utils.py``): a Shapes-layer rectangle drawn in data coordinates that is immune to
+  both the black-canvas bug and the ``scale_bar.unit`` deprecation (a bar of N data pixels
+  always represents ``N × pixel_um`` µm, independent of napari's unit machinery). It is
+  currently wired only into the temperature/movie-export workflow. **Deferred decision:**
+  unify on the custom scale bar across the main load path too. Benefits: removes the
+  deprecation exposure, eliminates the ``Layer.units`` black-canvas category entirely, and
+  decouples the scale bar from the auto-fit machinery. Tradeoff: the custom bar is a real
+  entry in the layer list (``PyCAT Scale Bar``) rather than a canvas overlay, so it must be
+  excluded from analysis-layer dropdowns and cleaned up via ``remove_custom_scale_bar`` on
+  reload. Low priority — the current built-in path is functional; migrate before adopting
+  a napari version that removes ``scale_bar.unit``.
+
 .. rubric:: Super-resolution data processing workflows
 
 Super-resolution (SR) is a natural extension: for the image-based methods the input

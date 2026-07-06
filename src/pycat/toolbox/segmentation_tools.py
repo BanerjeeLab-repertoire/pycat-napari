@@ -677,7 +677,8 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
-def fz_segmentation_and_binarization(image, mask, ball_radius):
+def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=5,
+                                     rim_close_min_result_area=150):
     """
     Applies Felzenszwalb's segmentation method followed by additional processing to convert the segmented
     image into a refined binary mask. This involves contrast adjustments, morphological operations, and local
@@ -692,6 +693,31 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
         A binary mask defining the region of interest where segmentation is focused.
     ball_radius : int
         The radius influencing the segmentation sensitivity and scale, particularly used in local thresholding.
+    rim_close_radius : int, optional
+        Radius of the morphological closing used to bridge fragmented rim
+        pieces of large, hollowed condensates before hole-filling (see notes
+        below). This is a small, FIXED scale independent of ball_radius --
+        it corresponds to the small-scale (disk(1)) morphological/Gabor
+        operations upstream that fragment a large condensate's rim, not to
+        the size of the condensate itself. Do not scale this with
+        ball_radius: at large ball_radius values that would bridge gaps of
+        100+ px and erroneously merge unrelated, well-separated objects
+        across the whole image. Increase only if real large-condensate rims
+        are still visibly broken after this default; default is 5. Safe to
+        tune upward even for densely-packed small puncta -- see
+        rim_close_min_result_area, which prevents this from deforming or
+        fusing small objects.
+    rim_close_min_result_area : int, optional
+        A closing/fill result is only kept where the resulting connected
+        component is at least this large (px); smaller components revert to
+        their pre-closing shape. This is what makes rim_close_radius safe to
+        set generously for large-condensate bridging without deforming or
+        fusing nearby, genuinely distinct small puncta -- closing a cluster
+        of small puncta rarely produces a component this large, so they
+        keep their original compact shape, while a real fragmented
+        large-condensate rim reliably does. Default is 150 (well above a
+        single ~7px-diameter punctum's area, well below a genuine large
+        condensate's).
 
     Returns
     -------
@@ -733,8 +759,88 @@ def fz_segmentation_and_binarization(image, mask, ball_radius):
     # Refine segmentation into a binary mask using local thresholding
     segmented_mask = local_thresholding_func(segmented_img, int(ball_radius))
 
-    # Determine the maximum area for objects based on the input cell mask
-    max_area = (np.sum(mask.astype(bool)) / 4)  # Set maximum area based on the input mask
+    # ── Absolute-brightness rescue for locally-uniform bright regions ──────
+    # Niblack/Sauvola are LOCAL, CONTRAST-based thresholds: a pixel passes
+    # only if it's bright relative to its immediate window_size=ball_radius
+    # neighborhood. Deep inside a large, flat, saturated condensate, that
+    # local neighborhood is essentially uniform -- local std collapses toward
+    # 0, so even a pixel far brighter than the whole image's background can
+    # fail the local test purely because its surroundings look like itself.
+    # This is a structural blind spot, independent of anything upstream: it
+    # persists even after the object is correctly preserved through
+    # pre-processing and enhancement, and explains large condensates being
+    # segmented as a thin rim/partial coverage rather than their full extent.
+    # A coarse, scale-independent ABSOLUTE brightness criterion (Otsu on this
+    # image/ROI) is OR-combined in to rescue exactly this case: pixels that
+    # are clearly bright relative to the whole image, even where local
+    # contrast is near zero. This is deliberately coarse and used only as an
+    # OR-addition (never removes anything local thresholding already found),
+    # so it cannot make small/medium puncta detection any less sensitive.
+    try:
+        otsu_thresh = sk.filters.threshold_otsu(segmented_img)
+        bright_mask = segmented_img > otsu_thresh
+        segmented_mask = np.logical_or(segmented_mask, bright_mask)
+    except ValueError:
+        # threshold_otsu can raise on a degenerate (near-constant) image;
+        # local_thresholding_func's result alone is used in that case.
+        pass
+
+    # ── Large-condensate rim bridging ───────────────────────────────────
+    # The upstream ball_radius-scale enhancement (white top-hat / Gaussian
+    # background division) is a band-pass operation: it suppresses the flat,
+    # uniform interior of condensates that are large relative to ball_radius,
+    # leaving only their curved rim. Local (Niblack/Sauvola) thresholding on
+    # that rim-only signal often breaks it into a scatter of disconnected
+    # fragments rather than one continuous ring -- a "necklace" of small
+    # puncta instead of one solid object. The binary_fill_holes call below
+    # only closes a hole that's already fully enclosed by a continuous ring;
+    # it can't do anything for a ring that's broken into pieces. A
+    # morphological closing first bridges those gaps into a continuous loop
+    # so the fill (and the external-contour fill downstream) can recover the
+    # object's full extent.
+    #
+    # IMPORTANT: rim_close_radius is intentionally NOT scaled with
+    # ball_radius. The fragmentation gap size comes from small, fixed-scale
+    # operations upstream (disk(1) erosion/dilation, Gabor filtering), not
+    # from the condensate's own size. An earlier version of this fix set
+    # close_radius = ball_radius, which at realistic ball_radius values
+    # (e.g. 75) applies a ~150px-wide closing to the whole image and
+    # erroneously fuses distinct, well-separated puncta/condensates
+    # anywhere in the mask -- corrupting segmentation broadly, not just for
+    # large condensates. Keeping this small and fixed avoids that.
+    close_radius = max(1, int(rim_close_radius))
+    closed = ndi.binary_closing(segmented_mask, structure=sk.morphology.disk(close_radius))
+    filled_closed = ndi.binary_fill_holes(closed)
+
+    # Only ACCEPT the closing/fill result where it produces a sufficiently
+    # large object. For an isolated small punctum (or several genuinely
+    # distinct, closely-spaced small puncta), the closing can subtly deform
+    # or -- at larger rim_close_radius values -- bridge them into elongated
+    # "worm" shapes instead of the clean, compact round dots local
+    # thresholding originally found. Gating by the RESULTING component size
+    # (rather than by rim_close_radius alone) means small puncta always keep
+    # their original, un-closed shape, regardless of how large
+    # rim_close_radius needs to be tuned to bridge a real large-condensate
+    # rim. Only components that end up at/above rim_close_min_result_area
+    # (i.e., plausibly a bridged large-condensate rim, not ordinary puncta)
+    # get the closed/filled version; everything else reverts to the
+    # pre-closing mask.
+    lbl_closed = sk.measure.label(filled_closed)
+    if lbl_closed.max() > 0:
+        areas = ndi.sum(np.ones_like(lbl_closed), lbl_closed, range(1, lbl_closed.max() + 1))
+        large_labels = np.where(areas >= rim_close_min_result_area)[0] + 1
+        accept = np.isin(lbl_closed, large_labels)
+    else:
+        accept = np.zeros_like(filled_closed, dtype=bool)
+    segmented_mask = np.where(accept, filled_closed, segmented_mask)
+
+    # Determine the maximum area for objects based on the input cell mask.
+    # This is intentionally permissive (previously a hard 25% cap): rejecting
+    # objects purely for being large also throws away genuine large/coarsened
+    # condensates. A more informed, shape-aware rejection of implausible
+    # (e.g., erroneously merged) large objects happens later in
+    # puncta_refinement_filtering_func, once solidity is available.
+    max_area = (np.sum(mask.astype(bool)) * 0.9)
 
     # Detect external contours and fill them to ensure solid object representation
     contour_mask = opencv_contour_func(segmented_mask, max_area=max_area)
@@ -1134,7 +1240,7 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     cell_bg_std = np.std(cell_bg_iqr)
 
     # Measure properties of each object in the labeled mask
-    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length')
+    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'solidity')
     puncta_region_props_df = pd.DataFrame(sk.measure.regionprops_table(labeled_puncta_mask, intensity_image=original_img, properties=properties))
     cell_area = np.sum(cell_mask)
     
@@ -1205,9 +1311,19 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         cell_intensity_condition = img_object_mean < cell_bg_mean
         # Setup kurtosis based conditions
         kurtosis_condition = img_object_kurtosis < kurtosis_threshold or processed_object_kurtosis < kurtosis_threshold
-        # Setup area based conditions
+        # Setup area based conditions.
+        # Large objects are only rejected here if they are ALSO irregularly
+        # shaped (low solidity). A genuine large/coarsened condensate is a
+        # single compact blob and has high solidity (area / convex_area),
+        # typically ~0.9+. Low solidity indicates a concave, dumbbell-like,
+        # or branching shape -- the signature of an erroneous merge of
+        # several distinct puncta rather than one real large object -- and
+        # is a more reliable artifact indicator than size alone.
         min_area = math.ceil(np.pi * min_spot_radius**2)
-        area_condition = df['area'].values[0] > cell_area*max_area_fraction or df['area'].values[0] < min_area
+        solidity = df['solidity'].values[0]
+        is_undersized = df['area'].values[0] < min_area
+        is_oversized_and_irregular = (df['area'].values[0] > cell_area*max_area_fraction) and (solidity < 0.85)
+        area_condition = is_oversized_and_irregular or is_undersized
         # Setup ellipticity based condition
         ellipticty_condition = ellipticity > 0.99
         # Setup gradient based condition
@@ -1350,7 +1466,11 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         )
         cell_intensity_condition = img_object_mean < cell_bg_mean
         kurtosis_condition = img_object_kurtosis < kurtosis_threshold or processed_object_kurtosis < kurtosis_threshold
-        area_condition = _area > cell_area*max_area_fraction or _area < min_area
+        # See puncta_refinement_filtering_func for the rationale: large
+        # objects are only rejected if they're also irregularly shaped.
+        is_undersized = _area < min_area
+        is_oversized_and_irregular = (_area > cell_area*max_area_fraction) and (p.solidity < 0.85)
+        area_condition = is_oversized_and_irregular or is_undersized
         ellipticty_condition = ellipticity > 0.99
         gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
         local_snr_condition = (img_dilated_object_mean/(img_local_bg_std+np.finfo(np.float32).eps)) <= local_snr_threshold
@@ -1895,4 +2015,4 @@ def compare_segmentation_speed(pre_processed_image_layer, original_image_layer, 
     print("[PyCAT] " + msg.replace("\n", "\n[PyCAT] "))
     napari_show_info(msg)
     return {'t_slow': t_slow, 't_fast': t_fast, 'speedup': speedup,
-            'identical': identical, 'n_slow': n_slow, 'n_fast': n_fast}
+            'identical': identical, 'n_slow': n_slow, 'n_fast': n_fast}

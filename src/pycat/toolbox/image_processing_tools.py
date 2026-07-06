@@ -1487,11 +1487,14 @@ FOREGROUND_SUPPRESSION_DEFAULTS = {
     'con_p':     4.0,  # local-contrast gate percentile
     'min_area':  3,    # objects smaller than this (px) knocked down as specks
     'border_grow': 2,  # dilate keep-region by this many px to protect borders
+    'large_object_min_area': 700,  # contiguous bright blobs >= this area (px)
+                                    # are treated as real regardless of local
+                                    # peakiness -- see _realness_weight notes.
 }
 
 
 def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
-                     border_grow=2):
+                     border_grow=2, large_object_min_area=700):
     """
     Composite per-pixel 'realness' weight in [0, 1] used by
     ``soft_foreground_suppression`` to decide what to keep vs. attenuate.
@@ -1529,6 +1532,21 @@ def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
         Radius (px) by which the high-confidence keep region is dilated to protect
         object borders. 0 disables border protection (weights unchanged). Larger
         values recover thicker borders but also spare more surrounding pixels.
+    large_object_min_area : int
+        Contiguous bright regions at or above this area (px) are treated as
+        real (weight forced to 1) regardless of the blob-shape/local-contrast
+        gates above. Those gates are tuned to the puncta scale
+        (sigma = ball_radius x 0.27) and, by construction, score near-zero
+        across the flat interior of any condensate whose diameter
+        substantially exceeds that scale -- large, coarsened/fused
+        condensates were being progressively dimmed (and eventually dropped
+        entirely by downstream thresholding) as a result. Size + brightness +
+        contiguity alone is strong evidence of realness here: noise
+        fluctuations are never simultaneously large, bright, AND contiguous,
+        so this does not reopen the noise-suppression problem this function
+        was built to solve. Deliberately NOT scaled with ball_radius (see the
+        rim_close_radius lesson in segmentation_tools.py) -- tune this
+        directly against your own large-condensate size range if needed.
 
     Returns
     -------
@@ -1595,12 +1613,35 @@ def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
             # (avoid promoting pure-zero background pixels into the object).
             band = grown & ~core & (pp > 1e-4)
             w = np.where(band, np.maximum(w, 0.9), w)
+
+    # Large-object rescue: independent of local peakiness, any sufficiently
+    # large, contiguous, clearly-bright-above-background region is treated
+    # as real. Uses a coarse global threshold (Otsu, falling back to a
+    # percentile if Otsu can't be computed) purely to find "clearly bright"
+    # pixels -- this is intentionally much coarser than the blob/contrast
+    # gates and is only used to gate by CONNECTED-COMPONENT SIZE, not to
+    # replace the fine-grained weight elsewhere.
+    if large_object_min_area and large_object_min_area > 0:
+        bright_px = pp[pp > 1e-4]
+        if bright_px.size >= 10:
+            try:
+                coarse_thresh = sk.filters.threshold_otsu(bright_px)
+            except Exception:
+                coarse_thresh = float(np.percentile(bright_px, 70))
+            coarse_bright = pp > coarse_thresh
+            lbl2, n2 = ndi.label(coarse_bright)
+            if n2 > 0:
+                sizes2 = ndi.sum(np.ones_like(lbl2), lbl2, range(1, n2 + 1))
+                big_labels = np.where(sizes2 >= large_object_min_area)[0] + 1
+                if big_labels.size:
+                    big = np.isin(lbl2, big_labels)
+                    w = np.where(big, 1.0, w)
     return w.astype(np.float32)
 
 
 def soft_foreground_suppression(image, ball_radius, strength=None,
                                 log_p=None, con_p=None, min_area=None,
-                                border_grow=None):
+                                border_grow=None, large_object_min_area=None):
     """
     Refine a preprocessed condensate image by attenuating noise-like foreground
     (diffuse texture and single-pixel fluctuations) while preserving the
@@ -1637,6 +1678,11 @@ def soft_foreground_suppression(image, ball_radius, strength=None,
         Radius (px) by which the keep-region is dilated to protect object borders
         from erosion during segmentation. 0 disables. Defaults to
         ``FOREGROUND_SUPPRESSION_DEFAULTS['border_grow']``.
+    large_object_min_area : int, optional
+        Area (px) above which a contiguous bright region is treated as real
+        regardless of local peakiness, rescuing large condensates that the
+        puncta-scale gates would otherwise dim or erase. Defaults to
+        ``FOREGROUND_SUPPRESSION_DEFAULTS['large_object_min_area']``.
 
     Returns
     -------
@@ -1656,6 +1702,8 @@ def soft_foreground_suppression(image, ball_radius, strength=None,
         min_area = FOREGROUND_SUPPRESSION_DEFAULTS['min_area']
     if border_grow is None:
         border_grow = FOREGROUND_SUPPRESSION_DEFAULTS['border_grow']
+    if large_object_min_area is None:
+        large_object_min_area = FOREGROUND_SUPPRESSION_DEFAULTS['large_object_min_area']
 
     input_dtype = str(image.dtype)
     img = dtype_conversion_func(image, output_bit_depth='float32')
@@ -1671,7 +1719,8 @@ def soft_foreground_suppression(image, ball_radius, strength=None,
     #   strength=1 -> weight_eff=weight (full attenuation of low-realness px)
     weight = _realness_weight(norm, ball_radius, log_p=log_p,
                               con_p=con_p, min_area=min_area,
-                              border_grow=border_grow)
+                              border_grow=border_grow,
+                              large_object_min_area=large_object_min_area)
     weight_eff = (1.0 - strength) + strength * weight
     refined = norm * weight_eff
 
