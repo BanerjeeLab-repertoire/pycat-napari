@@ -89,7 +89,7 @@ from pycat.toolbox.layer_tools import run_simple_multi_merge, run_advanced_two_l
 from pycat.toolbox.data_viz_tools import PlottingWidget
 from pycat.data.data_modules import BaseDataClass
 from pycat.toolbox.spatial_acf_tools import _add_run_sacf_analysis
-from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack
+from pycat.toolbox.timeseries_condensate_tools import _add_run_timeseries_condensate_analysis, _add_lazy_preprocess_stack, _add_ts_upscale_stack
 
 
 class _WheelScrollGuard(QObject):
@@ -950,6 +950,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         self._add_run_sacf_analysis = lambda **kw: _add_run_sacf_analysis(self, **kw)
         self._add_run_timeseries_condensate_analysis = lambda **kw: _add_run_timeseries_condensate_analysis(self, **kw)
         self._add_lazy_preprocess_stack = lambda **kw: _add_lazy_preprocess_stack(self, **kw)
+        self._add_ts_upscale_stack = lambda **kw: _add_ts_upscale_stack(self, **kw)
         self._add_run_two_channel_coloc = lambda **kw: _add_run_two_channel_coloc(self, **kw)
         self._add_export_timeseries_video = lambda **kw: _add_export_timeseries_video(self, **kw)
         self._add_run_ts_cellpose = lambda **kw: _add_run_ts_cellpose(self, **kw)
@@ -1803,10 +1804,12 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         # ── Step 2: Reference frame selector ─────────────────────────────
         self._add_reference_frame_selector(self.ts_layout)
 
-        # ── Steps 3-4: measurement lines and lazy stack preprocessing ──────
-        # Lazy preprocessing builds dask-backed layers so frames are
-        # processed one at a time on demand rather than all upfront.
+        # ── Steps 3-4: measurement lines, upscale, lazy stack preprocessing ─
+        # Order matches the 2D cellular workflow: measure → upscale → preprocess.
+        # Upscaling is optional and produces a lazy zarr-backed stack, so
+        # downstream preprocess/Cellpose/analysis all run on the upscaled data.
         tfu._add_measure_line(layout=self.ts_layout)
+        tfu._add_ts_upscale_stack(layout=self.ts_layout)
         tfu._add_lazy_preprocess_stack(layout=self.ts_layout)
 
         # ── Steps 5-6: Cellpose and cell analysis ─────────────────────────

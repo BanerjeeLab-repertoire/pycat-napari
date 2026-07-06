@@ -958,6 +958,7 @@ class FileIOClass:
         if bp:
             bp.record('open_image', {
                 'file_path': self.filePath,
+                'source_files': list(file_paths),
                 'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter', 100),
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius', 50),
                 'channel_assignment': getattr(self, '_last_channel_assignment', None),
@@ -1760,6 +1761,9 @@ class FileIOClass:
             self._last_channel_assignment.append({
                 'channel_num': channel_num,
                 'layer_name': name,
+                'source_path': file_path,
+                'source_stem': os.path.splitext(os.path.basename(file_path))[0],
+                'source_suffix': os.path.splitext(file_path)[1].lower(),
                 'detected_label': info.get('label') if info else None,
                 'detected_source': info.get('source') if info else None,
             })
@@ -2148,12 +2152,48 @@ class FileIOClass:
                     self.viewer.layers.remove(layer_name)
             self.central_manager.active_data_class.reset_values(df_names_to_reset=selected_dataframes)
 
-        # Reset the workflow checklist progress bar so the next dataset starts
-        # from step 1 rather than showing the previous run's completed pills.
+        # Save/Clear is a hard boundary between datasets. Reset the workflow UI
+        # and the in-memory batch recorder so subsequent operations start a new
+        # process instead of being appended to the previous saved dataset.
         try:
             wc = getattr(self.central_manager, 'workflow_checklist', None)
             if wc is not None:
                 wc.reset()
+        except Exception:
+            pass
+        try:
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp is not None:
+                # Save/Clear ends this dataset's recording. If there are unsaved
+                # recorded steps, offer to export the batch config first (unless
+                # the user silenced the prompt for this session), so the workflow
+                # isn't lost when the recorder resets.
+                if (bp.has_unsaved_steps()
+                        and not getattr(bp, '_export_prompt_silenced', False)):
+                    from PyQt5.QtWidgets import QMessageBox, QCheckBox
+                    box = QMessageBox(self.viewer.window._qt_window
+                                      if hasattr(self.viewer.window, '_qt_window') else None)
+                    box.setIcon(QMessageBox.Question)
+                    box.setWindowTitle("Export batch config?")
+                    box.setText(
+                        "This batch workflow recording hasn't been saved.\n\n"
+                        "Save-and-Clear ends the current recording. Export the "
+                        "batch config now so you can replay this workflow later?")
+                    box.setStandardButtons(QMessageBox.Save | QMessageBox.Discard)
+                    box.setDefaultButton(QMessageBox.Save)
+                    _dont_ask = QCheckBox("Don't ask again this session")
+                    box.setCheckBox(_dont_ask)
+                    choice = box.exec_()
+                    if _dont_ask.isChecked():
+                        bp._export_prompt_silenced = True
+                    if choice == QMessageBox.Save:
+                        from PyQt5.QtWidgets import QFileDialog
+                        from pathlib import Path as _Path
+                        path, _ = QFileDialog.getSaveFileName(
+                            None, "Save Batch Config", "", "JSON (*.json)")
+                        if path:
+                            bp.save_config(_Path(path))
+                bp.terminate_recording()
         except Exception:
             pass
 

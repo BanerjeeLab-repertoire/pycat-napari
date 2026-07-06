@@ -82,7 +82,74 @@ from PyQt5.QtWidgets import (
 )
 
 # Supported image extensions (same as PyCAT's Open 2D Images dialog)
-SUPPORTED_EXTENSIONS = {".tif", ".tiff", ".czi", ".png", ".jpg", ".jpeg"}
+SUPPORTED_EXTENSIONS = {".tif", ".tiff", ".czi", ".png", ".jpg", ".jpeg", ".ims"}
+
+
+def _first_step(config: Dict, *names: str) -> Optional[Dict]:
+    """Return the first recorded step matching one of *names*."""
+    for step in config.get("steps", []):
+        if step.get("step") in names:
+            return step
+    return None
+
+
+def _config_uses_split_source_files(config: Dict) -> bool:
+    """True when the recorded open step came from multiple source files."""
+    open_step = _first_step(config, "open_image", "open_stack")
+    if not open_step:
+        return False
+    params = open_step.get("params", {}) or {}
+    src = params.get("source_files") or []
+    return len(src) > 1
+
+
+def _primary_source_suffix(config: Dict) -> Optional[str]:
+    """Infer the filename suffix that identifies the primary file in split-file batches.
+
+    If the user recorded a workflow by opening two separate files as channels,
+    the batch folder contains pairs/groups. Processing every file independently
+    double-counts the dataset. We process only files that look like the first
+    recorded source and let replay_open_image locate its companions.
+    """
+    open_step = _first_step(config, "open_image", "open_stack")
+    if not open_step:
+        return None
+    params = open_step.get("params", {}) or {}
+    src = params.get("source_files") or []
+    if len(src) < 2:
+        return None
+    from pathlib import Path as _Path
+    stems = [_Path(x).stem for x in src]
+    primary = stems[0]
+    # Longest common prefix among the recorded split files.
+    prefix = primary
+    for st in stems[1:]:
+        i = 0
+        while i < min(len(prefix), len(st)) and prefix[i] == st[i]:
+            i += 1
+        prefix = prefix[:i]
+    suffix = primary[len(prefix):]
+    return suffix or None
+
+
+def _filter_split_source_primaries(files: List[Path], config: Dict) -> List[Path]:
+    """Drop companion split-channel files from the top-level batch file list."""
+    if not _config_uses_split_source_files(config):
+        return files
+    suffix = _primary_source_suffix(config)
+    if not suffix:
+        print("[PyCAT Batch] Split-file workflow detected, but primary suffix "
+              "could not be inferred — processing all files.")
+        return files
+    primaries = [p for p in files if p.stem.endswith(suffix)]
+    if primaries:
+        print(f"[PyCAT Batch] Split-file workflow detected — processing "
+              f"{len(primaries)} primary file(s) matching '*{suffix}' and "
+              "loading companion files during replay.")
+        return primaries
+    print(f"[PyCAT Batch] Split-file workflow detected, but no files matched "
+          f"the inferred primary suffix '*{suffix}' — processing all files.")
+    return files
 
 # ---------------------------------------------------------------------------
 # Config schema
@@ -368,6 +435,7 @@ class BatchDialog(QDialog):
             for p in Path(folder).iterdir()
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ]
+        files = _filter_split_source_primaries(files, config)
 
         if not files:
             QMessageBox.information(
@@ -444,6 +512,13 @@ class BatchProcessor:
         self.viewer = viewer
         self.config: Dict = _empty_config()
         self.step_registry: Dict[str, Callable] = {}
+        self.recording_enabled: bool = True
+        # Dirty = there are recorded steps not yet written to a config file.
+        # Used to prompt for export before a save-and-clear wipes the recording.
+        self._dirty: bool = False
+        # When True, don't prompt to export on save-and-clear for the rest of
+        # the session (user ticked "don't ask again").
+        self._export_prompt_silenced: bool = False
 
     # ------------------------------------------------------------------
     # Recording
@@ -451,6 +526,20 @@ class BatchProcessor:
 
     def record(self, step_name: str, params: Dict[str, Any]):
         """Append a step to the in-memory config log."""
+        if not self.recording_enabled:
+            print(f"[PyCAT Batch] Recording disabled — ignored step: {step_name}")
+            return
+        params = dict(params or {})
+        # Snapshot the active/all layer names at record time, to help diagnose
+        # cases where a step captured the wrong dropdown layer name.
+        try:
+            params.setdefault(
+                '_active_layer_at_record',
+                getattr(getattr(self.viewer.layers.selection, 'active', None), 'name', None))
+            params.setdefault('_all_layers_at_record',
+                              [l.name for l in self.viewer.layers])
+        except Exception:
+            pass
         self.config["steps"].append(
             {
                 "step": step_name,
@@ -458,6 +547,7 @@ class BatchProcessor:
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
             }
         )
+        self._dirty = True
         print(f"[PyCAT Batch] Recorded step: {step_name}  params={params}")
 
         # Notify the workflow checklist so it can auto-check this step
@@ -469,8 +559,25 @@ class BatchProcessor:
             pass
 
     def clear_recording(self):
-        """Reset the session recording."""
+        """Reset the session recording and re-enable recording for the next dataset."""
         self.config = _empty_config()
+        self.recording_enabled = True
+        self._dirty = False
+        print("[PyCAT Batch] Session recording reset.")
+
+    def has_unsaved_steps(self) -> bool:
+        """True if there are recorded steps not yet written to a config file."""
+        return self._dirty and len(self.config.get("steps", [])) > 0
+
+    def terminate_recording(self):
+        """End the current recorded process at a dataset boundary.
+
+        Save/Clear is a hard boundary between independent datasets. The just-
+        completed pipeline's steps should not keep accumulating onto the next
+        dataset's recording. Callers are responsible for prompting the user to
+        export the config first if it has unsaved steps.
+        """
+        self.clear_recording()
 
     # ------------------------------------------------------------------
     # Config I/O
@@ -481,6 +588,7 @@ class BatchProcessor:
         self.config["saved"] = datetime.now().isoformat(timespec="seconds")
         with open(path, "w") as f:
             json.dump(self.config, f, indent=2)
+        self._dirty = False
         print(f"[PyCAT Batch] Config saved → {path}")
 
     def load_config(self, path: Path):

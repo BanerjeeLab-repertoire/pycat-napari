@@ -1731,8 +1731,17 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     if crop_to_cell:
         rows = np.any(cell_mask, axis=1)
         cols = np.any(cell_mask, axis=0)
-        r0, r1 = np.where(rows)[0][[0, -1]]
-        c0, c1 = np.where(cols)[0][[0, -1]]
+        row_idx = np.where(rows)[0]
+        col_idx = np.where(cols)[0]
+        if row_idx.size == 0 or col_idx.size == 0:
+            # The cell mask is empty in this frame (e.g. a cell present in the
+            # union label set but absent from this time-point). There is nothing
+            # to segment — return empty results instead of crashing on the
+            # np.where(...)[[0, -1]] index.
+            _empty = np.zeros(cell_mask.shape, dtype=bool)
+            return _empty, _empty
+        r0, r1 = row_idx[[0, -1]]
+        c0, c1 = col_idx[[0, -1]]
         pad = int(math.ceil(6 * ball_radius))
         r0p = max(0, r0 - pad);  r1p = min(cell_mask.shape[0], r1 + pad + 1)
         c0p = max(0, c0 - pad);  c1p = min(cell_mask.shape[1], c1 + pad + 1)

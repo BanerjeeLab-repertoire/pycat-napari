@@ -536,6 +536,177 @@ class _StackProcessWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
+def _cellpose_min_diameter_px():
+    """Cellpose works best when objects are roughly >=~30 px across at the
+    resolution it sees. Returns the target minimum cell diameter in px that
+    upscaling should try to reach."""
+    return 30.0
+
+
+def upscale_stack_to_zarr(stack_like, factor, progress_cb=None):
+    """Upscale a (T,H,W) stack frame-by-frame into a zarr store on disk and
+    return a lazy _ZarrStack wrapper (reads frames on demand — snappy after
+    processing, like the rest of the TS pipeline).
+
+    Each frame is upscaled with order-1 (bilinear) interpolation. Frames are
+    written to zarr as they complete so the full upscaled stack is never held
+    in RAM at once.
+    """
+    import os as _os
+    import zarr as _zarr
+    from skimage.transform import rescale as _rescale
+
+    f = max(1, int(factor))
+    n_t = stack_like.shape[0]
+    H, W = stack_like.shape[-2], stack_like.shape[-1]
+    Hs, Ws = int(round(H * f)), int(round(W * f))
+
+    out_dir = _os.path.join(_session_zarr_dir(), f"upscaled_{f}x_{_os.getpid()}_{id(stack_like)}")
+    z_out = _zarr.open(out_dir, mode='w',
+                       shape=(n_t, Hs, Ws), chunks=(1, Hs, Ws),
+                       dtype=np.float32)
+    for t in range(n_t):
+        frame = _read_source_frame(stack_like, t).astype(np.float32)
+        if f == 1:
+            up = frame
+        else:
+            up = _rescale(frame, f, order=1, anti_aliasing=True,
+                          preserve_range=True).astype(np.float32)
+        z_out[t] = up
+        if progress_cb:
+            progress_cb(t + 1, n_t)
+    return _ZarrStack(_zarr.open(out_dir, mode='r'))
+
+
+def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
+    """Optional early upscale step for the time-series workflow.
+
+    Upscales the raw stack frame-by-frame into a lazy zarr-backed stack, so the
+    whole downstream pipeline (preprocess, Cellpose, condensate analysis) runs on
+    the upscaled data — matching the 2D workflow order (upscale BEFORE
+    preprocess). Optional and gated: if the data already meets Cellpose's
+    resolution needs, upscaling is unnecessary and the check says so.
+    """
+    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QSpinBox, QLabel
+
+    grp = QGroupBox("Upscale Stack (optional)")
+    form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
+
+    stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
+    form.addRow("Raw stack layer:", stack_dropdown)
+
+    factor_spin = QSpinBox(); factor_spin.setRange(1, 4); factor_spin.setValue(2)
+    factor_spin.setToolTip("Integer upscale factor. 2 = double each dimension.")
+    form.addRow("Upscale factor:", factor_spin)
+
+    advice = QLabel("<span style='color:#888;font-size:9pt;'>Upscaling helps only "
+                    "when objects are small relative to Cellpose's needs. Check "
+                    "below before upscaling.</span>")
+    advice.setWordWrap(True)
+    form.addRow(advice)
+
+    check_btn = QPushButton("Check if upscaling is needed")
+    check_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    form.addRow(check_btn)
+
+    def _on_check():
+        name = stack_dropdown.currentText()
+        try:
+            layer = ui_instance.viewer.layers[name]
+        except KeyError:
+            napari_show_warning(f"Layer '{name}' not found."); return
+        # Compare the current expected cell diameter (px) against Cellpose's
+        # preferred minimum. If already comfortably above it, upscaling isn't
+        # needed; otherwise recommend a factor to reach it.
+        cell_d = float(ui_instance._dr().get('cell_diameter', 0) or 0)
+        target = _cellpose_min_diameter_px()
+        if cell_d <= 0:
+            advice.setText("<span style='color:#f0a500;font-size:9pt;'>Set the "
+                           "cell diameter first (measure a line) so I can tell "
+                           "whether upscaling is needed.</span>")
+            return
+        if cell_d >= target:
+            advice.setText(f"<span style='color:#5cb85c;font-size:9pt;'><b>Not "
+                           f"needed</b> — cells are ~{cell_d:.0f} px, already "
+                           f"above Cellpose's ~{target:.0f} px target. You can "
+                           f"skip upscaling.</span>")
+            factor_spin.setValue(1)
+        else:
+            rec = int(np.ceil(target / max(cell_d, 1e-6)))
+            rec = max(2, min(4, rec))
+            advice.setText(f"<span style='color:#f0a500;font-size:9pt;'><b>"
+                           f"Recommended</b> — cells are ~{cell_d:.0f} px, below "
+                           f"Cellpose's ~{target:.0f} px target. Try factor "
+                           f"{rec}× (→ ~{cell_d*rec:.0f} px).</span>")
+            factor_spin.setValue(rec)
+    check_btn.clicked.connect(_on_check)
+
+    run_btn = QPushButton("▶  Upscale Stack (lazy)")
+    run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    prog = QProgressBar(); prog.setVisible(False)
+    form.addRow(run_btn); form.addRow(prog)
+
+    class _UpWorker(QThread):
+        progress = pyqtSignal(int, int)
+        finished_ok = pyqtSignal(object, int)
+        error = pyqtSignal(str)
+        def __init__(self, stack, factor):
+            super().__init__(); self._stack = stack; self._factor = factor
+        def run(self):
+            try:
+                out = upscale_stack_to_zarr(
+                    self._stack, self._factor,
+                    progress_cb=lambda i, n: self.progress.emit(i, n))
+                self.finished_ok.emit(out, self._factor)
+            except Exception as e:
+                import traceback; self.error.emit(traceback.format_exc())
+
+    def _on_run():
+        name = stack_dropdown.currentText()
+        try:
+            layer = ui_instance.viewer.layers[name]
+        except KeyError:
+            napari_show_warning(f"Layer '{name}' not found."); return
+        data = layer.data
+        if np.asarray(data).ndim != 3 and not hasattr(data, 'shape'):
+            napari_show_warning("Upscaling needs a (T,H,W) stack."); return
+        factor = factor_spin.value()
+        if factor == 1:
+            napari_show_info("Factor 1× — nothing to upscale."); return
+        prog.setVisible(True); prog.setRange(0, 0); run_btn.setEnabled(False)
+
+        worker = _UpWorker(data, factor)
+        ui_instance._ts_upscale_worker = worker
+        def _prog(i, n):
+            prog.setRange(0, n); prog.setValue(i)
+        def _done(out, f):
+            prog.setVisible(False); run_btn.setEnabled(True)
+            new_name = f"Upscaled {f}x [{name}]"
+            _cl = float(np.sqrt(ui_instance._mpx())) if ui_instance._mpx() else 1.0
+            ui_instance.viewer.add_image(
+                out, name=new_name,
+                scale=(_cl / f, _cl / f) if _cl else None)
+            # Downstream cell_diameter/ball_radius scale with the upscale factor.
+            dr = ui_instance._dr()
+            if dr.get('cell_diameter'):    dr['cell_diameter'] = float(dr['cell_diameter']) * f
+            if dr.get('ball_radius'):      dr['ball_radius']   = float(dr['ball_radius']) * f
+            ui_instance._record('ts_upscale_stack', {
+                'stack_layer': name, 'factor': f})
+            napari_show_info(f"Upscaled {f}× → '{new_name}' (lazy). "
+                             f"Cell diameter / ball radius scaled ×{f}.")
+        def _err(msg):
+            prog.setVisible(False); run_btn.setEnabled(True)
+            napari_show_warning("Upscale error — see terminal."); print(f"[PyCAT TS Upscale] {msg}")
+        worker.progress.connect(_prog); worker.finished_ok.connect(_done)
+        worker.error.connect(_err); worker.start()
+    run_btn.clicked.connect(_on_run)
+
+    target = layout if layout is not None else QVBoxLayout()
+    target.addWidget(grp)
+    return grp
+
+
 def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     """
     Widget that builds lazy preprocessed and background-removed stacks from
@@ -1181,6 +1352,10 @@ def _ts_analyze_frame_worker(args):
 
     for cell_label in cell_labels:
         cell_binary_mask = (labeled_cell_mask == cell_label)
+        # A cell in the union label set may have zero pixels in this frame's
+        # mask; skip it (nothing to segment, and avoids the empty-mask crash).
+        if not cell_binary_mask.any():
+            continue
 
         # Per-frame within-cell normalization for dissolution/dynamics experiments:
         # normalising to the CURRENT frame's own intensity range makes all
@@ -1500,6 +1675,12 @@ def run_timeseries_condensate_analysis(
 
             for cell_label in cell_labels:
                 cell_binary_mask = (_frame_mask == cell_label)
+                # A cell in the union label set may have zero pixels in this
+                # frame (e.g. it entered/left, or a (T,H,W) mask differs per
+                # frame). Nothing to segment — skip it (also avoids the empty-
+                # mask crop crash downstream).
+                if not cell_binary_mask.any():
+                    continue
 
                 if per_frame_normalize:
                     _cpx = frame_raw[cell_binary_mask]

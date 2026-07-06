@@ -23,6 +23,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.229] - 2026-07-06
+### Added (time-series: standalone early upscale step)
+- **The time-series workflow now has an optional early "Upscale Stack" step**, placed before
+  preprocessing to match the 2D cellular order (load → ROI → upscale → preprocess → segment
+  nuclei → segment condensates). Previously upscaling only happened inside the Cellpose call
+  and was rescaled away, so downstream analysis ran at original resolution.
+  - **Lazy / zarr-backed**: frames are upscaled one at a time into a zarr store on disk and
+    presented as a lazy `_ZarrStack`, so the result is snappy (frames read on demand) like the
+    rest of the TS pipeline, and the full upscaled stack is never held in RAM.
+  - **Optional and gated**: a "Check if upscaling is needed" button compares the current cell
+    diameter against Cellpose's ~30 px preferred minimum and recommends a factor (or says
+    upscaling isn't needed if the data already meets it).
+  - Downstream `cell_diameter` and `ball_radius` are scaled by the upscale factor so
+    Cellpose and background-removal parameters stay correct.
+  - Added to the workflow checklist as step 4 (subsequent steps renumbered).
+
+## [1.5.228] - 2026-07-06
+### Fixed (time-series condensate analysis crash: empty per-frame cell mask)
+- **`IndexError: index 0 is out of bounds for axis 0 with size 0` in
+  `segment_subcellular_objects` is fixed.** When the cell-label set is taken as the union
+  across all frames (from a (T,H,W) mask), a given cell can have zero pixels in a particular
+  frame; the crop optimisation then ran `np.where(rows)[0][[0, -1]]` on an all-False mask and
+  crashed. Now:
+  - `segment_subcellular_objects` guards the empty-mask case and returns empty results instead
+    of indexing into an empty array.
+  - The time-series analysis loop (both parallel and serial paths) skips cells with no pixels
+    in the current frame, so absent cells are cleanly ignored rather than segmented.
+  This is independent of upscaling — the crash could occur whenever a cell was missing from a
+  frame, regardless of the preprocessing path.
+
+## [1.5.227] - 2026-07-06
+### Fixed (In Vitro Fluorescence — tester feedback)
+- **Random Forest no longer produces empty masks.** Root cause: the RF classifier runs CLAHE
+  (`equalize_adapthist`), which requires float input in [-1, 1], but the raw fluorescence
+  image is in raw intensity units — CLAHE raised "Images of type float must be between -1 and
+  1", was swallowed by the worker, and surfaced as an empty mask. The image is now normalized
+  to [0, 1] before the RF call. Verified RF then produces a proper droplet mask.
+### Changed (In Vitro Fluorescence)
+- **Step 2 preprocessing is now optional with gentler methods.** Rolling-ball background
+  subtraction could hollow out large droplets (the donut problem). The step is now labeled
+  optional and offers Gaussian blur (default — keeps interiors solid), LoG edge enhancement,
+  or rolling-ball (legacy). Segmentation can run directly on the raw image if preprocessing is
+  skipped.
+- **Steps 7 (Dynamics) and 9 (Frame Quality / bleaching) are hidden unless a stack is loaded.**
+  These only apply to 2D+t or 3D data; they're shown/hidden automatically based on whether any
+  loaded image layer has ≥3 dimensions, re-evaluated on layer changes.
+- **Step 4 "volume fraction" clarified as an area fraction.** Φ is the fraction of the imaged
+  *plane* covered by droplets, not a true 3D volume fraction — in a flow cell, droplets settle
+  into the bottom few µm of a ~200 µm channel, so single-plane Φ doesn't represent bulk volume
+  fraction. The step note now says this explicitly.
+- Sauvola remains available but non-default (it's noise-sensitive on clean in-vitro fields,
+  producing irregular fragments in dark background); the min-object-size and optional
+  round-object filters help suppress that debris.
+
+## [1.5.226] - 2026-07-06
+### Changed (In Vitro (Fluorescence) — simplified droplet segmentation)
+- **Step 3 segmentation redesigned around a radio-button method selector**, showing only the
+  chosen method's parameters (via a stacked panel) instead of exposing all six at once. Based
+  on optimization against real FUS-PLD in-vitro data (clean, well-separated droplets), where a
+  simple global threshold gives round, well-segmented objects (solidity ~0.95) and the heavy
+  rolling-ball/kurtosis/SNR pipeline is unnecessary. Methods:
+  - **Threshold (Otsu)** — default, zero-parameter (with an optional sensitivity ×multiplier).
+    Matches what the data wants and what the user asked for.
+  - **Multi-level threshold (Multi-Otsu)** — choose number of classes + cut at lower (inclusive)
+    or upper (bright cores) boundary; good for core/halo droplets.
+  - **Local threshold (Sauvola)** — window + k, with better defaults (win=35, k=0) than before.
+  - **Random Forest** — with a **"Draw Scribbles" button** that creates/selects a labels layer
+    and arms the paint tool. (Paint 1 = background, 2 = droplet, matching the classifier's
+    label handling.)
+  - **Advanced: spot detection (kurtosis / SNR)** — the original rolling-ball pipeline, preserved
+    but tucked behind its own radio option so it's out of the way.
+- **Shared post-filters**: a single "min object size (px²)" control (replacing the confusing
+  "min spot radius") and an optional "reject non-round objects (solidity < 0.85)" filter suited
+  to droplet data.
+
+## [1.5.225] - 2026-07-06
+### Fixed (batch recording — structural fixes, adapted from Christian's audit patch)
+- **Save-and-Clear now ends the batch recording** instead of letting the next dataset's
+  steps accumulate onto the previous one. Because the batch config is only written when you
+  click "Save Config", Save-and-Clear first checks for unsaved recorded steps and — unless
+  silenced — prompts to export the config (with a "Don't ask again this session" checkbox),
+  then resets the recorder. This prevents both the "steps bleed across datasets" bug and
+  accidental loss of an unexported recording.
+- **Split-channel file loads are recorded and replayed correctly.** When a workflow is
+  recorded by opening two separate files as channels (e.g. `cell01_DAPI.tif` +
+  `cell01_GFP.tif`), the open step now records `source_files` and each channel's
+  `source_stem`/`source_suffix`. Batch mode detects the split-file workflow, processes only
+  the primary file per sample (instead of double-counting every file), and during replay
+  derives each companion file for the current sample (`cell17_DAPI` → `cell17_GFP`),
+  raising a clear error if a companion is missing.
+- **`.ims` added to the batch-supported extensions.**
+- **Recorded steps now carry a layer snapshot** (`_active_layer_at_record`,
+  `_all_layers_at_record`) to help diagnose steps that captured the wrong dropdown layer
+  name.
+- Added a `recording_enabled` guard on the recorder.
+### Note (not yet addressed)
+- Some GUI callbacks still record dropdown layer names *after* the operation has changed
+  viewer state; those per-widget captures need individual fixes (the layer snapshot above is
+  the diagnostic aid for finding them). Applied manually rather than via `git apply` — the
+  patch didn't apply cleanly against the current tree (which has drifted), and its
+  Save-and-Clear hunk needed the export-prompt guard added to avoid wiping unsaved
+  recordings.
+
 ## [1.5.224] - 2026-07-06
 ### Fixed (1.5.222 regression — ImportError on startup)
 - **Restored `_add_run_ts_cellpose`**, which was accidentally deleted when the transfection

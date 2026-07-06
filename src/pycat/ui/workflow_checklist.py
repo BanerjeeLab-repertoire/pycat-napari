@@ -57,13 +57,14 @@ TIMESERIES_PIPELINE = [
     ('open_stack',              '1.  Open IMS / image stack'),
     ('set_frame_range',         '2.  Select reference frame & range'),
     ('measure_line',            '3.  Measure lines'),
-    ('lazy_preprocess_stack',   '4.  Preprocess stack (zarr-backed)'),
-    ('auto_crop_roi',           '4b. Auto-crop ROI  [batch, opt]'),
-    ('ts_cellpose_keyframe',    '5.  Keyframe Cellpose segmentation'),
-    ('cell_analysis',           '6.  Cell Analyzer'),
-    ('timeseries_condensate_analysis', '7.  Time-Series Condensate Analysis'),
-    ('export_timeseries_video', '8.  Export video  [opt]'),
-    ('save_and_clear',          '9.  Save & Clear'),
+    ('ts_upscale_stack',        '4.  Upscale stack  [optional]'),
+    ('lazy_preprocess_stack',   '5.  Preprocess stack (zarr-backed)'),
+    ('auto_crop_roi',           '5b. Auto-crop ROI  [batch, opt]'),
+    ('ts_cellpose_keyframe',    '6.  Keyframe Cellpose segmentation'),
+    ('cell_analysis',           '7.  Cell Analyzer'),
+    ('timeseries_condensate_analysis', '8.  Time-Series Condensate Analysis'),
+    ('export_timeseries_video', '9.  Export video  [opt]'),
+    ('save_and_clear',          '10. Save & Clear'),
 ]
 
 COLOC_PIPELINE = [

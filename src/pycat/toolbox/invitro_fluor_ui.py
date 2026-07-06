@@ -42,6 +42,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
     QScrollArea, QSizePolicy, QHBoxLayout, QTabWidget, QComboBox,
+    QRadioButton, QButtonGroup, QStackedWidget,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -131,6 +132,32 @@ class InVitroFluorUI:
         _ivf_phase_diagram(self, layout)
         _ivf_frame_qc(self, layout)
 
+        # Steps 7 (Dynamics) and 9 (Frame Quality / bleaching) only apply to
+        # time-series (2D+t) or 3D data — a single 2D droplet image has no
+        # temporal dimension to coarsen or bleach. Show/hide them based on
+        # whether any loaded Image layer is a stack (ndim >= 3), re-evaluated
+        # whenever layers change.
+        def _update_timeseries_steps(*_):
+            try:
+                has_stack = any(
+                    getattr(l, 'data', None) is not None
+                    and np.asarray(l.data).ndim >= 3
+                    for l in self.viewer.layers
+                    if isinstance(l, napari.layers.Image))
+            except Exception:
+                has_stack = True  # fail open — don't hide if uncertain
+            for _attr in ('_ivf_dynamics_grp', '_ivf_qc_grp'):
+                g = getattr(self, _attr, None)
+                if g is not None:
+                    g.setVisible(has_stack)
+        self._ivf_update_ts_steps = _update_timeseries_steps
+        try:
+            self.viewer.layers.events.inserted.connect(_update_timeseries_steps)
+            self.viewer.layers.events.removed.connect(_update_timeseries_steps)
+        except Exception:
+            pass
+        _update_timeseries_steps()
+
         main_w = QWidget(); main_w.setLayout(layout)
         main_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         from pycat.ui.ui_modules import _apply_scroll_guard
@@ -162,39 +189,80 @@ def _show(title, tables):
 
 
 def _ivf_preprocessing(ui, layout):
-    grp = QGroupBox("Step 2 — Preprocess Fluorescence Image")
+    grp = QGroupBox("Step 2 — Preprocess Fluorescence Image (optional)")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
+    form.addRow(QLabel(
+        "<span style='color:#aaa;font-size:9pt;'>Optional. In-vitro droplets on a "
+        "clean field usually segment fine on the raw image — you can skip this "
+        "step. Rolling-ball can hollow out large droplets; a gentle Gaussian blur "
+        "or LoG edge-enhancement is usually a better choice if you preprocess.</span>"))
     img_dd = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow(label_with_circle("Fluorescence image:", dropdown=img_dd), img_dd)
+
+    method_dd = QComboBox()
+    method_dd.addItems(["Gaussian blur (gentle denoise)",
+                        "LoG edge enhancement",
+                        "Rolling-ball background subtraction"])
+    method_dd.setToolTip(
+        "Gaussian = light smoothing, keeps droplet interiors solid.\n"
+        "LoG = enhances droplet edges/blobs.\n"
+        "Rolling-ball = legacy background subtraction (can hollow large droplets).")
+    form.addRow("Method:", method_dd)
+
+    # Gaussian sigma
+    sigma_spin = QDoubleSpinBox(); sigma_spin.setRange(0.3, 20.0)
+    sigma_spin.setSingleStep(0.5); sigma_spin.setValue(1.5); sigma_spin.setDecimals(2)
+    sigma_spin.setToolTip("Gaussian/LoG sigma in pixels.")
+    _sigma_row = form.rowCount()
+    form.addRow("Sigma (px):", sigma_spin)
+
+    # Rolling-ball radius (shown only for rolling-ball)
     ball_spin = QSpinBox(); ball_spin.setRange(2,200); ball_spin.setValue(15)
-    ball_spin.setToolTip(
-        "Rolling ball radius for background subtraction (pixels).\n"
-        "For in vitro data, background is very uniform buffer — a\n"
-        "smaller radius than cellular (15-30px vs 50px) is typically better."
-    )
-    form.addRow("Rolling ball radius (px):", ball_spin)
+    ball_spin.setToolTip("Rolling ball radius (px). Smaller than cellular (15-30).")
+    ball_lbl = QLabel("Rolling ball radius (px):")
+    form.addRow(ball_lbl, ball_spin)
+
+    def _on_method_change():
+        is_ball = (method_dd.currentIndex() == 2)
+        ball_spin.setVisible(is_ball); ball_lbl.setVisible(is_ball)
+        sigma_spin.setVisible(not is_ball)
+    method_dd.currentIndexChanged.connect(_on_method_change)
+    _on_method_change()
+
     prog, run = _run_btn(form, "▶  Preprocess")
 
     def _on_run():
-        from pycat.toolbox.image_processing_tools import pre_process_image
         try: img = ui._img(img_dd)
         except KeyError as e: napari_show_warning(str(e)); return
-        ball = ball_spin.value()
+        idx = method_dd.currentIndex()
+        sigma = sigma_spin.value(); ball = ball_spin.value()
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
+
         def _task():
-            proc = pre_process_image(img, ball_radius=ball, window_size=ball*2)
-            return np.asarray(proc).astype(np.float32)
+            arr = np.asarray(img).astype(np.float32)
+            if idx == 0:   # Gaussian blur
+                from pycat.toolbox.image_processing_tools import gaussian_smooth_2d
+                return gaussian_smooth_2d(arr, sigma=sigma)
+            if idx == 1:   # LoG enhancement
+                from pycat.toolbox.image_processing_tools import apply_laplace_of_gauss_enhancement
+                return np.asarray(apply_laplace_of_gauss_enhancement(arr, sigma=sigma)).astype(np.float32)
+            # Rolling-ball (legacy)
+            from pycat.toolbox.image_processing_tools import pre_process_image
+            return np.asarray(pre_process_image(arr, ball_radius=ball, window_size=ball*2)).astype(np.float32)
+
         worker = _IVFWorker(_task)
         ui._ivf_pre_worker = worker
         def _done(proc):
             prog.setVisible(False); run.setEnabled(True)
+            _mnames = ['gaussian', 'log', 'rolling-ball']
             ui.viewer.add_image(proc, name=f"IVF Preprocessed [{img_dd.currentText()}]",
                                  colormap='viridis')
             ui._dr()['ivf_preprocessed'] = proc
             ui._record('ivf_preprocess', {'image_layer': img_dd.currentText(),
-                                           'ball_radius': ball})
-            napari_show_info("In vitro preprocessing done.")
+                                          'method': _mnames[idx],
+                                          'sigma': sigma, 'ball_radius': ball})
+            napari_show_info(f"In vitro preprocessing done ({_mnames[idx]}).")
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
             napari_show_warning("Preprocessing error — see terminal."); print(f"[PyCAT IVF] {msg}")
@@ -207,40 +275,135 @@ def _ivf_segmentation(ui, layout):
     grp  = QGroupBox("Step 3 — Segment Droplets")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
+
     pre_dd  = ui.create_layer_dropdown(napari.layers.Image)
     raw_dd  = ui.create_layer_dropdown(napari.layers.Image)
     form.addRow("Preprocessed image:", pre_dd)
     form.addRow("Raw fluorescence image:", raw_dd)
 
-    min_r   = QDoubleSpinBox(); min_r.setRange(1,50);   min_r.setValue(2.0)
+    # ── Method selector (radio buttons) ───────────────────────────────────
+    # In-vitro droplets on a clean field segment well with a simple global
+    # threshold, so Otsu is the default and the fiddly options are opt-in.
+    method_box = QVBoxLayout()
+    rb_otsu   = QRadioButton("Threshold (Otsu) — simplest, no parameters")
+    rb_multi  = QRadioButton("Multi-level threshold (Multi-Otsu)")
+    rb_sauv   = QRadioButton("Local threshold (Sauvola)")
+    rb_rf     = QRadioButton("Random Forest (paint scribbles)")
+    rb_adv    = QRadioButton("Advanced: spot detection (kurtosis / SNR)")
+    rb_otsu.setChecked(True)
+    bg = QButtonGroup(grp)
+    for _rb in (rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv):
+        bg.addButton(_rb); method_box.addWidget(_rb)
+    _mw = QWidget(); _mw.setLayout(method_box)
+    form.addRow("Segmentation method:", _mw)
+
+    # ── Per-method parameter panels (only the active one is shown) ─────────
+    stack = QStackedWidget()
+
+    # Otsu: one OPTIONAL sensitivity nudge (default 1.0 = plain Otsu).
+    otsu_w = QWidget(); otsu_f = QFormLayout(otsu_w)
+    otsu_f.setContentsMargins(0,0,0,0)
+    otsu_sens = QDoubleSpinBox(); otsu_sens.setRange(0.3, 3.0)
+    otsu_sens.setSingleStep(0.05); otsu_sens.setValue(1.0); otsu_sens.setDecimals(2)
+    otsu_sens.setToolTip("Multiplier on the Otsu threshold. 1.0 = standard Otsu. "
+                         "<1 catches dimmer droplets; >1 is stricter.")
+    otsu_f.addRow("Sensitivity (×Otsu):", otsu_sens)
+    stack.addWidget(otsu_w)
+
+    # Multi-Otsu: number of classes + which boundary to cut at.
+    multi_w = QWidget(); multi_f = QFormLayout(multi_w)
+    multi_f.setContentsMargins(0,0,0,0)
+    multi_classes = QSpinBox(); multi_classes.setRange(2,5); multi_classes.setValue(3)
+    multi_classes.setToolTip("Number of intensity classes to split the image into.")
+    multi_level = QComboBox()
+    multi_level.addItems(["Lower boundary (more inclusive)",
+                          "Upper boundary (bright cores only)"])
+    multi_level.setToolTip("Which class boundary becomes the foreground cutoff.")
+    multi_f.addRow("Classes:", multi_classes)
+    multi_f.addRow("Cut at:", multi_level)
+    stack.addWidget(multi_w)
+
+    # Sauvola: window + k (defaults chosen from real in-vitro data).
+    sauv_w = QWidget(); sauv_f = QFormLayout(sauv_w)
+    sauv_f.setContentsMargins(0,0,0,0)
+    sauv_win = QSpinBox(); sauv_win.setRange(3,501); sauv_win.setSingleStep(2)
+    sauv_win.setValue(35); sauv_win.setToolTip("Local window (px, forced odd).")
+    sauv_k = QDoubleSpinBox(); sauv_k.setRange(-1.0,1.0); sauv_k.setSingleStep(0.05)
+    sauv_k.setValue(0.0); sauv_k.setDecimals(3)
+    sauv_k.setToolTip("Sauvola k: lower = more inclusive threshold.")
+    sauv_f.addRow("Window size (px):", sauv_win)
+    sauv_f.addRow("k:", sauv_k)
+    stack.addWidget(sauv_w)
+
+    # Random Forest: a Draw-Scribbles button that makes+arms the labels layer.
+    rf_w = QWidget(); rf_f = QFormLayout(rf_w)
+    rf_f.setContentsMargins(0,0,0,0)
+    rf_scribble_btn = QPushButton("✏  Draw Scribbles")
+    rf_scribble_btn.setToolTip(
+        "Create/select a labels layer and switch to the paint tool. Paint "
+        "label 1 over BACKGROUND and label 2 over DROPLETS, then "
+        "press Segment Droplets.")
+    rf_f.addRow(QLabel("Paint 1 = background, 2 = droplet:"))
+    rf_f.addRow(rf_scribble_btn)
+    stack.addWidget(rf_w)
+
+    # Advanced spot detection: the original kurtosis/SNR/rolling-ball params.
+    adv_w = QWidget(); adv_f = QFormLayout(adv_w)
+    adv_f.setContentsMargins(0,0,0,0)
+    min_r   = QDoubleSpinBox(); min_r.setRange(1,50);    min_r.setValue(2.0)
     kurt_sp = QDoubleSpinBox(); kurt_sp.setRange(-10,0); kurt_sp.setValue(-3.0)
-    lsnr_sp = QDoubleSpinBox(); lsnr_sp.setRange(0,5);  lsnr_sp.setValue(0.8)
-    form.addRow("Min spot radius (px):", min_r)
-    form.addRow("Kurtosis threshold:", kurt_sp)
-    form.addRow("Local SNR threshold:", lsnr_sp)
+    lsnr_sp = QDoubleSpinBox(); lsnr_sp.setRange(0,5);   lsnr_sp.setValue(0.8)
+    adv_f.addRow("Min spot radius (px):", min_r)
+    adv_f.addRow("Kurtosis threshold:", kurt_sp)
+    adv_f.addRow("Local SNR threshold:", lsnr_sp)
+    stack.addWidget(adv_w)
 
-    # Segmentation-method selector: the kurtosis/SNR spot detector suits dim
-    # sub-diffraction puncta; local (Sauvola) thresholding suits large,
-    # well-defined in-vitro droplets where a simple adaptive threshold is
-    # cleaner. The spot-detector params above apply to "Spot detection"; the
-    # window/k params below apply to "Local threshold".
-    method_dd = QComboBox()
-    method_dd.addItems(["Spot detection (kurtosis / SNR)",
-                        "Local threshold (Sauvola)"])
-    method_dd.setToolTip(
-        "Spot detection = dim/small puncta. Local threshold = large, "
-        "well-defined droplets (brought over from General Analysis).")
-    form.addRow("Segmentation method:", method_dd)
+    form.addRow(stack)
 
-    lt_k = QDoubleSpinBox(); lt_k.setRange(-2.0, 2.0); lt_k.setSingleStep(0.05)
-    lt_k.setValue(0.0); lt_k.setDecimals(3)
-    lt_k.setToolTip("Sauvola k: lower = more inclusive threshold.")
-    form.addRow("Local threshold k:", lt_k)
+    # Wire radio buttons to the stack, and show/hide the RF scribble panel.
+    _rb_order = [rb_otsu, rb_multi, rb_sauv, rb_rf, rb_adv]
+    def _on_method():
+        for i, _rb in enumerate(_rb_order):
+            if _rb.isChecked():
+                stack.setCurrentIndex(i); break
+    for _rb in _rb_order:
+        _rb.toggled.connect(_on_method)
+    _on_method()
 
-    lt_win = QSpinBox(); lt_win.setRange(3, 501); lt_win.setSingleStep(2)
-    lt_win.setValue(35)
-    lt_win.setToolTip("Local window size (px, forced odd).")
-    form.addRow("Local window size (px):", lt_win)
+    # ── Shared post-filters ───────────────────────────────────────────────
+    min_area = QSpinBox(); min_area.setRange(0, 100000); min_area.setValue(6)
+    min_area.setToolTip("Discard objects smaller than this many pixels² (removes "
+                        "speckle). 0 = keep everything.")
+    form.addRow("Min object size (px²):", min_area)
+
+    round_cb = QCheckBox("Reject non-round objects (solidity < 0.85)")
+    round_cb.setChecked(False)
+    round_cb.setToolTip("In-vitro droplets are round; enable to drop irregular "
+                        "objects (merged clumps, debris).")
+    form.addRow("", round_cb)
+
+    # RF scribble button behaviour (mirrors the contrast-cascade pattern).
+    def _on_scribble():
+        nm = "IVF RF Scribbles"
+        names = [l.name for l in ui.viewer.layers]
+        if nm not in names:
+            iname = pre_dd.currentText()
+            shape = (np.asarray(ui.viewer.layers[iname].data).shape[-2:]
+                     if iname in names else (512, 512))
+            lyr = ui.viewer.add_labels(np.zeros(shape, dtype=np.uint8), name=nm)
+        else:
+            lyr = ui.viewer.layers[nm]
+        ui.viewer.layers.selection.active = lyr
+        lyr.visible = True
+        try:
+            lyr.mode = 'paint'
+            lyr.selected_label = 1
+            lyr.brush_size = 8
+        except Exception:
+            pass
+        napari_show_info("Paint 1 = background, 2 = droplet, then press "
+                         "'Segment Droplets'.")
+    rf_scribble_btn.clicked.connect(_on_scribble)
 
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
@@ -250,39 +413,101 @@ def _ivf_segmentation(ui, layout):
         try:
             pre = ui._img(pre_dd)
             raw = ui._img(raw_dd)
-        except KeyError as e: napari_show_warning(str(e)); return
+        except KeyError as e:
+            napari_show_warning(str(e)); return
         ball = int(ui._dr().get('ball_radius', 15))
-        use_local = method_dd.currentIndex() == 1
-        k_val = lt_k.value(); win = lt_win.value()
+
+        if rb_otsu.isChecked():      method = 'otsu'
+        elif rb_multi.isChecked():   method = 'multiotsu'
+        elif rb_sauv.isChecked():    method = 'sauvola'
+        elif rb_rf.isChecked():      method = 'rf'
+        else:                        method = 'spot'
+
+        # Snapshot params on the GUI thread.
+        p_sens   = otsu_sens.value()
+        p_classes= multi_classes.value()
+        p_upper  = (multi_level.currentIndex() == 1)
+        p_win    = sauv_win.value(); p_k = sauv_k.value()
+        p_minr   = min_r.value(); p_kurt = kurt_sp.value(); p_lsnr = lsnr_sp.value()
+        p_minarea= min_area.value(); p_round = round_cb.isChecked()
+
+        # RF needs its scribble layer up front (can't run in a worker w/o it).
+        rf_scribbles = None
+        if method == 'rf':
+            nm = "IVF RF Scribbles"
+            names = [l.name for l in ui.viewer.layers]
+            if nm not in names or int(np.asarray(ui.viewer.layers[nm].data).max()) == 0:
+                napari_show_warning("Draw scribbles first: click 'Draw Scribbles', "
+                                    "paint 1 = background and 2 = droplet.")
+                return
+            rf_scribbles = np.asarray(ui.viewer.layers[nm].data)
+
         prog.setRange(0,0); prog.setVisible(True); run.setEnabled(False)
 
         def _task():
             import skimage as sk
-            # Local (Sauvola) thresholding path — for large, well-defined droplets
-            if use_local:
+            from skimage import filters, morphology, measure
+
+            def _postfilter(binary):
+                b = np.asarray(binary) > 0
+                if p_minarea > 0:
+                    b = morphology.remove_small_objects(b, int(p_minarea))
+                lab = measure.label(b)
+                if p_round:
+                    keep = np.zeros_like(lab)
+                    for pr in measure.regionprops(lab):
+                        if pr.area >= 5 and pr.solidity >= 0.85:
+                            keep[lab == pr.label] = pr.label
+                    lab = measure.label(keep > 0)
+                return lab.astype(np.int32), b
+
+            if method == 'otsu':
+                t = filters.threshold_otsu(pre) * p_sens
+                return _postfilter(pre > t)
+
+            if method == 'multiotsu':
+                ts = filters.threshold_multiotsu(pre, classes=int(p_classes))
+                cut = ts[-1] if p_upper else ts[0]
+                return _postfilter(pre > cut)
+
+            if method == 'sauvola':
                 from pycat.toolbox.segmentation_tools import local_thresholding_func
-                binary = local_thresholding_func(pre, window_size=win,
-                                                 k_val=k_val, mode='Sauvola')
-                labeled = sk.measure.label(np.asarray(binary) > 0)
-                return labeled.astype(np.int32), (np.asarray(binary) > 0)
-            # No cell mask — use whole image as single "cell"
+                binary = local_thresholding_func(pre, window_size=int(p_win),
+                                                 k_val=p_k, mode='Sauvola')
+                return _postfilter(np.asarray(binary) > 0)
+
+            if method == 'rf':
+                from pycat.toolbox.segmentation_tools import train_and_apply_rf_classifier
+                od = int(ui._dr().get('cell_diameter', 100))
+                # train_and_apply_rf_classifier runs CLAHE (equalize_adapthist),
+                # which requires float input in [-1, 1]. The raw fluorescence
+                # image is in raw intensity units, so pass a [0,1]-normalized
+                # copy or CLAHE raises "Images of type float must be between -1
+                # and 1" — caught by the worker and surfacing as an EMPTY mask.
+                _p = np.asarray(pre, dtype=np.float32)
+                _lo, _hi = float(_p.min()), float(_p.max())
+                _pn = (_p - _lo) / (_hi - _lo) if _hi > _lo else _p
+                # Returns a LIST of refined masks, one per non-background class
+                # (the lowest painted label is dropped as background inside).
+                masks = train_and_apply_rf_classifier(_pn, rf_scribbles, od)
+                if not masks:
+                    return _postfilter(np.zeros(pre.shape, dtype=bool))
+                # Foreground = union of all returned (non-background) class masks.
+                fg = np.zeros(pre.shape, dtype=bool)
+                for m in masks:
+                    fg |= (np.asarray(m) > 0)
+                return _postfilter(fg)
+
+            # Advanced spot detection (original pipeline).
             H, W = pre.shape
-            whole = np.ones((H, W), dtype=bool)
-            whole[:2,:2] = False  # leave corner for background label
+            whole = np.ones((H, W), dtype=bool); whole[:2,:2] = False
             cms  = cell_mask_stretching(pre, whole.astype(int))
-            # Label the whole-field mask as cell 1
-            cell_mask = np.ones((H, W), dtype=int)
-            cell_mask[:2,:2] = 0
             refined, unrefined = segment_subcellular_objects(
                 raw.copy(), cms.copy(), whole, 1, ball, cell_df=None,
-                min_spot_radius=min_r.value(),
-                kurtosis_threshold=kurt_sp.value(),
-                local_snr_threshold=lsnr_sp.value(),
-                global_snr_threshold=0.8,
-            )
-            import skimage as sk
-            labeled = sk.measure.label(refined)
-            return labeled.astype(np.int32), unrefined
+                min_spot_radius=p_minr, kurtosis_threshold=p_kurt,
+                local_snr_threshold=p_lsnr, global_snr_threshold=0.8)
+            lab, _ = _postfilter(refined)
+            return lab, unrefined
 
         worker = _IVFWorker(_task)
         ui._ivf_seg_worker = worker
@@ -291,25 +516,28 @@ def _ivf_segmentation(ui, layout):
             prog.setVisible(False); run.setEnabled(True)
             labeled, unrefined = result
             n = int(labeled.max())
-            _mname = 'local-threshold' if use_local else 'spot-detection'
             ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
             ui._dr()['ivf_droplet_mask'] = labeled
             ui._record('ivf_segmentation', {
                 'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
-                'method': _mname,
-                'min_radius': min_r.value(), 'kurtosis': kurt_sp.value(),
-                'local_snr': lsnr_sp.value(),
-                'local_threshold_k': k_val, 'local_window': win,
+                'method': method,
+                'otsu_sensitivity': p_sens,
+                'multiotsu_classes': p_classes, 'multiotsu_upper': p_upper,
+                'sauvola_window': p_win, 'sauvola_k': p_k,
+                'min_radius': p_minr, 'kurtosis': p_kurt, 'local_snr': p_lsnr,
+                'min_area': p_minarea, 'reject_nonround': p_round,
             })
-            napari_show_info(f"In vitro: {n} droplets segmented.")
+            napari_show_info(f"In vitro: {n} droplets segmented ({method}).")
 
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
-            napari_show_warning("Segmentation error — see terminal."); print(f"[PyCAT IVF Seg] {msg}")
+            napari_show_warning("Segmentation error — see terminal.")
+            print(f"[PyCAT IVF Seg] {msg}")
 
         worker.finished.connect(_done); worker.error.connect(_err); worker.start()
     run.clicked.connect(_on_run)
     layout.addWidget(grp)
+
 
 
 def _ivf_field_summary(ui, layout):
@@ -318,8 +546,13 @@ def _ivf_field_summary(ui, layout):
     form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
-        "Volume fraction Φ, partition coefficient, bulk C_sat proxy, number density.</span>"
-    ))
+        "Area fraction Φ (2D coverage — see note), partition coefficient, bulk "
+        "C_sat proxy, number density.<br>"
+        "<b>Note:</b> Φ here is the fraction of the imaged <i>plane</i> covered by "
+        "droplets, not a true 3D volume fraction. In a flow cell, droplets settle "
+        "into the bottom few µm of a ~200 µm channel, so this single-plane Φ over- "
+        "or under-represents the bulk volume fraction depending on focal depth. "
+        "Treat it as a 2D coverage metric.</span>"))
     img_dd  = ui.create_layer_dropdown(napari.layers.Image)
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Fluorescence image:", img_dd)
@@ -463,6 +696,7 @@ def _ivf_spatial(ui, layout):
 
 def _ivf_dynamics(ui, layout):
     grp  = QGroupBox("Step 7 — Dynamics & Coarsening (time-series)")
+    ui._ivf_dynamics_grp = grp
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
 
@@ -658,6 +892,7 @@ def _ivf_phase_diagram(ui, layout):
 
 def _ivf_frame_qc(ui, layout):
     grp  = QGroupBox("Step 9 — Frame Quality (bleaching + focus)")
+    ui._ivf_qc_grp = grp
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     stack_dd = ui.create_layer_dropdown(napari.layers.Image)

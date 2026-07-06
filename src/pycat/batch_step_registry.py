@@ -33,6 +33,55 @@ def _get_data(data_instance, key, default=None):
     return data_instance.data_repository.get(key, default)
 
 
+def _derive_split_companion_path(primary_path: Path, primary_recorded_stem: str, companion_recorded_stem: str, companion_suffix: str = None) -> Path:
+    """Map a recorded split-channel companion file onto the current batch sample.
+
+    Example: recorded files `cell01_DAPI.tif` and `cell01_GFP.tif`; current
+    primary is `cell17_DAPI.tif` -> companion becomes `cell17_GFP.tif`.
+    """
+    primary_stem = primary_path.stem
+    # Longest common prefix between the recorded primary and companion.
+    i = 0
+    while i < min(len(primary_recorded_stem), len(companion_recorded_stem)) and primary_recorded_stem[i] == companion_recorded_stem[i]:
+        i += 1
+    common_prefix = primary_recorded_stem[:i]
+    primary_token = primary_recorded_stem[i:]
+    companion_token = companion_recorded_stem[i:]
+    if primary_token and primary_stem.endswith(primary_token):
+        new_stem = primary_stem[:-len(primary_token)] + companion_token
+    elif common_prefix and primary_stem.startswith(common_prefix):
+        new_stem = primary_stem[:len(common_prefix)] + companion_token
+    else:
+        # Last-resort fallback: same stem as current primary. This will only
+        # work for extension-split pairs, but gives a clear FileNotFoundError if
+        # not present.
+        new_stem = primary_stem
+    return primary_path.with_name(new_stem + (companion_suffix or primary_path.suffix))
+
+
+def _source_path_for_recorded_channel(image_path: Path, channel_assignment, channel: int) -> Path:
+    """Return the actual file that should provide a recorded channel."""
+    if not channel_assignment:
+        return image_path
+    entry = next((e for e in channel_assignment if e.get('channel_num') == channel), None)
+    if not entry:
+        return image_path
+    source_stem = entry.get('source_stem')
+    source_suffix = entry.get('source_suffix') or image_path.suffix
+    primary = channel_assignment[0]
+    primary_stem = primary.get('source_stem')
+    # Channels from the first recorded source are read from the current batch
+    # file. Channels from later recorded sources are companion split files.
+    if not source_stem or source_stem == primary_stem:
+        return image_path
+    companion = _derive_split_companion_path(image_path, primary_stem or image_path.stem, source_stem, source_suffix)
+    if not companion.exists():
+        raise FileNotFoundError(
+            f"Split-channel companion file not found for {image_path.name}: expected {companion.name}. "
+            f"Recorded companion stem was '{source_stem}'.")
+    return companion
+
+
 def _load_image(image_path: Path, channel: int = 0):
     """
     Load a single channel of an image file using AICSImage with a tifffile
@@ -185,7 +234,8 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     seg_channel = _resolve_channel_for_layer(channel_assignment, 'Segmentation', default=0)
     fluor_channel = _resolve_channel_for_layer(channel_assignment, 'Fluorescence', default=0)
 
-    image, microns_per_pixel = _load_image(image_path, channel=seg_channel)
+    seg_path = _source_path_for_recorded_channel(image_path, channel_assignment, seg_channel)
+    image, microns_per_pixel = _load_image(seg_path, channel=seg_channel if seg_path == image_path else 0)
 
     data_instance = BaseDataClass()
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
@@ -200,7 +250,8 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     # Load the fluorescence channel separately if it differs from the
     # segmentation channel — used later by condensate segmentation/analysis
     if fluor_channel != seg_channel:
-        fluor_image, _ = _load_image(image_path, channel=fluor_channel)
+        fluor_path = _source_path_for_recorded_channel(image_path, channel_assignment, fluor_channel)
+        fluor_image, _ = _load_image(fluor_path, channel=fluor_channel if fluor_path == image_path else 0)
         state['fluorescence_image'] = fluor_image
     else:
         state['fluorescence_image'] = image
@@ -220,7 +271,8 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
             if ch_num is None or layer_name is None:
                 continue
             if ch_num not in loaded_channel_cache:
-                extra_image, _ = _load_image(image_path, channel=ch_num)
+                extra_path = _source_path_for_recorded_channel(image_path, channel_assignment, ch_num)
+                extra_image, _ = _load_image(extra_path, channel=ch_num if extra_path == image_path else 0)
                 loaded_channel_cache[ch_num] = extra_image
             state['channels_by_name'][layer_name] = loaded_channel_cache[ch_num]
 
