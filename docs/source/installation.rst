@@ -109,6 +109,30 @@ Key advantages:
 
 Already have Anaconda? That's fine! You can skip the Miniforge installation.
 
+Installing Miniforge
+""""""""""""""""""""
+
+Download the installer for your system from the `conda-forge download page
+<https://conda-forge.org/download/>`_, then run it:
+
+* **Windows:** you'll get a ``.exe`` — double-click it and accept the defaults.
+* **macOS / Linux:** you'll get a ``.sh`` script (e.g.
+  ``Miniforge3-MacOSX-arm64.sh``). This is run from the Terminal, **not** by
+  double-clicking. Open the **Terminal** app and run ``bash`` followed by the
+  path to the downloaded file — the easiest way is to type ``bash`` and a space,
+  then drag the ``.sh`` file from Finder into the Terminal window to paste its
+  path::
+
+     bash ~/Downloads/Miniforge3-MacOSX-arm64.sh
+
+  Follow the prompts (page through the license, type ``yes`` to accept, accept
+  the default location, and answer ``yes`` to initialize). The exact filename
+  depends on your system — Apple Silicon Macs get ``arm64``, Intel Macs get
+  ``x86_64``.
+
+After it finishes, **close the Terminal and open a new one** so the changes take
+effect.
+
 Basic Environment Commands
 """"""""""""""""""""""""""
 
@@ -151,6 +175,23 @@ For Windows:
    On Windows, the application logo may not display correctly. This is purely cosmetic and does not affect functionality.
 
 For Mac M1/ARM:
+
+.. warning::
+   **Check your Python architecture first.** On an Apple Silicon (M-series) Mac,
+   run::
+
+      python -c "import platform; print(platform.machine())"
+
+   It must print ``arm64``. If it prints ``x86_64``, your Python is the Intel
+   build running under Rosetta emulation — this causes ``Intel MKL`` warnings and
+   can crash Cellpose with a segmentation fault. Do **not** use ``uname -m`` for
+   this check; it reports the hardware and can say ``arm64`` even while Python is
+   x86. To fix an ``x86_64`` result, install the **native Apple Silicon (arm64)**
+   Miniforge from the `conda-forge download page
+   <https://conda-forge.org/download/>`_ (the installer filename contains
+   ``arm64``, not ``x86_64``), then recreate the ``pycat-env`` and re-check before
+   installing. If it still reports ``x86_64``, an old Intel conda is likely first
+   on your ``PATH`` — check ``which conda`` and ensure the Miniforge one wins.
 
 On Apple Silicon, first install ``llvmlite`` and ``numba`` from conda-forge (they
 ship prebuilt Apple-Silicon binaries), then install PyCAT:
@@ -266,11 +307,38 @@ Troubleshooting
 
 If you encounter installation issues, check:
 
-1. Python version (must be 3.12.x)
+1. Python version (must be 3.12.x) — verify with ``python --version``
 2. Environment activation
 3. Complete installation of dependencies
 4. Support & Troubleshooting section of the `README <https://github.com/BanerjeeLab-repertoire/pycat-napari>`_
 5. Existing GitHub issues
+
+Common platform-specific issues
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Mac (Apple Silicon): "Intel MKL" warnings and/or a Cellpose segmentation fault.**
+Your Python is the Intel (x86) build running under Rosetta emulation. Check with
+``python -c "import platform; print(platform.machine())"`` — if it says ``x86_64``
+on an M-series Mac, install the native **arm64** Miniforge and recreate the
+environment (see the warning in the *For Mac M1/ARM* section above). Symptoms
+include repeated ``Intel MKL WARNING: ... SSE4.2 ... deprecated`` lines and/or
+``zsh: segmentation fault run-pycat`` after ``Cellpose model not found in
+cache...``.
+
+**Mac: ``conda-libmamba-solver`` / ``libarchive.19.dylib`` error.** A
+Homebrew-installed Miniconda whose solver library broke after a Homebrew update
+(not a PyCAT issue). Use Miniforge from the `conda-forge download page
+<https://conda-forge.org/download/>`_ instead and create your ``pycat-env``
+there.
+
+**Mac: ``llvmlite needs CMake tools to build``.** ``pip`` tried to compile
+``llvmlite`` / ``numba`` from source. Install them from conda-forge first:
+``conda install -c conda-forge llvmlite numba``, then install PyCAT.
+
+**"Could not find a version that satisfies the requirement pycat-napari" (every
+version rejected).** Your Python is neither 3.9 nor 3.12 (often 3.10/3.11 from a
+base environment). Confirm with ``python --version`` and recreate the environment
+with ``python=3.12``.
 
 .. note::
    Still having problems? Open a GitHub issue or reach out to us for urgent help.

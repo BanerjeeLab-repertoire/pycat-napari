@@ -2133,7 +2133,8 @@ def run_apply_bilateral_filter(radius_input, viewer):
 
 
 def pre_process_image(image, ball_radius, window_size,
-                      suppress_foreground=True, suppression_params=None):
+                      suppress_foreground=True, suppression_params=None,
+                      norm_max=None):
     """
     Enhances features in an image through a comprehensive pre-processing pipeline that includes noise reduction,
     feature enhancement, and contrast improvement. This function is tailored for images where maintaining 
@@ -2187,6 +2188,13 @@ def pre_process_image(image, ball_radius, window_size,
     # (white-top-hat rescale, DoG, WBNS wavelet thresholding) is tuned for
     # [0, 1] but receives [0, 0.046], causing near-total signal suppression.
     _pp_max = float(img.max())
+    # For a time-series, every frame must be normalised by the SAME scale or a
+    # brightening focus makes later frames appear dimmer (the per-frame max, the
+    # denominator, rises with the signal). Callers processing a stack pass a
+    # fixed norm_max (the stack's global max); 2D callers leave it None and get
+    # the original per-frame behaviour unchanged.
+    if norm_max is not None and float(norm_max) > 0:
+        _pp_max = float(norm_max)
     if _pp_max > 0:
         img = img / _pp_max
 

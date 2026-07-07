@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.259"
+version = "1.5.271"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -103,7 +103,13 @@ docs = [
 
 arm-mac = [
     "torchvision; platform_system=='Darwin' and platform_machine=='arm64'",
-    "torch==2.1.2; platform_system=='Darwin' and platform_machine=='arm64'"
+    # torch 2.1.2 has NO Python 3.12 wheel (3.12 support landed in torch 2.2.0),
+    # but PyCAT requires Python >=3.12 — so the old exact ==2.1.2 pin made
+    # `pip install pycat-napari[arm-mac]` fail with ResolutionImpossible on every
+    # supported Python. Use a bounded range that has cp312 arm64 wheels while
+    # staying within the torch range that still supports numpy<2.0 (matching the
+    # numpy>=1.22,<2.0 pin above).
+    "torch>=2.2.0,<2.3.0; platform_system=='Darwin' and platform_machine=='arm64'"
 ]
 
 devbio-napari = [

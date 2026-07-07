@@ -102,23 +102,124 @@ log = get_logger(__name__)
 
 
 
+def _is_macos_arch_mismatch():
+    """
+    Return True when PyCAT is running in a suspicious macOS architecture state —
+    specifically x86_64 Python under Rosetta translation on an Apple Silicon
+    machine. Importing/initializing PyTorch/Cellpose in that state can segfault in
+    native code before Python can catch it, so we skip the prewarm and tell the
+    user to use a native arm64 environment.
+    """
+    if sys.platform != 'darwin':
+        return False
+    import platform as _platform
+    import subprocess as _subprocess
+    python_arch = _platform.machine().lower()
+    # Direct Rosetta-translation flag: proc_translated == 1 means this process is
+    # an x86 binary being translated on Apple Silicon.
+    try:
+        r = _subprocess.run(['sysctl', '-n', 'sysctl.proc_translated'],
+                            capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout.strip() == '1':
+            return True
+    except Exception:
+        pass
+    # Belt-and-suspenders: Apple Silicon hardware while Python reports x86_64.
+    try:
+        r = _subprocess.run(['sysctl', '-n', 'hw.optional.arm64'],
+                            capture_output=True, text=True, timeout=2)
+        if (r.returncode == 0 and r.stdout.strip() == '1'
+                and python_arch in {'x86_64', 'amd64'}):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _prewarm_cellpose_model():
     """
     Pre-downloads and caches the Cellpose model on first launch so users don't experience
     a silent hang the first time they click 'Run Cellpose' inside the GUI.
     Progress output is printed to the terminal where run-pycat was invoked.
+
+    Two safety layers protect against native crashes during PyTorch/Cellpose init:
+
+    1. **Architecture guard.** On macOS, if PyCAT is running as x86_64 under Rosetta
+       on Apple Silicon, the prewarm is skipped entirely with a clear message —
+       that environment is known to segfault during PyTorch init, and the real fix
+       is a native arm64 environment, not caching a model.
+
+    2. **Subprocess isolation.** The model load still runs in a SEPARATE SUBPROCESS,
+       so any *other* native crash (e.g. an older CPU without AVX) only kills the
+       subprocess — PyCAT still launches and the non-Cellpose segmentation methods
+       (Multi-Otsu, StarDist, RF) remain available.
+
+    The model is selected via PyCAT's version-aware builder, so the SAME model the
+    real segmentation will use is cached: on Cellpose <4 the fast ``cyto2`` CNN
+    (selected via ``model_type``), on Cellpose >=4 ``cpsam`` (via
+    ``pretrained_model``). This avoids caching the wrong model or using the wrong
+    Cellpose API for the installed version.
     """
     try:
         from pathlib import Path
-        model_cache = Path.home() / '.cellpose' / 'models' / 'cyto2'
-        if model_cache.exists():
-            log.info("Cellpose model already cached, skipping download.")
+
+        # (1) Architecture guard — skip on Rosetta/x86-on-Apple-Silicon.
+        if _is_macos_arch_mismatch():
+            log.warning(
+                "Skipping Cellpose prewarm: PyCAT appears to be running as x86_64 "
+                "under Rosetta emulation on an Apple Silicon Mac. PyTorch/Cellpose "
+                "can crash during initialization in this state. Install PyCAT in a "
+                "native arm64 Miniforge/conda environment (check with "
+                "`python -c \"import platform; print(platform.machine())\"` — it "
+                "should say 'arm64'). The GUI will still start; Cellpose may be "
+                "unavailable until you switch to a native environment.")
             return
-        log.info("Cellpose model not found in cache — downloading now "
-                 "(one-time setup, may take a minute)...")
-        from cellpose import models
-        models.CellposeModel(gpu=False, pretrained_model='cyto2')  # GPU init done separately in background
-        log.info("Cellpose model downloaded and cached successfully.")
+
+        # Version-aware model + cache path (cyto2 on Cellpose<4, cpsam on >=4).
+        try:
+            from pycat.toolbox.segmentation_tools import default_cellpose_model
+            model_name = default_cellpose_model()
+        except Exception:
+            model_name = 'cyto2'
+        model_cache = Path.home() / '.cellpose' / 'models' / model_name
+        if model_cache.exists():
+            log.info("Cellpose model '%s' found in local cache (%s) — no download "
+                     "needed; it will load from disk when you run segmentation.",
+                     model_name, model_cache)
+            return
+        log.info("Cellpose model '%s' not in the local cache yet — downloading it "
+                 "once now. This is a ONE-TIME setup (it's saved to %s and reused "
+                 "on every future launch), and may take a minute...",
+                 model_name, model_cache.parent)
+
+        # (2) Subprocess isolation — load via PyCAT's version-aware builder so the
+        # child uses the correct Cellpose API (model_type vs pretrained_model) for
+        # the installed version, matching what real segmentation will do.
+        import subprocess
+        code = ("from pycat.toolbox.segmentation_tools import "
+                "_build_cellpose_model, default_cellpose_model; "
+                "_build_cellpose_model(default_cellpose_model())")
+        proc = subprocess.run([sys.executable, '-c', code],
+                              capture_output=True, text=True, timeout=600)
+        if proc.returncode == 0:
+            log.info("Cellpose model '%s' downloaded and cached — this won't "
+                     "happen again; future launches load it straight from disk.",
+                     model_name)
+        elif proc.returncode < 0:
+            # Negative return code == killed by a signal (e.g. -11 = SIGSEGV).
+            log.warning(
+                "Cellpose model pre-cache crashed at the native level "
+                "(signal %d) — this usually means the installed PyTorch is not "
+                "compatible with this CPU/architecture. PyCAT will still start; "
+                "Cellpose segmentation may be unavailable, but the other "
+                "segmentation methods (Multi-Otsu, StarDist, Random Forest) will "
+                "work. To enable Cellpose, install a compatible PyTorch (e.g. "
+                "`conda install -c conda-forge pytorch nomkl`) in a native "
+                "environment.", -proc.returncode)
+        else:
+            log.warning("Could not pre-cache Cellpose model (exit %d): %s",
+                        proc.returncode, (proc.stderr or '').strip()[-500:])
+            log.warning("Cellpose will attempt to download on first use instead.")
     except Exception as e:
         log.warning("Could not pre-cache Cellpose model: %s", e)
         log.warning("Cellpose will attempt to download the model on first use instead.")
@@ -156,11 +257,21 @@ def run_pycat_func():
         pass
 
     try:
-        # Use importlib.resources to get the path to the PyCAT logo
+        # Use importlib.resources to get the path to the PyCAT logo.
+        # IMPORTANT: build the QIcon INSIDE the as_file() block. as_file() may
+        # extract the resource to a temporary file that is deleted when the
+        # `with` exits (zipped/bundled installs), so using the path afterwards
+        # would silently load nothing — leaving napari's default icon. Loading
+        # into a QPixmap here reads the bytes while the file is guaranteed to
+        # exist, so the icon no longer depends on the path persisting.
+        from PyQt5.QtGui import QPixmap as _QPixmap
         logo_path = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
         with resources.as_file(logo_path) as icon_path:
-            icon_path_str = str(icon_path)
-        app.setWindowIcon(QIcon(icon_path_str))  # Set PyCAT logo as window icon
+            _pm = _QPixmap(str(icon_path))
+            if not _pm.isNull():
+                app.setWindowIcon(QIcon(_pm))
+            else:
+                log.warning("The PyCAT logo could not be loaded as a pixmap.")
     except FileNotFoundError:
         log.warning("The PyCAT logo file was not found.")
     except ModuleNotFoundError:
@@ -170,28 +281,35 @@ def run_pycat_func():
 
     log.info("Running PyCAT")  # Print message to console
 
-    # Pre-compile Numba JIT kernels and check GPU in background thread
-    # so the GUI opens instantly without waiting for CUDA initialization
-    import threading
-    def _warmup():
-        try:
-            from pycat.toolbox.numba_utils import warmup_numba
-            warmup_numba()
-        except Exception as e:
-            print(f"[PyCAT Numba] Warmup skipped: {e}")
-        # PyTorch/CUDA initialization — done in background so GUI opens instantly
-        try:
-            import torch
-            if torch.cuda.is_available():
-                print(f"[PyCAT] PyTorch CUDA available — Cellpose will use GPU: {torch.cuda.get_device_name(0)}")
-            else:
-                print("[PyCAT] PyTorch CUDA not available — Cellpose will use CPU.")
-                print("[PyCAT] To enable GPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
-        except Exception as e:
-            print(f"[PyCAT] Could not check PyTorch CUDA status: {e}")
-    threading.Thread(target=_warmup, daemon=True).start()
-
+    # Create the napari viewer (Qt/OpenGL) FIRST, on the main thread, before any
+    # background warmup touches torch/Numba. On macOS, importing/initialising
+    # torch (and running Numba JIT) on a worker thread *while* Qt initialises on
+    # the main thread can segfault at the C level — the native libraries are not
+    # safe to initialise concurrently. Creating the viewer first lets Qt finish
+    # its main-thread setup before the warmup thread starts. The warmup can also
+    # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
     viewer = napari.Viewer(title="PyCAT-Napari")
+
+    if os.environ.get('PYCAT_SKIP_WARMUP', '') not in ('1', 'true', 'True'):
+        import threading
+        def _warmup():
+            try:
+                from pycat.toolbox.numba_utils import warmup_numba
+                warmup_numba()
+            except Exception as e:
+                print(f"[PyCAT Numba] Warmup skipped: {e}")
+            # PyTorch/CUDA status check — background so the GUI stays responsive.
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    print(f"[PyCAT] PyTorch CUDA available — Cellpose will use GPU: {torch.cuda.get_device_name(0)}")
+                else:
+                    print("[PyCAT] PyTorch CUDA not available — Cellpose will use CPU.")
+                    print("[PyCAT] To enable GPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
+            except Exception as e:
+                print(f"[PyCAT] Could not check PyTorch CUDA status: {e}")
+        threading.Thread(target=_warmup, daemon=True).start()
+
     cm = CentralManager(viewer)
 
     # Batch processing setup — stored on cm (plain object) not viewer (pydantic model)
@@ -263,10 +381,24 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         Best-effort and fully guarded — napari internals vary by version."""
         from PyQt5.QtGui import QIcon
         from PyQt5.QtWidgets import QLabel
+        # The welcome logo is applied via a QSS `image: url(...)` that Qt reads
+        # LAZILY when it paints — long after this function returns. So the file
+        # must persist for the window's lifetime, not just a `with` block. If we
+        # used resources.as_file()'s temp path, it could be deleted before Qt
+        # ever paints (zipped installs), silently leaving napari's default bean.
+        # Copy the logo to a stable per-session temp file so the QSS url stays
+        # valid, and keep a reference so it isn't garbage-collected/cleaned early.
+        logo_str = None
         try:
+            import tempfile as _tempfile, atexit as _atexit, os as _os, shutil as _shutil
             _lp = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
+            _persist = _os.path.join(_tempfile.gettempdir(),
+                                     'pycat_welcome_logo_512.png')
             with resources.as_file(_lp) as _p:
-                logo_str = str(_p).replace('\\', '/')   # forward slashes for QSS url
+                _shutil.copyfile(str(_p), _persist)
+            _atexit.register(lambda: _os.path.exists(_persist)
+                             and _os.remove(_persist))
+            logo_str = _persist.replace('\\', '/')   # forward slashes for QSS url
         except Exception:
             logo_str = None
         try:

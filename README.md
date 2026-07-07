@@ -53,8 +53,8 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
 | Platform      | Python | Status    | Notes                    |
 |--------------|---------|-----------|--------------------------|
 | Windows 10/11 | 3.12    | Tested    | Logo display issue      |
-| Mac M1/ARM   | 3.12    | Tested    | Requires specific torch |
-| Mac Intel    | 3.12    | Untested* | Should work            |
+| Mac M1/ARM   | 3.12    | Tested    | Use a native arm64 env (see Step 2) |
+| Mac Intel    | 3.12    | Tested    | Works                   |
 | Linux        | 3.12    | Untested* | Should work            |
 
 *While untested, these platforms should work with standard installation.
@@ -80,10 +80,16 @@ Miniforge is a small, free installer that gives you Python **and** the `mamba` c
 
 1. Go to the **[conda-forge download page](https://conda-forge.org/download/)** and download the Miniforge installer for your computer (Windows, macOS Intel, macOS Apple Silicon, or Linux).
    - *Alternative:* you can also get the installers and detailed instructions from the **[Miniforge GitHub page](https://github.com/conda-forge/miniforge#miniforge3)**.
-2. Run the installer and accept the defaults.
-3. When it finishes, open a **new** terminal window:
+2. Run the installer:
+   - **Windows:** you'll get a `.exe` file — double-click it and accept the defaults.
+   - **macOS / Linux:** you'll get a `.sh` file (e.g. `Miniforge3-MacOSX-arm64.sh`). This is **not** something you double-click — it's run from the Terminal. Open the **Terminal** app, then type `bash ` (with a trailing space), drag the downloaded `.sh` file from Finder into the Terminal window (this pastes its full path), and press **Enter**. For example:
+     ```bash
+     bash ~/Downloads/Miniforge3-MacOSX-arm64.sh
+     ```
+     Follow the prompts — press Enter/space to page through the license, type `yes` to accept, accept the default install location, and answer `yes` when it asks to initialize. (The exact filename depends on your system; Apple Silicon Macs get `arm64`, Intel Macs get `x86_64`.)
+3. When it finishes, **close the Terminal and open a brand-new one** (the installer only takes effect in terminals opened *after* it runs):
    - **Windows:** open **Miniforge Prompt** from the Start menu (search "Miniforge").
-   - **macOS / Linux:** open the **Terminal** app.
+   - **macOS / Linux:** open a fresh **Terminal** window.
 
 > 💡 **Already have Anaconda or Miniconda?** You can skip this step — anywhere these instructions say `mamba`, use `conda` instead. Everything else is the same.
 
@@ -117,6 +123,34 @@ mamba activate pycat-env
 ```
 
 When it's active, your terminal prompt will show `(pycat-env)` at the start of the line. That's how you know PyCAT's workspace is turned on.
+
+> ⚠️ **Mac users — one quick check before you install.** Run:
+> ```bash
+> python -c "import platform; print(platform.machine())"
+> ```
+> - **Apple Silicon (M1/M2/M3/M4):** this should say `arm64`. If it says `x86_64` instead, your Python is the Intel build running under Rosetta emulation — this causes Intel MKL warnings and can crash Cellpose. Fix it by installing the **Apple Silicon (arm64)** Miniforge (see the note below) and recreating the environment.
+> - **Genuine Intel Mac:** `x86_64` is correct — carry on.
+>
+> Don't trust `uname -m` for this — it reports the *hardware*, which can say `arm64` even while your Python is x86 under Rosetta. `platform.machine()` reports what Python (and therefore `pip`) actually sees, which is what matters.
+
+<details>
+<summary><b>Apple Silicon Mac but Python says <code>x86_64</code>? (click to expand)</summary>
+
+<br>
+
+This happens when you have an Intel build of Anaconda/Miniconda installed (common — the default installer download is often the Intel one). Every environment it creates inherits Intel Python, which then runs under Rosetta emulation on your Apple Silicon chip. That's fragile: it pulls Intel-only math libraries (hence the "Intel MKL" warnings) and an Intel build of PyTorch that can segfault Cellpose.
+
+**Fix:** install the **native Apple Silicon** Miniforge:
+1. From the [conda-forge download page](https://conda-forge.org/download/), pick the **macOS Apple Silicon (arm64)** installer — the filename contains `arm64` (e.g. `Miniforge3-MacOSX-arm64.sh`), *not* `x86_64`.
+2. Open a **new** terminal, then recreate the environment and re-check:
+   ```bash
+   conda create -n pycat-env python=3.12
+   conda activate pycat-env
+   python -c "import platform; print(platform.machine())"
+   ```
+   This must now say `arm64` before you continue. If it still says `x86_64`, your old Intel conda is likely still first on your `PATH` — check with `which conda` and make sure the Miniforge one wins (you may need to comment out the old Anaconda init lines in your `~/.zshrc`).
+
+</details>
 
 <details>
 <summary><b>What is an "environment," and why do I need one?</b> (click to expand)</summary>
@@ -678,24 +712,41 @@ If you use PyCAT-Napari in your research, please cite:
    - Check platform-specific requirements
    - Use provided environment files
 
-2. **GUI Issues**
+2. **Mac: "Intel MKL" warnings and/or Cellpose crashes on an Apple Silicon Mac**
+   - **Cause:** your Python is the Intel (x86) build running under Rosetta emulation, even though your Mac is Apple Silicon. Check with `python -c "import platform; print(platform.machine())"` — if it says `x86_64` on an M-series Mac, that's the problem.
+   - **Symptoms:** repeated `Intel MKL WARNING: ... SSE4.2 ... deprecated` lines, and/or `zsh: segmentation fault run-pycat` right after `Cellpose model not found in cache — downloading now...` (an Intel build of PyTorch crashing under Rosetta).
+   - **Fix:** install the **native Apple Silicon (arm64)** Miniforge (filename contains `arm64`, not `x86_64`) from the [conda-forge download page](https://conda-forge.org/download/), recreate the `pycat-env`, and confirm `python -c "import platform; print(platform.machine())"` says `arm64` before installing. See the expandable note in Step 2 above for details.
+
+3. **Mac: `conda-libmamba-solver` / `libarchive.19.dylib` error**
+   - **Cause:** a Homebrew-installed Miniconda (path like `/opt/homebrew/Caskroom/miniconda/...`) whose bundled solver library broke after a Homebrew update. This is a conda/Homebrew issue, not a PyCAT one.
+   - **Fix:** use **Miniforge** (from the [conda-forge download page](https://conda-forge.org/download/)) instead of Homebrew's Miniconda, and create your `pycat-env` there. You don't have to uninstall the Homebrew conda — just install Miniforge alongside it and use that.
+
+4. **Mac: `llvmlite needs CMake tools to build`**
+   - **Cause:** `pip` couldn't find a prebuilt `llvmlite`/`numba` for your Mac and tried to compile from source, which needs `cmake`.
+   - **Fix:** install them from conda-forge first (prebuilt, no compiler needed): `conda install -c conda-forge llvmlite numba`, then `pip install "pycat-napari[arm-mac]"`. See Step 3 above.
+
+5. **`ERROR: Could not find a version that satisfies the requirement pycat-napari` (every version rejected)**
+   - **Cause:** your Python is neither 3.9 nor 3.12 — usually 3.10/3.11 from a base environment you didn't mean to install into. `pip` filters out every release because none matches your Python version.
+   - **Fix:** confirm your Python with `python --version` (it must be `3.12.x`), and if not, recreate the environment: `conda create -n pycat-env python=3.12` then activate it before installing.
+
+6. **GUI Issues**
    - Check PyQt5 installation
    - Update graphics drivers
    - Verify you're not running the program from jupyter notebook
 
-3. **Analysis Errors**
+7. **Analysis Errors**
    - Confirm input file format
    - Check memory availability
    - View traceback in napari or check your terminal for console errors
 
-4. **Performance Issues**
+8. **Performance Issues**
    - Slow processing or a spinning wheel in Windows/Mac is normal for condensate segmentation
    - Check the terminal for the progress printouts of the analysis
 
-5. **File Loading Errors (`newbyteorder` / tifffile)**
+9. **File Loading Errors (`newbyteorder` / tifffile)**
    - See [NumPy 2.0 Compatibility](#numpy-20-compatibility) below
 
-6. **TrackMate Integration Errors**
+10. **TrackMate Integration Errors**
    - `ImportError: TrackMate bridge requires pyimagej` — install with `pip install "pycat-napari[trackmate]"`
    - Java not found — install a JDK 11+ (`mamba install openjdk=11` is the most reliable cross-platform option) and confirm it's on `PATH` with `java -version`
    - Slow or failed first run — the first TrackMate run downloads a full Fiji distribution over the network; this can take several minutes and will fail without internet access, but only needs to happen once (cached afterward)

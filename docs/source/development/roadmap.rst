@@ -289,6 +289,342 @@ supporting Category B, because PyCAT's point-based spatial statistics are alread
 what localization-cluster analysis needs.
 
 
+Calibrated Thermodynamic & Quantitative Condensate Reporting
+------------------------------------------------------------
+
+A cross-evaluation of PyCAT against the Punctatools pipeline (a 3D Cellpose-ROI
++ LoG puncta detection + per-cell quantification tool with a thermodynamic
+reporting notebook) found that PyCAT is already architecturally broader in nearly
+every dimension (QC, batch replay, benchmarking, condensate physics, FRAP/MSD/
+fusion, brightfield, spatial statistics, morphological complexity, client
+enrichment, time-series, tracking bridges). The conclusion is **not** to adopt its
+pipeline, but to add a small set of *calibrated, physically-interpretable*
+reporting capabilities that PyCAT currently lacks. The biggest of these converts
+PyCAT from an image-analysis tool into a **biophysical-parameter-extraction** tool
+— a strong manuscript angle consistent with PyCAT's quantitative-measurement,
+physical-interpretation philosophy.
+
+.. rubric:: Calibrated fluorescence-to-concentration thermodynamics (highest value)
+
+PyCAT already computes intensity-based partition and enrichment (partition
+coefficient field, per-condensate and per-cell client enrichment, bimodal
+intensity fitting, dense/dilute intensity estimates). What it lacks is the
+*calibration to physical units* and the *free-energy* step:
+
+* **Calibration-curve manager** — load a standard curve from a purified
+  fluorescent protein, assign it to a fluorophore/channel, and convert measured
+  intensity to an apparent molar concentration (µM).
+* **Real-unit K_p and transfer free energy** — from the calibrated dense and
+  light (dilute) phase concentrations, compute the partition coefficient in real
+  units and the transfer free energy ΔG_transfer = −RT ln(K_p).
+* This is pure downstream analysis and composes with the existing partition /
+  enrichment machinery; no acquisition changes are required.
+
+.. rubric:: Condensate thermodynamics report (per-cell export preset)
+
+A consolidated, manuscript-friendly per-cell export table (depends on the
+calibration step above), with columns such as: ``cell_id``, ``n_condensates``,
+``cell_volume_or_area``, ``total_condensate_volume_or_area``,
+``condensate_volume_fraction``, ``mean_dense_intensity``, ``mean_light_intensity``,
+``dense_concentration_uM``, ``light_concentration_uM``, ``Kp``,
+``dG_transfer_kcal_mol``, ``mean_condensate_distance_to_border``,
+``client_enrichment``, and colocalization metrics. This should build on the shared
+tidy/long output schema (see the platform-consolidation notes) rather than a
+bespoke format.
+
+.. rubric:: Explicit 2D / 3D / time-series condensate modes
+
+PyCAT has 3D building blocks (Z-stack segmentation, 3D spot fitting, stack I/O),
+but the main *cellular condensate* workflow is still 2D-centric — and the in-vitro
+fluorescence workflow already carries an explicit caveat that its volume fraction
+is a 2D-projection proxy, not a true 3D volume fraction. As Punctatools notes, a
+2D projection gives inaccurate volume-fraction and partition estimates. The
+roadmap item is to make three explicit condensate-analysis modes — **2D**, **3D
+z-stack**, and **time-series** — each with appropriate outputs and warnings, so a
+true 3D volume fraction and partition coefficient are available when a Z-stack is
+supplied.
+
+.. rubric:: Explicit background-mode selector (UI surfacing of existing capability)
+
+The partition/enrichment backend already supports a scalar instrument-offset
+background, a user-supplied signal-free background mask, and local-background
+measurement. This capability is not yet surfaced as an explicit UI choice. Exposing
+a background-mode picker — global field background / per-cell or per-nucleus
+background / local shell around each condensate / user-supplied background mask —
+would make partition and enrichment measurements more transparent and defensible.
+Low effort (mostly UI), since the computation already exists.
+
+.. rubric:: Positive/negative-control validation workflow
+
+Extends the existing segmentation benchmark harness (which already has a
+ground-truth-validation mode) toward the control-based parameter validation that
+quantitative condensate work needs: run segmentation on a positive control and a
+negative / diffuse control, compare false positives, recommend a safe parameter
+range, and export a validation report. This aligns with the general benchmarking
+direction and the practice of testing parameters on representative and negative
+controls before committing to a batch run.
+
+Biological Object Model & Linked Multiscale Navigation
+------------------------------------------------------
+
+A cross-evaluation of a cloud-first, petabyte-scale microscopy platform
+(NimbusImage, Nat. Methods 2025) against PyCAT concluded: do **not** adopt its
+cloud/data-movement architecture (PyCAT's data-local, interactive, quantitative
+philosophy is a deliberate strength), but extract three related concepts that
+together point at one architectural addition — a navigable biological object model.
+These are unusual roadmap items in that the *data* to support them already exists
+scattered across PyCAT's modules; what is missing is the unifying structure.
+
+.. rubric:: Formalize the analysis hierarchy (semantic scale pyramid)
+
+Rather than an image pyramid, think an *analysis* pyramid: Image → Cell →
+Organelle → Condensate → Punctum → Single molecule, where each level carries its
+own measurements, QC, and statistics. This hierarchy already exists implicitly —
+the puncta analysis already associates each punctum with its parent cell
+(``cell_label``), producing cell-labelled puncta — but it is not formalized as an
+explicit, navigable structure. The item is to make the parent/child scale
+relationships first-class rather than per-analysis DataFrame columns.
+
+.. rubric:: Linked multiscale navigation (bidirectional brushing)
+
+The highest-value concept, and one that recurs independently: make analysis
+outputs and image layers *mutually navigable*. Select a data point in a plot (a
+partition-coefficient scatter point, an MSD track, an enrichment value) and jump
+to exactly that object in the image layers — the right channel, frame, or Z-slice
+— and the reverse: click an object in the viewer and highlight its row across all
+plots and tables. Traverse scales too: punctum → parent condensate → parent cell →
+whole field, or back down. The prerequisite identity links already exist (each
+object row carries a ``label`` tying it to its mask region, and ``cell_label``
+tying it to its parent); what is missing is the interactive traversal bridge. The
+plots are currently static matplotlib renders with no selection events, so the
+work is the linking layer, not the underlying identity. This embodies PyCAT's
+anti-black-box philosophy: every number in a plot becomes clickable back to the
+pixels it came from. It also pairs naturally with the provenance DAG.
+
+.. rubric:: Context-aware analysis (inherited hierarchy)
+
+Downstream analysis should inherit spatial context: not merely "segment puncta"
+but "segment puncta inside nucleus inside cell inside tissue region", so every
+measurement carries where it sits in the hierarchy. This makes results
+context-aware by construction rather than by post-hoc joining.
+
+.. rubric:: The unifying idea — an internal biological object model
+
+The three concepts above are three views of one addition: give every detected
+object a rich, persistent identity — an object graph — rather than treating it as
+a mask label plus a DataFrame row. Each object would carry its characteristic
+scale, persistence/topology, material state, spatial-neighborhood degree, parent
+object, and QC/provenance. Critically, almost none of these quantities come from a
+neural network — they come from combining analysis modules PyCAT already has
+(characteristic scale from blob/LoG sizing; persistence/topology from the dynamic-
+spatial and force-distance work; material state from the condensate-physics MSD/
+FRAP/viscosity modules; neighborhood from spatial metrology; parentage from
+``cell_label``). No unified object model class exists today — the pieces are
+computed independently and never assembled onto a single entity. Building that
+entity is the larger, longer-term innovation, and it is a far stronger
+contribution than another segmentation algorithm. It also directly serves future
+FISH work: an RNA punctum could report its scale, persistence, parent condensate,
+nearest chromatin boundary, material environment, and neighborhood-graph degree as
+properties of one object.
+
+Concretely, instead of every module independently taking masks and returning its
+own table, each detected object would internally carry a standardized record::
+
+   Object
+   ├── Geometry
+   ├── Intensity
+   ├── Scale-space signature
+   ├── Topology
+   ├── Material-state metrics
+   ├── Spatial relationships
+   ├── QC flags
+   ├── Provenance
+   └── Parent/child relationships
+
+The QC module, benchmarking, spatial statistics, DoH scale-space analysis, FRAP,
+MSD, and future FISH analyses then become different *views* of the same underlying
+biological object rather than isolated analyses that each emit a disconnected CSV.
+This is the threshold that would make PyCAT feel less like a collection of tools
+and more like a *scientific operating system for microscopy*, where every new
+method enriches a shared representation of the biology rather than producing
+another standalone output. Given the direction of the DoH scale-space work and the
+future FISH platform, this architecture is expected to scale well.
+
+.. rubric:: A related organizing principle
+
+The same source reinforces organizing PyCAT around scientific *questions* rather
+than analysis *methods*: "measure expression / condensates / transport / morphology
+/ material state / topology", with each workflow then selecting the appropriate
+algorithms. This is a more scientist-oriented abstraction than a menu of methods.
+
+Reproducibility, Measurement Reliability & the Measurement Reliability Index
+----------------------------------------------------------------------------
+
+A cross-evaluation of a Nature Methods reproducibility paper (2025) against PyCAT
+found strong alignment with PyCAT's rigor / anti-black-box direction — the paper is
+about making quantitative image analysis reproducible and comparable rather than
+introducing a new segmentation algorithm. Do not copy its pipeline; adopt a cluster
+of six related capabilities that all answer one question: *how much should a
+scientist trust this number, and why?* Several already have partial foundations in
+PyCAT. They culminate in a single unifying construct (the Measurement Reliability
+Index) that ties QC, segmentation confidence, parameter sensitivity, benchmarking,
+and provenance together.
+
+.. rubric:: Feature provenance (elevate existing batch recording to per-feature)
+
+Every numerical feature should be traceable to the raw image, preprocessing,
+segmentation, measurement definition, and software version. PyCAT already records
+the workflow step chain (the batch recorder captures ordered, parameterized steps
+with layer snapshots, shown in the "Recorded Steps" viewer). The gap is attaching
+that chain to each *output feature* as provenance — e.g. ``mean intensity`` derived
+from ``Image 4 → flatfield → rolling-ball → Cellpose cyto2 → ROI 17 → measurement``.
+This reinforces the previously-discussed provenance DAG.
+
+.. rubric:: Feature / parameter stability (per-measurement sensitivity)
+
+Reproducibility is not just re-running an algorithm; it is whether a measurement
+stays stable under realistic variation. The benchmark harness already has a
+parameter-sensitivity mode that sweeps a segmentation parameter and compares the
+resulting masks. The extension is *per-measurement* stability: for each reported
+feature, report how much it changes under a small parameter perturbation and flag
+trustworthy vs fragile measurements (e.g. "area: threshold ±5% → changes 1.2%,
+stable" vs "circularity: ±5% → changes 37%, unstable"). Few microscopy packages
+expose this.
+
+.. rubric:: Measurement confidence (combine QC + segmentation + benchmarking)
+
+A per-measurement confidence annotation combining image QC, segmentation
+stability, and benchmark agreement into one score with an explanation ("stable
+segmentation, high SNR, little boundary ambiguity"). PyCAT already attaches
+confidence in isolated places (e.g. coarsening-mechanism discrimination reports a
+high/low mechanism confidence); the item is to generalize this to every output.
+
+.. rubric:: PyCAT Validation Suite (standing per-release regression benchmark)
+
+A standardized internal validation suite (Cells / Condensates / Puncta / FISH /
+Fibers / Brightfield) run automatically every release, tracking metric drift across
+versions ("v1.3: puncta Dice up, runtime down, QC unchanged"). PyCAT already has a
+``tests/`` directory with synthetic fixtures and a benchmark harness (Dice /
+overlap); this elevates them into a release-gating regression tracker, and dovetails
+with the golden-master QC fixtures.
+
+.. rubric:: Measurement ontology (definition / equation / units / reference registry)
+
+A structured registry defining each measurement rigorously: definition, equation,
+units, and literature reference (e.g. partition coefficient = I_dense / I_dilute,
+dimensionless, Brangwynne 2009). Today these live in scattered docstrings. A
+structured ontology makes Methods-section and figure-legend generation nearly
+automatic — directly serving the reproducibility story — and fits PyCAT's
+rigorously-defined, literature-grounded measurement philosophy.
+
+.. rubric:: Metadata awareness (metadata travels with every measurement)
+
+Acquisition metadata and software versions should ride along with every output
+table without user intervention: pixel size, NA, magnification, bit depth,
+exposure, camera, PyCAT version, Cellpose version. PyCAT already embeds pixel size
+in measurement tables and can export normalized acquisition metadata as JSON; the
+item is to make the full set automatic and complete on every exported table.
+
+.. rubric:: The unifying construct — Measurement Reliability Index (MRI)
+
+The six items above converge on a single per-quantity **Measurement Reliability
+Index**: every reported value carries a reliability score derived from image QC,
+segmentation confidence, parameter sensitivity, benchmark agreement, and biological
+plausibility. For example, ``cell area 215 µm² → 0.98``, ``condensate circularity
+0.74 → 0.63``. Clicking a score explains why it is high or low ("boundary
+ambiguous", "low SNR", "high sensitivity to threshold", "methods disagree"). No
+mainstream microscopy software treats measurements this way. It composes with the
+QC module, the benchmarking framework, and the provenance system, and it embodies
+PyCAT's distinguishing philosophy: not just generating measurements, but
+communicating how much confidence scientists should place in them. Framing note:
+PyCAT is evolving into Image → Analysis Engine → Measurements → Scientific
+Interpretation → Publication; most software stops at measurements, and the
+interpretation layer (QC, benchmarking, provenance, physics, statistics) is the
+distinguishing direction to keep building rather than adding more segmentation
+models.
+
+Feature Families, Biological QC & the Measurement Platform Identity
+-------------------------------------------------------------------
+
+A cross-evaluation of a Cell Painting / image-based profiling review (Nature
+Methods 2024) against PyCAT. Cell Painting's core is phenotypic profiling —
+measure thousands of features and treat them as a fingerprint of cell state, then
+hand off to machine learning and a latent space. PyCAT should **not** adopt that
+measure-everything → ML → latent-space → interpret-later direction; it runs against
+PyCAT's hypothesis → measurement → mechanism → physics → biology philosophy. But
+several concepts fit well, and some restate ideas already captured in the
+biological-object-model section (state vectors, feature families, and the
+Experiment → Field → Cell → Nucleus → Condensate → Punctum hierarchy are the
+profiling view of that same object model — each object's standardized record, read
+as a vector, is a state fingerprint, and the record's top-level branches are the
+feature families). The genuinely new items:
+
+.. rubric:: Feature families instead of flat feature lists
+
+Features are currently emitted as flat DataFrame columns. Organize them into named
+biological families — Geometry, Intensity, Texture, Dynamics, Material state,
+Spatial organization, Topology, Scale-space, QC — so a wide export becomes
+interpretable groups rather than an undifferentiated list of columns. This is the
+near-term, buildable schema piece that makes the state-vector abstraction usable,
+and it maps directly onto the object record's branches.
+
+.. rubric:: Biological QC (a second QC layer beyond imaging QC)
+
+The QC module today measures *imaging* quality (focus, SNR, Nyquist, bleaching). A
+complementary *biological* QC layer would flag biological outliers rather than
+imaging problems: cell touching the field edge, oversegmented nucleus, abnormal
+aspect ratio, extreme intensity, low transfection, condensate outside the
+cytoplasm, likely-dead cell, mitotic cell. This is a natural extension of the
+planned QC/Image-Quality-Advisor module, adding an object-level biological-outlier
+pass to the existing field-level imaging assessment.
+
+.. rubric:: Feature redundancy / correlation reporting
+
+PyCAT computes many descriptors, and many are highly correlated (area, convex
+area, equivalent diameter, major axis all track size). A module could report
+correlated feature groups and recommend a minimal non-redundant set ("keep area,
+drop three redundant features"). Valuable for downstream statistics and machine
+learning; more of a statistics-support utility than core to the mechanistic story.
+
+.. rubric:: Analysis presets (unify the scattered preset idea)
+
+Some per-experiment presets already exist (e.g. the time-series condensate UI has a
+preset row). Generalize this into a first-class, workflow-level preset system —
+Condensate / FISH / FRAP / Tracking / Morphology presets — each bundling
+recommended preprocessing, QC thresholds, benchmark candidates, and default
+outputs, tied to the existing pipeline-definition structure.
+
+.. rubric:: Structural profiling (the DoH/FISH complement to phenotypic profiling)
+
+The reframe worth keeping: Cell Painting does *phenotypic* profiling ("what
+phenotype does this cell resemble?"). The DoH scale-space and future FISH work
+could do *structural* profiling ("how is the molecular architecture organized
+across spatial scales?") — an RNA-organization → scale-space signature → topology →
+spatial statistics → material-state → *structural state vector*. This is a
+different, complementary axis of biology from phenotypic profiling, and a
+distinctive positioning for the DoH/FISH platform.
+
+.. rubric:: Feature Explorer (borrow almost directly)
+
+Rather than presenting a flat spreadsheet, expose an interactive browser where each
+measurement carries a clear biological interpretation ("what does this measure?"),
+its mathematical definition, units, expected range, sensitivity to preprocessing/
+segmentation, correlated measurements, and example images showing low / medium /
+high values. This is the unifying *interface* over several other roadmap items —
+the measurement ontology (definitions/units/references), feature stability
+(sensitivity), feature redundancy (correlations), and the QC gallery (example
+images) — and it fits the educational direction already taken with the QC module,
+reinforcing PyCAT's identity as a platform that helps scientists understand and
+trust measurements, not merely generate them.
+
+.. rubric:: Framing — from image-analysis package to measurement platform
+
+The overarching realization: with provenance, benchmarking, scale-space, topology,
+and material-state analysis in place, segmentation becomes almost incidental and
+PyCAT shifts from answering "where are the objects?" (image analysis) to "what do
+these objects tell us about biology?" (a measurement platform). That is the
+identity to keep building toward.
+
 Core Functionalities
 --------------------
 
@@ -631,7 +967,7 @@ Miscellaneous Enhancements
 
 * PunctaTools
 
-  * Implement features from the `PunctaTools <https://github.com/stjude/punctatools>`_ analysis pipeline, or collaborate with them to integrate it into PyCAT fully.
+  * Rather than integrating the PunctaTools pipeline directly, adopt the small set of calibrated-reporting concepts it does well — see the *Calibrated Thermodynamic & Quantitative Condensate Reporting* section above. PyCAT is already architecturally broader; the value is in the calibrated thermodynamics report, not the pipeline.
 
 * Line Plots Functionality
 

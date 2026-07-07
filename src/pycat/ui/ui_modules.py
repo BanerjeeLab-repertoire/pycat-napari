@@ -2721,6 +2721,152 @@ class MenuManager:
         self.central_manager = central_manager
         self._setup_menu_bar()
 
+    def _hide_napari_native_menus(self, hidden_default=True):
+        """Collapse napari's own top-level menus (File / View / Plugins / Window /
+        Help / Layers) behind a single toggle, hidden by default.
+
+        The PyCAT workflow never needs napari's native menus, and several test
+        users lost their session by loading data through napari's File -> Open
+        (which bypasses PyCAT's channel-assignment / metadata pipeline and crashes
+        the workflow). So on startup only PyCAT's own controls are visible, with
+        napari's menus tucked away -- but NOT removed: a leftmost toggle reveals /
+        hides them on demand, because some of napari's layer operations are
+        genuinely useful. napari's Open* actions stay disabled regardless, so even
+        when the menus are revealed, data still loads through PyCAT.
+
+        Fully defensive: identifies napari-native menus by title, never touches
+        PyCAT's own menus, and never raises if napari changes its menu layout.
+        """
+        try:
+            menubar = self.viewer.window._qt_window.menuBar()
+        except Exception:
+            return
+
+        def _norm(t):
+            return (t or '').replace('&', '').strip().lower()
+
+        # PyCAT's own top-level titles -- never collapse these.
+        pycat_titles = {
+            _norm('\u25c6 PyCAT \u25b8'), _norm('Analysis Methods'), _norm('Toolbox'),
+            _norm('\u2605 Open/Save File(s)'), _norm('\u2620 Clear'), _norm('\u2302 Home'),
+            _norm('\u24d8 Metadata'), _norm('\u2630 Recorded Steps'),
+            _norm('\u2630 napari'), _norm('\u2630 napari \u25be'),
+        }
+        # napari-native top-level menus to collapse.
+        napari_titles = {'file', 'view', 'plugins', 'window', 'help', 'layers',
+                         'acquisition'}
+
+        # Collect the napari-native menu actions currently on the bar.
+        self._napari_menu_actions = []
+        try:
+            for action in menubar.actions():
+                menu = action.menu()
+                if menu is None:
+                    continue
+                title = _norm(action.text() or menu.title())
+                if title in pycat_titles:
+                    continue
+                if title in napari_titles:
+                    self._napari_menu_actions.append(action)
+        except Exception:
+            self._napari_menu_actions = []
+
+        # Make PyCAT's Open/Save the first PyCAT menu (workflow entry point).
+        self._reorder_pycat_menu_bar()
+
+        # Build the leftmost toggle that shows / hides the napari menus.
+        try:
+            from PyQt5.QtGui import QFont as _QFont
+            self._napari_toggle_action = QAction('\u2630 napari',
+                                                 self.viewer.window._qt_window)
+            self._napari_toggle_action.setToolTip(
+                'Show / hide napari\u2019s own menus (File, View, Layers, Window, '
+                'Help). Hidden by default \u2014 the PyCAT workflow doesn\u2019t need '
+                'them, but napari\u2019s layer operations are available here if you '
+                'want them. (napari\u2019s Open stays disabled; load data via '
+                '\u2605 Open/Save File(s).)')
+            _tf = _QFont()
+            _tf.setPointSize(max(1, _tf.pointSize() - 1))
+            self._napari_toggle_action.setFont(_tf)
+            self._napari_menus_visible = not hidden_default
+            self._napari_toggle_action.triggered.connect(self._toggle_napari_menus)
+            # Insert the toggle as the LEFTMOST item so that, with napari's menus
+            # hidden, the bar reads: [napari] PyCAT | Open/Save | Analysis | ...
+            _all = menubar.actions()
+            if _all:
+                menubar.insertAction(_all[0], self._napari_toggle_action)
+            else:
+                menubar.addAction(self._napari_toggle_action)
+        except Exception:
+            self._napari_toggle_action = None
+
+        # Apply the default visibility (hidden).
+        self._set_napari_menus_visible(not hidden_default)
+
+        # Belt-and-suspenders: napari's Open* actions stay disabled even when the
+        # menus are revealed, so data always loads through PyCAT.
+        try:
+            self._disable_napari_open_actions()
+        except Exception:
+            pass
+
+    def _set_napari_menus_visible(self, visible):
+        """Show or hide the collected napari-native menu actions and update the
+        toggle label to reflect state."""
+        for action in getattr(self, '_napari_menu_actions', []):
+            try:
+                action.setVisible(visible)
+            except Exception:
+                pass
+        self._napari_menus_visible = visible
+        tog = getattr(self, '_napari_toggle_action', None)
+        if tog is not None:
+            try:
+                tog.setText('\u2630 napari \u25be' if visible else '\u2630 napari')
+            except Exception:
+                pass
+
+    def _toggle_napari_menus(self, *_):
+        """Flip napari-native menu visibility (the un-hide control)."""
+        self._set_napari_menus_visible(
+            not getattr(self, '_napari_menus_visible', False))
+
+    def _reorder_pycat_menu_bar(self):
+        """Move PyCAT's ★ Open/Save File(s) ahead of Analysis Methods / Toolbox,
+        so loading data (the workflow entry point) is the first PyCAT menu.
+        Defensive: no-op if the expected actions aren't present."""
+        try:
+            menubar = self.viewer.window._qt_window.menuBar()
+            file_action = self.file_menu.menuAction()
+            anchor = self.analysis_methods_menu.menuAction()
+            if file_action is not None and anchor is not None:
+                menubar.removeAction(file_action)
+                menubar.insertAction(anchor, file_action)
+        except Exception:
+            pass
+
+    def _disable_napari_open_actions(self):
+        """Disable napari's built-in Open / Open Files / Open Folder actions so
+        that loading always goes through PyCAT's file I/O. Matches by action text
+        and is defensive against napari renaming these actions."""
+        try:
+            window = self.viewer.window._qt_window
+        except Exception:
+            return
+        _open_texts = {'open', 'open file...', 'open files...', 'open file(s)...',
+                       'open folder...', 'open sample', 'open files as stack...'}
+        def _norm(t):
+            return (t or '').replace('&', '').strip().lower()
+        try:
+            for act in window.findChildren(QAction):
+                if _norm(act.text()) in _open_texts:
+                    act.setEnabled(False)
+                    act.setToolTip('Use PyCAT\u2019s \u2605 Open/Save File(s) menu '
+                                   'to load data (napari\u2019s own Open is disabled '
+                                   'so files load through PyCAT\u2019s reader).')
+        except Exception:
+            pass
+
     def _home_fit_view(self):
         """
         Fit the camera to the selected Image / Labels / Shapes (ROI) layer.
@@ -2864,6 +3010,12 @@ class MenuManager:
             self.viewer.window._qt_window.setAcceptDrops(True)
         except Exception as _e:
             print(f"[PyCAT] Could not install file-drop handler: {_e}")
+
+        # Hide napari's native File menu (and disable its Open* actions) so users
+        # can't accidentally load data through napari's reader, which routes
+        # around PyCAT's channel-assignment / metadata pipeline and crashes the
+        # downstream workflow. Data must load via PyCAT's ★ Open/Save File(s).
+        self._hide_napari_native_menus()
 
     def _show_metadata_dialog(self):
         """Show acquisition metadata for the loaded file.

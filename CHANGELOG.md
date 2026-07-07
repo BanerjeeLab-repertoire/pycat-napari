@@ -23,6 +23,195 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.270] - 2026-07-07
+### Docs (roadmap: biological object model & linked multiscale navigation)
+- **Added a roadmap section capturing concepts from cross-evaluating the NimbusImage paper**
+  (Nat. Methods 2025), a cloud-first petabyte-scale platform. Conclusion: don’t adopt the cloud/
+  data-movement architecture (PyCAT’s data-local, interactive, quantitative philosophy is a
+  deliberate strength), but extract three converging concepts: (1) formalize the implicit analysis
+  hierarchy (Image→Cell→Organelle→Condensate→Punctum) that already exists via the cell/puncta
+  parentage; (2) linked multiscale navigation — bidirectional brushing between plots and image
+  layers so selecting a data point jumps to that object in the viewer and vice versa (the identity
+  links already exist; the interactive bridge does not); (3) context-aware analysis that inherits
+  spatial hierarchy. These unify into an internal biological object model where each object carries
+  scale, persistence/topology, material state, neighborhood, and parentage — quantities PyCAT
+  already computes in separate modules but never assembles onto one entity. In this model, each
+  object carries a standardized record (geometry, intensity, scale-space signature, topology,
+  material state, spatial relationships, QC, provenance, parent/child), and the existing modules
+  (QC, benchmarking, spatial stats, DoH, FRAP, MSD, future FISH) become views of one object rather
+  than isolated analyses — moving PyCAT toward a "scientific operating system for microscopy".
+  Verified against the codebase. Documentation only.
+- **Added a roadmap section capturing a reproducibility/measurement-reliability cluster** from
+  cross-evaluating a Nature Methods 2025 reproducibility paper (strongly on-thesis with PyCAT's
+  QC/rigor direction). Six related items, each verified against existing foundations: (1) feature
+  provenance (elevate the existing batch step-recording to per-feature traceability; reinforces the
+  provenance DAG); (2) per-measurement parameter-stability reporting (extends the existing
+  benchmark parameter-sweep from masks to derived measurements); (3) a general measurement-
+  confidence score combining QC + segmentation + benchmarking; (4) a standing per-release PyCAT
+  Validation Suite (built on the existing tests/ fixtures + benchmark harness); (5) a measurement
+  ontology (definition/equation/units/reference registry that makes Methods generation nearly
+  automatic); and (6) automatic metadata + software-version travel on every output table. These
+  converge on a unifying Measurement Reliability Index (MRI): every reported value carries a
+  reliability score with a clickable explanation of why it's high or low. Documentation only.
+- **Added a roadmap section from cross-evaluating a Cell Painting / image-based profiling review**
+  (Nature Methods 2024). Conclusion: don't adopt its measure-everything → ML → latent-space
+  direction (against PyCAT's hypothesis → mechanism → physics philosophy); several concepts restate
+  the biological object model (state vectors, feature families, object hierarchy = the profiling
+  view of it). Genuinely new items captured: feature-family grouping of outputs (currently flat
+  columns); a biological-QC layer flagging biological outliers (edge cells, oversegmentation, dead/
+  mitotic cells) as a second layer beyond imaging QC; correlation-based feature-redundancy
+  reporting; a unified workflow-level analysis-preset system; the "structural profiling" reframe for
+  the DoH/FISH work (complementary to phenotypic profiling); and a Feature Explorer — an interactive
+  measurement browser (interpretation, definition, units, range, sensitivity, correlations, example
+  images) that unifies the measurement ontology, feature stability, redundancy, and QC gallery into
+  one interface. Also frames PyCAT's shift from image-analysis package to measurement platform.
+  Documentation only.
+
+## [1.5.269] - 2026-07-07
+### Docs (roadmap: calibrated thermodynamic & quantitative condensate reporting)
+- **Added a roadmap section capturing five capabilities identified by cross-evaluating PyCAT
+  against the Punctatools pipeline** (verified against the codebase, not taken at face value).
+  Conclusion: don’t adopt the pipeline (PyCAT is already broader), but add: (1) a calibration-
+  curve manager converting fluorescence intensity to molar concentration plus real-unit Kp and
+  ΔG_transfer = −RT ln(Kp) — the flagship, turning PyCAT into a biophysical-parameter-extraction
+  tool; (2) a consolidated per-cell Condensate Thermodynamics Report export preset; (3) explicit
+  2D / 3D-z-stack / time-series condensate modes (the in-vitro workflow already flags its volume
+  fraction as a 2D-projection proxy); (4) a background-mode UI selector surfacing the scalar /
+  mask / local-background support the backend already has; and (5) a positive/negative-control
+  validation workflow extending the existing benchmark harness. The stale "integrate PunctaTools"
+  note was updated to "adopt the concepts, not the pipeline."
+
+## [1.5.268] - 2026-07-07
+### Fixed (macOS startup segfault: torch/Numba warmup raced Qt init)
+- **PyCAT could segfault on launch right after "Running PyCAT"** (seen on Apple Silicon macOS),
+  after a clean, correct install (native arm64, torch 2.2.x, Cellpose cached successfully). The
+  crash was a native-library race: a background thread imported torch and ran Numba JIT warmup at
+  the same moment napari/Qt was initialising on the main thread, and those native libraries are
+  not safe to initialise concurrently on macOS. Fixed by creating the napari viewer FIRST on the
+  main thread, then starting the warmup thread only after Qt has finished its main-thread setup.
+  Also added a `PYCAT_SKIP_WARMUP=1` environment variable to disable the background warmup
+  entirely as an escape hatch. Note: this is the most-likely fix based on the crash signature;
+  confirm on the affected machine.
+
+## [1.5.267] - 2026-07-07
+### Changed (clearer Cellpose cache messaging — it was never re-downloading)
+- **Reworded the Cellpose model messages so it is obvious the model is downloaded only once and
+  cached persistently.** The model was already cached on disk (`~/.cellpose/models`) and reused
+  across launches — but the terminal wording ("skipping download", "downloading now") made it look
+  like it might re-download every time. Now: a cache hit says the model was found locally and no
+  download is needed; a cache miss says the download is a ONE-TIME setup saved for all future
+  launches; and the post-download message confirms it won’t happen again. Added a distinct
+  "Loading Cellpose model weights from cache into memory (first use this session)" breadcrumb when
+  the model is actually loaded during segmentation, so loading-from-disk is clearly separate from
+  downloading. No functional change to caching — messaging only.
+
+## [1.5.266] - 2026-07-07
+### Fixed (arm-mac install failed with ResolutionImpossible on Python 3.12)
+- **`pip install "pycat-napari[arm-mac]"` failed with `ResolutionImpossible` / "no matching
+  distribution for torch" on Apple Silicon.** The `[arm-mac]` extra pinned `torch==2.1.2`, but
+  torch 2.1.2 has no Python 3.12 wheel (torch added cp312 support in 2.2.0) — while PyCAT itself
+  requires Python >=3.12. So the exact pin could never resolve on any supported Python: pip found
+  no installable torch and aborted. Changed the pin to `torch>=2.2.0,<2.3.0` (has cp312 arm64
+  wheels, and stays within the torch range compatible with the `numpy<2.0` pin). This was a
+  packaging bug, not a user error — affected users were on correct native-arm64 Python 3.12
+  environments. Surfaced during a multi-user install test.
+
+## [1.5.265] - 2026-07-07
+### Changed (Cellpose prewarm: keep it, but guard against the environment that crashes)
+- **The Cellpose prewarm is preserved (good first-run UX) but now skips itself only in the
+  specific broken state that caused the segfault** — x86_64 Python running under Rosetta
+  emulation on an Apple Silicon Mac — rather than being removed. A new architecture guard checks
+  `sysctl.proc_translated` (Rosetta flag) and `hw.optional.arm64` vs `platform.machine()`; when a
+  mismatch is detected it skips the prewarm with a clear message pointing the user to a native
+  arm64 environment. On every healthy environment (native arm64 Mac, genuine Intel Mac, Windows,
+  Linux) the prewarm runs as before.
+- **The prewarm now selects the model via PyCAT’s version-aware builder**
+  (`_build_cellpose_model(default_cellpose_model())`) instead of a hardcoded
+  `pretrained_model='cyto2'`. This matters: on Cellpose <4 (the pinned default, fast `cyto2` CNN)
+  the correct API is `model_type`, while `pretrained_model` is only a legacy fallback — so the old
+  prewarm was using the wrong API path for the common case. The cache-existence check is now
+  version-aware too (`cyto2` on Cellpose <4, `cpsam` on >=4), so it no longer always re-downloads
+  on Cellpose 4. The subprocess isolation from 1.5.262 is retained as a second safety net for any
+  other native crash (e.g. an older CPU without AVX).
+
+## [1.5.264] - 2026-07-07
+### Docs (Miniforge installer: tell Mac/Linux users how to run the .sh file)
+- **The install steps now explain how to actually run the Miniforge installer per platform.**
+  The conda-forge download page hands macOS/Linux users a `.sh` script (e.g.
+  `Miniforge3-MacOSX-arm64.sh`), which non-technical users did not know what to do with —
+  double-clicking a `.sh` does not run it. Step 2 (README) and a new "Installing Miniforge"
+  subsection (installation.rst) now cover: Windows → double-click the `.exe`; macOS/Linux → open
+  Terminal and run `bash <path-to-.sh>` (with the tip to drag the file from Finder into the
+  Terminal to fill in the path), follow the prompts, then open a fresh terminal. Surfaced during
+  the multi-user install test.
+
+## [1.5.263] - 2026-07-07
+### Docs (captured multi-user install-test debugging: Mac architecture + failure modes)
+- **Added a Mac architecture check and troubleshooting for the issues surfaced during a group
+  install test** (README + installation.rst). Key addition: on Apple Silicon, check
+  `python -c "import platform; print(platform.machine())"` returns `arm64` (not `x86_64`) before
+  installing — an `x86_64` result means Python is the Intel build under Rosetta emulation, which
+  causes Intel MKL warnings and Cellpose segfaults. Notes that `uname -m` is unreliable here (it
+  can report `arm64` while Python is x86). Also documented, with causes and fixes: the
+  Homebrew-conda `libarchive.19.dylib` solver error (use Miniforge), the `llvmlite needs CMake
+  tools to build` failure (install llvmlite/numba from conda-forge first), and the "every version
+  rejected" symptom (wrong Python version). Updated the platform-support table with real test
+  results (Intel Mac now Tested/Works; Apple Silicon note points to the native-arm64 guidance).
+
+## [1.5.262] - 2026-07-07
+### Fixed (Cellpose prewarm could segfault the whole app at startup)
+- **PyCAT could crash to desktop on launch with a segmentation fault while pre-caching the
+  Cellpose model** (`Cellpose model not found in cache ... zsh: segmentation fault`). Loading
+  Cellpose pulls in PyTorch / native math libraries that can crash at the C level on some
+  machines — notably older Intel CPUs without AVX, where the default AVX-assuming PyTorch/MKL
+  binaries hit an unsupported instruction. A C-level crash is not a Python exception, so the
+  existing try/except could not catch it, and because the prewarm runs before the QApplication is
+  created, the whole app died before the GUI opened. The model load now runs in a SEPARATE
+  SUBPROCESS, so a native crash only kills that subprocess — PyCAT still launches. On a
+  signal-kill (e.g. SIGSEGV) a clear message explains the likely cause (incompatible PyTorch for
+  this CPU) and notes the other segmentation methods (Multi-Otsu, StarDist, Random Forest) still
+  work, with a pointer to `conda install -c conda-forge pytorch nomkl`. Known limitation: this
+  makes startup crash-proof; if Cellpose is CPU-incompatible, clicking "Run Cellpose" in the GUI
+  can still crash (in-process) — isolating that path is a follow-up.
+### Fixed (PyCAT branding could silently fall back to napari’s on some installs)
+- **The app icon and napari welcome-logo replacement could silently no-op**, leaving napari’s
+  default branding — reported across multiple Macs. Both captured a path inside an
+  `importlib.resources.as_file()` block but used it after the block exited; as_file() may delete
+  its extracted temp file on exit (zipped installs), so the path could be invalid when Qt used it
+  — especially the welcome logo, whose QSS `image: url(...)` is read lazily long after startup.
+  The window icon is now loaded into a QPixmap inside the as_file() block; the welcome logo is
+  copied to a stable per-session temp file (cleaned up at exit) so the QSS url stays valid.
+
+## [1.5.261] - 2026-07-07
+### Fixed (reconciled a caller/callee mismatch from out-of-order patching)
+- **The time-series pipeline would crash with a `pre_process_image() got an unexpected keyword
+  argument norm_max` error.** The working tree had the newer time-series code (which calls
+  `pre_process_image(..., norm_max=...)`) but an older `image_processing_tools.py` whose
+  `pre_process_image` did not yet accept `norm_max` — the 1.5.242 change was documented in the
+  changelog but the code had not fully landed. Re-applied the `norm_max` parameter to
+  `pre_process_image` (None = original per-frame 2D behaviour, unchanged; a fixed value = the
+  stack global scale for time-series), and the 1.5.249 minimal recorded-step breadcrumb in
+  `batch_processor.py`, so caller and callee agree again.
+
+## [1.5.260] - 2026-07-07
+### Changed (napari's native menus collapsed behind a toggle, hidden by default)
+- **napari's own top-level menus (File / View / Plugins / Window / Help / Layers) are now hidden
+  by default and collapsed behind a single leftmost "☰ napari" toggle.** Supersedes the
+  File-only hide from 1.5.257. The PyCAT workflow doesn't need napari's native menus, and several
+  test users lost their session by loading data through napari's File → Open (which bypasses
+  PyCAT's channel-assignment / metadata pipeline and crashes the workflow). Now:
+  - **Nothing napari-native is visible on open** — only PyCAT's controls.
+  - **The menus are hidden, not removed** — clicking the leftmost **☰ napari** toggle reveals them
+    (some napari layer operations are genuinely useful), and clicking again hides them. The toggle
+    label shows a ▾ affordance when revealed.
+  - **★ Open/Save File(s) is now the first PyCAT menu** (moved ahead of Analysis Methods /
+    Toolbox), since loading data is the workflow's entry point. The visible bar reads
+    `☰ napari  ◆ PyCAT ▸  ★ Open/Save File(s)  Analysis Methods  Toolbox  …`.
+  - **napari's Open* actions stay disabled even when the menus are revealed**, so data always
+    loads through PyCAT's reader regardless.
+  - Fully defensive: identifies napari-native menus by title, never touches PyCAT's own menus
+    (verified no title overlap), and never raises if napari changes its menu layout.
+
 ## [1.5.259] - 2026-07-07
 ### Fixed (ReadTheDocs build was pinned to Python 3.9)
 - **`.readthedocs.yaml` build environment updated from Python 3.9 to 3.12.** The docs build does
@@ -46,21 +235,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test.
 
 ## [1.5.257] - 2026-07-07
-### Fixed (users loading data via napari's File → Open crashed the workflow)
-- **napari's native File menu is now hidden, and its Open actions disabled**, so data always
-  loads through PyCAT's ★ Open/Save File(s). Several test users instinctively reached for
-  napari's own File → Open, which routes data around PyCAT's channel-assignment / metadata
-  pipeline and then crashes the downstream workflow (the GUI closes to desktop). This complements
-  the visually-distinct ★ Open/Save File(s) menu and the existing file-drop handler (which already
-  routes drag-and-drop through PyCAT's loader).
-  - Hides napari's native **File** menu by default (View / Window / Plugins / Help are left
-    intact, so napari's console, docking, and help stay available).
-  - Belt-and-suspenders: disables any napari **Open / Open Files / Open Folder / Open as Stack**
-    action wherever it lives (menu, shortcut, command palette), with a tooltip pointing to PyCAT's
-    opener.
-  - Fully defensive: matches menus/actions by visible title (handling Qt's `&` mnemonic and case),
-    only ever targets napari-native menus (never PyCAT's own), and never raises if a future napari
-    version renames or restructures its menus — the menus simply stay as they were.
+### Superseded by 1.5.260
+- (Hid only napari's File menu. Replaced by the collapsible "☰ napari" toggle in 1.5.260, which
+  hides all napari-native menus by default while keeping them reachable. This version was held and
+  not released.)
 
 ## [1.5.256] - 2026-07-07
 ### Fixed (stale Python 3.9 references in docs — caused users to build a 3.9 environment)

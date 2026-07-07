@@ -551,7 +551,11 @@ class BatchProcessor:
             }
         )
         self._dirty = True
-        print(f"[PyCAT Batch] Recorded step: {step_name}  params={params}")
+        # Minimal terminal breadcrumb only. The full step name, parameters, and
+        # layer snapshots are shown in the "☰ Recorded Steps" viewer, so dumping
+        # the whole params dict here (including layer snapshots) is redundant
+        # noise. Keep a short one-liner so the recorder isn't silent.
+        print(f"[PyCAT Batch] Recorded step {len(self.config['steps'])}: {step_name}")
 
         # Notify the workflow checklist so it can auto-check this step
         try:

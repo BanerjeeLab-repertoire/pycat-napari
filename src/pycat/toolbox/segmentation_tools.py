@@ -157,6 +157,16 @@ def _build_cellpose_model(model_name):
     if key in _CELLPOSE_MODEL_CACHE:
         return _CELLPOSE_MODEL_CACHE[key]
 
+    # First use this session: load the cached weights from disk into memory.
+    # (Downloaded once to ~/.cellpose on first ever run; not re-downloaded.)
+    try:
+        import logging as _logging
+        _logging.getLogger('pycat').info(
+            "Loading Cellpose model '%s' weights from cache into memory "
+            "(first use this session)...", model_name)
+    except Exception:
+        pass
+
     if _cellpose_major_version() >= 4:
         # Cellpose 4+: legacy names don't exist; fall back to cpsam explicitly.
         name = model_name if model_name in available_cellpose_models() else 'cpsam'
