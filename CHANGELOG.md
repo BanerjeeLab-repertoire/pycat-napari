@@ -23,6 +23,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.253] - 2026-07-07
+### Fixed (lazy TIFF wrapper broke analysis that materialises the whole stack)
+- **Regression from the 1.5.245 OME-TIFF scrubbing fix.** The lazy `_TiffPageStack` reader's
+  `__array__` deliberately returns only the FIRST frame (so napari's incidental array/thumbnail
+  requests don't materialise the whole stack — that truncation, plus pinned contrast_limits, is
+  what made scrubbing smooth). But analysis code that did `np.asarray(layer.data)` to get the
+  full `(T, H, W)` stack then silently received a single 2D frame — so shape checks saw `ndim==2`
+  and bailed. This broke the temperature workflow's **"guess reference frame"** ("Reference-frame
+  guessing needs a (T, H, W) stack") and the same pattern in its sync / pattern-correction /
+  analysis steps.
+  - Added `_TiffPageStack.as_full_array()` (reads every frame, one at a time) and a module-level
+    `materialize_stack()` helper that safely turns any stack-like layer data (lazy wrapper, dask,
+    or plain array) into a real `(T, H, W)` array — the correct call for analysis that needs all
+    frames.
+  - The temperature UI's four stack-reading sites now use `materialize_stack()` instead of
+    `np.asarray()`. `__array__` still returns one frame, so napari display stays fast.
+  - Verified: `np.asarray(wrapper)` gives `ndim==2` (the bug) while `materialize_stack(wrapper)`
+    gives the correct `ndim==3` stack, byte-identical to the source; plain arrays pass through.
+### Note
+- The pixel-size regression on the same file was addressed in 1.5.253's companion fix (stale
+  `pixel_size_from_metadata` flag, see 1.5.252). A separate, deeper issue was noticed for
+  follow-up: the file_io load path computes a pixel size (with TIFF-tag recovery) but then
+  `update_metadata()` re-reads `physical_pixel_sizes` independently and can overwrite it with the
+  1.0 fallback for Micro-Manager OME-TIFFs — the two metadata paths should be reconciled.
+
+## [1.5.252] - 2026-07-07
+### Fixed (pixel-size gate hidden on an unscaled image after a stale metadata flag)
+- **The pixel-size gate now correctly appears when an image loads without a real physical pixel
+  size** (e.g. a Micro-Manager OME-TIFF whose resolution metadata is incomplete, where the
+  loader falls back to 1 µm/px² and warns "Resolution data incomplete, using default value of
+  1"). The metadata-provenance flag `pixel_size_from_metadata` was set correctly on the normal
+  and incomplete-metadata paths, but the two exception fallbacks in `update_metadata` set the
+  default scale **without clearing the flag** — so a `True` left over from a previously-loaded,
+  properly-scaled image made the gate think this image had a real scale and stay hidden. All
+  fallback paths now set `pixel_size_from_metadata = False`, so an unscaled image always prompts
+  for the pixel size. (`_valid_scale()` already treated a bare 1.0 as invalid; the bug was purely
+  the stale provenance flag.)
+
 ## [1.5.251] - 2026-07-07
 ### Changed (README Miniforge download link)
 - **The Miniforge install step now links to the official [conda-forge download

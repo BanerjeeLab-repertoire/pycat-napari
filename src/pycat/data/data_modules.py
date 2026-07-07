@@ -341,12 +341,17 @@ class BaseDataClass:
                 f"Attribute error encountered: {e}. Using default values."
             )
             self.data_repository['microns_per_pixel_sq'] = 1
+            # No real scale was obtained → clear the provenance flag so the
+            # pixel-size gate knows to prompt (a stale True from a prior load
+            # would otherwise suppress the gate on this unscaled image).
+            self.data_repository['pixel_size_from_metadata'] = False
             self.data_repository['metadata'] = {}
         except Exception as e:
             napari_show_warning(
                 f"Unexpected error while updating metadata: {e}. Using default values."
             )
             self.data_repository['microns_per_pixel_sq'] = 1
+            self.data_repository['pixel_size_from_metadata'] = False
             self.data_repository['metadata'] = {}
 
 

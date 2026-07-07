@@ -709,9 +709,22 @@ class _TiffPageStack:
 
     def __array__(self, dtype=None):
         # Deliberately read only the FIRST frame if napari asks for an array
-        # (e.g. thumbnail) — never materialise the whole stack.
+        # (e.g. thumbnail) — never materialise the whole stack. Analysis code
+        # that needs every frame must call as_full_array() (or index frames),
+        # NOT np.asarray(), which would otherwise silently get a 2D single
+        # frame and mis-detect the stack as non-3D.
         arr = np.asarray(self._pages[self._page_index(0)].asarray()).astype(np.float32)
         return arr if dtype is None else arr.astype(dtype)
+
+    def as_full_array(self, dtype=np.float32):
+        """Materialise the whole stack as a real (T, H, W) numpy array, read
+        one frame at a time. Use this for analysis that needs every frame — it
+        avoids the deliberately-truncated __array__ (which returns only frame 0
+        to keep napari's incidental array requests cheap)."""
+        out = np.empty(self.shape, dtype=dtype)
+        for t in range(self.shape[0]):
+            out[t] = self._read_frame(t).astype(dtype)
+        return out
 
     def __len__(self):
         return self.shape[0]
@@ -724,6 +737,34 @@ class _TiffPageStack:
             self._tif.close()
         except Exception:
             pass
+
+
+def materialize_stack(stack_like, dtype=np.float32):
+    """Return a real (T, H, W) numpy array from any stack-like layer data.
+
+    Handles PyCAT's lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS
+    readers) whose __array__ is deliberately truncated to one frame for napari's
+    sake, plus plain numpy/dask arrays. Analysis code that needs every frame
+    should call THIS, not np.asarray(layer.data) — the latter can silently
+    return a single 2D frame from a lazy wrapper and make a (T,H,W) stack look
+    2D (breaking shape checks and per-frame analysis).
+    """
+    # Lazy wrappers expose as_full_array() or are safely indexable by frame.
+    if hasattr(stack_like, 'as_full_array'):
+        return stack_like.as_full_array(dtype=dtype)
+    # dask
+    if hasattr(stack_like, 'compute'):
+        return np.asarray(stack_like.compute()).astype(dtype)
+    arr = np.asarray(stack_like)
+    # If __array__ truncated a 3D wrapper to 2D but it advertises a 3D shape,
+    # rebuild by indexing frames.
+    shp = getattr(stack_like, 'shape', None)
+    if arr.ndim == 2 and shp is not None and len(shp) == 3:
+        out = np.empty(shp, dtype=dtype)
+        for t in range(shp[0]):
+            out[t] = np.asarray(stack_like[t]).astype(dtype)
+        return out
+    return arr.astype(dtype)
 
 
 class _ZarrTYX_generic:
@@ -2109,6 +2150,18 @@ class FileIOClass:
             wc = getattr(self.central_manager, 'workflow_checklist', None)
             if wc is not None:
                 wc.reset()
+        except Exception:
+            pass
+
+        # Reset the batch recording so the recorded-steps list starts empty for
+        # the next dataset. The plain Clear button previously left the recording
+        # intact (only Save & Clear reset it via terminate_recording); both paths
+        # now reset it here. clear_recording() also flips the record toggle back
+        # to OFF and resyncs the toolbar button.
+        try:
+            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
+            if bp is not None:
+                bp.clear_recording()
         except Exception:
             pass
 

@@ -17,6 +17,7 @@ Steps
 from __future__ import annotations
 import os
 import numpy as np
+from pycat.file_io.file_io import materialize_stack
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -435,7 +436,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
-        stack = np.asarray(self.viewer.layers[sname].data)
+        stack = materialize_stack(self.viewer.layers[sname].data)
         if stack.ndim != 3:
             napari_show_warning("Reference-frame guessing needs a (T, H, W) stack."); return
         res = guess_clear_frame(stack)
@@ -461,7 +462,7 @@ class TemperatureDependentUI:
         temps = self._dr().get('temp_temperatures')
         if temps is None:
             napari_show_warning("Run Step 2 (Sync Temperatures) first."); return
-        stack = np.asarray(self.viewer.layers[sname].data)
+        stack = materialize_stack(self.viewer.layers[sname].data)
         if stack.ndim != 3:
             napari_show_warning("Temperature analysis needs a (T, H, W) stack."); return
 
@@ -603,7 +604,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return None
-        stack = np.asarray(self.viewer.layers[sname].data)
+        stack = materialize_stack(self.viewer.layers[sname].data)
         if stack.ndim != 3:
             napari_show_warning("Pattern correction needs a (T, H, W) stack."); return None
         return apply_static_pattern_correction(stack, self._ref_frame.value())
@@ -661,7 +662,7 @@ class TemperatureDependentUI:
         if not out:
             return
 
-        stack = np.asarray(self.viewer.layers[sname].data)
+        stack = materialize_stack(self.viewer.layers[sname].data)
         if self._export_corrected.isChecked():
             from pycat.toolbox.temperature_tools import apply_static_pattern_correction
             stack = apply_static_pattern_correction(stack, self._ref_frame.value())
