@@ -23,6 +23,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.259] - 2026-07-07
+### Fixed (ReadTheDocs build was pinned to Python 3.9)
+- **`.readthedocs.yaml` build environment updated from Python 3.9 to 3.12.** The docs build does
+  `pip install .` (the API reference uses autodoc, so PyCAT must be importable), but the build
+  Python was still 3.9 while the package now requires `>=3.12,<3.14` — so the docs build would fail
+  to install PyCAT, the same way a user on 3.9 can't. The build now runs on Python 3.12, matching
+  `pyproject.toml`. Needed for the corrected installation docs (1.5.256 / 1.5.258) to actually
+  publish to the live site.
+
+## [1.5.258] - 2026-07-07
+### Docs (Mac Apple Silicon: avoid the llvmlite source-build failure)
+- **Added Apple-Silicon install guidance to install `llvmlite` / `numba` from conda-forge before
+  pip-installing PyCAT** (README and installation.rst). On some Macs, `pip` can't find a prebuilt
+  `llvmlite` (a `numba` dependency) and falls back to compiling it from source, which fails with
+  `llvmlite needs CMake tools to build` when compiler tools aren't installed. Installing
+  `llvmlite` and `numba` from conda-forge first (they ship prebuilt Apple-Silicon binaries) avoids
+  the build entirely:
+  `conda install -c conda-forge llvmlite numba` then `pip install "pycat-napari[arm-mac]"`. The
+  note also documents the `cmake` fallback (`conda install -c conda-forge cmake llvmlite numba`)
+  for the rare case the source build is still attempted. Surfaced during a multi-user install
+  test.
+
+## [1.5.257] - 2026-07-07
+### Fixed (users loading data via napari's File → Open crashed the workflow)
+- **napari's native File menu is now hidden, and its Open actions disabled**, so data always
+  loads through PyCAT's ★ Open/Save File(s). Several test users instinctively reached for
+  napari's own File → Open, which routes data around PyCAT's channel-assignment / metadata
+  pipeline and then crashes the downstream workflow (the GUI closes to desktop). This complements
+  the visually-distinct ★ Open/Save File(s) menu and the existing file-drop handler (which already
+  routes drag-and-drop through PyCAT's loader).
+  - Hides napari's native **File** menu by default (View / Window / Plugins / Help are left
+    intact, so napari's console, docking, and help stay available).
+  - Belt-and-suspenders: disables any napari **Open / Open Files / Open Folder / Open as Stack**
+    action wherever it lives (menu, shortcut, command palette), with a tooltip pointing to PyCAT's
+    opener.
+  - Fully defensive: matches menus/actions by visible title (handling Qt's `&` mnemonic and case),
+    only ever targets napari-native menus (never PyCAT's own), and never raises if a future napari
+    version renames or restructures its menus — the menus simply stay as they were.
+
 ## [1.5.256] - 2026-07-07
 ### Fixed (stale Python 3.9 references in docs — caused users to build a 3.9 environment)
 - **The ReadTheDocs installation guide and conda recipe still instructed users to create a Python

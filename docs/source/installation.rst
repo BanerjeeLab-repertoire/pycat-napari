@@ -152,9 +152,21 @@ For Windows:
 
 For Mac M1/ARM:
 
+On Apple Silicon, first install ``llvmlite`` and ``numba`` from conda-forge (they
+ship prebuilt Apple-Silicon binaries), then install PyCAT:
+
 .. code-block:: bash
 
+   conda install -c conda-forge llvmlite numba
    pip install "pycat-napari[arm-mac]"
+
+.. note::
+   ``numba`` is a dependency. If ``pip`` cannot find a prebuilt ``llvmlite`` /
+   ``numba`` for your Mac it will try to compile them from source, which fails
+   with ``llvmlite needs CMake tools to build`` unless compiler tools are
+   installed. Installing them from conda-forge first avoids the build entirely.
+   If you still hit that error, add ``cmake`` to the conda install:
+   ``conda install -c conda-forge cmake llvmlite numba``.
 
 Optional Features
 ^^^^^^^^^^^^^^^^^

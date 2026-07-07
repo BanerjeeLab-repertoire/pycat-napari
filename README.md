@@ -139,9 +139,15 @@ pip install pycat-napari
 ```
 
 **Mac (Apple Silicon — M1/M2/M3):**
+
+On Apple Silicon, first install `llvmlite` and `numba` from conda-forge (they ship prebuilt Apple-Silicon binaries, so nothing has to compile), then install PyCAT:
+
 ```bash
+conda install -c conda-forge llvmlite numba
 pip install "pycat-napari[arm-mac]"
 ```
+
+> **Why?** `numba` is a dependency, and if `pip` can't find a prebuilt `llvmlite`/`numba` for your Mac it will try to *compile* them from source — which fails with `llvmlite needs CMake tools to build` unless you have compiler tools installed. Installing them from conda-forge first avoids the build entirely. (If you ever still hit that error, add `cmake` to the conda install: `conda install -c conda-forge cmake llvmlite numba`.)
 
 > On Windows, the app logo may not render perfectly — that's purely cosmetic and doesn't affect anything.
 
