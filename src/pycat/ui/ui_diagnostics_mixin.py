@@ -294,6 +294,174 @@ class _DiagnosticsWidgetsMixin:
         self._add_widget_to_layout_or_dock(w, layout, separate_widget,
                                             "Foreground Suppression Tuner")
 
+    def _add_temporal_enhancement_optimizer(self, layout=None, separate_widget=False):
+        """Compete temporally-aware enhancement strategies against a loaded
+        time-series and pick the one that best preserves the true intensity
+        trend across frames.
+
+        Per-frame CLAHE/LoG normalisation makes a brightening focus appear to
+        dim over time (and drops dim condensates once a bright one enters). This
+        tool runs several temporal strategies (per-frame baseline, pooled-stats
+        nn/nnn, windowed-mean, tri-planar), scores each by how well it preserves
+        the raw intensity trend, and lets you apply the winner as the session
+        default for time-series preprocessing.
+        """
+        from PyQt5.QtWidgets import (QFormLayout, QComboBox, QSpinBox,
+                                     QCheckBox, QLabel as _QLabel)
+        import napari
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Temporal Enhancement Optimizer', bold=True)
+        self.add_text_label(
+            outer,
+            'Per-frame CLAHE/LoG normalisation is per-frame adaptive, which is '
+            'only consistent across XY, not across time. For a correlated '
+            'time-series this makes a brightening focus look like it dims. This '
+            'tool competes several temporally-aware strategies (nn/nnn pooled '
+            'stats, windowed-mean, tri-planar) against your data and picks the '
+            'one that best preserves the true intensity trend.')
+
+        warn_lbl = _QLabel(
+            "<span style='color:#f0a500;font-size:9pt;'>\u26a0 Temporal "
+            "enhancement is valid only when neighbouring frames are correlated. "
+            "Run the correlation check below to confirm for your data.</span>")
+        warn_lbl.setWordWrap(True)
+        outer.addWidget(warn_lbl)
+
+        form = QFormLayout()
+        stack_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Time-series stack:", stack_dd)
+
+        override_cb = QCheckBox("Set window manually")
+        override_cb.setChecked(False)
+        form.addRow("", override_cb)
+        window_spin = QSpinBox(); window_spin.setRange(1, 5); window_spin.setValue(2)
+        window_spin.setToolTip("Temporal half-width: 1 = nearest neighbour, "
+                               "2 = nn + next-nearest.")
+        window_spin.setEnabled(False)
+        form.addRow("Window (frames):", window_spin)
+        override_cb.toggled.connect(window_spin.setEnabled)
+        outer.addLayout(form)
+
+        corr_lbl = _QLabel("")
+        corr_lbl.setWordWrap(True)
+        outer.addWidget(corr_lbl)
+
+        check_btn = QPushButton("Check temporal correlation")
+        check_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        def _check_corr():
+            import numpy as np
+            name = stack_dd.currentText()
+            if not name or name.lower() in ('none', 'select', '--'):
+                return
+            try:
+                data = np.asarray(self.viewer.layers[name].data)
+            except Exception:
+                return
+            if data.ndim != 3:
+                corr_lbl.setText("<span style='color:#d9534f;font-size:9pt;'>"
+                                 "Need a 3D (T,H,W) stack.</span>")
+                return
+            from pycat.toolbox.timeseries_condensate_tools import estimate_temporal_correlation
+            res = estimate_temporal_correlation(data)
+            colors = {'oversampled': '#5cb85c', 'moderate': '#f0a500',
+                      'undersampled': '#d9534f'}
+            c = colors.get(res['regime'], '#aaa')
+            mc = res.get('mean_correlation', float('nan'))
+            corr_lbl.setText(
+                "<span style='color:%s;font-size:9pt;'><b>%s</b> \u2014 mean r=%.2f. %s</span>"
+                % (c, res['regime'].upper(), mc, res['recommendation']))
+            warn_lbl.setVisible(res['regime'] not in ('oversampled', 'moderate'))
+        check_btn.clicked.connect(_check_corr)
+        outer.addWidget(check_btn)
+
+        results_lbl = _QLabel("")
+        results_lbl.setWordWrap(True)
+        outer.addWidget(results_lbl)
+
+        self._temporal_enh_winner = {}
+
+        run_btn = QPushButton("\u25b6  Run competition")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        def _run():
+            import numpy as np
+            from napari.utils.notifications import show_info, show_warning
+            name = stack_dd.currentText()
+            if not name or name.lower() in ('none', 'select', '--'):
+                show_warning("Select a time-series stack."); return
+            try:
+                data = np.asarray(self.viewer.layers[name].data).astype(np.float32)
+            except Exception as e:
+                show_warning("Could not read stack: %s" % e); return
+            if data.ndim != 3 or data.shape[0] < 3:
+                show_warning("Need a (T,H,W) stack with 3+ frames."); return
+            g0, g1 = float(data.min()), float(data.max())
+            if g1 > g0:
+                data = (data - g0) / (g1 - g0)
+            dr = self.central_manager.active_data_class.data_repository
+            ball_radius = int(dr.get('ball_radius', 15))
+            windows = [window_spin.value()] if override_cb.isChecked() else [1, 2]
+
+            from pycat.toolbox.temporal_enhancement_tools import compete_methods
+            run_btn.setEnabled(False); run_btn.setText("Running competition...")
+            try:
+                results = compete_methods(data, ball_radius, windows=windows)
+            except Exception as e:
+                import traceback; print(traceback.format_exc())
+                show_warning("Competition failed: %s - see terminal." % e)
+                run_btn.setEnabled(True); run_btn.setText("\u25b6  Run competition")
+                return
+            run_btn.setEnabled(True); run_btn.setText("\u25b6  Run competition")
+
+            header = ("<b>Ranked by trend preservation (best first):</b>"
+                      "<table cellpadding='3'>"
+                      "<tr><td><b>#</b></td><td><b>Method</b></td><td><b>Win</b></td>"
+                      "<td><b>Spearman</b></td><td><b>Monotonic</b></td>"
+                      "<td><b>Score</b></td></tr>")
+            body = []
+            for i, r in enumerate(results, 1):
+                if r['method'] == 'per_frame':
+                    tag = "per_frame (baseline)"
+                else:
+                    tag = "%s (w%d)" % (r['method'], r['window'])
+                win_mark = "BEST" if i == 1 else ""
+                body.append(
+                    "<tr><td>%d</td><td>%s</td><td>%s</td><td>%.3f</td><td>%.2f</td><td>%.3f</td></tr>"
+                    % (i, tag, win_mark, r['spearman'], r['monotonic_match'], r['composite']))
+            results_lbl.setText(header + "".join(body) + "</table>")
+
+            best = results[0]
+            self._temporal_enh_winner = {
+                'method': best['method'], 'window': int(best['window'])}
+            wname = "Temporal-Enhanced [%s] %s" % (best['method'], name)
+            if wname in self.viewer.layers:
+                self.viewer.layers[wname].data = best['enhanced']
+            else:
+                from pycat.ui.ui_utils import add_image_with_default_colormap
+                add_image_with_default_colormap(best['enhanced'], self.viewer, name=wname)
+            show_info("Winner: %s (w%d) - spearman %.3f, monotonic %.2f."
+                      % (best['method'], best['window'], best['spearman'], best['monotonic_match']))
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+
+        apply_btn = QPushButton("Apply winner as session default")
+        apply_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        def _apply():
+            from napari.utils.notifications import show_info, show_warning
+            w = getattr(self, '_temporal_enh_winner', {})
+            if not w:
+                show_warning("Run the competition first."); return
+            dr = self.central_manager.active_data_class.data_repository
+            dr['temporal_enhancement'] = dict(w)
+            show_info("Time-series preprocessing will use temporal enhancement: %s (w%d)."
+                      % (w['method'], w['window']))
+        apply_btn.clicked.connect(_apply)
+        outer.addWidget(apply_btn)
+
+        wdt = QWidget(); wdt.setLayout(outer)
+        self._add_widget_to_layout_or_dock(wdt, layout, separate_widget,
+                                            "Temporal Enhancement Optimizer")
+
     def _add_segmentation_speed_comparison(self, layout=None, separate_widget=False):
         """A/B widget: run condensate segmentation with the original vs the
         windowed (fast) refinement filter, timing each and verifying the refined

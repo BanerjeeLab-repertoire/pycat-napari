@@ -23,6 +23,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.247] - 2026-07-07
+### Changed (time-series first-run speedup — skip the source pre-copy)
+- **Time-series analysis no longer pre-copies the input stack to a temp zarr when the source is
+  a TIFF or an existing filesystem zarr (e.g. IMS).** Previously, before any processing, every
+  frame was read from the source and written to a temporary float32 zarr so the parallel workers
+  could open it by path — then each worker re-read those frames. On a first run (the debugging
+  case) that meant reading every frame twice and writing it once purely as copy overhead, before
+  real work began. Workers now read frames directly:
+  - **TIFF** (via the `_TiffPageStack` reader): each worker opens its own `tifffile` handle and
+    seeks to its page — no whole-stack copy.
+  - **Filesystem zarr / IMS-derived**: used directly, as before.
+  - **Other sources** (numpy, dask, non-seekable): still materialised to a temp zarr (unchanged).
+  - The global-range normalisation the copy used to apply is preserved — computed once up front
+    (a cheap frame-at-a-time min/max pass) and applied inside each worker, so intensity trends
+    across time are still preserved. Verified byte-equivalent to the old copy-then-read path on a
+    synthetic brightening-focus stack.
+  - **Safe fallback:** if a direct TIFF read fails mid-run (locked file, network hiccup,
+    unexpected page layout), the run materialises the source to a temp zarr and retries once.
+  - The preprocessed and background-removed output stacks are still written and shown as layers
+    exactly as before — only the redundant *input* copy is removed.
+  - Pseudo-3D temporal pre-pass (opt-in) still materialises a zarr when enabled, since it needs
+    the whole stack as an array anyway.
+- This is the first module to get the source-copy skip; other modules can adopt the same
+  `_source_descriptor` pattern later.
+
+## [1.5.246] - 2026-07-07
+### Fixed (TIFF lazy reader crashed on slice indexing)
+- **"Failed to open stack: int() argument must be … not 'slice'"** — the new `_TiffPageStack`
+  lazy TIFF reader (1.5.245) assumed the time index was always a scalar and did `int(t_idx)`,
+  which crashed when napari or downstream code indexed the T axis with a slice (`[:]`, `[10:15]`)
+  or a list/array. It now handles all indexing patterns: scalar int (the fast single-page
+  scrubbing path), numpy integer types, slices (reads the requested frame range), fancy
+  list/array indices, and any of these combined with a spatial sub-index. Verified against the
+  full set of napari access patterns.
+
+## [1.5.245] - 2026-07-07
+### Fixed (laggy scrubbing through TIFF/OME-TIFF time-series — corrected approach)
+- **TIFF/OME-TIFF (incl. Micro-Manager MMStack) time-series now scrub smoothly, staying fully
+  lazy.** Two independent causes were fixed, keeping the intended design (open the file once,
+  read exactly one frame per slider move — no eager copy, no materialisation):
+  - **Whole-stack read on every slider move (main cause):** the generic-stack layers were added
+    without pinned `contrast_limits`, so napari auto-estimated the display range by calling
+    `np.asarray()` on the lazy wrapper — which read the ENTIRE stack — on each frame change. The
+    TIFF/CZI paths now pin `contrast_limits` from the first frame (the IMS path already did
+    this), so navigation never triggers a whole-stack read.
+  - **Slow per-frame reads through AICSImage:** a Micro-Manager OME-TIFF read via AICSImage's
+    dask reader walks the OME plane-map on every frame, so scrubbing a large MMStack lags even
+    when only one frame is requested. TIFF time-series now read frames straight from the
+    multipage TIFF via a new lazy `_TiffPageStack` wrapper (`tifffile` per-page seek — one page
+    per read, no dask graph, no copy), matching the smooth per-frame behaviour of the native IMS
+    zarr path. The wrapper prefers the OME **series** page sequence so it spans multi-file
+    MMStack sets (`_1.ome.tif`, `_2.ome.tif`, …); it falls back to the AICSImage reader if the
+    page layout is ambiguous (e.g. an unmodelled multi-channel order) or tifffile can't open the
+    file. CZI keeps the AICSImage path.
+### Reverted
+- The v1.5.244 approach (materialising the whole stack to a local float32 zarr on load) is
+  removed: it defeated the lazy-loading design, and for an 8-bit 3800-frame MMStack it would
+  have written ~23.6 GB (4x the 5.9 GB source) to disk up front. The corrected fix above keeps
+  reads lazy and one-frame-at-a-time.
+
+## [1.5.244] - 2026-07-07
+### Superseded by 1.5.245
+- (Materialise-to-zarr approach — replaced by the lazy `_TiffPageStack` reader + pinned
+  contrast_limits in 1.5.245.)
+
+## [1.5.243] - 2026-07-07
+### Added (Temporal Enhancement Optimizer)
+- **New "Temporal Enhancement Optimizer" diagnostic widget** (Image Processing menu) that
+  competes temporally-aware enhancement strategies against a loaded time-series and picks the
+  one that best preserves the true intensity trend across frames. Motivation: per-frame
+  CLAHE/LoG normalization is per-frame adaptive — consistent across XY but not across time — so
+  in a correlated time-series a brightening focus can appear to dim, and dim condensates drop
+  out once a brighter one enters the field.
+  - Strategies competed: `per_frame` (baseline control), `pooled_stats` (nn/nnn — scale from the
+    pooled temporal window, enhance each frame's own pixels), `windowed_mean` (temporally-
+    weighted average then enhance), and `triplanar` (tri-planar XY/XT/YT coupling).
+  - Each is scored by trend preservation (Spearman rank correlation and direction-of-change
+    agreement between the raw and enhanced per-frame condensate signal), with a light cost
+    penalty so the cheapest method that does the job wins ties. Results are shown as a ranked
+    table and the winning enhanced stack is added as a layer for inspection.
+  - Window is optimized against the data by default (competes ±1 and ±2); a "Set window
+    manually" checkbox reveals a spin box to override.
+  - A validity warning notes temporal enhancement is only valid with adequate frame-to-frame
+    correlation; a "Check temporal correlation" button runs the estimator and hides the warning
+    if the data is in a correlated (oversampled/moderate) regime.
+  - "Apply winner as session default" stores the choice; a tri-planar/windowed winner is honored
+    by the time-series preprocessing step via the existing pseudo-3D temporal path.
+  - New module `temporal_enhancement_tools.py` (methods + scoring); verified that the scoring
+    correctly ranks trend-preserving enhancement above per-frame normalization on a synthetic
+    growing-focus stack.
+### Note
+- Full pipeline integration of the per-frame-worker strategies (`pooled_stats`, non-triplanar
+  windowed) is staged for a follow-up; the optimizer itself runs standalone and produces the
+  enhanced layer plus the winning configuration now.
+
+## [1.5.242] - 2026-07-06
+### Fixed (time-series: preprocessing re-normalized every frame per-frame, dimming later frames)
+- **The preprocessing/background-removal worker no longer re-normalizes each frame by its own
+  min/max.** Even after 1.5.240 put the *source* frames on one global [0,1] scale,
+  `pre_process_image` still divided each frame by its own max internally, and the worker did a
+  second per-frame min/max normalization before background removal. Both reintroduced the
+  intensity-trend distortion: as condensates brighten over time, the per-frame max (the
+  denominator) rises, so later frames appear DIMMER in the preprocessed/enhanced-background
+  stack even though the raw condensates are brighter (the reported "frame 4 dimmer than frame 3"
+  and dim condensates dropping out once something brighter appears).
+  - `pre_process_image` gained an optional `norm_max` parameter. When `None` (all 2D callers),
+    behavior is byte-identical to before. The time-series worker passes the stack's global max,
+    so every frame is normalized by the same scale.
+  - Removed the redundant second per-frame normalization in the worker.
+  - Verified: 2D path unchanged (norm_max=None); time-series frames now share one scale,
+    preserving the true intensity trend across time.
+
 ## [1.5.241] - 2026-07-06
 ### Fixed (time-series puncta segmentation now matches the 2D fluorescence path)
 Puncta detection in the time-series workflow was weaker than the validated 2D path because two

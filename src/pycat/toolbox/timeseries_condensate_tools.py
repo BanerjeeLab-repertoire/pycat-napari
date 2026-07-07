@@ -322,6 +322,38 @@ class _ZarrStack:
 # Parallel frame processing helpers
 # ---------------------------------------------------------------------------
 
+def _worker_read_frame(t, src_desc):
+    """Read frame t inside a worker subprocess, from whatever source the
+    descriptor names. Top-level + picklable so ProcessPoolExecutor can use it.
+
+    Supported descriptors:
+      {'kind': 'zarr', 'path': <dir>}                    filesystem zarr store
+      {'kind': 'tiff', 'path': <file>, 'nc': N, 'ci': C} multipage TIFF, page seek
+    Returns a float32 2D array (NOT yet globally normalised — the caller applies
+    the global range).
+    """
+    import numpy as np
+    kind = src_desc.get('kind')
+    if kind == 'tiff':
+        import tifffile as _tf
+        # Open per-call: TIFF handles are cheap to open and this keeps the
+        # worker stateless (a persistent handle can't be pickled across the
+        # pool). tifffile memory-maps, so repeated opens are not full reads.
+        with _tf.TiffFile(src_desc['path']) as _tif:
+            try:
+                pages = _tif.series[0].pages
+            except Exception:
+                pages = _tif.pages
+            nc = int(src_desc.get('nc', 1)) or 1
+            ci = int(src_desc.get('ci', 0))
+            page = pages[int(t) * nc + ci]
+            return np.asarray(page.asarray()).astype(np.float32)
+    # default: zarr
+    import zarr as _zarr
+    src = _zarr.open(src_desc['path'], mode='r')
+    return np.asarray(src[t]).astype(np.float32)
+
+
 def _process_frame_worker(args):
     """
     Top-level picklable function for ProcessPoolExecutor.
@@ -337,14 +369,22 @@ def _process_frame_worker(args):
                             category=UserWarning)
     os.environ.setdefault("CUDA_PATH", "")  # prevents CuPy from searching
 
-    t, src_zarr_path, process_fn_name, process_fn_kwargs = args
+    t, src_desc, process_fn_name, process_fn_kwargs = args
 
     import numpy as np
-    import zarr as _zarr
 
-    src = _zarr.open(src_zarr_path, mode='r')
-    frame = np.asarray(src[t]).astype(np.float32)
-    # Source was already normalised to [0,1] by _prepare_source_zarr
+    # src_desc describes how this subprocess should read frame t directly,
+    # avoiding a pre-copy of the whole stack into a temp zarr on first run.
+    #   {'kind': 'zarr',  'path': ...}                     — filesystem zarr
+    #   {'kind': 'tiff',  'path': ..., 'nc':.., 'ci':..}   — multipage TIFF page seek
+    # A global normalisation range is applied here (the copy used to do it).
+    frame = _worker_read_frame(t, src_desc)
+    _grange = process_fn_kwargs.get('_global_range')
+    if _grange is not None:
+        _gmn, _gmx = float(_grange[0]), float(_grange[1])
+        if _gmx > _gmn:
+            frame = np.clip((frame - _gmn) / (_gmx - _gmn + 1e-8), 0.0, 1.0)
+    # else: source descriptor already yields [0,1] (pre-materialised zarr path)
 
     if process_fn_name == 'preprocess_and_bg_remove':
         # Combined single-pass mode: compute both stages from one read of
@@ -356,19 +396,14 @@ def _process_frame_worker(args):
             pre_process_image, rb_gaussian_bg_removal_with_edge_enhancement)
         preproc_result = pre_process_image(frame,
                                            process_fn_kwargs['ball_radius'],
-                                           process_fn_kwargs['window_size'])
+                                           process_fn_kwargs['window_size'],
+                                           norm_max=process_fn_kwargs.get('norm_max'))
         preproc_result = np.asarray(preproc_result).astype(np.float32)
-        # Re-normalise preproc output to [0,1] per frame before passing to
-        # background removal — matching what the old two-pass path did
-        # implicitly via _read_source_frame when Pass 2 read back the preproc
-        # zarr. pre_process_image output is NOT guaranteed to be in [0,1]
-        # (CLAHE, tophat, wavelet all can shift the range), so without this
-        # step some frames arrive at rb_gaussian_bg_removal_with_edge_enhancement
-        # at a different absolute scale than others, producing the inconsistent
-        # intensity patterns visible in the enhanced background-removed stack.
-        _pr_mn, _pr_mx = preproc_result.min(), preproc_result.max()
-        if _pr_mx > _pr_mn:
-            preproc_result = (preproc_result - _pr_mn) / (_pr_mx - _pr_mn)
+        # NOTE: no per-frame min/max renormalisation here. pre_process_image was
+        # given the stack's global norm_max, so every frame is already on one
+        # consistent scale. Re-normalising per frame (as this code used to) would
+        # reintroduce the intensity-trend distortion — a brightening focus would
+        # make later frames look dimmer because the per-frame max rises with it.
         bgrem_result = rb_gaussian_bg_removal_with_edge_enhancement(
             preproc_result, process_fn_kwargs['ball_radius'])
         return t, preproc_result, np.asarray(bgrem_result).astype(np.float32)
@@ -377,7 +412,8 @@ def _process_frame_worker(args):
         from pycat.toolbox.image_processing_tools import pre_process_image
         result = pre_process_image(frame,
                                    process_fn_kwargs['ball_radius'],
-                                   process_fn_kwargs['window_size'])
+                                   process_fn_kwargs['window_size'],
+                                   norm_max=process_fn_kwargs.get('norm_max'))
     elif process_fn_name == 'bg_remove':
         from pycat.toolbox.image_processing_tools import (
             rb_gaussian_bg_removal_with_edge_enhancement)
@@ -422,6 +458,50 @@ class _StackProcessWorker(QThread):
         self._pseudo3d_temporal = pseudo3d_temporal
         import os
         self._n_workers = n_workers or min(8, max(1, os.cpu_count() - 1))
+
+    def _source_descriptor(self):
+        """Return a picklable descriptor telling workers how to read frames
+        directly, skipping the whole-stack pre-copy to zarr when the source is
+        already a seekable file (a TIFF via _TiffPageStack, or a filesystem
+        zarr such as IMS). Falls back to materialising a temp zarr for anything
+        else (numpy/dask/non-seekable).
+
+        Returns (descriptor_dict, needs_global_range_bool). When the source is a
+        pre-materialised zarr the frames are already [0,1]-normalised, so the
+        worker skips its own normalisation (needs_global_range=False).
+        """
+        import os
+        import zarr as _zarr
+
+        src = self._stack_data
+
+        # 1) TIFF-backed lazy reader (_TiffPageStack) — read pages directly.
+        #    Detect by duck-typing the attributes it exposes.
+        _tiff_path = getattr(src, '_path', None)
+        if (_tiff_path and isinstance(_tiff_path, str)
+                and os.path.isfile(_tiff_path)
+                and _tiff_path.lower().endswith(('.tif', '.tiff'))):
+            desc = {'kind': 'tiff', 'path': _tiff_path,
+                    'nc': int(getattr(src, '_nc', 1) or 1),
+                    'ci': int(getattr(src, '_ci', 0))}
+            return desc, True   # workers normalise with the global range
+
+        # 2) Already a filesystem zarr directory (e.g. IMS-derived) — use as-is.
+        src_zarr_path = None
+        if isinstance(src, str) and os.path.isdir(src):
+            src_zarr_path = src
+        elif hasattr(src, 'store') and isinstance(
+                getattr(src, 'store', None), _zarr.storage.DirectoryStore):
+            src_zarr_path = src.store.path
+        if src_zarr_path and os.path.isdir(src_zarr_path):
+            # A raw filesystem zarr is NOT guaranteed [0,1]-normalised, so the
+            # workers still apply the global range (cheap; preserves the trend).
+            return {'kind': 'zarr', 'path': src_zarr_path}, True
+
+        # 3) Fallback: materialise to a temp zarr (already [0,1]-normalised, so
+        #    workers do NOT re-normalise).
+        tmp_path = self._prepare_source_zarr()
+        return {'kind': 'zarr', 'path': tmp_path}, False
 
     def _prepare_source_zarr(self):
         """
@@ -492,8 +572,13 @@ class _StackProcessWorker(QThread):
                     dtype=np.float32,
                 )
 
-            # Ensure source is a filesystem zarr that subprocesses can open
-            src_path = self._prepare_source_zarr()
+            # Get a source descriptor. For TIFF / filesystem-zarr sources this
+            # skips the whole-stack pre-copy entirely (workers read frames
+            # directly), which is the bulk of the first-run materialisation lag.
+            src_desc, _needs_grange = self._source_descriptor()
+            # src_path kept for the pseudo-3D pre-pass below, which still needs a
+            # concrete zarr; only materialise for that when actually enabled.
+            src_path = src_desc['path'] if src_desc.get('kind') == 'zarr' else None
 
             # ── Pseudo-3D temporal pre-pass ───────────────────────────────
             # Same technique as the Z-stack pipeline (see bg_removal_3d),
@@ -508,6 +593,14 @@ class _StackProcessWorker(QThread):
             # pre-smoothed source instead of the raw one.
             if self._pseudo3d_temporal:
                 from pycat.toolbox.image_processing_tools import gaussian_smooth_3d_pseudo
+                # The pseudo-3D pre-pass needs the whole stack as an array. If
+                # we're on a direct-read path (no src_path), materialise the
+                # source zarr now — this branch is opt-in and already reads the
+                # whole stack, so the copy is not extra work here.
+                if src_path is None:
+                    src_path = self._prepare_source_zarr()
+                    src_desc = {'kind': 'zarr', 'path': src_path}
+                    _needs_grange = False
                 raw_src = _zarr.open(src_path, mode='r')
                 whole = np.asarray(raw_src).astype(np.float32)
                 ball_radius = self._process_fn_kwargs.get('ball_radius', 15)
@@ -522,9 +615,47 @@ class _StackProcessWorker(QThread):
                     chunks=(1, self._H, self._W), dtype=np.float32)
                 z_smoothed[:] = smoothed
                 src_path = smoothed_path
+                src_desc = {'kind': 'zarr', 'path': smoothed_path}
+                _needs_grange = True  # smoothed store is [0,1] per-stack already
+
+            # Global normalisation range. Workers normalise every frame by ONE
+            # scale (a brightening focus must not make later frames look dimmer).
+            # For a direct-read source (no pre-copy) compute it lazily here — one
+            # cheap frame-at-a-time min/max pass, far cheaper than a full copy.
+            _kwargs_with_norm = dict(self._process_fn_kwargs)
+            if _needs_grange:
+                if src_desc.get('kind') == 'zarr':
+                    try:
+                        _zs = _zarr.open(src_desc['path'], mode='r')
+                        _g0 = float('inf'); _g1 = float('-inf')
+                        for _t in range(self._n_t):
+                            _a = np.asarray(_zs[_t])
+                            _g0 = min(_g0, float(_a.min()))
+                            _g1 = max(_g1, float(_a.max()))
+                    except Exception:
+                        _g0, _g1 = 0.0, 1.0
+                else:  # tiff — read frames via the worker helper
+                    _g0 = float('inf'); _g1 = float('-inf')
+                    for _t in range(self._n_t):
+                        _a = _worker_read_frame(_t, src_desc)
+                        _g0 = min(_g0, float(_a.min()))
+                        _g1 = max(_g1, float(_a.max()))
+                if not np.isfinite(_g0) or not np.isfinite(_g1) or _g1 <= _g0:
+                    _g0, _g1 = 0.0, 1.0
+                _kwargs_with_norm['_global_range'] = (_g0, _g1)
+                _kwargs_with_norm['norm_max'] = 1.0  # frames arrive in [0,1]
+            else:
+                # Pre-materialised zarr: frames already [0,1]; norm_max stays the
+                # stack global max for pre_process_image's internal scaling.
+                try:
+                    _src_for_max = _zarr.open(src_desc['path'], mode='r')
+                    _global_norm_max = float(np.asarray(_src_for_max[:]).max())
+                except Exception:
+                    _global_norm_max = 1.0
+                _kwargs_with_norm['norm_max'] = _global_norm_max if _global_norm_max > 0 else 1.0
 
             args = [
-                (t, src_path, self._process_fn_name, self._process_fn_kwargs)
+                (t, src_desc, self._process_fn_name, _kwargs_with_norm)
                 for t in range(self._n_t)
             ]
 
@@ -533,22 +664,56 @@ class _StackProcessWorker(QThread):
             total_progress = self._n_t * (3 if self._pseudo3d_temporal else 2)
             batch_size = self._n_workers * 4
 
-            with ProcessPoolExecutor(max_workers=self._n_workers) as executor:
-                for batch_start in range(0, self._n_t, batch_size):
-                    batch = args[batch_start:batch_start + batch_size]
-                    futures = {executor.submit(_process_frame_worker, a): a[0]
-                               for a in batch}
-                    for future in as_completed(futures):
-                        result = future.result()
-                        if combined_mode:
-                            t_idx, preproc_res, bgrem_res = result
-                            z[t_idx]  = preproc_res
-                            z2[t_idx] = bgrem_res
-                        else:
-                            t_idx, res = result
-                            z[t_idx] = res
-                        done += 1
-                        self.progress.emit(offset + done, total_progress)
+            def _dispatch(dispatch_args):
+                """Run the parallel per-frame pass. Returns True on success.
+                Raises to the caller if a worker fails."""
+                nonlocal done
+                with ProcessPoolExecutor(max_workers=self._n_workers) as executor:
+                    for batch_start in range(0, self._n_t, batch_size):
+                        batch = dispatch_args[batch_start:batch_start + batch_size]
+                        futures = {executor.submit(_process_frame_worker, a): a[0]
+                                   for a in batch}
+                        for future in as_completed(futures):
+                            result = future.result()
+                            if combined_mode:
+                                t_idx, preproc_res, bgrem_res = result
+                                z[t_idx]  = preproc_res
+                                z2[t_idx] = bgrem_res
+                            else:
+                                t_idx, res = result
+                                z[t_idx] = res
+                            done += 1
+                            self.progress.emit(offset + done, total_progress)
+
+            try:
+                _dispatch(args)
+            except Exception as _dispatch_err:
+                # Safe fallback: if a direct-read source (TIFF) failed mid-run
+                # (locked file, network hiccup, unexpected page layout),
+                # materialise the source to a temp zarr and retry once. A zarr
+                # source that failed is a real error and re-raises.
+                if src_desc.get('kind') == 'tiff':
+                    print("[PyCAT TimeSeries] Direct TIFF read failed mid-run "
+                          f"({_dispatch_err}); falling back to zarr copy and "
+                          "retrying.")
+                    _fallback_path = self._prepare_source_zarr()
+                    _fb_desc = {'kind': 'zarr', 'path': _fallback_path}
+                    # Pre-materialised zarr is already [0,1]; drop the worker-side
+                    # global-range normalisation and use norm_max instead.
+                    _fb_kwargs = dict(_kwargs_with_norm)
+                    _fb_kwargs.pop('_global_range', None)
+                    try:
+                        _fbmax = float(np.asarray(
+                            _zarr.open(_fallback_path, mode='r')[:]).max())
+                    except Exception:
+                        _fbmax = 1.0
+                    _fb_kwargs['norm_max'] = _fbmax if _fbmax > 0 else 1.0
+                    done = 0
+                    args = [(t, _fb_desc, self._process_fn_name, _fb_kwargs)
+                            for t in range(self._n_t)]
+                    _dispatch(args)
+                else:
+                    raise
 
             # ── Pseudo-3D temporal post-pass ──────────────────────────────
             # Tri-planar Gabor edge-enhancement on the whole output stack,
@@ -1058,12 +1223,25 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                                          colormap=colormap)
             setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
 
+            # Honor an applied Temporal Enhancement Optimizer choice: a
+            # tri-planar / windowed winner maps onto the existing pseudo-3D
+            # temporal path (temporally-coupled pre-smoothing). Per-frame /
+            # pooled_stats winners leave the standard per-frame path in place.
+            _te = {}
+            try:
+                _te = ui_instance.central_manager.active_data_class.data_repository.get(
+                    'temporal_enhancement', {}) or {}
+            except Exception:
+                _te = {}
+            _te_triplanar = _te.get('method') in ('triplanar', 'windowed_mean')
+            _use_pseudo3d = pseudo3d_temporal_cb.isChecked() or _te_triplanar
+
             worker = _StackProcessWorker(
                 source, zarr_path, fn_name, fn_kwargs, n_t, H, W,
-                pseudo3d_temporal=pseudo3d_temporal_cb.isChecked())
+                pseudo3d_temporal=_use_pseudo3d)
             ui_instance._ts_workers.append(worker)
 
-            _n_stages = 3 if pseudo3d_temporal_cb.isChecked() else 2
+            _n_stages = 3 if _use_pseudo3d else 2
             prog_bar.setValue(0)
             prog_bar.setMaximum(n_t * _n_stages)
             prog_bar.setVisible(True)

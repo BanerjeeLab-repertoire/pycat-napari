@@ -640,6 +640,92 @@ class _ImsReaderTZYX:
         return self.shape[0]
 
 
+class _TiffPageStack:
+    """Lazy (T, Y, X) wrapper that reads ONE frame at a time straight from a
+    multipage TIFF via tifffile's page reader.
+
+    This is the fast path for Micro-Manager / OME-TIFF time-series. AICSImage's
+    dask reader consults the OME plane-map on every frame read, so scrubbing a
+    large MMStack lags badly; a plain `TiffFile.pages[t].asarray()` is a direct
+    seek+read of a single page (no dask graph, no OME-map walk, no copy of the
+    whole stack), which matches the smooth per-frame behaviour of the native IMS
+    zarr path. The file handle is kept open for the life of the wrapper.
+    """
+    def __init__(self, tiff_path, n_frames, H, W, dtype, channel_idx=0,
+                 n_channels=1):
+        import tifffile as _tf
+        self._path   = tiff_path
+        self._tif    = _tf.TiffFile(tiff_path)
+        # Prefer the SERIES page sequence: for a Micro-Manager MMStack split
+        # across sibling files (_1.ome.tif, _2.ome.tif, …) the OME series spans
+        # the whole set, whereas TiffFile.pages only sees this one file. Fall
+        # back to this file's pages if the series is unavailable.
+        try:
+            self._pages = self._tif.series[0].pages
+        except Exception:
+            self._pages = self._tif.pages
+        self._nc     = max(1, int(n_channels))
+        self._ci     = int(channel_idx)
+        self.shape   = (int(n_frames), int(H), int(W))
+        self.dtype   = np.dtype('float32')
+        self.ndim    = 3
+
+    def _page_index(self, t):
+        # Interleaved channels are stored as consecutive pages per timepoint.
+        return int(t) * self._nc + self._ci
+
+    def _read_frame(self, t):
+        arr = np.asarray(self._pages[self._page_index(t)].asarray())
+        return arr.astype(np.float32)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            t_idx, spatial = idx[0], idx[1:]
+        else:
+            t_idx, spatial = idx, ()
+
+        # napari (and downstream code) may index the T axis with an int (one
+        # frame — the scrubbing case), a slice (a range or the whole stack), or
+        # a fancy index. Handle each; only the int case is the fast per-frame
+        # read, but slices must not crash (the previous version did int(slice)).
+        if isinstance(t_idx, slice):
+            t_range = range(*t_idx.indices(self.shape[0]))
+            frames = np.stack([self._read_frame(t) for t in t_range], axis=0) \
+                if len(t_range) else np.empty((0,) + self.shape[1:], np.float32)
+            if spatial:
+                return frames[(slice(None),) + spatial]
+            return frames
+        if isinstance(t_idx, (list, tuple, np.ndarray)):
+            frames = np.stack([self._read_frame(int(t)) for t in t_idx], axis=0)
+            if spatial:
+                return frames[(slice(None),) + spatial]
+            return frames
+
+        # Scalar index → single frame (the common, fast path).
+        arr = self._read_frame(t_idx)
+        if spatial:
+            return arr[spatial]
+        return arr
+
+    def __array__(self, dtype=None):
+        # Deliberately read only the FIRST frame if napari asks for an array
+        # (e.g. thumbnail) — never materialise the whole stack.
+        arr = np.asarray(self._pages[self._page_index(0)].asarray()).astype(np.float32)
+        return arr if dtype is None else arr.astype(dtype)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def transpose(self, *axes):
+        return self.__getitem__(0)[np.newaxis]
+
+    def close(self):
+        try:
+            self._tif.close()
+        except Exception:
+            pass
+
+
 class _ZarrTYX_generic:
     """
     Lightweight napari-compatible wrapper around a plain zarr Array
@@ -1448,14 +1534,58 @@ class FileIOClass:
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
 
                 elif n_z == 1:
-                    # Pure time series (T, Y, X) — wrap the dask array so
-                    # frames load on demand (lazy; no eager copy to disk).
+                    # Pure time series (T, Y, X). AICSImage's dask array is lazy
+                    # but SLOW to scrub: indexing it per slider-move re-executes
+                    # the dask/reader graph for that frame, re-decoding through
+                    # the TIFF/CZI backend every time — so scrubbing a modest
+                    # TIFF lags badly even though an IMS (native zarr random
+                    # access) scrolls smoothly. Materialize once, frame-by-frame,
+                    # into an on-disk zarr store (memory-bounded — never holds
+                    # the whole stack in RAM) so subsequent frame reads are fast
+                    # zarr random access, matching the IMS path.
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
                     dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
-                    wrapper = _ZarrTYX_generic(dask_arr)
-                    self._stack_lazy_refs.append((image, dask_arr))
-                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
-                                          colormap=_ch_colormap)
+                    # Lazy by design: pull exactly one frame per slider move —
+                    # no eager copy. For TIFF/OME-TIFF (incl. Micro-Manager
+                    # MMStack) read frames straight from the multipage TIFF via
+                    # tifffile, which is a direct per-page seek and far faster to
+                    # scrub than AICSImage's dask reader (which walks the OME
+                    # plane-map on every frame). CZI has no tifffile path, so it
+                    # keeps the dask wrapper.
+                    wrapper = None
+                    if ext in ('.tif', '.tiff'):
+                        try:
+                            wrapper = _TiffPageStack(
+                                file_path, n_t, H, W, dask_arr.dtype,
+                                channel_idx=channel_idx, n_channels=n_c)
+                            # Sanity check: the page count must be consistent
+                            # with (frames x channels). If a multi-channel MM
+                            # file uses a page order we don't model, fall back to
+                            # the AICSImage reader rather than show wrong frames.
+                            _npages = len(wrapper._pages)
+                            if n_c > 1 and _npages < n_t * n_c:
+                                wrapper.close()
+                                wrapper = None
+                        except Exception as _te:
+                            debug_log("file_io: tifffile page reader failed, "
+                                      "using AICSImage dask wrapper", _te)
+                            wrapper = None
+                    if wrapper is None:
+                        wrapper = _ZarrTYX_generic(dask_arr)
+                        self._stack_lazy_refs.append((image, dask_arr))
+                    else:
+                        self._stack_lazy_refs.append(wrapper)  # keep handle open
+                    # Pin contrast_limits from the first frame. Without this,
+                    # napari auto-estimates the display range by calling
+                    # np.asarray() on the whole wrapper (__array__), which
+                    # materialises EVERY frame on each slider move — the real
+                    # cause of TIFF/CZI scrubbing lag (the IMS path already does
+                    # this; the generic path did not).
+                    _add_kw = dict(name=layer_name, colormap=_ch_colormap)
+                    _clim = _lazy_contrast_limits(wrapper)
+                    if _clim is not None:
+                        _add_kw['contrast_limits'] = _clim
+                    _stack_layer = self.viewer.add_image(wrapper, **_add_kw)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
