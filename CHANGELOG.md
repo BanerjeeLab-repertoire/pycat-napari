@@ -23,6 +23,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.256] - 2026-07-07
+### Fixed (stale Python 3.9 references in docs — caused users to build a 3.9 environment)
+- **The ReadTheDocs installation guide and conda recipe still instructed users to create a Python
+  3.9 environment**, contradicting the actual requirement (`pyproject.toml`: `>=3.12,<3.14`) and
+  the main README (which was already correct at 3.12). A multi-user install test surfaced this: a
+  user who followed the docs ended up in a Python 3.9 environment. Updated to Python 3.12
+  (supported range 3.12–3.13) everywhere:
+  - `docs/source/installation.rst` — platform table, minimum-requirements, the compatibility
+    warning, `conda create -n pycat-env python=3.12`, and all `python --version` checks.
+  - `docs/source/development/support.rst` — troubleshooting "verify Python 3.12 installation".
+  - `docs/source/conf.py` — intersphinx now points at the Python 3.12 docs.
+  - `meta.yaml` (conda recipe) — `python >=3.12,<3.14`.
+  The only remaining "3.9" mentions are the intentional "3.9 is no longer supported as of v1.5.39"
+  notes.
+### Note
+- Unrelated to PyCAT: a Mac user in the same test saw a `conda-libmamba-solver` / `libarchive.19.dylib`
+  error from a Homebrew-installed Miniconda (a known Homebrew-conda library-versioning breakage on
+  Apple Silicon), while PyCAT itself imported successfully. The recommended path is the Miniforge
+  install flow in the README rather than Homebrew's Miniconda.
+
+## [1.5.255] - 2026-07-07
+### Docs (generalized the spectroscopy roadmap section for public release)
+- **Rewrote the "Advanced Spectroscopy, Correlation & Orientation Methods" roadmap section to be
+  hardware-agnostic.** The 1.5.254 version named specific lab instruments and a future
+  custom-microscope design; since the roadmap is public-facing (ReadTheDocs), those details were
+  replaced with capability-based framing (e.g. "a fast sCMOS + TIRF/HILO," "point-detector
+  confocal," "polarization optics," "a FLIM-capable instrument") rather than instrument names or
+  future build plans. The technical content, sequencing (by data availability), reuse-of-existing-
+  machinery notes, and manuscript framing are unchanged.
+
+## [1.5.254] - 2026-07-07
+### Docs (roadmap: advanced spectroscopy / correlation / orientation methods)
+- **Added a dedicated "Advanced Spectroscopy, Correlation & Orientation Methods" section to the
+  roadmap** (`docs/source/development/roadmap.rst`), capturing the instrument-scoped plan for a
+  family of quantitative fluorescence techniques PyCAT doesn't yet analyse. Organized around the
+  positioning that PyCAT is the downstream quantification layer for specialised acquisition
+  instruments (import-and-analyse, don't reimplement acquisition), and scoped to the lab's actual
+  instrument base (Lumicks C-Trap, ISS Q2, Andor Dragonfly + iXon 888 EMCCD / Zyla sCMOS, campus
+  Stellaris/STED, incoming Airyscan 2, Kinetix). Covers: FCS/FCCS (Q2), RICS/STICS (scanning
+  confocals, highest near-term leverage), imaging camera-FCS (sCMOS/Zyla or future Kinetix; notes
+  why the EMCCD is the weaker FCS detector), FLIM phasor downstream (Q2), ratiometric/spectral,
+  fluorescence anisotropy/homo-FRET, PolScope orientation, and SMLM localization-table analysis
+  (cross-referenced to the existing Super-resolution Category B rubric). Sequenced by data
+  availability today vs. future hardware, with the "what composes with existing modules" note for
+  each. The existing FCS/FCCS stub under Advanced Methods now cross-references the new section.
+
 ## [1.5.253] - 2026-07-07
 ### Fixed (lazy TIFF wrapper broke analysis that materialises the whole stack)
 - **Regression from the 1.5.245 OME-TIFF scrubbing fix.** The lazy `_TiffPageStack` reader's

@@ -22,7 +22,7 @@ Installation Problems
 
 1. **Python Version Mismatch**
    
-* Verify Python 3.9 installation
+* Verify Python 3.12 installation
 * Check your environment activation
 * See :doc:`../installation` for detailed requirements
 

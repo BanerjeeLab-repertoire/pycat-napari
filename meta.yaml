@@ -28,12 +28,12 @@ build:
 
 requirements:
   build:
-    - python >=3.9
+    - python >=3.12,<3.14
     - setuptools >=42
     - pip
     - wheel
   run:
-    - python >=3.9
+    - python >=3.12,<3.14
     - aicsimageio
     - cellpose
     - matplotlib

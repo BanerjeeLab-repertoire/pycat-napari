@@ -18,19 +18,19 @@ Compatibility Matrix
      - Status
      - Notes
    * - Windows 10/11
-     - 3.9
+     - 3.12
      - Tested
      - Logo display issue
    * - Mac M1/ARM
-     - 3.9
+     - 3.12
      - Tested
      - Requires specific torch
    * - Mac Intel
-     - 3.9
+     - 3.12
      - Untested*
      - Should work
    * - Linux
-     - 3.9
+     - 3.12
      - Untested*
      - Should work
 
@@ -39,10 +39,10 @@ Compatibility Matrix
 Minimum Requirements
 ^^^^^^^^^^^^^^^^^^^^
 
-* **Python Version**: 3.9.x (Required)
+* **Python Version**: 3.12.x (Required)
 
 .. warning::
-   PyCAT-Napari is currently only compatible with Python 3.9. Other versions are not supported in this release. Future releases may aim to expand to more versions.
+   PyCAT-Napari requires Python 3.12 (supported range 3.12–3.13). Earlier versions, including 3.9, are no longer supported as of v1.5.39.
 
 * **RAM**: 8GB (16GB recommended)
 * **Disk Space**: ~100MB (including dependencies)
@@ -114,14 +114,14 @@ Basic Environment Commands
 
 .. code-block:: bash
 
-   # Create new environment with Python 3.9
-   conda create -n pycat-env python=3.9
+   # Create new environment with Python 3.12
+   conda create -n pycat-env python=3.12
 
    # Activate the environment
    conda activate pycat-env
 
    # Verify you're in the right environment
-   python --version  # Should show Python 3.9.x
+   python --version  # Should show Python 3.12.x
 
 Installation Methods
 --------------------
@@ -134,7 +134,7 @@ Basic Installation
 .. code-block:: bash
 
    # Create environment
-   conda create -n pycat-env python=3.9
+   conda create -n pycat-env python=3.12
 
    # Activate environment
    conda activate pycat-env
@@ -207,7 +207,7 @@ Basic Installation Checks
    conda activate pycat-env
 
    # Verify Python version
-   python --version  # Should show 3.9.x
+   python --version  # Should show 3.12.x
 
    # Test basic import
    python -c "import pycat; print('PyCAT import successful!')"
@@ -254,7 +254,7 @@ Troubleshooting
 
 If you encounter installation issues, check:
 
-1. Python version (must be 3.9.x)
+1. Python version (must be 3.12.x)
 2. Environment activation
 3. Complete installation of dependencies
 4. Support & Troubleshooting section of the `README <https://github.com/BanerjeeLab-repertoire/pycat-napari>`_
@@ -270,7 +270,7 @@ Python and Package Manager Installation
 ---------------------------------------
 
 If you do not have Python and/or a package manager installed, you can use the following instructions to install them.
-While you can install Python 3.9 directly from `python.org <https://www.python.org/downloads/>`_, we **strongly** recommend using a package manager instead, and you may as well get two birds with one stone.
+While you can install Python 3.12 directly from `python.org <https://www.python.org/downloads/>`_, we **strongly** recommend using a package manager instead, and you may as well get two birds with one stone.
 
 Package managers provide:
 
