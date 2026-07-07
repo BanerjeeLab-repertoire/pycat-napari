@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.251] - 2026-07-07
+### Changed (README Miniforge download link)
+- **The Miniforge install step now links to the official [conda-forge download
+  page](https://conda-forge.org/download/)** (per-platform installer picker) as the primary
+  download, with the [Miniforge GitHub page](https://github.com/conda-forge/miniforge#miniforge3)
+  kept as an alternative for the installers and detailed instructions.
+
 ## [1.5.250] - 2026-07-07
 ### Added (Segmentation Benchmark harness)
 - **New "Segmentation Benchmark" diagnostic tool** (Image Processing menu) — a general

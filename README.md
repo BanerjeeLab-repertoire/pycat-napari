@@ -78,10 +78,10 @@ PyCAT needs two things: **Python 3.12** and a tool to manage it. If you don't ha
 
 Miniforge is a small, free installer that gives you Python **and** the `mamba` command PyCAT uses to stay organized. It's the easiest starting point on every system.
 
-1. Go to the **[Miniforge releases page](https://github.com/conda-forge/miniforge#miniforge3)**.
-2. Download the installer for your computer (Windows, macOS Intel, macOS Apple Silicon, or Linux).
-3. Run the installer and accept the defaults.
-4. When it finishes, open a **new** terminal window:
+1. Go to the **[conda-forge download page](https://conda-forge.org/download/)** and download the Miniforge installer for your computer (Windows, macOS Intel, macOS Apple Silicon, or Linux).
+   - *Alternative:* you can also get the installers and detailed instructions from the **[Miniforge GitHub page](https://github.com/conda-forge/miniforge#miniforge3)**.
+2. Run the installer and accept the defaults.
+3. When it finishes, open a **new** terminal window:
    - **Windows:** open **Miniforge Prompt** from the Start menu (search "Miniforge").
    - **macOS / Linux:** open the **Terminal** app.
 
