@@ -152,10 +152,20 @@ def manders_m1_calculation(mask1, mask2, roi_mask):
     This function focuses the M1 calculation within the ROI if provided. If the ROI mask is not specified, the entire
     area of the masks is considered for the calculation.
     """
+    # Binarize the object masks first. These overlap coefficients are only
+    # valid on boolean (0/1) masks; the inputs may arrive as LABEL maps
+    # (object 1 = 1, object 2 = 2, ...). Multiplying/summing label values
+    # would weight objects by their arbitrary ID and can push the result
+    # above 1.0. (The distance analysis re-labels internally, so it is
+    # unaffected and still gets the label maps it needs.)
+    mask1 = np.asarray(mask1) > 0
+    mask2 = np.asarray(mask2) > 0
+
     # Apply ROI mask if provided
     if roi_mask is not None:
-        mask1 = mask1 * roi_mask
-        mask2 = mask2 * roi_mask
+        roi_bool = np.asarray(roi_mask) > 0
+        mask1 = mask1 & roi_bool
+        mask2 = mask2 & roi_bool
 
     # Avoid division by zero by returning 0.0 if mask1 sums to zero
     if np.sum(mask1) == 0:
@@ -190,10 +200,20 @@ def manders_m2_calculation(mask1, mask2, roi_mask):
     This function focuses the M2 calculation within the ROI if provided. If the ROI mask is not specified, the entire
     area of the masks is considered for the calculation.
     """
+    # Binarize the object masks first. These overlap coefficients are only
+    # valid on boolean (0/1) masks; the inputs may arrive as LABEL maps
+    # (object 1 = 1, object 2 = 2, ...). Multiplying/summing label values
+    # would weight objects by their arbitrary ID and can push the result
+    # above 1.0. (The distance analysis re-labels internally, so it is
+    # unaffected and still gets the label maps it needs.)
+    mask1 = np.asarray(mask1) > 0
+    mask2 = np.asarray(mask2) > 0
+
     # Apply ROI mask if provided
     if roi_mask is not None:
-        mask1 = mask1 * roi_mask
-        mask2 = mask2 * roi_mask
+        roi_bool = np.asarray(roi_mask) > 0
+        mask1 = mask1 & roi_bool
+        mask2 = mask2 & roi_bool
 
     # Avoid division by zero by returning 0.0 if mask2 sums to zero
     if np.sum(mask2) == 0:
@@ -228,10 +248,20 @@ def jaccard_index_calculation(mask1, mask2, roi_mask):
     This function focuses the Jaccard Index calculation within the ROI if provided. If the ROI mask is not specified,
     the entire area of the masks is considered for the calculation.
     """
+    # Binarize the object masks first. These overlap coefficients are only
+    # valid on boolean (0/1) masks; the inputs may arrive as LABEL maps
+    # (object 1 = 1, object 2 = 2, ...). Multiplying/summing label values
+    # would weight objects by their arbitrary ID and can push the result
+    # above 1.0. (The distance analysis re-labels internally, so it is
+    # unaffected and still gets the label maps it needs.)
+    mask1 = np.asarray(mask1) > 0
+    mask2 = np.asarray(mask2) > 0
+
     # Apply ROI mask if provided
     if roi_mask is not None:
-        mask1 = mask1 * roi_mask
-        mask2 = mask2 * roi_mask
+        roi_bool = np.asarray(roi_mask) > 0
+        mask1 = mask1 & roi_bool
+        mask2 = mask2 & roi_bool
 
     # Return np.nan if both masks sum to zero, indicating no overlap
     if np.sum(mask1) == 0 and np.sum(mask2) == 0:
@@ -267,10 +297,20 @@ def sorensen_dice_coefficient_calculation(mask1, mask2, roi_mask):
     This function focuses the Dice coefficient calculation within the ROI if provided. If the ROI mask is not specified,
     the entire area of the masks is considered for the calculation.
     """
+    # Binarize the object masks first. These overlap coefficients are only
+    # valid on boolean (0/1) masks; the inputs may arrive as LABEL maps
+    # (object 1 = 1, object 2 = 2, ...). Multiplying/summing label values
+    # would weight objects by their arbitrary ID and can push the result
+    # above 1.0. (The distance analysis re-labels internally, so it is
+    # unaffected and still gets the label maps it needs.)
+    mask1 = np.asarray(mask1) > 0
+    mask2 = np.asarray(mask2) > 0
+
     # Apply ROI mask if provided
     if roi_mask is not None:
-        mask1 = mask1 * roi_mask
-        mask2 = mask2 * roi_mask
+        roi_bool = np.asarray(roi_mask) > 0
+        mask1 = mask1 & roi_bool
+        mask2 = mask2 & roi_bool
 
     # Return np.nan if both masks sum to zero, indicating no overlap
     if np.sum(mask1) == 0 and np.sum(mask2) == 0:

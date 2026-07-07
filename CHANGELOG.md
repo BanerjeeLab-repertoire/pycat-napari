@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.272] - 2026-07-07
+### Fixed (object-based colocalization could report impossible overlap values > 1.0)
+- **The object-based colocalization coefficients (Manders M1/M2, Jaccard, Sørensen-Dice) could
+  return values greater than 1.0 and were biased by arbitrary object-ID numbers.** These
+  coefficients are only valid on boolean (0/1) masks, but the two object masks were passed in as
+  LABEL maps (object 1 = 1, object 2 = 2, ...). The overlap math (`sum(mask1 * mask2) /
+  sum(mask1)`, etc.) therefore multiplied and summed label VALUES, so an object labelled 3
+  counted three times as much as one labelled 1 — producing overlaps above 1.0 (impossible for a
+  fraction) and making identical experiments disagree purely because objects were numbered
+  differently. Fixed by binarising both object masks (`mask > 0`) at the start of each of the four
+  overlap functions, before the ROI is applied. Verified on the reviewer’s worked example: the
+  buggy path gave M1 = 1.5 / Dice = 1.2; the fixed path gives the correct M1 = 0.5 / Dice = 0.667.
+  The object-distance analysis is deliberately left untouched: it re-labels internally
+  (`skimage.measure.label`) and legitimately needs the label maps, so binarising only the overlap
+  steps fixes the coefficients without breaking distance measurements. (Reported in an independent
+  scientific/code review, Finding 1.)
+- Also includes the deferred one-time "Loading Cellpose model weights from cache into memory"
+  log breadcrumb that had been documented under 1.5.267 but not fully committed.
+
 ## [1.5.270] - 2026-07-07
 ### Docs (roadmap: biological object model & linked multiscale navigation)
 - **Added a roadmap section capturing concepts from cross-evaluating the NimbusImage paper**
