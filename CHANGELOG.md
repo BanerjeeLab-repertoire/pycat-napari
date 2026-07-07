@@ -23,6 +23,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.250] - 2026-07-07
+### Added (Segmentation Benchmark harness)
+- **New "Segmentation Benchmark" diagnostic tool** (Image Processing menu) — a general
+  comparison harness for manuscript preparation. Runs several segmentation candidates on the
+  same image and reports metrics as a pasteable markdown table plus in-app side-by-side mask
+  layers (`bench: <name>`). One framework covers three uses:
+  - **Method comparison** — run built-in methods (Otsu, Multi-Otsu, Sauvola, Felzenszwalb,
+    watershed, Cellpose) on one image; compare object count, area, runtime, and pairwise overlap.
+  - **Ground-truth validation** — mark any candidate as ground truth; the others are scored
+    against it.
+  - **Parameter sensitivity** — supply the same method at different parameters as candidates and
+    read the trend.
+  - **External / uploaded masks are first-class candidates.** Any Labels layer (a mask exported
+    from another tool, or a manual annotation) can be included in the comparison, so PyCAT's
+    segmentation can be benchmarked directly against other tools on identical data — useful for
+    puncta segmentation comparisons in particular.
+  - **Two metric families shown side by side, without privileging either:** pixel-overlap
+    (Dice / IoU) and matched-detection (precision / recall / F1 via Hungarian centroid matching,
+    plus mean localisation error). This matters for puncta: two tools can agree on *which* spots
+    exist (high F1) while their pixel masks differ (lower Dice) due to sub-pixel offset — both
+    columns tell the honest story.
+  - **Match tolerance** for detection metrics is either auto-scaled to a fraction of the mean
+    object radius (default) or a fixed pixel radius.
+  - New module `benchmark_tools.py` (candidates, both metric families, three modes, markdown
+    report); verified on synthetic puncta that detection F1 and pixel Dice correctly diverge for
+    a spatially-offset detector, and end-to-end with built-in method runners.
+### Note
+- The harness counts connected components, so touching puncta merge into one object (affects all
+  methods equally in a comparison). Runs on a single 2D image (pick one frame/plane).
+
+## [1.5.249] - 2026-07-07
+### Fixed (recorded-steps list didn't reset on Clear)
+- **The batch recorded-steps list now resets on the plain Clear button**, not just Save & Clear.
+  Previously `_clear_everything` (the shared reset used by the top-bar Clear and by Save &
+  Clear's discard option) reset layers, dataframes, and the workflow checklist but left the
+  batch recording intact, so a new dataset started with the previous dataset's recorded steps
+  still listed. It now calls `clear_recording()`, which empties the recorded steps, flips the
+  record toggle back to OFF (red), and resyncs the toolbar. Save & Clear still offers to export
+  the config first before resetting.
+### Changed (quieter recording output)
+- **Removed the verbose per-step recording dump from the terminal.** Each recorded step used to
+  print its full parameter dict (including layer snapshots) to the console; now that the "☰
+  Recorded Steps" viewer shows the step name, parameters, and snapshots, that dump was redundant
+  noise. Recording now prints a short one-line breadcrumb per step (`Recorded step N: <name>`)
+  so the recorder isn't silent, and the full detail lives in the viewer.
+
+## [1.5.248] - 2026-07-07
+### Changed (README reorganized for low/no-code users)
+- **Reworked the README install flow to reduce friction for non-technical users** (ahead of a
+  group test-installation session):
+  - **Miniforge-first, single top-to-bottom path.** "Getting Started" is now the one install
+    path, as four numbered steps: Install Miniforge → create a workspace → install PyCAT →
+    launch. A new user can't skip setup by clicking a separate "Installation" link.
+  - **Removed the standalone "Installation" table-of-contents entry** that let impatient users
+    jump past the Python/terminal setup; the TOC now points everyone into the guided Getting
+    Started steps (with Miniforge, workspace, install, and launch as sub-items).
+  - **`run-pycat` promoted to Step 4**, immediately after install and **before** GPU
+    acceleration, with a page break after it, so the first thing a user reaches is a working
+    launch — not optional speed tuning.
+  - **Advanced/optional material is now collapsible** (`<details>` blocks): GPU acceleration,
+    optional add-on packages, Cellpose model choice, dependency pin rationale, alternative
+    install, and verification — so the main path isn't visually overwhelming, but the detail is
+    one click away.
+  - Added beginner-friendly explanations (what an environment is, how to confirm each step
+    worked, a reminder to `mamba activate` next time) written for readers who don't know Python
+    or the terminal.
+
 ## [1.5.247] - 2026-07-07
 ### Changed (time-series first-run speedup — skip the source pre-copy)
 - **Time-series analysis no longer pre-copies the input stack to a temp zarr when the source is

@@ -3308,6 +3308,7 @@ class MenuManager:
             'Pipeline SNR Analysis': (self.central_manager.toolbox_functions_ui._add_pipeline_snr_analysis, {'separate_widget': True}),
             'Foreground Suppression Tuner': (self.central_manager.toolbox_functions_ui._add_foreground_suppression_tuner, {'separate_widget': True}),
             'Temporal Enhancement Optimizer': (self.central_manager.toolbox_functions_ui._add_temporal_enhancement_optimizer, {'separate_widget': True}),
+            'Segmentation Benchmark': (self.central_manager.toolbox_functions_ui._add_segmentation_benchmark, {'separate_widget': True}),
             'Segmentation Speed Comparison': (self.central_manager.toolbox_functions_ui._add_segmentation_speed_comparison, {'separate_widget': True}),
             'Chromatin Topology Map': (self.central_manager.toolbox_functions_ui._add_chromatin_topology, {'separate_widget': True}),
             'Nucleolus / Void Estimator': (self.central_manager.toolbox_functions_ui._add_nucleolus_void_estimator, {'separate_widget': True}),

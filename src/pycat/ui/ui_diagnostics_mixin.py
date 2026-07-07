@@ -462,6 +462,226 @@ class _DiagnosticsWidgetsMixin:
         self._add_widget_to_layout_or_dock(wdt, layout, separate_widget,
                                             "Temporal Enhancement Optimizer")
 
+    def _add_segmentation_benchmark(self, layout=None, separate_widget=False):
+        """General segmentation benchmarking harness.
+
+        Compares segmentation candidates on the same image and reports metrics
+        as a pasteable table plus in-app side-by-side mask layers. Candidates
+        can be PyCAT's built-in methods AND masks uploaded/loaded from other
+        tools (any Labels layer), so you can compare PyCAT vs an external tool
+        on identical data. Any candidate can be marked as the ground truth, in
+        which case the others are scored against it (pixel Dice/IoU AND
+        matched-detection precision/recall/F1, shown side by side).
+        """
+        from PyQt5.QtWidgets import (QFormLayout, QCheckBox, QComboBox,
+                                     QDoubleSpinBox, QLabel as _QLabel,
+                                     QListWidget, QListWidgetItem, QGroupBox,
+                                     QVBoxLayout as _QV)
+        from PyQt5.QtCore import Qt
+        import napari
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Segmentation Benchmark', bold=True)
+        self.add_text_label(
+            outer,
+            'Compare segmentation methods (and masks from other tools) on the '
+            'same image. Reports pixel overlap (Dice/IoU) and matched-detection '
+            '(precision/recall/F1) side by side, with a pasteable table and '
+            'side-by-side mask layers. Mark one candidate as ground truth to '
+            'score the others against it.')
+
+        form = QFormLayout()
+        img_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Image:", img_dd)
+        outer.addLayout(form)
+
+        # --- Built-in method candidates ---
+        methods_box = QGroupBox("Built-in methods to run")
+        mb = _QV()
+        method_checks = {}
+        for key, label in [('otsu', 'Otsu'), ('multiotsu', 'Multi-Otsu'),
+                           ('sauvola', 'Sauvola'), ('felzenszwalb', 'Felzenszwalb'),
+                           ('watershed', 'Watershed'), ('cellpose', 'Cellpose')]:
+            cb = QCheckBox(label)
+            cb.setChecked(key in ('otsu', 'multiotsu'))
+            method_checks[key] = cb
+            mb.addWidget(cb)
+        methods_box.setLayout(mb)
+        outer.addWidget(methods_box)
+
+        # --- External / uploaded mask candidates (any Labels layers) ---
+        ext_box = QGroupBox("External / uploaded masks to include (from other tools)")
+        eb = _QV()
+        eb.addWidget(_QLabel(
+            "<span style='font-size:9pt;color:#888;'>Tick any Labels layers to "
+            "include as candidates — e.g. a mask exported from another tool, "
+            "or a manual annotation. Load one via File → Open, then it appears "
+            "here.</span>"))
+        ext_list = QListWidget()
+        ext_list.setSelectionMode(QListWidget.NoSelection)
+        ext_box.setLayout(eb)
+        eb.addWidget(ext_list)
+        outer.addWidget(ext_box)
+
+        def _refresh_ext_list():
+            ext_list.clear()
+            for lyr in self.viewer.layers:
+                if isinstance(lyr, napari.layers.Labels):
+                    it = QListWidgetItem(lyr.name)
+                    it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                    it.setCheckState(Qt.Unchecked)
+                    ext_list.addItem(it)
+        _refresh_ext_list()
+        refresh_btn = QPushButton("↻ Refresh mask list")
+        refresh_btn.clicked.connect(_refresh_ext_list)
+        outer.addWidget(refresh_btn)
+
+        # --- Ground truth + tolerance controls ---
+        form2 = QFormLayout()
+        gt_dd = QComboBox()
+        gt_dd.addItem("(none — method comparison)")
+        form2.addRow("Ground truth:", gt_dd)
+
+        def _refresh_gt():
+            cur = gt_dd.currentText()
+            gt_dd.clear()
+            gt_dd.addItem("(none — method comparison)")
+            for key, cb in method_checks.items():
+                if cb.isChecked():
+                    gt_dd.addItem(cb.text())
+            for i in range(ext_list.count()):
+                it = ext_list.item(i)
+                if it.checkState() == Qt.Checked:
+                    gt_dd.addItem(it.text())
+        gt_refresh_btn = QPushButton("↻ Update ground-truth choices")
+        gt_refresh_btn.clicked.connect(_refresh_gt)
+
+        tol_mode = QComboBox()
+        tol_mode.addItems(["Auto (fraction of spot radius)", "Fixed pixels"])
+        form2.addRow("Match tolerance:", tol_mode)
+        tol_frac = QDoubleSpinBox(); tol_frac.setRange(0.1, 3.0)
+        tol_frac.setSingleStep(0.1); tol_frac.setValue(0.5)
+        form2.addRow("  · auto fraction:", tol_frac)
+        tol_px = QDoubleSpinBox(); tol_px.setRange(1.0, 100.0); tol_px.setValue(5.0)
+        form2.addRow("  · fixed px:", tol_px)
+        outer.addLayout(form2)
+        outer.addWidget(gt_refresh_btn)
+
+        results_lbl = _QLabel("")
+        results_lbl.setWordWrap(True)
+        results_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        outer.addWidget(results_lbl)
+
+        self._benchmark_last_md = ""
+
+        run_btn = QPushButton("▶  Run benchmark")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        def _run():
+            import numpy as np
+            from napari.utils.notifications import show_info, show_warning
+            from pycat.toolbox import benchmark_tools as bt
+
+            iname = img_dd.currentText()
+            if not iname or iname.lower() in ('none', 'select', '--'):
+                show_warning("Select an image."); return
+            try:
+                image = np.asarray(self.viewer.layers[iname].data)
+            except Exception as e:
+                show_warning("Could not read image: %s" % e); return
+            if image.ndim != 2:
+                show_warning("Benchmark runs on a single 2D image "
+                             "(pick one frame/plane)."); return
+
+            dr = self.central_manager.active_data_class.data_repository
+            obj_d = int(dr.get('cell_diameter', dr.get('object_size', 30)) or 30)
+            ball_r = int(dr.get('ball_radius', 15) or 15)
+
+            # Build candidates: built-in methods + checked external masks.
+            include = [k for k, cb in method_checks.items() if cb.isChecked()]
+            cands = bt.builtin_method_candidates(object_diameter=obj_d,
+                                                 ball_radius=ball_r,
+                                                 include=include) if include else []
+            # Watershed needs a binary input; wrap it specially if requested.
+            if 'watershed' in include:
+                from pycat.toolbox.segmentation_tools import (
+                    opencv_watershed_func)
+                from skimage.filters import threshold_otsu
+                def _ws(img):
+                    a = np.asarray(img, dtype=float)
+                    try: t = threshold_otsu(a)
+                    except Exception: t = a.mean()
+                    return np.asarray(opencv_watershed_func((a > t).astype(np.uint8),
+                                      original_image=a), dtype=np.int32)
+                cands.append(bt.Candidate('Watershed', method_fn=_ws,
+                                          params={'method': 'Otsu + watershed'}))
+            for i in range(ext_list.count()):
+                it = ext_list.item(i)
+                if it.checkState() == Qt.Checked:
+                    nm = it.text()
+                    try:
+                        m = np.asarray(self.viewer.layers[nm].data)
+                        cands.append(bt.Candidate(nm, mask=m, external=True,
+                                                  params={'source': 'uploaded/external'}))
+                    except Exception:
+                        pass
+            if len(cands) < 1:
+                show_warning("Select at least one method or external mask.")
+                return
+
+            gt_choice = gt_dd.currentText()
+            gt_name = None if gt_choice.startswith("(none") else gt_choice
+            mode = 'fixed' if tol_mode.currentIndex() == 1 else 'auto'
+            mpx = float(dr.get('microns_per_pixel_sq', 0) or 0) ** 0.5 or None
+
+            run_btn.setEnabled(False); run_btn.setText("Running benchmark…")
+            try:
+                res = bt.run_benchmark(
+                    image, cands, ground_truth_name=gt_name,
+                    tolerance_mode=mode, fixed_tolerance_px=tol_px.value(),
+                    scale_fraction=tol_frac.value(), microns_per_px=mpx)
+            except Exception as e:
+                import traceback; print(traceback.format_exc())
+                show_warning("Benchmark failed: %s — see terminal." % e)
+                run_btn.setEnabled(True); run_btn.setText("▶  Run benchmark")
+                return
+            run_btn.setEnabled(True); run_btn.setText("▶  Run benchmark")
+
+            # Add each candidate's mask as a side-by-side layer.
+            for name, lab in res['labels'].items():
+                lyr_name = "bench: %s" % name
+                if lyr_name in self.viewer.layers:
+                    self.viewer.layers[lyr_name].data = lab
+                else:
+                    self.viewer.add_labels(np.asarray(lab), name=lyr_name)
+
+            md = bt.to_markdown_table(res)
+            self._benchmark_last_md = md
+            # Render as a simple HTML table for the panel.
+            html = md.replace('&', '&amp;')
+            results_lbl.setText("<pre style='font-size:9pt;'>" + html + "</pre>")
+            show_info("Benchmark complete: %d candidates. Table is selectable "
+                      "for copy; masks added as 'bench: ' layers." % len(cands))
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+
+        copy_btn = QPushButton("Copy table (markdown)")
+        def _copy():
+            from napari.utils.notifications import show_info
+            try:
+                from qtpy.QtWidgets import QApplication
+                QApplication.clipboard().setText(self._benchmark_last_md or "")
+                show_info("Benchmark table copied to clipboard (markdown).")
+            except Exception:
+                pass
+        copy_btn.clicked.connect(_copy)
+        outer.addWidget(copy_btn)
+
+        wdt = QWidget(); wdt.setLayout(outer)
+        self._add_widget_to_layout_or_dock(wdt, layout, separate_widget,
+                                            "Segmentation Benchmark")
+
     def _add_segmentation_speed_comparison(self, layout=None, separate_widget=False):
         """A/B widget: run condensate segmentation with the original vs the
         windowed (fast) refinement filter, timing each and verifying the refined

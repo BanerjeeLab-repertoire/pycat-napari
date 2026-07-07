@@ -12,8 +12,12 @@ PyCAT (Python Condensate Analysis Toolbox) is an open-source application built o
 
 - [Features](#features)
 - [System Requirements](#system-requirements)
-- [Getting Started](#getting-started)
-- [Installation](#installation)
+- [**Getting Started / Installation**](#getting-started) ← **start here**
+  - [Step 1 — Install Miniforge](#step-1--install-miniforge-gets-you-python--a-package-manager)
+  - [Step 2 — Create a workspace](#step-2--create-a-workspace-for-pycat)
+  - [Step 3 — Install PyCAT](#step-3--install-pycat)
+  - [Step 4 — Launch PyCAT](#step-4--launch-pycat)
+- [Optional: Speed & Extra Features](#optional-speed--extra-features)
 - [TrackMate Integration (Optional)](#trackmate-integration-optional)
 - [Usage](#usage)
 - [Documentation](#documentation)
@@ -64,111 +68,127 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
 
 ## Getting Started
 
-PyCAT requires Python 3.12 and a package/environment manager. We recommend using Mambaforge/Miniforge for package and environment management, but we include instructions for alternative methods.  Before installing PyCAT-Napari, follow this quick assessment to determine your setup needs:
+> **New to Python or the terminal? Start here and go top to bottom.** This section takes you from a fresh computer to a running PyCAT window. You do **not** need to know how to code. Follow each step in order — copy each command into your terminal exactly as shown.
 
-### Initial Setup Check
+PyCAT needs two things: **Python 3.12** and a tool to manage it. If you don't have those yet, Step 1 sets them up. If you're already comfortable with conda/mamba environments, you can jump to [Step 3: Install PyCAT](#step-3--install-pycat).
 
-#### 1. Do you have Python installed?
+---
 
-Check Python Installation
+### Step 1 — Install Miniforge (gets you Python + a package manager)
 
-Run this command in your terminal (mac)/command prompt (anaconda prompt)/powershell(windows):
+Miniforge is a small, free installer that gives you Python **and** the `mamba` command PyCAT uses to stay organized. It's the easiest starting point on every system.
+
+1. Go to the **[Miniforge releases page](https://github.com/conda-forge/miniforge#miniforge3)**.
+2. Download the installer for your computer (Windows, macOS Intel, macOS Apple Silicon, or Linux).
+3. Run the installer and accept the defaults.
+4. When it finishes, open a **new** terminal window:
+   - **Windows:** open **Miniforge Prompt** from the Start menu (search "Miniforge").
+   - **macOS / Linux:** open the **Terminal** app.
+
+> 💡 **Already have Anaconda or Miniconda?** You can skip this step — anywhere these instructions say `mamba`, use `conda` instead. Everything else is the same.
+
+<details>
+<summary><b>How do I know it worked?</b> (click to expand)</summary>
+
+<br>
+
+In your new terminal window, type:
+
 ```bash
-python --version
-```
-
-If you get a version number: ✅ You have Python installed
-
-If you get an error: ❌ See [Python and Package Manager Installation Guide](https://pycat-napari.readthedocs.io/en/latest/installation.html#python-and-package-manager-installation) 
-
-#### 2. Do you have Conda or Mamba installed?
-
-Check Your Environment Manager
-
-```bash
-conda --version
-# or
 mamba --version
 ```
 
-If you get a version number: ✅ You have conda/mamba installed 
+If you see a version number (e.g. `mamba 1.5.x`), you're ready for Step 2. If you get an error like "command not found," close the terminal, open a brand-new one, and try again — the installer only takes effect in terminals opened *after* it finishes.
 
-If you get an error: ❌ See [Python and Package Manager Installation Guide](https://pycat-napari.readthedocs.io/en/latest/installation.html#python-and-package-manager-installation) 
+</details>
 
-#### 3. Are you familiar with Python environments?
+---
 
-If yes: ✅ Proceed to [Installation](#installation)
+### Step 2 — Create a workspace for PyCAT
 
-If no: ❌ Read our quick environment guide below
+This makes a clean, isolated "environment" so PyCAT's pieces don't collide with anything else on your computer. Copy these two commands into your terminal, one at a time:
 
-**Python Package and Environments Info**
-
-Think of environments like separate containers for different projects - they help avoid conflicts and keep things organized. Don't worry, they're simpler than they sound!
-
-Python environments help you:
-- Keep projects separate
-- Avoid version conflicts
-- Ensure reproducibility
-
-Package Manager Choice
-> 💡 **Why Miniforge?**  
-> Miniforge is a lightweight distribution of Conda, offering faster package installation and fewer pre-installed packages Mambaforge is being deprecated in favor of Miniforge. 
-> **Key Advantages:**  
-> - Quicker dependency resolution  
-> - Minimal initial install (no unnecessary extras)  
-> - Fully compatible with conda commands (just use `mamba` in place of `conda`)
-
-Already have Anaconda? That's fine! You can skip the Miniforge installation and use your existing setup.
-
-Basic environment commands:
 ```bash
-# Create new environment with Python 3.12
+# Create a new environment named "pycat-env" with Python 3.12
 mamba create -n pycat-env python=3.12
 
-# Activate the environment
-mamba activate pycat-env
-
-# Verify you're in the right environment
-python --version  # Should show Python 3.12.x
-```
-
-## Installation
-
-### Basic Installation
-
-Create and activate a new environment:
-```bash
-# Create environment
-mamba create -n pycat-env python=3.12
-
-# Activate environment
+# Turn it on (you'll do this every time before using PyCAT)
 mamba activate pycat-env
 ```
 
-#### Windows
+When it's active, your terminal prompt will show `(pycat-env)` at the start of the line. That's how you know PyCAT's workspace is turned on.
+
+<details>
+<summary><b>What is an "environment," and why do I need one?</b> (click to expand)</summary>
+
+<br>
+
+Think of an environment as a separate, labeled box for one project. It keeps PyCAT's exact set of tools together and prevents version conflicts with other software. They're simpler than they sound — the two commands above are all you need. Every time you come back to use PyCAT, just open a terminal and run `mamba activate pycat-env` first.
+
+</details>
+
+---
+
+### Step 3 — Install PyCAT
+
+With `(pycat-env)` showing in your prompt, install PyCAT with **one** command for your system:
+
+**Windows / Linux:**
 ```bash
 pip install pycat-napari
 ```
-Note: On Windows, due to some platform-specific rendering quirks, the application logo may not display correctly. This is purely cosmetic and does not affect functionality.
 
-#### Mac M1/ARM
+**Mac (Apple Silicon — M1/M2/M3):**
 ```bash
 pip install "pycat-napari[arm-mac]"
 ```
 
-### GPU Acceleration (recommended for Cellpose)
+> On Windows, the app logo may not render perfectly — that's purely cosmetic and doesn't affect anything.
 
-Cellpose segmentation runs on CPU by default, but is **much faster on an NVIDIA GPU**. To enable GPU acceleration, install the CUDA build of PyTorch after installing PyCAT:
+---
+
+### Step 4 — Launch PyCAT
+
+You're done installing. Start the program with:
+
+```bash
+run-pycat
+```
+
+The PyCAT window should open. 🎉 **That's the whole basic setup** — you can start using it now. See [Usage](#usage) for a walkthrough.
+
+> ⚠️ **Remember for next time:** whenever you want to use PyCAT, open a terminal and run `mamba activate pycat-env` first, then `run-pycat`.
+
+---
+
+<!-- ========================= PAGE BREAK ========================= -->
+
+## Optional: Speed & Extra Features
+
+Everything below is **optional**. PyCAT works fully without any of it. Come back here later if you want faster segmentation or extra tools.
+
+<details>
+<summary><b>⚡ GPU Acceleration (much faster Cellpose segmentation)</b> (click to expand)</summary>
+
+<br>
+
+Cellpose segmentation runs on CPU by default, but is **much faster on an NVIDIA GPU**. To enable GPU acceleration, install the CUDA build of PyTorch **after** installing PyCAT (make sure `(pycat-env)` is active):
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 ```
 
-This single command is **safe on both GPU and CPU-only machines** — on a machine without a CUDA GPU it installs a working CPU build of PyTorch, so you can use the same instruction everywhere without worrying about mismatched versions. PyCAT detects the GPU automatically and falls back to CPU (with a warning) when none is present.
+This single command is **safe on both GPU and CPU-only machines** — on a computer without a CUDA GPU it installs a working CPU build, so you can use the same instruction everywhere without worrying about mismatched versions. PyCAT detects the GPU automatically and falls back to CPU (with a warning) when none is present.
 
-> 💡 The `[gpu]` extra below is **separate**: it accelerates rolling-ball and morphological operations (via CuPy), not Cellpose. Install both for full GPU acceleration.
+> 💡 The `[gpu]` extra (in the next section) is **separate**: it accelerates rolling-ball and morphological operations via CuPy, not Cellpose. Install both for full GPU acceleration.
 
-### Optional Features
+</details>
+
+<details>
+<summary><b>📦 Optional add-on packages (dev tools, devbio-napari, StarDist, TrackMate)</b> (click to expand)</summary>
+
+<br>
+
 
 You can install PyCAT with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
 
@@ -194,7 +214,13 @@ pip install "pycat-napari[trackmate]"
    pip install "pycat-napari[arm-mac, dev]"
    ```
 
-### Cellpose Model: cyto2 (default) vs Cellpose-SAM
+</details>
+
+<details>
+<summary><b>🔬 Choosing a Cellpose model (cyto2 default vs Cellpose-SAM)</b> (click to expand)</summary>
+
+<br>
+
 
 PyCAT pins **`cellpose<4`** by default, which uses the fast **`cyto2`** CNN. This is
 the recommended model for most users: it runs quickly on CPU and reproduces the
@@ -225,8 +251,13 @@ model dropdown will show `cyto2` (and `cyto`, `nuclei`) on Cellpose < 4, or
 `cpsam` on Cellpose ≥ 4. No code changes are needed to switch — just activate
 the environment that has the Cellpose version you want.
 
+</details>
 
-### Dependency Version Constraints (why NumPy < 2 and Zarr < 3)
+<details>
+<summary><b>🔧 Why PyCAT pins NumPy < 2 and Zarr < 3 (advanced)</b> (click to expand)</summary>
+
+<br>
+
 
 PyCAT pins `numpy>=1.22,<2.0` and `zarr>=2.12,<3.0`. These caps are intentional and
 load-bearing; they are not stale pins waiting to be bumped.
@@ -249,8 +280,13 @@ load-bearing; they are not stale pins waiting to be bumped.
   Cellpose 3; it becomes worthwhile only once the stack moves to the NumPy-2 / Zarr-3
   era.
 
+</details>
 
-### Alternative Installation Methods
+<details>
+<summary><b>🧩 Alternative installation (tested environment files)</b> (click to expand)</summary>
+
+<br>
+
 
 If you encounter issues with the standard installation, use our tested environment files located in the config/ folder. We provide complete environment files that match our development package setup (no dev tools installed though, please install those separately if youre trying to install a dev version for a fork or pull request) to provide you with the same environment we developed and ran in. To use these environment files, just download the yaml file from the config folder on the github repo, then cd to the location of the downloaded file in your terminal, then run:
 
@@ -262,7 +298,13 @@ mamba env create -f pycat-devbio-napari-env-x86-windows.yml
 mamba env create -f pycat-devbio-napari-env-arm-mac.yml
 ```
 
-### Verifying Installation & Optional Testing 
+</details>
+
+<details>
+<summary><b>✅ Verifying your installation & optional testing</b> (click to expand)</summary>
+
+<br>
+
 
 After installation, verify PyCAT-Napari is working correctly:
 
@@ -290,6 +332,8 @@ If you encounter any failures, check:
 5. Check the issues 
 
 Still having problems installing or running the program? Open a github issue. If you need urgent help, reach out to us and we will try to get back to you as soon as possible. 
+
+</details>
 
 ## TrackMate Integration (Optional)
 
