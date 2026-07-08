@@ -561,7 +561,8 @@ class VideoParticleTrackingUI:
                 self.viewer.layers.remove("Bead Detections")
             if 'bead_class' in det_df.columns:
                 cmap = {'singlet': '#00ff00', 'aggregate': '#ff3b30',
-                        'out_of_plane': '#ffcc00', 'unfit': '#888888'}
+                        'out_of_plane': '#ffcc00', 'ambiguous': '#3b9dff',
+                        'unfit': '#888888'}
                 face = [cmap.get(c, '#00ff00') for c in det_df['bead_class']]
                 self.viewer.add_points(
                     coords, name="Bead Detections", size=6,

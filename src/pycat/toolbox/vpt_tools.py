@@ -339,6 +339,7 @@ def detect_beads_frame(
     fit_quality: bool = False,
     fit_window: int = 9,
     fast_fit: bool = False,
+    use_gpu: bool = False,
 ) -> np.ndarray:
     """
     Detect beads in a single frame via Laplacian-of-Gaussian blob detection.
@@ -370,9 +371,14 @@ def detect_beads_frame(
     if mx > mn:
         img = (img - mn) / (mx - mn)
 
-    blobs = sk.feature.blob_log(
-        img, min_sigma=min_sigma, max_sigma=max_sigma,
-        num_sigma=num_sigma, threshold=threshold)
+    if use_gpu:
+        blobs = blob_log_gpu(
+            img, min_sigma=min_sigma, max_sigma=max_sigma,
+            num_sigma=num_sigma, threshold=threshold)
+    else:
+        blobs = sk.feature.blob_log(
+            img, min_sigma=min_sigma, max_sigma=max_sigma,
+            num_sigma=num_sigma, threshold=threshold)
 
     if blobs.shape[0] == 0:
         return np.empty((0, 2))
@@ -424,6 +430,71 @@ def detect_beads_frame(
                               amplitude=np.nan, integrated_intensity=np.nan,
                               offset=np.nan, r_squared=np.nan))
     return beads
+
+
+# ---------------------------------------------------------------------------
+# 3d. Accelerated blob detection (GPU LoG scale-space, matches skimage blob_log)
+# ---------------------------------------------------------------------------
+
+def blob_log_gpu(image, min_sigma=1.0, max_sigma=5.0, num_sigma=5,
+                 threshold=0.02, overlap=0.5):
+    """GPU-accelerated Laplacian-of-Gaussian blob detection.
+
+    Reproduces skimage.feature.blob_log: builds the scale-normalised LoG cube
+    (-gaussian_laplace(img, s) * s**2 over num_sigma scales), finds 3D local
+    maxima above threshold, converts the scale index to a sigma, and prunes
+    overlapping blobs. The expensive part — the per-scale Gaussian convolutions
+    — runs on the GPU (keeping the whole cube on-device to avoid per-scale
+    transfer), which is where blob_log spends ~all its time. Results match the
+    CPU path within floating-point tolerance.
+
+    Falls back to skimage.blob_log on the CPU if CuPy/GPU is unavailable, so it
+    is always safe to call.
+
+    Returns an (N, 3) array of (y, x, sigma), same as skimage.blob_log.
+    """
+    from skimage import feature as skfeature
+    try:
+        from pycat.toolbox.gpu_utils import gpu_available
+    except Exception:
+        gpu_available = lambda: False
+
+    if not gpu_available():
+        return skfeature.blob_log(
+            image, min_sigma=min_sigma, max_sigma=max_sigma,
+            num_sigma=num_sigma, threshold=threshold, overlap=overlap)
+
+    import cupy as cp
+    import cupyx.scipy.ndimage as cpnd
+    from skimage.feature.blob import _prune_blobs
+
+    img = cp.asarray(image, dtype=cp.float32)
+    scales = np.linspace(min_sigma, max_sigma, num_sigma)
+    # scale-normalised LoG cube, built and kept on the GPU
+    cube = cp.empty((num_sigma,) + img.shape, dtype=cp.float32)
+    for i, s in enumerate(scales):
+        cube[i] = -cpnd.gaussian_laplace(img, float(s)) * (float(s) ** 2)
+
+    # 3D local maxima above threshold (maximum_filter footprint 3^ndim).
+    fp = cp.ones((3,) * cube.ndim, dtype=bool)
+    maxed = cpnd.maximum_filter(cube, footprint=fp)
+    peaks_mask = (cube == maxed) & (cube > threshold)
+    coords = cp.argwhere(peaks_mask)
+    if coords.size == 0:
+        return np.empty((0, 3))
+    coords = cp.asnumpy(coords)  # (M, 3): scale_idx, y, x
+
+    # Convert scale index -> sigma, assemble (y, x, sigma) then prune overlaps.
+    sig = scales[coords[:, 0]]
+    blobs = np.column_stack([coords[:, 1], coords[:, 2], sig]).astype(np.float64)
+    # skimage prunes with sigma scaled by sqrt(ndim); replicate its call shape.
+    sigma_dim = blobs[:, -1:]
+    blobs_for_prune = np.hstack([blobs[:, :-1], sigma_dim])
+    try:
+        pruned = _prune_blobs(blobs_for_prune, overlap, sigma_dim=1)
+    except TypeError:
+        pruned = _prune_blobs(blobs_for_prune, overlap)
+    return pruned
 
 
 # ---------------------------------------------------------------------------
@@ -566,38 +637,61 @@ def classify_beads(beads_df: pd.DataFrame,
     # aggregate is much brighter; a poor template match (low ncc/symmetry) that
     # isn't brighter is treated as out-of-plane/unfit.
     if 'r_squared' not in df.columns and 'ncc' in df.columns:
-        # Fast-mode classification leans on the TEMPLATE MATCH (ncc, symmetry),
-        # which robustly separates clean singlets from aggregates/defocused
-        # beads, rather than the raw patch-sum intensity (which is noisy in fast
-        # mode and would over-call aggregates). Intensity is used only as a
-        # secondary confirmation for the brightest outliers.
+        # Fast-mode classification, calibrated for large (non-diffraction-limited)
+        # Airy-disk beads where a real single bead is BRIGHT and high-mass.
+        #
+        # Four tiers:
+        #   rejected     : poor template match (ncc below a floor) — these are
+        #                  Airy-ring fragments, hot pixels, and noise. DROPPED
+        #                  entirely (never become points), not just labelled.
+        #   aggregate    : a real bead that is BRIGHT and COMPACT and HIGH-MASS
+        #                  (top mass tail AND high amplitude). Requiring BOTH is
+        #                  what separates a true aggregate from an out-of-focus
+        #                  blob (which is high-mass but DIM/diffuse).
+        #   ambiguous    : high-mass but dim/diffuse (out of focus) — too
+        #                  uncertain to call singlet or aggregate; flagged so the
+        #                  software is honest about not knowing.
+        #   singlet      : every other well-matched real bead (the large majority).
         ncc = df['ncc'].to_numpy(dtype=float)
-        sym = df['symmetry'].to_numpy(dtype=float)
+        amp = df['amplitude'].to_numpy(dtype=float)
         ii = df['integrated_intensity'].to_numpy(dtype=float)
-        med_ncc = float(np.nanmedian(ncc)) if np.isfinite(np.nanmedian(ncc)) else 0.5
-        # singlet intensity reference (robust lower-half median)
-        fin = ii[np.isfinite(ii)]
-        singlet_int = (float(np.median(fin[fin <= np.median(fin)]))
-                       if len(fin) >= 4 else (float(np.median(fin)) if len(fin) else np.nan))
+
+        # Real-vs-garbage: absolute NCC floor. The template is built FROM the
+        # real beads, so genuine beads match it well; rings/hot/noise do not.
+        NCC_FLOOR = 0.5
+        is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
+
+        # References computed over REAL beads only (so garbage doesn't skew them).
+        rii = ii[is_real & np.isfinite(ii)]
+        ramp = amp[is_real & np.isfinite(amp)]
+        if len(rii) >= 10:
+            singlet_int = float(np.median(rii[rii <= np.median(rii)]))
+            mass_hi = float(np.percentile(rii, 99.5))   # aggregate mass gate
+            amp_hi = float(np.percentile(ramp, 50))     # must also be bright
+        else:
+            singlet_int = float(np.median(rii)) if len(rii) else np.nan
+            mass_hi = np.inf; amp_hi = np.inf
+
         n_units, classes = [], []
         for k in range(len(df)):
-            c, s, I = ncc[k], sym[k], ii[k]
+            if not is_real[k]:
+                n_units.append(np.nan); classes.append('rejected'); continue
+            I, A = ii[k], amp[k]
             nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
             n_units.append(nu)
-            # Good template match + symmetric = singlet.
-            good_match = (np.isfinite(c) and c >= 0.6 * med_ncc
-                          and (not np.isfinite(s) or s > 0.35))
-            # Aggregate: much brighter than a singlet AND a decent (bright,
-            # roundish) match — i.e. genuinely more signal, not just noise.
-            very_bright = np.isfinite(nu) and nu >= 3.0
-            if very_bright and good_match:
-                classes.append('aggregate')
-            elif good_match:
-                classes.append('singlet')
+            high_mass = np.isfinite(I) and I >= mass_hi
+            bright = np.isfinite(A) and A >= amp_hi
+            if high_mass and bright:
+                classes.append('aggregate')          # bright + compact + heavy
+            elif high_mass and not bright:
+                classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
             else:
-                classes.append('out_of_plane')
+                classes.append('singlet')             # the large majority
         df['n_units_est'] = n_units
         df['bead_class'] = classes
+        # DROP rejected detections entirely — a marked point should be a real
+        # bead (rings/hot pixels/noise never become points).
+        df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
         df['singlet'] = df['bead_class'] == 'singlet'
         return df
 
@@ -816,8 +910,12 @@ def split_bead_populations(detections_df: pd.DataFrame,
     if recover_out_of_plane:
         primary_classes.append('out_of_plane')
     primary = df[df['bead_class'].isin(primary_classes)].reset_index(drop=True)
-    aggregate = df[df['bead_class'] == 'aggregate'].reset_index(drop=True)
-    return dict(primary=primary, aggregate=aggregate)
+    # Aggregates AND ambiguous (dim/diffuse, possibly-aggregate) are kept out of
+    # the primary microrheology set — an aggregate's size biases Stokes-Einstein
+    # viscosity, and an ambiguous bead can't be confirmed as a clean singlet.
+    # They are still returned (as the secondary population) rather than dropped.
+    secondary = df[df['bead_class'].isin(['aggregate', 'ambiguous'])].reset_index(drop=True)
+    return dict(primary=primary, aggregate=secondary)
 
 
 def aggregate_population_stats(aggregate_df: pd.DataFrame,

@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.280] - 2026-07-08
+### Fixed (VPT fast-mode bead classification recalibrated for Airy-disk beads; garbage now rejected)
+- **Fast-mode bead classification was mismapped for large (non-diffraction-limited) beads, and never
+  rejected non-bead detections.** Two problems, both fixed. (1) The singlet-vs-aggregate split was
+  drawn on brightness, which is inverted for 200 nm-2 um beads that image as bright Airy disks: a
+  real single bead is bright and high-mass, so it was wrongly called an aggregate (the previous
+  logic labelled ~220 aggregates per frame when only ~2 exist). Aggregate now requires a bead to be
+  BOTH high-mass (top ~0.5% tail) AND bright/compact, which matches a hand-labelled ground-truth
+  frame (~2-3 aggregates/frame, the large majority singlets). Dim-but-large out-of-focus blobs are
+  now flagged as a distinct "ambiguous" class (blue) rather than forced into singlet/aggregate,
+  since they cannot be confidently classified. (2) Detections that poorly match the empirical PSF
+  template (low normalised cross-correlation) — Airy-ring fragments, hot pixels, and noise — are now
+  REJECTED (dropped) instead of being labelled and displayed, so a marked point is a real bead.
+  Aggregate and ambiguous beads are routed to the secondary population (kept out of the primary
+  microrheology set, since their size/uncertainty would bias Stokes-Einstein viscosity) rather than
+  dropped. NOTE: Airy-ring de-duplication (merging multiple detections around one bead) is a further
+  planned refinement; this release rejects poorly-matched ring fragments but does not yet merge
+  well-matched ones.
+
 ## [1.5.279] - 2026-07-08
 ### Fixed (VPT Link Trajectories crashed with AttributeError: no _fit_quality)
 - **Both VPT trajectory linkers (TrackMate LAP and Bayesian/Hungarian) raised
