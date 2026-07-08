@@ -23,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.294] - 2026-07-08
+### Fixed (batch replay ran steps on the wrong channel; Measure Line values were ignored)
+- **Batch replay of the Condensate Analysis pipeline could run steps on the wrong image layer, and
+  ignored the measurements made with the Measure Line tool.** Contributed by a user who diagnosed
+  the failures. Three fixes: (1) replay now resolves the actual layer name the GUI recorded for each
+  step (a new _resolve_image_layer helper) instead of assuming a fixed channel/stage — previously
+  Cellpose could run on the foreground-suppressed segmentation channel instead of the fluorescence
+  channel and segment 0 cells. It honours both which channel (segmentation / fluorescence / a named
+  extra channel from 3+ fluorophore files) and which stage (raw vs preprocessed / background-
+  removed) the recorded name encodes. (2) The Measure Line step now applies the recorded
+  cell_diameter / ball_radius / object_size instead of being a no-op; leaving the stale open_image
+  ball_radius in place had, after upscaling, produced an oversized rolling-ball element and a
+  MemoryError in condensate segmentation, and gave Cellpose the wrong cell diameter. (3) Replay now
+  skips cell/condensate analysis gracefully (with an explanatory message) when segmentation yields
+  0 cells or no puncta, instead of crashing inside pandas. Preprocessing and background removal also
+  now act only on the layer that was active when the step was recorded, matching the interactive
+  tool. Non-condensate replay paths (time-series, brightfield, in-vitro) are unchanged.
+
 ## [1.5.293] - 2026-07-08
 ### Added (VPT: CPU-parallel bead detection)
 - **Fast-mode bead detection now runs across a process pool when possible**, cutting the time to
