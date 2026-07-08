@@ -434,6 +434,41 @@ class VideoParticleTrackingUI:
             "data, slightly slower.")
         form.addRow(self._template_per_frame)
 
+        # Physical bead size (nm). Sets the template patch size (converted to px
+        # via the pixel size) and the ring de-duplication merge radius.
+        self._bead_size_nm = QDoubleSpinBox()
+        self._bead_size_nm.setRange(0.0, 100000.0); self._bead_size_nm.setValue(200.0)
+        self._bead_size_nm.setSingleStep(50.0); self._bead_size_nm.setDecimals(0)
+        self._bead_size_nm.setSuffix(" nm")
+        self._bead_size_nm.setToolTip(
+            "Physical bead diameter in nanometres. Converted to pixels using the "
+            "loaded pixel size to size the detection template and the ring-merge "
+            "radius. 0 = do not use a physical size (fall back to sigma-based).")
+        form.addRow("Bead size:", self._bead_size_nm)
+
+        self._template_type = QComboBox()
+        self._template_type.addItem("Empirical PSF (from data) — recommended", "empirical")
+        self._template_type.addItem("Airy model (Bessel J₁, ringed beads)", "airy")
+        self._template_type.setCurrentIndex(0)
+        self._template_type.setToolTip(
+            "Template used for fast-mode matching:\n"
+            "• Empirical — measured from the cleanest beads in your data "
+            "(best default; adapts to your actual PSF).\n"
+            "• Airy model — an analytic diffraction pattern (central disk + "
+            "ring). Use when large beads show a visible Airy ring, so one bead "
+            "matches as a single object instead of the ring being detected "
+            "separately.")
+        form.addRow("Template:", self._template_type)
+
+        self._dedup_rings = QCheckBox("Merge duplicate ring/multi-scale detections")
+        self._dedup_rings.setChecked(True)
+        self._dedup_rings.setToolTip(
+            "A single large bead can trigger several detections (at multiple "
+            "scales, or on its Airy ring). Merge detections that fall within "
+            "about one bead radius, keeping the brightest (the bead centre). "
+            "Uses the bead size above to set the merge radius.")
+        form.addRow(self._dedup_rings)
+
 
         self._exclude_agg = QCheckBox("Route aggregates to a secondary population")
         self._exclude_agg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -527,6 +562,16 @@ class VideoParticleTrackingUI:
         subpixel = self._subpixel.isChecked()
         template_mode = ('per_frame' if self._template_per_frame.isChecked()
                          else 'per_stack')
+        bead_nm = self._bead_size_nm.value() or None
+        template_type = self._template_type.currentData()
+        # Merge radius (px) from the physical bead size, if de-dup is enabled.
+        merge_radius = None
+        if self._dedup_rings.isChecked() and bead_nm:
+            try:
+                from pycat.toolbox.vpt_tools import bead_half_from_size
+                merge_radius = bead_half_from_size(bead_nm, self._mpx(), n_rings=1)
+            except Exception:
+                merge_radius = None
         def _job(progress):
             # Keep ALL classes labelled at detection; routing (primary vs.
             # aggregate) happens at the tracking step so aggregates can be
@@ -539,6 +584,9 @@ class VideoParticleTrackingUI:
                 microns_per_pixel=self._mpx(),
                 quality_mode=qmode, subpixel=subpixel,
                 template_mode=template_mode,
+                bead_size_nm=bead_nm,
+                template_type=template_type,
+                merge_radius_px=merge_radius,
                 exclude_aggregates=False, recover_out_of_plane=True,
                 progress_callback=progress)
 

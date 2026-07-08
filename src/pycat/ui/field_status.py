@@ -360,7 +360,7 @@ def prompt_pixel_size_on_load(get_dr, parent=None):
 
     # Teaching line — why it matters.
     why = QLabel(
-        "<span style='color:#aaaaaa;font-size:9pt;'>The pixel size (µm per pixel) "
+        "<span style='color:#333333;font-size:9pt;'>The pixel size (µm per pixel) "
         "sets the physical scale for every downstream measurement — object sizes, "
         "distances, diffusion coefficients, and viscosities are all computed from "
         "it. Without a correct value these results default to a scale of 1.0 µm/px "

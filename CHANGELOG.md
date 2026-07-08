@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.288] - 2026-07-08
+### Added (VPT: physical bead size, Airy-model template, and ring/multi-scale de-duplication)
+- **Bead detection can now use the physical bead size and merge duplicate detections.** Large
+  (non-diffraction-limited) beads image as an Airy disk and can trigger several detections on one
+  bead — at multiple blob scales, or on the Airy ring. Three additions address this. (1) A **bead
+  size** input (nm, default 200) is converted to pixels via the loaded pixel size to set the
+  detection template patch size and the de-duplication radius. (2) A **de-duplication** step (on by
+  default) merges detections that fall within about one bead radius, keeping the brightest (the bead
+  centre), so one bead yields one point. (3) A **template type** selector offers the empirical PSF
+  (measured from the data, default) or an **Airy model** (analytic Bessel J₁ disk + ring) for data
+  where beads show a resolved ring, so the bead matches as a single object rather than the ring
+  being detected separately. On test data whose beads showed no resolved ring the empirical template
+  remains the better fit; the Airy option is for scopes/beads that do show rings.
+### Changed
+- Pixel-size load dialog: darkened the explanatory text for readability.
+
 ## [1.5.287] - 2026-07-08
 ### Added (dedicated load-time pixel-size dialog, separate from the in-dock gate)
 - **A modal pixel-size dialog now appears on load when an image has no scale in its metadata.** This

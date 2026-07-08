@@ -501,6 +501,102 @@ def blob_log_gpu(image, min_sigma=1.0, max_sigma=5.0, num_sigma=5,
 # 3c. Fast template-based bead scoring (empirical PSF + cross-correlation)
 # ---------------------------------------------------------------------------
 
+def bead_half_from_size(bead_size_nm, microns_per_pixel, n_rings=1, min_half=4, max_half=24):
+    """Choose a template half-width (px) from the physical bead size so the
+    patch is large enough to include the requested number of Airy rings.
+
+    bead_size_nm : physical bead diameter in nanometres (user input).
+    microns_per_pixel : loaded pixel size (µm/px); the linear scale, i.e.
+        sqrt(microns_per_pixel_sq).
+    n_rings : how many Airy rings the patch should span (1 by default; the 2nd
+        ring is often only visible after frame averaging).
+
+    The Airy disk radius (first dark ring) is roughly the bead radius scaled up
+    by the optics, so we take the bead radius in px and pad it by n_rings worth
+    of ring spacing (~the same radius again per ring), then clamp to a sane
+    range. This is a heuristic starting size; detection/scoring still adapt.
+    """
+    try:
+        mpp = float(microns_per_pixel) if microns_per_pixel and microns_per_pixel > 0 else None
+    except Exception:
+        mpp = None
+    if not mpp:
+        return min_half
+    bead_um = float(bead_size_nm) / 1000.0
+    bead_radius_px = (bead_um / mpp) / 2.0
+    # central disk + n_rings, each ~one disk-radius wide, plus a small margin
+    half = int(np.ceil(bead_radius_px * (1 + n_rings) + 2))
+    return int(max(min_half, min(max_half, half)))
+
+
+def build_airy_template(half, first_zero_px=None):
+    """Build an analytic Airy-disk template (Bessel J1) of size (2*half+1)^2.
+
+    The Airy intensity is I(r) = [2*J1(x)/x]^2 with x = 3.8317 * r / first_zero,
+    where first_zero is the radius (px) of the first dark ring. Unlike a Gaussian
+    template this reproduces the central disk AND the surrounding ring, so on
+    data where beads show a resolved Airy pattern a single bead matches as ONE
+    object (rather than blob_log firing separately on the ring).
+
+    If first_zero_px is None it defaults to ~half (first dark ring near the patch
+    edge, i.e. the patch spans about the first ring). Returns a zero-mean,
+    unit-variance template for NCC scoring.
+    """
+    from scipy.special import j1
+    if first_zero_px is None:
+        first_zero_px = max(2.0, half * 0.8)
+    y, x = np.ogrid[-half:half + 1, -half:half + 1]
+    r = np.sqrt(y * y + x * x).astype(np.float64)
+    xx = 3.8317 * r / float(first_zero_px)
+    xx[xx == 0] = 1e-9
+    airy = (2.0 * j1(xx) / xx) ** 2
+    airy = airy.astype(np.float32)
+    tmpl_z = (airy - airy.mean()) / (airy.std() + 1e-8)
+    return tmpl_z
+
+
+def dedup_detections(coords, frame, merge_radius_px, keep='brightest'):
+    """Merge detections that fall within merge_radius_px of one another, keeping
+    a single representative per cluster. blob_log can fire multiple times on one
+    bead — at several scales on a broad bead, or on the Airy ring of a large
+    bead — producing duplicate detections. This collapses each such cluster to
+    one point (the brightest local intensity = the bead centre by default).
+
+    coords : list/array of (y, x).
+    frame  : the image, used to pick the brightest detection per cluster.
+    merge_radius_px : detections closer than this are treated as the same bead.
+    Returns the filtered list of (y, x).
+    """
+    if coords is None or len(coords) == 0 or merge_radius_px is None or merge_radius_px <= 0:
+        return coords
+    from scipy.spatial import cKDTree
+    pts = np.asarray([(float(y), float(x)) for (y, x) in coords], dtype=float)
+    raw = np.asarray(frame, dtype=np.float32)
+    H, W = raw.shape
+
+    def local_intensity(y, x, r=2):
+        yi, xi = int(round(y)), int(round(x))
+        y0, y1 = max(0, yi - r), min(H, yi + r + 1)
+        x0, x1 = max(0, xi - r), min(W, xi + r + 1)
+        if y1 <= y0 or x1 <= x0:
+            return -np.inf
+        return float(raw[y0:y1, x0:x1].mean())
+
+    tree = cKDTree(pts)
+    order = np.argsort([-local_intensity(y, x) for (y, x) in pts])  # brightest first
+    used = np.zeros(len(pts), dtype=bool)
+    kept = []
+    for idx in order:
+        if used[idx]:
+            continue
+        neighbours = tree.query_ball_point(pts[idx], r=float(merge_radius_px))
+        kept.append(idx)                 # brightest in its neighbourhood
+        for n in neighbours:
+            used[n] = True
+    kept.sort()
+    return [tuple(pts[i]) for i in kept]
+
+
 def build_bead_template(frame, coords, half=4, clean_percentile=60):
     """Build an empirical PSF template by averaging the cleanest bead patches.
 
@@ -759,6 +855,10 @@ def detect_beads_stack(
     quality_mode: str = 'fast',
     template_mode: str = 'per_stack',
     subpixel: bool = True,
+    bead_size_nm: Optional[float] = None,
+    template_type: str = 'empirical',
+    merge_radius_px: Optional[float] = None,
+    refine_with_airy: bool = False,
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -811,6 +911,13 @@ def detect_beads_stack(
     rows = []
     nominal_area = float(np.pi * (max_sigma * np.sqrt(2) * microns_per_pixel) ** 2)
     half = max(2, fit_window // 2)
+    # If a physical bead size is given, size the template patch from it (so it
+    # can span the Airy ring). Overrides the fit_window-derived half.
+    if bead_size_nm:
+        try:
+            half = bead_half_from_size(bead_size_nm, microns_per_pixel, n_rings=1)
+        except Exception:
+            pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
     done = 0
@@ -819,10 +926,19 @@ def detect_beads_stack(
             coords = detect_beads_frame(
                 frame, min_sigma=min_sigma, max_sigma=max_sigma,
                 num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+            # De-duplicate multi-scale / ring detections on a single bead, if a
+            # merge radius is set (from the physical bead size upstream).
+            if merge_radius_px:
+                coords = dedup_detections(coords, frame, merge_radius_px)
             if template_z is None or template_mode == 'per_frame':
-                tz, half = build_bead_template(frame, coords, half=half)
-                if tz is not None:
-                    template_z = tz
+                if template_type == 'airy':
+                    # Analytic Airy (Bessel J1) template — matches beads that
+                    # show a resolved ring, so a bead is one object not several.
+                    template_z = build_airy_template(half)
+                else:
+                    tz, _h = build_bead_template(frame, coords, half=half)
+                    if tz is not None:
+                        template_z = tz
             scored = score_beads_template(frame, coords, template_z,
                                           half=half, subpixel=subpixel)
             for i, b in enumerate(scored):
