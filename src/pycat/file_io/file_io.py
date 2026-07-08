@@ -2206,7 +2206,8 @@ class FileIOClass:
         try:
             from pycat.ui.field_status import prompt_pixel_size_on_load
             prompt_pixel_size_on_load(
-                lambda: self.central_manager.active_data_class.data_repository)
+                lambda: self.central_manager.active_data_class.data_repository,
+                central_manager=self.central_manager)
         except Exception:
             pass
 

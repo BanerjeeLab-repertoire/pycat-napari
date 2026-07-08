@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.289] - 2026-07-08
+### Fixed (in-dock pixel-size gate now hides after the scale is set via the load-time popup)
+- **Setting the pixel size in the load-time popup did not hide an already-open method panel's
+  in-dock pixel-size gate.** The popup and the gate share the same scale value, but two links were
+  missing: the popup did not notify the gate to re-check after writing the scale, and the gate only
+  hid on a scale it had confirmed itself or one from metadata — not on a valid scale set elsewhere.
+  The popup now fires the data-changed notification after setting the scale, and the gate hides
+  whenever the repository holds a valid scale that was set externally (its own field still empty),
+  while still not hiding mid-typing in the dock field. Popup and dock gate now stay consistent.
+
 ## [1.5.288] - 2026-07-08
 ### Added (VPT: physical bead size, Airy-model template, and ring/multi-scale de-duplication)
 - **Bead detection can now use the physical bead size and merge duplicate detections.** Large

@@ -322,7 +322,7 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None,
     return grp
 
 
-def prompt_pixel_size_on_load(get_dr, parent=None):
+def prompt_pixel_size_on_load(get_dr, parent=None, central_manager=None):
     """Show a modal pixel-size dialog after a file load when the image has no
     valid physical scale (pixel size fell back to 1.0 and did not come from
     metadata). Writes the confirmed value into the same
@@ -393,6 +393,14 @@ def prompt_pixel_size_on_load(get_dr, parent=None):
                 d['pixel_size_from_metadata'] = False
                 result['set'] = True
             dlg.accept()
+            # The scale just changed — tell any registered gates (e.g. an open
+            # method panel's in-dock pixel-size gate) to re-evaluate, so a gate
+            # that was showing now hides instead of contradicting the popup.
+            if central_manager is not None:
+                try:
+                    central_manager.notify_data_changed()
+                except Exception:
+                    pass
         # if 0/invalid, do nothing (keep dialog open so they enter a value or Skip)
 
     set_btn.clicked.connect(_accept)
@@ -516,6 +524,16 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
             return
         # Hide once the user has CONFIRMED a valid scale (not merely typed one).
         if _valid_scale() and state['confirmed']:
+            circle._set('green', "Scale set.")
+            grp.setVisible(False)
+            return
+        # Hide when a valid scale was set EXTERNALLY (e.g. the load-time popup or
+        # a persisted value) rather than typed into this field. We detect that as
+        # "the repository has a valid scale but this field is still empty/zero" —
+        # i.e. the user did not enter it here, so there is nothing to confirm and
+        # the gate should not contradict the already-set scale.
+        if _valid_scale() and field.value() <= 0:
+            state['confirmed'] = True
             circle._set('green', "Scale set.")
             grp.setVisible(False)
             return
