@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.292] - 2026-07-08
+### Changed (restrict to Python 3.12 to prevent accidental 3.13 installs)
+- **requires-python tightened to >=3.12,<3.13**, and the 3.13 classifier and the contradictory
+  "supported range 3.12-3.13" README note were corrected to 3.12-only. Some users following the
+  install steps ended up on Python 3.13, which is not yet validated against the native dependency
+  stack (PyQt5/torch/numba/cellpose on arm64) and contributed to launch instability. pip will now
+  refuse to install on 3.13 with a clear version error instead of installing and crashing. 3.13
+  support can be re-enabled after deliberate testing.
+
 ## [1.5.291] - 2026-07-08
 ### Fixed (launch segfault on Apple Silicon / arm64 Macs)
 - **Multiple native arm64 (Apple Silicon) macOS users hit a segmentation fault at launch**, right
