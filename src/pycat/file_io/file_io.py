@@ -767,6 +767,58 @@ def materialize_stack(stack_like, dtype=np.float32):
     return arr.astype(dtype)
 
 
+def iter_frames(stack_like, dtype=np.float32, indices=None):
+    """Yield frames of a (T, H, W) stack ONE AT A TIME, without ever holding
+    the whole stack in memory.
+
+    This is the streaming counterpart to materialize_stack(): use it for
+    per-frame analysis (e.g. bead detection) that only needs one frame at a
+    time, so a long movie never has to be fully materialised. Handles PyCAT's
+    lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS readers) by indexing
+    them frame-by-frame, dask arrays by computing one frame at a time, and plain
+    numpy arrays by iterating rows of the T axis. A 2D input yields a single
+    frame.
+
+    Parameters
+    ----------
+    stack_like : array-like or lazy wrapper with .shape and __getitem__.
+    dtype : frames are returned as this dtype.
+    indices : optional iterable of frame indices to yield (e.g. a keyframe
+        subset). If None, all frames are yielded in order.
+
+    Yields
+    ------
+    (t, frame) : the frame index and the 2D frame as a numpy array.
+    """
+    shp = getattr(stack_like, 'shape', None)
+    # 2D single frame
+    if shp is not None and len(shp) == 2:
+        yield 0, np.asarray(stack_like).astype(dtype)
+        return
+
+    if shp is not None and len(shp) == 3:
+        n = shp[0]
+        idxs = range(n) if indices is None else list(indices)
+        is_dask = hasattr(stack_like, 'compute') and not hasattr(stack_like, 'as_full_array')
+        for t in idxs:
+            if t < 0 or t >= n:
+                continue
+            frame = stack_like[t]
+            if is_dask and hasattr(frame, 'compute'):
+                frame = frame.compute()
+            yield int(t), np.asarray(frame).astype(dtype)
+        return
+
+    # Fallback: unknown shape — materialise once and iterate (last resort).
+    arr = materialize_stack(stack_like, dtype=dtype)
+    if arr.ndim == 2:
+        arr = arr[np.newaxis, ...]
+    idxs = range(arr.shape[0]) if indices is None else list(indices)
+    for t in idxs:
+        if 0 <= t < arr.shape[0]:
+            yield int(t), arr[t]
+
+
 class _ZarrTYX_generic:
     """
     Lightweight napari-compatible wrapper around a plain zarr Array

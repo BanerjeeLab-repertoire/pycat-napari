@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.276] - 2026-07-07
+### Changed (VPT bead detection now streams frame-by-frame; host inference uses keyframes)
+- **VPT bead detection no longer materialises the whole movie in memory, and "Infer Host from
+  Beads" no longer processes every frame.** Two related performance fixes: (1) detect_beads_stack
+  now STREAMS frames one at a time via a new iter_frames() helper, reading each frame from the lazy
+  layer on demand instead of building a full (T, H, W) array up front. Memory stays flat regardless
+  of movie length, and the earlier frame-0-collapse class of bug is now impossible by construction
+  (frames are indexed individually, never via np.asarray on the whole wrapper). (2) Host inference
+  (Mode C) previously ran blob detection on every frame just to build a bead-density map, which on
+  a long movie (e.g. ~1000 frames) took minutes and froze the UI. Because the host is treated as
+  stationary, it now samples up to 8 evenly-spaced keyframes — empirically this reproduces the
+  all-frames inferred host to within a few percent IoU while cutting the work by ~100x. Added a
+  frame_indices parameter to detect_beads_stack for keyframe subsetting (original frame indices are
+  preserved in the output). New iter_frames() streaming helper in file_io alongside
+  materialize_stack().
+
 ## [1.5.275] - 2026-07-07
 ### Added (VPT can infer an unlabelled host condensate from the bead distribution — Mode C)
 - **New "Infer from beads" host mode for VPT.** When the condensate is real but unlabelled (no

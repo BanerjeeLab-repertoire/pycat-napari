@@ -532,9 +532,21 @@ def detect_beads_stack(
     recover_out_of_plane: bool = True,
     fit_window: int = 9,
     progress_callback=None,
+    frame_indices=None,
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
+
+    Frames are read and processed ONE AT A TIME (streamed via iter_frames), so
+    a long movie is never fully held in memory. Pass a lazy stack wrapper (e.g.
+    a napari layer's .data) directly — do not pre-materialise it.
+
+    Parameters
+    ----------
+    frame_indices : optional iterable of frame indices to process (e.g. a
+        keyframe subset for host inference). If None, all frames are used.
+        Note: the 'frame' column in the output uses the ORIGINAL frame index,
+        so subsetting stays traceable.
 
     Returns
     -------
@@ -544,18 +556,23 @@ def detect_beads_stack(
         placeholder (beads are point-like); it carries a small constant so
         downstream code that reads it doesn't divide by zero.
     """
-    stack = np.asarray(bead_stack)
-    if stack.ndim == 2:
-        stack = stack[np.newaxis, ...]
+    from pycat.file_io.file_io import iter_frames
+
+    # Determine the frame count for progress reporting without materialising.
+    shp = getattr(bead_stack, 'shape', None)
+    if shp is not None and len(shp) == 3:
+        n_frames = len(list(frame_indices)) if frame_indices is not None else shp[0]
+    else:
+        n_frames = 1
 
     rows = []
-    n_frames = stack.shape[0]
     nominal_area = float(np.pi * (max_sigma * np.sqrt(2) * microns_per_pixel) ** 2)
 
-    for t in range(n_frames):
+    done = 0
+    for t, frame in iter_frames(bead_stack, indices=frame_indices):
         if not fit_quality:
             coords = detect_beads_frame(
-                stack[t], min_sigma=min_sigma, max_sigma=max_sigma,
+                frame, min_sigma=min_sigma, max_sigma=max_sigma,
                 num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
             for i, (y, x) in enumerate(coords):
                 rows.append({
@@ -565,7 +582,7 @@ def detect_beads_stack(
                     'area_um2': nominal_area})
         else:
             beads = detect_beads_frame(
-                stack[t], min_sigma=min_sigma, max_sigma=max_sigma,
+                frame, min_sigma=min_sigma, max_sigma=max_sigma,
                 num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
                 fit_quality=True, fit_window=fit_window)
             for i, b in enumerate(beads):
@@ -585,8 +602,9 @@ def detect_beads_stack(
                     'sigma_mean': b['sigma_mean'], 'amplitude': b['amplitude'],
                     'integrated_intensity': b['integrated_intensity'],
                     'r_squared': b['r_squared']})
+        done += 1
         if progress_callback is not None:
-            progress_callback(t + 1, n_frames)
+            progress_callback(done, n_frames)
 
     if not rows:
         cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']

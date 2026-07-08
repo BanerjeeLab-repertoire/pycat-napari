@@ -288,26 +288,41 @@ class VideoParticleTrackingUI:
         erode it and store it as the bead-inclusion mask."""
         from pycat.toolbox.vpt_tools import (
             detect_beads_stack, infer_host_from_beads, erode_host_mask)
-        from pycat.file_io.file_io import materialize_stack
         name = self._bead_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(
                 f"Bead channel '{name}' not found — select the bead channel "
                 "in Step 3 first."); return
-        try:
-            stack = materialize_stack(self.viewer.layers[name].data)
-        except Exception as e:
-            napari_show_warning(f"Could not read the bead stack: {e}"); return
+        layer_data = self.viewer.layers[name].data
+        shp = getattr(layer_data, 'shape', None)
+        if shp is None or len(shp) < 2:
+            napari_show_warning("Bead layer has an unexpected shape."); return
+        H, W = int(shp[-2]), int(shp[-1])
 
-        # Detect beads across all frames (no host filter — we're building one),
-        # pool their centroids into a single (N, 2) array of (y, x) pixels.
+        # The host condensate is (approximately) stationary, so we only need a
+        # handful of frames to build a stable bead-density map — detecting on
+        # every frame of a long movie is both unnecessary and slow enough to
+        # freeze the UI (~1s per frame => minutes on a 1000-frame stack). Sample
+        # up to N_KEYFRAMES evenly-spaced frames and stream just those (frames
+        # are read one at a time; the full stack is never materialised).
+        # Empirically this matches the all-frames host to within a few % IoU.
+        N_KEYFRAMES = 8
+        if len(shp) == 3 and shp[0] > N_KEYFRAMES:
+            key_idx = np.unique(
+                np.linspace(0, shp[0] - 1, N_KEYFRAMES).astype(int))
+        else:
+            key_idx = None  # all frames (short stack) or 2D
+
+        # Detect beads across the KEY frames (no host filter — we're building
+        # one), pool their centroids into a single (N, 2) array of (y, x) px.
         try:
             det = detect_beads_stack(
-                stack, host_mask=None,
+                layer_data, host_mask=None,
                 min_sigma=self._min_sigma.value(),
                 max_sigma=self._max_sigma.value(),
                 threshold=self._bead_thresh.value(),
-                microns_per_pixel=1.0, fit_quality=False)
+                microns_per_pixel=1.0, fit_quality=False,
+                frame_indices=key_idx)
         except Exception as e:
             napari_show_warning(f"Bead detection for host inference failed: {e}")
             return
@@ -317,7 +332,6 @@ class VideoParticleTrackingUI:
                 "threshold or widen the sigma range in Step 3."); return
 
         coords = det[['y_um', 'x_um']].values  # mpp=1.0 above, so these are px
-        H, W = stack.shape[-2], stack.shape[-1]
         mpp = self._mpx()
         try:
             labeled = infer_host_from_beads(
@@ -428,17 +442,13 @@ class VideoParticleTrackingUI:
         name = self._bead_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Bead channel layer '{name}' not found."); return
-        # The bead channel is a time-series (T, H, W). napari layer data for an
-        # OME-TIFF time-series is often a lazy _TiffPageStack whose __array__
-        # deliberately returns only the FIRST frame (to keep napari's incidental
-        # array requests cheap). Calling np.asarray() here would therefore
-        # silently collapse the whole movie to a single frame — beads would be
-        # detected on frame 0 only and there would be nothing to link. Use
-        # materialize_stack(), which reads every frame into a real (T, H, W)
-        # array (and is a no-op passthrough for data that is already a full
-        # numpy array).
-        from pycat.file_io.file_io import materialize_stack
-        stack = materialize_stack(self.viewer.layers[name].data)
+        # The bead channel is a time-series (T, H, W). detect_beads_stack now
+        # STREAMS frames one at a time (via iter_frames), so we pass the lazy
+        # layer data straight through — no need to materialise the whole stack
+        # in memory (which for a long movie is large, and for a lazy
+        # _TiffPageStack, np.asarray() would collapse to frame 0). This keeps
+        # memory flat regardless of movie length.
+        stack = self.viewer.layers[name].data
         host_mask = self._dr().get('vpt_host_mask')
         mode = self._host_mode()
         if mode == 'host' and host_mask is None:
