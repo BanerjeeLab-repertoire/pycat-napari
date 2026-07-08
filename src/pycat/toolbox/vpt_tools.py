@@ -1161,9 +1161,24 @@ def detect_beads_stack(
                 tasks = [(t, src_desc, True, det_kwargs, merge_radius_px)
                          for t in idxs]
                 precomputed_coords = {}
+                from concurrent.futures import as_completed
                 with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                    for t, coords in ex.map(_detect_frame_worker, tasks):
+                    _n_par = len(tasks)
+                    futures = [ex.submit(_detect_frame_worker, task)
+                               for task in tasks]
+                    _done_par = 0
+                    for fut in as_completed(futures):
+                        t, coords = fut.result()
                         precomputed_coords[t] = coords
+                        _done_par += 1
+                        # Report progress DURING parallel detection — the
+                        # expensive phase. as_completed fires as each frame
+                        # finishes, so the bar advances smoothly instead of
+                        # sitting at 0 until the (cheap) scoring loop runs.
+                        if progress_callback is not None and _n_par:
+                            progress_callback(
+                                int(_done_par / _n_par * max(1, n_frames)),
+                                max(1, n_frames))
             except Exception:
                 # Any failure (pickling, worker crash, host_mask not picklable)
                 # → fall back to serial detection below.
@@ -1256,37 +1271,64 @@ def detect_beads_stack(
 # ---------------------------------------------------------------------------
 
 def split_bead_populations(detections_df: pd.DataFrame,
-                           recover_out_of_plane: bool = True) -> dict:
-    """
-    Split classified bead detections into a primary probe population and a
-    secondary aggregate population.
+                           recover_out_of_plane: bool = False) -> dict:
+    """Separate classified detections into three NEVER-MIXED populations.
 
-    primary   = singlets (+ out-of-plane if recover_out_of_plane) — used for
-                microrheology, since Stokes-Einstein assumes a known single
-                bead size.
-    aggregate = beads classified as aggregates — tracked separately so
-                aggregation can be used as its own readout (count, size, and
-                mobility over time) rather than discarded.
+    The three bead classes are kept strictly separate so microrheology runs on a
+    known, homogeneous probe population:
 
-    Returns
-    -------
-    dict with 'primary' and 'aggregate' DataFrames. If the input lacks a
-    'bead_class' column (quality fit not run), everything is 'primary'.
+      singlet     (green)  — clean, in-focus single beads. The correct default
+                             for Stokes-Einstein viscosity (known single-bead
+                             size, reliable centroid).
+      out_of_plane(yellow) — dim / out-of-focus beads. Position is less certain,
+                             so they are NOT mixed into the singlet measurement
+                             by default. They can be analysed ON THEIR OWN (to
+                             check whether they give a consistent viscosity) and
+                             only then, at the user's choice, combined with the
+                             singlets.
+      aggregate   (red)    — aggregates (and ambiguous). Their size biases
+                             Stokes-Einstein, so they are ALWAYS a separate
+                             readout (count / size / mobility), never in the
+                             viscosity population.
+
+    Returns a dict with 'singlet', 'out_of_plane', 'aggregate' DataFrames, plus
+    'primary' for backward compatibility (singlets, or singlets+out_of_plane if
+    recover_out_of_plane is True). Callers that want a specific population should
+    read the named key directly rather than 'primary'.
     """
+    if detections_df is None or detections_df.empty \
+            or 'bead_class' not in detections_df.columns:
+        empty = pd.DataFrame()
+        base = detections_df if detections_df is not None else empty
+        return dict(primary=base, singlet=base, out_of_plane=empty,
+                    aggregate=empty)
     df = detections_df
-    if df is None or df.empty or 'bead_class' not in df.columns:
-        return dict(primary=df if df is not None else pd.DataFrame(),
-                    aggregate=pd.DataFrame())
-    primary_classes = ['singlet', 'unfit']
-    if recover_out_of_plane:
-        primary_classes.append('out_of_plane')
-    primary = df[df['bead_class'].isin(primary_classes)].reset_index(drop=True)
-    # Aggregates AND ambiguous (dim/diffuse, possibly-aggregate) are kept out of
-    # the primary microrheology set — an aggregate's size biases Stokes-Einstein
-    # viscosity, and an ambiguous bead can't be confirmed as a clean singlet.
-    # They are still returned (as the secondary population) rather than dropped.
-    secondary = df[df['bead_class'].isin(['aggregate', 'ambiguous'])].reset_index(drop=True)
-    return dict(primary=primary, aggregate=secondary)
+    singlet = df[df['bead_class'].isin(['singlet', 'unfit'])].reset_index(drop=True)
+    out_of_plane = df[df['bead_class'] == 'out_of_plane'].reset_index(drop=True)
+    aggregate = df[df['bead_class'].isin(['aggregate', 'ambiguous'])].reset_index(drop=True)
+    # 'primary' kept for backward compatibility with existing callers.
+    if recover_out_of_plane and len(out_of_plane):
+        primary = pd.concat([singlet, out_of_plane], ignore_index=True)
+    else:
+        primary = singlet
+    return dict(primary=primary, singlet=singlet,
+                out_of_plane=out_of_plane, aggregate=aggregate)
+
+
+def select_bead_population(detections_df: pd.DataFrame, which: str = 'singlet') -> pd.DataFrame:
+    """Return one (or a deliberate combination) of the bead populations for
+    microrheology, by name.
+
+    which : 'singlet' (green, default) | 'out_of_plane' (yellow) |
+            'singlet+out_of_plane' (green+yellow, opt-in) | 'aggregate' (red).
+    Populations are never mixed except the explicit 'singlet+out_of_plane'.
+    """
+    pops = split_bead_populations(detections_df)
+    if which == 'singlet+out_of_plane':
+        parts = [pops['singlet'], pops['out_of_plane']]
+        parts = [p for p in parts if p is not None and len(p)]
+        return pd.concat(parts, ignore_index=True) if parts else pops['singlet']
+    return pops.get(which, pops['singlet'])
 
 
 def aggregate_population_stats(aggregate_df: pd.DataFrame,

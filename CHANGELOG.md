@@ -23,6 +23,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.300] - 2026-07-08
+### Changed (VPT detection: honest progress bar and runtime estimate)
+- **The detection progress bar now advances during the actual detection work.** With CPU-parallel
+  detection the expensive per-frame blob detection ran in a process pool that reported nothing, so
+  the bar sat near 0 and then jumped when the cheap scoring loop ran. Progress is now emitted as
+  each frame finishes in the pool (via as_completed), so the bar moves smoothly through the real
+  work. Results are unchanged (still verified identical to serial).
+- **The pre-run time estimate accounts for acceleration.** It previously always showed the serial
+  worst case (about 13 minutes for 1000 frames) regardless of GPU or multi-core use. It now divides
+  by the expected speedup (GPU if present, else the CPU worker count) and names which accelerator it
+  assumes, so the estimate reflects what will actually happen.
+
+## [1.5.299] - 2026-07-08
+### Changed (VPT microrheology: never mix bead populations; viscosity reported first)
+- **The three bead populations (green singlets / yellow out-of-plane / red aggregates) are never
+  mixed, and microrheology runs on green singlets by default.** Previously out-of-plane (dim,
+  defocused) beads were folded into the primary set by default, which fed the linker a large,
+  low-quality population and produced many spurious short trajectories that biased the MSD and
+  pulled the fitted viscosity far too low. A new Microrheology population selector (in the detection
+  step) offers: Green (singlets, default), Yellow (out-of-plane) only — so the dim population can be
+  checked on its own to see whether it gives a consistent viscosity, and Green + Yellow (combine)
+  once that is confirmed. Aggregates (red) are always tracked as a separate readout and never enter
+  the viscosity population, since their size would bias Stokes-Einstein. The old always-on
+  keep-out-of-plane / route-aggregates checkboxes are replaced by this single explicit choice.
+- **Viscosity is now reported first** (ahead of the diffusion coefficient) in both the results table
+  and the completion message, since it is the headline quantity.
+
 ## [1.5.298] - 2026-07-08
 ### Fixed (Compute MSD hung / crashed on large track sets)
 - **Microrheology (Compute MSD) could freeze or crash PyCAT on movies that produce many long
