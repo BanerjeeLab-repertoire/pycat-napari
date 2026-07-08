@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.284] - 2026-07-08
+### Fixed (pixel-size gate stopped appearing after the 1.5.283 de-duplication change)
+- **The 1.5.283 gate coordinator was too strict and suppressed the gate entirely.** It only showed
+  a gate whose widget already reported a parent, but that check could be false at the moment the
+  gate re-evaluated (before the panel finished attaching), so the gate never appeared on load or
+  method selection. The floating-window problem is already prevented by embedding the gate in its
+  panel layout (added in 1.5.283), so the extra parent check was redundant and has been removed. The
+  coordinator now simply shows the first gate that needs a scale and hides the rest — restoring the
+  gate on load while keeping single-window, no-orphan behaviour.
+
 ## [1.5.283] - 2026-07-08
 ### Fixed (pixel-size gate floated as separate windows / persisted after close; auto-clear now covers stacks)
 - **The pixel-size gate appeared as one or more floating windows that persisted even after the PyCAT

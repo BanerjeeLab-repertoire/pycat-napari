@@ -343,16 +343,12 @@ def _coordinate_pixel_gates():
                 _PIXEL_GATES.remove(g); continue
         except Exception:
             continue
-        # Only show a gate embedded in a real parent window — never one that
-        # would float as its own top-level window (which would outlive the GUI).
-        # A widget added to a layout that is attached to a panel has a parent;
-        # if it somehow lacks one, showing it would create a floating window, so
-        # we suppress that case.
-        try:
-            parented = grp.parentWidget() is not None
-        except Exception:
-            parented = False
-        if g.get('wants') and parented and not shown:
+        # De-duplication only: show the first gate that wants to be visible,
+        # hide the rest. The gate can no longer float as its own window because
+        # it is embedded in its panel layout (see add_pixel_size_gate), so no
+        # parent check is needed here — that check was suppressing legitimate
+        # shows when refresh fired before the panel was fully attached.
+        if g.get('wants') and not shown:
             grp.setVisible(True)
             shown = True
         else:
