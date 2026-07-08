@@ -627,7 +627,7 @@ def viscosity_from_diffusion(
 # ---------------------------------------------------------------------------
 
 def run_vpt_analysis(
-    host_image: np.ndarray,
+    host_image: Optional[np.ndarray],
     bead_stack: np.ndarray,
     microns_per_pixel: float = 1.0,
     frame_interval_s: float = 0.1,
@@ -665,9 +665,16 @@ def run_vpt_analysis(
     from pycat.toolbox.condensate_physics_tools import (
         compute_msd, fit_anomalous_diffusion)
 
-    # 1-2. Host segmentation + erosion
-    host_labeled = segment_host_condensate(host_image, method=seg_method)
-    host_eroded  = erode_host_mask(host_labeled, erosion_px=erosion_px)
+    # 1-2. Host segmentation + erosion.
+    #      If host_image is None (e.g. a beads-in-glycerol control, or any data
+    #      with no condensate boundary), skip host masking and track every bead
+    #      across the full frame — the detection layer treats host_mask=None as
+    #      "keep all beads".
+    if host_image is None:
+        host_eroded = None
+    else:
+        host_labeled = segment_host_condensate(host_image, method=seg_method)
+        host_eroded  = erode_host_mask(host_labeled, erosion_px=erosion_px)
 
     # 3. Bead detection — keep ALL classes labelled so aggregates can be
     #    routed to a secondary population rather than discarded.

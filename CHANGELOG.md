@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.274] - 2026-07-07
+### Added (VPT host-condensate segmentation is now optional — no-host / full-frame mode)
+- **VPT no longer requires a companion host-condensate channel.** Not all microrheology data has a
+  separate channel that labels the host phase — for example beads-in-glycerol viscosity controls,
+  or any bulk-medium experiment with no condensate boundary at all. Previously the bead-detection
+  step hard-blocked with "run Step 2 first" whenever no host mask was present, making these
+  datasets impossible to analyse. Step 2 now offers a Host mode selector: "Host channel" (the
+  existing behaviour, default), "No host (full frame)" (skip host masking and track every bead
+  across the whole field), and "Infer from beads" (reserved for a future release, disabled for
+  now). In no-host mode the host-segmentation controls are greyed out and bead detection proceeds
+  with no inclusion mask. The end-to-end run_vpt_analysis() helper likewise accepts host_image=None
+  and skips host segmentation. The underlying detection already treated a missing host mask as
+  "keep all beads", so this change is purely about exposing that path in the UI. Validated on a
+  real 5-frame bead substack: all ~780-820 beads per frame are detected and tracked across the full
+  field with no host channel. (Full-frame control support also enables pipeline self-validation:
+  beads in a known-viscosity medium like glycerol are how VPT microrheology is calibrated.)
+
 ## [1.5.273] - 2026-07-07
 ### Fixed (VPT particle tracking only saw the first frame of a time-series)
 - **The VPT (video particle tracking) pipeline silently collapsed any multi-frame time-series to

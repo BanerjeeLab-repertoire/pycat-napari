@@ -134,6 +134,34 @@ class VideoParticleTrackingUI:
             "surface flow corrupt bulk diffusion — are excluded.</span>")
         note.setWordWrap(True); form.addRow(note)
 
+        # Host mode selector. Not all data has a companion host channel:
+        #   • Host channel   — segment a separate condensate channel (default).
+        #   • No host        — no condensate boundary at all (e.g. beads-in-
+        #                      glycerol viscosity controls); track every bead
+        #                      across the full frame.
+        #   • Infer from beads — (experimental / not yet enabled) synthesize a
+        #                      host region from the bead distribution when the
+        #                      condensate is real but unlabelled.
+        self._rb_mode_host   = QRadioButton("Host channel")
+        self._rb_mode_nohost = QRadioButton("No host (full frame)")
+        self._rb_mode_infer  = QRadioButton("Infer from beads")
+        self._rb_mode_host.setChecked(True)
+        self._rb_mode_infer.setEnabled(False)  # Mode C — pending validation
+        self._rb_mode_infer.setToolTip(
+            "Experimental (not yet enabled): infer an unlabelled host boundary "
+            "from where the beads cluster. Coming in a future version.")
+        self._rb_mode_nohost.setToolTip(
+            "No condensate boundary — track all beads across the whole field. "
+            "Use for bulk-medium controls (e.g. beads diffusing in glycerol).")
+        mode_row = QHBoxLayout()
+        for rb in (self._rb_mode_host, self._rb_mode_nohost, self._rb_mode_infer):
+            mode_row.addWidget(rb)
+        mode_row.addStretch()
+        mode_w = QWidget(); mode_w.setLayout(mode_row)
+        form.addRow("Host mode:", mode_w)
+        for rb in (self._rb_mode_host, self._rb_mode_nohost):
+            rb.toggled.connect(self._on_host_mode_changed)
+
         self._host_dd = self.create_layer_dropdown(napari.layers.Image)
         self._host_dd.setToolTip("Fluorescence channel that labels the condensate host phase.")
         form.addRow("Host channel:", self._host_dd)
@@ -170,6 +198,22 @@ class VideoParticleTrackingUI:
         if self._rb_triangle.isChecked(): return 'triangle'
         if self._rb_li.isChecked():       return 'li'
         return 'otsu'
+
+    def _host_mode(self):
+        """Return the selected host mode: 'host', 'nohost', or 'infer'."""
+        if self._rb_mode_nohost.isChecked(): return 'nohost'
+        if self._rb_mode_infer.isChecked():  return 'infer'
+        return 'host'
+
+    def _on_host_mode_changed(self, _checked=False):
+        """Grey out the host-segmentation controls when no host channel is used."""
+        host_mode = self._host_mode() == 'host'
+        for w in (self._host_dd, self._rb_otsu, self._rb_triangle, self._rb_li,
+                  self._erosion_spin):
+            try:
+                w.setEnabled(host_mode)
+            except Exception:
+                pass
 
     def _on_segment_host(self):
         from pycat.toolbox.vpt_tools import segment_host_condensate, erode_host_mask
@@ -286,10 +330,19 @@ class VideoParticleTrackingUI:
         # numpy array).
         from pycat.file_io.file_io import materialize_stack
         stack = materialize_stack(self.viewer.layers[name].data)
-        if host_mask is None:
+        host_mask = self._dr().get('vpt_host_mask')
+        mode = self._host_mode()
+        if mode == 'host' and host_mask is None:
+            # Host-channel mode genuinely needs the mask from Step 2.
             napari_show_warning(
                 "No host mask found — run Step 2 first so beads near the "
-                "condensate interface can be excluded."); return
+                "condensate interface can be excluded. (Or switch Host mode to "
+                "'No host (full frame)' if this data has no condensate "
+                "boundary, e.g. a beads-in-glycerol control.)"); return
+        if mode != 'host':
+            # No-host / full-frame: track every bead across the whole field.
+            # (The detection layer already treats host_mask=None as "keep all".)
+            host_mask = None
 
         self._bead_prog.setVisible(True); self._bead_prog.setRange(0, 0)
 
