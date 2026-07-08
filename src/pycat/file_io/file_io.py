@@ -998,6 +998,17 @@ class FileIOClass:
         if not file_paths: 
             return
 
+        # Auto-clear existing layers before loading a new dataset. Loading a new
+        # image while a previous one is still present causes confusing display
+        # behaviour — e.g. a 300-frame image loaded over a 1000-frame one looks
+        # like it failed to load when scrubbed past frame 300, because the frame
+        # slider still spans the old stack and only the old layer has data there.
+        # Reset to the workflow start state first, so the new dataset loads clean.
+        # If there is existing work, confirm before discarding it (matching the
+        # Clear button's safety prompt) so unsaved analysis isn't lost silently.
+        if not self._auto_clear_before_load():
+            return  # user declined to discard existing work
+
         self._last_channel_info = []  # reset per file-open to avoid accumulation
         self._last_channel_assignment = []  # reset per file-open
 
@@ -2160,6 +2171,51 @@ class FileIOClass:
             self._enable_auto_scale_bar()
 
 
+
+    def _auto_clear_before_load(self):
+        """Reset to the workflow start state before loading a new dataset.
+
+        Returns True if it is safe to proceed with the load, False if the user
+        declined to discard existing work.
+
+        If no image layers are present, there is nothing to clear and we proceed
+        immediately. If layers exist, we treat that as potentially-unsaved work
+        and ask for confirmation (mirroring the Clear button's safety prompt)
+        before wiping — so a new load never silently discards analysis. On
+        confirmation we reuse _clear_everything, the same full reset the Clear
+        button uses (layers, data repository, dataframes, workflow checklist,
+        and batch recording), so the new dataset starts from a clean state.
+        """
+        try:
+            has_layers = len(self.viewer.layers) > 0
+        except Exception:
+            has_layers = False
+        if not has_layers:
+            return True  # nothing to clear
+
+        # There is existing work — confirm before discarding it.
+        try:
+            from qtpy.QtWidgets import QMessageBox
+            resp = QMessageBox.question(
+                None, "Load new image?",
+                "Loading a new image will clear the current layers and reset the "
+                "workflow.\n\nAny unsaved analysis will be lost. Continue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if resp != QMessageBox.Yes:
+                return False
+        except Exception:
+            # If the dialog can't be shown, err on the side of NOT destroying
+            # work silently — proceed only if there were no layers (handled
+            # above). Here layers exist, so bail out safely.
+            return False
+
+        try:
+            self._clear_everything(self.viewer)
+        except Exception:
+            # If the reset fails, still allow the load to proceed (napari will
+            # add the new layers alongside; not ideal but not destructive).
+            pass
+        return True
 
     def _clear_everything(self, viewer):
         """

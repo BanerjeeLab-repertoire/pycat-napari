@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.281] - 2026-07-08
+### Fixed (loading a new image now clears the previous one first, avoiding confusing overlaps)
+- **Loading a new image while a previous one was still present caused confusing display behaviour.**
+  For example, loading a 300-frame stack over an existing 1000-frame stack made the new image look
+  like it had failed to load: the frame slider still spanned 1000 frames, and scrubbing past frame
+  300 showed the old layer (or nothing) because the new image had no data there. Opening an image
+  now resets to the workflow start state BEFORE the new dataset is added, so it loads clean. If
+  existing layers are present (potentially-unsaved work), a confirmation prompt appears first
+  — matching the Clear button's safety behaviour — so analysis is never discarded silently. The
+  reset reuses the same _clear_everything logic the Clear button uses (layers, data repository,
+  dataframes, workflow checklist, and batch recording). Mask loading is unaffected (masks are meant
+  to overlay the current image, so they still add rather than replace).
+
 ## [1.5.280] - 2026-07-08
 ### Fixed (VPT fast-mode bead classification recalibrated for Airy-disk beads; garbage now rejected)
 - **Fast-mode bead classification was mismapped for large (non-diffraction-limited) beads, and never
