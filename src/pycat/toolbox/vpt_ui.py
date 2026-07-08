@@ -146,10 +146,11 @@ class VideoParticleTrackingUI:
         self._rb_mode_nohost = QRadioButton("No host (full frame)")
         self._rb_mode_infer  = QRadioButton("Infer from beads")
         self._rb_mode_host.setChecked(True)
-        self._rb_mode_infer.setEnabled(False)  # Mode C — pending validation
         self._rb_mode_infer.setToolTip(
-            "Experimental (not yet enabled): infer an unlabelled host boundary "
-            "from where the beads cluster. Coming in a future version.")
+            "Infer an unlabelled host boundary from the bead distribution "
+            "(density + watershed + a physical size gate). Detect beads first "
+            "(Step 3), then run 'Infer Host from Beads' here. Only condensates "
+            "large enough for boundary-free bulk diffusion are kept.")
         self._rb_mode_nohost.setToolTip(
             "No condensate boundary — track all beads across the whole field. "
             "Use for bulk-medium controls (e.g. beads diffusing in glycerol).")
@@ -159,8 +160,25 @@ class VideoParticleTrackingUI:
         mode_row.addStretch()
         mode_w = QWidget(); mode_w.setLayout(mode_row)
         form.addRow("Host mode:", mode_w)
-        for rb in (self._rb_mode_host, self._rb_mode_nohost):
+        for rb in (self._rb_mode_host, self._rb_mode_nohost, self._rb_mode_infer):
             rb.toggled.connect(self._on_host_mode_changed)
+
+        # Physics gate for inferred hosts: minimum condensate radius for a bead
+        # to sample bulk diffusion without feeling the interface. Only used in
+        # 'Infer from beads' mode.
+        from qtpy.QtWidgets import QDoubleSpinBox
+        self._min_cond_radius = QDoubleSpinBox()
+        self._min_cond_radius.setRange(0.5, 100.0)
+        self._min_cond_radius.setValue(5.0)
+        self._min_cond_radius.setSingleStep(0.5)
+        self._min_cond_radius.setSuffix(" µm")
+        self._min_cond_radius.setToolTip(
+            "Minimum condensate radius (µm) to keep. Beads in condensates "
+            "smaller than this feel boundary/interface effects and don't report "
+            "bulk viscosity, so small condensates are discarded. Edge-clipped "
+            "condensates are judged by their projected (circle-fit) radius.")
+        self._min_cond_radius_row = self._min_cond_radius  # keep a handle
+        form.addRow("Min condensate radius:", self._min_cond_radius)
 
         self._host_dd = self.create_layer_dropdown(napari.layers.Image)
         self._host_dd.setToolTip("Fluorescence channel that labels the condensate host phase.")
@@ -187,12 +205,13 @@ class VideoParticleTrackingUI:
         form.addRow("Interface erosion (px):", self._erosion_spin)
 
         self._host_prog = QProgressBar(); self._host_prog.setVisible(False)
-        btn = QPushButton("▶  Segment Host & Erode")
-        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        btn.clicked.connect(self._on_segment_host)
+        self._seg_btn = QPushButton("▶  Segment Host & Erode")
+        self._seg_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self._seg_btn.clicked.connect(self._on_segment_host)
         form.addRow(self._host_prog); from pycat.ui.field_status import button_with_circle as _bwc
-        form.addRow(_bwc(btn))
+        form.addRow(_bwc(self._seg_btn))
         layout.addWidget(grp)
+        self._on_host_mode_changed()  # set initial enabled/label state
 
     def _seg_method_name(self):
         if self._rb_triangle.isChecked(): return 'triangle'
@@ -206,16 +225,36 @@ class VideoParticleTrackingUI:
         return 'host'
 
     def _on_host_mode_changed(self, _checked=False):
-        """Grey out the host-segmentation controls when no host channel is used."""
-        host_mode = self._host_mode() == 'host'
+        """Enable/disable controls and relabel the action button per host mode."""
+        mode = self._host_mode()
+        # Host-channel controls only matter in 'host' mode.
         for w in (self._host_dd, self._rb_otsu, self._rb_triangle, self._rb_li,
                   self._erosion_spin):
-            try:
-                w.setEnabled(host_mode)
-            except Exception:
-                pass
+            try: w.setEnabled(mode == 'host')
+            except Exception: pass
+        # The physical size gate only applies to inferred hosts.
+        try:
+            self._min_cond_radius.setEnabled(mode == 'infer')
+        except Exception:
+            pass
+        # Relabel the action button to fit the mode.
+        try:
+            if mode == 'host':
+                self._seg_btn.setText("▶  Segment Host & Erode")
+                self._seg_btn.setEnabled(True)
+            elif mode == 'infer':
+                self._seg_btn.setText("▶  Infer Host from Beads")
+                self._seg_btn.setEnabled(True)
+            else:  # nohost
+                self._seg_btn.setText("(no host — full frame)")
+                self._seg_btn.setEnabled(False)
+        except Exception:
+            pass
 
     def _on_segment_host(self):
+        if self._host_mode() == 'infer':
+            self._infer_host_from_beads()
+            return
         from pycat.toolbox.vpt_tools import segment_host_condensate, erode_host_mask
         name = self._host_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
@@ -243,6 +282,76 @@ class VideoParticleTrackingUI:
         napari_show_info(
             f"Host segmentation complete: {n_cond} condensate(s), "
             f"eroded {self._erosion_spin.value()}px inward.")
+
+    def _infer_host_from_beads(self):
+        """Mode C: infer an unlabelled host from where the beads are, then
+        erode it and store it as the bead-inclusion mask."""
+        from pycat.toolbox.vpt_tools import (
+            detect_beads_stack, infer_host_from_beads, erode_host_mask)
+        from pycat.file_io.file_io import materialize_stack
+        name = self._bead_dd.currentText()
+        if name not in [l.name for l in self.viewer.layers]:
+            napari_show_warning(
+                f"Bead channel '{name}' not found — select the bead channel "
+                "in Step 3 first."); return
+        try:
+            stack = materialize_stack(self.viewer.layers[name].data)
+        except Exception as e:
+            napari_show_warning(f"Could not read the bead stack: {e}"); return
+
+        # Detect beads across all frames (no host filter — we're building one),
+        # pool their centroids into a single (N, 2) array of (y, x) pixels.
+        try:
+            det = detect_beads_stack(
+                stack, host_mask=None,
+                min_sigma=self._min_sigma.value(),
+                max_sigma=self._max_sigma.value(),
+                threshold=self._bead_thresh.value(),
+                microns_per_pixel=1.0, fit_quality=False)
+        except Exception as e:
+            napari_show_warning(f"Bead detection for host inference failed: {e}")
+            return
+        if det.empty:
+            napari_show_warning(
+                "No beads detected — cannot infer a host. Lower the detection "
+                "threshold or widen the sigma range in Step 3."); return
+
+        coords = det[['y_um', 'x_um']].values  # mpp=1.0 above, so these are px
+        H, W = stack.shape[-2], stack.shape[-1]
+        mpp = self._mpx()
+        try:
+            labeled = infer_host_from_beads(
+                coords, (H, W), microns_per_pixel=mpp,
+                min_condensate_radius_um=self._min_cond_radius.value())
+        except Exception as e:
+            napari_show_warning(f"Host inference failed: {e}"); return
+
+        n_cond = int(labeled.max())
+        if n_cond == 0:
+            napari_show_warning(
+                "No condensate large enough was inferred. Lower the minimum "
+                "condensate radius, or this data may have no bulk-diffusion "
+                "region (consider 'No host (full frame)' mode)."); return
+
+        eroded = erode_host_mask(labeled, erosion_px=self._erosion_spin.value())
+        if int(eroded.max()) == 0:
+            napari_show_warning(
+                "Inferred condensates vanished after erosion. Reduce the "
+                "interface erosion depth."); return
+
+        if "Inferred Host Mask" in self.viewer.layers:
+            self.viewer.layers.remove("Inferred Host Mask")
+        self.viewer.add_labels(eroded.astype(int), name="Inferred Host Mask")
+        self._dr()['vpt_host_mask'] = eroded
+        self._record('vpt_infer_host', {
+            'bead_channel': name,
+            'min_condensate_radius_um': self._min_cond_radius.value(),
+            'erosion_px': self._erosion_spin.value(),
+            'n_condensates': int(eroded.max())})
+        napari_show_info(
+            f"Inferred host from beads: {int(eroded.max())} condensate(s) "
+            f"large enough for bulk diffusion (≥{self._min_cond_radius.value():.1f}µm "
+            "radius). Boundary is INFERRED from bead distribution, not imaged.")
 
     # ── Step 3: bead detection ─────────────────────────────────────────
     def _add_bead_detection(self, layout):

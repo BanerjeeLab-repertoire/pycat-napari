@@ -23,6 +23,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.275] - 2026-07-07
+### Added (VPT can infer an unlabelled host condensate from the bead distribution — Mode C)
+- **New "Infer from beads" host mode for VPT.** When the condensate is real but unlabelled (no
+  companion host channel), PyCAT can now synthesise a host mask from where the beads are. The
+  method combines three stages: (1) a bead-density map is thresholded and split with a
+  distance-transform watershed, so touching condensates are separated rather than merged; (2) each
+  region is validated by its internal bead content; and (3) a physical size gate keeps only
+  condensates large enough for beads to sample bulk (boundary-free) diffusion — beads in a
+  condensate that is too shallow feel the interface and do not report bulk viscosity, so small
+  condensates are discarded. Condensates clipped by the frame edge have their true radius estimated
+  by fitting a circle to their visible (non-border) interface arc, so a large condensate that is
+  only partly in frame is still retained. The minimum condensate radius is user-adjustable (µm,
+  physically grounded, default 5 µm). The result is reported explicitly as an INFERRED boundary
+  (it follows the bead distribution, not a directly imaged condensate edge). This method was
+  selected by comparing it against a bead-geometry/clustering alternative on real data with a
+  hand-annotated boundary: the density+watershed+physics approach recovered the annotated central
+  condensate substantially better (IoU ~0.73 vs ~0.50) and, unlike proximity clustering, did not
+  collapse neighbouring condensates into one region. Exposed as new tools infer_host_from_beads()
+  in vpt_tools and an "Infer Host from Beads" action in the Step 2 panel.
+
 ## [1.5.274] - 2026-07-07
 ### Added (VPT host-condensate segmentation is now optional — no-host / full-frame mode)
 - **VPT no longer requires a companion host-condensate channel.** Not all microrheology data has a
