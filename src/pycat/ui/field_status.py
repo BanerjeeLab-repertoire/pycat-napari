@@ -322,6 +322,85 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None,
     return grp
 
 
+def prompt_pixel_size_on_load(get_dr, parent=None):
+    """Show a modal pixel-size dialog after a file load when the image has no
+    valid physical scale (pixel size fell back to 1.0 and did not come from
+    metadata). Writes the confirmed value into the same
+    data_repository['microns_per_pixel_sq'] the in-dock gates read, so the two
+    stay consistent. Dismissible: Skip leaves the scale unset (the in-dock gate
+    will still prompt). This is separate from the dock widgets — a deliberate
+    top-level dialog, so it has none of the embedding/parenting subtleties of an
+    in-panel widget.
+
+    Returns True if a value was set, False if skipped/closed.
+    """
+    dr = get_dr() or {}
+    mpp_sq = dr.get('microns_per_pixel_sq')
+    from_meta = bool(dr.get('pixel_size_from_metadata'))
+    # Only prompt for the no-valid-scale case (scale is 1.0 and not from metadata).
+    has_valid = bool(mpp_sq) and abs(float(mpp_sq if mpp_sq else 1.0) - 1.0) > 1e-9
+    if has_valid or from_meta:
+        return False
+
+    try:
+        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QDoubleSpinBox,
+                                     QDialogButtonBox, QHBoxLayout)
+        from PyQt5.QtCore import Qt
+    except Exception:
+        return False
+
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Set pixel size")
+    dlg.setModal(True)
+    v = QVBoxLayout(dlg)
+
+    title = QLabel("<b>This image has no pixel size in its metadata.</b>")
+    title.setWordWrap(True)
+    v.addWidget(title)
+
+    # Teaching line — why it matters.
+    why = QLabel(
+        "<span style='color:#aaaaaa;font-size:9pt;'>The pixel size (µm per pixel) "
+        "sets the physical scale for every downstream measurement — object sizes, "
+        "distances, diffusion coefficients, and viscosities are all computed from "
+        "it. Without a correct value these results default to a scale of 1.0 µm/px "
+        "and will be wrong. Enter the value for this acquisition, or Skip to set it "
+        "later.</span>")
+    why.setWordWrap(True)
+    v.addWidget(why)
+
+    row = QHBoxLayout()
+    row.addWidget(QLabel("Pixel size:"))
+    field = QDoubleSpinBox()
+    field.setRange(0.0, 1000.0); field.setDecimals(4); field.setSuffix(" µm/px")
+    field.setValue(0.0)
+    row.addWidget(field)
+    v.addLayout(row)
+
+    buttons = QDialogButtonBox()
+    set_btn = buttons.addButton("Set scale", QDialogButtonBox.AcceptRole)
+    skip_btn = buttons.addButton("Skip", QDialogButtonBox.RejectRole)
+    v.addWidget(buttons)
+
+    result = {'set': False}
+
+    def _accept():
+        val = field.value()
+        if val and val > 0:
+            d = get_dr()
+            if d is not None:
+                d['microns_per_pixel_sq'] = float(val) ** 2
+                d['pixel_size_from_metadata'] = False
+                result['set'] = True
+            dlg.accept()
+        # if 0/invalid, do nothing (keep dialog open so they enter a value or Skip)
+
+    set_btn.clicked.connect(_accept)
+    skip_btn.clicked.connect(dlg.reject)
+    dlg.exec_()
+    return result['set']
+
+
 def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     """Add a pixel-size input that is shown ONLY when the image metadata did not
     provide a real scale, and hides itself once a valid scale exists.
@@ -489,7 +568,13 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
             central_manager.register_data_switch_callback(refresh)
         except Exception:
             pass
-    refresh()
+    # NOTE: do NOT call refresh() here at construction time. The panel is not yet
+    # docked, so grp has no parent window — calling setVisible(True) now would
+    # flash the gate as a brief floating top-level window before it settles into
+    # the dock. The gate starts hidden (set above) and is refreshed by the real
+    # triggers instead: the data-switch callback (registered above) and the
+    # notify_data_changed() fired after a file loads — both of which run once the
+    # panel is docked and grp is properly embedded, so it appears cleanly in-dock.
 
     # Expose a reset so Clear can re-show the gate for the next dataset.
     def _reset_gate():

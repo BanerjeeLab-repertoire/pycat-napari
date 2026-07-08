@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.287] - 2026-07-08
+### Added (dedicated load-time pixel-size dialog, separate from the in-dock gate)
+- **A modal pixel-size dialog now appears on load when an image has no scale in its metadata.** This
+  replaces the earlier attempt to make the in-dock gate double as a popup (which flickered as a
+  transient window). The dialog is a proper top-level modal — no embedding/parenting subtleties —
+  and appears only for the hygiene case (pixel size fell back to 1.0 and did not come from
+  metadata). It includes a short explanation of why pixel size matters (it sets the physical scale
+  for all downstream measurements — sizes, distances, diffusion, viscosity), an input field, and
+  Set/Skip buttons. Skip leaves the scale unset (the in-dock gate still lets the user set it later).
+  The dialog writes the same data_repository scale the in-dock gate reads, so the two stay
+  consistent. The in-dock gate no longer refreshes at construction time (which caused its own
+  pre-dock flicker); it now updates only on real triggers (data switch, post-load notify) once it
+  is docked.
+
 ## [1.5.286] - 2026-07-08
 ### Fixed (removed a transient flickering pixel-size window)
 - **A pixel-size window briefly flickered and vanished on load.** The gate de-duplication

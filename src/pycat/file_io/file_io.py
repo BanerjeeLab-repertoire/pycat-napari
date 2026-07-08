@@ -1174,6 +1174,7 @@ class FileIOClass:
             self.central_manager.notify_data_changed()
         except Exception:
             pass
+        self._prompt_pixel_size_if_needed()
 
 
 
@@ -1877,6 +1878,7 @@ class FileIOClass:
             self.central_manager.notify_data_changed()
         except Exception:
             pass
+        self._prompt_pixel_size_if_needed()
 
         self._add_diameter_annotation_layers()
 
@@ -2196,6 +2198,17 @@ class FileIOClass:
             self._enable_auto_scale_bar()
 
 
+
+    def _prompt_pixel_size_if_needed(self):
+        """After a load, show the modal pixel-size dialog if the freshly-loaded
+        image has no valid physical scale. Separate from the in-dock gate; both
+        read/write the same data_repository scale so they stay consistent."""
+        try:
+            from pycat.ui.field_status import prompt_pixel_size_on_load
+            prompt_pixel_size_on_load(
+                lambda: self.central_manager.active_data_class.data_repository)
+        except Exception:
+            pass
 
     def _auto_clear_before_load(self):
         """Reset to the workflow start state before loading a new dataset.
