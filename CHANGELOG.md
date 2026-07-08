@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.295] - 2026-07-08
+### Added / Fixed (context-aware multi-file OME-TIFF handling; stop per-frame companion warning)
+- **Multi-file OME-TIFF sets (e.g. Micro-Manager MMStacks split across sibling files) are now
+  resolved up front, lazily, without materialising the stack.** A new resolver reads the OME
+  metadata to see which linked files it references and checks which are actually present on disk,
+  then builds a global frame->(file, page) map spanning the present files. Two cases are handled:
+  (1) all companions present -> frames are read across the linked files transparently; (2) some
+  companions missing (a file copied out of its set) -> only the frames that physically exist are
+  loaded, with a clear warning, instead of silently zero-filling absent planes. The single-file fast
+  path is unchanged.
+- **Fixed a warning that spammed the terminal once per frame during parallel bead detection.** The
+  VPT parallel workers re-open the file per frame; on a multi-file OME set whose companions were
+  missing, tifffile printed "OME series failed to read ... Missing data are zeroed" on every read
+  (thousands of lines). Workers now read via the resolved page map (or, for single files, with the
+  tifffile OME warning silenced) and match the serial reader frame-for-frame.
+
 ## [1.5.294] - 2026-07-08
 ### Fixed (batch replay ran steps on the wrong channel; Measure Line values were ignored)
 - **Batch replay of the Condensate Analysis pipeline could run steps on the wrong image layer, and

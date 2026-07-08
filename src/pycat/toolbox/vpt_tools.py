@@ -856,38 +856,88 @@ def _bead_source_descriptor(bead_stack):
     file-backed lazy reader we know how to re-open in a subprocess (in which case
     the caller falls back to serial/in-process detection).
 
-    Currently supports the TIFF-backed lazy reader (_TiffPageStack), which
-    exposes its path and channel layout. An already-materialised numpy array is
-    NOT given a descriptor here — it is small enough to pass to workers directly
-    (handled by the caller) or processed serially.
+    For a multi-file OME set the wrapper carries a page map (global frame →
+    (file, page)); we pass that map to the workers so they read exactly the same
+    frames the serial path does, across the linked files, without re-resolving
+    the OME series per frame (which is both slow and the source of the repeated
+    "companion missing" warning).
     """
     path = getattr(bead_stack, '_path', None)
-    if path:
+    if not path:
+        return None
+    page_map = getattr(bead_stack, '_page_map', None)
+    if page_map is not None:
+        # Multi-file: hand the workers the explicit (file, page) map.
         return {
-            'kind': 'tiff',
-            'path': str(path),
+            'kind': 'pagemap',
+            'page_map': [(str(p), int(i)) for (p, i) in page_map],
             'nc': int(getattr(bead_stack, '_nc', 1) or 1),
             'ci': int(getattr(bead_stack, '_ci', 0)),
         }
-    return None
+    return {
+        'kind': 'tiff',
+        'path': str(path),
+        'nc': int(getattr(bead_stack, '_nc', 1) or 1),
+        'ci': int(getattr(bead_stack, '_ci', 0)),
+    }
 
 
 def _read_frame_from_descriptor(t, src_desc):
     """Read frame t in a worker subprocess from a source descriptor. Top-level +
-    picklable. Mirrors the time-series reader so both share the same approach."""
+    picklable. Mirrors the time-series reader so both share the same approach.
+
+    tifffile logs an OME-series warning ("... failed to read ... Missing data are
+    zeroed") when a multi-file OME set references a companion file that is not
+    present. The serial reader hits this once (it opens the file a single time);
+    a worker re-opens the file per frame, so without suppression the warning is
+    printed once PER FRAME — thousands of lines for a long movie. We silence
+    tifffile's logger for the duration of the read; the frame we want lives in
+    this file's own pages regardless of the companion.
+    """
     import numpy as np
+    import logging
     kind = src_desc.get('kind')
+    if kind == 'pagemap':
+        # Multi-file OME set: read from the explicit (file, page) map so workers
+        # match the serial reader exactly, across linked files, no per-frame OME
+        # resolution (and thus no repeated companion-missing warning).
+        import tifffile as _tf
+        page_map = src_desc['page_map']
+        nc = int(src_desc.get('nc', 1)) or 1
+        ci = int(src_desc.get('ci', 0))
+        gi = int(t) * nc + ci
+        path, page_idx = page_map[gi]
+        _tflog = logging.getLogger('tifffile')
+        _prev = _tflog.level
+        _tflog.setLevel(logging.ERROR)
+        try:
+            with _tf.TiffFile(path) as _tif:
+                return np.asarray(_tif.pages[page_idx].asarray()).astype(np.float32)
+        finally:
+            _tflog.setLevel(_prev)
     if kind == 'tiff':
         import tifffile as _tf
-        with _tf.TiffFile(src_desc['path']) as _tif:
-            try:
-                pages = _tif.series[0].pages
-            except Exception:
-                pages = _tif.pages
-            nc = int(src_desc.get('nc', 1)) or 1
-            ci = int(src_desc.get('ci', 0))
-            page = pages[int(t) * nc + ci]
-            return np.asarray(page.asarray()).astype(np.float32)
+        _tflog = logging.getLogger('tifffile')
+        _prev = _tflog.level
+        _tflog.setLevel(logging.ERROR)  # hide the per-file OME warning
+        try:
+            with _tf.TiffFile(src_desc['path']) as _tif:
+                # Match the serial reader (_TiffPageStack) EXACTLY so parallel and
+                # serial read the same frame: prefer the OME series (which spans
+                # a multi-file set) and fall back to this file's own pages. The
+                # only difference from serial is that we silence tifffile's
+                # per-file OME warning, which would otherwise print once per frame
+                # because each worker re-opens the file.
+                try:
+                    pages = _tif.series[0].pages
+                except Exception:
+                    pages = _tif.pages
+                nc = int(src_desc.get('nc', 1)) or 1
+                ci = int(src_desc.get('ci', 0))
+                page = pages[int(t) * nc + ci]
+                return np.asarray(page.asarray()).astype(np.float32)
+        finally:
+            _tflog.setLevel(_prev)
     raise ValueError(f"unsupported source descriptor kind: {kind!r}")
 
 

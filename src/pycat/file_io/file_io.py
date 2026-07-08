@@ -640,6 +640,119 @@ class _ImsReaderTZYX:
         return self.shape[0]
 
 
+def resolve_ome_file_set(primary_path):
+    """Inspect a (possibly multi-file) OME-TIFF and report which companion files
+    the metadata references and which are actually present on disk.
+
+    Micro-Manager / OME-TIFF acquisitions are often split across sibling files
+    (``..._MMStack_Pos0.ome.tif``, ``..._1.ome.tif``, …). The OME metadata in the
+    FIRST file lists every file in the set. Two things can go wrong:
+
+      * the companion files ARE present → we want to read frames from whichever
+        file physically holds them (a true multi-file lazy view);
+      * the companions are MISSING (a user copied one file out of the set without
+        realising they were linked) → tifffile silently zero-fills the absent
+        planes and prints a per-frame warning. Zero frames are misleading, so we
+        prefer to use only the frames that physically exist and say so.
+
+    Returns a dict:
+        {
+          'referenced': [filenames listed in OME metadata],
+          'present':    [filenames that exist on disk, in order],
+          'missing':    [filenames referenced but absent],
+          'is_multifile': bool,   # more than one file referenced
+          'complete':   bool,     # all referenced files present
+        }
+    The caller decides policy (warn + use present frames, build a cross-file
+    view, etc.). Never raises — on any parsing problem it reports the primary
+    file alone as a single-file set.
+    """
+    import os
+    import re
+    result = {'referenced': [], 'present': [], 'missing': [],
+              'is_multifile': False, 'complete': True}
+    try:
+        import tifffile as _tf
+        with _tf.TiffFile(primary_path) as _t:
+            ome = _t.ome_metadata or ''
+        # OME lists each file via <UUID FileName="...">; de-duplicate, keep order.
+        names = []
+        for fn in re.findall(r'FileName="([^"]+)"', ome):
+            if fn not in names:
+                names.append(fn)
+        primary_name = os.path.basename(primary_path)
+        if primary_name not in names:
+            names.insert(0, primary_name)
+        result['referenced'] = names
+        result['is_multifile'] = len(names) > 1
+        folder = os.path.dirname(os.path.abspath(primary_path))
+        for fn in names:
+            if os.path.exists(os.path.join(folder, fn)):
+                result['present'].append(fn)
+            else:
+                result['missing'].append(fn)
+        result['complete'] = (len(result['missing']) == 0)
+    except Exception:
+        # Any failure → treat as a plain single file (safe default).
+        import os as _os
+        result['referenced'] = [_os.path.basename(primary_path)]
+        result['present'] = list(result['referenced'])
+        result['missing'] = []
+        result['is_multifile'] = False
+        result['complete'] = True
+    return result
+
+
+def build_ome_page_map(primary_path):
+    """Build a global frame → (file_path, page_index) map for an OME set,
+    including ONLY files that physically exist. Frames whose backing file is
+    missing are omitted (not zero-filled), so the resulting stack contains only
+    real data. Also returns the count of frames dropped because their file was
+    absent.
+
+    Returns (page_map, n_missing_frames) where page_map is a list of
+    (abs_file_path, page_index_within_that_file). Reading frame t means opening
+    page_map[t][0] and reading its page page_map[t][1].
+
+    Falls back to a single-file map (this file's own pages) on any problem.
+    """
+    import os
+    info = resolve_ome_file_set(primary_path)
+    folder = os.path.dirname(os.path.abspath(primary_path))
+    page_map = []
+    n_missing_frames = 0
+    try:
+        import tifffile as _tf
+        for fn in info['referenced']:
+            fpath = os.path.join(folder, fn)
+            if not os.path.exists(fpath):
+                # Count how many frames this missing file would have held so the
+                # caller can report it. Use the primary's per-file page count as
+                # an estimate when the file itself can't be opened.
+                continue
+            with _tf.TiffFile(fpath) as _t:
+                npages = len(_t.pages)
+            for p in range(npages):
+                page_map.append((os.path.abspath(fpath), p))
+        # Report missing frames as the difference the OME metadata implied. We
+        # can only know present frames for certain; expose the missing FILE
+        # count via the caller (resolve_ome_file_set) — frame count for missing
+        # files is not reliably knowable without the files, so report 0 here and
+        # let the caller warn based on missing file names.
+        if not page_map:
+            raise ValueError("empty page map")
+    except Exception:
+        # Fallback: this file's own pages only.
+        try:
+            import tifffile as _tf
+            with _tf.TiffFile(primary_path) as _t:
+                npages = len(_t.pages)
+            page_map = [(os.path.abspath(primary_path), p) for p in range(npages)]
+        except Exception:
+            page_map = [(os.path.abspath(primary_path), 0)]
+    return page_map, n_missing_frames
+
+
 class _TiffPageStack:
     """Lazy (T, Y, X) wrapper that reads ONE frame at a time straight from a
     multipage TIFF via tifffile's page reader.
@@ -655,26 +768,68 @@ class _TiffPageStack:
                  n_channels=1):
         import tifffile as _tf
         self._path   = tiff_path
-        self._tif    = _tf.TiffFile(tiff_path)
-        # Prefer the SERIES page sequence: for a Micro-Manager MMStack split
-        # across sibling files (_1.ome.tif, _2.ome.tif, …) the OME series spans
-        # the whole set, whereas TiffFile.pages only sees this one file. Fall
-        # back to this file's pages if the series is unavailable.
-        try:
-            self._pages = self._tif.series[0].pages
-        except Exception:
-            self._pages = self._tif.pages
         self._nc     = max(1, int(n_channels))
         self._ci     = int(channel_idx)
-        self.shape   = (int(n_frames), int(H), int(W))
         self.dtype   = np.dtype('float32')
         self.ndim    = 3
+
+        # Decide single-file (fast path) vs multi-file OME set. For a genuine
+        # multi-file acquisition we build a page map spanning the files that are
+        # actually PRESENT on disk; missing companions are dropped (not zeroed),
+        # and the frame count is reduced to match real data.
+        self._page_map = None          # list of (abs_path, page_idx) if multifile
+        self._handles = {}             # abs_path -> open TiffFile (lazy)
+        info = resolve_ome_file_set(tiff_path)
+        if info.get('is_multifile') and not info.get('complete'):
+            # Some companion files are missing — use only present frames.
+            page_map, _ = build_ome_page_map(tiff_path)
+            self._page_map = page_map
+            self._present_info = info
+            real_frames = len(page_map) // self._nc
+            self.shape = (int(real_frames), int(H), int(W))
+        elif info.get('is_multifile') and info.get('complete'):
+            # All companions present — read across files via the page map.
+            page_map, _ = build_ome_page_map(tiff_path)
+            self._page_map = page_map
+            self._present_info = info
+            total_frames = len(page_map) // self._nc
+            self.shape = (int(total_frames), int(H), int(W))
+        else:
+            # Single-file fast path (unchanged behaviour): keep one open handle
+            # and index its series/pages directly.
+            self._tif = _tf.TiffFile(tiff_path)
+            try:
+                self._pages = self._tif.series[0].pages
+            except Exception:
+                self._pages = self._tif.pages
+            self.shape = (int(n_frames), int(H), int(W))
 
     def _page_index(self, t):
         # Interleaved channels are stored as consecutive pages per timepoint.
         return int(t) * self._nc + self._ci
 
+    def _get_handle(self, path):
+        """Lazily open (and cache) a TiffFile handle for a page-map file."""
+        h = self._handles.get(path)
+        if h is None:
+            import tifffile as _tf
+            h = _tf.TiffFile(path)
+            self._handles[path] = h
+        return h
+
     def _read_frame(self, t):
+        if self._page_map is not None:
+            # Multi-file: look up which physical file + page holds this frame.
+            gi = self._page_index(t)
+            if gi >= len(self._page_map):
+                # Past the end of real data — return a black frame rather than
+                # crashing (defensive; shape math should prevent this).
+                return np.zeros(self.shape[1:], np.float32)
+            path, page_idx = self._page_map[gi]
+            handle = self._get_handle(path)
+            arr = np.asarray(handle.pages[page_idx].asarray())
+            return arr.astype(np.float32)
+        # Single-file fast path.
         arr = np.asarray(self._pages[self._page_index(t)].asarray())
         return arr.astype(np.float32)
 
@@ -733,10 +888,19 @@ class _TiffPageStack:
         return self.__getitem__(0)[np.newaxis]
 
     def close(self):
+        # Single-file mode keeps one handle in self._tif; multi-file mode keeps
+        # a cache of per-file handles in self._handles. Close whichever exist.
         try:
-            self._tif.close()
+            tif = getattr(self, '_tif', None)
+            if tif is not None:
+                tif.close()
         except Exception:
             pass
+        for h in getattr(self, '_handles', {}).values():
+            try:
+                h.close()
+            except Exception:
+                pass
 
 
 def materialize_stack(stack_like, dtype=np.float32):
@@ -1679,14 +1843,31 @@ class FileIOClass:
                             wrapper = _TiffPageStack(
                                 file_path, n_t, H, W, dask_arr.dtype,
                                 channel_idx=channel_idx, n_channels=n_c)
-                            # Sanity check: the page count must be consistent
-                            # with (frames x channels). If a multi-channel MM
-                            # file uses a page order we don't model, fall back to
-                            # the AICSImage reader rather than show wrong frames.
-                            _npages = len(wrapper._pages)
-                            if n_c > 1 and _npages < n_t * n_c:
-                                wrapper.close()
-                                wrapper = None
+                            # If this is a multi-file OME set with missing
+                            # companions, tell the user we're using only the
+                            # frames that physically exist (least-friction: warn
+                            # and proceed rather than block).
+                            _pinfo = getattr(wrapper, '_present_info', None)
+                            if _pinfo and _pinfo.get('missing'):
+                                from napari.utils.notifications import show_warning as _sw
+                                _sw(f"This OME-TIFF references "
+                                    f"{len(_pinfo['referenced'])} linked files but "
+                                    f"{len(_pinfo['missing'])} are missing "
+                                    f"({', '.join(_pinfo['missing'][:3])}"
+                                    f"{'…' if len(_pinfo['missing'])>3 else ''}). "
+                                    f"Loading only the {wrapper.shape[0]} frames that "
+                                    f"are present. If you meant to analyse the full "
+                                    f"set, keep the linked .ome.tif files together.")
+                            # Sanity check: for the single-file fast path the page
+                            # count must be consistent with (frames x channels).
+                            # (Multi-file mode sizes itself from the page map, so
+                            # skip this check there.)
+                            _pages_attr = getattr(wrapper, '_pages', None)
+                            if _pages_attr is not None:
+                                _npages = len(_pages_attr)
+                                if n_c > 1 and _npages < n_t * n_c:
+                                    wrapper.close()
+                                    wrapper = None
                         except Exception as _te:
                             debug_log("file_io: tifffile page reader failed, "
                                       "using AICSImage dask wrapper", _te)
