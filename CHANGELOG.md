@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.273] - 2026-07-07
+### Fixed (VPT particle tracking only saw the first frame of a time-series)
+- **The VPT (video particle tracking) pipeline silently collapsed any multi-frame time-series to
+  its FIRST frame, so bead detection, track linking, and the scroll-through detection overlay all
+  behaved as if the movie were a single image.** The bead-detection step loaded the stack with
+  `np.asarray(layer.data)`, but for an OME/ImageJ TIFF time-series PyCAT wraps the data in a lazy
+  `_TiffPageStack` whose `__array__` deliberately returns only frame 0 (to keep napari’s incidental
+  array requests cheap). So `detect_beads_stack` received a single 2D frame, detected beads on
+  frame 0 only, and produced no linkable trajectories — and the red/yellow/green "Bead Detections"
+  points layer only had frame-0 points, so it appeared correct on the first frame but went empty
+  when scrolling. Fixed by loading the bead stack with `materialize_stack()` (the same helper used
+  by the temperature workflow), which reads every frame into a real (T, H, W) array and passes
+  plain arrays through unchanged. Validated on a user-provided 5-frame Blackfly uint8 substack:
+  ~780-820 beads detected per frame across all frames, tracks link across the full stack, and the
+  detection overlay now updates correctly as the user scrolls through time. (uint8 input is handled
+  correctly — detection min-max normalizes per frame, so bit depth does not affect thresholds.)
+
 ## [1.5.272] - 2026-07-07
 ### Fixed (object-based colocalization could report impossible overlap values > 1.0)
 - **The object-based colocalization coefficients (Manders M1/M2, Jaccard, Sørensen-Dice) could

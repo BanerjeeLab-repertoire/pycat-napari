@@ -275,8 +275,17 @@ class VideoParticleTrackingUI:
         name = self._bead_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Bead channel layer '{name}' not found."); return
-        stack = np.asarray(self.viewer.layers[name].data)
-        host_mask = self._dr().get('vpt_host_mask')
+        # The bead channel is a time-series (T, H, W). napari layer data for an
+        # OME-TIFF time-series is often a lazy _TiffPageStack whose __array__
+        # deliberately returns only the FIRST frame (to keep napari's incidental
+        # array requests cheap). Calling np.asarray() here would therefore
+        # silently collapse the whole movie to a single frame — beads would be
+        # detected on frame 0 only and there would be nothing to link. Use
+        # materialize_stack(), which reads every frame into a real (T, H, W)
+        # array (and is a no-op passthrough for data that is already a full
+        # numpy array).
+        from pycat.file_io.file_io import materialize_stack
+        stack = materialize_stack(self.viewer.layers[name].data)
         if host_mask is None:
             napari_show_warning(
                 "No host mask found — run Step 2 first so beads near the "
