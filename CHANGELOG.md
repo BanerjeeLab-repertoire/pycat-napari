@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.283] - 2026-07-08
+### Fixed (pixel-size gate floated as separate windows / persisted after close; auto-clear now covers stacks)
+- **The pixel-size gate appeared as one or more floating windows that persisted even after the PyCAT
+  GUI was closed.** Root cause: the gate group box was never added to its panel layout, so Qt
+  rendered the parentless widget as a top-level window. Because each analysis panel builds its own
+  gate, several could float at once (the "3 windows"), and being unparented they outlived the main
+  window. The gate is now embedded in its panel layout and starts hidden. A shared coordinator
+  ensures at most one gate is visible at a time and never shows a gate that lacks a parent window,
+  so duplicates and orphan windows can no longer occur.
+- **Auto-clear on load now also applies to T/Z and multi-dimensional stacks.** The previous release
+  reset existing layers before loading a new 2-D image, but the stack loader (open_stack, used for
+  time-series / z-stack / OME-TIFF / Imaris) did not, so loading a stack over an existing image
+  still produced the confusing frame-count overlap. The same confirm-then-reset now runs for stack
+  loads.
+
 ## [1.5.282] - 2026-07-08
 ### Fixed (pixel-size gate now appears after loading an image whose metadata lacks a scale)
 - **The pixel-size gate stopped appearing after a file load, which could let analyses run with the

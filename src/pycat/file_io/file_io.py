@@ -1221,6 +1221,13 @@ class FileIOClass:
         if not file_path:
             return
 
+        # Reset to the workflow start state before loading a new stack (same as
+        # the 2-D loader). Prevents the confusing overlap where a new stack loads
+        # over an existing one with a different frame count. Confirms first if
+        # there is existing work.
+        if not self._auto_clear_before_load():
+            return  # user declined to discard existing work
+
         self.filePath      = file_path
         self.base_file_name = os.path.splitext(os.path.basename(file_path))[0]
         ext = os.path.splitext(file_path)[1].lower()

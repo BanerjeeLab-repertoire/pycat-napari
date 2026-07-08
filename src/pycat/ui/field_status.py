@@ -322,6 +322,53 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None,
     return grp
 
 
+# Module-level registry of all live pixel-size gates. Multiple analysis panels
+# each build their own gate; without coordination several can display at once
+# (the "3 windows" problem). The registry lets gates agree that only ONE is
+# shown at a time: each gate reports whether it WANTS to show (scale not yet
+# set), and only the first wanting gate in registration order actually displays.
+# The rest stay hidden but remain ready to take over if the first is destroyed.
+_PIXEL_GATES = []  # list of dicts: {'grp', 'wants', 'alive'}
+
+
+def _coordinate_pixel_gates():
+    """Ensure at most one pixel-size gate is visible. Called by each gate's
+    refresh(). The first registered gate that wants to show is shown; all others
+    are hidden regardless of their own wish."""
+    shown = False
+    for g in list(_PIXEL_GATES):
+        grp = g.get('grp')
+        try:
+            if grp is None or not _qt_alive(grp):
+                _PIXEL_GATES.remove(g); continue
+        except Exception:
+            continue
+        # Only show a gate embedded in a real parent window — never one that
+        # would float as its own top-level window (which would outlive the GUI).
+        # A widget added to a layout that is attached to a panel has a parent;
+        # if it somehow lacks one, showing it would create a floating window, so
+        # we suppress that case.
+        try:
+            parented = grp.parentWidget() is not None
+        except Exception:
+            parented = False
+        if g.get('wants') and parented and not shown:
+            grp.setVisible(True)
+            shown = True
+        else:
+            grp.setVisible(False)
+
+
+def _qt_alive(widget):
+    """True if a Qt widget hasn't been deleted (accessing a deleted C++ object
+    raises RuntimeError)."""
+    try:
+        widget.isVisible()
+        return True
+    except Exception:
+        return False
+
+
 def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     """Add a pixel-size input that is shown ONLY when the image metadata did not
     provide a real scale, and hides itself once a valid scale exists.
@@ -408,10 +455,29 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
                 except Exception:
                     pass
 
+    # Embed the gate in the panel's layout. Without this the QGroupBox has no
+    # parent and Qt renders it as a FLOATING top-level window — which is what
+    # caused multiple gate windows to appear and to persist after the main GUI
+    # closed. Start hidden; the coordinator shows it (at most one) when needed.
+    layout.addWidget(grp)
+    grp.setVisible(False)
+
+    # Shared coordination state for this gate (registered in _PIXEL_GATES so
+    # only one gate shows at a time, and never as an orphan top-level window).
+    _gate = {'grp': grp, 'wants': False, 'alive': True}
+    _PIXEL_GATES.append(_gate)
+
+    def _set_wants(wants):
+        """Record whether this gate wants to be visible, then let the shared
+        coordinator decide actual visibility (at most one gate shown, and only
+        when it has a real parent window so it never floats as its own window)."""
+        _gate['wants'] = bool(wants)
+        _coordinate_pixel_gates()
+
     def refresh(*_a):
         # No image loaded (e.g. after Clear) → the gate is irrelevant; hide it.
         if not _image_present():
-            grp.setVisible(False)
+            _set_wants(False)
             return
 
         # If persist is on, we have a remembered scale, and the current data has
@@ -426,16 +492,15 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
 
         # Hide entirely once metadata supplied a scale.
         if _from_metadata() and _valid_scale():
-            grp.setVisible(False)
+            _set_wants(False)
             return
         # Hide once the user has CONFIRMED a valid scale (not merely typed one).
         if _valid_scale() and state['confirmed']:
             circle._set('green', "Scale set.")
-            grp.setVisible(False)
+            _set_wants(False)
             return
 
-        # Otherwise stay visible so the user can enter / adjust / confirm.
-        grp.setVisible(True)
+        # Otherwise this gate wants to be visible (the coordinator shows one).
         v = field.value()
         if v > 0:
             circle._set('yellow', "Review the pixel size, then Confirm.")
@@ -492,8 +557,6 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
             state['remembered'] = None
         refresh()
     refresh._reset_gate = _reset_gate
-    return refresh
-    layout.addWidget(grp)
     return refresh
 
 
