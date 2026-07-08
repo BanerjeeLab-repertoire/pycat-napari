@@ -99,6 +99,19 @@ class CentralManager:
         if cb not in lst:
             lst.append(cb)
 
+    def notify_data_changed(self):
+        """Fire the registered data-switch callbacks WITHOUT changing the active
+        data class. A plain image load does not switch the data class, so gates
+        (e.g. the pixel-size gate) would otherwise never re-evaluate after a
+        file is opened. The file loader calls this once the new image and its
+        metadata (including pixel size) are in the data repository, so the gate
+        re-checks the freshly-loaded scale and shows/hides accordingly."""
+        for cb in list(getattr(self, '_data_switch_callbacks', [])):
+            try:
+                cb()
+            except Exception:
+                pass
+
     def set_active_data_class(self, data_class):
         """
         Sets the active data class instance, allowing for dynamic changes in data management strategies

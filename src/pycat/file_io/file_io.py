@@ -1166,6 +1166,15 @@ class FileIOClass:
         except Exception:
             self._fit_view_to_layer()
 
+        # Notify registered gates (e.g. the pixel-size gate) to re-evaluate now
+        # that this 2-D image's metadata/scale is in the data repository. A plain
+        # load does not switch the data class, so without this the gate would
+        # keep its pre-load state and never appear.
+        try:
+            self.central_manager.notify_data_changed()
+        except Exception:
+            pass
+
 
 
     def open_stack(self, file_path=None):
@@ -1852,6 +1861,15 @@ class FileIOClass:
         # pixel size is essentially never exactly 1.0 µm/px, so treat 1.0 as the
         # "no metadata" fallback and anything else as metadata-derived.
         dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
+
+        # The pixel size has just been set from this file's metadata (or fallen
+        # back to 1.0). A plain load does not switch the data class, so notify
+        # any registered gates (e.g. the pixel-size gate) to re-evaluate now,
+        # otherwise the gate would keep its pre-load state and never appear.
+        try:
+            self.central_manager.notify_data_changed()
+        except Exception:
+            pass
 
         self._add_diameter_annotation_layers()
 

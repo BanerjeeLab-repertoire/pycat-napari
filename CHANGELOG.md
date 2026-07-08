@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.282] - 2026-07-08
+### Fixed (pixel-size gate now appears after loading an image whose metadata lacks a scale)
+- **The pixel-size gate stopped appearing after a file load, which could let analyses run with the
+  fallback scale of 1.0 um/px.** The gate re-evaluates its visibility only when notified of a data
+  change, and those notifications previously fired only on an active-data-class SWITCH (e.g.
+  changing analysis method) — not on a plain image load. So opening a file whose metadata has no
+  pixel size (which falls back to 1.0 and should prompt the user) left the gate in its pre-load
+  state and it never appeared. This matters because the pixel size feeds physical-unit conversions
+  (e.g. VPT microrheology viscosity via Stokes-Einstein): a silent 1.0 fallback yields wrong-scaled
+  results. Added CentralManager.notify_data_changed(), which fires the registered gate callbacks
+  without switching the data class, and called it at the end of every image-load path (2-D images
+  and T/Z/multi-dimensional stacks, including OME-TIFF and Imaris) once the freshly-loaded pixel
+  size is in the data repository. The gate now correctly appears for files without a real scale and
+  stays hidden for files whose metadata supplies one. Mask loading is unaffected.
+
 ## [1.5.281] - 2026-07-08
 ### Fixed (loading a new image now clears the previous one first, avoiding confusing overlaps)
 - **Loading a new image while a previous one was still present caused confusing display behaviour.**
