@@ -1231,12 +1231,21 @@ def aggregate_population_stats(aggregate_df: pd.DataFrame,
             'frame', 'n_aggregates', 'total_aggregated_units',
             'median_aggregate_units', 'median_sigma', 'aggregated_fraction'])
     g = aggregate_df.groupby('frame')
-    out = pd.DataFrame({
-        'n_aggregates': g.size(),
-        'total_aggregated_units': g['n_units_est'].sum(min_count=1),
-        'median_aggregate_units': g['n_units_est'].median(),
-        'median_sigma': g['sigma_mean'].median(),
-    })
+    cols = {'n_aggregates': g.size()}
+    # n_units_est and sigma_mean only exist in FIT detection mode; fast
+    # (template) mode does not fit a Gaussian, so guard each column and fill
+    # NaN when it is absent rather than raising a KeyError.
+    if 'n_units_est' in aggregate_df.columns:
+        cols['total_aggregated_units'] = g['n_units_est'].sum(min_count=1)
+        cols['median_aggregate_units'] = g['n_units_est'].median()
+    else:
+        cols['total_aggregated_units'] = np.nan
+        cols['median_aggregate_units'] = np.nan
+    if 'sigma_mean' in aggregate_df.columns:
+        cols['median_sigma'] = g['sigma_mean'].median()
+    else:
+        cols['median_sigma'] = np.nan
+    out = pd.DataFrame(cols)
     if total_by_frame is not None:
         out['aggregated_fraction'] = (out['n_aggregates']
                                       / total_by_frame.reindex(out.index)).astype(float)
@@ -1456,7 +1465,7 @@ def run_vpt_analysis(
             if not agg_tracks.empty and 'track_id' in agg_tracks else 0)
 
 
-def _link(detections, linker, max_dist_um, max_gap, mpp):
+def _link(detections, linker, max_dist_um, max_gap, mpp, progress_callback=None):
     """Route to the requested trajectory linker."""
     linker = (linker or 'trackmate').lower()
     if linker == 'trackmate':
@@ -1475,6 +1484,7 @@ def _link(detections, linker, max_dist_um, max_gap, mpp):
     if linker == 'bayesian':
         from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
         return link_trajectories_bayesian(
-            detections, max_displacement_um=max_dist_um, max_gap_frames=max_gap)
+            detections, max_displacement_um=max_dist_um, max_gap_frames=max_gap,
+            progress_callback=progress_callback)
     from pycat.toolbox.dynamic_spatial_tools import link_trajectories
     return link_trajectories(detections, max_dist_um, max_gap)

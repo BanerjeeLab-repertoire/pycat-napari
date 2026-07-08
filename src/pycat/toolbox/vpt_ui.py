@@ -719,7 +719,13 @@ class VideoParticleTrackingUI:
 
         route_agg = (self._exclude_agg.isChecked()
                      and 'bead_class' in det.columns)
-        self._track_prog.setVisible(True); self._track_prog.setRange(0, 0)
+        # Determinate progress bar (0..n_frames) so it advances visibly per
+        # frame instead of spinning indefinitely. The linker is sequential
+        # across frames, so per-frame progress is the natural unit.
+        _n_link_frames = int(det['frame'].nunique()) if 'frame' in det else 0
+        self._track_prog.setVisible(True)
+        self._track_prog.setRange(0, max(1, _n_link_frames))
+        self._track_prog.setValue(0)
 
         def _job(progress):
             if route_agg:
@@ -730,7 +736,8 @@ class VideoParticleTrackingUI:
                 primary, aggregates = det, det.iloc[0:0]
             ptracks = drift_correct_com(
                 _link(primary, self._linker_name(), self._max_link.value(),
-                      self._max_gap.value(), self._mpx()))
+                      self._max_gap.value(), self._mpx(),
+                      progress_callback=progress))
             atracks = None
             if route_agg and len(aggregates) >= 2:
                 try:
@@ -799,6 +806,7 @@ class VideoParticleTrackingUI:
             self._track_prog.setVisible(False)
             napari_show_warning("Linking failed — see terminal."); print(msg)
         w.finished.connect(_done); w.error.connect(_err)
+        w.progress.connect(lambda i, n: self._track_prog.setValue(i))
         self._track_worker = w; w.start()
 
     # ── Step 5: microrheology ──────────────────────────────────────────

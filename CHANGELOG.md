@@ -23,6 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.296] - 2026-07-08
+### Fixed (VPT linking crashed in fast mode) + Changed (faster linker, real progress bar)
+- **Linking failed with KeyError: sigma_mean when aggregates were routed to a secondary
+  population in fast (template) detection mode.** aggregate_population_stats assumed the
+  Gaussian-fit columns (sigma_mean, n_units_est) that only fit-mode detection produces; fast mode
+  does not fit a Gaussian. The function now guards each fit-only column and reports the stats it can
+  (aggregate counts and aggregated fraction) instead of raising. Both linkers work in fast mode
+  again.
+- **The trajectory linker cost matrix is vectorised**, replacing a double Python loop over every
+  (track, detection) pair per frame with numpy broadcasting. On dense movies (hundreds of beads per
+  frame across many frames) this removes the dominant runtime cost. The computed cost matrix is
+  numerically identical to the previous loop (verified exact), so tracking results are unchanged.
+- **The linking progress bar is now determinate.** It previously spun indefinitely, so there was no
+  way to tell whether linking was progressing or stalled; it now advances per frame (0..n_frames)
+  as the sequential linker moves through the movie.
+
 ## [1.5.295] - 2026-07-08
 ### Added / Fixed (context-aware multi-file OME-TIFF handling; stop per-frame companion warning)
 - **Multi-file OME-TIFF sets (e.g. Micro-Manager MMStacks split across sibling files) are now

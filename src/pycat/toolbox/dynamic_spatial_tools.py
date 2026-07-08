@@ -110,6 +110,7 @@ def link_trajectories_bayesian(
     death_cost: float = None,
     use_velocity: bool = True,
     velocity_alpha: float = 0.3,
+    progress_callback=None,
 ) -> pd.DataFrame:
     """
     Link condensate detections into trajectories using Bayesian cost
@@ -183,7 +184,13 @@ def link_trajectories_bayesian(
     active: dict[int, dict] = {}
 
     # ── Frame-by-frame linking ────────────────────────────────────────────
+    _n_frames_total = len(frames)
     for t_idx, t in enumerate(frames):
+        if progress_callback is not None:
+            try:
+                progress_callback(t_idx + 1, _n_frames_total)
+            except Exception:
+                pass
         curr_mask = df['frame'] == t
         curr      = df[curr_mask].copy()
         n_curr    = len(curr)
@@ -227,27 +234,36 @@ def link_trajectories_bayesian(
         curr_x = curr['x_um'].values
         curr_a = curr['area_um2'].values
 
-        for i, tid in enumerate(viable_ids):
-            for j in range(n_curr):
-                dy = curr_y[j] - pred_y[i]
-                dx = curr_x[j] - pred_x[i]
-                d  = float(np.sqrt(dy**2 + dx**2))
-
-                # Hard cutoff: no link beyond max_displacement (scaled by gap)
-                gap = max(1, t - active[tid]['last_frame'])
-                if d > max_displacement_um * gap:
-                    C[i, j] = INF_COST
-                    continue
-
-                # Distance cost (Gaussian)
-                cost = _gaussian_cost(d, sigma_um * gap)
-
-                # Area consistency cost (chi-squared on log-area ratio)
-                if area_weight > 0 and pred_a[i] > 0 and curr_a[j] > 0:
-                    log_ratio = abs(np.log(curr_a[j] / pred_a[i]))
-                    cost += area_weight * log_ratio
-
-                C[i, j] = cost
+        # ── Vectorised cost block (viable tracks × current detections) ──────
+        # This inner block used to be a double Python for-loop over every
+        # (track, detection) pair — O(n_viable × n_curr) Python-level ops per
+        # frame, which dominated runtime on dense movies (hundreds of beads ×
+        # thousands of frames). Broadcasting computes the whole block at once.
+        if n_viable > 0 and n_curr > 0:
+            gaps = np.array([max(1, t - active[tid]['last_frame'])
+                             for tid in viable_ids], dtype=float)  # (n_viable,)
+            # Pairwise displacements: (n_viable, n_curr)
+            dyv = curr_y[None, :] - pred_y[:, None]
+            dxv = curr_x[None, :] - pred_x[:, None]
+            dist = np.sqrt(dyv * dyv + dxv * dxv)
+            gapcol = gaps[:, None]
+            # Gaussian distance cost = d² / (2 (σ·gap)²)
+            sig = sigma_um * gapcol
+            cost_block = dist * dist / (2.0 * sig * sig)
+            # Area-consistency cost (only where both areas are positive)
+            if area_weight > 0:
+                pa = pred_a[:, None]
+                ca = curr_a[None, :]
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    log_ratio = np.abs(np.log(ca / pa))
+                log_ratio[~np.isfinite(log_ratio)] = 0.0
+                valid_area = (pa > 0) & (ca > 0)
+                cost_block = cost_block + np.where(valid_area,
+                                                   area_weight * log_ratio, 0.0)
+            # Hard cutoff: forbid links beyond max displacement (gap-scaled).
+            forbidden = dist > (max_displacement_um * gapcol)
+            cost_block = np.where(forbidden, INF_COST, cost_block)
+            C[:n_viable, :n_curr] = cost_block
 
         # Death diagonal (track ends, no detection in this frame)
         for i in range(n_viable):
