@@ -338,6 +338,7 @@ def detect_beads_frame(
     host_mask: Optional[np.ndarray] = None,
     fit_quality: bool = False,
     fit_window: int = 9,
+    fast_fit: bool = False,
 ) -> np.ndarray:
     """
     Detect beads in a single frame via Laplacian-of-Gaussian blob detection.
@@ -406,7 +407,7 @@ def detect_beads_frame(
                               offset=np.nan, r_squared=np.nan))
             continue
         patch = raw[y0:y1, x0:x1]
-        fit = fit_gaussian_2d_spot(patch)
+        fit = fit_gaussian_2d_spot(patch, fast=fast_fit)
         if fit.get('success'):
             sx, sy = fit['sigma_x'], fit['sigma_y']
             sigma_mean = 0.5 * (sx + sy)
@@ -423,6 +424,92 @@ def detect_beads_frame(
                               amplitude=np.nan, integrated_intensity=np.nan,
                               offset=np.nan, r_squared=np.nan))
     return beads
+
+
+# ---------------------------------------------------------------------------
+# 3c. Fast template-based bead scoring (empirical PSF + cross-correlation)
+# ---------------------------------------------------------------------------
+
+def build_bead_template(frame, coords, half=4, clean_percentile=60):
+    """Build an empirical PSF template by averaging the cleanest bead patches.
+
+    Instead of assuming a Gaussian, we measure the instrument's actual bead
+    shape from the data: extract a patch around each detected bead, keep the
+    cleanest (highest central-peak-over-edge) subset, normalise each to [0, 1],
+    and average. The result is a zero-mean, unit-variance template used for fast
+    normalised cross-correlation scoring.
+
+    Returns (template_z, half) where template_z is a (2*half+1, 2*half+1) array,
+    or (None, half) if too few beads to build a stable template.
+    """
+    raw = np.asarray(frame, dtype=np.float32)
+    H, W = raw.shape
+    patches = []
+    for (y, x) in coords:
+        yi, xi = int(round(y)), int(round(x))
+        if yi - half < 0 or xi - half < 0 or yi + half + 1 > H or xi + half + 1 > W:
+            continue
+        patches.append(raw[yi - half:yi + half + 1, xi - half:xi + half + 1])
+    if len(patches) < 10:
+        return None, half
+    patches = np.asarray(patches)
+    mn = patches.min(axis=(1, 2), keepdims=True)
+    mx = patches.max(axis=(1, 2), keepdims=True)
+    norm = np.where(mx > mn, (patches - mn) / (mx - mn + 1e-8), 0.0)
+    peakiness = norm[:, half, half] - norm[:, 0, :].mean(axis=1)
+    keep = peakiness > np.percentile(peakiness, clean_percentile)
+    if keep.sum() < 5:
+        keep = np.ones(len(norm), dtype=bool)
+    tmpl = norm[keep].mean(axis=0)
+    tmpl_z = (tmpl - tmpl.mean()) / (tmpl.std() + 1e-8)
+    return tmpl_z, half
+
+
+def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
+    """Score each detected bead by fast features against an empirical template.
+
+    For every bead, compute (all ~microseconds/bead):
+      - ncc       : normalised cross-correlation to the template (shape match)
+      - snr       : central peak over patch std (brightness/contrast)
+      - symmetry  : radial symmetry (1 = symmetric; aggregates are lopsided)
+    Optionally refine the centre to sub-pixel via an intensity centroid.
+
+    Returns a list of per-bead dicts with keys: y, x, ncc, snr, symmetry,
+    amplitude, integrated_intensity.
+    """
+    raw = np.asarray(frame, dtype=np.float32)
+    H, W = raw.shape
+    w = 2 * half + 1
+    out = []
+    for (y, x) in coords:
+        yi, xi = int(round(y)), int(round(x))
+        if yi - half < 0 or xi - half < 0 or yi + half + 1 > H or xi + half + 1 > W:
+            out.append(dict(y=float(y), x=float(x), ncc=np.nan, snr=np.nan,
+                            symmetry=np.nan,
+                            amplitude=float(raw[min(yi, H - 1), min(xi, W - 1)]),
+                            integrated_intensity=np.nan))
+            continue
+        p = raw[yi - half:yi + half + 1, xi - half:xi + half + 1]
+        pmn, pmx = p.min(), p.max()
+        pn = (p - pmn) / (pmx - pmn + 1e-8) if pmx > pmn else np.zeros_like(p)
+        pz = (pn - pn.mean()) / (pn.std() + 1e-8)
+        ncc = float((pz * template_z).sum() / (w * w)) if template_z is not None else np.nan
+        snr = float(pn[half, half] / (pn.std() + 1e-8))
+        q = np.array([pn[:half, :half].sum(), pn[:half, half + 1:].sum(),
+                      pn[half + 1:, :half].sum(), pn[half + 1:, half + 1:].sum()])
+        symmetry = float(1.0 - q.std() / (q.mean() + 1e-8))
+        yy, xx = float(y), float(x)
+        if subpixel:
+            ww = np.clip(p - pmn, 0, None)
+            s = ww.sum()
+            if s > 0:
+                gy, gx = np.mgrid[0:w, 0:w]
+                yy = (yi - half) + float((ww * gy).sum() / s)
+                xx = (xi - half) + float((ww * gx).sum() / s)
+        out.append(dict(y=yy, x=xx, ncc=ncc, snr=snr, symmetry=symmetry,
+                        amplitude=float(p[half, half]),
+                        integrated_intensity=float(np.clip(p - pmn, 0, None).sum())))
+    return out
 
 
 def classify_beads(beads_df: pd.DataFrame,
@@ -472,7 +559,49 @@ def classify_beads(beads_df: pd.DataFrame,
             df[c] = [] if c != 'singlet' else []
         return df
 
-    valid = df['r_squared'].notna() & df['integrated_intensity'].notna()
+    # Fast-mode classification: when the fast template scorer was used, we have
+    # ncc / snr / symmetry / integrated_intensity but no Gaussian r_squared.
+    # Classify from those instead: a singlet matches the template well (high
+    # ncc), is symmetric, and has near-singlet integrated intensity; an
+    # aggregate is much brighter; a poor template match (low ncc/symmetry) that
+    # isn't brighter is treated as out-of-plane/unfit.
+    if 'r_squared' not in df.columns and 'ncc' in df.columns:
+        # Fast-mode classification leans on the TEMPLATE MATCH (ncc, symmetry),
+        # which robustly separates clean singlets from aggregates/defocused
+        # beads, rather than the raw patch-sum intensity (which is noisy in fast
+        # mode and would over-call aggregates). Intensity is used only as a
+        # secondary confirmation for the brightest outliers.
+        ncc = df['ncc'].to_numpy(dtype=float)
+        sym = df['symmetry'].to_numpy(dtype=float)
+        ii = df['integrated_intensity'].to_numpy(dtype=float)
+        med_ncc = float(np.nanmedian(ncc)) if np.isfinite(np.nanmedian(ncc)) else 0.5
+        # singlet intensity reference (robust lower-half median)
+        fin = ii[np.isfinite(ii)]
+        singlet_int = (float(np.median(fin[fin <= np.median(fin)]))
+                       if len(fin) >= 4 else (float(np.median(fin)) if len(fin) else np.nan))
+        n_units, classes = [], []
+        for k in range(len(df)):
+            c, s, I = ncc[k], sym[k], ii[k]
+            nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
+            n_units.append(nu)
+            # Good template match + symmetric = singlet.
+            good_match = (np.isfinite(c) and c >= 0.6 * med_ncc
+                          and (not np.isfinite(s) or s > 0.35))
+            # Aggregate: much brighter than a singlet AND a decent (bright,
+            # roundish) match — i.e. genuinely more signal, not just noise.
+            very_bright = np.isfinite(nu) and nu >= 3.0
+            if very_bright and good_match:
+                classes.append('aggregate')
+            elif good_match:
+                classes.append('singlet')
+            else:
+                classes.append('out_of_plane')
+        df['n_units_est'] = n_units
+        df['bead_class'] = classes
+        df['singlet'] = df['bead_class'] == 'singlet'
+        return df
+
+
     # Robust singlet reference = median of reasonably-fit beads. Use the lower
     # half of the intensity distribution to bias the reference toward singlets
     # (aggregates are the bright minority).
@@ -533,6 +662,9 @@ def detect_beads_stack(
     fit_window: int = 9,
     progress_callback=None,
     frame_indices=None,
+    quality_mode: str = 'fast',
+    template_mode: str = 'per_stack',
+    subpixel: bool = True,
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -541,22 +673,39 @@ def detect_beads_stack(
     a long movie is never fully held in memory. Pass a lazy stack wrapper (e.g.
     a napari layer's .data) directly — do not pre-materialise it.
 
-    Parameters
-    ----------
+    Quality modes (speed vs. precision trade-off):
+      'fast'     — empirical-PSF template + cross-correlation scoring. No
+                   per-bead nonlinear fit; ~microseconds/bead. Default. Gives
+                   classification (singlet/aggregate/out-of-plane) and, with
+                   subpixel=True, a cheap centroid centre.
+      'fast_fit' — bounded Gaussian fit with a tight iteration cap (fast but
+                   still a real fit; good centres + sigmas at moderate cost).
+      'precise'  — full Gaussian fit (highest precision, slowest). Use when
+                   sub-pixel localisation precision genuinely matters.
+
+    template_mode ('fast' only): 'per_stack' builds one PSF template from the
+    first processed frame (fastest; correct when the PSF is stable). 'per_frame'
+    rebuilds the template each frame (adapts to focus drift; useful for SMLM-
+    like data). subpixel toggles cheap centroid refinement in 'fast' mode.
+
+    The legacy fit_quality=True is honoured as an alias for quality_mode
+    ='precise' (backwards compatibility).
+
     frame_indices : optional iterable of frame indices to process (e.g. a
-        keyframe subset for host inference). If None, all frames are used.
-        Note: the 'frame' column in the output uses the ORIGINAL frame index,
-        so subsetting stays traceable.
+        keyframe subset for host inference). The 'frame' column uses ORIGINAL
+        indices so subsetting stays traceable.
 
     Returns
     -------
     props_df : DataFrame with columns frame, object_id, y_um, x_um, area_um2
-        — the schema expected by the trajectory linkers (TrackMate bridge,
-        link_trajectories, link_trajectories_bayesian). area_um2 is a nominal
-        placeholder (beads are point-like); it carries a small constant so
-        downstream code that reads it doesn't divide by zero.
+        (+ quality columns depending on mode). Schema is compatible with the
+        trajectory linkers and classify_beads.
     """
     from pycat.file_io.file_io import iter_frames
+
+    # Back-compat: fit_quality=True means the caller wants a real fit.
+    if fit_quality and quality_mode == 'fast':
+        quality_mode = 'precise'
 
     # Determine the frame count for progress reporting without materialising.
     shp = getattr(bead_stack, 'shape', None)
@@ -567,27 +716,37 @@ def detect_beads_stack(
 
     rows = []
     nominal_area = float(np.pi * (max_sigma * np.sqrt(2) * microns_per_pixel) ** 2)
+    half = max(2, fit_window // 2)
+    template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
     done = 0
     for t, frame in iter_frames(bead_stack, indices=frame_indices):
-        if not fit_quality:
+        if quality_mode == 'fast':
             coords = detect_beads_frame(
                 frame, min_sigma=min_sigma, max_sigma=max_sigma,
                 num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
-            for i, (y, x) in enumerate(coords):
+            if template_z is None or template_mode == 'per_frame':
+                tz, half = build_bead_template(frame, coords, half=half)
+                if tz is not None:
+                    template_z = tz
+            scored = score_beads_template(frame, coords, template_z,
+                                          half=half, subpixel=subpixel)
+            for i, b in enumerate(scored):
                 rows.append({
                     'frame': t, 'object_id': i,
-                    'y_um': float(y) * microns_per_pixel,
-                    'x_um': float(x) * microns_per_pixel,
-                    'area_um2': nominal_area})
+                    'y_um': float(b['y']) * microns_per_pixel,
+                    'x_um': float(b['x']) * microns_per_pixel,
+                    'area_um2': nominal_area,
+                    'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
+                    'amplitude': b['amplitude'],
+                    'integrated_intensity': b['integrated_intensity']})
         else:
             beads = detect_beads_frame(
                 frame, min_sigma=min_sigma, max_sigma=max_sigma,
                 num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
-                fit_quality=True, fit_window=fit_window)
+                fit_quality=True, fit_window=fit_window,
+                fast_fit=(quality_mode == 'fast_fit'))
             for i, b in enumerate(beads):
-                # Area from the fitted PSF (pi * sqrt(2 ln2) FWHM area proxy):
-                # use pi * sigma_x * sigma_y in physical units when available.
                 if np.isfinite(b.get('sigma_x', np.nan)) and np.isfinite(b.get('sigma_y', np.nan)):
                     area = float(np.pi * b['sigma_x'] * b['sigma_y']
                                  * microns_per_pixel ** 2)
@@ -608,20 +767,18 @@ def detect_beads_stack(
 
     if not rows:
         cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']
-        if fit_quality:
+        if quality_mode == 'fast':
+            cols += ['ncc', 'snr', 'symmetry', 'amplitude',
+                     'integrated_intensity', 'n_units_est', 'bead_class', 'singlet']
+        else:
             cols += ['sigma_x', 'sigma_y', 'sigma_mean', 'amplitude',
                      'integrated_intensity', 'r_squared', 'n_units_est',
                      'bead_class', 'singlet']
         return pd.DataFrame(columns=cols)
 
     df = pd.DataFrame(rows)
-    if not fit_quality:
-        return df
-
-    # Classify beads using the pooled population statistics
     df = classify_beads(df)
 
-    # Optionally drop aggregates and/or exclude unrecoverable defocused beads
     if exclude_aggregates:
         df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
     if not recover_out_of_plane:

@@ -59,9 +59,17 @@ def gaussian_3d_offset(coords, amplitude, x0, y0, z0, sigma_x, sigma_y, sigma_z,
 # Single-spot fits
 # ---------------------------------------------------------------------------
 
-def fit_gaussian_2d_spot(patch: np.ndarray, sigma_guess: float = 2.0) -> dict:
+def fit_gaussian_2d_spot(patch: np.ndarray, sigma_guess: float = 2.0,
+                         fast: bool = False) -> dict:
     """
     Fit a 2D Gaussian + offset to a small image patch centred on a spot.
+
+    fast : if True, use an unbounded Levenberg-Marquardt fit with a tight
+        iteration cap (maxfev=200). This is dramatically faster than the bounded
+        Trust-Region fit (which can burn thousands of evaluations per bead on
+        noisy patches) at a small precision cost — suitable for the 'fast_fit'
+        quality mode. If the unbounded fit produces an out-of-range centre it is
+        rejected and the bead falls back to NaN metrics.
 
     Returns
     -------
@@ -77,7 +85,6 @@ def fit_gaussian_2d_spot(patch: np.ndarray, sigma_guess: float = 2.0) -> dict:
 
     offset0 = float(np.median(p))
     amp0 = float(p.max() - offset0)
-    # intensity-weighted centroid as the centre guess
     tot = p.sum()
     if tot > 0:
         y0g = float((y * p).sum() / tot)
@@ -89,8 +96,18 @@ def fit_gaussian_2d_spot(patch: np.ndarray, sigma_guess: float = 2.0) -> dict:
     ub = [np.inf, w, h, w, h, np.inf]
 
     try:
-        popt, _ = curve_fit(gaussian_2d_offset, (x, y), p.ravel(),
-                            p0=p0, bounds=(lb, ub), maxfev=10000)
+        if fast:
+            # Unbounded LM with a tight cap — much faster, mild precision cost.
+            popt, _ = curve_fit(gaussian_2d_offset, (x, y), p.ravel(),
+                                p0=p0, maxfev=200)
+            # Reject nonsensical centres/sigmas that the unbounded fit can yield.
+            if (not (0 <= popt[1] <= w and 0 <= popt[2] <= h)
+                    or popt[3] <= 0 or popt[4] <= 0
+                    or popt[3] > w or popt[4] > h):
+                raise RuntimeError("fast fit out of range")
+        else:
+            popt, _ = curve_fit(gaussian_2d_offset, (x, y), p.ravel(),
+                                p0=p0, bounds=(lb, ub), maxfev=10000)
         fit = gaussian_2d_offset((x, y), *popt)
         ss_res = np.sum((p.ravel() - fit) ** 2)
         ss_tot = np.sum((p.ravel() - p.mean()) ** 2)

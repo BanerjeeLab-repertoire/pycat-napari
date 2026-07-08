@@ -23,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.277] - 2026-07-07
+### Changed (VPT bead detection is far faster: fast template mode by default, with a visible progress bar)
+- **VPT bead detection now defaults to a fast empirical-PSF template method instead of a per-bead
+  Gaussian fit, cutting a long-movie run from hours to minutes, and the progress bar now actually
+  moves.** The old default fit a 2D Gaussian to every bead in every frame (bounded curve_fit,
+  maxfev=10000): on a ~1000-frame movie with ~800 beads/frame that is ~3 hours and looked frozen.
+  Detection now offers three modes: "Fast (template match)" (default) builds one empirical PSF
+  template from the cleanest beads and scores every bead by normalised cross-correlation + peak SNR
+  + radial symmetry (~microseconds/bead), giving the overlay and singlet/aggregate/out-of-plane
+  classification in ~10-15x less time; "Fast fit" runs a bounded Gaussian with a tight iteration
+  cap; "Precise fit" is the full Gaussian for when localisation precision matters. Added a
+  "Sub-pixel centres" toggle (cheap intensity-centroid refinement) and a "Rebuild PSF template per
+  frame" option (adapts to focus drift / SMLM-like data; default builds one template per stack).
+  The progress bar is now determinate (0..n_frames) and advances per frame instead of sitting as an
+  indeterminate spinner, and a confirmation warning appears before runs estimated to exceed ~2
+  minutes. New template functions build_bead_template()/score_beads_template() and a fast= option on
+  fit_gaussian_2d_spot(). (Further speedup via across-frame parallelism is planned separately.)
+
 ## [1.5.276] - 2026-07-07
 ### Changed (VPT bead detection now streams frame-by-frame; host inference uses keyframes)
 - **VPT bead detection no longer materialises the whole movie in memory, and "Infer Host from

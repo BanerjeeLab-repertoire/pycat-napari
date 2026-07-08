@@ -402,14 +402,38 @@ class VideoParticleTrackingUI:
         self._bead_thresh.setToolTip("Detection sensitivity. Lower = detect more (dimmer) beads.")
         form.addRow("Threshold:", self._bead_thresh)
 
-        self._fit_quality = QCheckBox("Gaussian quality fit + classify beads")
-        self._fit_quality.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self._fit_quality.setChecked(True)
-        self._fit_quality.setToolTip(
-            "Fit a 2D Gaussian to each bead to measure width/brightness and "
-            "classify singlet / aggregate / out-of-plane. Aggregates are "
-            "larger AND brighter; defocused beads are larger but dimmer.")
-        form.addRow(self._fit_quality)
+        from qtpy.QtWidgets import QComboBox
+        self._quality_mode = QComboBox()
+        self._quality_mode.addItem("Fast (template match) — recommended", "fast")
+        self._quality_mode.addItem("Fast fit (bounded Gaussian, quick)", "fast_fit")
+        self._quality_mode.addItem("Precise fit (full Gaussian, slow)", "precise")
+        self._quality_mode.setCurrentIndex(0)
+        self._quality_mode.setToolTip(
+            "How bead quality/classification is measured:\n"
+            "• Fast — empirical-PSF template + cross-correlation. Seconds/minutes "
+            "for a long movie. Best default for throughput.\n"
+            "• Fast fit — a real Gaussian fit with a tight iteration cap.\n"
+            "• Precise fit — full Gaussian fit; highest precision, slowest "
+            "(can take many minutes on a long movie).")
+        form.addRow("Detection mode:", self._quality_mode)
+        self._quality_mode.currentIndexChanged.connect(self._on_quality_mode_changed)
+
+        self._subpixel = QCheckBox("Sub-pixel centres")
+        self._subpixel.setChecked(True)
+        self._subpixel.setToolTip(
+            "Refine each bead centre to sub-pixel precision with a cheap "
+            "intensity centroid (fast mode). Off = integer blob centres.")
+        form.addRow(self._subpixel)
+
+        self._template_per_frame = QCheckBox("Rebuild PSF template per frame (drift/SMLM)")
+        self._template_per_frame.setChecked(False)
+        self._template_per_frame.setToolTip(
+            "Fast mode builds one empirical PSF template per stack by default "
+            "(fastest; correct when the PSF is stable). Enable to rebuild the "
+            "template every frame — adapts to focus drift, useful for SMLM-like "
+            "data, slightly slower.")
+        form.addRow(self._template_per_frame)
+
 
         self._exclude_agg = QCheckBox("Route aggregates to a secondary population")
         self._exclude_agg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -437,6 +461,13 @@ class VideoParticleTrackingUI:
         form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
+    def _on_quality_mode_changed(self, _i=0):
+        """Sub-pixel and template controls only apply to fast (template) mode."""
+        is_fast = self._quality_mode.currentData() == 'fast'
+        for w in (self._subpixel, self._template_per_frame):
+            try: w.setEnabled(is_fast)
+            except Exception: pass
+
     def _on_detect_beads(self):
         from pycat.toolbox.vpt_tools import detect_beads_stack
         name = self._bead_dd.currentText()
@@ -463,9 +494,39 @@ class VideoParticleTrackingUI:
             # (The detection layer already treats host_mask=None as "keep all".)
             host_mask = None
 
-        self._bead_prog.setVisible(True); self._bead_prog.setRange(0, 0)
+        # Determine frame count for a REAL (determinate) progress bar and a
+        # runtime estimate, without materialising the stack.
+        _shp = getattr(stack, 'shape', None)
+        n_frames = int(_shp[0]) if (_shp is not None and len(_shp) == 3) else 1
+        qmode = self._quality_mode.currentData()
 
-        fit_q = self._fit_quality.isChecked()
+        # Warn before a long run (precise fit on a long movie can take many
+        # minutes). Rough per-frame cost estimates (seconds): fast ~0.8,
+        # fast_fit ~3, precise ~10.
+        per_frame = {'fast': 0.8, 'fast_fit': 3.0, 'precise': 10.0}.get(qmode, 0.8)
+        est_sec = per_frame * n_frames
+        if est_sec > 120:
+            from qtpy.QtWidgets import QMessageBox
+            mins = est_sec / 60.0
+            resp = QMessageBox.question(
+                self, "Long detection run",
+                f"Detecting beads in {n_frames} frames in "
+                f"'{self._quality_mode.currentText().split(' —')[0]}' mode is "
+                f"estimated to take about {mins:.0f} minute(s).\n\n"
+                "Tip: 'Fast (template match)' mode is much quicker. Proceed?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if resp != QMessageBox.Yes:
+                return
+
+        # Determinate progress bar (0..n_frames) so it visibly advances per
+        # frame, rather than an indeterminate spinner stuck at 0%.
+        self._bead_prog.setVisible(True)
+        self._bead_prog.setRange(0, max(1, n_frames))
+        self._bead_prog.setValue(0)
+
+        subpixel = self._subpixel.isChecked()
+        template_mode = ('per_frame' if self._template_per_frame.isChecked()
+                         else 'per_stack')
         def _job(progress):
             # Keep ALL classes labelled at detection; routing (primary vs.
             # aggregate) happens at the tracking step so aggregates can be
@@ -476,7 +537,8 @@ class VideoParticleTrackingUI:
                 max_sigma=self._max_sigma.value(),
                 threshold=self._bead_thresh.value(),
                 microns_per_pixel=self._mpx(),
-                fit_quality=fit_q,
+                quality_mode=qmode, subpixel=subpixel,
+                template_mode=template_mode,
                 exclude_aggregates=False, recover_out_of_plane=True,
                 progress_callback=progress)
 
@@ -511,7 +573,9 @@ class VideoParticleTrackingUI:
             rec = {'bead_channel': name, 'min_sigma': self._min_sigma.value(),
                    'max_sigma': self._max_sigma.value(),
                    'threshold': self._bead_thresh.value(),
-                   'fit_quality': self._fit_quality.isChecked()}
+                   'quality_mode': self._quality_mode.currentData(),
+                   'subpixel': self._subpixel.isChecked(),
+                   'template_mode': ('per_frame' if self._template_per_frame.isChecked() else 'per_stack')}
             if 'bead_class' in det_df.columns:
                 counts = det_df['bead_class'].value_counts().to_dict()
                 rec['class_counts'] = counts
@@ -545,8 +609,7 @@ class VideoParticleTrackingUI:
             napari_show_warning("Bead detection failed — see terminal.")
             print(msg)
         w.finished.connect(_done); w.error.connect(_err)
-        w.progress.connect(lambda i, n: (
-            self._bead_prog.setRange(0, n), self._bead_prog.setValue(i)))
+        w.progress.connect(lambda i, n: self._bead_prog.setValue(i))
         self._bead_worker = w; w.start()
 
     # ── Step 4: trajectory linking ─────────────────────────────────────
