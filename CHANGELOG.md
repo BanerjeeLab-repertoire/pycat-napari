@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.301] - 2026-07-08
+### Fixed (VPT trajectory layers rendered at the wrong scale)
+- **Bead/Aggregate trajectory layers now overlay the image correctly when a pixel size is set.**
+  When a micron pixel size is applied (e.g. via the pixel-size gate at load), the image layer
+  renders in micron world units (layer scale = µm/px) but the trajectory layers were added in pixel
+  coordinates with no scale, so they rendered in a different coordinate frame — appearing as a
+  full-width streak beside a tiny image. The trajectory layers now inherit the bead image layer's
+  spatial scale, so tracks and image share one coordinate frame and overlay 1:1.
+
 ## [1.5.300] - 2026-07-08
 ### Changed (VPT detection: honest progress bar and runtime estimate)
 - **The detection progress bar now advances during the actual detection work.** With CPU-parallel

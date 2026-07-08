@@ -823,13 +823,46 @@ class VideoParticleTrackingUI:
             self._dr()['vpt_tracks'] = tracks
             mpp = self._mpx()
 
+            # Find the bead image layer to match its scale — a Tracks layer
+            # added with no scale sits at raw pixel coordinates, so if the image
+            # carries a (µm or upscaled) scale the tracks render at a different
+            # world extent (the symptom: a full-width streak next to a tiny
+            # image). Copy the image layer's spatial scale onto the tracks.
+            _bead_name = self._bead_dd.currentText()
+            _img_layer = None
+            try:
+                import napari.layers as _nl
+                for _l in self.viewer.layers:
+                    if isinstance(_l, _nl.Image):
+                        if _bead_name and _l.name == _bead_name:
+                            _img_layer = _l; break
+                        if _img_layer is None:
+                            _img_layer = _l   # fallback: first image layer
+            except Exception:
+                _img_layer = None
+
             def _tracks_layer(tr, name, color=None):
                 tl = tr[['track_id', 'frame']].copy()
                 tl['y'] = tr['y_um_raw'] / mpp if 'y_um_raw' in tr else tr['y_um'] / mpp
                 tl['x'] = tr['x_um_raw'] / mpp if 'x_um_raw' in tr else tr['x_um'] / mpp
                 if name in self.viewer.layers:
                     self.viewer.layers.remove(name)
-                self.viewer.add_tracks(tl[['track_id', 'frame', 'y', 'x']].values, name=name)
+                add_kwargs = {}
+                # Match the image layer's spatial (y, x) scale so the tracks
+                # overlay the image 1:1. Tracks data is (track_id, frame, y, x),
+                # so the scale vector is (frame_scale, y_scale, x_scale).
+                if _img_layer is not None:
+                    try:
+                        import numpy as _np
+                        isc = _np.asarray(_img_layer.scale, float)
+                        if isc.size >= 2:
+                            yx = isc[-2:]
+                            add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
+                    except Exception:
+                        pass
+                self.viewer.add_tracks(
+                    tl[['track_id', 'frame', 'y', 'x']].values, name=name,
+                    **add_kwargs)
 
             _tracks_layer(tracks, "Bead Trajectories")
 
