@@ -754,7 +754,11 @@ def classify_beads(beads_df: pd.DataFrame,
 
         # Real-vs-garbage: absolute NCC floor. The template is built FROM the
         # real beads, so genuine beads match it well; rings/hot/noise do not.
-        NCC_FLOOR = 0.5
+        # 0.55 (rather than 0.50) reduces frame-to-frame flicker: dim detections
+        # whose NCC hovers right at the floor were dropping in and out between
+        # frames as their score wobbled; a slightly firmer floor keeps that
+        # borderline-noise population consistently rejected.
+        NCC_FLOOR = 0.55
         is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
 
         # References computed over REAL beads only (so garbage doesn't skew them).
@@ -762,7 +766,12 @@ def classify_beads(beads_df: pd.DataFrame,
         ramp = amp[is_real & np.isfinite(amp)]
         if len(rii) >= 10:
             singlet_int = float(np.median(rii[rii <= np.median(rii)]))
-            mass_hi = float(np.percentile(rii, 99.5))   # aggregate mass gate
+            # Aggregate mass gate at p99.3 (not p99.5): p99.5 landed INSIDE the
+            # top mass cluster, so a genuine aggregate whose mass fluctuates a
+            # few percent frame-to-frame kept crossing it and flickered
+            # red/green. p99.3 sits just BELOW that cluster, so the handful of
+            # true aggregates stay solidly above it every frame (stable class).
+            mass_hi = float(np.percentile(rii, 99.3))
             amp_hi = float(np.percentile(ramp, 50))     # must also be bright
         else:
             singlet_int = float(np.median(rii)) if len(rii) else np.nan

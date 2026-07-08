@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.290] - 2026-07-08
+### Fixed (VPT bead classification flickered frame-to-frame: aggregates and dim detections)
+- **A large aggregate alternated between the aggregate (red) and singlet (green) class across
+  frames, and very dim detections dropped in and out.** Both were frame-to-frame instability from
+  classification thresholds sitting right where borderline objects live. Two fixes, validated on
+  test data: (1) the aggregate mass gate moved from the 99.5th to the 99.3rd percentile — the 99.5
+  cut landed inside the top mass cluster, so a genuine aggregate whose mass fluctuates a few percent
+  kept crossing it; 99.3 sits just below that cluster, so the true aggregates stay above it every
+  frame. (2) the template-match (NCC) floor moved from 0.50 to 0.55 — dim detections whose match
+  score hovered at 0.50 were flipping between kept and rejected each frame; the firmer floor keeps
+  that borderline-noise population consistently out. Aggregate classification is now stable across
+  frames and the dim in/out flicker is roughly halved. NOTE: a bead whose intensity GENUINELY
+  crosses the threshold in a given frame can still change class there; fully eliminating that needs
+  temporal consistency (holding an object's class once it is tracked), a separate future refinement.
+
 ## [1.5.289] - 2026-07-08
 ### Fixed (in-dock pixel-size gate now hides after the scale is set via the load-time popup)
 - **Setting the pixel size in the load-time popup did not hide an already-open method panel's
