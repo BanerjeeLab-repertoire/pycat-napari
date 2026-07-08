@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.293] - 2026-07-08
+### Added (VPT: CPU-parallel bead detection)
+- **Fast-mode bead detection now runs across a process pool when possible**, cutting the time to
+  reach the tracking step on multi-core machines. Per-frame blob detection (the expensive,
+  embarrassingly-parallel part) is dispatched to worker processes that re-open the source file and
+  read their own frame; template building, scoring and classification stay in the main process. It
+  activates automatically (parallel=auto) for fast mode on a file-backed stack with more than one
+  frame and more than one worker, and falls back cleanly to serial detection for anything else (a
+  non-file-backed stack, a single frame, or any worker error). Results are unchanged: a regression
+  test (tests/test_vpt_parallel_equivalence.py) asserts the parallel path produces bead coordinates
+  identical to serial on every frame. GPU-accelerated detection is a separate, later addition built
+  on this foundation.
+
 ## [1.5.292] - 2026-07-08
 ### Changed (restrict to Python 3.12 to prevent accidental 3.13 installs)
 - **requires-python tightened to >=3.12,<3.13**, and the 3.13 classifier and the contradictory

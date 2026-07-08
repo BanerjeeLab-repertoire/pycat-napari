@@ -847,6 +847,75 @@ def classify_beads(beads_df: pd.DataFrame,
     return df
 
 
+def _bead_source_descriptor(bead_stack):
+    """Build a small picklable descriptor that lets a worker subprocess re-open
+    the bead stack and read a single frame, WITHOUT pickling the (unpicklable,
+    file-handle-backed) lazy stack wrapper itself.
+
+    Returns a dict describing how to read a frame, or None if the stack is not a
+    file-backed lazy reader we know how to re-open in a subprocess (in which case
+    the caller falls back to serial/in-process detection).
+
+    Currently supports the TIFF-backed lazy reader (_TiffPageStack), which
+    exposes its path and channel layout. An already-materialised numpy array is
+    NOT given a descriptor here — it is small enough to pass to workers directly
+    (handled by the caller) or processed serially.
+    """
+    path = getattr(bead_stack, '_path', None)
+    if path:
+        return {
+            'kind': 'tiff',
+            'path': str(path),
+            'nc': int(getattr(bead_stack, '_nc', 1) or 1),
+            'ci': int(getattr(bead_stack, '_ci', 0)),
+        }
+    return None
+
+
+def _read_frame_from_descriptor(t, src_desc):
+    """Read frame t in a worker subprocess from a source descriptor. Top-level +
+    picklable. Mirrors the time-series reader so both share the same approach."""
+    import numpy as np
+    kind = src_desc.get('kind')
+    if kind == 'tiff':
+        import tifffile as _tf
+        with _tf.TiffFile(src_desc['path']) as _tif:
+            try:
+                pages = _tif.series[0].pages
+            except Exception:
+                pages = _tif.pages
+            nc = int(src_desc.get('nc', 1)) or 1
+            ci = int(src_desc.get('ci', 0))
+            page = pages[int(t) * nc + ci]
+            return np.asarray(page.asarray()).astype(np.float32)
+    raise ValueError(f"unsupported source descriptor kind: {kind!r}")
+
+
+def _detect_frame_worker(args):
+    """Top-level picklable worker for ProcessPoolExecutor.
+
+    Reads one frame (from a source descriptor OR a directly-passed array),
+    runs blob-detection (+ optional de-dup), and returns (t, coords) where
+    coords is a plain list of (y, x) floats — small and cheap to pickle back.
+
+    Only the EXPENSIVE, embarrassingly-parallel part (per-frame blob detection)
+    runs here. Template building, scoring and classification stay in the parent
+    process where the shared template lives. This keeps the worker stateless and
+    the returned payload tiny.
+    """
+    (t, frame_or_desc, is_desc, det_kwargs, merge_radius_px) = args
+    import numpy as np
+    if is_desc:
+        frame = _read_frame_from_descriptor(t, frame_or_desc)
+    else:
+        frame = np.asarray(frame_or_desc, dtype=np.float32)
+    coords = detect_beads_frame(frame, **det_kwargs)
+    if merge_radius_px:
+        coords = dedup_detections(coords, frame, merge_radius_px)
+    # Return plain python floats so the payload is trivially picklable.
+    return int(t), [(float(y), float(x)) for (y, x) in coords]
+
+
 def detect_beads_stack(
     bead_stack: np.ndarray,
     host_mask: Optional[np.ndarray] = None,
@@ -868,6 +937,8 @@ def detect_beads_stack(
     template_type: str = 'empirical',
     merge_radius_px: Optional[float] = None,
     refine_with_airy: bool = False,
+    parallel: str = 'auto',
+    n_workers: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -929,16 +1000,55 @@ def detect_beads_stack(
             pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
+    # ── Optional CPU-parallel pre-detection (fast mode only) ─────────────────
+    # The expensive, embarrassingly-parallel part is per-frame blob detection.
+    # When enabled and the stack is file-backed (so workers can re-open it),
+    # detect coords for all frames across a process pool up front, then do the
+    # cheap scoring/classification serially below (where the shared template
+    # lives). Falls back cleanly to serial if anything is unavailable.
+    precomputed_coords = None
+    if quality_mode == 'fast' and parallel in ('auto', 'cpu', 'process'):
+        src_desc = _bead_source_descriptor(bead_stack)
+        try:
+            import os as _os
+            max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+        except Exception:
+            max_workers = 1
+        # Only worth it with a real descriptor and enough frames + workers.
+        if src_desc is not None and max_workers > 1 and n_frames and n_frames > 1:
+            try:
+                from concurrent.futures import ProcessPoolExecutor
+                det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
+                                  num_sigma=num_sigma, threshold=threshold,
+                                  host_mask=host_mask)
+                idxs = (list(frame_indices) if frame_indices is not None
+                        else list(range(n_frames)))
+                tasks = [(t, src_desc, True, det_kwargs, merge_radius_px)
+                         for t in idxs]
+                precomputed_coords = {}
+                with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                    for t, coords in ex.map(_detect_frame_worker, tasks):
+                        precomputed_coords[t] = coords
+            except Exception:
+                # Any failure (pickling, worker crash, host_mask not picklable)
+                # → fall back to serial detection below.
+                precomputed_coords = None
+
     done = 0
     for t, frame in iter_frames(bead_stack, indices=frame_indices):
         if quality_mode == 'fast':
-            coords = detect_beads_frame(
-                frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
-            # De-duplicate multi-scale / ring detections on a single bead, if a
-            # merge radius is set (from the physical bead size upstream).
-            if merge_radius_px:
-                coords = dedup_detections(coords, frame, merge_radius_px)
+            if precomputed_coords is not None and t in precomputed_coords:
+                # Coords already found in parallel; frame still needed for
+                # template building + scoring (both cheap).
+                coords = precomputed_coords[t]
+            else:
+                coords = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+                # De-duplicate multi-scale / ring detections on a single bead, if
+                # a merge radius is set (from the physical bead size upstream).
+                if merge_radius_px:
+                    coords = dedup_detections(coords, frame, merge_radius_px)
             if template_z is None or template_mode == 'per_frame':
                 if template_type == 'airy':
                     # Analytic Airy (Bessel J1) template — matches beads that
