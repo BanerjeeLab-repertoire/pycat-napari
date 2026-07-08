@@ -58,6 +58,24 @@ import sys
 import os
 import warnings
 
+# ── OpenMP runtime safety (must run BEFORE numpy/torch/numba/napari import) ──
+# On Apple Silicon (arm64) several bundled libraries (PyTorch, Numba, MKL,
+# Cellpose) can each pull in their OWN copy of the OpenMP runtime. When two
+# copies load into the same process the program can abort at the C level with a
+# segmentation fault at launch — which multiple native-arm64 macOS users hit.
+# The "OMP: Info #276 ... omp_set_nested ... deprecated" banner is a tell-tale
+# sign of a duplicate OpenMP load. Setting KMP_DUPLICATE_LIB_OK=TRUE tells the
+# Intel/LLVM OpenMP runtime to tolerate the duplicate instead of aborting, and
+# capping the thread counts avoids oversubscription races during init. These are
+# no-ops on machines that don't have the conflict, so they are safe everywhere.
+# They MUST be set before the first native import, hence right after `import os`.
+for _var, _val in (
+    ('KMP_DUPLICATE_LIB_OK', 'TRUE'),
+    ('OMP_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '4')),
+    ('KMP_INIT_AT_FORK', 'FALSE'),
+):
+    os.environ.setdefault(_var, _val)
+
 # Set dask scheduler to synchronous BEFORE dask is imported anywhere.
 # Prevents dask from importing 'distributed' which crashes on Windows
 # environments with malformed SSL certificates in the Windows cert store.
@@ -299,15 +317,24 @@ def run_pycat_func():
             except Exception as e:
                 print(f"[PyCAT Numba] Warmup skipped: {e}")
             # PyTorch/CUDA status check — background so the GUI stays responsive.
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    print(f"[PyCAT] PyTorch CUDA available — Cellpose will use GPU: {torch.cuda.get_device_name(0)}")
-                else:
-                    print("[PyCAT] PyTorch CUDA not available — Cellpose will use CPU.")
-                    print("[PyCAT] To enable GPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
-            except Exception as e:
-                print(f"[PyCAT] Could not check PyTorch CUDA status: {e}")
+            # SKIPPED on macOS: (a) there is no CUDA on Apple Silicon, so the
+            # check has no useful result there, and (b) importing torch on this
+            # worker thread *while* Qt/CentralManager initialise on the main
+            # thread is a known cause of a C-level segfault at launch on arm64
+            # Macs. Deferring the torch import to first actual use avoids the
+            # concurrent native-init race entirely.
+            if sys.platform == 'darwin':
+                pass
+            else:
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        print(f"[PyCAT] PyTorch CUDA available — Cellpose will use GPU: {torch.cuda.get_device_name(0)}")
+                    else:
+                        print("[PyCAT] PyTorch CUDA not available — Cellpose will use CPU.")
+                        print("[PyCAT] To enable GPU: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118")
+                except Exception as e:
+                    print(f"[PyCAT] Could not check PyTorch CUDA status: {e}")
         threading.Thread(target=_warmup, daemon=True).start()
 
     cm = CentralManager(viewer)

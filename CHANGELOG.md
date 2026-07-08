@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.291] - 2026-07-08
+### Fixed (launch segfault on Apple Silicon / arm64 Macs)
+- **Multiple native arm64 (Apple Silicon) macOS users hit a segmentation fault at launch**, right
+  after startup finished (the OMP: Info #276 omp_set_nested banner printed first). This is the
+  signature of a duplicate OpenMP runtime: PyTorch, Numba, MKL and Cellpose can each load their own
+  copy of libomp, and on arm64 two copies in one process can abort at the C level. Two mitigations,
+  both applied before any native library is imported: (1) KMP_DUPLICATE_LIB_OK=TRUE (plus capped
+  OMP thread counts) so the OpenMP runtime tolerates the duplicate instead of crashing; these are
+  no-ops on machines without the conflict, so they are safe everywhere. (2) On macOS the background
+  startup thread no longer imports PyTorch — that import raced with Qt/CentralManager initialising
+  on the main thread (a concurrent native-init crash the code already warned about), and the check
+  it performed (CUDA availability) is meaningless on Apple Silicon anyway. Torch now loads on first
+  actual use instead of during launch.
+
 ## [1.5.290] - 2026-07-08
 ### Fixed (VPT bead classification flickered frame-to-frame: aggregates and dim detections)
 - **A large aggregate alternated between the aggregate (red) and singlet (green) class across
