@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.286] - 2026-07-08
+### Fixed (removed a transient flickering pixel-size window)
+- **A pixel-size window briefly flickered and vanished on load.** The gate de-duplication
+  coordinator added in 1.5.283 iterated a global registry that still held gates from previously-
+  removed analysis panels; briefly toggling one of those stale, unparented gates visible produced a
+  flash of a window that immediately disappeared. The coordinator turned out to be unnecessary: the
+  real cause of the earlier duplicate/floating windows was that the gate was not embedded in its
+  panel layout (fixed in 1.5.283), and PyCAT only ever docks one analysis panel at a time, so there
+  is only ever one gate. The coordinator has been removed and each gate simply shows/hides itself
+  within its own panel. The in-panel gate still appears correctly when a scale is needed; the stray
+  flickering window is gone.
+
 ## [1.5.285] - 2026-07-08
 ### Fixed (pixel-size gate never appeared — missing show signal in the refactored coordinator)
 - **The gate coordinator introduced in 1.5.283 was missing the call that marks a gate as wanting to

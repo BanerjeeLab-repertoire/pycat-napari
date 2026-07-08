@@ -322,49 +322,6 @@ def add_step1_file_io(viewer, layout, registry=None, on_change=None,
     return grp
 
 
-# Module-level registry of all live pixel-size gates. Multiple analysis panels
-# each build their own gate; without coordination several can display at once
-# (the "3 windows" problem). The registry lets gates agree that only ONE is
-# shown at a time: each gate reports whether it WANTS to show (scale not yet
-# set), and only the first wanting gate in registration order actually displays.
-# The rest stay hidden but remain ready to take over if the first is destroyed.
-_PIXEL_GATES = []  # list of dicts: {'grp', 'wants', 'alive'}
-
-
-def _coordinate_pixel_gates():
-    """Ensure at most one pixel-size gate is visible. Called by each gate's
-    refresh(). The first registered gate that wants to show is shown; all others
-    are hidden regardless of their own wish."""
-    shown = False
-    for g in list(_PIXEL_GATES):
-        grp = g.get('grp')
-        try:
-            if grp is None or not _qt_alive(grp):
-                _PIXEL_GATES.remove(g); continue
-        except Exception:
-            continue
-        # De-duplication only: show the first gate that wants to be visible,
-        # hide the rest. The gate can no longer float as its own window because
-        # it is embedded in its panel layout (see add_pixel_size_gate), so no
-        # parent check is needed here — that check was suppressing legitimate
-        # shows when refresh fired before the panel was fully attached.
-        if g.get('wants') and not shown:
-            grp.setVisible(True)
-            shown = True
-        else:
-            grp.setVisible(False)
-
-
-def _qt_alive(widget):
-    """True if a Qt widget hasn't been deleted (accessing a deleted C++ object
-    raises RuntimeError)."""
-    try:
-        widget.isVisible()
-        return True
-    except Exception:
-        return False
-
-
 def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     """Add a pixel-size input that is shown ONLY when the image metadata did not
     provide a real scale, and hides itself once a valid scale exists.
@@ -458,21 +415,10 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     layout.addWidget(grp)
     grp.setVisible(False)
 
-    # Shared coordination state for this gate (registered in _PIXEL_GATES so
-    # only one gate shows at a time, and never as an orphan top-level window).
-    _gate = {'grp': grp, 'wants': False, 'alive': True}
-    _PIXEL_GATES.append(_gate)
-
-    def _set_wants(wants):
-        """Record whether this gate wants to be visible, then let the shared
-        coordinator decide actual visibility (at most one gate shown at a time)."""
-        _gate['wants'] = bool(wants)
-        _coordinate_pixel_gates()
-
     def refresh(*_a):
         # No image loaded (e.g. after Clear) → the gate is irrelevant; hide it.
         if not _image_present():
-            _set_wants(False)
+            grp.setVisible(False)
             return
 
         # If persist is on, we have a remembered scale, and the current data has
@@ -487,16 +433,16 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
 
         # Hide entirely once metadata supplied a scale.
         if _from_metadata() and _valid_scale():
-            _set_wants(False)
+            grp.setVisible(False)
             return
         # Hide once the user has CONFIRMED a valid scale (not merely typed one).
         if _valid_scale() and state['confirmed']:
             circle._set('green', "Scale set.")
-            _set_wants(False)
+            grp.setVisible(False)
             return
 
         # Otherwise this gate wants to be visible (the coordinator shows one).
-        _set_wants(True)
+        grp.setVisible(True)
         v = field.value()
         if v > 0:
             circle._set('yellow', "Review the pixel size, then Confirm.")
