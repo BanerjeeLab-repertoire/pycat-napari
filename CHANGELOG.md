@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.279] - 2026-07-08
+### Fixed (VPT Link Trajectories crashed with AttributeError: no _fit_quality)
+- **Both VPT trajectory linkers (TrackMate LAP and Bayesian/Hungarian) raised
+  AttributeError: 'VideoParticleTrackingUI' object has no attribute '_fit_quality'.** The
+  _fit_quality checkbox was replaced by the detection-mode dropdown in 1.5.277, but the linking
+  step (_on_link) still referenced it when deciding whether to route aggregates to a secondary
+  population. Since all detection modes now classify beads (a bead_class column is always
+  produced), the stale _fit_quality guard was removed — aggregate routing is now gated solely on
+  the "Route aggregates" checkbox and the presence of the bead_class column. Detection itself was
+  unaffected (fast-mode detection ran correctly end-to-end); this only blocked the linking step.
+
 ## [1.5.278] - 2026-07-07
 ### Fixed (VPT Detect Beads crashed opening the long-run warning dialog)
 - **The >2-minute detection warning dialog raised a TypeError and aborted Detect Beads.** The

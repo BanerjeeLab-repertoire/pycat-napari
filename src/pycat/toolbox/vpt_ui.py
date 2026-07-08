@@ -668,7 +668,7 @@ class VideoParticleTrackingUI:
         if det is None or det.empty:
             napari_show_warning("No bead detections found — run Step 3 first."); return
 
-        route_agg = (self._fit_quality.isChecked() and self._exclude_agg.isChecked()
+        route_agg = (self._exclude_agg.isChecked()
                      and 'bead_class' in det.columns)
         self._track_prog.setVisible(True); self._track_prog.setRange(0, 0)
 
