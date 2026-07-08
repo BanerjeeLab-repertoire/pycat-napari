@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.285] - 2026-07-08
+### Fixed (pixel-size gate never appeared — missing show signal in the refactored coordinator)
+- **The gate coordinator introduced in 1.5.283 was missing the call that marks a gate as wanting to
+  be shown.** When the gate visibility logic was refactored to route through the shared coordinator,
+  the hide branches were updated but the visible branch never set its want-to-show flag, so the
+  coordinator always saw zero gates wanting display and the gate never appeared on load or method
+  selection. Added the missing signal in the visible branch. The gate now appears when a scale is
+  needed, still as a single embedded panel (no floating or duplicate windows).
+
 ## [1.5.284] - 2026-07-08
 ### Fixed (pixel-size gate stopped appearing after the 1.5.283 de-duplication change)
 - **The 1.5.283 gate coordinator was too strict and suppressed the gate entirely.** It only showed

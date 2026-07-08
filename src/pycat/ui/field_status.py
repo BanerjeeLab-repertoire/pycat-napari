@@ -465,8 +465,7 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
 
     def _set_wants(wants):
         """Record whether this gate wants to be visible, then let the shared
-        coordinator decide actual visibility (at most one gate shown, and only
-        when it has a real parent window so it never floats as its own window)."""
+        coordinator decide actual visibility (at most one gate shown at a time)."""
         _gate['wants'] = bool(wants)
         _coordinate_pixel_gates()
 
@@ -497,6 +496,7 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
             return
 
         # Otherwise this gate wants to be visible (the coordinator shows one).
+        _set_wants(True)
         v = field.value()
         if v > 0:
             circle._set('yellow', "Review the pixel size, then Confirm.")
