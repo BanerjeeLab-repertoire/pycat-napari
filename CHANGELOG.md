@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.297] - 2026-07-08
+### Changed (VPT fast-mode classification: real out-of-plane bin, viscosity strictness, temporal stability)
+- **Dim, out-of-focus detections now go to the out-of-plane (yellow) class instead of blinking as
+  green singlets.** The fast-mode classifier never actually assigned the yellow class; dim spots
+  became singlets (and flickered in/out as they crossed the match-quality floor). Dim detections
+  (low amplitude or low SNR relative to the population) are now binned out_of_plane.
+- **A classification strictness control (hidden under Show advanced detection options) makes the dim
+  gate viscosity-aware.** The default (1.0) is tuned for viscous samples (~3 Pa·s and above), where
+  beads move slowly and a dim spot is almost always out of focus. For less viscous / faster samples,
+  where beads cross the focal plane quickly and a firm gate would wrongly bin real beads, the control
+  can be lowered (opt-in). The parameters are not meant to be universal across all viscosities.
+- **Stable dim tracks are promoted back to singlet after linking (temporal stability pass).** A dim
+  detection that persists across many frames with few gaps is a real, faint, in-focus bead, not an
+  out-of-focus blink; once tracks exist this is detectable, so such tracks are reclassified from
+  yellow to singlet. Blinking dim tracks correctly remain yellow. Aggregates and normal singlets are
+  untouched. (Blinking of the yellow population frame-to-frame is expected and acceptable.)
+
 ## [1.5.296] - 2026-07-08
 ### Fixed (VPT linking crashed in fast mode) + Changed (faster linker, real progress bar)
 - **Linking failed with KeyError: sigma_mean when aggregates were routed to a secondary

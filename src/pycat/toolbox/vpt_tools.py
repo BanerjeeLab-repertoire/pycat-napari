@@ -682,7 +682,8 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
 def classify_beads(beads_df: pd.DataFrame,
                    aggregate_intensity_factor: float = 1.6,
                    defocus_r2_max: float = 0.85,
-                   sigma_outlier_factor: float = 1.5) -> pd.DataFrame:
+                   sigma_outlier_factor: float = 1.5,
+                   strictness: float = 1.0) -> pd.DataFrame:
     """
     Classify fitted beads into singlet / aggregate / out-of-plane using the
     2D-Gaussian quality metrics.
@@ -751,6 +752,8 @@ def classify_beads(beads_df: pd.DataFrame,
         ncc = df['ncc'].to_numpy(dtype=float)
         amp = df['amplitude'].to_numpy(dtype=float)
         ii = df['integrated_intensity'].to_numpy(dtype=float)
+        snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
+               else np.full(len(df), np.nan))
 
         # Real-vs-garbage: absolute NCC floor. The template is built FROM the
         # real beads, so genuine beads match it well; rings/hot/noise do not.
@@ -764,6 +767,7 @@ def classify_beads(beads_df: pd.DataFrame,
         # References computed over REAL beads only (so garbage doesn't skew them).
         rii = ii[is_real & np.isfinite(ii)]
         ramp = amp[is_real & np.isfinite(amp)]
+        rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
         if len(rii) >= 10:
             singlet_int = float(np.median(rii[rii <= np.median(rii)]))
             # Aggregate mass gate at p99.3 (not p99.5): p99.5 landed INSIDE the
@@ -777,17 +781,53 @@ def classify_beads(beads_df: pd.DataFrame,
             singlet_int = float(np.median(rii)) if len(rii) else np.nan
             mass_hi = np.inf; amp_hi = np.inf
 
+        # Dim / out-of-focus (YELLOW) threshold. Dim detections — low amplitude
+        # relative to the population — are most likely beads drifting out of the
+        # focal plane; they belong in the out_of_plane (yellow) bin, not called
+        # singlets. The cutoff is a low-amplitude percentile scaled by
+        # `strictness`: strictness=1.0 (default, tuned for viscous samples
+        # ~3 Pa·s and above, where beads move slowly) uses the 25th percentile;
+        # higher strictness pushes more borderline-dim detections to yellow,
+        # lower strictness (opt-in for less viscous / faster samples) keeps more
+        # as singlets. In a viscous sample most beads stay in focus, so the dim
+        # tail is genuinely out-of-plane; in a fast/low-viscosity sample beads
+        # cross the plane quickly and a stricter dim gate would wrongly bin real
+        # beads, hence the exposed control.
+        s = float(strictness) if strictness and strictness > 0 else 1.0
+        if len(ramp) >= 10:
+            dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
+            amp_dim = float(np.percentile(ramp, dim_pct))
+        else:
+            amp_dim = -np.inf
+        # A low-SNR detection is also out-of-focus-like (weak, diffuse peak).
+        if len(rsnr) >= 10:
+            snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
+            snr_dim = float(np.percentile(rsnr, snr_pct))
+        else:
+            snr_dim = -np.inf
+
         n_units, classes = [], []
         for k in range(len(df)):
             if not is_real[k]:
                 n_units.append(np.nan); classes.append('rejected'); continue
             I, A = ii[k], amp[k]
+            S = snr[k] if 'snr' in df else np.nan
             nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
             n_units.append(nu)
             high_mass = np.isfinite(I) and I >= mass_hi
             bright = np.isfinite(A) and A >= amp_hi
+            # Dim / out-of-focus: low amplitude AND not part of the bright
+            # aggregate tail. These go YELLOW (out_of_plane). Blinking of this
+            # population across frames is expected and acceptable — a bead that
+            # is genuinely in focus and stable will instead read as a singlet;
+            # the temporal-stability pass (after linking) promotes stable dim
+            # tracks back to singlet.
+            is_dim = (np.isfinite(A) and A <= amp_dim) or \
+                     (np.isfinite(S) and S <= snr_dim)
             if high_mass and bright:
                 classes.append('aggregate')          # bright + compact + heavy
+            elif is_dim and not high_mass:
+                classes.append('out_of_plane')        # YELLOW: dim / out of focus
             elif high_mass and not bright:
                 classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
             else:
@@ -989,6 +1029,7 @@ def detect_beads_stack(
     refine_with_airy: bool = False,
     parallel: str = 'auto',
     n_workers: Optional[int] = None,
+    strictness: float = 1.0,
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -1156,7 +1197,7 @@ def detect_beads_stack(
         return pd.DataFrame(columns=cols)
 
     df = pd.DataFrame(rows)
-    df = classify_beads(df)
+    df = classify_beads(df, strictness=strictness)
 
     if exclude_aggregates:
         df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
@@ -1257,6 +1298,64 @@ def aggregate_population_stats(aggregate_df: pd.DataFrame,
 # ---------------------------------------------------------------------------
 # 5. Ensemble center-of-mass drift correction
 # ---------------------------------------------------------------------------
+
+def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
+                                     max_gap_frac=0.25):
+    """Promote STABLE dim tracks back to singlet after linking.
+
+    Per-frame classification sends dim detections to out_of_plane (yellow),
+    because a dim spot is usually a bead drifting out of the focal plane. But a
+    dim spot that is actually a real in-focus bead will appear in (almost) every
+    frame of its track — it is stable, not blinking. Once tracks exist we can
+    tell the two apart:
+
+      * a dim track that is LONG and has FEW gaps  → a real (if faint) bead →
+        promote every detection in it to 'singlet';
+      * a dim track that is SHORT or GAPPY (blinks in and out) → genuinely
+        out-of-focus → leave as 'out_of_plane' (yellow).
+
+    This is the temporal counterpart to the per-frame classifier: instantaneous
+    features cannot distinguish a faint-but-real bead from an out-of-focus one,
+    but persistence across frames can. Aggregates and normal singlets are left
+    untouched.
+
+    Parameters
+    ----------
+    tracks_df : linked detections with columns track_id, frame, bead_class.
+    min_stable_len : minimum number of frames a dim track must span to be
+        considered a stable (real) bead.
+    max_gap_frac : maximum fraction of missing frames (gaps) within the track's
+        span for it to count as stable rather than blinking.
+
+    Returns the DataFrame with 'bead_class' updated in place (copy returned).
+    """
+    if tracks_df is None or tracks_df.empty or 'bead_class' not in tracks_df:
+        return tracks_df
+    if 'track_id' not in tracks_df or 'frame' not in tracks_df:
+        return tracks_df
+    df = tracks_df.copy()
+    for tid, grp in df.groupby('track_id'):
+        if tid == -1:
+            continue
+        classes = grp['bead_class']
+        # Only consider tracks that are predominantly dim (out_of_plane).
+        dim_frac = float((classes == 'out_of_plane').mean())
+        if dim_frac < 0.5:
+            continue
+        frames = grp['frame'].to_numpy()
+        n_present = len(frames)
+        span = (frames.max() - frames.min() + 1) if n_present else 0
+        gap_frac = 1.0 - (n_present / span) if span > 0 else 1.0
+        if n_present >= min_stable_len and gap_frac <= max_gap_frac:
+            # Stable, persistent dim track → a real bead. Promote its dim
+            # detections to singlet (leave any aggregate frames alone).
+            promote = grp.index[grp['bead_class'] == 'out_of_plane']
+            df.loc[promote, 'bead_class'] = 'singlet'
+    # keep the convenience flag consistent
+    if 'singlet' in df.columns:
+        df['singlet'] = df['bead_class'] == 'singlet'
+    return df
+
 
 def drift_correct_com(tracks_df: pd.DataFrame) -> pd.DataFrame:
     """

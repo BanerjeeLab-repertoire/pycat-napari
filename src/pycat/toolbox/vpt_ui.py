@@ -469,6 +469,38 @@ class VideoParticleTrackingUI:
             "Uses the bead size above to set the merge radius.")
         form.addRow(self._dedup_rings)
 
+        # ── Advanced: classification strictness (viscosity-dependent) ────────
+        # Dim detections are routed to the out-of-plane (yellow) bin. How
+        # aggressively depends on the sample: in a viscous sample (~3 Pa·s and
+        # above, the default) beads move slowly and a dim spot is almost always
+        # a bead drifting out of focus, so a firm dim gate is correct. In a
+        # low-viscosity sample (approaching water) beads cross the focal plane
+        # quickly and the same gate would wrongly bin real beads — so this is an
+        # exposed control, hidden by default to keep the common case simple.
+        self._strictness_row = QWidget()
+        _sr = QHBoxLayout(self._strictness_row)
+        _sr.setContentsMargins(0, 0, 0, 0)
+        self._strictness = QDoubleSpinBox()
+        self._strictness.setRange(0.2, 3.0); self._strictness.setValue(1.0)
+        self._strictness.setSingleStep(0.1); self._strictness.setDecimals(1)
+        self._strictness.setToolTip(
+            "Classification strictness for the dim / out-of-plane (yellow) bin.\n"
+            "1.0 (default) is tuned for viscous samples (~3 Pa·s and above),\n"
+            "where beads move slowly and dim spots are usually out of focus.\n"
+            "Lower it (toward 0.2) for less viscous / faster samples so fewer\n"
+            "real beads are pushed to yellow; raise it for an even stricter\n"
+            "dim gate. Stable dim tracks are promoted back to singlet after\n"
+            "linking regardless of this value.")
+        _sr.addWidget(QLabel("Strictness (viscosity):"))
+        _sr.addWidget(self._strictness)
+        self._strictness_row.setVisible(False)   # hidden until 'Advanced' toggled
+
+        self._show_advanced = QCheckBox("Show advanced detection options")
+        self._show_advanced.setChecked(False)
+        self._show_advanced.toggled.connect(self._strictness_row.setVisible)
+        form.addRow(self._show_advanced)
+        form.addRow(self._strictness_row)
+
 
         self._exclude_agg = QCheckBox("Route aggregates to a secondary population")
         self._exclude_agg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -587,6 +619,7 @@ class VideoParticleTrackingUI:
                 bead_size_nm=bead_nm,
                 template_type=template_type,
                 merge_radius_px=merge_radius,
+                strictness=self._strictness.value(),
                 exclude_aggregates=False, recover_out_of_plane=True,
                 progress_callback=progress)
 
@@ -712,7 +745,7 @@ class VideoParticleTrackingUI:
     def _on_link(self):
         from pycat.toolbox.vpt_tools import (
             _link, drift_correct_com, split_bead_populations,
-            aggregate_population_stats)
+            aggregate_population_stats, reclassify_by_temporal_stability)
         det = self._dr().get('vpt_detections')
         if det is None or det.empty:
             napari_show_warning("No bead detections found — run Step 3 first."); return
@@ -738,6 +771,10 @@ class VideoParticleTrackingUI:
                 _link(primary, self._linker_name(), self._max_link.value(),
                       self._max_gap.value(), self._mpx(),
                       progress_callback=progress))
+            # Temporal stability pass: a dim track that persists stably across
+            # frames is a real (faint) bead, not an out-of-focus blink — promote
+            # it back to singlet. Blinking dim tracks stay yellow.
+            ptracks = reclassify_by_temporal_stability(ptracks)
             atracks = None
             if route_agg and len(aggregates) >= 2:
                 try:
