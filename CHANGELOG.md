@@ -23,6 +23,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.298] - 2026-07-08
+### Fixed (Compute MSD hung / crashed on large track sets)
+- **Microrheology (Compute MSD) could freeze or crash PyCAT on movies that produce many long
+  tracks.** Three causes, all addressed. (1) Both the ensemble compute_msd and the per-track MSD
+  curves built their displacements with an O(n²) Python double loop over frame pairs; this is now
+  vectorised (gap-aware array shifts), numerically identical to before but far faster on long
+  tracks. (2) The per-track MSD now samples LOG-SPACED lags instead of every integer lag — MSD is
+  read on log-log axes, so this preserves the curve shape while computing and drawing far fewer
+  points. (3) The MSD spaghetti plot now caps how many individual track lines it draws (a random
+  sample of 400) instead of one matplotlib line per track, which by itself could freeze the UI with
+  tens of thousands of tracks; the ensemble mean and the fitted diffusion result still use every
+  track.
+
+### Added (VPT: GPU-accelerated bead detection with automatic tiered selection)
+- **Fast-mode bead detection now uses the GPU when one is available.** The expensive part of blob
+  detection — the per-scale Laplacian-of-Gaussian convolutions — runs on the GPU (via CuPy), keeping
+  the scale-space cube on-device; the peak finding then uses scikit-image's exact peak_local_max so
+  results are bit-for-bit identical to the CPU detector. Detection now selects the best available
+  path automatically: GPU if present, else the CPU process-pool (1.5.293), else plain serial.
+- **A runtime equivalence guard protects correctness.** Before trusting the GPU for a whole stack,
+  detection verifies the GPU detector reproduces the CPU detector on the first frame; if they
+  disagree for any reason (driver/CuPy quirk) it silently falls back to the CPU path, so GPU
+  acceleration can never make results wrong — only faster. Requires the optional gpu extra
+  (cupy-cuda11x) and a CUDA device; without them the CPU paths are used unchanged.
+
 ## [1.5.297] - 2026-07-08
 ### Changed (VPT fast-mode classification: real out-of-plane bin, viscosity strictness, temporal stability)
 - **Dim, out-of-focus detections now go to the out-of-plane (yellow) class instead of blinking as

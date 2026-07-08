@@ -467,33 +467,39 @@ def blob_log_gpu(image, min_sigma=1.0, max_sigma=5.0, num_sigma=5,
     import cupy as cp
     import cupyx.scipy.ndimage as cpnd
     from skimage.feature.blob import _prune_blobs
+    from skimage.feature import peak_local_max
 
     img = cp.asarray(image, dtype=cp.float32)
     scales = np.linspace(min_sigma, max_sigma, num_sigma)
-    # scale-normalised LoG cube, built and kept on the GPU
-    cube = cp.empty((num_sigma,) + img.shape, dtype=cp.float32)
+    # scale-normalised LoG cube, built and kept on the GPU (the expensive part —
+    # the per-scale Gaussian convolutions — is what runs on-device).
+    cube_gpu = cp.empty((num_sigma,) + img.shape, dtype=cp.float32)
     for i, s in enumerate(scales):
-        cube[i] = -cpnd.gaussian_laplace(img, float(s)) * (float(s) ** 2)
+        cube_gpu[i] = -cpnd.gaussian_laplace(img, float(s)) * (float(s) ** 2)
 
-    # 3D local maxima above threshold (maximum_filter footprint 3^ndim).
-    fp = cp.ones((3,) * cube.ndim, dtype=bool)
-    maxed = cpnd.maximum_filter(cube, footprint=fp)
-    peaks_mask = (cube == maxed) & (cube > threshold)
-    coords = cp.argwhere(peaks_mask)
-    if coords.size == 0:
+    # Move the finished cube to the CPU and finish with skimage's EXACT peak
+    # finder (peak_local_max) and pruning, so results are bit-for-bit the same
+    # as skimage.blob_log. A raw (cube == maximum_filter) comparison does NOT
+    # match skimage — peak_local_max deduplicates plateau/tie maxima and handles
+    # borders differently — so we defer to it rather than reimplement it. The
+    # convolutions (the costly step) still ran on the GPU.
+    cube = cp.asnumpy(cube_gpu)
+    # blob_log stores the scale as the LAST axis for peak_local_max; skimage
+    # transposes the (scale, y, x) cube to (y, x, scale). Match that.
+    image_cube = np.moveaxis(cube, 0, -1)
+    local_maxima = peak_local_max(
+        image_cube, threshold_abs=threshold, threshold_rel=None,
+        exclude_border=False, footprint=np.ones((3,) * image_cube.ndim))
+    if local_maxima.size == 0:
         return np.empty((0, 3))
-    coords = cp.asnumpy(coords)  # (M, 3): scale_idx, y, x
-
-    # Convert scale index -> sigma, assemble (y, x, sigma) then prune overlaps.
-    sig = scales[coords[:, 0]]
-    blobs = np.column_stack([coords[:, 1], coords[:, 2], sig]).astype(np.float64)
-    # skimage prunes with sigma scaled by sqrt(ndim); replicate its call shape.
-    sigma_dim = blobs[:, -1:]
-    blobs_for_prune = np.hstack([blobs[:, :-1], sigma_dim])
+    lm = local_maxima.astype(np.float64)
+    # columns: y, x, scale_index → replace scale index with sigma
+    sigmas_of_peaks = scales[local_maxima[:, -1]]
+    lm = np.hstack([lm[:, :-1], sigmas_of_peaks[:, np.newaxis]])
     try:
-        pruned = _prune_blobs(blobs_for_prune, overlap, sigma_dim=1)
+        pruned = _prune_blobs(lm, overlap, sigma_dim=1)
     except TypeError:
-        pruned = _prune_blobs(blobs_for_prune, overlap)
+        pruned = _prune_blobs(lm, overlap)
     return pruned
 
 
@@ -1030,6 +1036,7 @@ def detect_beads_stack(
     parallel: str = 'auto',
     n_workers: Optional[int] = None,
     strictness: float = 1.0,
+    use_gpu: str = 'auto',
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -1097,8 +1104,45 @@ def detect_beads_stack(
     # detect coords for all frames across a process pool up front, then do the
     # cheap scoring/classification serially below (where the shared template
     # lives). Falls back cleanly to serial if anything is unavailable.
+    # ── Tier selection: GPU > CPU-parallel > serial ─────────────────────────
+    # GPU (LoG convolutions on-device) is the biggest single-machine win and is
+    # done IN-PROCESS: we do not also spin up a process pool, because the pool
+    # workers would contend for the one GPU. So GPU takes priority; only when no
+    # GPU is present do we consider the CPU process-pool path.
+    gpu_on = False
+    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
+        try:
+            from pycat.toolbox.gpu_utils import gpu_available
+            gpu_on = bool(gpu_available())
+        except Exception:
+            gpu_on = False
+        if gpu_on:
+            # Equivalence guard: verify the GPU blob detector matches the CPU
+            # (skimage) detector on the FIRST frame before trusting it for the
+            # whole stack. If they disagree (a driver/cupy quirk), fall back to
+            # CPU so results are never silently wrong. Runs once, cheap.
+            try:
+                from pycat.file_io.file_io import iter_frames as _itf
+                _t0, _f0 = next(iter(_itf(bead_stack, indices=frame_indices)))
+                _cpu = detect_beads_frame(
+                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=False)
+                _gpu = detect_beads_frame(
+                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=True)
+                # Compare as sorted rounded coordinate sets.
+                def _key(cs):
+                    return sorted((round(float(y), 3), round(float(x), 3))
+                                  for (y, x) in cs)
+                if _key(_cpu) != _key(_gpu):
+                    gpu_on = False   # disagreement → do not trust GPU
+            except Exception:
+                gpu_on = False
+
     precomputed_coords = None
-    if quality_mode == 'fast' and parallel in ('auto', 'cpu', 'process'):
+    if quality_mode == 'fast' and not gpu_on and parallel in ('auto', 'cpu', 'process'):
         src_desc = _bead_source_descriptor(bead_stack)
         try:
             import os as _os
@@ -1135,7 +1179,8 @@ def detect_beads_stack(
             else:
                 coords = detect_beads_frame(
                     frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                    num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+                    num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+                    use_gpu=gpu_on)
                 # De-duplicate multi-scale / ring detections on a single bead, if
                 # a merge radius is set (from the physical bead size upstream).
                 if merge_radius_px:

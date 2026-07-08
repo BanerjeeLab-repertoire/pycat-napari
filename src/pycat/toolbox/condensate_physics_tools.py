@@ -119,21 +119,31 @@ def compute_msd(
         if len(grp) < min_track_length:
             continue
 
-        y = grp['y_um'].values
-        x = grp['x_um'].values
-        t = grp['frame'].values
+        t = grp['frame'].values.astype(int)
+        y = grp['y_um'].values.astype(float)
+        x = grp['x_um'].values.astype(float)
+
+        # Gap-aware position series indexed by frame, so displacements at a fixed
+        # lag are a vectorised array shift instead of an O(n^2) Python double
+        # loop over pairs. Missing frames are NaN and excluded per lag. This is
+        # numerically identical to the pairwise loop but far faster on long
+        # tracks (the double loop made large movies hang).
+        f0, f1 = t.min(), t.max()
+        span = f1 - f0 + 1
+        ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+        ys[t - f0] = y; xs[t - f0] = x
 
         for lag in range(1, max_lag + 1):
-            disps = []
-            for i in range(len(t)):
-                for j in range(i + 1, len(t)):
-                    if t[j] - t[i] == lag:
-                        dy = y[j] - y[i]
-                        dx = x[j] - x[i]
-                        disps.append(dy**2 + dx**2)
-            if disps:
-                per_track[lag].append(float(np.mean(disps)))   # this track's MSD(τ)
-                pair_counts[lag] += len(disps)
+            if lag >= span:
+                break
+            dy = ys[lag:] - ys[:-lag]
+            dx = xs[lag:] - xs[:-lag]
+            sq = dy * dy + dx * dx
+            valid = np.isfinite(sq)
+            n_valid = int(valid.sum())
+            if n_valid:
+                per_track[lag].append(float(np.mean(sq[valid])))  # this track's MSD(τ)
+                pair_counts[lag] += n_valid
 
     rows = []
     for lag in range(1, max_lag + 1):
@@ -1008,6 +1018,7 @@ def per_track_msd_curves(
     max_lag: int = None,
     frame_interval_s: float = 1.0,
     min_track_length: int = 5,
+    n_lags: int = 40,
 ) -> pd.DataFrame:
     """
     MSD(τ) curve for every individual track (for the spaghetti-plot overlay).
@@ -1015,10 +1026,25 @@ def per_track_msd_curves(
     Returns a long DataFrame: track_id, lag_frames, lag_s, msd_um2.
     Each track's MSD at a lag is the mean of that track's squared displacements
     at that lag (time-averaged MSD per track).
+
+    Two performance measures keep this fast and light enough for movies with
+    many long tracks:
+      * lags are sampled LOG-SPACED (n_lags points across 1..max_lag) rather
+        than every integer lag. MSD is viewed on log-log axes, so log-spaced
+        lags preserve the curve shape while computing and rendering far fewer
+        points (dense large-τ points are visually redundant).
+      * displacements at each lag are computed VECTORISED (array slicing on a
+        gap-filled position series) instead of an O(n²) Python double loop.
     """
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
         max_lag = max(1, len(frames) // 4)
+    # Log-spaced unique integer lags in [1, max_lag].
+    if max_lag <= n_lags:
+        lags = np.arange(1, max_lag + 1)
+    else:
+        lags = np.unique(np.round(
+            np.geomspace(1, max_lag, n_lags)).astype(int))
     rows = []
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0:
@@ -1026,19 +1052,26 @@ def per_track_msd_curves(
         grp = grp.sort_values('frame').reset_index(drop=True)
         if len(grp) < min_track_length:
             continue
-        y = grp['y_um'].values
-        x = grp['x_um'].values
-        t = grp['frame'].values
-        for lag in range(1, max_lag + 1):
-            disps = []
-            for i in range(len(t)):
-                for j in range(i + 1, len(t)):
-                    if t[j] - t[i] == lag:
-                        disps.append((y[j] - y[i]) ** 2 + (x[j] - x[i]) ** 2)
-            if disps:
-                rows.append({'track_id': int(tid), 'lag_frames': lag,
+        t = grp['frame'].values.astype(int)
+        y = grp['y_um'].values.astype(float)
+        x = grp['x_um'].values.astype(float)
+        # Build a gap-aware position series indexed by frame so a fixed lag is a
+        # simple array shift. Missing frames are NaN and excluded per lag.
+        f0, f1 = t.min(), t.max()
+        span = f1 - f0 + 1
+        ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+        ys[t - f0] = y; xs[t - f0] = x
+        for lag in lags:
+            if lag >= span:
+                break
+            dy = ys[lag:] - ys[:-lag]
+            dx = xs[lag:] - xs[:-lag]
+            sq = dy * dy + dx * dx
+            valid = np.isfinite(sq)
+            if valid.any():
+                rows.append({'track_id': int(tid), 'lag_frames': int(lag),
                              'lag_s': lag * frame_interval_s,
-                             'msd_um2': float(np.mean(disps))})
+                             'msd_um2': float(np.mean(sq[valid]))})
     return pd.DataFrame(rows)
 
 
