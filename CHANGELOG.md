@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.278] - 2026-07-07
+### Fixed (VPT Detect Beads crashed opening the long-run warning dialog)
+- **The >2-minute detection warning dialog raised a TypeError and aborted Detect Beads.** The
+  QMessageBox.question() call passed the VPT UI object as its parent, but that class is a plain
+  controller (not a QWidget), which PyQt5 rejects. Fixed by passing None as the dialog parent
+  (matching the established pattern elsewhere in the codebase). Detect Beads now runs; the warning
+  appears correctly before long (precise-fit) runs.
+
 ## [1.5.277] - 2026-07-07
 ### Changed (VPT bead detection is far faster: fast template mode by default, with a visible progress bar)
 - **VPT bead detection now defaults to a fast empirical-PSF template method instead of a per-bead

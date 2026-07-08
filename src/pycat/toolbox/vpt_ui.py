@@ -509,7 +509,7 @@ class VideoParticleTrackingUI:
             from qtpy.QtWidgets import QMessageBox
             mins = est_sec / 60.0
             resp = QMessageBox.question(
-                self, "Long detection run",
+                None, "Long detection run",
                 f"Detecting beads in {n_frames} frames in "
                 f"'{self._quality_mode.currentText().split(' —')[0]}' mode is "
                 f"estimated to take about {mins:.0f} minute(s).\n\n"
