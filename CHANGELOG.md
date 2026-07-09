@@ -23,6 +23,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.305] - 2026-07-09
+### Added (measured per-frame acquisition timing captured at load)
+- **The real per-frame cadence is now read from MicroManager page tags.** A metadata
+  audit of the VPT test file showed the previously-used interval was wrong: the nominal
+  `Interval_ms` in the MicroManager summary is `0.0` (unset), and the OME
+  `<Description>` free-text says "500ms interval" — but the camera actually ran at
+  ~100 ms/frame. The authoritative source is the per-page `MicroManagerMetadata`
+  `ElapsedTime-ms` timestamp on each frame. A new `_extract_mm_frame_times_from_tiff`
+  reads those timestamps directly (via tifffile), computes the inter-frame deltas, and
+  records the **median** frame interval, its **IQR**, and the **full per-frame delta
+  array** into `file_metadata['common']`, along with **exposure**, **camera name**,
+  **acquisition start time** and **frame count**. On the test data this correctly
+  recovers ~0.1 s/frame.
+- **Frame-interval precedence is now measured-first.** For a loaded file the interval is
+  taken, most-authoritative first, from: (1) measured MicroManager `ElapsedTime-ms`
+  deltas, (2) OME structured `TimeIncrement`, (3) OME per-plane `DeltaT` differences,
+  (4) MicroManager `Interval_ms` **only if > 0**. Free-text OME `<Description>` is never
+  parsed for timing. A zero `Interval_ms` is no longer reported as a real cadence.
+- **The metadata panel now shows timing and provenance.** The File Metadata dialog
+  displays Camera, Exposure (s), Frame interval (s) with its IQR, Frame interval source,
+  and Z step in the curated view; the full measured per-frame deltas, frame count and
+  acquisition start time appear under "Show all raw metadata". All of these are included
+  in the JSON export.
+
+### Note (correction to the 1.5.304 conclusion)
+- The 1.5.304 entry stated the test data was "actually 0.5 s/frame". A thorough metadata
+  dump disproved this — the measured cadence is ~0.1 s/frame (the value Step 5 originally
+  defaulted to). The frame interval was therefore **not** the cause of the low VPT
+  viscosity; that investigation continues on the MSD-magnitude side. The outlier-rejection
+  work from 1.5.304 stands.
+
+### To do (queued in the roadmap)
+- Audit every method that consumes an acquisition parameter (frame interval, pixel size,
+  exposure, Z step, bit depth) to confirm it derives the value correctly for the specific
+  data type and reads from the single `file_metadata` source. Add a VPT toggle to feed the
+  captured per-frame deltas into the MSD lag-time axis (currently captured/displayed only).
+
 ## [1.5.304] - 2026-07-09
 ### Fixed (VPT viscosity too low — outlier trajectories + frame interval from metadata)
 - **Acquisition timing (frame interval) is now captured at load, in the top-level metadata, for all
