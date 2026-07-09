@@ -49,6 +49,31 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: Time Series In Vitro platform — specialised per-condensate analyses (foundation shipped)
+
+The Time Series In Vitro Object Analysis (Fluorescence) module provides the 2D+t
+foundation: per-frame segmentation, fusion-aware condensate linking, per-condensate
+temporal *object records* (size/intensity/shape vs time), and whole-field trajectories
+(Φ, partition, C_sat vs time). Each object record is the durable structure the following
+specialised analyses attach their own time-series to (build each as its own module
+against the foundation; all are import-and-analyse, per the "own the downstream
+quantification" positioning):
+
+* **Interior bubbling** — detect and track void/vacuole formation and motion *inside* a
+  condensate over time (interior morphodynamics distinct from the outer boundary).
+* **Catalysis kinetics** — per-condensate intensity-vs-time of a fluorescent reporter
+  whose signal is driven by catalysis; fit reaction kinetics per object.
+* **Internal flow** — bead diffusion *within* a condensate tracking interior flow fields
+  (RICS/STICS-adjacent; composes with the fluctuation-spectroscopy roadmap family and
+  the VPT machinery).
+* **Fiber growth off the interface** — nucleation and elongation of fibers from the
+  condensate boundary; length/rate per object over time.
+* **Contrast cascade** — the contrast-cascade method, applied per tracked object.
+
+Design note: these are *views* on the shared per-condensate object record (the biological
+object model direction), not disconnected pipelines — each new method enriches the same
+temporal object rather than emitting an isolated CSV.
+
 .. rubric:: Audit: acquisition parameters derived per data type and metadata structure
 
 Frame interval, pixel size, exposure, Z step and bit depth are now captured at the

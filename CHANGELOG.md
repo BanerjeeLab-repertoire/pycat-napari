@@ -23,6 +23,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.306] - 2026-07-09
+### Added (Time Series In Vitro Fluorescence — 2D+t foundation)
+- **New analysis method: Time Series In Vitro Object Analysis (Fluorescence).** The temporal
+  counterpart of the 2D in vitro fluorescence pipeline. It segments every frame, LINKS
+  droplets across frames into per-condensate temporal objects, and reports both per-object
+  and whole-field time-series. New modules `timeseries_invitro_tools.py` (analysis) and
+  `timeseries_invitro_fluor_ui.py` (stepped UI). Steps: load (time-series-gated) →
+  per-frame preprocess → per-frame segment (Multi-Otsu/Otsu/watershed) → link
+  (fusion-aware) → per-condensate trajectories → field trajectories.
+- **Fusion-aware condensate linking.** Reuses the Bayesian/Hungarian linker but tuned for
+  large, slow, irregular objects: a size-scaled search radius (a droplet moves at most a
+  fraction of its own radius per frame), up-weighted area consistency, and velocity
+  prediction OFF (condensates are not ballistic). A dedicated pass detects droplet FUSION
+  events — where two tracks merge into one — and flags them (child + parent track ids)
+  rather than silently mis-linking, since fusion is scientifically central here.
+- **Per-condensate temporal object records.** Each tracked droplet becomes a durable object
+  record carrying size/intensity/shape vs time plus a linear area-growth rate. These records
+  are the foundation the planned specialised analyses (interior bubbling, catalysis kinetics,
+  internal flow, fiber growth, contrast cascade — now on the roadmap) attach to.
+- **Streaming segmentation with opt-in keyframing.** Frames are segmented one at a time
+  (never materialising the whole movie). Multi-Otsu is cheap enough to run every frame
+  (the default); a keyframe checkbox (with a caveat tooltip) exists only for exceptionally
+  long stacks and copies masks between keyframes.
+- **A tracked-label overlay** recolours each droplet by track id so one condensate keeps one
+  colour through the movie.
+
+### Fixed (2D in vitro fluorescence — time-series steps shown on plain 2D images)
+- **The Dynamics/coarsening and Frame-Quality steps now hide correctly for non-time-series
+  data.** They were gated on `data.ndim >= 3`, which is true for RGB `(H, W, 3)`, a singleton
+  leading axis `(1, H, W)`, and channel/Z stacks — none of which are time series — so the
+  steps stayed visible on plain 2D images. The gate now keys on a real temporal axis: the
+  loaded file's `n_timepoints` metadata (captured at load) first, then a proper multi-frame
+  stack test (new `_has_time_series` / `_layer_is_time_series` helpers). Validated against
+  2D / RGB / singleton / real-stack shapes.
+
+### Changed (menu naming)
+- **"Time-Series Object Analysis" → "Time Series Cellular Object Analysis"** (it is the 2D+t
+  cellular pipeline), and the new **"Time Series In Vitro Object Analysis (Fluorescence)"**
+  added alongside it under Cell and Object Analyses.
+
 ## [1.5.305] - 2026-07-09
 ### Added (measured per-frame acquisition timing captured at load)
 - **The real per-frame cadence is now read from MicroManager page tags.** A metadata
