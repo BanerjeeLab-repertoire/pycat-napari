@@ -23,6 +23,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.311] - 2026-07-09
+### Added (VPT scientific-choice items made explicit & recorded — audit #9–#11)
+- **Explicit drift-correction modes (#9).** Center-of-mass subtraction is standard for
+  microrheology but also removes any REAL collective motion (internal flow, sedimentation,
+  bulk translation). `drift_correct_com` now takes a `mode`: **Ensemble COM** (the previous
+  always-on behaviour, default), **Immobile-reference** (estimates drift from only the most
+  stationary tracks, so genuinely flowing/diffusing beads don't bias the correction), or
+  **None** (keep collective motion — for internal-flow studies). Exposed as a Step-5
+  dropdown and recorded in the microrheology provenance. Verified on a synthetic mix of
+  stationary + flowing tracks: plain COM over-corrects the stationary beads (the flowing
+  track pollutes the estimate) while immobile-reference recovers them exactly.
+- **Out-of-plane handling made explicit (#10).** Recovered out-of-plane (yellow) beads are
+  already excluded from viscosity unless the population selector includes them — but the
+  temporal-stability pass promotes stable dim tracks back to singlet, which can fold a
+  persistent defocused bead into the viscosity set. This promotion is now a Step-5 checkbox
+  ("Promote stable dim tracks to singlet", default on = prior behaviour); turning it OFF
+  gives a stricter singlet-only viscosity that never merges defocused beads whose axial
+  fluctuations could masquerade as 2D motion. Recorded in provenance.
+- **Fast-mode classification thresholds are now recorded (#11).** The (previously purely
+  hard-coded) fast-template thresholds — NCC floor, aggregate mass/amplitude percentiles and
+  their resolved values, dim-amplitude percentile, strictness — are attached to the
+  classification result and captured in the bead-detection provenance record, so a fast-mode
+  run is reproducible and the imaging regime is auditable. (Exposing them as editable
+  advanced controls is deferred to the planned interactive detection-filter widget.)
+
+### Fixed (introduced-and-caught during this change)
+- Added `QComboBox` to the top-level PyQt import in `vpt_ui` — the new drift-mode dropdown
+  used it where only a local import existed elsewhere, which would have raised a NameError.
+
+## [1.5.310] - 2026-07-09
+### Fixed (VPT bugs — verified against an external audit)
+- **`classify_beads()` crashed in every Gaussian-fit mode** (`fast_fit`, `precise`, legacy
+  `fit_quality=True`). The Gaussian-fit branch used a `valid` mask that was never defined
+  (the fast-template branch returns before it), so any fit-mode detection raised a
+  NameError. `valid` is now defined as the finite-`integrated_intensity`/`sigma_mean`/
+  `r_squared` mask before use. Verified both the Gaussian-fit and fast-template paths now
+  classify correctly.
+- **The bead-class summary table silently vanished in fast mode.** `vpt_ui` hard-coded
+  `median_sigma=('sigma_mean', 'median')` in the per-class aggregation, but fast template
+  mode produces no `sigma_mean` column; the resulting KeyError was swallowed, so the user
+  lost the summary on every (default) fast-mode run. The aggregation is now built from
+  whichever columns exist (adding `median_ncc` in fast mode), and a failure is logged via
+  `debug_log` instead of vanishing.
+- **"Infer host from beads" mode discarded the inferred mask during detection.** The detect
+  step did `if mode != 'host': host_mask = None`, which threw away the inferred host in
+  `infer` mode and ran full-frame — so inferring a host had no effect on bead filtering.
+  Now only `nohost` mode clears the mask; `infer` mode keeps its inferred host (and warns
+  if one hasn't been inferred yet).
+- **Erosion control was disabled in infer mode** even though `_infer_host_from_beads()`
+  erodes the inferred mask with the spin's value — so infer mode used a stale/hidden
+  erosion setting. Erosion is now enabled for both `host` and `infer` modes.
+- **`vpt_infer_host` was recorded but had no batch-replay handler**, so an inferred-host run
+  created an unregistered step. Added a skip handler in `batch_step_registry` matching the
+  other (interactive, non-replayable) VPT steps.
+
+### Audit items checked and NOT changed
+- **`aggregate_population_stats` missing-`sigma_mean` guard:** already fixed in a prior
+  version (guards both `sigma_mean` and `n_units_est`). No change.
+- **`run_vpt_analysis` defaults slow/precise:** the audit claimed `bead_fit_quality=True`;
+  the actual default is `fit_quality=False` (fast mode), already consistent with the UI.
+  No change.
+- **Scientific-choice items (drift-correction modes, out-of-plane default, hard-coded
+  fast-mode thresholds):** these are analysis-design decisions, not bugs, and are being
+  taken to the roadmap/next-session discussion rather than changed unilaterally.
+
 ## [1.5.309] - 2026-07-09
 ### Added
 - **Canonical `normalize01()` in `general_utils`.** A single, safe min-max normaliser to

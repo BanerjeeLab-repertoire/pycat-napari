@@ -27,7 +27,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
-    QScrollArea, QSizePolicy, QRadioButton,
+    QScrollArea, QSizePolicy, QRadioButton, QComboBox,
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
@@ -227,11 +227,18 @@ class VideoParticleTrackingUI:
     def _on_host_mode_changed(self, _checked=False):
         """Enable/disable controls and relabel the action button per host mode."""
         mode = self._host_mode()
-        # Host-channel controls only matter in 'host' mode.
-        for w in (self._host_dd, self._rb_otsu, self._rb_triangle, self._rb_li,
-                  self._erosion_spin):
+        # Host-channel-only controls (channel dropdown + threshold method) matter
+        # only in 'host' mode.
+        for w in (self._host_dd, self._rb_otsu, self._rb_triangle, self._rb_li):
             try: w.setEnabled(mode == 'host')
             except Exception: pass
+        # Erosion applies to BOTH host and infer modes: _infer_host_from_beads()
+        # also erodes the inferred mask, so its value must be live in infer mode
+        # (previously it was disabled/stale in infer mode).
+        try:
+            self._erosion_spin.setEnabled(mode in ('host', 'infer'))
+        except Exception:
+            pass
         # The physical size gate only applies to inferred hosts.
         try:
             self._min_cond_radius.setEnabled(mode == 'infer')
@@ -561,10 +568,19 @@ class VideoParticleTrackingUI:
                 "condensate interface can be excluded. (Or switch Host mode to "
                 "'No host (full frame)' if this data has no condensate "
                 "boundary, e.g. a beads-in-glycerol control.)"); return
-        if mode != 'host':
+        if mode == 'infer' and host_mask is None:
+            # Infer mode is meant to FILTER beads by the host inferred from the
+            # bead distribution — but that requires the inferred mask to exist.
+            napari_show_warning(
+                "No inferred host mask found — click 'Infer Host from Beads' "
+                "first so the inferred boundary can filter beads. (Or switch to "
+                "'No host (full frame)' to track every bead.)"); return
+        if mode == 'nohost':
             # No-host / full-frame: track every bead across the whole field.
-            # (The detection layer already treats host_mask=None as "keep all".)
+            # (The detection layer treats host_mask=None as "keep all".)
             host_mask = None
+        # mode == 'host' or 'infer': keep the (segmented or inferred) host_mask
+        # so beads outside/near the boundary are excluded as intended.
 
         # Determine frame count for a REAL (determinate) progress bar and a
         # runtime estimate, without materialising the stack.
@@ -682,6 +698,14 @@ class VideoParticleTrackingUI:
             if 'bead_class' in det_df.columns:
                 counts = det_df['bead_class'].value_counts().to_dict()
                 rec['class_counts'] = counts
+            # Record the classification thresholds actually used (#11), so a
+            # fast-mode run is reproducible and the regime is auditable.
+            try:
+                _thr = det_df.attrs.get('classify_thresholds')
+                if _thr:
+                    rec['classify_thresholds'] = _thr
+            except Exception:
+                pass
             self._record('vpt_detect_beads', rec)
 
             if 'bead_class' in det_df.columns:
@@ -690,15 +714,24 @@ class VideoParticleTrackingUI:
                 try:
                     import pandas as pd
                     from pycat.ui.ui_utils import show_dataframes_dialog
-                    summ = det_df.groupby('bead_class').agg(
-                        n=('bead_class', 'size'),
-                        median_sigma=('sigma_mean', 'median'),
-                        median_intensity=('integrated_intensity', 'median'),
-                        median_n_units=('n_units_est', 'median')).reset_index()
+                    # Fast template mode has no sigma_mean (no Gaussian fit);
+                    # build the aggregation from whichever columns are present so
+                    # the summary table still renders instead of silently failing.
+                    _agg = {'n': ('bead_class', 'size')}
+                    if 'sigma_mean' in det_df.columns:
+                        _agg['median_sigma'] = ('sigma_mean', 'median')
+                    if 'ncc' in det_df.columns:
+                        _agg['median_ncc'] = ('ncc', 'median')
+                    if 'integrated_intensity' in det_df.columns:
+                        _agg['median_intensity'] = ('integrated_intensity', 'median')
+                    if 'n_units_est' in det_df.columns:
+                        _agg['median_n_units'] = ('n_units_est', 'median')
+                    summ = det_df.groupby('bead_class').agg(**_agg).reset_index()
                     show_dataframes_dialog("Bead Quality Classes",
                                            [('Per-class summary', summ.round(3))])
-                except Exception:
-                    pass
+                except Exception as _e:
+                    from pycat.utils.general_utils import debug_log
+                    debug_log("vpt_ui: bead-class summary table failed", _e)
                 napari_show_info(
                     f"Detected {n} beads across {det_df['frame'].nunique()} "
                     f"frames. Classes: {counts} "
@@ -810,14 +843,24 @@ class VideoParticleTrackingUI:
                 aggregates = pops['aggregate']
             else:
                 primary, aggregates = det, det.iloc[0:0]
+            _drift_mode = self._drift_mode.currentData() if hasattr(self, '_drift_mode') else 'com'
             ptracks = drift_correct_com(
                 _link(primary, self._linker_name(), self._max_link.value(),
                       self._max_gap.value(), self._mpx(),
-                      progress_callback=progress))
+                      progress_callback=progress),
+                mode=_drift_mode)
             # Temporal stability pass: a dim track that persists stably across
             # frames is a real (faint) bead, not an out-of-focus blink — promote
-            # it back to singlet. Blinking dim tracks stay yellow.
-            ptracks = reclassify_by_temporal_stability(ptracks)
+            # it back to singlet. Blinking dim tracks stay yellow. This is a
+            # judgement call that affects the viscosity population, so it is an
+            # explicit, recorded choice (#10): with it OFF, out-of-plane tracks
+            # are never merged into the singlet set, giving a stricter,
+            # singlet-only viscosity that excludes any defocused bead whose
+            # axial fluctuations could masquerade as 2D motion.
+            _promote = (self._promote_stable.isChecked()
+                        if hasattr(self, '_promote_stable') else True)
+            if _promote:
+                ptracks = reclassify_by_temporal_stability(ptracks)
             atracks = None
             if len(aggregates) >= 2:
                 try:
@@ -957,6 +1000,41 @@ class VideoParticleTrackingUI:
         self._min_track.setToolTip("Minimum track length (frames) to include in the MSD.")
         form.addRow("Min track length:", self._min_track)
 
+        # Drift-correction mode (#9). COM subtraction is standard for
+        # microrheology but removes REAL collective motion (internal flow,
+        # sedimentation, bulk translation) along with stage drift — so the choice
+        # is explicit and recorded, not always-on.
+        self._drift_mode = QComboBox()
+        self._drift_mode.addItem("Ensemble COM (standard)", "com")
+        self._drift_mode.addItem("Immobile-reference (flow-safe)", "immobile_reference")
+        self._drift_mode.addItem("None (keep collective motion)", "none")
+        self._drift_mode.setToolTip(
+            "How to remove drift before the MSD:\n"
+            "• Ensemble COM — subtract the mean displacement of all beads "
+            "(classic microrheology). Removes stage drift AND any real bulk flow.\n"
+            "• Immobile-reference — estimate drift from only the most stationary "
+            "tracks, so genuinely flowing/diffusing beads don't bias the "
+            "correction. Safer when real motion is present.\n"
+            "• None — no correction; use when collective flow IS the signal "
+            "(e.g. internal-flow studies).")
+        form.addRow("Drift correction:", self._drift_mode)
+
+        # Out-of-plane handling (#10). A defocused bead's axial fluctuations can
+        # masquerade as in-plane motion and bias viscosity. Recovered out-of-plane
+        # (yellow) beads are already excluded from viscosity unless the population
+        # selector includes them — but the temporal-stability pass promotes stable
+        # dim tracks back to singlet, which can fold a persistent defocused bead
+        # into the viscosity set. This makes that promotion explicit.
+        self._promote_stable = QCheckBox("Promote stable dim tracks to singlet")
+        self._promote_stable.setChecked(True)
+        self._promote_stable.setToolTip(
+            "When on, a dim (out-of-plane) track that persists stably across "
+            "frames is treated as a real faint bead and included in the singlet "
+            "viscosity population. Turn OFF for a stricter singlet-only viscosity "
+            "that never merges defocused beads — safer if axial fluctuations of "
+            "out-of-focus beads might bias the measurement.")
+        form.addRow(self._promote_stable)
+
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -1019,6 +1097,10 @@ class VideoParticleTrackingUI:
             'bead_radius_um': self._bead_radius.value(),
             'temperature_C': self._temp_C.value(),
             'min_track_length': self._min_track.value(),
+            'drift_mode': (self._drift_mode.currentData()
+                           if hasattr(self, '_drift_mode') else 'com'),
+            'promote_stable_to_singlet': (self._promote_stable.isChecked()
+                                          if hasattr(self, '_promote_stable') else True),
             'D_um2_per_s': D, 'alpha': alpha, 'eta_Pa_s': eta})
 
         # Graphs: the MSD spaghetti plot (per-track + ensemble mean + fit) and

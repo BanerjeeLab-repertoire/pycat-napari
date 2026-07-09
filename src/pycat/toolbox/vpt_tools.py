@@ -844,8 +844,32 @@ def classify_beads(beads_df: pd.DataFrame,
         # bead (rings/hot pixels/noise never become points).
         df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
         df['singlet'] = df['bead_class'] == 'singlet'
+        # Record the (otherwise hard-coded) classification thresholds actually
+        # used, so results are reproducible and the regime is auditable (#11).
+        df.attrs['classify_thresholds'] = {
+            'mode': 'fast_template',
+            'ncc_floor': float(NCC_FLOOR),
+            'aggregate_mass_percentile': 99.3,
+            'aggregate_amp_percentile': 50.0,
+            'aggregate_mass_hi': float(mass_hi),
+            'aggregate_amp_hi': float(amp_hi),
+            'dim_amp_percentile': float(locals().get('dim_pct')) if locals().get('dim_pct') is not None else None,
+            'strictness': float(strictness),
+        }
         return df
 
+
+    # ── Gaussian-fit-mode classification (fast_fit / precise / legacy) ────────
+    # This branch is reached when a Gaussian fit produced sigma_mean + r_squared
+    # (the fast-template branch above returns before here). Restrict the singlet
+    # reference statistics to beads with finite fit metrics — without this mask
+    # the reference medians would be polluted by NaN/failed fits (and 'valid'
+    # was previously undefined here, crashing every Gaussian-fit call).
+    valid = (
+        np.isfinite(df['integrated_intensity']) &
+        np.isfinite(df['sigma_mean']) &
+        np.isfinite(df['r_squared'])
+    )
 
     # Robust singlet reference = median of reasonably-fit beads. Use the lower
     # half of the intensity distribution to bias the reference toward singlets
@@ -1444,25 +1468,42 @@ def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
     return df
 
 
-def drift_correct_com(tracks_df: pd.DataFrame) -> pd.DataFrame:
+def drift_correct_com(tracks_df: pd.DataFrame, mode: str = 'com',
+                      immobile_fraction: float = 0.25) -> pd.DataFrame:
     """
-    Remove global drift/flow by subtracting the ensemble center-of-mass
-    displacement at each frame — the approach used in the manual workflow.
+    Remove global drift/flow from trajectories, with an EXPLICIT choice of how.
 
-    For each frame transition the mean displacement of all beads present in
-    both frames is accumulated into a running COM trajectory, which is then
-    subtracted from every bead position. This removes stage drift and bulk
-    condensate translation while preserving each bead's relative thermal
-    motion.
+    Center-of-mass subtraction is standard for microrheology, but it is not
+    free: subtracting the ensemble mean displacement also removes any REAL
+    collective motion — internal flow, sedimentation, convection, bulk
+    condensate translation. If that collective motion is part of the physics
+    being studied, COM correction erases it. The mode is therefore explicit and
+    recorded rather than always-on.
 
     Parameters
     ----------
     tracks_df : DataFrame with columns track_id, frame, y_um, x_um.
+    mode : one of
+        'none'                — no correction (raw positions; use when collective
+                                flow IS the signal, e.g. internal-flow studies).
+        'com'                 — subtract the ensemble center-of-mass displacement
+                                per frame (the classic microrheology correction;
+                                default, preserves prior behaviour). Removes stage
+                                drift AND any bulk flow.
+        'immobile_reference'  — estimate drift from only the most IMMOBILE tracks
+                                (smallest total displacement), so genuinely
+                                diffusing/flowing beads don't contribute to the
+                                drift estimate. Safer when real motion is present
+                                but a stationary sub-population exists (stuck
+                                beads, fiducials).
+    immobile_fraction : for 'immobile_reference', the fraction of tracks (by
+        smallest net displacement) used as the drift reference (default 0.25).
 
     Returns
     -------
-    corrected : same DataFrame with y_um, x_um drift-corrected, plus
-        original values preserved in y_um_raw, x_um_raw.
+    corrected : same DataFrame with y_um, x_um corrected per the mode, plus the
+        original values preserved in y_um_raw, x_um_raw, and a 'drift_mode'
+        attribute recorded on the returned frame's .attrs.
     """
     if tracks_df.empty:
         return tracks_df
@@ -1471,16 +1512,43 @@ def drift_correct_com(tracks_df: pd.DataFrame) -> pd.DataFrame:
     df['y_um_raw'] = df['y_um']
     df['x_um_raw'] = df['x_um']
 
+    mode = (mode or 'com').lower()
+    if mode == 'none':
+        df.attrs['drift_mode'] = 'none'
+        return df
+
     frames = np.sort(df['frame'].unique())
-    # Per-frame mean displacement of beads present in consecutive frames
+
+    # Choose which tracks define the drift reference.
+    if mode == 'immobile_reference':
+        # Net displacement per track; keep the most immobile fraction.
+        net = {}
+        for tid, g in df.groupby('track_id'):
+            g = g.sort_values('frame')
+            if len(g) < 2:
+                continue
+            dx = g['x_um'].iloc[-1] - g['x_um'].iloc[0]
+            dy = g['y_um'].iloc[-1] - g['y_um'].iloc[0]
+            net[tid] = float(np.hypot(dx, dy))
+        if net:
+            thresh = np.quantile(list(net.values()),
+                                 max(0.01, min(1.0, immobile_fraction)))
+            ref_ids = {tid for tid, d in net.items() if d <= thresh}
+        else:
+            ref_ids = set(df['track_id'].unique())
+    else:  # 'com'
+        ref_ids = None  # all tracks
+
     com_dx = {frames[0]: 0.0}
     com_dy = {frames[0]: 0.0}
     cum_dx, cum_dy = 0.0, 0.0
 
     for f_prev, f_cur in zip(frames[:-1], frames[1:]):
         prev = df[df['frame'] == f_prev].set_index('track_id')
-        cur  = df[df['frame'] == f_cur].set_index('track_id')
+        cur = df[df['frame'] == f_cur].set_index('track_id')
         common = prev.index.intersection(cur.index)
+        if ref_ids is not None:
+            common = common.intersection(ref_ids)
         if len(common) > 0:
             dx = (cur.loc[common, 'x_um'] - prev.loc[common, 'x_um']).mean()
             dy = (cur.loc[common, 'y_um'] - prev.loc[common, 'y_um']).mean()
@@ -1493,6 +1561,7 @@ def drift_correct_com(tracks_df: pd.DataFrame) -> pd.DataFrame:
 
     df['x_um'] = df.apply(lambda r: r['x_um'] - com_dx.get(r['frame'], 0.0), axis=1)
     df['y_um'] = df.apply(lambda r: r['y_um'] - com_dy.get(r['frame'], 0.0), axis=1)
+    df.attrs['drift_mode'] = mode
 
     return df
 

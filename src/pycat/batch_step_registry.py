@@ -1378,6 +1378,9 @@ _STEP_MAP = {
     'vpt_segment_host':         lambda s,p,pa,o: print(
         '[PyCAT Batch]   VPT host segmentation skipped in headless mode '
         '(interactive multichannel step).'),
+    'vpt_infer_host':           lambda s,p,pa,o: print(
+        '[PyCAT Batch]   VPT infer-host-from-beads skipped in headless mode '
+        '(interactive step).'),
     'vpt_detect_beads':         lambda s,p,pa,o: print(
         '[PyCAT Batch]   VPT bead detection skipped in headless mode.'),
     'vpt_link_trajectories':    lambda s,p,pa,o: print(
