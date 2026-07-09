@@ -467,33 +467,39 @@ def blob_log_gpu(image, min_sigma=1.0, max_sigma=5.0, num_sigma=5,
     import cupy as cp
     import cupyx.scipy.ndimage as cpnd
     from skimage.feature.blob import _prune_blobs
+    from skimage.feature import peak_local_max
 
     img = cp.asarray(image, dtype=cp.float32)
     scales = np.linspace(min_sigma, max_sigma, num_sigma)
-    # scale-normalised LoG cube, built and kept on the GPU
-    cube = cp.empty((num_sigma,) + img.shape, dtype=cp.float32)
+    # scale-normalised LoG cube, built and kept on the GPU (the expensive part —
+    # the per-scale Gaussian convolutions — is what runs on-device).
+    cube_gpu = cp.empty((num_sigma,) + img.shape, dtype=cp.float32)
     for i, s in enumerate(scales):
-        cube[i] = -cpnd.gaussian_laplace(img, float(s)) * (float(s) ** 2)
+        cube_gpu[i] = -cpnd.gaussian_laplace(img, float(s)) * (float(s) ** 2)
 
-    # 3D local maxima above threshold (maximum_filter footprint 3^ndim).
-    fp = cp.ones((3,) * cube.ndim, dtype=bool)
-    maxed = cpnd.maximum_filter(cube, footprint=fp)
-    peaks_mask = (cube == maxed) & (cube > threshold)
-    coords = cp.argwhere(peaks_mask)
-    if coords.size == 0:
+    # Move the finished cube to the CPU and finish with skimage's EXACT peak
+    # finder (peak_local_max) and pruning, so results are bit-for-bit the same
+    # as skimage.blob_log. A raw (cube == maximum_filter) comparison does NOT
+    # match skimage — peak_local_max deduplicates plateau/tie maxima and handles
+    # borders differently — so we defer to it rather than reimplement it. The
+    # convolutions (the costly step) still ran on the GPU.
+    cube = cp.asnumpy(cube_gpu)
+    # blob_log stores the scale as the LAST axis for peak_local_max; skimage
+    # transposes the (scale, y, x) cube to (y, x, scale). Match that.
+    image_cube = np.moveaxis(cube, 0, -1)
+    local_maxima = peak_local_max(
+        image_cube, threshold_abs=threshold, threshold_rel=None,
+        exclude_border=False, footprint=np.ones((3,) * image_cube.ndim))
+    if local_maxima.size == 0:
         return np.empty((0, 3))
-    coords = cp.asnumpy(coords)  # (M, 3): scale_idx, y, x
-
-    # Convert scale index -> sigma, assemble (y, x, sigma) then prune overlaps.
-    sig = scales[coords[:, 0]]
-    blobs = np.column_stack([coords[:, 1], coords[:, 2], sig]).astype(np.float64)
-    # skimage prunes with sigma scaled by sqrt(ndim); replicate its call shape.
-    sigma_dim = blobs[:, -1:]
-    blobs_for_prune = np.hstack([blobs[:, :-1], sigma_dim])
+    lm = local_maxima.astype(np.float64)
+    # columns: y, x, scale_index → replace scale index with sigma
+    sigmas_of_peaks = scales[local_maxima[:, -1]]
+    lm = np.hstack([lm[:, :-1], sigmas_of_peaks[:, np.newaxis]])
     try:
-        pruned = _prune_blobs(blobs_for_prune, overlap, sigma_dim=1)
+        pruned = _prune_blobs(lm, overlap, sigma_dim=1)
     except TypeError:
-        pruned = _prune_blobs(blobs_for_prune, overlap)
+        pruned = _prune_blobs(lm, overlap)
     return pruned
 
 
@@ -682,7 +688,8 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
 def classify_beads(beads_df: pd.DataFrame,
                    aggregate_intensity_factor: float = 1.6,
                    defocus_r2_max: float = 0.85,
-                   sigma_outlier_factor: float = 1.5) -> pd.DataFrame:
+                   sigma_outlier_factor: float = 1.5,
+                   strictness: float = 1.0) -> pd.DataFrame:
     """
     Classify fitted beads into singlet / aggregate / out-of-plane using the
     2D-Gaussian quality metrics.
@@ -751,6 +758,8 @@ def classify_beads(beads_df: pd.DataFrame,
         ncc = df['ncc'].to_numpy(dtype=float)
         amp = df['amplitude'].to_numpy(dtype=float)
         ii = df['integrated_intensity'].to_numpy(dtype=float)
+        snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
+               else np.full(len(df), np.nan))
 
         # Real-vs-garbage: absolute NCC floor. The template is built FROM the
         # real beads, so genuine beads match it well; rings/hot/noise do not.
@@ -764,6 +773,7 @@ def classify_beads(beads_df: pd.DataFrame,
         # References computed over REAL beads only (so garbage doesn't skew them).
         rii = ii[is_real & np.isfinite(ii)]
         ramp = amp[is_real & np.isfinite(amp)]
+        rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
         if len(rii) >= 10:
             singlet_int = float(np.median(rii[rii <= np.median(rii)]))
             # Aggregate mass gate at p99.3 (not p99.5): p99.5 landed INSIDE the
@@ -777,17 +787,53 @@ def classify_beads(beads_df: pd.DataFrame,
             singlet_int = float(np.median(rii)) if len(rii) else np.nan
             mass_hi = np.inf; amp_hi = np.inf
 
+        # Dim / out-of-focus (YELLOW) threshold. Dim detections — low amplitude
+        # relative to the population — are most likely beads drifting out of the
+        # focal plane; they belong in the out_of_plane (yellow) bin, not called
+        # singlets. The cutoff is a low-amplitude percentile scaled by
+        # `strictness`: strictness=1.0 (default, tuned for viscous samples
+        # ~3 Pa·s and above, where beads move slowly) uses the 25th percentile;
+        # higher strictness pushes more borderline-dim detections to yellow,
+        # lower strictness (opt-in for less viscous / faster samples) keeps more
+        # as singlets. In a viscous sample most beads stay in focus, so the dim
+        # tail is genuinely out-of-plane; in a fast/low-viscosity sample beads
+        # cross the plane quickly and a stricter dim gate would wrongly bin real
+        # beads, hence the exposed control.
+        s = float(strictness) if strictness and strictness > 0 else 1.0
+        if len(ramp) >= 10:
+            dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
+            amp_dim = float(np.percentile(ramp, dim_pct))
+        else:
+            amp_dim = -np.inf
+        # A low-SNR detection is also out-of-focus-like (weak, diffuse peak).
+        if len(rsnr) >= 10:
+            snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
+            snr_dim = float(np.percentile(rsnr, snr_pct))
+        else:
+            snr_dim = -np.inf
+
         n_units, classes = [], []
         for k in range(len(df)):
             if not is_real[k]:
                 n_units.append(np.nan); classes.append('rejected'); continue
             I, A = ii[k], amp[k]
+            S = snr[k] if 'snr' in df else np.nan
             nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
             n_units.append(nu)
             high_mass = np.isfinite(I) and I >= mass_hi
             bright = np.isfinite(A) and A >= amp_hi
+            # Dim / out-of-focus: low amplitude AND not part of the bright
+            # aggregate tail. These go YELLOW (out_of_plane). Blinking of this
+            # population across frames is expected and acceptable — a bead that
+            # is genuinely in focus and stable will instead read as a singlet;
+            # the temporal-stability pass (after linking) promotes stable dim
+            # tracks back to singlet.
+            is_dim = (np.isfinite(A) and A <= amp_dim) or \
+                     (np.isfinite(S) and S <= snr_dim)
             if high_mass and bright:
                 classes.append('aggregate')          # bright + compact + heavy
+            elif is_dim and not high_mass:
+                classes.append('out_of_plane')        # YELLOW: dim / out of focus
             elif high_mass and not bright:
                 classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
             else:
@@ -847,6 +893,125 @@ def classify_beads(beads_df: pd.DataFrame,
     return df
 
 
+def _bead_source_descriptor(bead_stack):
+    """Build a small picklable descriptor that lets a worker subprocess re-open
+    the bead stack and read a single frame, WITHOUT pickling the (unpicklable,
+    file-handle-backed) lazy stack wrapper itself.
+
+    Returns a dict describing how to read a frame, or None if the stack is not a
+    file-backed lazy reader we know how to re-open in a subprocess (in which case
+    the caller falls back to serial/in-process detection).
+
+    For a multi-file OME set the wrapper carries a page map (global frame →
+    (file, page)); we pass that map to the workers so they read exactly the same
+    frames the serial path does, across the linked files, without re-resolving
+    the OME series per frame (which is both slow and the source of the repeated
+    "companion missing" warning).
+    """
+    path = getattr(bead_stack, '_path', None)
+    if not path:
+        return None
+    page_map = getattr(bead_stack, '_page_map', None)
+    if page_map is not None:
+        # Multi-file: hand the workers the explicit (file, page) map.
+        return {
+            'kind': 'pagemap',
+            'page_map': [(str(p), int(i)) for (p, i) in page_map],
+            'nc': int(getattr(bead_stack, '_nc', 1) or 1),
+            'ci': int(getattr(bead_stack, '_ci', 0)),
+        }
+    return {
+        'kind': 'tiff',
+        'path': str(path),
+        'nc': int(getattr(bead_stack, '_nc', 1) or 1),
+        'ci': int(getattr(bead_stack, '_ci', 0)),
+    }
+
+
+def _read_frame_from_descriptor(t, src_desc):
+    """Read frame t in a worker subprocess from a source descriptor. Top-level +
+    picklable. Mirrors the time-series reader so both share the same approach.
+
+    tifffile logs an OME-series warning ("... failed to read ... Missing data are
+    zeroed") when a multi-file OME set references a companion file that is not
+    present. The serial reader hits this once (it opens the file a single time);
+    a worker re-opens the file per frame, so without suppression the warning is
+    printed once PER FRAME — thousands of lines for a long movie. We silence
+    tifffile's logger for the duration of the read; the frame we want lives in
+    this file's own pages regardless of the companion.
+    """
+    import numpy as np
+    import logging
+    kind = src_desc.get('kind')
+    if kind == 'pagemap':
+        # Multi-file OME set: read from the explicit (file, page) map so workers
+        # match the serial reader exactly, across linked files, no per-frame OME
+        # resolution (and thus no repeated companion-missing warning).
+        import tifffile as _tf
+        page_map = src_desc['page_map']
+        nc = int(src_desc.get('nc', 1)) or 1
+        ci = int(src_desc.get('ci', 0))
+        gi = int(t) * nc + ci
+        path, page_idx = page_map[gi]
+        _tflog = logging.getLogger('tifffile')
+        _prev = _tflog.level
+        _tflog.setLevel(logging.ERROR)
+        try:
+            with _tf.TiffFile(path) as _tif:
+                return np.asarray(_tif.pages[page_idx].asarray()).astype(np.float32)
+        finally:
+            _tflog.setLevel(_prev)
+    if kind == 'tiff':
+        import tifffile as _tf
+        _tflog = logging.getLogger('tifffile')
+        _prev = _tflog.level
+        _tflog.setLevel(logging.ERROR)  # hide the per-file OME warning
+        try:
+            with _tf.TiffFile(src_desc['path']) as _tif:
+                # Match the serial reader (_TiffPageStack) EXACTLY so parallel and
+                # serial read the same frame: prefer the OME series (which spans
+                # a multi-file set) and fall back to this file's own pages. The
+                # only difference from serial is that we silence tifffile's
+                # per-file OME warning, which would otherwise print once per frame
+                # because each worker re-opens the file.
+                try:
+                    pages = _tif.series[0].pages
+                except Exception:
+                    pages = _tif.pages
+                nc = int(src_desc.get('nc', 1)) or 1
+                ci = int(src_desc.get('ci', 0))
+                page = pages[int(t) * nc + ci]
+                return np.asarray(page.asarray()).astype(np.float32)
+        finally:
+            _tflog.setLevel(_prev)
+    raise ValueError(f"unsupported source descriptor kind: {kind!r}")
+
+
+def _detect_frame_worker(args):
+    """Top-level picklable worker for ProcessPoolExecutor.
+
+    Reads one frame (from a source descriptor OR a directly-passed array),
+    runs blob-detection (+ optional de-dup), and returns (t, coords) where
+    coords is a plain list of (y, x) floats — small and cheap to pickle back.
+
+    Only the EXPENSIVE, embarrassingly-parallel part (per-frame blob detection)
+    runs here. Template building, scoring and classification stay in the parent
+    process where the shared template lives. This keeps the worker stateless and
+    the returned payload tiny.
+    """
+    (t, frame_or_desc, is_desc, det_kwargs, merge_radius_px) = args
+    import numpy as np
+    if is_desc:
+        frame = _read_frame_from_descriptor(t, frame_or_desc)
+    else:
+        frame = np.asarray(frame_or_desc, dtype=np.float32)
+    coords = detect_beads_frame(frame, **det_kwargs)
+    if merge_radius_px:
+        coords = dedup_detections(coords, frame, merge_radius_px)
+    # Return plain python floats so the payload is trivially picklable.
+    return int(t), [(float(y), float(x)) for (y, x) in coords]
+
+
 def detect_beads_stack(
     bead_stack: np.ndarray,
     host_mask: Optional[np.ndarray] = None,
@@ -868,6 +1033,10 @@ def detect_beads_stack(
     template_type: str = 'empirical',
     merge_radius_px: Optional[float] = None,
     refine_with_airy: bool = False,
+    parallel: str = 'auto',
+    n_workers: Optional[int] = None,
+    strictness: float = 1.0,
+    use_gpu: str = 'auto',
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -929,16 +1098,108 @@ def detect_beads_stack(
             pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
+    # ── Optional CPU-parallel pre-detection (fast mode only) ─────────────────
+    # The expensive, embarrassingly-parallel part is per-frame blob detection.
+    # When enabled and the stack is file-backed (so workers can re-open it),
+    # detect coords for all frames across a process pool up front, then do the
+    # cheap scoring/classification serially below (where the shared template
+    # lives). Falls back cleanly to serial if anything is unavailable.
+    # ── Tier selection: GPU > CPU-parallel > serial ─────────────────────────
+    # GPU (LoG convolutions on-device) is the biggest single-machine win and is
+    # done IN-PROCESS: we do not also spin up a process pool, because the pool
+    # workers would contend for the one GPU. So GPU takes priority; only when no
+    # GPU is present do we consider the CPU process-pool path.
+    gpu_on = False
+    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
+        try:
+            from pycat.toolbox.gpu_utils import gpu_available
+            gpu_on = bool(gpu_available())
+        except Exception:
+            gpu_on = False
+        if gpu_on:
+            # Equivalence guard: verify the GPU blob detector matches the CPU
+            # (skimage) detector on the FIRST frame before trusting it for the
+            # whole stack. If they disagree (a driver/cupy quirk), fall back to
+            # CPU so results are never silently wrong. Runs once, cheap.
+            try:
+                from pycat.file_io.file_io import iter_frames as _itf
+                _t0, _f0 = next(iter(_itf(bead_stack, indices=frame_indices)))
+                _cpu = detect_beads_frame(
+                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=False)
+                _gpu = detect_beads_frame(
+                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=True)
+                # Compare as sorted rounded coordinate sets.
+                def _key(cs):
+                    return sorted((round(float(y), 3), round(float(x), 3))
+                                  for (y, x) in cs)
+                if _key(_cpu) != _key(_gpu):
+                    gpu_on = False   # disagreement → do not trust GPU
+            except Exception:
+                gpu_on = False
+
+    precomputed_coords = None
+    if quality_mode == 'fast' and not gpu_on and parallel in ('auto', 'cpu', 'process'):
+        src_desc = _bead_source_descriptor(bead_stack)
+        try:
+            import os as _os
+            max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+        except Exception:
+            max_workers = 1
+        # Only worth it with a real descriptor and enough frames + workers.
+        if src_desc is not None and max_workers > 1 and n_frames and n_frames > 1:
+            try:
+                from concurrent.futures import ProcessPoolExecutor
+                det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
+                                  num_sigma=num_sigma, threshold=threshold,
+                                  host_mask=host_mask)
+                idxs = (list(frame_indices) if frame_indices is not None
+                        else list(range(n_frames)))
+                tasks = [(t, src_desc, True, det_kwargs, merge_radius_px)
+                         for t in idxs]
+                precomputed_coords = {}
+                from concurrent.futures import as_completed
+                with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                    _n_par = len(tasks)
+                    futures = [ex.submit(_detect_frame_worker, task)
+                               for task in tasks]
+                    _done_par = 0
+                    for fut in as_completed(futures):
+                        t, coords = fut.result()
+                        precomputed_coords[t] = coords
+                        _done_par += 1
+                        # Report progress DURING parallel detection — the
+                        # expensive phase. as_completed fires as each frame
+                        # finishes, so the bar advances smoothly instead of
+                        # sitting at 0 until the (cheap) scoring loop runs.
+                        if progress_callback is not None and _n_par:
+                            progress_callback(
+                                int(_done_par / _n_par * max(1, n_frames)),
+                                max(1, n_frames))
+            except Exception:
+                # Any failure (pickling, worker crash, host_mask not picklable)
+                # → fall back to serial detection below.
+                precomputed_coords = None
+
     done = 0
     for t, frame in iter_frames(bead_stack, indices=frame_indices):
         if quality_mode == 'fast':
-            coords = detect_beads_frame(
-                frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
-            # De-duplicate multi-scale / ring detections on a single bead, if a
-            # merge radius is set (from the physical bead size upstream).
-            if merge_radius_px:
-                coords = dedup_detections(coords, frame, merge_radius_px)
+            if precomputed_coords is not None and t in precomputed_coords:
+                # Coords already found in parallel; frame still needed for
+                # template building + scoring (both cheap).
+                coords = precomputed_coords[t]
+            else:
+                coords = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+                    use_gpu=gpu_on)
+                # De-duplicate multi-scale / ring detections on a single bead, if
+                # a merge radius is set (from the physical bead size upstream).
+                if merge_radius_px:
+                    coords = dedup_detections(coords, frame, merge_radius_px)
             if template_z is None or template_mode == 'per_frame':
                 if template_type == 'airy':
                     # Analytic Airy (Bessel J1) template — matches beads that
@@ -996,7 +1257,7 @@ def detect_beads_stack(
         return pd.DataFrame(columns=cols)
 
     df = pd.DataFrame(rows)
-    df = classify_beads(df)
+    df = classify_beads(df, strictness=strictness)
 
     if exclude_aggregates:
         df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
@@ -1010,37 +1271,64 @@ def detect_beads_stack(
 # ---------------------------------------------------------------------------
 
 def split_bead_populations(detections_df: pd.DataFrame,
-                           recover_out_of_plane: bool = True) -> dict:
-    """
-    Split classified bead detections into a primary probe population and a
-    secondary aggregate population.
+                           recover_out_of_plane: bool = False) -> dict:
+    """Separate classified detections into three NEVER-MIXED populations.
 
-    primary   = singlets (+ out-of-plane if recover_out_of_plane) — used for
-                microrheology, since Stokes-Einstein assumes a known single
-                bead size.
-    aggregate = beads classified as aggregates — tracked separately so
-                aggregation can be used as its own readout (count, size, and
-                mobility over time) rather than discarded.
+    The three bead classes are kept strictly separate so microrheology runs on a
+    known, homogeneous probe population:
 
-    Returns
-    -------
-    dict with 'primary' and 'aggregate' DataFrames. If the input lacks a
-    'bead_class' column (quality fit not run), everything is 'primary'.
+      singlet     (green)  — clean, in-focus single beads. The correct default
+                             for Stokes-Einstein viscosity (known single-bead
+                             size, reliable centroid).
+      out_of_plane(yellow) — dim / out-of-focus beads. Position is less certain,
+                             so they are NOT mixed into the singlet measurement
+                             by default. They can be analysed ON THEIR OWN (to
+                             check whether they give a consistent viscosity) and
+                             only then, at the user's choice, combined with the
+                             singlets.
+      aggregate   (red)    — aggregates (and ambiguous). Their size biases
+                             Stokes-Einstein, so they are ALWAYS a separate
+                             readout (count / size / mobility), never in the
+                             viscosity population.
+
+    Returns a dict with 'singlet', 'out_of_plane', 'aggregate' DataFrames, plus
+    'primary' for backward compatibility (singlets, or singlets+out_of_plane if
+    recover_out_of_plane is True). Callers that want a specific population should
+    read the named key directly rather than 'primary'.
     """
+    if detections_df is None or detections_df.empty \
+            or 'bead_class' not in detections_df.columns:
+        empty = pd.DataFrame()
+        base = detections_df if detections_df is not None else empty
+        return dict(primary=base, singlet=base, out_of_plane=empty,
+                    aggregate=empty)
     df = detections_df
-    if df is None or df.empty or 'bead_class' not in df.columns:
-        return dict(primary=df if df is not None else pd.DataFrame(),
-                    aggregate=pd.DataFrame())
-    primary_classes = ['singlet', 'unfit']
-    if recover_out_of_plane:
-        primary_classes.append('out_of_plane')
-    primary = df[df['bead_class'].isin(primary_classes)].reset_index(drop=True)
-    # Aggregates AND ambiguous (dim/diffuse, possibly-aggregate) are kept out of
-    # the primary microrheology set — an aggregate's size biases Stokes-Einstein
-    # viscosity, and an ambiguous bead can't be confirmed as a clean singlet.
-    # They are still returned (as the secondary population) rather than dropped.
-    secondary = df[df['bead_class'].isin(['aggregate', 'ambiguous'])].reset_index(drop=True)
-    return dict(primary=primary, aggregate=secondary)
+    singlet = df[df['bead_class'].isin(['singlet', 'unfit'])].reset_index(drop=True)
+    out_of_plane = df[df['bead_class'] == 'out_of_plane'].reset_index(drop=True)
+    aggregate = df[df['bead_class'].isin(['aggregate', 'ambiguous'])].reset_index(drop=True)
+    # 'primary' kept for backward compatibility with existing callers.
+    if recover_out_of_plane and len(out_of_plane):
+        primary = pd.concat([singlet, out_of_plane], ignore_index=True)
+    else:
+        primary = singlet
+    return dict(primary=primary, singlet=singlet,
+                out_of_plane=out_of_plane, aggregate=aggregate)
+
+
+def select_bead_population(detections_df: pd.DataFrame, which: str = 'singlet') -> pd.DataFrame:
+    """Return one (or a deliberate combination) of the bead populations for
+    microrheology, by name.
+
+    which : 'singlet' (green, default) | 'out_of_plane' (yellow) |
+            'singlet+out_of_plane' (green+yellow, opt-in) | 'aggregate' (red).
+    Populations are never mixed except the explicit 'singlet+out_of_plane'.
+    """
+    pops = split_bead_populations(detections_df)
+    if which == 'singlet+out_of_plane':
+        parts = [pops['singlet'], pops['out_of_plane']]
+        parts = [p for p in parts if p is not None and len(p)]
+        return pd.concat(parts, ignore_index=True) if parts else pops['singlet']
+    return pops.get(which, pops['singlet'])
 
 
 def aggregate_population_stats(aggregate_df: pd.DataFrame,
@@ -1071,12 +1359,21 @@ def aggregate_population_stats(aggregate_df: pd.DataFrame,
             'frame', 'n_aggregates', 'total_aggregated_units',
             'median_aggregate_units', 'median_sigma', 'aggregated_fraction'])
     g = aggregate_df.groupby('frame')
-    out = pd.DataFrame({
-        'n_aggregates': g.size(),
-        'total_aggregated_units': g['n_units_est'].sum(min_count=1),
-        'median_aggregate_units': g['n_units_est'].median(),
-        'median_sigma': g['sigma_mean'].median(),
-    })
+    cols = {'n_aggregates': g.size()}
+    # n_units_est and sigma_mean only exist in FIT detection mode; fast
+    # (template) mode does not fit a Gaussian, so guard each column and fill
+    # NaN when it is absent rather than raising a KeyError.
+    if 'n_units_est' in aggregate_df.columns:
+        cols['total_aggregated_units'] = g['n_units_est'].sum(min_count=1)
+        cols['median_aggregate_units'] = g['n_units_est'].median()
+    else:
+        cols['total_aggregated_units'] = np.nan
+        cols['median_aggregate_units'] = np.nan
+    if 'sigma_mean' in aggregate_df.columns:
+        cols['median_sigma'] = g['sigma_mean'].median()
+    else:
+        cols['median_sigma'] = np.nan
+    out = pd.DataFrame(cols)
     if total_by_frame is not None:
         out['aggregated_fraction'] = (out['n_aggregates']
                                       / total_by_frame.reindex(out.index)).astype(float)
@@ -1088,6 +1385,64 @@ def aggregate_population_stats(aggregate_df: pd.DataFrame,
 # ---------------------------------------------------------------------------
 # 5. Ensemble center-of-mass drift correction
 # ---------------------------------------------------------------------------
+
+def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
+                                     max_gap_frac=0.25):
+    """Promote STABLE dim tracks back to singlet after linking.
+
+    Per-frame classification sends dim detections to out_of_plane (yellow),
+    because a dim spot is usually a bead drifting out of the focal plane. But a
+    dim spot that is actually a real in-focus bead will appear in (almost) every
+    frame of its track — it is stable, not blinking. Once tracks exist we can
+    tell the two apart:
+
+      * a dim track that is LONG and has FEW gaps  → a real (if faint) bead →
+        promote every detection in it to 'singlet';
+      * a dim track that is SHORT or GAPPY (blinks in and out) → genuinely
+        out-of-focus → leave as 'out_of_plane' (yellow).
+
+    This is the temporal counterpart to the per-frame classifier: instantaneous
+    features cannot distinguish a faint-but-real bead from an out-of-focus one,
+    but persistence across frames can. Aggregates and normal singlets are left
+    untouched.
+
+    Parameters
+    ----------
+    tracks_df : linked detections with columns track_id, frame, bead_class.
+    min_stable_len : minimum number of frames a dim track must span to be
+        considered a stable (real) bead.
+    max_gap_frac : maximum fraction of missing frames (gaps) within the track's
+        span for it to count as stable rather than blinking.
+
+    Returns the DataFrame with 'bead_class' updated in place (copy returned).
+    """
+    if tracks_df is None or tracks_df.empty or 'bead_class' not in tracks_df:
+        return tracks_df
+    if 'track_id' not in tracks_df or 'frame' not in tracks_df:
+        return tracks_df
+    df = tracks_df.copy()
+    for tid, grp in df.groupby('track_id'):
+        if tid == -1:
+            continue
+        classes = grp['bead_class']
+        # Only consider tracks that are predominantly dim (out_of_plane).
+        dim_frac = float((classes == 'out_of_plane').mean())
+        if dim_frac < 0.5:
+            continue
+        frames = grp['frame'].to_numpy()
+        n_present = len(frames)
+        span = (frames.max() - frames.min() + 1) if n_present else 0
+        gap_frac = 1.0 - (n_present / span) if span > 0 else 1.0
+        if n_present >= min_stable_len and gap_frac <= max_gap_frac:
+            # Stable, persistent dim track → a real bead. Promote its dim
+            # detections to singlet (leave any aggregate frames alone).
+            promote = grp.index[grp['bead_class'] == 'out_of_plane']
+            df.loc[promote, 'bead_class'] = 'singlet'
+    # keep the convenience flag consistent
+    if 'singlet' in df.columns:
+        df['singlet'] = df['bead_class'] == 'singlet'
+    return df
+
 
 def drift_correct_com(tracks_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -1296,7 +1651,7 @@ def run_vpt_analysis(
             if not agg_tracks.empty and 'track_id' in agg_tracks else 0)
 
 
-def _link(detections, linker, max_dist_um, max_gap, mpp):
+def _link(detections, linker, max_dist_um, max_gap, mpp, progress_callback=None):
     """Route to the requested trajectory linker."""
     linker = (linker or 'trackmate').lower()
     if linker == 'trackmate':
@@ -1315,6 +1670,7 @@ def _link(detections, linker, max_dist_um, max_gap, mpp):
     if linker == 'bayesian':
         from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
         return link_trajectories_bayesian(
-            detections, max_displacement_um=max_dist_um, max_gap_frames=max_gap)
+            detections, max_displacement_um=max_dist_um, max_gap_frames=max_gap,
+            progress_callback=progress_callback)
     from pycat.toolbox.dynamic_spatial_tools import link_trajectories
     return link_trajectories(detections, max_dist_um, max_gap)

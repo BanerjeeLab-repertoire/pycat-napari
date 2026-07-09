@@ -70,6 +70,8 @@ def compute_msd(
     max_lag: int = None,
     frame_interval_s: float = 1.0,
     min_track_length: int = 5,
+    reject_outlier_tracks: bool = True,
+    outlier_iqr_factor: float = 1.5,
 ) -> pd.DataFrame:
     """
     Compute ensemble-averaged MSD from linked trajectories, with a per-track
@@ -112,28 +114,87 @@ def compute_msd(
     per_track: dict[int, list[float]] = {lag: [] for lag in range(1, max_lag + 1)}
     pair_counts: dict[int, int] = {lag: 0 for lag in range(1, max_lag + 1)}
 
+    # ── Outlier-track rejection (matches the reference analysis notebook) ────
+    # A movie yields many trajectories; spurious ones (mis-links, brief tracks
+    # that happen to jump) have anomalously HIGH first/last MSD and, if included,
+    # inflate the ensemble MSD → inflate D → deflate viscosity by a large factor.
+    # The reference workflow rejects tracks whose first and last per-track MSD
+    # fall outside a 1.5×IQR fence in LOG space (get_outlier_bounds). We replicate
+    # that: compute each eligible track's first- and last-lag MSD, build the log
+    # IQR fences, and keep only tracks inside both. This is what brings PyCAT's
+    # viscosity into line with the hand-analysis on real data.
+    accepted_ids = None
+    if reject_outlier_tracks:
+        firsts, lasts, ids = [], [], []
+        for tid, grp in tracks_df.groupby('track_id'):
+            if tid < 0:
+                continue
+            g = grp.sort_values('frame')
+            if len(g) < min_track_length:
+                continue
+            t = g['frame'].values.astype(int)
+            y = g['y_um'].values.astype(float)
+            x = g['x_um'].values.astype(float)
+            f0, f1 = t.min(), t.max()
+            span = f1 - f0 + 1
+            ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+            ys[t - f0] = y; xs[t - f0] = x
+            # first-lag MSD (lag 1)
+            dy1 = ys[1:] - ys[:-1]; dx1 = xs[1:] - xs[:-1]
+            sq1 = dy1 * dy1 + dx1 * dx1; v1 = np.isfinite(sq1)
+            # last-lag MSD (largest available lag for this track)
+            L = span - 1
+            dyL = ys[L:] - ys[:-L]; dxL = xs[L:] - xs[:-L]
+            sqL = dyL * dyL + dxL * dxL; vL = np.isfinite(sqL)
+            if v1.any() and vL.any():
+                m1 = float(np.mean(sq1[v1])); mL = float(np.mean(sqL[vL]))
+                if m1 > 0 and mL > 0:
+                    firsts.append(m1); lasts.append(mL); ids.append(tid)
+        if len(ids) >= 8:
+            lf = np.log(np.asarray(firsts)); ll = np.log(np.asarray(lasts))
+            q1f, q3f = np.percentile(lf, [25, 75]); iqrf = q3f - q1f
+            q1l, q3l = np.percentile(ll, [25, 75]); iqrl = q3l - q1l
+            lo_f = q1f - outlier_iqr_factor * iqrf
+            hi_f = q3f + outlier_iqr_factor * iqrf
+            lo_l = q1l - 1.0 * iqrl                     # notebook uses 1×IQR lower
+            hi_l = q3l + outlier_iqr_factor * iqrl
+            accepted_ids = {tid for tid, a, b in zip(ids, lf, ll)
+                            if lo_f <= a <= hi_f and lo_l <= b <= hi_l}
+
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0:
+            continue
+        if accepted_ids is not None and tid not in accepted_ids:
             continue
         grp = grp.sort_values('frame').reset_index(drop=True)
         if len(grp) < min_track_length:
             continue
 
-        y = grp['y_um'].values
-        x = grp['x_um'].values
-        t = grp['frame'].values
+        t = grp['frame'].values.astype(int)
+        y = grp['y_um'].values.astype(float)
+        x = grp['x_um'].values.astype(float)
+
+        # Gap-aware position series indexed by frame, so displacements at a fixed
+        # lag are a vectorised array shift instead of an O(n^2) Python double
+        # loop over pairs. Missing frames are NaN and excluded per lag. This is
+        # numerically identical to the pairwise loop but far faster on long
+        # tracks (the double loop made large movies hang).
+        f0, f1 = t.min(), t.max()
+        span = f1 - f0 + 1
+        ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+        ys[t - f0] = y; xs[t - f0] = x
 
         for lag in range(1, max_lag + 1):
-            disps = []
-            for i in range(len(t)):
-                for j in range(i + 1, len(t)):
-                    if t[j] - t[i] == lag:
-                        dy = y[j] - y[i]
-                        dx = x[j] - x[i]
-                        disps.append(dy**2 + dx**2)
-            if disps:
-                per_track[lag].append(float(np.mean(disps)))   # this track's MSD(τ)
-                pair_counts[lag] += len(disps)
+            if lag >= span:
+                break
+            dy = ys[lag:] - ys[:-lag]
+            dx = xs[lag:] - xs[:-lag]
+            sq = dy * dy + dx * dx
+            valid = np.isfinite(sq)
+            n_valid = int(valid.sum())
+            if n_valid:
+                per_track[lag].append(float(np.mean(sq[valid])))  # this track's MSD(τ)
+                pair_counts[lag] += n_valid
 
     rows = []
     for lag in range(1, max_lag + 1):
@@ -159,6 +220,7 @@ def compute_msd(
 def fit_anomalous_diffusion(
     msd_df: pd.DataFrame,
     max_lag_fit: int = None,
+    fit_localization_offset: bool = True,
 ) -> dict:
     """
     Fit MSD(τ) = 4D·τ^α (anomalous diffusion model) using log-log regression.
@@ -203,17 +265,44 @@ def fit_anomalous_diffusion(
     D_ll = float(np.exp(log_intercept) / 4.0)
     a_ll = float(log_slope)
     D, alpha = D_ll, a_ll
+    sigma_loc_um = float('nan')
     try:
         sigma = None
         if 'msd_sem' in df.columns:
             sem = df['msd_sem'].values.astype(float)
             if np.all(np.isfinite(sem)) and np.all(sem > 0):
                 sigma = sem
-        popt, _ = optimize.curve_fit(
-            lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
-            p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
-            bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
-        D, alpha = float(popt[0]), float(popt[1])
+        if fit_localization_offset:
+            # Fit MSD = 4·D·τ^α + 4·σ_loc², separating the STATIC LOCALIZATION
+            # ERROR (a constant offset from centroid uncertainty) from real
+            # diffusion. This matters enormously in viscous samples: when the
+            # medium is thick the bead barely moves per frame, so the constant
+            # localization floor can dwarf the real τ-dependent signal. A fit
+            # WITHOUT the offset absorbs that floor into D, inflating D (and thus
+            # deflating Stokes-Einstein viscosity) by a large factor. The offset
+            # term lets D reflect only the genuine time-dependent motion.
+            # Parameter 3 is σ_loc² (µm²); reported back as σ_loc (nm) for the
+            # user to sanity-check against their expected localization precision.
+            # Offset bound matches the reference notebook workflow: the constant
+            # term N = 4·σ_loc² cannot exceed the smallest MSD value, since
+            # MSD = (non-negative diffusion signal) + N. Our fit parameter is
+            # off = N/4, so its upper bound is min(msd)/4.
+            off_max = max(float(np.min(msd)) / 4.0, 1e-9)
+            off0 = min(max(float(np.min(msd)) * 0.25, 1e-9), off_max)
+            popt, _ = optimize.curve_fit(
+                lambda tt, D_, a_, off_: 4.0 * D_ * tt ** a_ + 4.0 * off_,
+                tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll, off0], sigma=sigma,
+                absolute_sigma=False,
+                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, off_max]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
+            sigma_loc_um = float(np.sqrt(max(popt[2], 0.0)))
+        else:
+            popt, _ = optimize.curve_fit(
+                lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
+                bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
     except Exception:
         pass  # keep the log-log estimate if the non-linear fit fails
 
@@ -225,7 +314,8 @@ def fit_anomalous_diffusion(
         motion_type = 'Brownian'
 
     tau_fit = tau
-    msd_fit = 4 * D * tau_fit ** alpha
+    _off = (sigma_loc_um ** 2) if np.isfinite(sigma_loc_um) else 0.0
+    msd_fit = 4 * D * tau_fit ** alpha + 4 * _off
     # R² of the (non-linear) model on the actual MSD values.
     ss_res = float(np.sum((msd - msd_fit) ** 2))
     ss_tot = float(np.sum((msd - msd.mean()) ** 2))
@@ -236,6 +326,8 @@ def fit_anomalous_diffusion(
         alpha=alpha,
         motion_type=motion_type,
         r_squared=float(r2),
+        localization_error_nm=(float(sigma_loc_um * 1000.0)
+                               if np.isfinite(sigma_loc_um) else float('nan')),
         fit_lags_s=tau_fit,
         fit_msd=msd_fit,
         log_log_slope=a_ll,
@@ -1008,6 +1100,7 @@ def per_track_msd_curves(
     max_lag: int = None,
     frame_interval_s: float = 1.0,
     min_track_length: int = 5,
+    n_lags: int = 40,
 ) -> pd.DataFrame:
     """
     MSD(τ) curve for every individual track (for the spaghetti-plot overlay).
@@ -1015,10 +1108,25 @@ def per_track_msd_curves(
     Returns a long DataFrame: track_id, lag_frames, lag_s, msd_um2.
     Each track's MSD at a lag is the mean of that track's squared displacements
     at that lag (time-averaged MSD per track).
+
+    Two performance measures keep this fast and light enough for movies with
+    many long tracks:
+      * lags are sampled LOG-SPACED (n_lags points across 1..max_lag) rather
+        than every integer lag. MSD is viewed on log-log axes, so log-spaced
+        lags preserve the curve shape while computing and rendering far fewer
+        points (dense large-τ points are visually redundant).
+      * displacements at each lag are computed VECTORISED (array slicing on a
+        gap-filled position series) instead of an O(n²) Python double loop.
     """
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
         max_lag = max(1, len(frames) // 4)
+    # Log-spaced unique integer lags in [1, max_lag].
+    if max_lag <= n_lags:
+        lags = np.arange(1, max_lag + 1)
+    else:
+        lags = np.unique(np.round(
+            np.geomspace(1, max_lag, n_lags)).astype(int))
     rows = []
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0:
@@ -1026,19 +1134,26 @@ def per_track_msd_curves(
         grp = grp.sort_values('frame').reset_index(drop=True)
         if len(grp) < min_track_length:
             continue
-        y = grp['y_um'].values
-        x = grp['x_um'].values
-        t = grp['frame'].values
-        for lag in range(1, max_lag + 1):
-            disps = []
-            for i in range(len(t)):
-                for j in range(i + 1, len(t)):
-                    if t[j] - t[i] == lag:
-                        disps.append((y[j] - y[i]) ** 2 + (x[j] - x[i]) ** 2)
-            if disps:
-                rows.append({'track_id': int(tid), 'lag_frames': lag,
+        t = grp['frame'].values.astype(int)
+        y = grp['y_um'].values.astype(float)
+        x = grp['x_um'].values.astype(float)
+        # Build a gap-aware position series indexed by frame so a fixed lag is a
+        # simple array shift. Missing frames are NaN and excluded per lag.
+        f0, f1 = t.min(), t.max()
+        span = f1 - f0 + 1
+        ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+        ys[t - f0] = y; xs[t - f0] = x
+        for lag in lags:
+            if lag >= span:
+                break
+            dy = ys[lag:] - ys[:-lag]
+            dx = xs[lag:] - xs[:-lag]
+            sq = dy * dy + dx * dx
+            valid = np.isfinite(sq)
+            if valid.any():
+                rows.append({'track_id': int(tid), 'lag_frames': int(lag),
                              'lag_s': lag * frame_interval_s,
-                             'msd_um2': float(np.mean(disps))})
+                             'msd_um2': float(np.mean(sq[valid]))})
     return pd.DataFrame(rows)
 
 

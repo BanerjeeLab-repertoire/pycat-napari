@@ -469,24 +469,61 @@ class VideoParticleTrackingUI:
             "Uses the bead size above to set the merge radius.")
         form.addRow(self._dedup_rings)
 
+        # ── Advanced: classification strictness (viscosity-dependent) ────────
+        # Dim detections are routed to the out-of-plane (yellow) bin. How
+        # aggressively depends on the sample: in a viscous sample (~3 Pa·s and
+        # above, the default) beads move slowly and a dim spot is almost always
+        # a bead drifting out of focus, so a firm dim gate is correct. In a
+        # low-viscosity sample (approaching water) beads cross the focal plane
+        # quickly and the same gate would wrongly bin real beads — so this is an
+        # exposed control, hidden by default to keep the common case simple.
+        self._strictness_row = QWidget()
+        _sr = QHBoxLayout(self._strictness_row)
+        _sr.setContentsMargins(0, 0, 0, 0)
+        self._strictness = QDoubleSpinBox()
+        self._strictness.setRange(0.2, 3.0); self._strictness.setValue(1.0)
+        self._strictness.setSingleStep(0.1); self._strictness.setDecimals(1)
+        self._strictness.setToolTip(
+            "Classification strictness for the dim / out-of-plane (yellow) bin.\n"
+            "1.0 (default) is tuned for viscous samples (~3 Pa·s and above),\n"
+            "where beads move slowly and dim spots are usually out of focus.\n"
+            "Lower it (toward 0.2) for less viscous / faster samples so fewer\n"
+            "real beads are pushed to yellow; raise it for an even stricter\n"
+            "dim gate. Stable dim tracks are promoted back to singlet after\n"
+            "linking regardless of this value.")
+        _sr.addWidget(QLabel("Strictness (viscosity):"))
+        _sr.addWidget(self._strictness)
+        self._strictness_row.setVisible(False)   # hidden until 'Advanced' toggled
 
-        self._exclude_agg = QCheckBox("Route aggregates to a secondary population")
-        self._exclude_agg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self._exclude_agg.setChecked(True)
-        self._exclude_agg.setToolTip(
-            "Keep aggregates OUT of the primary microrheology set (their "
-            "size/mass would bias Stokes-Einstein viscosity) and instead track "
-            "them as a separate population with its own aggregation readout. "
-            "Uncheck to fold aggregates back into the primary tracks.")
-        form.addRow(self._exclude_agg)
+        self._show_advanced = QCheckBox("Show advanced detection options")
+        self._show_advanced.setChecked(False)
+        self._show_advanced.toggled.connect(self._strictness_row.setVisible)
+        form.addRow(self._show_advanced)
+        form.addRow(self._strictness_row)
 
-        self._recover_defocus = QCheckBox("Keep recoverable out-of-plane beads")
-        self._recover_defocus.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self._recover_defocus.setChecked(True)
-        self._recover_defocus.setToolTip(
-            "Keep beads flagged as out-of-plane/defocused (larger, dimmer). "
-            "Their centroid is still usable for tracking; uncheck to drop them.")
-        form.addRow(self._recover_defocus)
+
+        # ── Which bead population drives microrheology ───────────────────────
+        # The three classes are never silently mixed. Green (singlets) is the
+        # correct default for Stokes-Einstein viscosity. Yellow (out-of-plane)
+        # can be measured on its own to check whether it agrees, then optionally
+        # combined with green. Red (aggregates) is always a separate readout —
+        # its size would bias viscosity — never in the viscosity population.
+        self._pop_choice = QComboBox()
+        self._pop_choice.addItem("Green (singlets) — recommended", "singlet")
+        self._pop_choice.addItem("Yellow (out-of-plane) only", "out_of_plane")
+        self._pop_choice.addItem("Green + Yellow (combine)", "singlet+out_of_plane")
+        self._pop_choice.setCurrentIndex(0)
+        self._pop_choice.setToolTip(
+            "Which detected population to link and measure for viscosity.\n"
+            "• Green (singlets): clean, in-focus single beads — the correct\n"
+            "  default; Stokes-Einstein assumes a known single-bead size.\n"
+            "• Yellow (out-of-plane) only: measure the dim/defocused population\n"
+            "  on its own, to check whether it gives a consistent viscosity\n"
+            "  before trusting or combining it.\n"
+            "• Green + Yellow: combine both, once you've confirmed yellow agrees.\n"
+            "Aggregates (red) are always tracked separately and never included\n"
+            "in the viscosity population.")
+        form.addRow("Microrheology population:", self._pop_choice)
 
         self._bead_prog = QProgressBar(); self._bead_prog.setVisible(False)
         btn = QPushButton("▶  Detect Beads")
@@ -535,19 +572,35 @@ class VideoParticleTrackingUI:
         n_frames = int(_shp[0]) if (_shp is not None and len(_shp) == 3) else 1
         qmode = self._quality_mode.currentData()
 
-        # Warn before a long run (precise fit on a long movie can take many
-        # minutes). Rough per-frame cost estimates (seconds): fast ~0.8,
-        # fast_fit ~3, precise ~10.
+        # Warn before a long run. Rough per-frame serial cost (seconds): fast
+        # ~0.8, fast_fit ~3, precise ~10. Fast mode is accelerated (GPU if
+        # present, else a CPU process pool), so divide the serial estimate by the
+        # expected speedup — otherwise the estimate always reads the serial
+        # worst case (e.g. ~13 min for 1000 frames) even when detection actually
+        # runs several times faster.
         per_frame = {'fast': 0.8, 'fast_fit': 3.0, 'precise': 10.0}.get(qmode, 0.8)
-        est_sec = per_frame * n_frames
+        speedup = 1.0
+        if qmode == 'fast':
+            try:
+                from pycat.toolbox.gpu_utils import gpu_available
+                if gpu_available():
+                    speedup = 6.0            # GPU LoG convolutions (approx)
+                else:
+                    import os as _os
+                    speedup = max(1.0, min(8, (_os.cpu_count() or 2) - 1))
+            except Exception:
+                speedup = 1.0
+        est_sec = per_frame * n_frames / speedup
         if est_sec > 120:
             from qtpy.QtWidgets import QMessageBox
             mins = est_sec / 60.0
+            _accel = ("GPU" if speedup >= 6 else
+                      (f"{int(speedup)} CPU workers" if speedup > 1 else "serial"))
             resp = QMessageBox.question(
                 None, "Long detection run",
                 f"Detecting beads in {n_frames} frames in "
                 f"'{self._quality_mode.currentText().split(' —')[0]}' mode is "
-                f"estimated to take about {mins:.0f} minute(s).\n\n"
+                f"estimated to take about {mins:.0f} minute(s) ({_accel}).\n\n"
                 "Tip: 'Fast (template match)' mode is much quicker. Proceed?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if resp != QMessageBox.Yes:
@@ -587,6 +640,7 @@ class VideoParticleTrackingUI:
                 bead_size_nm=bead_nm,
                 template_type=template_type,
                 merge_radius_px=merge_radius,
+                strictness=self._strictness.value(),
                 exclude_aggregates=False, recover_out_of_plane=True,
                 progress_callback=progress)
 
@@ -686,14 +740,33 @@ class VideoParticleTrackingUI:
         form.addRow(method_grp)
 
         self._max_link = QDoubleSpinBox()
-        self._max_link.setRange(0.1, 50); self._max_link.setValue(2.0)
-        self._max_link.setSingleStep(0.5); self._max_link.setDecimals(2)
-        self._max_link.setToolTip("Maximum bead displacement between frames (µm).")
+        self._max_link.setRange(0.01, 50)
+        # Default max linking distance ≈ 2× the bead diameter (a bead should not
+        # move more than about its own size between frames in a viscous medium;
+        # linking farther invites mis-links). Derived from the Step-3 bead size
+        # when available, else a small sensible fallback.
+        try:
+            _bead_um = (self._bead_size_nm.value() / 1000.0
+                        if hasattr(self, '_bead_size_nm') else 0.2)
+        except Exception:
+            _bead_um = 0.2
+        self._max_link.setValue(max(0.05, round(2.0 * _bead_um, 3)))
+        self._max_link.setSingleStep(0.05); self._max_link.setDecimals(3)
+        self._max_link.setToolTip(
+            "Maximum bead displacement between frames (µm). A physically grounded "
+            "default is about 2× the bead size — a bead should not travel much "
+            "more than its own diameter per frame in a viscous sample; larger "
+            "values invite spurious links.")
         form.addRow("Max linking dist (µm):", self._max_link)
 
         self._max_gap = QSpinBox()
-        self._max_gap.setRange(0, 20); self._max_gap.setValue(2)
-        self._max_gap.setToolTip("Max frames a bead can vanish and still be reconnected.")
+        self._max_gap.setRange(0, 20); self._max_gap.setValue(0)
+        self._max_gap.setToolTip(
+            "Max frames a bead can vanish and still be reconnected. Default 0: "
+            "do NOT bridge gaps — a bead that disappears and reappears is more "
+            "likely a broken/mis-linked trajectory that should be pruned than a "
+            "real continuous track. Increase only if you specifically want to "
+            "reconnect across brief dropouts.")
         form.addRow("Max frame gap:", self._max_gap)
 
         self._track_prog = QProgressBar(); self._track_prog.setVisible(False)
@@ -712,27 +785,41 @@ class VideoParticleTrackingUI:
     def _on_link(self):
         from pycat.toolbox.vpt_tools import (
             _link, drift_correct_com, split_bead_populations,
-            aggregate_population_stats)
+            aggregate_population_stats, reclassify_by_temporal_stability,
+            select_bead_population)
         det = self._dr().get('vpt_detections')
         if det is None or det.empty:
             napari_show_warning("No bead detections found — run Step 3 first."); return
 
-        route_agg = (self._exclude_agg.isChecked()
-                     and 'bead_class' in det.columns)
-        self._track_prog.setVisible(True); self._track_prog.setRange(0, 0)
+        has_classes = 'bead_class' in det.columns
+        pop_which = (self._pop_choice.currentData() if has_classes else 'singlet')
+        # Determinate progress bar (0..n_frames) so it advances visibly per
+        # frame instead of spinning indefinitely. The linker is sequential
+        # across frames, so per-frame progress is the natural unit.
+        _n_link_frames = int(det['frame'].nunique()) if 'frame' in det else 0
+        self._track_prog.setVisible(True)
+        self._track_prog.setRange(0, max(1, _n_link_frames))
+        self._track_prog.setValue(0)
 
         def _job(progress):
-            if route_agg:
-                pops = split_bead_populations(
-                    det, recover_out_of_plane=self._recover_defocus.isChecked())
-                primary, aggregates = pops['primary'], pops['aggregate']
+            if has_classes:
+                # The chosen population drives microrheology; aggregates are
+                # ALWAYS tracked separately (never in the viscosity set).
+                pops = split_bead_populations(det)
+                primary = select_bead_population(det, pop_which)
+                aggregates = pops['aggregate']
             else:
                 primary, aggregates = det, det.iloc[0:0]
             ptracks = drift_correct_com(
                 _link(primary, self._linker_name(), self._max_link.value(),
-                      self._max_gap.value(), self._mpx()))
+                      self._max_gap.value(), self._mpx(),
+                      progress_callback=progress))
+            # Temporal stability pass: a dim track that persists stably across
+            # frames is a real (faint) bead, not an out-of-focus blink — promote
+            # it back to singlet. Blinking dim tracks stay yellow.
+            ptracks = reclassify_by_temporal_stability(ptracks)
             atracks = None
-            if route_agg and len(aggregates) >= 2:
+            if len(aggregates) >= 2:
                 try:
                     atracks = _link(aggregates, self._linker_name(),
                                     self._max_link.value(), self._max_gap.value(),
@@ -740,8 +827,8 @@ class VideoParticleTrackingUI:
                 except Exception:
                     atracks = None
             total_by_frame = det.groupby('frame').size()
-            astats = aggregate_population_stats(aggregates, total_by_frame=total_by_frame) \
-                if route_agg else None
+            astats = (aggregate_population_stats(aggregates, total_by_frame=total_by_frame)
+                      if len(aggregates) else None)
             return dict(primary=ptracks, aggregate_tracks=atracks,
                         aggregate_stats=astats, aggregates=aggregates)
 
@@ -755,13 +842,46 @@ class VideoParticleTrackingUI:
             self._dr()['vpt_tracks'] = tracks
             mpp = self._mpx()
 
+            # Find the bead image layer to match its scale — a Tracks layer
+            # added with no scale sits at raw pixel coordinates, so if the image
+            # carries a (µm or upscaled) scale the tracks render at a different
+            # world extent (the symptom: a full-width streak next to a tiny
+            # image). Copy the image layer's spatial scale onto the tracks.
+            _bead_name = self._bead_dd.currentText()
+            _img_layer = None
+            try:
+                import napari.layers as _nl
+                for _l in self.viewer.layers:
+                    if isinstance(_l, _nl.Image):
+                        if _bead_name and _l.name == _bead_name:
+                            _img_layer = _l; break
+                        if _img_layer is None:
+                            _img_layer = _l   # fallback: first image layer
+            except Exception:
+                _img_layer = None
+
             def _tracks_layer(tr, name, color=None):
                 tl = tr[['track_id', 'frame']].copy()
                 tl['y'] = tr['y_um_raw'] / mpp if 'y_um_raw' in tr else tr['y_um'] / mpp
                 tl['x'] = tr['x_um_raw'] / mpp if 'x_um_raw' in tr else tr['x_um'] / mpp
                 if name in self.viewer.layers:
                     self.viewer.layers.remove(name)
-                self.viewer.add_tracks(tl[['track_id', 'frame', 'y', 'x']].values, name=name)
+                add_kwargs = {}
+                # Match the image layer's spatial (y, x) scale so the tracks
+                # overlay the image 1:1. Tracks data is (track_id, frame, y, x),
+                # so the scale vector is (frame_scale, y_scale, x_scale).
+                if _img_layer is not None:
+                    try:
+                        import numpy as _np
+                        isc = _np.asarray(_img_layer.scale, float)
+                        if isc.size >= 2:
+                            yx = isc[-2:]
+                            add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
+                    except Exception:
+                        pass
+                self.viewer.add_tracks(
+                    tl[['track_id', 'frame', 'y', 'x']].values, name=name,
+                    **add_kwargs)
 
             _tracks_layer(tracks, "Bead Trajectories")
 
@@ -788,17 +908,18 @@ class VideoParticleTrackingUI:
                 'linker': self._linker_name(),
                 'max_linking_distance_um': self._max_link.value(),
                 'max_frame_gap': self._max_gap.value(),
-                'routed_aggregates': bool(route_agg),
+                'microrheology_population': pop_which,
                 'n_aggregate_tracks': n_agg_tracks})
             msg = (f"Linked {tracks['track_id'].nunique()} primary trajectories "
-                   f"(drift-corrected).")
-            if route_agg:
+                   f"(drift-corrected) from the {pop_which} population.")
+            if n_agg_tracks:
                 msg += f" Aggregate population: {n_agg_tracks} tracks."
             napari_show_info(msg)
         def _err(msg):
             self._track_prog.setVisible(False)
             napari_show_warning("Linking failed — see terminal."); print(msg)
         w.finished.connect(_done); w.error.connect(_err)
+        w.progress.connect(lambda i, n: self._track_prog.setValue(i))
         self._track_worker = w; w.start()
 
     # ── Step 5: microrheology ──────────────────────────────────────────
@@ -810,7 +931,13 @@ class VideoParticleTrackingUI:
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(0.1)
         self._frame_dt.setDecimals(4); self._frame_dt.setSingleStep(0.01)
-        self._frame_dt.setToolTip("Time between frames (seconds).")
+        self._frame_dt.setToolTip(
+            "Time between frames (seconds). Auto-filled from the file's metadata "
+            "when available (OME TimeIncrement / per-plane DeltaT / MicroManager "
+            "Interval_ms); edit to override.")
+        self._frame_dt_touched = False
+        self._frame_dt.valueChanged.connect(
+            lambda _v: setattr(self, '_frame_dt_touched', True))
         form.addRow("Frame interval (s):", self._frame_dt)
 
         self._bead_radius = QDoubleSpinBox()
@@ -838,10 +965,30 @@ class VideoParticleTrackingUI:
         form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
+    def _sync_frame_interval_from_metadata(self):
+        """If the loaded file's metadata captured a frame interval, use it as the
+        Step-5 default (unless the user has already changed the field). The
+        interval is captured once at load into file_metadata, so every timing-
+        dependent step reads it from one place instead of re-asking the user."""
+        try:
+            if getattr(self, '_frame_dt_touched', False):
+                return  # user set it explicitly — never override
+            md = self._dr().get('file_metadata') or {}
+            fi = (md.get('common') or {}).get('frame_interval_s')
+            if fi and fi > 0:
+                # Set programmatically WITHOUT flipping the user-touched flag.
+                self._frame_dt.blockSignals(True)
+                self._frame_dt.setValue(float(fi))
+                self._frame_dt.blockSignals(False)
+        except Exception:
+            pass
+
     def _on_rheology(self):
         from pycat.toolbox.condensate_physics_tools import (
             compute_msd, fit_anomalous_diffusion)
         from pycat.toolbox.vpt_tools import viscosity_from_diffusion
+        # Pull the frame interval from the file's captured metadata if available.
+        self._sync_frame_interval_from_metadata()
         tracks = self._dr().get('vpt_tracks')
         if tracks is None or tracks.empty:
             napari_show_warning("No trajectories found — run Step 4 first."); return
@@ -899,11 +1046,14 @@ class VideoParticleTrackingUI:
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
             summary = pd.DataFrame([{
+                'viscosity (Pa·s)': round(eta, 4) if eta == eta else None,
                 'D (µm²/s)': round(D, 5) if D == D else None,
                 'alpha': round(alpha, 3) if alpha == alpha else None,
                 'motion': motion,
                 'R²': round(r2, 3) if r2 == r2 else None,
-                'viscosity (Pa·s)': round(eta, 4) if eta == eta else None,
+                'localization err (nm)': (round(fit.get('localization_error_nm'), 1)
+                                          if fit.get('localization_error_nm') ==
+                                          fit.get('localization_error_nm') else None),
                 'n_tracks': int(tracks['track_id'].nunique()),
             }])
             show_dataframes_dialog("VPT Microrheology Results",
@@ -912,5 +1062,6 @@ class VideoParticleTrackingUI:
             pass
 
         napari_show_info(
-            f"Microrheology complete: D={D:.4g} µm²/s, α={alpha:.3g} ({motion}), "
-            f"η={eta:.4g} Pa·s (n={tracks['track_id'].nunique()} tracks).")
+            f"Microrheology complete: η={eta:.4g} Pa·s "
+            f"(D={D:.4g} µm²/s, α={alpha:.3g}, {motion}; "
+            f"n={tracks['track_id'].nunique()} tracks).")

@@ -38,15 +38,31 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.2, 5.2))
-    # faint per-track curves
+    # faint per-track curves. Cap the number actually drawn: a movie can produce
+    # tens of thousands of tracks, and drawing one matplotlib line each freezes
+    # the UI (each ax.plot is a separate artist). A random sample of a few
+    # hundred conveys the spread just as well; the quantitative result is the
+    # ensemble mean and fit, which use ALL tracks regardless of this cap.
+    MAX_SPAGHETTI = 400
     if per_track_df is not None and len(per_track_df):
-        for tid, g in per_track_df.groupby('track_id'):
+        all_tids = per_track_df['track_id'].unique()
+        n_all = len(all_tids)
+        if n_all > MAX_SPAGHETTI:
+            import numpy as _np
+            _rng = _np.random.default_rng(0)
+            shown = set(_rng.choice(all_tids, MAX_SPAGHETTI, replace=False))
+            plot_df = per_track_df[per_track_df['track_id'].isin(shown)]
+        else:
+            plot_df = per_track_df
+        for tid, g in plot_df.groupby('track_id'):
             g = g.sort_values('lag_s')
             ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
                     alpha=0.18, lw=0.8, zorder=1)
-        # a proxy handle for the legend
-        ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
-                label=f"individual tracks (n={per_track_df['track_id'].nunique()})")
+        # a proxy handle for the legend (report the TRUE track count)
+        _lbl = (f"individual tracks (n={n_all}"
+                + (f"; showing {MAX_SPAGHETTI}" if n_all > MAX_SPAGHETTI else "")
+                + ")")
+        ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0, label=_lbl)
 
     # solid ensemble mean with SEM band
     if ensemble_msd_df is not None and len(ensemble_msd_df):

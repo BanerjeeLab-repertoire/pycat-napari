@@ -197,6 +197,74 @@ def _normalize_to_float(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
+def _resolve_image_layer(state: dict, layer_name, fallback=None):
+    """
+    Resolve a RECORDED napari layer name to the actual array in ``state``.
+
+    The GUI records which layer each step operated on (e.g.
+    ``"Upscaled Fluorescence Image"`` or
+    ``"Enhanced Background Removed Pre-Processed Upscaled Segmentation Image"``).
+    Replay must honour that recorded name instead of assuming a fixed
+    channel/stage, otherwise a step can silently run on the wrong channel
+    (e.g. Cellpose running on the foreground-suppressed segmentation channel
+    instead of the fluorescence channel, finding 0 cells).
+
+    Resolution uses two independent facts encoded in the layer name:
+
+      1. WHICH CHANNEL  — "Segmentation" vs "Fluorescence" vs a named extra
+         channel from ``state['channels_by_name']`` (3+ fluorophore files).
+      2. WHICH STAGE    — raw (upscaled) vs preprocessed / background-removed.
+         The processed segmentation array lives in ``state['preprocessed']``
+         (background_removal overwrites it with the enhanced bg-removed image),
+         and the processed fluorescence array in
+         ``state['preprocessed_fluorescence']``.
+
+    Parameters
+    ----------
+    state : dict          per-file replay state.
+    layer_name : str|None the recorded layer name to resolve.
+    fallback : ndarray    array to return if ``layer_name`` is missing/'None'
+                          or cannot be matched.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
+    if not layer_name or str(layer_name).strip().lower() == 'none':
+        return fallback
+
+    name = str(layer_name).lower()
+
+    # --- which processing stage? (most-processed keyword wins) -------------
+    is_processed = ('background removed' in name
+                    or 'bg removed' in name
+                    or 'pre-processed' in name
+                    or 'preprocessed' in name)
+
+    # --- which channel? ----------------------------------------------------
+    if 'fluorescence' in name:
+        if is_processed:
+            return state.get('preprocessed_fluorescence',
+                             state.get('fluorescence_image', state['image']))
+        return state.get('fluorescence_image', state['image'])
+
+    if 'segmentation' in name:
+        if is_processed:
+            return state.get('preprocessed', state['image'])
+        return state['image']
+
+    # --- a named extra channel (files with 3+ fluorophores) ---------------
+    channels = state.get('channels_by_name', {}) or {}
+    if layer_name in channels:                       # exact recorded name
+        return channels[layer_name]
+    for key, arr in channels.items():                # loose base-name match
+        base = key.lower()
+        if base and (base in name or name in base):
+            return arr
+
+    return fallback
+
+
 # ---------------------------------------------------------------------------
 # Replay functions
 # Each signature: fn(state, image_path, params, output_dir) -> None
@@ -292,9 +360,12 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
 
 def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
-    Run pre_process_image on the segmentation channel (state['image']).
-    Also preprocesses the fluorescence channel separately if it differs,
-    storing it in state['preprocessed_fluorescence'] for downstream use.
+    Run pre_process_image on ONLY the layer the GUI recorded as active
+    (params['active_layer']), mirroring the interactive tool, which acts on
+    the single active layer. The non-active channel is left unprocessed (its
+    "preprocessed" slot passes through the raw array), so a config that only
+    preprocessed the segmentation channel does not also silently preprocess
+    the fluorescence channel.
     """
     from pycat.toolbox.image_processing_tools import pre_process_image
 
@@ -311,32 +382,36 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     suppress_foreground = bool(params.get('suppress_foreground', True))
     suppression_params = params.get('foreground_suppression_params', None)
 
-    # Preprocess segmentation channel (used for Cellpose)
-    seg_image = _normalize_to_float(state['image'])
-    preprocessed = pre_process_image(
-        seg_image, ball_radius, window_size,
-        suppress_foreground=suppress_foreground,
-        suppression_params=suppression_params)
-    state['preprocessed'] = np.asarray(preprocessed).astype(np.float32)
+    # Which layer was active when preprocessing was clicked?
+    active_name = str(params.get('active_layer')
+                      or params.get('active_image_layer') or '').lower()
+    on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
 
-    _save_array(state['preprocessed'],
-                output_dir / f"{image_path.stem}_preprocessed.tiff")
-
-    # Preprocess fluorescence channel separately if different from seg
-    fluor = state.get('fluorescence_image')
-    if fluor is not None and not np.array_equal(fluor, state['image']):
-        fluor_norm = _normalize_to_float(fluor)
-        fluor_proc = pre_process_image(
-            fluor_norm, ball_radius, window_size,
+    def _proc(arr):
+        return np.asarray(pre_process_image(
+            _normalize_to_float(arr), ball_radius, window_size,
             suppress_foreground=suppress_foreground,
-            suppression_params=suppression_params)
-        state['preprocessed_fluorescence'] = np.asarray(fluor_proc).astype(np.float32)
-        _save_array(state['preprocessed_fluorescence'],
-                    output_dir / f"{image_path.stem}_preprocessed_fluor.tiff")
-    else:
-        state['preprocessed_fluorescence'] = state['preprocessed']
+            suppression_params=suppression_params)).astype(np.float32)
 
-    print(f"[PyCAT Batch]   Preprocessing done.")
+    if on_fluor:
+        fluor = state.get('fluorescence_image', state['image'])
+        state['preprocessed_fluorescence'] = _proc(fluor)
+        # Segmentation channel was NOT the active layer -> leave it unprocessed.
+        state.setdefault('preprocessed', np.asarray(state['image']).copy())
+        _save_array(state['preprocessed_fluorescence'],
+                    output_dir / f"{image_path.stem}_preprocessed.tiff")
+        print(f"[PyCAT Batch]   Preprocessing done (active layer: fluorescence).")
+    else:
+        state['preprocessed'] = _proc(state['image'])
+        # Fluorescence channel was NOT the active layer -> pass through raw so
+        # any later reference to a processed-fluor layer returns the raw image
+        # rather than an unintentionally preprocessed one.
+        fluor = state.get('fluorescence_image')
+        state['preprocessed_fluorescence'] = (
+            np.asarray(fluor).copy() if fluor is not None else state['preprocessed'])
+        _save_array(state['preprocessed'],
+                    output_dir / f"{image_path.stem}_preprocessed.tiff")
+        print(f"[PyCAT Batch]   Preprocessing done (active layer: segmentation).")
 
 
 def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -347,7 +422,14 @@ def replay_cellpose_segmentation(state: dict, image_path: Path, params: dict, ou
     in headless mode with a warning.
     """
     method          = params.get('method', 'cellpose')
-    image           = _normalize_to_float(state.get('preprocessed', state['image']))
+    # Run on the layer the GUI recorded for this step (params['image_layer']),
+    # e.g. "Upscaled Fluorescence Image". Falling back to the segmentation
+    # channel (as older replay did) runs Cellpose on the foreground-suppressed
+    # channel and typically finds 0 cells, which then crashes cell_analysis.
+    resolved = _resolve_image_layer(
+        state, params.get('image_layer'),
+        fallback=state.get('fluorescence_image', state.get('preprocessed', state['image'])))
+    image           = _normalize_to_float(resolved)
     data_instance   = state['data_instance']
     object_diameter = _get_data(data_instance, 'cell_diameter', 100)
 
@@ -389,15 +471,30 @@ def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir
     """Run cell_analysis_func on the Cellpose mask to get labeled cells + cell_df."""
     from pycat.toolbox.feature_analysis_tools import cell_analysis_func
 
-    # Use the processed fluorescence image for cell morphology measurements,
-    # matching what the GUI passes: the bg-removed fluorescence layer.
-    image = state.get('preprocessed_fluorescence',
-                       state.get('fluorescence_image', state['image']))
+    # Measure cell features on the layer the GUI recorded (params['image_layer']),
+    # e.g. "Upscaled Segmentation Image", rather than assuming the fluorescence
+    # channel.
+    image = _resolve_image_layer(
+        state, params.get('image_layer'),
+        fallback=state.get('preprocessed_fluorescence',
+                           state.get('fluorescence_image', state['image'])))
     data_instance = state['data_instance']
     cell_masks = state.get('cellpose_mask')
 
     if cell_masks is None:
         raise RuntimeError("cell_analysis requires cellpose_segmentation to run first.")
+
+    # If segmentation produced no cells, skip gracefully instead of crashing
+    # deep inside pandas ("No objects to concatenate").
+    if int(np.asarray(cell_masks).max()) == 0:
+        print(f"[PyCAT Batch]   Cell analysis skipped for {image_path.name}: "
+              f"0 cells were segmented. Check that cellpose_segmentation ran on "
+              f"the intended channel (recorded image_layer="
+              f"{params.get('image_layer')!r}) and that the cell diameter is set "
+              f"correctly.")
+        state['labeled_cells'] = None
+        state['no_cells'] = True
+        return
 
     labeled_cell_masks, cell_df = cell_analysis_func(
         image, cell_masks, omission_mask=None, data_instance=data_instance
@@ -449,15 +546,23 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     )
     import pandas as pd
 
-    # Use the preprocessed fluorescence channel for condensate segmentation.
-    # seg_image_layer → the bg-removed enhanced layer used as the thresholding
-    # source; measure_image_layer → the raw/fluorescence image for intensity.
-    # In replay we map these to the equivalent state arrays:
-    #   seg_image_layer   → state['preprocessed_fluorescence'] (enhanced)
-    #   measure_image_layer → state['fluorescence_image'] (raw intensity)
-    original_image = state.get('fluorescence_image', state['image'])
-    pre_processed_image = state.get('preprocessed_fluorescence',
-                                     state.get('preprocessed', state['image']))
+    if state.get('no_cells'):
+        print(f"[PyCAT Batch]   Condensate segmentation skipped for "
+              f"{image_path.name}: no cells were segmented upstream.")
+        return
+
+    # Resolve the layers the GUI actually recorded for this step:
+    #   seg_image_layer     → thresholding source (usually the bg-removed layer)
+    #   measure_image_layer → intensity image the puncta are measured on
+    # Honour whichever channel/stage each name encodes instead of assuming the
+    # fluorescence channel.
+    pre_processed_image = _resolve_image_layer(
+        state, params.get('seg_image_layer'),
+        fallback=state.get('preprocessed_fluorescence',
+                           state.get('preprocessed', state['image'])))
+    original_image = _resolve_image_layer(
+        state, params.get('measure_image_layer'),
+        fallback=state.get('fluorescence_image', state['image']))
     data_instance = state['data_instance']
     ball_radius = _get_data(data_instance, 'ball_radius', 50)
 
@@ -536,8 +641,16 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     """
     from pycat.toolbox.feature_analysis_tools import puncta_analysis_func
 
-    # Use the fluorescence channel image for puncta intensity measurement
-    image = state.get('fluorescence_image', state['image'])
+    if state.get('no_cells') or state.get('puncta_mask') is None:
+        print(f"[PyCAT Batch]   Condensate analysis skipped for "
+              f"{image_path.name}: no cells/puncta available upstream.")
+        return
+
+    # Measure puncta intensity on the layer the GUI recorded (image_layer),
+    # e.g. "Upscaled Fluorescence Image".
+    image = _resolve_image_layer(
+        state, params.get('image_layer'),
+        fallback=state.get('fluorescence_image', state['image']))
     data_instance = state['data_instance']
     puncta_mask = state.get('puncta_mask')
     labeled_cells = state.get('labeled_cells')
@@ -690,6 +803,11 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
                                 _get_data(data_instance, 'ball_radius', 50))))
     sp = params.get('foreground_suppression_params', None) or {}
 
+    # Which layer was active when background removal was clicked?
+    active_name = str(params.get('active_layer')
+                      or params.get('active_image_layer') or '').lower()
+    on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
+
     def _enhance(img):
         img = _normalize_to_float(img)
         # Detect already-preprocessed input (same heuristic as the GUI runner).
@@ -707,37 +825,51 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
                 border_grow=sp.get('border_grow')).astype(np.float32)
         return rb_gaussian_bg_removal_with_edge_enhancement(img, ball_radius).astype(np.float32)
 
-    # Background remove segmentation channel
-    state['preprocessed'] = _enhance(preprocessed)
-    _save_array(state['preprocessed'],
-                output_dir / f"{image_path.stem}_bg_removed.tiff")
-
-    # Background remove fluorescence channel if separate
-    fluor_proc = state.get('preprocessed_fluorescence')
-    if fluor_proc is not None and fluor_proc is not preprocessed:
+    if on_fluor:
+        fluor_proc = state.get('preprocessed_fluorescence',
+                               state.get('fluorescence_image', state['image']))
         state['preprocessed_fluorescence'] = _enhance(fluor_proc)
         _save_array(state['preprocessed_fluorescence'],
-                    output_dir / f"{image_path.stem}_bg_removed_fluor.tiff")
+                    output_dir / f"{image_path.stem}_bg_removed.tiff")
+        print(f"[PyCAT Batch]   Background removal done (active layer: fluorescence).")
     else:
-        state['preprocessed_fluorescence'] = state['preprocessed']
-
-    print(f"[PyCAT Batch]   Background removal done.")
+        state['preprocessed'] = _enhance(preprocessed)
+        _save_array(state['preprocessed'],
+                    output_dir / f"{image_path.stem}_bg_removed.tiff")
+        print(f"[PyCAT Batch]   Background removal done (active layer: segmentation).")
 
 
 def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir: Path):
     """
-    Measure Line records object/cell diameter measurements made interactively
-    via drawn lines in the GUI — there is no equivalent automatic action for
-    headless batch mode since it requires the user to draw on the image.
-    The cell_diameter/object_size/ball_radius values from the recorded
-    params (captured at the moment Measure Line was clicked) are already
-    applied to data_instance by replay_open_image, so this step is a no-op
-    that exists only to keep the recorded step sequence complete and to
-    surface the values that were in effect at that point in the GUI session.
+    Apply the object/cell measurements the user made with the Measure Line
+    tool in the GUI.
+
+    These values (cell_diameter, ball_radius, object_size) are captured at the
+    moment Measure Line was clicked and are what every downstream step in the
+    GUI used from then on. They intentionally OVERRIDE the placeholder values
+    recorded at open_image time. This step runs *before* upscaling, so the
+    values written here are the pre-upscale measurements; replay_upscaling then
+    doubles cell_diameter and ball_radius exactly as the GUI does.
+
+    (Previously this was a no-op, which left the stale open_image ball_radius in
+    place — after upscaling that produced an enormous rolling-ball structuring
+    element and a MemoryError in condensate segmentation, and gave Cellpose the
+    wrong cell diameter.)
     """
-    print(f"[PyCAT Batch]   Measure Line skipped in headless mode "
-          f"(values already set: cell_diameter={params.get('cell_diameter')}, "
-          f"ball_radius={params.get('ball_radius')}).")
+    data_instance = state['data_instance']
+    applied = []
+    for key in ('cell_diameter', 'ball_radius', 'object_size'):
+        val = params.get(key)
+        if val is not None:
+            data_instance.data_repository[key] = val
+            applied.append(f"{key}={val}")
+
+    if applied:
+        print(f"[PyCAT Batch]   Measure Line applied recorded measurements: "
+              f"{', '.join(applied)}.")
+    else:
+        print(f"[PyCAT Batch]   Measure Line: no recorded measurements to apply "
+              f"(using open_image values).")
 
 
 def replay_open_stack(state: dict, image_path: Path, params: dict, output_dir: Path):

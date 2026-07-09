@@ -61,7 +61,7 @@ PyCAT-Napari provides a comprehensive suite of tools for biological image analys
 
 ### Minimum Requirements
 - **Python Version**: 3.12.x (Required)
-  > ⚠️ **Important**: PyCAT-Napari requires Python 3.12 (supported range 3.12–3.13). Earlier versions, including 3.9, are no longer supported as of v1.5.39. 
+  > ⚠️ **Important**: PyCAT-Napari requires Python 3.12. Python 3.13 and newer are not yet supported. Earlier versions, including 3.9, are no longer supported as of v1.5.39. 
 - RAM: 8GB (16GB recommended; large time-series/Z-stack acquisitions benefit from more)
 - Disk Space: ~100MB (including dependencies); optional TrackMate integration downloads an additional ~500MB–1GB Fiji distribution on first use
 - GPU: Not required — PyCAT runs entirely on CPU by default. An NVIDIA GPU with CUDA is optional and used automatically when available (Cellpose segmentation, and rolling-ball/morphological operations via the `[gpu]` extra) for faster processing.
