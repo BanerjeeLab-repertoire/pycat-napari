@@ -23,6 +23,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.313] - 2026-07-09
+### Added (batch — automatic object-size → ball_radius estimation, human out of the loop)
+- **ball_radius is now estimated per image during batch processing** for fluorescence
+  workflows, so batches no longer need a hand-tuned ball_radius (Meet Raval's request). New
+  `estimate_object_size_px()` implements the validated pipeline: white top-hat → Otsu →
+  label → median object equivalent-diameter → ball_radius = round(size/2). Verified on
+  synthetic puncta (recovers ~8 px objects → ball_radius 4).
+- **Strictly scoped to workflows where intensity thresholding is valid.** Auto-estimation
+  applies ONLY to 2D cellular fluorescence and 2D in-vitro fluorescence, inferred from the
+  recorded step names. Brightfield, time-series, and z-stack workflows are excluded (top-hat
+  + Otsu size estimation is not physically valid there — brightfield is edge/phase contrast,
+  time-series object size drifts, z-stack projection diameter ≠ 3D size). The estimator also
+  carries a hard `workflow` validity guard that raises rather than silently producing a bad
+  radius. An explicitly recorded ball_radius always takes precedence and disables the auto path.
+- **The user is told at batch start** (not a hidden step): when auto-estimation is active a
+  clear message is printed explaining that ball_radius will be estimated per image and why,
+  and each image logs its estimated value + object count.
+- **Experimental brightfield estimator stubbed (not wired in).**
+  `estimate_object_size_px_brightfield()` uses Sobel edge-energy + Otsu + hole-filling
+  instead of intensity top-hat, but is explicitly marked NOT VALIDATED and is intentionally
+  left out of the automatic path pending validation on real brightfield data.
+- Both estimators are flagged in-code for optimization/validation on real datasets before
+  being relied on quantitatively.
+
 ## [1.5.312] - 2026-07-09
 ### Changed (Colocalization — unified tabbed widget, phase 1)
 - **The two separate colocalization pipelines are merged into one tabbed widget.** Object-

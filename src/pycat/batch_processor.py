@@ -194,9 +194,50 @@ class BatchWorker(QThread):
     def cancel(self):
         self._cancelled = True
 
+    def _auto_ball_radius_active(self) -> bool:
+        """Whether to auto-estimate ball_radius for this batch.
+
+        True only when (a) the recorded workflow is a fluorescence one where
+        intensity-threshold object-size estimation is valid — inferred from the
+        recorded step names — AND (b) no explicit ball_radius was recorded on the
+        open_image step (an explicitly-set value always takes precedence).
+        Brightfield / time-series / z-stack workflows are excluded (top-hat +
+        Otsu size estimation is not valid there).
+        """
+        steps = self.config.get("steps", [])
+        step_names = {s.get("step", "") for s in steps}
+        # Cellular-fluorescence tell: subcellular/condensate segmentation.
+        cellular = bool(step_names & {
+            'segment_subcellular_objects', 'condensate_segmentation',
+            'condensate_analysis'})
+        # In-vitro-fluorescence tell: the ivf_* segmentation step.
+        invitro = 'ivf_segmentation' in step_names
+        if not (cellular or invitro):
+            return False
+        # An explicit ball_radius recorded on open_image wins — don't override.
+        for s in steps:
+            if s.get("step") in ("open_image", "open_stack", "open_image_stack"):
+                if 'ball_radius' in (s.get("params") or {}):
+                    return False
+        return True
+
     def run(self):
         output_dir = self.output_dir
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Decide whether automatic object-size → ball_radius estimation applies
+        # to this batch, and tell the user up front (it's not a hidden step). It
+        # applies only for fluorescence workflows where intensity thresholding is
+        # valid, and only when the recorded workflow did NOT pin an explicit
+        # ball_radius (an explicit value always wins).
+        self._auto_ball_radius = self._auto_ball_radius_active()
+        if self._auto_ball_radius:
+            print("[PyCAT Batch] Automatic object-size estimation is ON: "
+                  "ball_radius will be estimated per image from the fluorescence "
+                  "signal (top-hat + Otsu → median object size). This applies "
+                  "because this is a fluorescence workflow with no explicit "
+                  "ball_radius recorded. "
+                  "# TODO: optimize the estimator on a real dataset.")
 
         results = []
         total = len(self.files)
@@ -247,6 +288,9 @@ class BatchWorker(QThread):
         created in one PyCAT version remain forward-compatible.
         """
         state: Dict = {}  # shared across all steps for this file
+        # Propagate the batch-level auto-ball_radius decision so the open_image
+        # replay can estimate it per image when appropriate.
+        state['_auto_ball_radius'] = getattr(self, '_auto_ball_radius', False)
         for step_entry in self.config.get("steps", []):
             step_name = step_entry.get("step", "")
             params = step_entry.get("params", {})

@@ -309,7 +309,28 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     data_instance.data_repository['microns_per_pixel'] = microns_per_pixel
     data_instance.data_repository['microns_per_pixel_sq'] = microns_per_pixel ** 2
     data_instance.data_repository['cell_diameter'] = params.get('cell_diameter', 100)
-    data_instance.data_repository['ball_radius'] = params.get('ball_radius', 50)
+
+    # ball_radius: use the recorded value if present; otherwise, when the batch
+    # enabled automatic object-size estimation (valid fluorescence workflow, no
+    # explicit ball_radius), estimate it per image from the fluorescence signal
+    # (top-hat + Otsu → median object diameter). Falls back to 50 if estimation
+    # finds no objects. The user was told at batch start that this is applying.
+    _ball_radius = params.get('ball_radius', None)
+    if _ball_radius is None and state.get('_auto_ball_radius'):
+        try:
+            from pycat.toolbox.image_processing_tools import estimate_object_size_px
+            _est = estimate_object_size_px(image)   # seg image = fluorescence here
+            if _est.get('ball_radius'):
+                _ball_radius = _est['ball_radius']
+                print(f"[PyCAT Batch]   Auto ball_radius = {_ball_radius} "
+                      f"(object_size {_est['object_size_px']:.1f}px from "
+                      f"{_est['n_objects']} objects) for {image_path.name}.")
+        except Exception as _e:
+            print(f"[PyCAT Batch]   Auto ball_radius estimation failed "
+                  f"({_e}); using default.")
+    if _ball_radius is None:
+        _ball_radius = 50
+    data_instance.data_repository['ball_radius'] = _ball_radius
 
     state['image'] = image
     state['preprocessed'] = image.copy()
