@@ -23,6 +23,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.314] - 2026-07-09
+### Added (reusable phased-progress mechanism; VPT double-100% fixed)
+- **`PhasedProgress` helper (`ui_utils`)** maps several sequential work phases onto ONE
+  continuous 0→100% progress bar. This fixes the class of confusion where a method that
+  MATERIALIZES a lazy stack and then PROCESSES it drove the bar to 100% twice (or left one
+  phase looking frozen). Each phase gets a weighted slice of a single monotonic bar, with an
+  optional phase-name label. Its `callback(done, total)` matches the progress_callback used
+  throughout PyCAT, so existing per-phase callbacks drop in unchanged. Span math verified.
+- **`materialize_stack` / `as_full_array` now accept a `progress_callback`** so the
+  frame-by-frame rebuild of a lazy stack can drive a determinate "Materializing…" bar
+  instead of a silent freeze. Eager arrays return immediately (no spurious progress).
+- **VPT bead detection double-100% fixed** (where this thread began). In CPU-parallel mode,
+  detection ran two loops (parallel pre-detection, then serial scoring) that each drove the
+  bar 0→100%. The parallel pass now fills 0→70% and the scoring pass continues 70→100% — a
+  single monotonic sweep that reaches 100% once. Pure-serial mode is unchanged (0→100%).
+
+### Documentation / roadmap
+- Added a **progress-bar audit** rubric to the roadmap tracking the per-method rollout of
+  the new helper (wire materialization progress into the seven materialize-then-work UIs;
+  add bars to the zero-bar slow UIs contrast_cascade / fd_curve / data_qc; audit the core
+  cell/condensate runners). Deliberately staged as a per-method rollout rather than a
+  blanket sweep.
+- Added a **documentation audit** rubric capturing tester feedback that the instruction
+  docs have drifted from the current GUI (missing "measure lines", stale instruction
+  screenshots, doc-vs-GUI name mismatches like "Condensate segmentation" vs "sub cellular
+  object segmentation"). These are docs fixes, tracked so they are not lost.
+
 ## [1.5.313] - 2026-07-09
 ### Added (batch — automatic object-size → ball_radius estimation, human out of the loop)
 - **ball_radius is now estimated per image during batch processing** for fluorescence

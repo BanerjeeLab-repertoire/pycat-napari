@@ -443,3 +443,92 @@ def remove_custom_scale_bar(viewer, layer_name='PyCAT Scale Bar'):
             viewer.layers.remove(layer_name)
         except Exception:
             pass
+
+
+class PhasedProgress:
+    """Map several sequential work phases onto ONE continuous 0→100% progress bar.
+
+    The problem this solves: a method that first MATERIALIZES a lazy stack and
+    then PROCESSES it has two slow phases. Barring each separately makes the bar
+    run to 100% twice (confusing — "why did it finish then start again?"), and
+    barring only one leaves the other looking frozen. PhasedProgress gives each
+    phase a weighted slice of a single bar, so progress is monotonic 0→100 across
+    the whole operation and the label says which phase is running.
+
+    Usage
+    -----
+        pp = PhasedProgress(progress_bar, label_widget,
+                            phases=[("Materializing", 0.3), ("Detecting", 0.7)])
+        pp.start_phase(0)
+        materialize_stack(stack, progress_callback=pp.callback)   # 0 → 30%
+        pp.start_phase(1)
+        detect(..., progress_callback=pp.callback)                # 30 → 100%
+        pp.finish()
+
+    The ``callback(done, total)`` signature matches the progress_callback used
+    throughout PyCAT (materialize_stack, detect_beads_stack, the tools workers),
+    so existing per-phase callbacks drop in unchanged.
+    """
+
+    def __init__(self, progress_bar, label_widget=None, phases=None):
+        """
+        progress_bar : QProgressBar (range is driven to 0–100 here).
+        label_widget : optional QLabel to show the current phase name.
+        phases : list of (name, weight). Weights are normalised; each phase
+            occupies weight/sum of the bar. Default: one full-width phase.
+        """
+        self.bar = progress_bar
+        self.label = label_widget
+        phases = phases or [("Working", 1.0)]
+        names = [p[0] for p in phases]
+        weights = [max(0.0, float(p[1])) for p in phases]
+        tot = sum(weights) or 1.0
+        # Cumulative [start, end] percentage span for each phase.
+        self._spans = []
+        acc = 0.0
+        for w in weights:
+            frac = w / tot
+            self._spans.append((acc * 100.0, (acc + frac) * 100.0))
+            acc += frac
+        self._names = names
+        self._i = 0
+        try:
+            self.bar.setRange(0, 100)
+            self.bar.setValue(0)
+            self.bar.setVisible(True)
+        except Exception:
+            pass
+
+    def start_phase(self, i):
+        """Begin phase i (0-indexed); updates the label and snaps the bar to the
+        phase's starting percentage."""
+        self._i = max(0, min(i, len(self._spans) - 1))
+        lo, _ = self._spans[self._i]
+        try:
+            self.bar.setValue(int(round(lo)))
+            if self.label is not None:
+                self.label.setText(f"{self._names[self._i]}…")
+        except Exception:
+            pass
+
+    def callback(self, done, total):
+        """progress_callback(done, total) → maps into the current phase's span."""
+        lo, hi = self._spans[self._i]
+        frac = (float(done) / float(total)) if total else 1.0
+        frac = 0.0 if frac < 0 else (1.0 if frac > 1 else frac)
+        try:
+            self.bar.setValue(int(round(lo + frac * (hi - lo))))
+        except Exception:
+            pass
+
+    def finish(self):
+        try:
+            self.bar.setValue(100)
+        except Exception:
+            pass
+
+    def hide(self):
+        try:
+            self.bar.setVisible(False)
+        except Exception:
+            pass

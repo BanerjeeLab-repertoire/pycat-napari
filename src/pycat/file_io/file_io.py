@@ -871,20 +871,29 @@ class _TiffPageStack:
         arr = np.asarray(self._pages[self._page_index(0)].asarray()).astype(np.float32)
         return arr if dtype is None else arr.astype(dtype)
 
-    def as_full_array(self, dtype=np.float32):
+    def as_full_array(self, dtype=np.float32, progress_callback=None):
         """Materialise the whole stack as a real (T, H, W) numpy array, read
         one frame at a time. Use this for analysis that needs every frame — it
         avoids the deliberately-truncated __array__ (which returns only frame 0
         to keep napari's incidental array requests cheap).
 
         dtype=None preserves the source frame dtype (e.g. integer label masks).
+        progress_callback : optional callable(done, total) for a determinate
+            "Materializing…" bar.
         """
         _f0 = self._read_frame(0)
         _dt = _f0.dtype if dtype is None else dtype
         out = np.empty(self.shape, dtype=_dt)
         out[0] = _f0.astype(_dt)
-        for t in range(1, self.shape[0]):
+        n = self.shape[0]
+        if progress_callback is not None:
+            try: progress_callback(1, n)
+            except Exception: pass
+        for t in range(1, n):
             out[t] = self._read_frame(t).astype(_dt)
+            if progress_callback is not None:
+                try: progress_callback(t + 1, n)
+                except Exception: pass
         return out
 
     def __len__(self):
@@ -909,7 +918,7 @@ class _TiffPageStack:
                 pass
 
 
-def materialize_stack(stack_like, dtype=np.float32):
+def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
     """Return a real (T, H, W) numpy array from any stack-like layer data.
 
     Handles PyCAT's lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS
@@ -918,10 +927,15 @@ def materialize_stack(stack_like, dtype=np.float32):
     should call THIS, not np.asarray(layer.data) — the latter can silently
     return a single 2D frame from a lazy wrapper and make a (T,H,W) stack look
     2D (breaking shape checks and per-frame analysis).
+
+    progress_callback : optional callable(done, total) invoked as frames are
+        read, so a caller can show a determinate "Materializing…" bar. Only the
+        frame-by-frame rebuild path reports progress (the only genuinely slow
+        case); eager arrays return immediately.
     """
     # Lazy wrappers expose as_full_array() or are safely indexable by frame.
     if hasattr(stack_like, 'as_full_array'):
-        return stack_like.as_full_array(dtype=dtype)
+        return stack_like.as_full_array(dtype=dtype, progress_callback=progress_callback)
     # dask
     if hasattr(stack_like, 'compute'):
         out = np.asarray(stack_like.compute())
@@ -937,8 +951,15 @@ def materialize_stack(stack_like, dtype=np.float32):
         _dt = _f0.dtype if dtype is None else dtype
         out = np.empty(shp, dtype=_dt)
         out[0] = _f0.astype(_dt)
-        for t in range(1, shp[0]):
+        n = shp[0]
+        if progress_callback is not None:
+            try: progress_callback(1, n)
+            except Exception: pass
+        for t in range(1, n):
             out[t] = np.asarray(stack_like[t]).astype(_dt)
+            if progress_callback is not None:
+                try: progress_callback(t + 1, n)
+                except Exception: pass
         return out
     return arr if dtype is None else arr.astype(dtype)
 

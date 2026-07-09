@@ -1199,9 +1199,13 @@ def detect_beads_stack(
                         # expensive phase. as_completed fires as each frame
                         # finishes, so the bar advances smoothly instead of
                         # sitting at 0 until the (cheap) scoring loop runs.
+                        # Parallel detection is phase 1 of 2 → map it to the
+                        # first 70% of the bar so the subsequent scoring loop
+                        # continues from there instead of restarting at 0
+                        # (avoids the bar hitting 100% twice).
                         if progress_callback is not None and _n_par:
                             progress_callback(
-                                int(_done_par / _n_par * max(1, n_frames)),
+                                int(_done_par / _n_par * 0.70 * max(1, n_frames)),
                                 max(1, n_frames))
             except Exception:
                 # Any failure (pickling, worker crash, host_mask not picklable)
@@ -1267,7 +1271,14 @@ def detect_beads_stack(
                     'r_squared': b['r_squared']})
         done += 1
         if progress_callback is not None:
-            progress_callback(done, n_frames)
+            # If parallel pre-detection ran, it consumed the first 70% of the
+            # bar; the scoring loop here fills the remaining 70→100%. Otherwise
+            # (pure serial) the scoring loop IS the whole operation → 0→100%.
+            if precomputed_coords is not None:
+                _val = int(0.70 * n_frames + (done / max(1, n_frames)) * 0.30 * n_frames)
+                progress_callback(min(_val, n_frames), n_frames)
+            else:
+                progress_callback(done, n_frames)
 
     if not rows:
         cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']

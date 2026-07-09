@@ -49,7 +49,38 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: Progress-bar audit (materialization-progress helper shipped; per-method rollout pending)
+
+A reusable phased-progress mechanism now exists (``PhasedProgress`` in ``ui_utils`` +
+``progress_callback`` on ``materialize_stack`` / ``as_full_array``) that maps a
+materialization phase and a work phase onto ONE continuous 0→100% bar, fixing the
+"bar reaches 100% twice" confusion. It was applied first to VPT bead detection (the
+parallel-detection pass now fills 0→70% and the scoring pass 70→100%). Remaining work,
+to be done per-method (not as a blanket sweep):
+
+* Wire the materialization ``progress_callback`` into the seven UIs that materialize a
+  stack synchronously before a worker starts (frap, condensate_physics, fusion,
+  invitro_bf, brightfield, invitro_fluor, temperature) so large stacks show a
+  "Materializing…" indication instead of a frozen 0%.
+* Add progress bars to the zero-bar UIs that do slow work: ``contrast_cascade_ui``,
+  ``fd_curve_ui``, ``data_qc_ui``.
+* Audit the core cell/condensate runners in ``ui_modules`` (currently under-covered) and
+  add determinate bars where per-cell / per-object loops make progress measurable.
+* Sweep for any remaining indeterminate/fake bars that could be determinate.
+
+.. rubric:: Documentation audit (user feedback — docs drifting from current GUI)
+
+Tester feedback (Abhradeep) that the instruction docs no longer match the software:
+
+* "Measure lines" cannot be found from the current instructions — findability / renamed.
+* Instruction-page images do not match the current test data (stale screenshots).
+* Module names differ between the docs site and the GUI, e.g. "Condensate segmentation"
+  (docs) vs "sub cellular object segmentation" (GUI) — reconcile naming across docs and UI.
+
+These are documentation fixes (not code); tracked here so they are not lost.
+
 .. rubric:: Time Series In Vitro platform — specialised per-condensate analyses (foundation shipped)
+
 
 The Time Series In Vitro Object Analysis (Fluorescence) module provides the 2D+t
 foundation: per-frame segmentation, fusion-aware condensate linking, per-condensate
