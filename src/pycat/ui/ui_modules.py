@@ -3835,72 +3835,104 @@ class MenuManager:
             else:
                 _info("Side-by-side grid view OFF.")
 
-    def _image_layers_for_grid(self):
-        """Visible Image layers, in layer order — the ones that get grid cells."""
+    def _annotation_layers(self):
+        """Layers that are pure annotation/drawing (Shapes/Points) — these are
+        removed from the grid (they can't tile meaningfully). Mask (Labels)
+        layers are NOT included here: they overlay their image and are controlled
+        by their own visibility eyeball."""
         out = []
         try:
             for lyr in self.viewer.layers:
-                if isinstance(lyr, napari.layers.Image) and bool(getattr(lyr, 'visible', True)):
+                if isinstance(lyr, (napari.layers.Shapes, napari.layers.Points)):
                     out.append(lyr)
         except Exception:
             pass
         return out
 
-    def _apply_managed_grid(self):
-        """Enable napari grid sized to the visible image layers.
+    def _grid_tileable_visible(self):
+        """Visible layers that should occupy grid cells: Image and Labels (mask)
+        layers that are currently visible, in layer order."""
+        out = []
+        try:
+            for lyr in self.viewer.layers:
+                if isinstance(lyr, (napari.layers.Image, napari.layers.Labels)):
+                    if bool(getattr(lyr, 'visible', True)):
+                        out.append(lyr)
+        except Exception:
+            pass
+        return out
 
-        napari's grid tiles by TOTAL layer count (a hidden layer still consumes a
-        cell), so merely hiding the annotation Shapes layers leaves empty tiles.
-        To make the grid contain ONLY the images, we temporarily REMOVE the
-        non-image layers (annotations/shapes/points) from the viewer while grid is
-        on — preserving each layer object so it can be re-inserted unchanged when
-        grid is turned off. napari then tiles exactly the image layers.
+    def _apply_managed_grid(self):
+        """Enable napari grid, reflowed to only the VISIBLE tileable layers.
+
+        The diagnostic on napari 0.7.1 established two facts that drive this:
+          (1) napari's grid tiles by TOTAL layer count and ignores visibility, so
+              hidden layers otherwise leave empty black tiles (grid does NOT
+              reflow on its own, and shape=(-1,-1) auto-recomputes to the full
+              count) — but
+          (2) setting grid.shape EXPLICITLY to fit the visible count DOES reflow
+              the canvas, and napari fills cells by LAYER INDEX.
+        So: remove pure annotation/drawing layers, move the visible tileable
+        layers (images + visible masks) to the FRONT so they occupy the low-index
+        cells, and set grid.shape to exactly fit their count. Hidden images fall
+        to the back / off the exposed cells. Masks stay in the list and overlay
+        their image via z-order; their eyeball controls whether they show.
 
         Idempotent and re-entrancy-safe.
         """
+        import math
         if getattr(self, '_grid_applying', False):
             return
         self._grid_applying = True
         try:
             g = self.viewer.grid
-            # Pull out non-image layers, remembering each layer object + its index
-            # so we can restore position and content exactly on grid-off.
+            # 1. Remove pure annotation/drawing layers (recorded for restore).
             if not hasattr(self, '_grid_removed_nonimage'):
                 self._grid_removed_nonimage = []
             for idx in range(len(self.viewer.layers) - 1, -1, -1):
                 lyr = self.viewer.layers[idx]
-                if not isinstance(lyr, napari.layers.Image):
-                    # Record (index, layer-object) once; the layer object keeps
-                    # its data/attributes while detached from the viewer.
-                    already = any(l is lyr for _, l in self._grid_removed_nonimage)
-                    if not already:
+                if isinstance(lyr, (napari.layers.Shapes, napari.layers.Points)):
+                    if not any(l is lyr for _, l in self._grid_removed_nonimage):
                         self._grid_removed_nonimage.append((idx, lyr))
                     try:
                         self.viewer.layers.remove(lyr)
                     except Exception:
                         pass
-            # Now only image layers remain; enable grid and let napari auto-size.
-            n = len([l for l in self.viewer.layers
-                     if isinstance(l, napari.layers.Image)])
+            # 2. Count visible tileable layers and set an explicit grid shape.
+            vis = self._grid_tileable_visible()
+            n = len(vis)
             if n <= 1:
                 g.enabled = False
-            else:
-                g.enabled = True
-                try:
-                    g.shape = (-1, -1)   # napari auto-sizes to the layer count
-                    g.stride = 1
-                except Exception:
-                    pass
+                return
+            # 3. Move visible tileable layers to the front (low indices) so they
+            #    occupy the cells the explicit shape exposes. Preserve their
+            #    relative order; hidden layers drift to the back.
+            try:
+                # napari LayerList.move(src_index, dst_index). Build target order.
+                target = vis + [l for l in self.viewer.layers if l not in vis]
+                for dst, lyr in enumerate(target):
+                    src = list(self.viewer.layers).index(lyr)
+                    if src != dst:
+                        self.viewer.layers.move(src, dst)
+            except Exception:
+                pass
+            cols = int(math.ceil(math.sqrt(n)))
+            rows = int(math.ceil(n / cols))
+            g.enabled = True
+            try:
+                g.stride = 1
+                g.shape = (rows, cols)   # EXPLICIT shape → reflows (proven)
+            except Exception:
+                pass
         except Exception as _e:
             print(f"[PyCAT] managed grid failed: {_e}")
         finally:
             self._grid_applying = False
 
     def _restore_grid_removed_layers(self):
-        """Re-insert the non-image layers removed for grid mode, at their original
-        positions (best-effort), preserving their data."""
+        """Re-insert the annotation/drawing layers removed for grid mode, at their
+        original positions (best-effort), preserving their data."""
         removed = getattr(self, '_grid_removed_nonimage', [])
-        # Restore in ascending index order so positions line up.
         for idx, lyr in sorted(removed, key=lambda t: t[0]):
             try:
                 if lyr not in list(self.viewer.layers):

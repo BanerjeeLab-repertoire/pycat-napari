@@ -23,6 +23,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.323] - 2026-07-09
+### Fixed (grid reflow — now driven by the napari 0.7.1 diagnostic)
+- **Grid now reflows to only the visible tiles.** A diagnostic on napari 0.7.1 established
+  that napari's grid tiles by TOTAL layer count and ignores visibility (so hidden layers
+  left empty black tiles, and `shape=(-1,-1)` auto-recomputed to the full count) — but
+  setting `grid.shape` EXPLICITLY to fit the visible count DOES reflow, and napari fills
+  cells by layer index. The managed grid now: removes only pure annotation/drawing
+  (Shapes/Points) layers, moves the visible tileable layers (images + visible masks) to the
+  front so they occupy the exposed cells, and sets an explicit `grid.shape` sized to the
+  visible count — so hiding/showing a layer via its eyeball reflows the grid to fill the
+  canvas.
+- **Masks now ride along in the grid** instead of being removed: Labels (mask) layers stay
+  in the layer list and overlay their image, controlled by their own visibility eyeball
+  (per the intended comparison behaviour). Only annotation/drawing layers are set aside.
+
+### Changed
+- **Grid toggle moved to the PyCAT toolbar** (Layers section, next to the show/hide-all-eye
+  and Gray/Viridis colormap controls) as a "🗃 Grid" button, where a viewer-layout action
+  belongs — instead of being buried in the Open/Save menu.
+- **Tightened the image-vs-mask default** in "Add Image / Mask": a file is only defaulted to
+  MASK when its integer values look like real label IDs (contiguous from 0, i.e. 0..N, or
+  binary), not merely "few values". This stops low-contrast or few-valued IMAGES from
+  defaulting to mask. (The user still confirms in the dialog, and PyCAT-saved files skip the
+  guess entirely via their signifier.)
+
 ## [1.5.322] - 2026-07-09
 ### Fixed (grid tiling of annotation layers — from live test)
 - **Grid mode no longer leaves empty tiles for annotation/drawing layers.** Hiding those

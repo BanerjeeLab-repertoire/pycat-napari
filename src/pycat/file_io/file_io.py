@@ -1478,9 +1478,17 @@ class FileIOClass:
             is_int = _np.issubdtype(plane.dtype, _np.integer)
             uniq = _np.unique(plane)
             n_unique = int(uniq.size)
-            if is_int and n_unique <= 256:
-                mx = int(uniq.max()) if n_unique else 0
-                if n_unique <= 16 or mx <= (n_unique + 2):
+            # A label mask has integer values that are (a) few and (b) look like
+            # label IDs: contiguous from 0 (0,1,2,...,N) or binary. A grayscale
+            # image — even integer-typed — has values scattered across its range,
+            # so uniq won't be a contiguous 0..N run. Requiring the contiguous
+            # pattern (not just "few values") avoids mis-tagging low-contrast
+            # images as masks.
+            if is_int and n_unique <= 256 and n_unique >= 1:
+                mn = int(uniq.min()); mx = int(uniq.max())
+                contiguous_from_zero = (mn == 0 and mx == n_unique - 1)
+                binary = (n_unique <= 2 and mn == 0)
+                if contiguous_from_zero or binary:
                     looks_like_mask = True
         except Exception as _e:
             debug_log("file_io: add_image_or_mask classification failed", _e)

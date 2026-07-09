@@ -887,6 +887,31 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     cmap_action.triggered.connect(_reset_colormaps)
     toolbar.addAction(cmap_action)
 
+    # Side-by-side grid toggle: tile visible image (+ mask) layers for
+    # comparison. Lives here in the Layers section next to the show/hide-all and
+    # colormap controls, since it's a viewer-layout action. Delegates to the
+    # MenuManager's managed-grid implementation.
+    grid_action = QAction("\U0001F5C3  Grid", main_window)   # 🗃 card-box glyph
+    grid_action.setToolTip(
+        "Toggle side-by-side grid view: tiles the visible image (and mask) "
+        "layers for comparison, reflowing to only the ones shown. Annotation / "
+        "drawing layers are set aside while grid is on and return when it's off.")
+
+    def _toggle_grid():
+        try:
+            cm = getattr(processor, '_central_manager', None)
+            mm = getattr(cm, 'menu_manager', None) if cm is not None else None
+            if mm is not None and hasattr(mm, '_toggle_grid_view'):
+                mm._toggle_grid_view()
+            else:
+                # Fallback: plain napari grid toggle if the manager isn't reachable.
+                viewer.grid.enabled = not bool(viewer.grid.enabled)
+        except Exception as e:
+            print(f"[PyCAT] Grid toggle failed: {e}")
+
+    grid_action.triggered.connect(_toggle_grid)
+    toolbar.addAction(grid_action)
+
     main_window.addToolBar(Qt.TopToolBarArea, toolbar)
     print("[PyCAT Batch] Batch toolbar added.")
 
