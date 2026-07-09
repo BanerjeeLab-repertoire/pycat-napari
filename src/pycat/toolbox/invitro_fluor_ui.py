@@ -69,6 +69,65 @@ class InVitroFluorUI:
     def _mpx(self):
         return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
 
+    @staticmethod
+    def _layer_is_time_series(layer):
+        """True only for a genuine multi-frame (T, H, W[, ...]) stack.
+
+        Distinguishes a real temporal stack from images that are 3D by ndim
+        alone but have no time axis: RGB (H, W, 3), a singleton leading axis
+        (1, H, W), and — heuristically — small channel/Z stacks. A napari
+        Image layer flagged rgb is never a time series. Otherwise the layer is
+        treated as a time series when its leading axis is a stack of >1 frames.
+        """
+        try:
+            data = getattr(layer, 'data', None)
+            if data is None:
+                return False
+            if getattr(layer, 'rgb', False):
+                return False
+            shape = getattr(data, 'shape', None)
+            if shape is None:
+                shape = np.asarray(data).shape
+            if len(shape) < 3:
+                return False
+            # Trailing-3 with 2 leading spatial dims → RGB(A), not time.
+            if len(shape) == 3 and shape[-1] in (3, 4) and shape[0] > 4:
+                return False
+            # A singleton leading axis is not a temporal stack.
+            if shape[0] <= 1:
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _has_time_series(self):
+        """Whether the loaded data has a real time axis.
+
+        Prefers the authoritative file metadata (n_timepoints > 1, captured at
+        load), then falls back to inspecting the Image layers. Fails open (True)
+        only if nothing conclusive is found AND a multi-dim layer exists, so a
+        genuine 2D image reliably hides the time-series-only steps.
+        """
+        # 1) Authoritative: loaded-file metadata frame count.
+        try:
+            md = (self._dr().get('file_metadata') or {}).get('common', {}) or {}
+            nt = md.get('n_timepoints')
+            if nt is not None:
+                return int(nt) > 1
+            nf = md.get('n_frames')
+            if nf is not None:
+                return int(nf) > 1
+        except Exception:
+            pass
+        # 2) Layer inspection.
+        try:
+            return any(
+                self._layer_is_time_series(l)
+                for l in self.viewer.layers
+                if isinstance(l, napari.layers.Image))
+        except Exception:
+            return False
+
     def _record(self, step, params):
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp: bp.record(step, params)
@@ -133,19 +192,20 @@ class InVitroFluorUI:
         _ivf_frame_qc(self, layout)
 
         # Steps 7 (Dynamics) and 9 (Frame Quality / bleaching) only apply to
-        # time-series (2D+t) or 3D data — a single 2D droplet image has no
-        # temporal dimension to coarsen or bleach. Show/hide them based on
-        # whether any loaded Image layer is a stack (ndim >= 3), re-evaluated
-        # whenever layers change.
+        # time-series (2D+t) data — a single 2D droplet image has no temporal
+        # dimension to coarsen or bleach. Show/hide them based on whether a real
+        # time axis is present, re-evaluated whenever layers change.
+        #
+        # IMPORTANT: the test must key on an actual *temporal* axis, not raw
+        # ndim >= 3. A single 2D image can still be 3D as far as ndim goes —
+        # RGB (H, W, 3), a singleton leading axis (1, H, W), or a channel/Z
+        # stack (C, H, W)/(Z, H, W) are all ndim 3 but NOT time series. Using
+        # ndim >= 3 left these steps visible on plain 2D images (the reported
+        # bug). We instead treat a layer as a time series only when it is a
+        # genuine multi-frame stack, and prefer the loaded file's metadata
+        # (n_timepoints) as the authoritative signal when available.
         def _update_timeseries_steps(*_):
-            try:
-                has_stack = any(
-                    getattr(l, 'data', None) is not None
-                    and np.asarray(l.data).ndim >= 3
-                    for l in self.viewer.layers
-                    if isinstance(l, napari.layers.Image))
-            except Exception:
-                has_stack = True  # fail open — don't hide if uncertain
+            has_stack = self._has_time_series()
             for _attr in ('_ivf_dynamics_grp', '_ivf_qc_grp'):
                 g = getattr(self, _attr, None)
                 if g is not None:

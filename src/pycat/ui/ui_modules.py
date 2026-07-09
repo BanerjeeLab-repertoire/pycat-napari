@@ -73,6 +73,7 @@ from pycat.toolbox.contrast_cascade_ui import _add_contrast_cascade
 from pycat.toolbox.condensate_physics_ui import _add_condensate_physics
 from pycat.toolbox.brightfield_ui import BrightfieldCondensateUI
 from pycat.toolbox.invitro_fluor_ui import InVitroFluorUI
+from pycat.toolbox.timeseries_invitro_fluor_ui import TimeSeriesInVitroFluorUI
 from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
 from pycat.toolbox.frap_ui import FRAPUI
 from pycat.toolbox.fusion_ui import DropletFusionUI
@@ -1535,6 +1536,10 @@ class AnalysisMethodsUI(BaseUIClass):
     def _switch_to_invitro_fluor_analysis(self, *args, **kwargs):
         """Switch to the in vitro fluorescence condensate analysis pipeline."""
         self._switch_analysis(BaseDataClass, InVitroFluorUI, *args, **kwargs)
+
+    def _switch_to_ts_invitro_fluor_analysis(self, *args, **kwargs):
+        """Switch to the time-series (2D+t) in vitro fluorescence pipeline."""
+        self._switch_analysis(BaseDataClass, TimeSeriesInVitroFluorUI, *args, **kwargs)
 
     def _switch_to_vpt_analysis(self, *args, **kwargs):
         """Switch to the Video Particle Tracking (microrheology) pipeline."""
@@ -3073,6 +3078,11 @@ class MenuManager:
             ('emission_nm', 'Emission (nm)'),
             ('acquisition_date', 'Acquisition date'),
             ('software', 'Software'),
+            ('camera_name', 'Camera'),
+            ('exposure_s', 'Exposure (s)'),
+            ('frame_interval_s', 'Frame interval (s)'),
+            ('frame_interval_source', 'Frame interval source'),
+            ('z_step_um', 'Z step (µm)'),
         ]
 
         def _fmt(v):
@@ -3085,12 +3095,38 @@ class MenuManager:
                 return f"{v:.6g}"
             return str(v)
 
+        def _fmt_interval(c):
+            """Frame interval with IQR appended when measured per-frame."""
+            fi = c.get('frame_interval_s')
+            if fi is None:
+                return '—'
+            txt = f"{float(fi):.6g}"
+            iqr = c.get('frame_interval_iqr_s')
+            if iqr is not None:
+                txt += f"  (IQR {float(iqr):.4g})"
+            return txt
+
         def _populate(show_raw):
-            rows = [(lbl, _fmt(common.get(key))) for key, lbl in _labels]
-            if show_raw and raw:
-                rows.append(('— raw metadata —', ''))
-                for k in sorted(raw.keys()):
-                    rows.append((k, _fmt(raw.get(k))))
+            rows = []
+            for key, lbl in _labels:
+                if key == 'frame_interval_s':
+                    rows.append((lbl, _fmt_interval(common)))
+                else:
+                    rows.append((lbl, _fmt(common.get(key))))
+            if show_raw:
+                # Full per-frame timing (the measured deltas) live in the
+                # expanded view so the curated panel stays compact.
+                deltas = common.get('frame_deltas_s')
+                if deltas:
+                    rows.append(('— frame timing (measured) —', ''))
+                    rows.append(('n frames', _fmt(common.get('n_frames'))))
+                    rows.append(('acquisition start', _fmt(common.get('acquisition_start_time'))))
+                    rows.append(('frame deltas (s)',
+                                 ', '.join(f"{float(d):.5g}" for d in deltas)))
+                if raw:
+                    rows.append(('— raw metadata —', ''))
+                    for k in sorted(raw.keys()):
+                        rows.append((k, _fmt(raw.get(k))))
             table.setRowCount(len(rows))
             for i, (k, v) in enumerate(rows):
                 table.setItem(i, 0, QTableWidgetItem(str(k)))
@@ -3411,7 +3447,8 @@ class MenuManager:
             'Cellular Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_condensate_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
             'In Vitro Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_invitro_fluor_analysis, {}),
             'In Vitro Object Analysis (Brightfield)': (self.central_manager.analysis_methods_ui._switch_to_invitro_bf_analysis, {}),
-            'Time-Series Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Time Series Cellular Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Time Series In Vitro Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_ts_invitro_fluor_analysis, {}),
             'Z-Stack (3D) Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
         }
         self._add_actions_to_menu(condensate_cell_analysis_dict, condensate_cell_analysis_submenu)

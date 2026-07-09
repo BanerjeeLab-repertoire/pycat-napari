@@ -83,6 +83,26 @@ def _empty_common(file_path):
         'emission_nm': None,
         'acquisition_date': None,
         'software': None,
+        # Temporal / acquisition timing — captured at load so any consumer
+        # (VPT microrheology, kymographs, FRAP, time-series analyses) reads the
+        # frame interval from one place instead of asking the user to re-enter
+        # it. frame_interval_s is the primary value; exposure_s and the raw
+        # per-plane times are kept for provenance and for cases where the
+        # nominal interval and the actual elapsed times differ.
+        'frame_interval_s': None,
+        'frame_interval_source': None,
+        'frame_interval_iqr_s': None,
+        # Full per-frame inter-frame deltas (seconds), when the file records
+        # per-frame acquisition times (e.g. MicroManager ElapsedTime-ms). Kept
+        # so a consumer (VPT MSD fitting) can use the true, possibly non-uniform
+        # cadence instead of a single median, and so the metadata viewer/export
+        # can show the actual timing rather than a nominal declared value.
+        'frame_deltas_s': None,
+        'exposure_s': None,
+        'z_step_um': None,
+        'camera_name': None,
+        'acquisition_start_time': None,
+        'n_frames': None,
     }
 
 
@@ -250,6 +270,23 @@ def extract_tiff_metadata(file_path):
             }
             if n_pages > 1:
                 raw['n_pages'] = str(n_pages)
+
+            # Measured per-frame acquisition timing from MicroManager page tags,
+            # if present (authoritative cadence; see _extract_mm_frame_times_from_tiff).
+            try:
+                _mm = _extract_mm_frame_times_from_tiff(file_path)
+                if _mm:
+                    if _mm.get('frame_interval_s'):
+                        common['frame_interval_s'] = float(_mm['frame_interval_s'])
+                        common['frame_interval_source'] = _mm.get('source')
+                        common['frame_interval_iqr_s'] = _mm.get('frame_interval_iqr_s')
+                        common['frame_deltas_s'] = _mm.get('frame_deltas_s')
+                    for _k in ('exposure_s', 'camera_name',
+                               'acquisition_start_time', 'n_frames'):
+                        if _mm.get(_k) is not None and common.get(_k) is None:
+                            common[_k] = _mm[_k]
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -259,6 +296,167 @@ def extract_tiff_metadata(file_path):
 # ---------------------------------------------------------------------------
 # AICSImage (CZI, OME-TIFF, and TIFFs AICSImage can parse)
 # ---------------------------------------------------------------------------
+
+def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
+    """Read per-frame acquisition timing directly from a (MicroManager) TIFF.
+
+    MicroManager writes a per-page ``MicroManagerMetadata`` tag containing
+    ``ElapsedTime-ms`` (a real timestamp) and ``Exposure-ms``. This is the
+    ground-truth cadence — it reflects what the camera actually did, unlike the
+    nominal ``Interval_ms`` in the summary (often 0 / unset) or a free-text OME
+    ``<Description>`` like "500ms interval" (which the hardware may ignore).
+
+    Returns a dict with keys (any of which may be absent):
+      frame_interval_s, frame_interval_iqr_s, frame_deltas_s (list),
+      exposure_s, camera_name, acquisition_start_time, n_frames, source
+    or ``None`` if no per-frame timing is found.
+    """
+    try:
+        import tifffile
+        import numpy as _np
+    except Exception:
+        return None
+
+    elapsed_ms = []
+    exposure_ms = None
+    camera_name = None
+    start_time = None
+    n_pages = 0
+    try:
+        with tifffile.TiffFile(file_path) as t:
+            n_pages = len(t.pages)
+            limit = n_pages if max_pages is None else min(n_pages, max_pages)
+            for i in range(limit):
+                pg = t.pages[i]
+                tag = pg.tags.get('MicroManagerMetadata')
+                if tag is None or not isinstance(tag.value, dict):
+                    continue
+                mm = tag.value
+                et = mm.get('ElapsedTime-ms')
+                if et is not None:
+                    try:
+                        elapsed_ms.append(float(et))
+                    except (TypeError, ValueError):
+                        pass
+                if exposure_ms is None and mm.get('Exposure-ms') is not None:
+                    try:
+                        exposure_ms = float(mm.get('Exposure-ms'))
+                    except (TypeError, ValueError):
+                        pass
+                if start_time is None and mm.get('ReceivedTime'):
+                    start_time = _safe_str(mm.get('ReceivedTime'))
+                if camera_name is None:
+                    # The camera-specific keys are prefixed with the device
+                    # name, e.g. 'Blackfly S BFS-U3-16S2M-Exposure Mode'.
+                    for k in mm.keys():
+                        if k.endswith('-Exposure Mode'):
+                            camera_name = k.rsplit('-Exposure Mode', 1)[0]
+                            break
+    except Exception:
+        return None
+
+    if len(elapsed_ms) < 2:
+        # Still return exposure/camera if we found them on a single page.
+        if exposure_ms is not None or camera_name is not None:
+            out = {'source': 'micromanager_page_tags', 'n_frames': n_pages or None}
+            if exposure_ms is not None:
+                out['exposure_s'] = exposure_ms / 1e3
+            if camera_name is not None:
+                out['camera_name'] = camera_name
+            if start_time is not None:
+                out['acquisition_start_time'] = start_time
+            return out
+        return None
+
+    arr = _np.asarray(elapsed_ms, dtype=float)
+    deltas_ms = _np.diff(arr)
+    deltas_ms = deltas_ms[deltas_ms > 0]
+    if deltas_ms.size == 0:
+        return None
+    deltas_s = deltas_ms / 1e3
+    median_s = float(_np.median(deltas_s))
+    q1, q3 = _np.percentile(deltas_s, [25, 75])
+    iqr_s = float(q3 - q1)
+
+    out = {
+        'frame_interval_s': median_s,
+        'frame_interval_iqr_s': iqr_s,
+        'frame_deltas_s': [float(x) for x in deltas_s],
+        'n_frames': n_pages or (len(elapsed_ms)),
+        'source': 'micromanager_elapsedtime',
+    }
+    if exposure_ms is not None:
+        out['exposure_s'] = exposure_ms / 1e3
+    if camera_name is not None:
+        out['camera_name'] = camera_name
+    if start_time is not None:
+        out['acquisition_start_time'] = start_time
+    return out
+
+
+def _extract_frame_interval_s(image):
+    """Best-effort frame interval (seconds) from an AICSImage's OME model.
+
+    Tries several sources and returns (interval_s, source_str) or (None, None):
+      1. OME Pixels TimeIncrement (with TimeIncrementUnit) — the nominal interval.
+      2. Median of consecutive per-plane DeltaT values — the actual cadence.
+      3. MicroManager 'Interval_ms' in the raw metadata string (only if > 0).
+    """
+    import re as _re
+
+    def _to_seconds(val, unit):
+        if val is None:
+            return None
+        v = float(val)
+        u = (unit or 's').lower()
+        if u in ('ms', 'millisecond', 'milliseconds'):
+            return v / 1e3
+        if u in ('us', 'µs', 'microsecond', 'microseconds'):
+            return v / 1e6
+        if u in ('min', 'minute', 'minutes'):
+            return v * 60.0
+        return v  # seconds (default)
+
+    # 1 & 2: structured OME model via the ome-types object, if present.
+    try:
+        ome = getattr(image, 'ome_metadata', None)
+        if ome is not None and hasattr(ome, 'images') and ome.images:
+            px = ome.images[0].pixels
+            ti = getattr(px, 'time_increment', None)
+            tiu = getattr(px, 'time_increment_unit', None)
+            s = _to_seconds(ti, getattr(tiu, 'value', tiu) if tiu else None)
+            if s and s > 0:
+                return s, 'ome_time_increment'
+            # per-plane DeltaT
+            planes = getattr(px, 'planes', None) or []
+            deltas = [getattr(p, 'delta_t', None) for p in planes]
+            deltas = [float(d) for d in deltas if d is not None]
+            if len(deltas) >= 2:
+                import numpy as _np
+                diffs = _np.diff(_np.sort(_np.asarray(deltas)))
+                diffs = diffs[diffs > 0]
+                if diffs.size:
+                    # DeltaT unit is usually seconds in OME; assume s.
+                    return float(_np.median(diffs)), 'ome_delta_t'
+    except Exception:
+        pass
+
+    # 3: MicroManager Interval_ms in the raw metadata string.
+    try:
+        md = image.metadata
+        s = str(md) if md is not None else ''
+        m = _re.search(r'"?Interval_ms"?\s*[:=]\s*([0-9.]+)', s)
+        if m:
+            _iv = float(m.group(1)) / 1e3
+            # Interval_ms is often 0 / unset in MicroManager summaries; a zero
+            # interval is meaningless and must not be reported as a real cadence.
+            if _iv > 0:
+                return _iv, 'micromanager_interval_ms'
+    except Exception:
+        pass
+
+    return None, None
+
 
 def extract_aicsimage_metadata(file_path, image=None):
     """Extract normalised metadata from an AICSImage object (CZI/OME-TIFF).
@@ -296,8 +494,45 @@ def extract_aicsimage_metadata(file_path, image=None):
             if y:
                 common['pixel_size_um'] = float(y)
                 common['pixel_size_source'] = 'ome_metadata'
+            # Z step (µm) from the same structured pixel-size object.
+            z = getattr(px, 'Z', None)
+            if z:
+                common['z_step_um'] = float(z)
         except Exception:
             pass
+
+        # Frame interval (seconds). Precedence, most authoritative first:
+        #   1. Measured per-frame MicroManager ElapsedTime-ms deltas (the actual
+        #      cadence the camera achieved — reads the TIFF page tags directly).
+        #   2. OME structured TimeIncrement.
+        #   3. OME per-plane DeltaT differences.
+        #   4. MicroManager Interval_ms (only if > 0).
+        # Free-text OME <Description> is never parsed for timing. The measured
+        # deltas, IQR, exposure, camera, start time and frame count are all kept
+        # for provenance and for MSD fitting against the true (non-uniform) cadence.
+        try:
+            _mm = _extract_mm_frame_times_from_tiff(file_path)
+            if _mm:
+                if _mm.get('frame_interval_s'):
+                    common['frame_interval_s'] = float(_mm['frame_interval_s'])
+                    common['frame_interval_source'] = _mm.get('source')
+                    common['frame_interval_iqr_s'] = _mm.get('frame_interval_iqr_s')
+                    common['frame_deltas_s'] = _mm.get('frame_deltas_s')
+                for _k in ('exposure_s', 'camera_name',
+                           'acquisition_start_time', 'n_frames'):
+                    if _mm.get(_k) is not None and common.get(_k) is None:
+                        common[_k] = _mm[_k]
+        except Exception:
+            pass
+        # If the measured cadence was unavailable, fall back to the OME model.
+        if common.get('frame_interval_s') is None:
+            try:
+                _fi, _src = _extract_frame_interval_s(image)
+                if _fi and _fi > 0:
+                    common['frame_interval_s'] = float(_fi)
+                    common['frame_interval_source'] = _src
+            except Exception:
+                pass
 
         # Channel names.
         try:

@@ -49,6 +49,59 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: Time Series In Vitro platform — specialised per-condensate analyses (foundation shipped)
+
+The Time Series In Vitro Object Analysis (Fluorescence) module provides the 2D+t
+foundation: per-frame segmentation, fusion-aware condensate linking, per-condensate
+temporal *object records* (size/intensity/shape vs time), and whole-field trajectories
+(Φ, partition, C_sat vs time). Each object record is the durable structure the following
+specialised analyses attach their own time-series to (build each as its own module
+against the foundation; all are import-and-analyse, per the "own the downstream
+quantification" positioning):
+
+* **Interior bubbling** — detect and track void/vacuole formation and motion *inside* a
+  condensate over time (interior morphodynamics distinct from the outer boundary).
+* **Catalysis kinetics** — per-condensate intensity-vs-time of a fluorescent reporter
+  whose signal is driven by catalysis; fit reaction kinetics per object.
+* **Internal flow** — bead diffusion *within* a condensate tracking interior flow fields
+  (RICS/STICS-adjacent; composes with the fluctuation-spectroscopy roadmap family and
+  the VPT machinery).
+* **Fiber growth off the interface** — nucleation and elongation of fibers from the
+  condensate boundary; length/rate per object over time.
+* **Contrast cascade** — the contrast-cascade method, applied per tracked object.
+
+Design note: these are *views* on the shared per-condensate object record (the biological
+object model direction), not disconnected pipelines — each new method enriches the same
+temporal object rather than emitting an isolated CSV.
+
+.. rubric:: Audit: acquisition parameters derived per data type and metadata structure
+
+Frame interval, pixel size, exposure, Z step and bit depth are now captured at the
+load layer into ``data_repository['file_metadata']['common']`` from the file's real
+metadata (for MicroManager files, the authoritative per-frame ``ElapsedTime-ms`` deltas,
+with median + IQR + the full delta array preserved). The next step is to audit every
+method that consumes an acquisition parameter and confirm it derives that parameter
+**correctly for the specific data type and that type's metadata structure**, reading
+from the single ``file_metadata`` source rather than re-deriving or re-defaulting:
+
+* **Frame interval** — VPT Step 5 (microrheology), time-series condensate, FRAP, any
+  kymograph/tracking path. Confirm each pulls ``frame_interval_s`` from
+  ``file_metadata['common']`` and that the value is right for the file's format (OME
+  ``TimeIncrement`` vs per-plane ``DeltaT`` vs MicroManager ``ElapsedTime-ms`` deltas
+  vs nominal ``Interval_ms``). Never parse free-text OME ``<Description>`` for timing.
+* **Per-frame (non-uniform) cadence** — with the full ``frame_deltas_s`` array now
+  captured, add a VPT toggle to feed the true per-frame deltas into the MSD lag-time
+  axis instead of a single median, and validate it against Gable's reference notebook
+  (``VPT_04062022_XML``). Currently deltas are captured and displayed only.
+* **Pixel size** — confirm the µm/px used by each spatial measurement matches the
+  file's metadata / user gate for that data type.
+* **Exposure, Z step, bit depth** — confirm any method that assumes these reads them
+  from ``file_metadata`` rather than hard-coding a default.
+
+Goal: one source of truth per acquisition parameter, correctly extracted per data
+type, with provenance visible in the metadata panel. Do this as a careful pass so no
+method's current behaviour is silently changed without validation.
+
 .. rubric:: In-vitro brightfield segmentation — generalize across regimes (awaiting test data)
 
 The texture (local-std + watershed) method added in v1.5.231 was optimized against ONE

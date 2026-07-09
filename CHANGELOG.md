@@ -23,6 +23,299 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.306] - 2026-07-09
+### Added (Time Series In Vitro Fluorescence — 2D+t foundation)
+- **New analysis method: Time Series In Vitro Object Analysis (Fluorescence).** The temporal
+  counterpart of the 2D in vitro fluorescence pipeline. It segments every frame, LINKS
+  droplets across frames into per-condensate temporal objects, and reports both per-object
+  and whole-field time-series. New modules `timeseries_invitro_tools.py` (analysis) and
+  `timeseries_invitro_fluor_ui.py` (stepped UI). Steps: load (time-series-gated) →
+  per-frame preprocess → per-frame segment (Multi-Otsu/Otsu/watershed) → link
+  (fusion-aware) → per-condensate trajectories → field trajectories.
+- **Fusion-aware condensate linking.** Reuses the Bayesian/Hungarian linker but tuned for
+  large, slow, irregular objects: a size-scaled search radius (a droplet moves at most a
+  fraction of its own radius per frame), up-weighted area consistency, and velocity
+  prediction OFF (condensates are not ballistic). A dedicated pass detects droplet FUSION
+  events — where two tracks merge into one — and flags them (child + parent track ids)
+  rather than silently mis-linking, since fusion is scientifically central here.
+- **Per-condensate temporal object records.** Each tracked droplet becomes a durable object
+  record carrying size/intensity/shape vs time plus a linear area-growth rate. These records
+  are the foundation the planned specialised analyses (interior bubbling, catalysis kinetics,
+  internal flow, fiber growth, contrast cascade — now on the roadmap) attach to.
+- **Streaming segmentation with opt-in keyframing.** Frames are segmented one at a time
+  (never materialising the whole movie). Multi-Otsu is cheap enough to run every frame
+  (the default); a keyframe checkbox (with a caveat tooltip) exists only for exceptionally
+  long stacks and copies masks between keyframes.
+- **A tracked-label overlay** recolours each droplet by track id so one condensate keeps one
+  colour through the movie.
+
+### Fixed (2D in vitro fluorescence — time-series steps shown on plain 2D images)
+- **The Dynamics/coarsening and Frame-Quality steps now hide correctly for non-time-series
+  data.** They were gated on `data.ndim >= 3`, which is true for RGB `(H, W, 3)`, a singleton
+  leading axis `(1, H, W)`, and channel/Z stacks — none of which are time series — so the
+  steps stayed visible on plain 2D images. The gate now keys on a real temporal axis: the
+  loaded file's `n_timepoints` metadata (captured at load) first, then a proper multi-frame
+  stack test (new `_has_time_series` / `_layer_is_time_series` helpers). Validated against
+  2D / RGB / singleton / real-stack shapes.
+
+### Changed (menu naming)
+- **"Time-Series Object Analysis" → "Time Series Cellular Object Analysis"** (it is the 2D+t
+  cellular pipeline), and the new **"Time Series In Vitro Object Analysis (Fluorescence)"**
+  added alongside it under Cell and Object Analyses.
+
+## [1.5.305] - 2026-07-09
+### Added (measured per-frame acquisition timing captured at load)
+- **The real per-frame cadence is now read from MicroManager page tags.** A metadata
+  audit of the VPT test file showed the previously-used interval was wrong: the nominal
+  `Interval_ms` in the MicroManager summary is `0.0` (unset), and the OME
+  `<Description>` free-text says "500ms interval" — but the camera actually ran at
+  ~100 ms/frame. The authoritative source is the per-page `MicroManagerMetadata`
+  `ElapsedTime-ms` timestamp on each frame. A new `_extract_mm_frame_times_from_tiff`
+  reads those timestamps directly (via tifffile), computes the inter-frame deltas, and
+  records the **median** frame interval, its **IQR**, and the **full per-frame delta
+  array** into `file_metadata['common']`, along with **exposure**, **camera name**,
+  **acquisition start time** and **frame count**. On the test data this correctly
+  recovers ~0.1 s/frame.
+- **Frame-interval precedence is now measured-first.** For a loaded file the interval is
+  taken, most-authoritative first, from: (1) measured MicroManager `ElapsedTime-ms`
+  deltas, (2) OME structured `TimeIncrement`, (3) OME per-plane `DeltaT` differences,
+  (4) MicroManager `Interval_ms` **only if > 0**. Free-text OME `<Description>` is never
+  parsed for timing. A zero `Interval_ms` is no longer reported as a real cadence.
+- **The metadata panel now shows timing and provenance.** The File Metadata dialog
+  displays Camera, Exposure (s), Frame interval (s) with its IQR, Frame interval source,
+  and Z step in the curated view; the full measured per-frame deltas, frame count and
+  acquisition start time appear under "Show all raw metadata". All of these are included
+  in the JSON export.
+
+### Note (correction to the 1.5.304 conclusion)
+- The 1.5.304 entry stated the test data was "actually 0.5 s/frame". A thorough metadata
+  dump disproved this — the measured cadence is ~0.1 s/frame (the value Step 5 originally
+  defaulted to). The frame interval was therefore **not** the cause of the low VPT
+  viscosity; that investigation continues on the MSD-magnitude side. The outlier-rejection
+  work from 1.5.304 stands.
+
+### To do (queued in the roadmap)
+- Audit every method that consumes an acquisition parameter (frame interval, pixel size,
+  exposure, Z step, bit depth) to confirm it derives the value correctly for the specific
+  data type and reads from the single `file_metadata` source. Add a VPT toggle to feed the
+  captured per-frame deltas into the MSD lag-time axis (currently captured/displayed only).
+
+## [1.5.304] - 2026-07-09
+### Fixed (VPT viscosity too low — outlier trajectories + frame interval from metadata)
+- **Acquisition timing (frame interval) is now captured at load, in the top-level metadata, for all
+  consumers.** The load-time metadata extraction now records frame_interval_s (and exposure, Z step)
+  from OME TimeIncrement, per-plane DeltaT, or MicroManager Interval_ms, into
+  data_repository[file_metadata]. VPT Step 5 reads it as the frame-interval default instead of a
+  fixed 0.1 s (a wrong interval scales the diffusion coefficient and viscosity directly — the test
+  data is actually 0.5 s/frame, so the old default was 5x off). Any timing-dependent analysis can now
+  read the interval from one place. The user can still override it.
+- **MSD now rejects outlier trajectories, matching the reference analysis workflow.** A movie yields
+  many trajectories; spurious/mis-linked ones have anomalously high MSD and, when averaged in, inflate
+  the ensemble MSD, inflate D, and deflate viscosity by a large factor. compute_msd now rejects tracks
+  whose first- and last-lag per-track MSD fall outside a 1.5x IQR fence in log space (the reference
+  notebook get_outlier_bounds method) before aggregating. On mixed good/spurious tracks this recovers
+  the correct diffusion coefficient.
+### Changed (VPT linking defaults — physically grounded)
+- Max linking distance now defaults to about 2x the bead size (a bead should not move much more than
+  its own diameter between frames in a viscous sample); max frame gap now defaults to 0 (do not bridge
+  gaps — a bead that vanishes and reappears is more likely a broken/mis-linked track to prune than a
+  real continuous one).
+### Note
+- The localization-offset MSD fit added in 1.5.302/1.5.303 is correct physics but was NOT the cause of
+  the low viscosity on this dataset: the real MSD is a clean power law with no low-lag plateau, so the
+  fitted offset is ~0 there. The dominant cause was outlier trajectories plus the wrong frame interval,
+  both addressed here.
+
+## [1.5.303] - 2026-07-09
+### Changed (MSD localization offset bound matched to the reference notebook)
+- **Tightened the MSD localization-offset bound to match the reference analysis notebook exactly.**
+  1.5.302 added the offset term (MSD = 4*D*t^alpha + N) but bounded N loosely; it is now bounded to
+  [0, min(MSD)] as in the reference notebook, since the constant offset cannot exceed the smallest
+  measured MSD value. This makes PyCAT's viscosity fit reproduce the reference workflow result on
+  viscous samples.
+
+## [1.5.302] - 2026-07-08
+### Fixed (viscosity far too low in viscous samples — MSD localization-error offset)
+- **The MSD fit now separates static localization error from real diffusion, fixing viscosities
+  that came out ~30x too low in viscous samples.** In a viscous medium a probe bead barely moves
+  per frame, so the constant offset in the MSD from bead-centroid localization uncertainty (tens of
+  nm) can dwarf the real time-dependent signal. The previous fit (MSD = 4·D·τ^α, no offset) absorbed
+  that constant floor into D, inflating the diffusion coefficient and deflating Stokes-Einstein
+  viscosity by a large factor (e.g. a true ~7 Pa·s condensate reading ~0.2 Pa·s). The fit is now
+  MSD = 4·D·τ^α + 4·σ_loc², so D reflects only genuine motion; the fitted localization error is
+  reported (nm) in the results table as a sanity check. This matches the reference analysis notebook (MSD = 4*D*t^alpha + N, with N the localization offset bounded to [0, min(MSD)]); the previous PyCAT fit omitted N, which is why a ~7 Pa*s condensate read ~0.2 Pa*s. The offset fit recovers the same D as before
+  when the localization floor is negligible (fast / low-viscosity samples), so it is safe across the
+  range. This also improves the other MSD-based workflows (in-vitro fluorescence/brightfield,
+  condensate physics) which share the same fit.
+### Fixed (VPT trajectory layers rendered at the wrong scale)
+- Bead/Aggregate trajectory layers now inherit the bead image layer's spatial scale, so tracks and
+  image share one coordinate frame and overlay 1:1 when a micron pixel size is set (previously the
+  tracks rendered as a full-width streak beside a tiny image).
+
+## [1.5.301] - 2026-07-08
+### Fixed (VPT trajectory layers rendered at the wrong scale)
+- **Bead/Aggregate trajectory layers now overlay the image correctly when a pixel size is set.**
+  When a micron pixel size is applied (e.g. via the pixel-size gate at load), the image layer
+  renders in micron world units (layer scale = µm/px) but the trajectory layers were added in pixel
+  coordinates with no scale, so they rendered in a different coordinate frame — appearing as a
+  full-width streak beside a tiny image. The trajectory layers now inherit the bead image layer's
+  spatial scale, so tracks and image share one coordinate frame and overlay 1:1.
+
+## [1.5.300] - 2026-07-08
+### Changed (VPT detection: honest progress bar and runtime estimate)
+- **The detection progress bar now advances during the actual detection work.** With CPU-parallel
+  detection the expensive per-frame blob detection ran in a process pool that reported nothing, so
+  the bar sat near 0 and then jumped when the cheap scoring loop ran. Progress is now emitted as
+  each frame finishes in the pool (via as_completed), so the bar moves smoothly through the real
+  work. Results are unchanged (still verified identical to serial).
+- **The pre-run time estimate accounts for acceleration.** It previously always showed the serial
+  worst case (about 13 minutes for 1000 frames) regardless of GPU or multi-core use. It now divides
+  by the expected speedup (GPU if present, else the CPU worker count) and names which accelerator it
+  assumes, so the estimate reflects what will actually happen.
+
+## [1.5.299] - 2026-07-08
+### Changed (VPT microrheology: never mix bead populations; viscosity reported first)
+- **The three bead populations (green singlets / yellow out-of-plane / red aggregates) are never
+  mixed, and microrheology runs on green singlets by default.** Previously out-of-plane (dim,
+  defocused) beads were folded into the primary set by default, which fed the linker a large,
+  low-quality population and produced many spurious short trajectories that biased the MSD and
+  pulled the fitted viscosity far too low. A new Microrheology population selector (in the detection
+  step) offers: Green (singlets, default), Yellow (out-of-plane) only — so the dim population can be
+  checked on its own to see whether it gives a consistent viscosity, and Green + Yellow (combine)
+  once that is confirmed. Aggregates (red) are always tracked as a separate readout and never enter
+  the viscosity population, since their size would bias Stokes-Einstein. The old always-on
+  keep-out-of-plane / route-aggregates checkboxes are replaced by this single explicit choice.
+- **Viscosity is now reported first** (ahead of the diffusion coefficient) in both the results table
+  and the completion message, since it is the headline quantity.
+
+## [1.5.298] - 2026-07-08
+### Fixed (Compute MSD hung / crashed on large track sets)
+- **Microrheology (Compute MSD) could freeze or crash PyCAT on movies that produce many long
+  tracks.** Three causes, all addressed. (1) Both the ensemble compute_msd and the per-track MSD
+  curves built their displacements with an O(n²) Python double loop over frame pairs; this is now
+  vectorised (gap-aware array shifts), numerically identical to before but far faster on long
+  tracks. (2) The per-track MSD now samples LOG-SPACED lags instead of every integer lag — MSD is
+  read on log-log axes, so this preserves the curve shape while computing and drawing far fewer
+  points. (3) The MSD spaghetti plot now caps how many individual track lines it draws (a random
+  sample of 400) instead of one matplotlib line per track, which by itself could freeze the UI with
+  tens of thousands of tracks; the ensemble mean and the fitted diffusion result still use every
+  track.
+
+### Added (VPT: GPU-accelerated bead detection with automatic tiered selection)
+- **Fast-mode bead detection now uses the GPU when one is available.** The expensive part of blob
+  detection — the per-scale Laplacian-of-Gaussian convolutions — runs on the GPU (via CuPy), keeping
+  the scale-space cube on-device; the peak finding then uses scikit-image's exact peak_local_max so
+  results are bit-for-bit identical to the CPU detector. Detection now selects the best available
+  path automatically: GPU if present, else the CPU process-pool (1.5.293), else plain serial.
+- **A runtime equivalence guard protects correctness.** Before trusting the GPU for a whole stack,
+  detection verifies the GPU detector reproduces the CPU detector on the first frame; if they
+  disagree for any reason (driver/CuPy quirk) it silently falls back to the CPU path, so GPU
+  acceleration can never make results wrong — only faster. Requires the optional gpu extra
+  (cupy-cuda11x) and a CUDA device; without them the CPU paths are used unchanged.
+
+## [1.5.297] - 2026-07-08
+### Changed (VPT fast-mode classification: real out-of-plane bin, viscosity strictness, temporal stability)
+- **Dim, out-of-focus detections now go to the out-of-plane (yellow) class instead of blinking as
+  green singlets.** The fast-mode classifier never actually assigned the yellow class; dim spots
+  became singlets (and flickered in/out as they crossed the match-quality floor). Dim detections
+  (low amplitude or low SNR relative to the population) are now binned out_of_plane.
+- **A classification strictness control (hidden under Show advanced detection options) makes the dim
+  gate viscosity-aware.** The default (1.0) is tuned for viscous samples (~3 Pa·s and above), where
+  beads move slowly and a dim spot is almost always out of focus. For less viscous / faster samples,
+  where beads cross the focal plane quickly and a firm gate would wrongly bin real beads, the control
+  can be lowered (opt-in). The parameters are not meant to be universal across all viscosities.
+- **Stable dim tracks are promoted back to singlet after linking (temporal stability pass).** A dim
+  detection that persists across many frames with few gaps is a real, faint, in-focus bead, not an
+  out-of-focus blink; once tracks exist this is detectable, so such tracks are reclassified from
+  yellow to singlet. Blinking dim tracks correctly remain yellow. Aggregates and normal singlets are
+  untouched. (Blinking of the yellow population frame-to-frame is expected and acceptable.)
+
+## [1.5.296] - 2026-07-08
+### Fixed (VPT linking crashed in fast mode) + Changed (faster linker, real progress bar)
+- **Linking failed with KeyError: sigma_mean when aggregates were routed to a secondary
+  population in fast (template) detection mode.** aggregate_population_stats assumed the
+  Gaussian-fit columns (sigma_mean, n_units_est) that only fit-mode detection produces; fast mode
+  does not fit a Gaussian. The function now guards each fit-only column and reports the stats it can
+  (aggregate counts and aggregated fraction) instead of raising. Both linkers work in fast mode
+  again.
+- **The trajectory linker cost matrix is vectorised**, replacing a double Python loop over every
+  (track, detection) pair per frame with numpy broadcasting. On dense movies (hundreds of beads per
+  frame across many frames) this removes the dominant runtime cost. The computed cost matrix is
+  numerically identical to the previous loop (verified exact), so tracking results are unchanged.
+- **The linking progress bar is now determinate.** It previously spun indefinitely, so there was no
+  way to tell whether linking was progressing or stalled; it now advances per frame (0..n_frames)
+  as the sequential linker moves through the movie.
+
+## [1.5.295] - 2026-07-08
+### Added / Fixed (context-aware multi-file OME-TIFF handling; stop per-frame companion warning)
+- **Multi-file OME-TIFF sets (e.g. Micro-Manager MMStacks split across sibling files) are now
+  resolved up front, lazily, without materialising the stack.** A new resolver reads the OME
+  metadata to see which linked files it references and checks which are actually present on disk,
+  then builds a global frame->(file, page) map spanning the present files. Two cases are handled:
+  (1) all companions present -> frames are read across the linked files transparently; (2) some
+  companions missing (a file copied out of its set) -> only the frames that physically exist are
+  loaded, with a clear warning, instead of silently zero-filling absent planes. The single-file fast
+  path is unchanged.
+- **Fixed a warning that spammed the terminal once per frame during parallel bead detection.** The
+  VPT parallel workers re-open the file per frame; on a multi-file OME set whose companions were
+  missing, tifffile printed "OME series failed to read ... Missing data are zeroed" on every read
+  (thousands of lines). Workers now read via the resolved page map (or, for single files, with the
+  tifffile OME warning silenced) and match the serial reader frame-for-frame.
+
+## [1.5.294] - 2026-07-08
+### Fixed (batch replay ran steps on the wrong channel; Measure Line values were ignored)
+- **Batch replay of the Condensate Analysis pipeline could run steps on the wrong image layer, and
+  ignored the measurements made with the Measure Line tool.** Contributed by a user who diagnosed
+  the failures. Three fixes: (1) replay now resolves the actual layer name the GUI recorded for each
+  step (a new _resolve_image_layer helper) instead of assuming a fixed channel/stage — previously
+  Cellpose could run on the foreground-suppressed segmentation channel instead of the fluorescence
+  channel and segment 0 cells. It honours both which channel (segmentation / fluorescence / a named
+  extra channel from 3+ fluorophore files) and which stage (raw vs preprocessed / background-
+  removed) the recorded name encodes. (2) The Measure Line step now applies the recorded
+  cell_diameter / ball_radius / object_size instead of being a no-op; leaving the stale open_image
+  ball_radius in place had, after upscaling, produced an oversized rolling-ball element and a
+  MemoryError in condensate segmentation, and gave Cellpose the wrong cell diameter. (3) Replay now
+  skips cell/condensate analysis gracefully (with an explanatory message) when segmentation yields
+  0 cells or no puncta, instead of crashing inside pandas. Preprocessing and background removal also
+  now act only on the layer that was active when the step was recorded, matching the interactive
+  tool. Non-condensate replay paths (time-series, brightfield, in-vitro) are unchanged.
+
+## [1.5.293] - 2026-07-08
+### Added (VPT: CPU-parallel bead detection)
+- **Fast-mode bead detection now runs across a process pool when possible**, cutting the time to
+  reach the tracking step on multi-core machines. Per-frame blob detection (the expensive,
+  embarrassingly-parallel part) is dispatched to worker processes that re-open the source file and
+  read their own frame; template building, scoring and classification stay in the main process. It
+  activates automatically (parallel=auto) for fast mode on a file-backed stack with more than one
+  frame and more than one worker, and falls back cleanly to serial detection for anything else (a
+  non-file-backed stack, a single frame, or any worker error). Results are unchanged: a regression
+  test (tests/test_vpt_parallel_equivalence.py) asserts the parallel path produces bead coordinates
+  identical to serial on every frame. GPU-accelerated detection is a separate, later addition built
+  on this foundation.
+
+## [1.5.292] - 2026-07-08
+### Changed (restrict to Python 3.12 to prevent accidental 3.13 installs)
+- **requires-python tightened to >=3.12,<3.13**, and the 3.13 classifier and the contradictory
+  "supported range 3.12-3.13" README note were corrected to 3.12-only. Some users following the
+  install steps ended up on Python 3.13, which is not yet validated against the native dependency
+  stack (PyQt5/torch/numba/cellpose on arm64) and contributed to launch instability. pip will now
+  refuse to install on 3.13 with a clear version error instead of installing and crashing. 3.13
+  support can be re-enabled after deliberate testing.
+
+## [1.5.291] - 2026-07-08
+### Fixed (launch segfault on Apple Silicon / arm64 Macs)
+- **Multiple native arm64 (Apple Silicon) macOS users hit a segmentation fault at launch**, right
+  after startup finished (the OMP: Info #276 omp_set_nested banner printed first). This is the
+  signature of a duplicate OpenMP runtime: PyTorch, Numba, MKL and Cellpose can each load their own
+  copy of libomp, and on arm64 two copies in one process can abort at the C level. Two mitigations,
+  both applied before any native library is imported: (1) KMP_DUPLICATE_LIB_OK=TRUE (plus capped
+  OMP thread counts) so the OpenMP runtime tolerates the duplicate instead of crashing; these are
+  no-ops on machines without the conflict, so they are safe everywhere. (2) On macOS the background
+  startup thread no longer imports PyTorch — that import raced with Qt/CentralManager initialising
+  on the main thread (a concurrent native-init crash the code already warned about), and the check
+  it performed (CUDA availability) is meaningless on Apple Silicon anyway. Torch now loads on first
+  actual use instead of during launch.
+
 ## [1.5.290] - 2026-07-08
 ### Fixed (VPT bead classification flickered frame-to-frame: aggregates and dim detections)
 - **A large aggregate alternated between the aggregate (red) and singlet (green) class across
