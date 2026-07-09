@@ -406,7 +406,8 @@ class FRAPUI:
         name = self._rec_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Recovery stack '{name}' not found."); return
-        stack = np.asarray(self.viewer.layers[name].data)
+        from pycat.file_io.file_io import materialize_stack
+        stack = materialize_stack(self.viewer.layers[name].data)
         if stack.ndim != 3:
             napari_show_warning("Recovery stack must be a 3D (T, H, W) time series."); return
 
@@ -485,7 +486,8 @@ class FRAPUI:
         prebleach_stack = None
         pbname = self._prebleach_dd.currentText()
         if pbname != "None" and pbname in [l.name for l in self.viewer.layers]:
-            prebleach_stack = np.asarray(self.viewer.layers[pbname].data)
+            from pycat.file_io.file_io import materialize_stack
+            prebleach_stack = materialize_stack(self.viewer.layers[pbname].data)
 
         # Fit model + ROI geometry
         use_rd   = self._rb_rd.isChecked()

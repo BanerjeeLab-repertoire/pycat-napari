@@ -212,7 +212,8 @@ class DropletFusionUI:
             name = self._img_dd.currentText()
             if name not in [l.name for l in self.viewer.layers]:
                 napari_show_warning(f"Image stack '{name}' not found."); return
-            stack = np.asarray(self.viewer.layers[name].data)
+            from pycat.file_io.file_io import materialize_stack
+            stack = materialize_stack(self.viewer.layers[name].data)
             try:
                 time, sig = aspect_ratio_signal(
                     stack, frame_interval_s=self._frame_dt.value())

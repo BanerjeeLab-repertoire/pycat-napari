@@ -469,7 +469,8 @@ def _ivbf_dynamics(ui, layout):
         from pycat.toolbox.invitro_tools import (
             coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
         try:
-            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data)
+            from pycat.file_io.file_io import materialize_stack
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Needs a 3D (T,H,W) mask stack."); return
@@ -554,7 +555,8 @@ def _ivbf_focus_qc(ui, layout):
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
-            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data).astype(np.float32)
+            from pycat.file_io.file_io import materialize_stack
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Needs a 3D (T,H,W) stack."); return

@@ -304,7 +304,8 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         name = fus_stack_dd.currentText()
         if name not in [l.name for l in ui_instance.viewer.layers]:
             napari_show_warning("Select a labelled condensate mask stack first."); return
-        stack = np.asarray(ui_instance.viewer.layers[name].data)
+        from pycat.file_io.file_io import materialize_stack
+        stack = materialize_stack(ui_instance.viewer.layers[name].data, dtype=None)
         if stack.ndim != 3:
             napari_show_warning("Fusion needs a 3D (T,H,W) mask stack."); return
         mpx = float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5
@@ -407,8 +408,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         from pycat.toolbox.condensate_physics_tools import (
             analyse_frame_quality, apply_bleach_correction)
         try:
+            from pycat.file_io.file_io import materialize_stack
             layer = ui_instance.viewer.layers[stack_dd_qc.currentText()]
-            stack = np.asarray(layer.data).astype(np.float32)
+            stack = materialize_stack(layer.data, dtype=np.float32)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:

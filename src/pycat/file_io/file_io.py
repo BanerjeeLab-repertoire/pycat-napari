@@ -875,10 +875,16 @@ class _TiffPageStack:
         """Materialise the whole stack as a real (T, H, W) numpy array, read
         one frame at a time. Use this for analysis that needs every frame — it
         avoids the deliberately-truncated __array__ (which returns only frame 0
-        to keep napari's incidental array requests cheap)."""
-        out = np.empty(self.shape, dtype=dtype)
-        for t in range(self.shape[0]):
-            out[t] = self._read_frame(t).astype(dtype)
+        to keep napari's incidental array requests cheap).
+
+        dtype=None preserves the source frame dtype (e.g. integer label masks).
+        """
+        _f0 = self._read_frame(0)
+        _dt = _f0.dtype if dtype is None else dtype
+        out = np.empty(self.shape, dtype=_dt)
+        out[0] = _f0.astype(_dt)
+        for t in range(1, self.shape[0]):
+            out[t] = self._read_frame(t).astype(_dt)
         return out
 
     def __len__(self):
@@ -918,17 +924,23 @@ def materialize_stack(stack_like, dtype=np.float32):
         return stack_like.as_full_array(dtype=dtype)
     # dask
     if hasattr(stack_like, 'compute'):
-        return np.asarray(stack_like.compute()).astype(dtype)
+        out = np.asarray(stack_like.compute())
+        return out if dtype is None else out.astype(dtype)
     arr = np.asarray(stack_like)
     # If __array__ truncated a 3D wrapper to 2D but it advertises a 3D shape,
     # rebuild by indexing frames.
     shp = getattr(stack_like, 'shape', None)
     if arr.ndim == 2 and shp is not None and len(shp) == 3:
-        out = np.empty(shp, dtype=dtype)
-        for t in range(shp[0]):
-            out[t] = np.asarray(stack_like[t]).astype(dtype)
+        # Preserve source dtype when dtype is None (e.g. integer label masks
+        # must NOT be floated). Infer from the first frame otherwise.
+        _f0 = np.asarray(stack_like[0])
+        _dt = _f0.dtype if dtype is None else dtype
+        out = np.empty(shp, dtype=_dt)
+        out[0] = _f0.astype(_dt)
+        for t in range(1, shp[0]):
+            out[t] = np.asarray(stack_like[t]).astype(_dt)
         return out
-    return arr.astype(dtype)
+    return arr if dtype is None else arr.astype(dtype)
 
 
 def iter_frames(stack_like, dtype=np.float32, indices=None):

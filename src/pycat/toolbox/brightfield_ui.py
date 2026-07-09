@@ -683,7 +683,8 @@ def _add_bf_dynamics(ui, layout):
             fit_coarsening, kaplan_meier_lifetimes,
         )
         try:
-            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data)
+            from pycat.file_io.file_io import materialize_stack
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:
@@ -866,9 +867,9 @@ def _add_bf_frame_qc(ui, layout):
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
-            stack = np.asarray(
-                ui.viewer.layers[stack_dd.currentText()].data
-            ).astype(np.float32)
+            from pycat.file_io.file_io import materialize_stack
+            stack = materialize_stack(
+                ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:

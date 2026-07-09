@@ -23,6 +23,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.307] - 2026-07-09
+### Fixed (latent frame-collapse bug across stack-consuming analyses — health audit)
+- **Six analysis UIs that read a time-series/stack via `np.asarray(layer.data)` now
+  materialise it safely.** That raw pattern silently returns only frame 0 of a (T, H, W)
+  stack when the layer holds one of PyCAT's lazy wrappers (whose `__array__` is
+  deliberately truncated for napari) — the exact frame-collapse bug fixed twice this
+  session in the temperature and VPT paths. A codebase audit found the same latent bug in
+  **FRAP** (recovery + prebleach stacks), **condensate physics** (fusion mask + frame-QC
+  stacks), **droplet fusion**, **in vitro brightfield** (dynamics + QC), **brightfield**
+  (dynamics + QC), and **in vitro fluorescence** (dynamics label + image + QC). None had
+  imported the safe helpers; each worked only because test data happened to load eagerly.
+  All now route stack reads through `materialize_stack`, which reconstructs the full stack
+  frame-by-frame when a wrapper truncates. Several of these feed physical-units results
+  (FRAP recovery, viscosity/fusion) that would have been silently wrong on a lazily-loaded
+  multi-frame file. Symptomatically, the old code could also reject a valid stack with
+  "must be 3D" when the wrapper collapsed it to 2D.
+- **`materialize_stack` / `as_full_array` now preserve the source dtype when `dtype=None`.**
+  Previously they always built the output as float, which would silently float integer
+  LABEL-MASK stacks. Passing `dtype=None` (used for the mask-stack reads above) now keeps
+  the original integer dtype and label values intact, while the default `float32` behaviour
+  is unchanged for image stacks.
+- **Added `tests/test_materialize_stack.py`** — golden-master tests that assert the
+  materialiser recovers a full stack from a truncating wrapper and preserves label-mask
+  dtype (the first unit coverage of this critical path).
+
 ## [1.5.306] - 2026-07-09
 ### Added (Time Series In Vitro Fluorescence — 2D+t foundation)
 - **New analysis method: Time Series In Vitro Object Analysis (Fluorescence).** The temporal

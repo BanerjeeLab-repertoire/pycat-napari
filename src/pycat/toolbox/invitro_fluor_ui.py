@@ -793,14 +793,16 @@ def _ivf_dynamics(ui, layout):
             coarsening_statistics, detect_sedimentation,
             detect_and_fit_fusions)
 
+        from pycat.file_io.file_io import materialize_stack
         try:
-            stack = np.asarray(ui.viewer.layers[stack_dd.currentText()].data)
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Dynamics needs a 3D (T,H,W) label stack."); return
 
         try:
-            img_stack = np.asarray(ui.viewer.layers[img_dd.currentText()].data).astype(np.float32)
+            img_stack = materialize_stack(
+                ui.viewer.layers[img_dd.currentText()].data, dtype=np.float32)
         except Exception:
             img_stack = None
 
@@ -971,8 +973,9 @@ def _ivf_frame_qc(ui, layout):
         from pycat.toolbox.condensate_physics_tools import (
             analyse_frame_quality, apply_bleach_correction)
         try:
+            from pycat.file_io.file_io import materialize_stack
             layer = ui.viewer.layers[stack_dd.currentText()]
-            stack = np.asarray(layer.data).astype(np.float32)
+            stack = materialize_stack(layer.data, dtype=np.float32)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("QC needs a 3D (T,H,W) stack."); return
