@@ -83,6 +83,16 @@ def _empty_common(file_path):
         'emission_nm': None,
         'acquisition_date': None,
         'software': None,
+        # Temporal / acquisition timing — captured at load so any consumer
+        # (VPT microrheology, kymographs, FRAP, time-series analyses) reads the
+        # frame interval from one place instead of asking the user to re-enter
+        # it. frame_interval_s is the primary value; exposure_s and the raw
+        # per-plane times are kept for provenance and for cases where the
+        # nominal interval and the actual elapsed times differ.
+        'frame_interval_s': None,
+        'frame_interval_source': None,
+        'exposure_s': None,
+        'z_step_um': None,
     }
 
 
@@ -260,6 +270,66 @@ def extract_tiff_metadata(file_path):
 # AICSImage (CZI, OME-TIFF, and TIFFs AICSImage can parse)
 # ---------------------------------------------------------------------------
 
+def _extract_frame_interval_s(image):
+    """Best-effort frame interval (seconds) from an AICSImage's OME model.
+
+    Tries several sources and returns (interval_s, source_str) or (None, None):
+      1. OME Pixels TimeIncrement (with TimeIncrementUnit) — the nominal interval.
+      2. Median of consecutive per-plane DeltaT values — the actual cadence.
+      3. MicroManager 'Interval_ms' in the raw metadata string.
+    """
+    import re as _re
+
+    def _to_seconds(val, unit):
+        if val is None:
+            return None
+        v = float(val)
+        u = (unit or 's').lower()
+        if u in ('ms', 'millisecond', 'milliseconds'):
+            return v / 1e3
+        if u in ('us', 'µs', 'microsecond', 'microseconds'):
+            return v / 1e6
+        if u in ('min', 'minute', 'minutes'):
+            return v * 60.0
+        return v  # seconds (default)
+
+    # 1 & 2: structured OME model via the ome-types object, if present.
+    try:
+        ome = getattr(image, 'ome_metadata', None)
+        if ome is not None and hasattr(ome, 'images') and ome.images:
+            px = ome.images[0].pixels
+            ti = getattr(px, 'time_increment', None)
+            tiu = getattr(px, 'time_increment_unit', None)
+            s = _to_seconds(ti, getattr(tiu, 'value', tiu) if tiu else None)
+            if s and s > 0:
+                return s, 'ome_time_increment'
+            # per-plane DeltaT
+            planes = getattr(px, 'planes', None) or []
+            deltas = [getattr(p, 'delta_t', None) for p in planes]
+            deltas = [float(d) for d in deltas if d is not None]
+            if len(deltas) >= 2:
+                import numpy as _np
+                diffs = _np.diff(_np.sort(_np.asarray(deltas)))
+                diffs = diffs[diffs > 0]
+                if diffs.size:
+                    # DeltaT unit is usually seconds in OME; assume s.
+                    return float(_np.median(diffs)), 'ome_delta_t'
+    except Exception:
+        pass
+
+    # 3: MicroManager Interval_ms in the raw metadata string.
+    try:
+        md = image.metadata
+        s = str(md) if md is not None else ''
+        m = _re.search(r'"?Interval_ms"?\s*[:=]\s*([0-9.]+)', s)
+        if m:
+            return float(m.group(1)) / 1e3, 'micromanager_interval_ms'
+    except Exception:
+        pass
+
+    return None, None
+
+
 def extract_aicsimage_metadata(file_path, image=None):
     """Extract normalised metadata from an AICSImage object (CZI/OME-TIFF).
 
@@ -296,6 +366,22 @@ def extract_aicsimage_metadata(file_path, image=None):
             if y:
                 common['pixel_size_um'] = float(y)
                 common['pixel_size_source'] = 'ome_metadata'
+            # Z step (µm) from the same structured pixel-size object.
+            z = getattr(px, 'Z', None)
+            if z:
+                common['z_step_um'] = float(z)
+        except Exception:
+            pass
+
+        # Frame interval (seconds). Try, in order: the OME model's structured
+        # TimeIncrement; per-plane DeltaT differences; then MicroManager's
+        # Interval_ms. Whichever succeeds first sets frame_interval_source so a
+        # consumer can see where the value came from.
+        try:
+            _fi, _src = _extract_frame_interval_s(image)
+            if _fi and _fi > 0:
+                common['frame_interval_s'] = float(_fi)
+                common['frame_interval_source'] = _src
         except Exception:
             pass
 

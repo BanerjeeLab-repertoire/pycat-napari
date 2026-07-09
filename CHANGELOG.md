@@ -23,6 +23,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.304] - 2026-07-09
+### Fixed (VPT viscosity too low — outlier trajectories + frame interval from metadata)
+- **Acquisition timing (frame interval) is now captured at load, in the top-level metadata, for all
+  consumers.** The load-time metadata extraction now records frame_interval_s (and exposure, Z step)
+  from OME TimeIncrement, per-plane DeltaT, or MicroManager Interval_ms, into
+  data_repository[file_metadata]. VPT Step 5 reads it as the frame-interval default instead of a
+  fixed 0.1 s (a wrong interval scales the diffusion coefficient and viscosity directly — the test
+  data is actually 0.5 s/frame, so the old default was 5x off). Any timing-dependent analysis can now
+  read the interval from one place. The user can still override it.
+- **MSD now rejects outlier trajectories, matching the reference analysis workflow.** A movie yields
+  many trajectories; spurious/mis-linked ones have anomalously high MSD and, when averaged in, inflate
+  the ensemble MSD, inflate D, and deflate viscosity by a large factor. compute_msd now rejects tracks
+  whose first- and last-lag per-track MSD fall outside a 1.5x IQR fence in log space (the reference
+  notebook get_outlier_bounds method) before aggregating. On mixed good/spurious tracks this recovers
+  the correct diffusion coefficient.
+### Changed (VPT linking defaults — physically grounded)
+- Max linking distance now defaults to about 2x the bead size (a bead should not move much more than
+  its own diameter between frames in a viscous sample); max frame gap now defaults to 0 (do not bridge
+  gaps — a bead that vanishes and reappears is more likely a broken/mis-linked track to prune than a
+  real continuous one).
+### Note
+- The localization-offset MSD fit added in 1.5.302/1.5.303 is correct physics but was NOT the cause of
+  the low viscosity on this dataset: the real MSD is a clean power law with no low-lag plateau, so the
+  fitted offset is ~0 there. The dominant cause was outlier trajectories plus the wrong frame interval,
+  both addressed here.
+
 ## [1.5.303] - 2026-07-09
 ### Changed (MSD localization offset bound matched to the reference notebook)
 - **Tightened the MSD localization-offset bound to match the reference analysis notebook exactly.**

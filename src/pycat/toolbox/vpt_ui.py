@@ -740,14 +740,33 @@ class VideoParticleTrackingUI:
         form.addRow(method_grp)
 
         self._max_link = QDoubleSpinBox()
-        self._max_link.setRange(0.1, 50); self._max_link.setValue(2.0)
-        self._max_link.setSingleStep(0.5); self._max_link.setDecimals(2)
-        self._max_link.setToolTip("Maximum bead displacement between frames (µm).")
+        self._max_link.setRange(0.01, 50)
+        # Default max linking distance ≈ 2× the bead diameter (a bead should not
+        # move more than about its own size between frames in a viscous medium;
+        # linking farther invites mis-links). Derived from the Step-3 bead size
+        # when available, else a small sensible fallback.
+        try:
+            _bead_um = (self._bead_size_nm.value() / 1000.0
+                        if hasattr(self, '_bead_size_nm') else 0.2)
+        except Exception:
+            _bead_um = 0.2
+        self._max_link.setValue(max(0.05, round(2.0 * _bead_um, 3)))
+        self._max_link.setSingleStep(0.05); self._max_link.setDecimals(3)
+        self._max_link.setToolTip(
+            "Maximum bead displacement between frames (µm). A physically grounded "
+            "default is about 2× the bead size — a bead should not travel much "
+            "more than its own diameter per frame in a viscous sample; larger "
+            "values invite spurious links.")
         form.addRow("Max linking dist (µm):", self._max_link)
 
         self._max_gap = QSpinBox()
-        self._max_gap.setRange(0, 20); self._max_gap.setValue(2)
-        self._max_gap.setToolTip("Max frames a bead can vanish and still be reconnected.")
+        self._max_gap.setRange(0, 20); self._max_gap.setValue(0)
+        self._max_gap.setToolTip(
+            "Max frames a bead can vanish and still be reconnected. Default 0: "
+            "do NOT bridge gaps — a bead that disappears and reappears is more "
+            "likely a broken/mis-linked trajectory that should be pruned than a "
+            "real continuous track. Increase only if you specifically want to "
+            "reconnect across brief dropouts.")
         form.addRow("Max frame gap:", self._max_gap)
 
         self._track_prog = QProgressBar(); self._track_prog.setVisible(False)
@@ -912,7 +931,13 @@ class VideoParticleTrackingUI:
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(0.1)
         self._frame_dt.setDecimals(4); self._frame_dt.setSingleStep(0.01)
-        self._frame_dt.setToolTip("Time between frames (seconds).")
+        self._frame_dt.setToolTip(
+            "Time between frames (seconds). Auto-filled from the file's metadata "
+            "when available (OME TimeIncrement / per-plane DeltaT / MicroManager "
+            "Interval_ms); edit to override.")
+        self._frame_dt_touched = False
+        self._frame_dt.valueChanged.connect(
+            lambda _v: setattr(self, '_frame_dt_touched', True))
         form.addRow("Frame interval (s):", self._frame_dt)
 
         self._bead_radius = QDoubleSpinBox()
@@ -940,10 +965,30 @@ class VideoParticleTrackingUI:
         form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
+    def _sync_frame_interval_from_metadata(self):
+        """If the loaded file's metadata captured a frame interval, use it as the
+        Step-5 default (unless the user has already changed the field). The
+        interval is captured once at load into file_metadata, so every timing-
+        dependent step reads it from one place instead of re-asking the user."""
+        try:
+            if getattr(self, '_frame_dt_touched', False):
+                return  # user set it explicitly — never override
+            md = self._dr().get('file_metadata') or {}
+            fi = (md.get('common') or {}).get('frame_interval_s')
+            if fi and fi > 0:
+                # Set programmatically WITHOUT flipping the user-touched flag.
+                self._frame_dt.blockSignals(True)
+                self._frame_dt.setValue(float(fi))
+                self._frame_dt.blockSignals(False)
+        except Exception:
+            pass
+
     def _on_rheology(self):
         from pycat.toolbox.condensate_physics_tools import (
             compute_msd, fit_anomalous_diffusion)
         from pycat.toolbox.vpt_tools import viscosity_from_diffusion
+        # Pull the frame interval from the file's captured metadata if available.
+        self._sync_frame_interval_from_metadata()
         tracks = self._dr().get('vpt_tracks')
         if tracks is None or tracks.empty:
             napari_show_warning("No trajectories found — run Step 4 first."); return

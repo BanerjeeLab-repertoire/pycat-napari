@@ -70,6 +70,8 @@ def compute_msd(
     max_lag: int = None,
     frame_interval_s: float = 1.0,
     min_track_length: int = 5,
+    reject_outlier_tracks: bool = True,
+    outlier_iqr_factor: float = 1.5,
 ) -> pd.DataFrame:
     """
     Compute ensemble-averaged MSD from linked trajectories, with a per-track
@@ -112,8 +114,57 @@ def compute_msd(
     per_track: dict[int, list[float]] = {lag: [] for lag in range(1, max_lag + 1)}
     pair_counts: dict[int, int] = {lag: 0 for lag in range(1, max_lag + 1)}
 
+    # ── Outlier-track rejection (matches the reference analysis notebook) ────
+    # A movie yields many trajectories; spurious ones (mis-links, brief tracks
+    # that happen to jump) have anomalously HIGH first/last MSD and, if included,
+    # inflate the ensemble MSD → inflate D → deflate viscosity by a large factor.
+    # The reference workflow rejects tracks whose first and last per-track MSD
+    # fall outside a 1.5×IQR fence in LOG space (get_outlier_bounds). We replicate
+    # that: compute each eligible track's first- and last-lag MSD, build the log
+    # IQR fences, and keep only tracks inside both. This is what brings PyCAT's
+    # viscosity into line with the hand-analysis on real data.
+    accepted_ids = None
+    if reject_outlier_tracks:
+        firsts, lasts, ids = [], [], []
+        for tid, grp in tracks_df.groupby('track_id'):
+            if tid < 0:
+                continue
+            g = grp.sort_values('frame')
+            if len(g) < min_track_length:
+                continue
+            t = g['frame'].values.astype(int)
+            y = g['y_um'].values.astype(float)
+            x = g['x_um'].values.astype(float)
+            f0, f1 = t.min(), t.max()
+            span = f1 - f0 + 1
+            ys = np.full(span, np.nan); xs = np.full(span, np.nan)
+            ys[t - f0] = y; xs[t - f0] = x
+            # first-lag MSD (lag 1)
+            dy1 = ys[1:] - ys[:-1]; dx1 = xs[1:] - xs[:-1]
+            sq1 = dy1 * dy1 + dx1 * dx1; v1 = np.isfinite(sq1)
+            # last-lag MSD (largest available lag for this track)
+            L = span - 1
+            dyL = ys[L:] - ys[:-L]; dxL = xs[L:] - xs[:-L]
+            sqL = dyL * dyL + dxL * dxL; vL = np.isfinite(sqL)
+            if v1.any() and vL.any():
+                m1 = float(np.mean(sq1[v1])); mL = float(np.mean(sqL[vL]))
+                if m1 > 0 and mL > 0:
+                    firsts.append(m1); lasts.append(mL); ids.append(tid)
+        if len(ids) >= 8:
+            lf = np.log(np.asarray(firsts)); ll = np.log(np.asarray(lasts))
+            q1f, q3f = np.percentile(lf, [25, 75]); iqrf = q3f - q1f
+            q1l, q3l = np.percentile(ll, [25, 75]); iqrl = q3l - q1l
+            lo_f = q1f - outlier_iqr_factor * iqrf
+            hi_f = q3f + outlier_iqr_factor * iqrf
+            lo_l = q1l - 1.0 * iqrl                     # notebook uses 1×IQR lower
+            hi_l = q3l + outlier_iqr_factor * iqrl
+            accepted_ids = {tid for tid, a, b in zip(ids, lf, ll)
+                            if lo_f <= a <= hi_f and lo_l <= b <= hi_l}
+
     for tid, grp in tracks_df.groupby('track_id'):
         if tid < 0:
+            continue
+        if accepted_ids is not None and tid not in accepted_ids:
             continue
         grp = grp.sort_values('frame').reset_index(drop=True)
         if len(grp) < min_track_length:
