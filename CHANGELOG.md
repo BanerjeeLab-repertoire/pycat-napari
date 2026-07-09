@@ -23,6 +23,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.329] - 2026-07-09
+### Fixed (drag-and-drop onto the canvas — layer-insertion backstop)
+- **Files dropped on the napari canvas now load through PyCAT.** On napari 0.7.1 the canvas
+  refuses the drag before any Qt event filter can catch it (the persistent "no-drop" cursor),
+  so intercepting the drop at the widget level is impossible. This takes the opposite
+  approach: let napari's reader load the file, then detect the resulting layer as FOREIGN
+  (napari sets `layer.source.path` on reader-loaded layers; PyCAT's programmatic `add_image`
+  leaves it `None`), remove the raw napari layer(s), and re-open the same path through PyCAT's
+  context-aware opener so it enters the channel-assignment / metadata pipeline. This catches a
+  load regardless of how it was triggered, without depending on reaching napari's canvas
+  widget.
+  - Handles a multi-channel drop (one file → several napari layers sharing a path): all are
+    removed and the path is re-opened once. Multiple distinct dropped files: the first
+    replaces the session, the rest add without clearing (comparison).
+  - Re-entrancy-guarded so PyCAT re-opening the file doesn't re-trigger the backstop;
+    PyCAT's own layers (source.path=None) are never touched. Deferred via QTimer so the layer
+    list isn't mutated inside the inserted-event callback. Validated the foreign-detection and
+    dedup logic in the sandbox.
+  - There is a brief moment where napari's raw layer exists before PyCAT swaps it; this is
+    inherent to letting the drop land first, and is the trade for catching canvas drops that
+    can't be intercepted at the widget level on 0.7.1.
+
 ## [1.5.328] - 2026-07-09
 ### Fixed (napari File menu — hide the now-empty submenu containers)
 - The load-action lockdown (1.5.320) correctly removed napari's direct loaders (Open

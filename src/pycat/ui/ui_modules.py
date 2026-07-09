@@ -3364,11 +3364,111 @@ class MenuManager:
         except Exception as _e:
             print(f"[PyCAT] Could not install file-drop handler: {_e}")
 
+        # LAYER-INSERTION BACKSTOP for drag-and-drop onto the canvas.
+        # On napari 0.7.1 the canvas refuses the drag before any event filter can
+        # catch it (the "no-drop" cursor), so the filter approach above cannot
+        # intercept a canvas drop. This backstop takes the opposite tack: let
+        # napari's own reader load the file (producing a layer), then detect that
+        # layer as FOREIGN (napari sets layer.source.path on reader-loaded layers;
+        # PyCAT's programmatic add_image leaves it None), remove the raw napari
+        # layer(s), and re-open the SAME path through PyCAT's context-aware opener
+        # so it enters the channel-assignment / metadata pipeline. This catches a
+        # load no matter how it was triggered (canvas drop, or any path we can't
+        # otherwise block), without depending on reaching napari's canvas widget.
+        try:
+            self._pycat_reroute_guard = False
+
+            def _on_foreign_layer_inserted(event):
+                # Re-entrancy guard: PyCAT's own opener inserts layers too.
+                if getattr(self, '_pycat_reroute_guard', False):
+                    return
+                try:
+                    layer = event.value
+                except Exception:
+                    layer = getattr(event, 'source', None)
+                if layer is None:
+                    return
+                # Foreign = has a reader source path PyCAT didn't set.
+                src_path = None
+                try:
+                    src = getattr(layer, 'source', None)
+                    src_path = getattr(src, 'path', None) if src is not None else None
+                except Exception:
+                    src_path = None
+                if not src_path:
+                    return  # programmatic PyCAT layer — leave it alone
+                # Defer the reroute: several layers can be inserted from one drop
+                # (multi-channel), and we must not mutate viewers inside the
+                # inserted callback. Collect the path and process once via a timer.
+                try:
+                    if not hasattr(self, '_pending_foreign_paths'):
+                        self._pending_foreign_paths = []
+                    if src_path not in self._pending_foreign_paths:
+                        self._pending_foreign_paths.append(src_path)
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(0, self._process_foreign_layers)
+                except Exception:
+                    pass
+
+            self._on_foreign_layer_inserted = _on_foreign_layer_inserted
+            self.viewer.layers.events.inserted.connect(_on_foreign_layer_inserted)
+        except Exception as _e:
+            print(f"[PyCAT] Could not install layer-insertion backstop: {_e}")
+
         # Hide napari's native File menu (and disable its Open* actions) so users
         # can't accidentally load data through napari's reader, which routes
         # around PyCAT's channel-assignment / metadata pipeline and crashes the
         # downstream workflow. Data must load via PyCAT's ★ Open/Save File(s).
         self._hide_napari_native_menus()
+
+    def _process_foreign_layers(self):
+        """Remove napari-reader-loaded (foreign) layers and re-open their source
+        files through PyCAT's opener. Runs deferred (QTimer) so it doesn't mutate
+        the layer list from inside the inserted-event callback. Handles the
+        multi-layer case (one dropped multi-channel file → several foreign
+        layers sharing a path)."""
+        paths = getattr(self, '_pending_foreign_paths', [])
+        self._pending_foreign_paths = []
+        if not paths:
+            return
+        # Collect and remove every foreign layer whose source path is in our set.
+        try:
+            to_remove = []
+            for layer in list(self.viewer.layers):
+                try:
+                    src = getattr(layer, 'source', None)
+                    sp = getattr(src, 'path', None) if src is not None else None
+                except Exception:
+                    sp = None
+                if sp and sp in paths:
+                    to_remove.append(layer)
+            for layer in to_remove:
+                try:
+                    self.viewer.layers.remove(layer)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Re-open each unique path through PyCAT's context-aware opener, guarding
+        # against the backstop re-triggering on PyCAT's own inserts.
+        import os as _os
+        self._pycat_reroute_guard = True
+        try:
+            from napari.utils.notifications import show_info as _info
+            for i, p in enumerate(paths):
+                try:
+                    # First dropped file replaces the session (normal open);
+                    # additional files add without clearing (comparison).
+                    self.central_manager.file_io.open_image_auto(
+                        file_path=p, clear_first=(i == 0))
+                except Exception as _e:
+                    print(f"[PyCAT] Could not re-open dropped file '{p}': {_e}")
+            try:
+                _info("Loaded dropped file(s) through PyCAT.")
+            except Exception:
+                pass
+        finally:
+            self._pycat_reroute_guard = False
 
     def _show_metadata_dialog(self):
         """Show acquisition metadata for the loaded file.
