@@ -765,9 +765,26 @@ class VideoParticleTrackingUI:
         self._rb_trackmate.setToolTip(
             "Real TrackMate LAP tracker via embedded Fiji. Requires "
             "pip install pycat-napari[trackmate] + a JDK. Falls back to "
-            "Bayesian if unavailable.")
-        self._rb_bayesian.setToolTip("PyCAT's native Hungarian/LAP linker with gap closing.")
-        self._rb_greedy.setToolTip("Fast greedy nearest-neighbour linker.")
+            "Bayesian if unavailable.\n\n"
+            "VALIDATED: TrackMate-through-PyCAT recovers viscosity within ~10% "
+            "of the reference workflow. This is the recommended linker for "
+            "quantitative viscosity/microrheology.")
+        self._rb_bayesian.setToolTip(
+            "PyCAT's native Hungarian/LAP linker with gap closing.\n\n"
+            "\u26a0 NOT YET VALIDATED for quantitative viscosity: this linker can "
+            "produce FRAGMENTED trajectories (many short tracks instead of long "
+            "continuous ones), which biases the ensemble MSD and the resulting "
+            "viscosity. Use TrackMate LAP for quantitative results; use this only "
+            "for exploration or where TrackMate is unavailable. Check the track "
+            "spanning report after linking \u2014 a healthy result has many tracks "
+            "spanning most of the movie.")
+        self._rb_greedy.setToolTip(
+            "Fast greedy nearest-neighbour linker.\n\n"
+            "\u26a0 NOT YET VALIDATED for quantitative viscosity, and the most "
+            "fragmentation-prone of the three (no global optimisation or gap "
+            "closing \u2014 it commits to the nearest match each frame). Expect "
+            "short, broken tracks that bias the MSD. Use TrackMate LAP for "
+            "quantitative viscosity; use greedy only for a fast first look.")
         for rb in (self._rb_trackmate, self._rb_bayesian, self._rb_greedy):
             ml.addWidget(rb)
         form.addRow(method_grp)
@@ -1121,6 +1138,13 @@ class VideoParticleTrackingUI:
                                       self._temp_C.value(), dimensions=2)
             self._dr()['vpt_moduli_df'] = mod
             if len(mod):
+                print("[PyCAT VPT] NOTE: G'/G'' (storage/loss moduli) use the "
+                      "Mason (2000) algebraic GSER and are NOT YET VALIDATED in "
+                      "PyCAT. They are unreliable on viscous-dominated samples "
+                      "(alpha~1, where G' is a small difference of noisy terms) "
+                      "and on fragmented trajectories. Treat as exploratory; the "
+                      "viscosity fit is the validated quantity. (Evans 2009 is the "
+                      "planned more-robust replacement.)")
                 plot_moduli(mod, interactive=True)
         except Exception as e:
             print(f"[PyCAT] VPT plots failed: {e}")

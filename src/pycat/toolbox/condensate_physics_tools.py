@@ -1183,6 +1183,19 @@ def compute_moduli_gser(
     is unreliable at the first/last one or two frequencies (edge effects in the
     local-slope estimate) — those are dropped.
 
+    VALIDATION STATUS (2026-07): this Mason-algebraic estimate is NOT YET
+    validated in PyCAT and has two known failure modes: (1) on viscous-dominated
+    samples (α≈1) G'(ω) = |G*|·cos(πα/2) is the small difference of large noisy
+    terms and is essentially meaningless — G''≈ωη just re-reports the viscosity;
+    (2) it inherits all noise from the ensemble MSD, so fragmented trajectories
+    make the local slope α (and hence the G'/G'' split) unreliable. Use the
+    direct viscosity fit for quantitative results. PLANNED UPGRADE: replace this
+    with the Evans et al. (2009, Phys. Rev. E 80:012501) direct compliance→moduli
+    conversion, which does not rely on the single-point local-power-law
+    assumption and is more robust; validate against a known analytic MSD.
+
+    Reference: Mason, T.G. (2000), Rheologica Acta 39:371–378.
+
     Parameters
     ----------
     msd_df : output of compute_msd() (needs lag_s, msd_um2).

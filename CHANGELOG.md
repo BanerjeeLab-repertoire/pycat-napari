@@ -23,6 +23,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.320] - 2026-07-09
+### Fixed / Changed (from live test feedback)
+- **Removed the redundant "Open 2D Image(s)" and "Open Image Stack (T/Z / IMS)" menu items.**
+  The context-aware "Open Image (auto-detect 2D / stack)" replaces both; the menu is now
+  Open Image / Add Image / Toggle Side-by-Side / Load Previous Session / Open 2D Mask(s) /
+  Save and Clear.
+- **napari load-action disable strengthened for 0.7.1.** The previous version disabled
+  QActions found via `window.findChildren`, but napari 0.7.1 provides menu actions through
+  its app-model — they may not be window children, so the sweep missed them and napari's
+  File → Open stayed live. The guard now WALKS THE MENU-BAR TREE directly (reaching
+  app-model actions wherever they live), disables AND hides each load action (a hidden
+  action can't be triggered even if napari rebuilds/re-enables it), and re-runs on every
+  menu `aboutToShow` in case napari recreates the actions when the menu opens.
+- **Side-by-side grid is now PyCAT-managed.** napari's raw grid tiled EVERY layer, so the
+  Cell/Object Diameter annotation Shapes layers got their own empty tiles instead of
+  overlaying the images. The managed grid tiles only IMAGE layers and hides non-image
+  annotation/shape layers while grid is on (restoring them on grid-off), and recomputes when
+  layer visibility changes so hiding/showing an image reflows the grid. (Reflow on image
+  visibility uses napari's auto grid sizing; behaviour across napari builds should be
+  verified live.)
+
+## [1.5.319] - 2026-07-09
+### Changed (VPT — validation status surfaced after TrackMate confirmation)
+- **TrackMate LAP confirmed validated for viscosity** (recovers within ~10% of the
+  reference workflow through PyCAT). Its tooltip now states this; it is the recommended
+  linker for quantitative microrheology.
+- **Fragmentation warnings added to the Bayesian and Greedy linker tooltips.** Both are
+  not-yet-validated for quantitative viscosity and can produce fragmented (short, broken)
+  trajectories that bias the ensemble MSD and the resulting viscosity; the tooltips now say
+  so and point users to TrackMate for quantitative results and to the track-spanning report
+  as a health check. (The underlying Bayesian/Greedy linkers still need debugging — low
+  priority; the warnings prevent silent misuse in the meantime.)
+- **G'/G'' (storage/loss moduli) flagged as not-yet-validated.** The current estimate uses
+  the **Mason (2000) algebraic GSER** (|G*| = kBT/(πa·MSD(1/ω)·Γ(1+α)), split by
+  G'=|G*|cos(πα/2), G''=|G*|sin(πα/2), with α the local log-slope of the MSD). This is NOT
+  Evans's method. It has two known failure modes — meaningless G' on viscous samples (α≈1,
+  small difference of noisy terms) and sensitivity to MSD noise from fragmented tracks — so
+  a console caveat now prints when moduli are computed, and the function docstring documents
+  the status. PLANNED UPGRADE: replace with **Evans et al. (2009, Phys. Rev. E 80:012501)**
+  direct compliance→moduli conversion (more robust; no single-point power-law assumption),
+  to be validated against a known analytic MSD once Gable provides a viscoelastic test set.
+
 ## [1.5.318] - 2026-07-09
 ### Added (context-aware opener, add-without-clear, side-by-side grid)
 - **Context-aware "Open Image (auto-detect 2D / stack)".** A single opener parses the

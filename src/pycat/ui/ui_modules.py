@@ -3064,7 +3064,43 @@ class MenuManager:
             txt = (act.text() or '').replace('&', '').strip().lower()
             return txt in _load_texts
 
+        def _disable_in_menu(menu, depth=0):
+            """Recursively disable+hide load actions within a QMenu tree. Walking
+            the menu tree (rather than window.findChildren) is essential on napari
+            0.7.1, where menu actions are provided by the app-model and may not be
+            children of the QMainWindow — so findChildren misses them, but the
+            menu that renders them always contains them."""
+            if menu is None or depth > 4:
+                return
+            try:
+                for act in menu.actions():
+                    sub = act.menu()
+                    if sub is not None:
+                        _disable_in_menu(sub, depth + 1)
+                        continue
+                    try:
+                        if _is_load_action(act):
+                            act.setEnabled(False)
+                            act.setToolTip(_tip)
+                            # Hiding removes it from the menu entirely — a hidden
+                            # action can't be triggered even if napari re-enables
+                            # it, and makes the lockdown visually obvious.
+                            act.setVisible(False)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
         def _sweep():
+            # Primary: walk the menu-bar tree (reaches app-model actions).
+            try:
+                menubar = window.menuBar()
+                for action in menubar.actions():
+                    _disable_in_menu(action.menu())
+            except Exception:
+                pass
+            # Secondary: also sweep any QActions parented under the window
+            # (older napari where actions ARE window children).
             try:
                 from PyQt5.QtGui import QAction as _QA
             except Exception:
@@ -3075,6 +3111,7 @@ class MenuManager:
                         if _is_load_action(act):
                             act.setEnabled(False)
                             act.setToolTip(_tip)
+                            act.setVisible(False)
                     except Exception:
                         continue
             except Exception:
@@ -3083,8 +3120,11 @@ class MenuManager:
         # Initial sweep.
         _sweep()
 
-        # Re-sweep whenever any top-level menu is about to show (covers lazily
-        # built actions + anything napari re-enables). Connect once.
+        # Re-sweep whenever any top-level menu (or its submenus) is about to show
+        # — covers lazily built/re-created actions. napari 0.7.1 may REBUILD menu
+        # actions each time the menu opens, so a one-shot disable of the original
+        # QAction objects is undone; re-running at aboutToShow catches the fresh
+        # actions right before they're displayed. Connect once per menu.
         if not getattr(self, '_napari_load_guard_wired', False):
             try:
                 menubar = window.menuBar()
@@ -3092,7 +3132,6 @@ class MenuManager:
                     menu = action.menu()
                     if menu is not None:
                         menu.aboutToShow.connect(_sweep)
-                        # Also hook submenus (Open with Plugin / Open Sample).
                         for sub in menu.actions():
                             smenu = sub.menu()
                             if smenu is not None:
@@ -3721,10 +3760,7 @@ class MenuManager:
                 'Open Image (auto-detect 2D / stack)': (self.central_manager.file_io.open_image_auto, {}),
                 'Add Image (keep current — compare / add channel)': (self._open_image_add, {}),
                 'Toggle Side-by-Side (grid view)': (self._toggle_grid_view, {}),
-                'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
-                'Open Image Stack (T/Z / IMS)': (self.central_manager.file_io.open_stack, {}),
                 'Load Previous Session Results': (self._open_session_loader, {}),
-                # IMS files are now handled by the unified Open Stack menu item above
                 'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
@@ -3737,18 +3773,137 @@ class MenuManager:
         self.central_manager.file_io.open_image_auto(clear_first=False)
 
     def _toggle_grid_view(self, *args, **kwargs):
-        """Toggle napari's grid mode so multiple loaded images/layers tile
-        side-by-side in the canvas for comparison (they share one camera and one
-        set of dim sliders — good for comparing same-modality data). Toggling
-        again returns to the normal single overlaid view."""
+        """Toggle a PyCAT-managed side-by-side grid for comparing images.
+
+        napari's raw grid mode tiles EVERY layer — including PyCAT's annotation
+        Shapes layers (Cell/Object Diameter) and any drawing layers, which then
+        get their own empty tiles instead of overlaying the images. It also grids
+        by layer count regardless of the visibility eyeball. This managed version:
+          - tiles only IMAGE layers (annotations/shapes/points stay overlaid,
+            hidden behind the scenes while comparing — they can't be tiled
+            meaningfully since an annotation belongs to one image),
+          - respects the visibility eyeball: hidden image layers are dropped from
+            the grid and it reflows,
+          - recomputes automatically when layer visibility changes while grid is
+            on, and restores the normal overlaid view when toggled off.
+        """
+        try:
+            self._pycat_grid_on = not getattr(self, '_pycat_grid_on', False)
+        except Exception:
+            self._pycat_grid_on = True
+
+        from napari.utils.notifications import show_info as _info
+        if self._pycat_grid_on:
+            self._apply_managed_grid()
+            # Recompute the grid whenever any layer's visibility toggles.
+            if not getattr(self, '_grid_vis_wired', False):
+                try:
+                    for lyr in self.viewer.layers:
+                        try:
+                            lyr.events.visible.connect(self._on_grid_layer_vis_changed)
+                        except Exception:
+                            pass
+                    # New layers added while grid is on should also be watched.
+                    self.viewer.layers.events.inserted.connect(
+                        self._on_grid_layers_changed)
+                    self.viewer.layers.events.removed.connect(
+                        self._on_grid_layers_changed)
+                    self._grid_vis_wired = True
+                except Exception:
+                    pass
+            _info("Side-by-side grid view ON (image layers only).")
+        else:
+            try:
+                self.viewer.grid.enabled = False
+            except Exception:
+                pass
+            # Restore any non-image layers we hid while grid was on.
+            for lyr in getattr(self, '_grid_hidden_nonimage', []):
+                try:
+                    lyr.visible = True
+                except Exception:
+                    pass
+            self._grid_hidden_nonimage = []
+            _info("Side-by-side grid view OFF.")
+
+    def _image_layers_for_grid(self):
+        """Visible Image layers, in layer order — the ones that get grid cells."""
+        out = []
+        try:
+            for lyr in self.viewer.layers:
+                if isinstance(lyr, napari.layers.Image) and bool(getattr(lyr, 'visible', True)):
+                    out.append(lyr)
+        except Exception:
+            pass
+        return out
+
+    def _apply_managed_grid(self):
+        """Enable napari grid sized to the visible image layers. Non-image layers
+        (annotations/shapes/points) are hidden while grid is on so they don't
+        claim their own empty grid cells; they're restored when grid is turned
+        off. Idempotent and re-entrancy-safe (hiding layers here fires visibility
+        events that call back in — a guard prevents recursion)."""
+        import math
+        if getattr(self, '_grid_applying', False):
+            return
+        self._grid_applying = True
         try:
             g = self.viewer.grid
-            new_state = not bool(g.enabled)
-            g.enabled = new_state
-            from napari.utils.notifications import show_info as _info
-            _info(f"Side-by-side grid view {'ON' if new_state else 'OFF'}.")
+            # Hide non-image layers that are currently visible (record them once
+            # so we can restore exactly those on grid-off).
+            if not hasattr(self, '_grid_hidden_nonimage'):
+                self._grid_hidden_nonimage = []
+            for lyr in list(self.viewer.layers):
+                if not isinstance(lyr, napari.layers.Image):
+                    if bool(getattr(lyr, 'visible', True)):
+                        if lyr not in self._grid_hidden_nonimage:
+                            self._grid_hidden_nonimage.append(lyr)
+                        try:
+                            lyr.visible = False
+                        except Exception:
+                            pass
+            # Count visible image layers → grid cells.
+            imgs = self._image_layers_for_grid()
+            n = len(imgs)
+            if n <= 1:
+                g.enabled = False
+                return
+            cols = int(math.ceil(math.sqrt(n)))
+            rows = int(math.ceil(n / cols))
+            g.enabled = True
+            try:
+                # Let napari auto-size the grid to the current layer set; this
+                # tracks the (visible) layer count better across napari versions
+                # than a fixed shape. Fall back to the computed shape if the
+                # auto sentinel isn't accepted.
+                try:
+                    g.shape = (-1, -1)
+                except Exception:
+                    g.shape = (rows, cols)
+                g.stride = 1
+            except Exception:
+                pass
         except Exception as _e:
-            print(f"[PyCAT] Could not toggle grid view: {_e}")
+            print(f"[PyCAT] managed grid failed: {_e}")
+        finally:
+            self._grid_applying = False
+
+    def _on_grid_layer_vis_changed(self, *args):
+        if getattr(self, '_pycat_grid_on', False):
+            self._apply_managed_grid()
+
+    def _on_grid_layers_changed(self, *args):
+        if getattr(self, '_pycat_grid_on', False):
+            # Wire visibility watcher on any new layer, then recompute.
+            try:
+                for lyr in self.viewer.layers:
+                    try:
+                        lyr.events.visible.connect(self._on_grid_layer_vis_changed)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self._apply_managed_grid()
 
     # Add specific analysis methods as actions to the analysis methods menu.
     def _add_analysis_methods_to_menu(self):
