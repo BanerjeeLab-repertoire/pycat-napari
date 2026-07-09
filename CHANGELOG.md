@@ -23,6 +23,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.312] - 2026-07-09
+### Changed (Colocalization — unified tabbed widget, phase 1)
+- **The two separate colocalization pipelines are merged into one tabbed widget.** Object-
+  based and pixel-wise colocalization were previously two separate menu entries and UI
+  classes, inconsistent with the tabbed multi-method pattern used elsewhere. They are now a
+  single **Colocalization Analysis (Pixel-wise + Object-based)** method with a
+  `QTabWidget`: a "Pixel-wise Correlation" tab (CLAHE/WBNS/RB/rescale preprocessing →
+  PWCCA metrics → cross-correlation-function analysis) and an "Object-based Colocalization"
+  tab (upscale/preprocess → Cellpose → cell + subcellular segmentation → two-channel /
+  object-based / Manders object coloc). All existing metric functions and method-picker
+  dialogs are reused unchanged; only the housing is unified.
+- **Layer hand-off from upstream methods.** Because the coloc runner dropdowns read live
+  viewer layers, any processed images and masks produced by a prior 2D/3D cell or in-vitro
+  analysis are already available in the widget. In addition, on open the widget makes a
+  best-effort guess at sensible defaults from common upstream layer names (e.g. "Upscaled
+  Fluorescence Image", "Labeled Cell Mask", "Condensate Mask") and pre-selects them in the
+  dropdowns, so a cell/in-vitro → colocalization workflow lands ready to run. The user
+  re-curates freely; the guess is convenience only.
+- The old `ObjectColocAnalysisUI` / `PixelColocAnalysisUI` classes and their switch methods
+  remain in the codebase (no longer in the menu) as a safe fallback during the transition.
+
+### Notes / next phases
+- **Phase 2 (planned):** multi-channel — start with pairwise across N selected channels,
+  building toward a full combinatorial N×N coloc matrix.
+- **Phase 3 (planned):** surface the CCF / van-Steensel cross-correlation-function tools
+  (currently in `correlation_func_analysis_tools`) as first-class coloc options, and add
+  object nearest-neighbour distance distributions. A toolbox audit found the coloc *metrics*
+  are well covered (Pearson, all Manders variants, Spearman/Kendall/weighted-tau, Li ICA,
+  Costes significance, Jaccard/Dice, object distances) but fragmented across three modules
+  and lacking multi-channel orchestration — which these phases address.
+
 ## [1.5.311] - 2026-07-09
 ### Added (VPT scientific-choice items made explicit & recorded — audit #9–#11)
 - **Explicit drift-correction modes (#9).** Center-of-mass subtraction is standard for

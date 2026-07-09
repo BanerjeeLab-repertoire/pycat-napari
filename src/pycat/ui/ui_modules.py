@@ -30,7 +30,8 @@ import napari
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
-    QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction)
+    QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction,
+    QTabWidget)
 from PyQt5.QtCore import Qt, QObject
 
 # Local application imports
@@ -1577,6 +1578,10 @@ class AnalysisMethodsUI(BaseUIClass):
         """Switches the analysis interface to time-series condensate analysis."""
         self._switch_analysis(BaseDataClass, TimeSeriesCondensateUI, *args, **kwargs)
 
+    def _switch_to_coloc_analysis(self, *args, **kwargs):
+        """Switch to the unified (tabbed) colocalization analysis pipeline."""
+        self._switch_analysis(BaseDataClass, ColocalizationAnalysisUI, *args, **kwargs)
+
     def _switch_to_object_coloc_analysis(self, *args, **kwargs):
         """
         Switches the analysis interface to object colocalization analysis.
@@ -2466,6 +2471,161 @@ class PixelColocAnalysisUI(AnalysisMethodsUI):
         # Align UI components to the top of the layout for a tidy presentation
         self.pixel_coloc_layout.setAlignment(Qt.AlignTop)
 
+
+
+class ColocalizationAnalysisUI(AnalysisMethodsUI):
+    """Unified colocalization analysis with PIXEL-WISE and OBJECT-BASED tabs.
+
+    Replaces the two separate coloc pipelines (ObjectColocAnalysisUI and
+    PixelColocAnalysisUI) with a single tabbed widget, matching the tabbed
+    multi-method pattern used elsewhere in PyCAT. Shared preprocessing /
+    segmentation lives above the tabs (both approaches need channels and, for
+    object-based, masks); the coloc-specific runners live in their respective
+    tabs.
+
+    Layer hand-off: because the runner dropdowns read live viewer layers, any
+    layers produced by an upstream method (2D/3D cell or in-vitro analysis) are
+    already available here. `_suggest_layers()` additionally makes a best-effort
+    guess at sensible defaults from common upstream layer names, so a
+    cell/in-vitro → colocalization workflow lands with the right dropdowns
+    pre-filled (the user can always re-curate).
+    """
+
+    def __init__(self, viewer, central_manager):
+        super().__init__(viewer, central_manager)
+        self.coloc_layout = QVBoxLayout()
+
+    # -- layer hand-off: guess sensible defaults from upstream method outputs --
+    # Substrings (lowercased) that commonly name processed intensity images and
+    # segmentation masks produced by the cell / in-vitro / z-stack pipelines.
+    _IMAGE_HINTS = ('upscaled', 'preprocessed', 'pre-process', 'fluorescence',
+                    'processed', 'channel', 'intensity')
+    _MASK_HINTS = ('labeled cell', 'cell mask', 'condensate', 'puncta',
+                   'droplet', 'labeled', 'mask', 'segmentation')
+
+    def _suggest_layers(self):
+        """Return best-effort (image_names, mask_names) ordered by likely
+        relevance, for pre-filling coloc dropdowns from upstream outputs."""
+        import napari as _napari
+        imgs, masks = [], []
+        try:
+            for l in self.viewer.layers:
+                nm = l.name
+                low = nm.lower()
+                if isinstance(l, _napari.layers.Image):
+                    score = sum(h in low for h in self._IMAGE_HINTS)
+                    imgs.append((score, nm))
+                elif isinstance(l, _napari.layers.Labels):
+                    score = sum(h in low for h in self._MASK_HINTS)
+                    masks.append((score, nm))
+        except Exception:
+            pass
+        imgs.sort(key=lambda t: -t[0])
+        masks.sort(key=lambda t: -t[0])
+        return [n for _, n in imgs], [n for _, n in masks]
+
+    def setup_ui(self):
+        try:
+            self.central_manager.workflow_checklist.activate('coloc')
+        except Exception:
+            pass
+
+        tf = self.central_manager.toolbox_functions_ui
+
+        # Shared header + measure line (both tabs need a scale and a loaded image).
+        self._add_workflow_header(self.coloc_layout, include_pixel_gate=True)
+        tf._add_measure_line(layout=self.coloc_layout)
+
+        note = QLabel(
+            "<span style='color:#888;font-size:9pt;'>"
+            "Colocalization operates on layers already in the viewer — including "
+            "processed images and masks produced by other analysis methods. Run a "
+            "cell / in-vitro analysis first, then the dropdowns below will list "
+            "those outputs.</span>")
+        note.setWordWrap(True)
+        self.coloc_layout.addWidget(note)
+
+        # ── Tabs ──────────────────────────────────────────────────────────────
+        tabs = QTabWidget()
+
+        # Pixel-wise tab: intensity-correlation preprocessing + PWCCA + CCF.
+        pix_w = QWidget(); pix_l = QVBoxLayout(pix_w)
+        tf._add_run_clahe(layout=pix_l)
+        tf._add_run_wbns(layout=pix_l)
+        tf._add_run_rb_gaussian_background_removal(layout=pix_l)
+        tf._add_run_apply_rescale_intensity(layout=pix_l)
+        tf._add_run_pwcca(layout=pix_l)
+        tf._add_run_ccf_analysis(layout=pix_l)
+        pix_l.setAlignment(Qt.AlignTop)
+        tabs.addTab(pix_w, "Pixel-wise Correlation")
+
+        # Object-based tab: segmentation + object coloc metrics.
+        obj_w = QWidget(); obj_l = QVBoxLayout(obj_w)
+        tf._add_run_upscaling(layout=obj_l)
+        tf._add_pre_process(layout=obj_l)
+        tf._add_run_cellpose_segmentation(layout=obj_l)
+        tf._add_run_cell_analysis_func(layout=obj_l)
+        tf._add_run_segment_subcellular_objects(layout=obj_l)
+        tf._add_run_puncta_analysis_func(layout=obj_l)
+        tf._add_run_two_channel_coloc(layout=obj_l)
+        tf._add_run_obca(layout=obj_l)
+        tf._add_run_manders_coloc(layout=obj_l)
+        obj_l.setAlignment(Qt.AlignTop)
+        tabs.addTab(obj_w, "Object-based Colocalization")
+
+        self.coloc_layout.addWidget(tabs)
+        tf._add_save_and_clear(layout=self.coloc_layout)
+
+        main_widget = QWidget()
+        main_widget.setLayout(self.coloc_layout)
+
+        # Best-effort layer hand-off: pre-select likely layers now that the
+        # runners (and their dropdowns) are built and parented under main_widget.
+        try:
+            self._apply_layer_suggestions(root_widget=main_widget)
+        except Exception:
+            pass
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        main_widget.setMinimumWidth(0)
+        try:
+            _relax_min_widths(main_widget)
+        except Exception:
+            pass
+        scroll_area.setWidget(main_widget)
+        self.viewer.window.add_dock_widget(
+            scroll_area, name="Colocalization Analysis Dock")
+        main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.coloc_layout.setAlignment(Qt.AlignTop)
+        _apply_scroll_guard(main_widget)
+
+    def _apply_layer_suggestions(self, root_widget=None):
+        """Pre-select likely image/mask layers in coloc dropdowns (best effort).
+
+        Walks ALL QComboBox descendants of the dock (via Qt findChildren, so it
+        reaches dropdowns nested inside the tab pages) and, for any dropdown that
+        contains a suggested layer name, sets it to the highest-scoring
+        suggestion present. Convenience only — the user re-curates freely.
+        """
+        img_names, mask_names = self._suggest_layers()
+        if not img_names and not mask_names:
+            return
+        from PyQt5.QtWidgets import QComboBox
+        if root_widget is None:
+            return  # applied after the main widget exists (see setup_ui)
+        ordered = img_names + mask_names
+        for combo in root_widget.findChildren(QComboBox):
+            try:
+                items = [combo.itemText(j) for j in range(combo.count())]
+                for cand in ordered:
+                    if cand in items:
+                        combo.setCurrentText(cand)
+                        break
+            except Exception:
+                continue
 
 
 class GeneralAnalysisUI(AnalysisMethodsUI):
@@ -3467,8 +3627,7 @@ class MenuManager:
 
         coloc_analysis_submenu = self.analysis_methods_menu.addMenu('Colocalization Analysis')
         coloc_analysis_actions = {
-            'Object Based Colocalization Analysis': (self.central_manager.analysis_methods_ui._switch_to_object_coloc_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'Pixel Based Correlation Analysis': (self.central_manager.analysis_methods_ui._switch_to_pixel_coloc_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository})
+            'Colocalization Analysis (Pixel-wise + Object-based)': (self.central_manager.analysis_methods_ui._switch_to_coloc_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
         }
         self._add_actions_to_menu(coloc_analysis_actions, coloc_analysis_submenu)
 
