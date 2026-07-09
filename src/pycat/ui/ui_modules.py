@@ -3173,6 +3173,48 @@ class MenuManager:
             if app is not None:
                 app.installEventFilter(self._pycat_drop_filter)
             self.viewer.window._qt_window.setAcceptDrops(True)
+            # An app-level filter usually sees events first, but a file dropped
+            # directly on the napari CANVAS can still be consumed by napari's own
+            # widget-level dropEvent (its QtViewer sets acceptDrops + a dropEvent
+            # that calls napari's reader — which bypasses PyCAT's channel
+            # assignment). Belt-and-suspenders: install the same filter directly
+            # on the canvas/qt_viewer widget AND turn OFF its acceptDrops so
+            # napari's dropEvent can't fire. Accessor names differ across napari
+            # versions, so probe defensively.
+            _qtv = None
+            for _acc in ('_qt_viewer', 'qt_viewer'):
+                try:
+                    _qtv = getattr(self.viewer.window, _acc, None)
+                    if _qtv is not None:
+                        break
+                except Exception:
+                    continue
+            if _qtv is not None:
+                for _wattr in ('canvas', '_canvas', 'native'):
+                    try:
+                        _w = getattr(_qtv, _wattr, None)
+                        # napari canvas objects may expose a Qt widget via
+                        # .native; unwrap when present.
+                        _qw = getattr(_w, 'native', _w)
+                        if _qw is not None and hasattr(_qw, 'installEventFilter'):
+                            # Install the filter on the canvas widget so it sees
+                            # (and consumes) the Drop BEFORE napari's own
+                            # dropEvent. Keep acceptDrops=True so the drag is
+                            # accepted; the filter returns True on Drop, consuming
+                            # it before napari's handler runs.
+                            _qw.installEventFilter(self._pycat_drop_filter)
+                            try:
+                                _qw.setAcceptDrops(True)
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
+                # The QtViewer widget itself, too.
+                try:
+                    if hasattr(_qtv, 'installEventFilter'):
+                        _qtv.installEventFilter(self._pycat_drop_filter)
+                except Exception:
+                    pass
         except Exception as _e:
             print(f"[PyCAT] Could not install file-drop handler: {_e}")
 

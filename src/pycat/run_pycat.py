@@ -251,6 +251,20 @@ def run_pycat_func():
 
     app = QApplication(sys.argv)  # sys.argv is necessary for proper app initialization
 
+    # OS-level branding: without these the taskbar / dock / window-manager label
+    # the process as "napari" (or "python"). Present it as PyCAT everywhere.
+    try:
+        app.setApplicationName("PyCAT")
+        app.setApplicationDisplayName("PyCAT")
+        app.setOrganizationName("Banerjee Lab")
+        try:
+            # Linux: associate with a desktop entry name if present.
+            app.setDesktopFileName("PyCAT")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     # Global UI font: a sans-serif family (Arial/Segoe/DejaVu depending on OS) at a
     # slightly larger base size, so default text reads at the larger scale the
     # step headers use rather than the small Qt default.

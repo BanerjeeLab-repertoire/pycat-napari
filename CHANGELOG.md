@@ -23,6 +23,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.316] - 2026-07-09
+### Added
+- **napari-integration audit** (`docs/audits/PyCAT_napari_integration_audit_2026-07-09.md`)
+  covering branding, napari feature usage, and file drag-and-drop routing, with file:line
+  evidence and priorities.
+
+### Fixed (audit finding, P1 — drag-and-drop bypassing PyCAT)
+- **Files dropped on the napari CANVAS could bypass PyCAT's file I/O.** PyCAT installed an
+  application-level drop filter, but napari's canvas widget (QtViewer) has its own
+  `dropEvent` that routes to napari's reader — so a file dropped directly on the image area
+  (the most natural target) could load through napari and skip PyCAT's channel-assignment /
+  data-repository registration. The PyCAT drop filter is now ALSO installed directly on the
+  canvas / qt_viewer widget so it intercepts and consumes the drop before napari's handler,
+  across napari-version accessor differences (`_qt_viewer` / `qt_viewer`, `canvas` /
+  `native`), all guarded defensively.
+  ⚠️ **Needs live verification:** napari isn't available in the build/test sandbox, so the
+  widget-accessor path and event precedence can only be confirmed by actually dragging a
+  file onto the canvas in the running app. Verify: (1) drop a CZI/TIFF onto the image area →
+  PyCAT's channel-assignment dialog should appear (not a bare napari layer); (2) drop onto
+  the dock/side panels → still routes through PyCAT; (3) dragging a path into a text field
+  still works (input widgets are intentionally skipped).
+
+### Fixed (audit finding, P2 — OS-level branding)
+- **The app identified itself as "napari" (or "python") to the OS.** `setApplicationName` /
+  `setApplicationDisplayName` were never called, so the taskbar / dock / window-manager
+  showed the wrong name despite the in-window branding being thorough. Now set to "PyCAT"
+  (plus `setDesktopFileName("PyCAT")` on Linux) at QApplication creation.
+
+### Surfaced, not changed (your call)
+- Window title is still `PyCAT-Napari`; per the rebrand roadmap note, consider `PyCAT`.
+  Left as a positioning decision.
+- napari's advanced visualization (3D display, tracks, vectors, surfaces) is barely used —
+  confirms the roadmap's 3D-rendering / kymograph / tracks items are genuine additive
+  opportunities, not defects.
+
+## [1.5.315] - 2026-07-09
+### Added
+- **Full per-method audit** (`PyCAT_method_audit_2026-07-09.md`) covering all 18 analysis
+  methods across four axes — workflow/tool-chain soundness, performance/redundant I/O,
+  autopopulation logic, and UEX status-circle coverage — with file:line evidence, findings
+  tagged by category, and a priority ranking. See the doc for the full findings and the
+  pinned P2/P3 follow-ups.
+
+### Fixed (audit finding CC-1, P1 — redundant materialization)
+- **temperature_ui re-materialized the same stack up to 4× per session.** Four analysis
+  buttons (clear-frame guess, turbidity, per-temperature analysis, pattern correction/export)
+  each independently called `materialize_stack(...)` on the *same* selected stack, re-decoding
+  the entire lazy time-series from disk on every click. Added a `_get_stack()` cache keyed on
+  the layer name AND the underlying data object's identity, so the stack is materialized once
+  and reused across all four analyses; the cache invalidates automatically when the user picks
+  a different stack or the layer data is replaced. Validated: 4 clicks on one stack → 1
+  materialization (was 4); switching stacks correctly re-materializes.
+
+### Audit findings verified as NON-issues (recorded so they aren't re-chased)
+- Autopopulation is not broken in the delegator UIs: the nine per-method
+  `create_layer_dropdown` reimplementations are thin delegators to the base helper, which
+  carries the auto-refresh + name_hint wiring — so dropdowns update correctly everywhere.
+- The multiple `materialize_stack` calls in frap / invitro_fluor / brightfield operate on
+  *different* layers or in *different* handlers — not redundant re-reads (only temperature was).
+
+### Pinned follow-ups (P2/P3, in the audit doc — not changed this release)
+- UEX status circles for temperature / fusion / timeseries_invitro_fluor / fd_curve.
+- Generalize the colocalization smart layer pre-selection into a shared helper.
+- Worker-thread offload for nb_ui / spida_ui / frap_ui / fusion_ui (heavy compute on the
+  main thread). Progress-bar rollout continues per the existing roadmap rubric.
+
 ## [1.5.314] - 2026-07-09
 ### Added (reusable phased-progress mechanism; VPT double-100% fixed)
 - **`PhasedProgress` helper (`ui_utils`)** maps several sequential work phases onto ONE

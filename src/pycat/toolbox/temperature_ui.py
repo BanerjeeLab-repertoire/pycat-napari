@@ -43,6 +43,27 @@ class TemperatureDependentUI:
     def _dr(self):
         return self.central_manager.active_data_class.data_repository
 
+    def _get_stack(self, sname):
+        """Materialize the named stack ONCE and cache it, so the several
+        temperature analyses (clear-frame guess, turbidity, per-temperature,
+        transitions) don't each re-decode the whole lazy stack from disk.
+
+        The cache is keyed on the layer name AND the identity of the layer's
+        underlying data object, so it invalidates automatically when the user
+        picks a different stack or the layer data is replaced.
+        """
+        try:
+            layer = self.viewer.layers[sname]
+        except Exception:
+            return None
+        data = layer.data
+        cache = getattr(self, '_stack_cache', None)
+        if cache is not None and cache[0] == sname and cache[1] is data:
+            return cache[2]
+        arr = materialize_stack(data)
+        self._stack_cache = (sname, data, arr)
+        return arr
+
     def _on_pixel_size_set(self, v):
         """When the user enters a pixel size in the gate, refresh the field
         circles AND update the on-screen scale bar to microns."""
@@ -436,7 +457,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
-        stack = materialize_stack(self.viewer.layers[sname].data)
+        stack = self._get_stack(sname)
         if stack.ndim != 3:
             napari_show_warning("Reference-frame guessing needs a (T, H, W) stack."); return
         res = guess_clear_frame(stack)
@@ -462,7 +483,7 @@ class TemperatureDependentUI:
         temps = self._dr().get('temp_temperatures')
         if temps is None:
             napari_show_warning("Run Step 2 (Sync Temperatures) first."); return
-        stack = materialize_stack(self.viewer.layers[sname].data)
+        stack = self._get_stack(sname)
         if stack.ndim != 3:
             napari_show_warning("Temperature analysis needs a (T, H, W) stack."); return
 
@@ -604,7 +625,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return None
-        stack = materialize_stack(self.viewer.layers[sname].data)
+        stack = self._get_stack(sname)
         if stack.ndim != 3:
             napari_show_warning("Pattern correction needs a (T, H, W) stack."); return None
         return apply_static_pattern_correction(stack, self._ref_frame.value())
@@ -662,7 +683,7 @@ class TemperatureDependentUI:
         if not out:
             return
 
-        stack = materialize_stack(self.viewer.layers[sname].data)
+        stack = self._get_stack(sname)
         if self._export_corrected.isChecked():
             from pycat.toolbox.temperature_tools import apply_static_pattern_correction
             stack = apply_static_pattern_correction(stack, self._ref_frame.value())
