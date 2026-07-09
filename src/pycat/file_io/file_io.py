@@ -2670,6 +2670,15 @@ class FileIOClass:
             data = dtype_conversion_func(data, 'float32')  # Ensure image data is correct float32 dtype
             # Add the image to the viewer
             add_image_with_default_colormap(data, self.viewer, name=name)
+            # Stash the current file's metadata on the layer so a later
+            # multi-image comparison can diff acquisition settings per-layer even
+            # though data_repository['file_metadata'] is overwritten on each load.
+            try:
+                _md = self.central_manager.active_data_class.data_repository.get('file_metadata')
+                if _md is not None and len(self.viewer.layers):
+                    self.viewer.layers[-1].metadata['pycat_file_metadata'] = _md
+            except Exception:
+                pass
             # Auto scale bar for the freshly-loaded 2D image.
             self._enable_auto_scale_bar()
 

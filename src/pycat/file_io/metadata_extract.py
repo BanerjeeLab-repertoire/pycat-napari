@@ -598,3 +598,103 @@ def extract_metadata(file_path, reader=None, image=None, width_px=None):
         return result
     # Fallback: try AICSImage for anything else (czi, lif, nd2, ...).
     return extract_aicsimage_metadata(file_path, image=image)
+
+
+# ---------------------------------------------------------------------------
+# Acquisition metadata comparison (multi-image side-by-side trust check)
+# ---------------------------------------------------------------------------
+
+# Fields that affect whether a QUANTITATIVE comparison between images is valid,
+# with a severity: 'critical' differences undermine intensity/size comparison
+# and warrant a strong warning; 'info' differences are worth noting but don't
+# by themselves invalidate a comparison. (label, key, severity)
+_COMPARE_FIELDS = [
+    ('Objective',          'objective',           'critical'),
+    ('Numerical aperture', 'numerical_aperture',  'critical'),
+    ('Pixel size (um)',    'pixel_size_um',       'critical'),
+    ('Exposure (s)',       'exposure_s',          'critical'),
+    ('Excitation (nm)',    'excitation_nm',       'critical'),
+    ('Emission (nm)',      'emission_nm',         'critical'),
+    ('Bit depth',          'bit_depth',           'critical'),
+    ('Modality',           'modality',            'critical'),
+    ('Camera',             'camera_name',         'info'),
+    ('Z step (um)',        'z_step_um',           'info'),
+    ('Frame interval (s)', 'frame_interval_s',    'info'),
+    ('Channels',           'n_channels',          'info'),
+    ('Z planes',           'n_z',                 'info'),
+    ('Software',           'software',            'info'),
+]
+
+
+def _values_differ(values):
+    """True if the non-None values are not all equal. All-None (unknown) is not
+    a difference. A mix of None and a value IS flagged (one file lacks the info),
+    but only among the values that are present do we compare equality."""
+    present = [v for v in values if v is not None]
+    if len(present) <= 1:
+        return False
+    first = present[0]
+    # Numeric compare with tolerance; else exact.
+    def _eq(a, b):
+        try:
+            return abs(float(a) - float(b)) <= 1e-6 * max(1.0, abs(float(a)))
+        except (TypeError, ValueError):
+            return a == b
+    return not all(_eq(first, v) for v in present)
+
+
+def compare_acquisition_metadata(metadata_list, names=None):
+    """Diff acquisition metadata across several images to flag whether a
+    side-by-side comparison is trustworthy.
+
+    Parameters
+    ----------
+    metadata_list : list[dict]
+        One 'common' metadata dict per image (as produced by extract_metadata,
+        i.e. the ['common'] block). Missing/None values are treated as unknown.
+    names : list[str] or None
+        Display names per image (e.g. layer or file names). Defaults to
+        Image 1..N.
+
+    Returns
+    -------
+    dict with:
+      'names'          : the per-image names
+      'rows'           : list of {label, key, severity, values, differs}
+      'n_critical_diff': count of critical fields that differ
+      'n_info_diff'    : count of info fields that differ
+      'any_diff'       : bool
+      'summary'        : one-line human-readable verdict
+    """
+    n = len(metadata_list)
+    if names is None:
+        names = [f"Image {i + 1}" for i in range(n)]
+    rows = []
+    n_crit = 0
+    n_info = 0
+    for label, key, severity in _COMPARE_FIELDS:
+        values = [(_m or {}).get(key) for _m in metadata_list]
+        differs = _values_differ(values)
+        if differs:
+            if severity == 'critical':
+                n_crit += 1
+            else:
+                n_info += 1
+        rows.append({'label': label, 'key': key, 'severity': severity,
+                     'values': values, 'differs': differs})
+
+    any_diff = (n_crit + n_info) > 0
+    if n < 2:
+        summary = "Need at least two images to compare."
+    elif n_crit > 0:
+        summary = (f"\u26a0 {n_crit} acquisition setting(s) differ that can make "
+                   f"a quantitative comparison untrustworthy (intensity / size / "
+                   f"resolution may not be directly comparable).")
+    elif n_info > 0:
+        summary = (f"{n_info} setting(s) differ, but none that critically affect "
+                   f"quantitative comparison. Review the flagged rows.")
+    else:
+        summary = ("Acquisition settings match across the images \u2014 "
+                   "comparison is on equal footing.")
+    return {'names': names, 'rows': rows, 'n_critical_diff': n_crit,
+            'n_info_diff': n_info, 'any_diff': any_diff, 'summary': summary}

@@ -23,6 +23,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.324] - 2026-07-09
+### Added (acquisition-metadata comparison / trust check for side-by-side)
+- **A metadata-diff table now flags when compared images were acquired under different
+  settings.** Comparing images with different exposure, laser/excitation, objective, NA,
+  pixel size, emission filter, bit depth, or modality can make a quantitative comparison
+  untrustworthy — regardless of how the grid looks. PyCAT now diffs the acquisition metadata
+  across the currently visible images and presents a table highlighting differences: red for
+  settings that critically affect quantitative comparison, amber for less-critical ones,
+  with a plain-language verdict at the top.
+- **It runs automatically when grid comparison starts** with 2+ images and pops the table
+  only if a *critical* setting differs (stays quiet when settings match). It's also available
+  on demand via a **"Compare loaded images…"** button in the ⓘ Metadata dialog.
+- To support this across a multi-image session (where `data_repository['file_metadata']` is
+  overwritten on each load), each image's acquisition metadata is now stashed on its napari
+  layer (`layer.metadata['pycat_file_metadata']`) at load time, so per-layer comparison works.
+- The comparison logic (`compare_acquisition_metadata` in metadata_extract.py) treats a
+  missing value as "unknown" (not a conflict), compares numerics with tolerance, and was
+  validated on identical / critical-diff / info-diff / missing-value / 3-image / all-empty /
+  single-image cases.
+
 ## [1.5.323] - 2026-07-09
 ### Fixed (grid reflow — now driven by the napari 0.7.1 diagnostic)
 - **Grid now reflows to only the visible tiles.** A diagnostic on napari 0.7.1 established

@@ -3489,6 +3489,14 @@ class MenuManager:
 
         export_btn.clicked.connect(_export)
         controls.addWidget(export_btn)
+
+        compare_btn = QPushButton("Compare loaded images…")
+        compare_btn.setToolTip(
+            "Diff acquisition settings across the currently visible images and "
+            "flag differences (exposure, laser, objective, filters, etc.) that "
+            "can make a quantitative comparison untrustworthy.")
+        compare_btn.clicked.connect(lambda: self._show_metadata_comparison())
+        controls.addWidget(compare_btn)
         layout.addLayout(controls)
 
         close_btn = QPushButton("Close")
@@ -3821,6 +3829,14 @@ class MenuManager:
                       f"contents) and will return when you toggle grid off.")
             else:
                 _info("Side-by-side grid view ON (image layers only).")
+            # Surface an acquisition-metadata comparison so the user knows
+            # whether the images being compared were acquired under the same
+            # settings (different exposure / laser / objective / filters make a
+            # quantitative comparison untrustworthy — independent of the grid).
+            try:
+                self._maybe_warn_metadata_diff()
+            except Exception:
+                pass
         else:
             try:
                 self.viewer.grid.enabled = False
@@ -3834,6 +3850,107 @@ class MenuManager:
                       f"drawing layer(s) restored.")
             else:
                 _info("Side-by-side grid view OFF.")
+
+    def _gather_compared_metadata(self):
+        """Collect per-layer acquisition metadata for the currently VISIBLE image
+        layers (the ones being compared in grid mode). Returns (names, metas).
+        Reads the metadata stashed on each layer at load time."""
+        names, metas = [], []
+        try:
+            for lyr in self.viewer.layers:
+                if isinstance(lyr, napari.layers.Image) and bool(getattr(lyr, 'visible', True)):
+                    md = None
+                    try:
+                        full = lyr.metadata.get('pycat_file_metadata')
+                        if isinstance(full, dict):
+                            md = full.get('common', full)
+                    except Exception:
+                        md = None
+                    names.append(lyr.name)
+                    metas.append(md or {})
+        except Exception:
+            pass
+        return names, metas
+
+    def _maybe_warn_metadata_diff(self):
+        """When grid comparison starts with 2+ images, run the acquisition-
+        metadata diff and, if critical settings differ, pop the comparison table
+        so the user knows the comparison may be untrustworthy. If everything
+        matches (or metadata is absent), stay quiet."""
+        names, metas = self._gather_compared_metadata()
+        if len(names) < 2:
+            return
+        # Only show automatically when there's something worth warning about.
+        try:
+            from pycat.file_io.metadata_extract import compare_acquisition_metadata
+            result = compare_acquisition_metadata(metas, names=names)
+        except Exception:
+            return
+        if result['n_critical_diff'] > 0:
+            self._show_metadata_comparison(result)
+
+    def _show_metadata_comparison(self, result=None):
+        """Show a table diffing acquisition metadata across the compared images,
+        highlighting settings that differ. Can be called standalone; if no
+        result is passed it gathers the current visible-image metadata."""
+        from qtpy.QtWidgets import (QDialog, QVBoxLayout, QLabel, QTableWidget,
+                                    QTableWidgetItem, QPushButton)
+        from qtpy.QtGui import QColor
+        if result is None:
+            names, metas = self._gather_compared_metadata()
+            if len(names) < 2:
+                from napari.utils.notifications import show_info as _info
+                _info("Load/show at least two images to compare their metadata.")
+                return
+            from pycat.file_io.metadata_extract import compare_acquisition_metadata
+            result = compare_acquisition_metadata(metas, names=names)
+
+        names = result['names']
+        rows = result['rows']
+        dlg = QDialog()
+        dlg.setWindowTitle("Acquisition Metadata Comparison")
+        lay = QVBoxLayout(dlg)
+
+        verdict = QLabel(result['summary'])
+        verdict.setWordWrap(True)
+        if result['n_critical_diff'] > 0:
+            verdict.setStyleSheet("color:#c0392b; font-weight:bold;")
+        elif result['any_diff']:
+            verdict.setStyleSheet("color:#b8860b;")
+        else:
+            verdict.setStyleSheet("color:#2e7d32;")
+        lay.addWidget(verdict)
+
+        table = QTableWidget(len(rows), len(names) + 1)
+        table.setHorizontalHeaderLabels(['Setting'] + list(names))
+        for r, row in enumerate(rows):
+            lbl = QTableWidgetItem(row['label']
+                                   + ('  \u26a0' if row['differs'] and
+                                      row['severity'] == 'critical' else ''))
+            table.setItem(r, 0, lbl)
+            for c, val in enumerate(row['values']):
+                item = QTableWidgetItem('—' if val is None else str(val))
+                if row['differs']:
+                    # Highlight differing rows: red for critical, amber for info.
+                    item.setBackground(QColor('#f9d6d5') if row['severity'] ==
+                                       'critical' else QColor('#fdf1cf'))
+                table.setItem(r, c + 1, item)
+        table.resizeColumnsToContents()
+        lay.addWidget(table)
+
+        note = QLabel("Rows highlighted red are acquisition settings that can "
+                      "make a quantitative comparison untrustworthy; amber rows "
+                      "differ but are less critical. '—' means the value wasn't "
+                      "recorded in that file's metadata.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#888; font-size:9pt;")
+        lay.addWidget(note)
+
+        close = QPushButton("Close")
+        close.clicked.connect(dlg.accept)
+        lay.addWidget(close)
+        dlg.resize(600, 400)
+        dlg.exec_()
 
     def _annotation_layers(self):
         """Layers that are pure annotation/drawing (Shapes/Points) — these are
