@@ -67,6 +67,37 @@ def debug_log(context, exc=None):
         pass
 
 
+def normalize01(arr, out_dtype=np.float32):
+    """Min-max normalise an array to [0, 1], safely.
+
+    Returns (arr - min) / (max - min) as ``out_dtype``. On a flat/constant array
+    (max == min) this returns all zeros instead of dividing by zero — the common
+    case that a bare ``(x - mn) / (mx - mn)`` turns into NaN/inf (e.g. an all-
+    background frame in a time series, or a fully-saturated region). This is the
+    single canonical normalisation used across PyCAT so the divide-by-zero guard
+    and behaviour are consistent everywhere.
+
+    Parameters
+    ----------
+    arr : array-like
+        Input image / stack.
+    out_dtype : numpy dtype
+        Output dtype (default float32). Pass None to keep float64.
+
+    Returns
+    -------
+    numpy.ndarray in [0, 1].
+    """
+    a = np.asarray(arr, dtype=np.float64)
+    mn = float(a.min()) if a.size else 0.0
+    mx = float(a.max()) if a.size else 0.0
+    if mx > mn:
+        out = (a - mn) / (mx - mn)
+    else:
+        out = np.zeros_like(a)
+    return out if out_dtype is None else out.astype(out_dtype)
+
+
 def dtype_conversion_func(image, output_bit_depth='uint16'):
     """
     Converts the data type of an image to a specified bit depth using skimage's utility functions. This conversion

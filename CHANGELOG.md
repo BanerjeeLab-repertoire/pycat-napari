@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.309] - 2026-07-09
+### Added
+- **Canonical `normalize01()` in `general_utils`.** A single, safe min-max normaliser to
+  [0, 1] that returns zeros on a flat/constant array instead of dividing by zero. New code
+  (and files as they're touched) should use this instead of re-inlining
+  `(x - mn) / (mx - mn ...)`, so the divide-by-zero guard and behaviour stay consistent.
+
+### Audit note (health audit findings 4 & 5 — closed as low-value after inspection)
+- **Finding 4 (duplicated normalise idiom):** on close inspection every existing site is
+  already guarded (an `if mx > mn` / `if mx <= mn` check precedes each one), so there is NO
+  latent divide-by-zero bug — the finding is cosmetic duplication only. Rather than a
+  15-file mechanical rewrite (churn + regression risk for no behaviour change), the shared
+  `normalize01()` is provided for incremental adoption. Existing working sites are left alone.
+- **Finding 5 (stray prints):** the raw count (~241) was misleading — ~180 are the
+  intentional `[PyCAT] …` status-logging convention, the rest are the startup banner, a
+  standalone repair script, and batch-replay status messages. There is no meaningful
+  stray-debug-print problem; no changes made.
+- Findings 1–3 (latent stack frame-collapse bugs across six UIs; metadata-path
+  diagnosability; missing measurement-correctness tests) were the substantive ones and
+  shipped in 1.5.307–1.5.308.
+
 ## [1.5.308] - 2026-07-09
 ### Changed (diagnosability — health audit finding 2)
 - **Silent metadata-extraction failures now leave a breadcrumb.** In
