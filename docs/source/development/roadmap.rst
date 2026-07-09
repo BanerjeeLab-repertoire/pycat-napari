@@ -49,6 +49,29 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: FIJI-style independent multi-image comparison (architectural — pinned)
+
+PyCAT can now load images without clearing (add-without-clear) and toggle napari's grid
+mode for side-by-side viewing in ONE viewer (shipped) — but those layers still share one
+camera and one set of dim sliders. True FIJI-style comparison, where multiple images live
+in independent windows each with their own zoom, dims, and analysis state, cuts against
+PyCAT's single-``active_data_class`` architecture (the whole analysis pipeline assumes one
+active dataset, and loads auto-clear by default). Delivering it properly means letting
+``central_manager`` hold multiple datasets and letting analyses target a chosen one — a
+significant, cross-cutting change to evaluate carefully rather than rush. Pinned as an
+architectural project; the grid-view + add-without-clear path covers most same-modality
+comparison needs in the meantime.
+
+.. rubric:: Multi-scene / position scene-switcher (follow-up to the context-aware opener)
+
+The context-aware opener parses X/Y/Z/C/T/P and routes multi-position files to the stack
+loader, which already handles the sibling-file position case (separate .ims per position →
+tagged layers). What remains is a true SCENE SWITCHER for a single multi-scene file (e.g. a
+CZI with SizeS>1): a dropdown to lazily load one scene/position at a time (low-memory,
+consistent with the data-local thesis) rather than overlaying or scrubbing positions. Needs
+a scene-aware lazy wrapper + a small UI control; deferred to its own focused pass so it
+doesn't destabilise the loader.
+
 .. rubric:: Progress-bar audit (materialization-progress helper shipped; per-method rollout pending)
 
 A reusable phased-progress mechanism now exists (``PhasedProgress`` in ``ui_utils`` +

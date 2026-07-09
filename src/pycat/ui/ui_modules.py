@@ -3718,6 +3718,9 @@ class MenuManager:
             Add specific file I/O methods as actions to the file I/O menu.
             """
             file_io_methods_dict = {
+                'Open Image (auto-detect 2D / stack)': (self.central_manager.file_io.open_image_auto, {}),
+                'Add Image (keep current — compare / add channel)': (self._open_image_add, {}),
+                'Toggle Side-by-Side (grid view)': (self._toggle_grid_view, {}),
                 'Open 2D Image(s)': (self.central_manager.file_io.open_2d_image, {}),
                 'Open Image Stack (T/Z / IMS)': (self.central_manager.file_io.open_stack, {}),
                 'Load Previous Session Results': (self._open_session_loader, {}),
@@ -3726,6 +3729,26 @@ class MenuManager:
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
             self._add_actions_to_menu(file_io_methods_dict, self.file_menu)
+
+    def _open_image_add(self, *args, **kwargs):
+        """Open an image WITHOUT clearing the current session — adds its layers
+        alongside the existing ones (for side-by-side comparison or loading a
+        missing channel of a split-file image). Uses the context-aware router."""
+        self.central_manager.file_io.open_image_auto(clear_first=False)
+
+    def _toggle_grid_view(self, *args, **kwargs):
+        """Toggle napari's grid mode so multiple loaded images/layers tile
+        side-by-side in the canvas for comparison (they share one camera and one
+        set of dim sliders — good for comparing same-modality data). Toggling
+        again returns to the normal single overlaid view."""
+        try:
+            g = self.viewer.grid
+            new_state = not bool(g.enabled)
+            g.enabled = new_state
+            from napari.utils.notifications import show_info as _info
+            _info(f"Side-by-side grid view {'ON' if new_state else 'OFF'}.")
+        except Exception as _e:
+            print(f"[PyCAT] Could not toggle grid view: {_e}")
 
     # Add specific analysis methods as actions to the analysis methods menu.
     def _add_analysis_methods_to_menu(self):

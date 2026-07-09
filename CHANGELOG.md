@@ -23,6 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.318] - 2026-07-09
+### Added (context-aware opener, add-without-clear, side-by-side grid)
+- **Context-aware "Open Image (auto-detect 2D / stack)".** A single opener parses the
+  file's dimensional structure (X/Y/Z/C/T/P) BEFORE loading and routes it: any real Z or T
+  axis (size > 1), or multi-position (P > 1), goes to the lazy stack loader; a single XY
+  plane (optionally multi-channel XYC) goes to the 2D loader. Channels remain SEPARATE
+  overlaid layers (the analysis pipeline is unchanged); the decision is made on the real
+  axes, not the file extension. Falls back to the 2D loader if structure can't be read. The
+  two over-specific "Open 2D Image" / "Open Image Stack" items remain as explicit options.
+- **"Add Image (keep current)".** Opens an image WITHOUT clearing the session — adds its
+  layers alongside the existing ones, via a new `clear_first=False` path on both openers.
+  For loading a missing channel of a split-file image, or placing a second image next to the
+  first for comparison.
+- **"Toggle Side-by-Side (grid view)".** Flips napari's grid mode so multiple loaded
+  images/layers tile in the canvas for comparison. (They share one camera + dim sliders —
+  good for same-modality comparison; full independent-window comparison is a separate
+  roadmap item.)
+- **Stack slider axes are now labelled T / Z** (instead of the default 0 / 1), so
+  multi-dimensional browsing is legible.
+
+### Roadmap
+- Pinned **FIJI-style independent multi-image comparison** (independent windows/zoom/dims
+  per image) as an architectural project — it cuts against the single-``active_data_class``
+  design, so it's evaluated carefully rather than rushed; grid-view + add-without-clear
+  cover most same-modality comparison in the meantime.
+- Pinned a **multi-scene / position scene-switcher** (lazy one-scene-at-a-time browsing of a
+  single multi-scene file, e.g. CZI SizeS>1) as a follow-up to the context-aware opener.
+
 ## [1.5.317] - 2026-07-09
 ### Fixed (napari file-loading could bypass PyCAT — verified against napari 0.7.1)
 - **napari's own data-loading actions are now hard-disabled by objectName.** The napari

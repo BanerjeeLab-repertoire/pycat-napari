@@ -1169,11 +1169,23 @@ class FileIOClass:
         except Exception:
             pass
 
-    def open_2d_image(self, file_paths=None):
+    def open_2d_image(self, file_paths=None, clear_first=True):
         """
         Opens a dialog for selecting and opening 2D image files. Supports multiple file formats and handles multichannel 
         images by assigning channels through a dialog. The method updates the Napari viewer with the opened images and 
         integrates image metadata into the provided data instance for subsequent analysis.
+
+        Parameters
+        ----------
+        file_paths : list[str] or None
+            Paths to open; None opens a file dialog.
+        clear_first : bool, default True
+            If True, reset to the workflow start state before loading (the normal
+            single-dataset behaviour). If False, ADD the loaded layers to the
+            current session without clearing — used to load a missing channel of a
+            split-file image, or to place a second image alongside the first for
+            side-by-side comparison. Metadata/data-repository updates still apply
+            to the active data class, so analyses continue to target it.
 
         Notes
         -----
@@ -1203,7 +1215,8 @@ class FileIOClass:
         # Reset to the workflow start state first, so the new dataset loads clean.
         # If there is existing work, confirm before discarding it (matching the
         # Clear button's safety prompt) so unsaved analysis isn't lost silently.
-        if not self._auto_clear_before_load():
+        # clear_first=False skips this (add-without-clearing).
+        if clear_first and not self._auto_clear_before_load():
             return  # user declined to discard existing work
 
         self._last_channel_info = []  # reset per file-open to avoid accumulation
@@ -1375,11 +1388,85 @@ class FileIOClass:
 
 
 
-    def open_stack(self, file_path=None):
+    def open_image_auto(self, file_path=None, clear_first=True):
+        """Context-aware opener: inspect a file's dimensional structure
+        (X, Y, Z, C, T, P) and route it to the right loader automatically, so
+        the user doesn't have to know whether their file is "2D" or a "stack".
+
+        Routing rule:
+          - Any real Z or T axis (size > 1), or multi-position (P > 1) → open_stack
+            (lazy; napari gives a slider per non-spatial axis; channels become
+            separate overlaid layers; multi-position is handled by the scene
+            switcher).
+          - Otherwise (a single XY plane, optionally multi-channel XYC) →
+            open_2d_image (channel-assignment pipeline).
+
+        Every file is parsed for structure BEFORE loading so the decision is made
+        on the real axes, not the file extension. If structure can't be read, we
+        fall back to the 2D opener (which itself handles multi-channel).
+
+        clear_first is forwarded so this can also add-without-clearing.
+        """
+        if not isinstance(file_path, str):
+            file_path = None
+        if file_path is None:
+            options = QFileDialog.Options()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Open Image",
+                "",
+                "Image Files (*.ims *.tif *.tiff *.czi *.png);;All Files (*)",
+                options=options)
+        if not file_path:
+            return
+
+        ext = os.path.splitext(file_path)[1].lower()
+        # IMS is always a stack format (T/C/Z), route directly.
+        if ext == '.ims':
+            self.open_stack(file_path=file_path, clear_first=clear_first)
+            return
+
+        n_t = n_z = n_c = n_p = 1
+        parsed = False
+        try:
+            from aicsimageio import AICSImage
+            img = AICSImage(file_path)
+            dims = img.dims  # has .T .C .Z .Y .X
+            n_t = int(getattr(dims, 'T', 1) or 1)
+            n_z = int(getattr(dims, 'Z', 1) or 1)
+            n_c = int(getattr(dims, 'C', 1) or 1)
+            try:
+                n_p = len(img.scenes) if img.scenes is not None else 1
+            except Exception:
+                n_p = 1
+            parsed = True
+            print(f"[PyCAT open-auto] {os.path.basename(file_path)}: "
+                  f"P={n_p} T={n_t} C={n_c} Z={n_z} → "
+                  f"{'stack' if (n_t > 1 or n_z > 1 or n_p > 1) else '2D'}")
+        except Exception as _e:
+            debug_log("file_io: open_image_auto structure parse failed; "
+                      "falling back to 2D loader", _e)
+
+        # Multi-position (P>1) or any real Z/T axis → stack loader.
+        if parsed and (n_t > 1 or n_z > 1 or n_p > 1):
+            self.open_stack(file_path=file_path, clear_first=clear_first)
+        else:
+            self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
+
+    def open_stack(self, file_path=None, clear_first=True):
         """
         Open any supported multi-frame image file as a lazy (T, Y, X) or
         (Z, Y, X) stack — one layer per channel — without loading the full
         array into memory.
+
+        Parameters
+        ----------
+        file_path : str or None
+            Path to open; None opens a file dialog.
+        clear_first : bool, default True
+            If True, reset to the workflow start state before loading (normal
+            single-dataset behaviour). If False, ADD the loaded layers to the
+            current session without clearing (side-by-side comparison / loading
+            an additional channel). See open_2d_image for the rationale.
 
         Supported formats
         -----------------
@@ -1422,8 +1509,8 @@ class FileIOClass:
         # Reset to the workflow start state before loading a new stack (same as
         # the 2-D loader). Prevents the confusing overlap where a new stack loads
         # over an existing one with a different frame count. Confirms first if
-        # there is existing work.
-        if not self._auto_clear_before_load():
+        # there is existing work. clear_first=False skips this (add-without-clear).
+        if clear_first and not self._auto_clear_before_load():
             return  # user declined to discard existing work
 
         self.filePath      = file_path
@@ -2095,6 +2182,29 @@ class FileIOClass:
         self._prompt_pixel_size_if_needed()
 
         self._add_diameter_annotation_layers()
+
+        # Label the non-spatial slider axes so they read "T"/"Z" instead of the
+        # default "0"/"1". napari shows one slider per axis beyond the displayed
+        # two (Y, X); giving them names makes multi-dimensional browsing legible.
+        try:
+            ndim = 2
+            if n_t and n_t > 1:
+                ndim += 1
+            if n_z and n_z > 1:
+                ndim += 1
+            if ndim > 2:
+                # Axis order for the loaded stacks is (T, Z, Y, X) with whichever
+                # of T/Z are present; build labels to match.
+                labels = []
+                if n_t and n_t > 1:
+                    labels.append('T')
+                if n_z and n_z > 1:
+                    labels.append('Z')
+                labels += ['Y', 'X']
+                if len(labels) == self.viewer.dims.ndim:
+                    self.viewer.dims.axis_labels = labels
+        except Exception:
+            pass
 
         # Auto scale bar for the freshly-loaded stack.
         self._enable_auto_scale_bar()
