@@ -23,6 +23,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.327] - 2026-07-09
+### Added (standalone Reference / Background Subtraction widget)
+- **New Toolbox → Image Processing → "Reference / Background Subtraction" widget.** A general
+  reference-subtraction tool built on the validated `reference_subtraction` core:
+  - **Input** selected from a layer dropdown (2D image or T/Z stack).
+  - **Reference** chosen either as a frame INDEX within the input (static-pattern removal,
+    with the reference frame rebuilt from its neighbours) OR as a SEPARATE image layer
+    (loaded via Add Image — a clear field of the same view); the external reference's shape
+    is checked against the input frames.
+  - **Modality** selector — Brightfield (subtract pattern, keep gray baseline) or
+    Fluorescence (preserve background floor + noise, adaptive softening so signal isn't
+    driven below zero; reports the applied strength and warns if it had to soften, which
+    signals a reference/data mismatch).
+  - **Advanced** max-clip-fraction control (default 0.01%, range 0.001–1%) for the
+    fluorescence softening.
+  - **Output** added as a new layer; **Export** to TIFF (float32) or MP4 (same imageio/pyav
+    backend the temperature export uses).
+- The widget reuses the same subtraction function as the temperature workflow, so there's one
+  implementation of the science.
+
+## [1.5.326] - 2026-07-09
+### Fixed (temperature — subtraction now produces a visible layer)
+- **"Subtract first frame" in temperature-dependent microscopy now lets you SEE the
+  subtracted result.** Previously the reference subtraction was applied only internally
+  (to the entropy computation and the MP4/TIFF export) with no visible layer. A new
+  "Preview subtracted stack → new layer" button applies the subtraction and adds the
+  corrected stack to the viewer, without disturbing the rest of the method.
+
+### Added (generalized reference-subtraction core, reused by the above)
+- **`reference_subtraction(stack, reference, mode, …)` in temperature_tools** — a general
+  reference/background subtraction usable both by the temperature workflow and (next) a
+  standalone widget:
+  - **Brightfield mode:** `frame − reference + mean(reference)` — subtract the fixed
+    pattern, add back the mean gray so the brightfield baseline is preserved (the existing,
+    validated behaviour); the in-stack reference frame is rebuilt from its neighbours
+    (nn/nnn) so it isn't a flat outlier, matching the entropy-inheritance fix.
+  - **Fluorescence mode:** subtracts only the STRUCTURED part of the reference
+    (`reference − min(reference)`), preserving the uniform background floor and its noise
+    texture — because a heavily-zeroed image loses the background structure a microscopist
+    reads, and flattening discards real information. The subtraction strength is softened by
+    a single factor α (chosen so no frame clips more than a set fraction of pixels, default
+    0.01%), residual negatives are clamped, and α (<1 signals a reference/data mismatch) is
+    reported. Validated in the sandbox: floor + signal preserved, no negatives, α backs off
+    correctly when the reference is too bright.
+
+## [1.5.325] - 2026-07-09
+### Fixed (grid — from live test)
+- **"Show/hide all" no longer shuffles the grid order.** The reflow moved visible layers to
+  the front based on the transient list order, so cascading visibility events (especially
+  show/hide-all) scrambled which layer sat in which cell. The grid now snapshots a CANONICAL
+  layer order the moment grid mode is enabled and arranges every reflow against that fixed
+  anchor — so visibility toggles reflow the grid to fill the canvas without ever changing a
+  layer's slot. Verified: after any hide/show sequence (including hide-all then show-all) the
+  order returns exactly to the canonical arrangement. Layers added after grid-on append to
+  the anchor in arrival order.
+- **Grid toggle now lives ONLY in the PyCAT toolbar** (🗃 Grid, Layers section). Removed the
+  duplicate "Toggle Side-by-Side" item from the Open/Save File(s) menu.
+
 ## [1.5.324] - 2026-07-09
 ### Added (acquisition-metadata comparison / trust check for side-by-side)
 - **A metadata-diff table now flags when compared images were acquired under different

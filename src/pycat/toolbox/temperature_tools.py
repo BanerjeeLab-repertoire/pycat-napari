@@ -316,6 +316,107 @@ def apply_static_pattern_correction(stack, reference_index=0):
     return corrected
 
 
+def reference_subtraction(stack, reference, mode='brightfield',
+                          clip_fraction=1e-4, rebuild_reference_index=None):
+    """Subtract a reference pattern from every frame of a stack, in a way
+    appropriate to the imaging modality.
+
+    This generalises ``apply_static_pattern_correction`` so it can be reused as a
+    standalone widget and driven from the temperature workflow. The reference may
+    be a frame drawn from the stack itself (static-pattern removal) or a separate
+    image of the same field acquired clear of objects.
+
+    Parameters
+    ----------
+    stack : (T, H, W) or (H, W) array
+        The data to correct. A single 2-D frame is treated as a 1-frame stack.
+    reference : (H, W) array
+        The reference pattern to subtract (same H, W as the stack frames).
+    mode : {'brightfield', 'fluorescence'}
+        - 'brightfield': ``corrected = frame - reference + mean(reference)``.
+          Subtracts the fixed pattern and adds the reference's mean gray back so
+          the image keeps its brightfield gray baseline (doesn't go toward black).
+        - 'fluorescence': subtracts only the STRUCTURED part of the reference,
+          ``pattern = reference - min(reference)``, so the uniform background
+          floor and its noise texture are preserved (a heavily-zeroed image loses
+          the background structure a microscopist reads, and denoising-to-flat
+          discards real information). The subtraction strength is softened
+          adaptively so it doesn't drive more than ``clip_fraction`` of pixels
+          negative; any residual negatives are clamped to zero.
+    clip_fraction : float
+        Fluorescence mode only. The maximum fraction of pixels allowed to clip at
+        zero. One softening factor alpha in (0, 1] is chosen for the WHOLE stack
+        (uniform treatment across a time/temperature series) as the largest alpha
+        for which no frame clips more than this fraction. Default 1e-4 (0.01%).
+    rebuild_reference_index : int or None
+        If the reference is a frame WITHIN the stack, pass its index here so that
+        frame — which would otherwise be flat/degenerate after subtracting itself
+        — is rebuilt from its already-corrected neighbours (nn / nnn), matching
+        the entropy-inheritance behaviour of apply_static_pattern_correction.
+
+    Returns
+    -------
+    corrected : (T, H, W) float32 array
+    info : dict
+        {'mode', 'alpha', 'clip_fraction_requested', 'clip_fraction_actual'} —
+        alpha < 1 means the subtraction had to be softened (a signal the
+        reference may be too bright / mismatched for this data).
+    """
+    stack = np.asarray(stack, dtype=np.float32)
+    single = (stack.ndim == 2)
+    if single:
+        stack = stack[None, ...]
+    n = stack.shape[0]
+    reference = np.asarray(reference, dtype=np.float32)
+
+    info = {'mode': mode, 'alpha': 1.0,
+            'clip_fraction_requested': float(clip_fraction),
+            'clip_fraction_actual': 0.0}
+
+    if mode == 'brightfield':
+        mean_ref = float(reference.mean())
+        corrected = (stack - reference + mean_ref).astype(np.float32)
+    else:
+        # Fluorescence: subtract only the structured pattern, preserving the
+        # uniform floor + noise. Choose one softening factor alpha for the whole
+        # stack so no frame clips more than clip_fraction of pixels.
+        pattern = reference - float(reference.min())
+        pos = pattern > 0
+        alpha = 1.0
+        if np.any(pos):
+            # For each frame, the alpha that would just zero a pixel is
+            # frame/pattern (where pattern>0). The clip_fraction-th percentile of
+            # those ratios across the whole stack is the alpha that clips exactly
+            # that fraction. Take the min across frames for uniform treatment.
+            pct = 100.0 * float(clip_fraction)
+            ratios_min = 1.0
+            for t in range(n):
+                fr = stack[t]
+                r = fr[pos] / pattern[pos]
+                # alpha that clips ~clip_fraction of pixels in this frame:
+                a_t = np.percentile(r, pct)
+                ratios_min = min(ratios_min, float(a_t))
+            alpha = float(np.clip(ratios_min, 0.0, 1.0))
+        corrected = (stack - alpha * pattern).astype(np.float32)
+        # Clamp the residual pathological negatives.
+        n_neg = int(np.count_nonzero(corrected < 0))
+        corrected = np.clip(corrected, 0.0, None)
+        info['alpha'] = alpha
+        info['clip_fraction_actual'] = n_neg / float(corrected.size)
+
+    # Rebuild the reference frame from neighbours if it lives in the stack.
+    if rebuild_reference_index is not None and n > 1:
+        ref = int(np.clip(rebuild_reference_index, 0, n - 1))
+        if 0 < ref < n - 1:
+            corrected[ref] = 0.5 * (corrected[ref - 1] + corrected[ref + 1])
+        elif ref == 0:
+            corrected[ref] = corrected[1]
+        else:
+            corrected[ref] = corrected[ref - 1]
+
+    return (corrected[0] if single else corrected), info
+
+
 def entropy_turbidity_curve(
     stack: np.ndarray,
     temperatures: np.ndarray,

@@ -380,6 +380,20 @@ class TemperatureDependentUI:
         ref_row.addWidget(self._ref_frame); ref_row.addWidget(guess_btn)
         rw = QWidget(); rw.setLayout(ref_row); form.addRow("Reference frame:", rw)
 
+        # Let the user SEE the subtracted result as its own layer (previously the
+        # subtraction was only applied internally to the entropy computation and
+        # the export, with no visible layer). This applies the same reference
+        # subtraction and adds the corrected stack to the viewer.
+        preview_sub_btn = QPushButton("Preview subtracted stack \u2192 new layer")
+        preview_sub_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        preview_sub_btn.setToolTip(
+            "Apply the reference-frame subtraction (brightfield: subtract pattern, "
+            "keep gray baseline) and add the result as a new layer so you can see "
+            "it. Does not change the analysis \u2014 it just materialises what the "
+            "subtraction produces.")
+        preview_sub_btn.clicked.connect(self._on_preview_subtracted)
+        form.addRow("", preview_sub_btn)
+
         self._correct_focus = QCheckBox("Correct focal drift (off by default)")
         self._correct_focus.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._correct_focus.setChecked(False)
@@ -473,6 +487,36 @@ class TemperatureDependentUI:
                 f"(CoV={res['cov']:.3f} > {res['threshold']:.2f}) — this stack may "
                 "have no clear reference. Subtraction left off; enable it only if "
                 "you trust this frame.")
+
+    def _on_preview_subtracted(self):
+        """Apply the reference-frame subtraction and add the corrected stack as a
+        visible layer, so the user can see what the subtraction produces. Uses
+        the shared reference_subtraction (brightfield mode = the temperature use
+        case: subtract the static pattern, keep the gray baseline; the reference
+        frame is rebuilt from neighbours)."""
+        from pycat.toolbox.temperature_tools import reference_subtraction
+        sname = self._stack_dd.currentText()
+        if sname not in [l.name for l in self.viewer.layers]:
+            napari_show_warning(f"Stack layer '{sname}' not found."); return
+        stack = self._get_stack(sname)
+        if stack is None or stack.ndim != 3:
+            napari_show_warning("Need a (T, H, W) stack to subtract."); return
+        ref_idx = int(self._ref_frame.value())
+        ref_idx = max(0, min(ref_idx, stack.shape[0] - 1))
+        try:
+            corrected, info = reference_subtraction(
+                stack, stack[ref_idx], mode='brightfield',
+                rebuild_reference_index=ref_idx)
+        except Exception as e:
+            napari_show_warning(f"Subtraction failed: {e}")
+            import traceback; traceback.print_exc(); return
+        name = f"{sname} (ref-subtracted f{ref_idx})"
+        try:
+            self.viewer.add_image(corrected, name=name)
+            napari_show_info(f"Added '{name}'. Static pattern from frame "
+                             f"{ref_idx} subtracted; gray baseline preserved.")
+        except Exception as e:
+            napari_show_warning(f"Could not add layer: {e}")
 
     def _on_turbidity(self):
         from pycat.toolbox.temperature_tools import (

@@ -3767,7 +3767,6 @@ class MenuManager:
             file_io_methods_dict = {
                 'Open Image (auto-detect 2D / stack)': (self.central_manager.file_io.open_image_auto, {}),
                 'Add Image / Mask (keep current)': (self.central_manager.file_io.add_image_or_mask, {}),
-                'Toggle Side-by-Side (grid view)': (self._toggle_grid_view, {}),
                 'Load Previous Session Results': (self._open_session_loader, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
@@ -3801,6 +3800,15 @@ class MenuManager:
 
         from napari.utils.notifications import show_info as _info
         if self._pycat_grid_on:
+            # Snapshot the CANONICAL order of tileable layers at the moment grid
+            # is turned on. Every reflow arranges visible layers against THIS
+            # fixed anchor (not the transient list order), so toggling visibility
+            # — including "show/hide all" — can never shuffle the grid: a layer
+            # always returns to the same relative slot. Layers added later append
+            # to the anchor in arrival order.
+            self._grid_canonical_order = [
+                l for l in self.viewer.layers
+                if isinstance(l, (napari.layers.Image, napari.layers.Labels))]
             self._apply_managed_grid()
             # Recompute the grid whenever any layer's visibility toggles.
             if not getattr(self, '_grid_vis_wired', False):
@@ -3845,6 +3853,9 @@ class MenuManager:
             # Re-insert the non-image layers removed for grid mode.
             n_restored = len(getattr(self, '_grid_removed_nonimage', []))
             self._restore_grid_removed_layers()
+            # Clear the canonical order anchor so a fresh snapshot is taken next
+            # time grid is enabled.
+            self._grid_canonical_order = []
             if n_restored:
                 _info(f"Side-by-side grid view OFF. {n_restored} annotation/"
                       f"drawing layer(s) restored.")
@@ -3989,11 +4000,13 @@ class MenuManager:
               count) — but
           (2) setting grid.shape EXPLICITLY to fit the visible count DOES reflow
               the canvas, and napari fills cells by LAYER INDEX.
-        So: remove pure annotation/drawing layers, move the visible tileable
-        layers (images + visible masks) to the FRONT so they occupy the low-index
-        cells, and set grid.shape to exactly fit their count. Hidden images fall
-        to the back / off the exposed cells. Masks stay in the list and overlay
-        their image via z-order; their eyeball controls whether they show.
+        So: remove pure annotation/drawing layers; arrange the visible tileable
+        layers (images + visible masks) into the front cells ORDERED BY A
+        CANONICAL ANCHOR snapshotted when grid was enabled — so visibility
+        toggles (including show/hide-all) reflow the grid without ever shuffling
+        which layer sits where — and set grid.shape to fit the visible count.
+        Hidden tileable layers sort after the visible ones; masks overlay their
+        image via z-order and are governed by their own eyeball.
 
         Idempotent and re-entrancy-safe.
         """
@@ -4021,12 +4034,29 @@ class MenuManager:
             if n <= 1:
                 g.enabled = False
                 return
-            # 3. Move visible tileable layers to the front (low indices) so they
-            #    occupy the cells the explicit shape exposes. Preserve their
-            #    relative order; hidden layers drift to the back.
+            # 3. Arrange visible tileable layers into the front cells, ordered by
+            #    the CANONICAL anchor captured at grid-on (not by transient list
+            #    order) so visibility toggles never shuffle the grid. Any layer
+            #    not in the anchor (added after grid-on) is appended in arrival
+            #    order. Hidden tileable layers go after the visible ones.
+            anchor = getattr(self, '_grid_canonical_order', None) or []
+
+            def _anchor_key(layer):
+                try:
+                    return anchor.index(layer)
+                except ValueError:
+                    return len(anchor) + list(self.viewer.layers).index(layer)
+
+            vis_sorted = sorted(vis, key=_anchor_key)
+            hidden_tileable = [
+                l for l in self.viewer.layers
+                if isinstance(l, (napari.layers.Image, napari.layers.Labels))
+                and l not in vis]
+            hidden_sorted = sorted(hidden_tileable, key=_anchor_key)
+            target = vis_sorted + hidden_sorted + [
+                l for l in self.viewer.layers
+                if l not in vis_sorted and l not in hidden_sorted]
             try:
-                # napari LayerList.move(src_index, dst_index). Build target order.
-                target = vis + [l for l in self.viewer.layers if l not in vis]
                 for dst, lyr in enumerate(target):
                     src = list(self.viewer.layers).index(lyr)
                     if src != dst:
@@ -4136,6 +4166,7 @@ class MenuManager:
         image_processing_submenu = self.toolbox_menu.addMenu('Image Processing')
         image_processing_actions = {
             'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True}),
+            'Reference / Background Subtraction': (self.central_manager.toolbox_functions_ui._add_run_reference_subtraction, {'separate_widget': True}),
             'Pipeline Step Diagnostics': (self.central_manager.toolbox_functions_ui._add_pipeline_diagnostics, {'separate_widget': True}),
             'Pipeline SNR Analysis': (self.central_manager.toolbox_functions_ui._add_pipeline_snr_analysis, {'separate_widget': True}),
             'Foreground Suppression Tuner': (self.central_manager.toolbox_functions_ui._add_foreground_suppression_tuner, {'separate_widget': True}),
