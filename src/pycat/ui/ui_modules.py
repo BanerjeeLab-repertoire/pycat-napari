@@ -3011,26 +3011,110 @@ class MenuManager:
             pass
 
     def _disable_napari_open_actions(self):
-        """Disable napari's built-in Open / Open Files / Open Folder actions so
-        that loading always goes through PyCAT's file I/O. Matches by action text
-        and is defensive against napari renaming these actions."""
+        """Hard-disable every napari action that loads data, so a file can never
+        enter the viewer through napari's own reader (which bypasses PyCAT's
+        channel-assignment / data-repository pipeline and breaks downstream
+        analysis). Loading must always go through PyCAT's ★ Open/Save File(s).
+
+        Matching is primarily by the action's stable ``objectName`` (napari 0.7
+        gives every action one, e.g. ``napari.window.file.open_files_dialog``),
+        which is far more robust than display text (accelerators, '...' suffixes,
+        version renames). A small text fallback covers older napari.
+
+        napari builds some menus lazily (actions only exist once the menu is
+        shown), so this is ALSO wired to each file-menu's ``aboutToShow`` to
+        re-disable every time the menu opens — a one-shot startup pass alone
+        misses lazily-created actions and anything napari re-enables.
+        """
         try:
             window = self.viewer.window._qt_window
         except Exception:
             return
-        _open_texts = {'open', 'open file...', 'open files...', 'open file(s)...',
-                       'open folder...', 'open sample', 'open files as stack...'}
-        def _norm(t):
-            return (t or '').replace('&', '').strip().lower()
-        try:
-            for act in window.findChildren(QAction):
-                if _norm(act.text()) in _open_texts:
-                    act.setEnabled(False)
-                    act.setToolTip('Use PyCAT\u2019s \u2605 Open/Save File(s) menu '
-                                   'to load data (napari\u2019s own Open is disabled '
-                                   'so files load through PyCAT\u2019s reader).')
-        except Exception:
-            pass
+
+        # Stable objectName prefixes / exact ids for data-LOADING actions.
+        # Anything whose objectName starts with one of these, OR is a sample
+        # loader (napari.<sample> under the Open Sample menu), is disabled.
+        _load_object_prefixes = (
+            'napari.window.file.open_files_dialog',
+            'napari.window.file.open_files_as_stack_dialog',
+            'napari.window.file.open_folder_dialog',
+            'napari.window.file._open_files_with_plugin',
+            'napari.window.file._open_files_as_stack_with_plugin',
+            'napari.window.file._open_folder_with_plugin',
+            'napari.window.file._image_from_clipboard',
+        )
+        # Text fallback for older napari that may lack objectNames.
+        _load_texts = {'open', 'open file...', 'open files...', 'open file(s)...',
+                       'open folder...', 'open sample', 'open files as stack...',
+                       'new image from clipboard'}
+
+        _tip = ('Loading through napari is disabled \u2014 use PyCAT\u2019s '
+                '\u2605 Open/Save File(s) menu so data enters PyCAT\u2019s '
+                'pipeline (channel assignment + registration). napari\u2019s own '
+                'reader would bypass this and break analysis.')
+
+        def _is_load_action(act):
+            on = act.objectName() or ''
+            if any(on.startswith(p) for p in _load_object_prefixes):
+                return True
+            # Open Sample entries: objectName is 'napari.<sample>' and they live
+            # under the Open Sample menu; disable all sample loaders.
+            if on.startswith('napari.') and self._obj_is_sample_loader(on):
+                return True
+            txt = (act.text() or '').replace('&', '').strip().lower()
+            return txt in _load_texts
+
+        def _sweep():
+            try:
+                from PyQt5.QtGui import QAction as _QA
+            except Exception:
+                from PyQt5.QtWidgets import QAction as _QA
+            try:
+                for act in window.findChildren(_QA):
+                    try:
+                        if _is_load_action(act):
+                            act.setEnabled(False)
+                            act.setToolTip(_tip)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        # Initial sweep.
+        _sweep()
+
+        # Re-sweep whenever any top-level menu is about to show (covers lazily
+        # built actions + anything napari re-enables). Connect once.
+        if not getattr(self, '_napari_load_guard_wired', False):
+            try:
+                menubar = window.menuBar()
+                for action in menubar.actions():
+                    menu = action.menu()
+                    if menu is not None:
+                        menu.aboutToShow.connect(_sweep)
+                        # Also hook submenus (Open with Plugin / Open Sample).
+                        for sub in menu.actions():
+                            smenu = sub.menu()
+                            if smenu is not None:
+                                smenu.aboutToShow.connect(_sweep)
+                self._napari_load_guard_wired = True
+            except Exception:
+                pass
+
+    def _obj_is_sample_loader(self, object_name):
+        """True for napari 'Open Sample' loader actions. These have objectNames
+        like 'napari.astronaut' / 'napari.cells3d' (a sample id) rather than the
+        'napari.window.*' / 'napari.viewer.*' / 'napari.layer.*' namespaces used
+        by UI/toggle actions. Heuristic: 'napari.<single_token>' with no further
+        dotted namespace, and not one of the known non-loader singletons."""
+        parts = object_name.split('.')
+        if len(parts) != 2 or parts[0] != 'napari':
+            return False
+        # Known non-loader 'napari.<x>' actions to leave alone (none currently,
+        # but guard against false positives on UI singletons).
+        _not_loaders = {'napari.new_layer'}
+        return object_name not in _not_loaders
+
 
     def _home_fit_view(self):
         """
@@ -3174,13 +3258,15 @@ class MenuManager:
                 app.installEventFilter(self._pycat_drop_filter)
             self.viewer.window._qt_window.setAcceptDrops(True)
             # An app-level filter usually sees events first, but a file dropped
-            # directly on the napari CANVAS can still be consumed by napari's own
-            # widget-level dropEvent (its QtViewer sets acceptDrops + a dropEvent
-            # that calls napari's reader — which bypasses PyCAT's channel
-            # assignment). Belt-and-suspenders: install the same filter directly
-            # on the canvas/qt_viewer widget AND turn OFF its acceptDrops so
-            # napari's dropEvent can't fire. Accessor names differ across napari
-            # versions, so probe defensively.
+            # directly on the napari CANVAS is handled by napari's QtViewer. The
+            # "no-drop" cursor over the canvas means the canvas widget has
+            # acceptDrops=False, so Qt never even generates DragEnter/Drop events
+            # there for our filter to catch. Fix: force acceptDrops=True on the
+            # QtViewer + its canvas widget, and install our event filter on each
+            # so it intercepts and routes the drop. (PyQt does not honour
+            # instance-level dropEvent reassignment — Qt calls the C++ virtual —
+            # so an installed event filter is the correct mechanism, and it only
+            # works once acceptDrops is enabled on the target widget.)
             _qtv = None
             for _acc in ('_qt_viewer', 'qt_viewer'):
                 try:
@@ -3189,32 +3275,36 @@ class MenuManager:
                         break
                 except Exception:
                     continue
+
+            def _enable_drops(widget):
+                if widget is None:
+                    return
+                try:
+                    if hasattr(widget, 'setAcceptDrops'):
+                        widget.setAcceptDrops(True)
+                    if hasattr(widget, 'installEventFilter'):
+                        widget.installEventFilter(self._pycat_drop_filter)
+                except Exception:
+                    pass
+
             if _qtv is not None:
-                for _wattr in ('canvas', '_canvas', 'native'):
+                _enable_drops(_qtv)
+                for _wattr in ('canvas', '_canvas'):
                     try:
                         _w = getattr(_qtv, _wattr, None)
-                        # napari canvas objects may expose a Qt widget via
-                        # .native; unwrap when present.
                         _qw = getattr(_w, 'native', _w)
-                        if _qw is not None and hasattr(_qw, 'installEventFilter'):
-                            # Install the filter on the canvas widget so it sees
-                            # (and consumes) the Drop BEFORE napari's own
-                            # dropEvent. Keep acceptDrops=True so the drag is
-                            # accepted; the filter returns True on Drop, consuming
-                            # it before napari's handler runs.
-                            _qw.installEventFilter(self._pycat_drop_filter)
+                        _enable_drops(_qw)
+                        # vispy's native widget may itself wrap a viewport/child
+                        # that receives the events; enable on its children too.
+                        if _qw is not None and hasattr(_qw, 'children'):
                             try:
-                                _qw.setAcceptDrops(True)
+                                for _child in _qw.children():
+                                    if hasattr(_child, 'setAcceptDrops'):
+                                        _enable_drops(_child)
                             except Exception:
                                 pass
                     except Exception:
                         continue
-                # The QtViewer widget itself, too.
-                try:
-                    if hasattr(_qtv, 'installEventFilter'):
-                        _qtv.installEventFilter(self._pycat_drop_filter)
-                except Exception:
-                    pass
         except Exception as _e:
             print(f"[PyCAT] Could not install file-drop handler: {_e}")
 

@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.317] - 2026-07-09
+### Fixed (napari file-loading could bypass PyCAT — verified against napari 0.7.1)
+- **napari's own data-loading actions are now hard-disabled by objectName.** The napari
+  File menu is hidden by default, but if a user revealed it (via the ☰ napari toggle) and
+  used File → Open, the file loaded through napari's reader — bypassing PyCAT's
+  channel-assignment / data-repository registration and breaking downstream analysis. The
+  previous guard matched on display TEXT, which was stale for napari 0.7.1 and didn't fire.
+  The guard now matches on napari's stable action `objectName`s (e.g.
+  `napari.window.file.open_files_dialog`), which is version-robust, and covers every load
+  path: Open File(s), Open Files as Stack, Open Folder, all three "Open with Plugin"
+  variants, New Image from Clipboard, and every "Open Sample" loader. Verified against a
+  live napari 0.7.1 menu dump: all load/sample actions match, and nothing safe (Preferences,
+  Save Screenshot, Close/Exit, all View/Layers/Window/Help actions) is touched.
+- **The guard re-applies on menu `aboutToShow`.** napari 0.7 builds some menu actions
+  lazily (they don't exist until the menu is first opened), so a one-shot startup sweep
+  missed them — the likely reason the old guard appeared inactive. The disable now re-runs
+  every time a file menu opens, so lazily-created or re-enabled actions can't leak.
+- napari's **New Layer** (empty Labels/Points/Shapes) and all Save-screenshot / view /
+  layer-visualization actions are intentionally left enabled — they don't load external
+  data into PyCAT's pipeline.
+
 ## [1.5.316] - 2026-07-09
 ### Added
 - **napari-integration audit** (`docs/audits/PyCAT_napari_integration_audit_2026-07-09.md`)
