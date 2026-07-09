@@ -232,13 +232,18 @@ def fit_anomalous_diffusion(
             # term lets D reflect only the genuine time-dependent motion.
             # Parameter 3 is σ_loc² (µm²); reported back as σ_loc (nm) for the
             # user to sanity-check against their expected localization precision.
-            off0 = max(float(np.min(msd)) * 0.5, 1e-9)
+            # Offset bound matches the reference notebook workflow: the constant
+            # term N = 4·σ_loc² cannot exceed the smallest MSD value, since
+            # MSD = (non-negative diffusion signal) + N. Our fit parameter is
+            # off = N/4, so its upper bound is min(msd)/4.
+            off_max = max(float(np.min(msd)) / 4.0, 1e-9)
+            off0 = min(max(float(np.min(msd)) * 0.25, 1e-9), off_max)
             popt, _ = optimize.curve_fit(
                 lambda tt, D_, a_, off_: 4.0 * D_ * tt ** a_ + 4.0 * off_,
                 tau, msd,
                 p0=[max(D_ll, 1e-9), a_ll, off0], sigma=sigma,
                 absolute_sigma=False,
-                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, 1e3]), maxfev=10000)
+                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, off_max]), maxfev=10000)
             D, alpha = float(popt[0]), float(popt[1])
             sigma_loc_um = float(np.sqrt(max(popt[2], 0.0)))
         else:

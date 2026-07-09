@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.303] - 2026-07-09
+### Changed (MSD localization offset bound matched to the reference notebook)
+- **Tightened the MSD localization-offset bound to match the reference analysis notebook exactly.**
+  1.5.302 added the offset term (MSD = 4*D*t^alpha + N) but bounded N loosely; it is now bounded to
+  [0, min(MSD)] as in the reference notebook, since the constant offset cannot exceed the smallest
+  measured MSD value. This makes PyCAT's viscosity fit reproduce the reference workflow result on
+  viscous samples.
+
 ## [1.5.302] - 2026-07-08
 ### Fixed (viscosity far too low in viscous samples — MSD localization-error offset)
 - **The MSD fit now separates static localization error from real diffusion, fixing viscosities
@@ -32,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that constant floor into D, inflating the diffusion coefficient and deflating Stokes-Einstein
   viscosity by a large factor (e.g. a true ~7 Pa·s condensate reading ~0.2 Pa·s). The fit is now
   MSD = 4·D·τ^α + 4·σ_loc², so D reflects only genuine motion; the fitted localization error is
-  reported (nm) in the results table as a sanity check. The offset fit recovers the same D as before
+  reported (nm) in the results table as a sanity check. This matches the reference analysis notebook (MSD = 4*D*t^alpha + N, with N the localization offset bounded to [0, min(MSD)]); the previous PyCAT fit omitted N, which is why a ~7 Pa*s condensate read ~0.2 Pa*s. The offset fit recovers the same D as before
   when the localization floor is negligible (fast / low-viscosity samples), so it is safe across the
   range. This also improves the other MSD-based workflows (in-vitro fluorescence/brightfield,
   condensate physics) which share the same fit.
