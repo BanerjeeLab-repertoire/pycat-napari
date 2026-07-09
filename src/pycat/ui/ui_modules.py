@@ -3758,10 +3758,9 @@ class MenuManager:
             """
             file_io_methods_dict = {
                 'Open Image (auto-detect 2D / stack)': (self.central_manager.file_io.open_image_auto, {}),
-                'Add Image (keep current — compare / add channel)': (self._open_image_add, {}),
+                'Add Image / Mask (keep current)': (self.central_manager.file_io.add_image_or_mask, {}),
                 'Toggle Side-by-Side (grid view)': (self._toggle_grid_view, {}),
                 'Load Previous Session Results': (self._open_session_loader, {}),
-                'Open 2D Mask(s)': (self.central_manager.file_io.open_2d_mask, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
             self._add_actions_to_menu(file_io_methods_dict, self.file_menu)
@@ -3811,20 +3810,30 @@ class MenuManager:
                     self._grid_vis_wired = True
                 except Exception:
                     pass
-            _info("Side-by-side grid view ON (image layers only).")
+            # If any non-image (annotation / drawing) layers were pulled out to
+            # keep them from claiming empty grid tiles, tell the user they're
+            # temporarily set aside and will come back when grid is turned off —
+            # so a drawing layer vanishing from the list isn't alarming.
+            n_removed = len(getattr(self, '_grid_removed_nonimage', []))
+            if n_removed:
+                _info(f"Side-by-side grid view ON. {n_removed} annotation/"
+                      f"drawing layer(s) temporarily set aside (with their "
+                      f"contents) and will return when you toggle grid off.")
+            else:
+                _info("Side-by-side grid view ON (image layers only).")
         else:
             try:
                 self.viewer.grid.enabled = False
             except Exception:
                 pass
-            # Restore any non-image layers we hid while grid was on.
-            for lyr in getattr(self, '_grid_hidden_nonimage', []):
-                try:
-                    lyr.visible = True
-                except Exception:
-                    pass
-            self._grid_hidden_nonimage = []
-            _info("Side-by-side grid view OFF.")
+            # Re-insert the non-image layers removed for grid mode.
+            n_restored = len(getattr(self, '_grid_removed_nonimage', []))
+            self._restore_grid_removed_layers()
+            if n_restored:
+                _info(f"Side-by-side grid view OFF. {n_restored} annotation/"
+                      f"drawing layer(s) restored.")
+            else:
+                _info("Side-by-side grid view OFF.")
 
     def _image_layers_for_grid(self):
         """Visible Image layers, in layer order — the ones that get grid cells."""
@@ -3838,55 +3847,71 @@ class MenuManager:
         return out
 
     def _apply_managed_grid(self):
-        """Enable napari grid sized to the visible image layers. Non-image layers
-        (annotations/shapes/points) are hidden while grid is on so they don't
-        claim their own empty grid cells; they're restored when grid is turned
-        off. Idempotent and re-entrancy-safe (hiding layers here fires visibility
-        events that call back in — a guard prevents recursion)."""
-        import math
+        """Enable napari grid sized to the visible image layers.
+
+        napari's grid tiles by TOTAL layer count (a hidden layer still consumes a
+        cell), so merely hiding the annotation Shapes layers leaves empty tiles.
+        To make the grid contain ONLY the images, we temporarily REMOVE the
+        non-image layers (annotations/shapes/points) from the viewer while grid is
+        on — preserving each layer object so it can be re-inserted unchanged when
+        grid is turned off. napari then tiles exactly the image layers.
+
+        Idempotent and re-entrancy-safe.
+        """
         if getattr(self, '_grid_applying', False):
             return
         self._grid_applying = True
         try:
             g = self.viewer.grid
-            # Hide non-image layers that are currently visible (record them once
-            # so we can restore exactly those on grid-off).
-            if not hasattr(self, '_grid_hidden_nonimage'):
-                self._grid_hidden_nonimage = []
-            for lyr in list(self.viewer.layers):
+            # Pull out non-image layers, remembering each layer object + its index
+            # so we can restore position and content exactly on grid-off.
+            if not hasattr(self, '_grid_removed_nonimage'):
+                self._grid_removed_nonimage = []
+            for idx in range(len(self.viewer.layers) - 1, -1, -1):
+                lyr = self.viewer.layers[idx]
                 if not isinstance(lyr, napari.layers.Image):
-                    if bool(getattr(lyr, 'visible', True)):
-                        if lyr not in self._grid_hidden_nonimage:
-                            self._grid_hidden_nonimage.append(lyr)
-                        try:
-                            lyr.visible = False
-                        except Exception:
-                            pass
-            # Count visible image layers → grid cells.
-            imgs = self._image_layers_for_grid()
-            n = len(imgs)
+                    # Record (index, layer-object) once; the layer object keeps
+                    # its data/attributes while detached from the viewer.
+                    already = any(l is lyr for _, l in self._grid_removed_nonimage)
+                    if not already:
+                        self._grid_removed_nonimage.append((idx, lyr))
+                    try:
+                        self.viewer.layers.remove(lyr)
+                    except Exception:
+                        pass
+            # Now only image layers remain; enable grid and let napari auto-size.
+            n = len([l for l in self.viewer.layers
+                     if isinstance(l, napari.layers.Image)])
             if n <= 1:
                 g.enabled = False
-                return
-            cols = int(math.ceil(math.sqrt(n)))
-            rows = int(math.ceil(n / cols))
-            g.enabled = True
-            try:
-                # Let napari auto-size the grid to the current layer set; this
-                # tracks the (visible) layer count better across napari versions
-                # than a fixed shape. Fall back to the computed shape if the
-                # auto sentinel isn't accepted.
+            else:
+                g.enabled = True
                 try:
-                    g.shape = (-1, -1)
+                    g.shape = (-1, -1)   # napari auto-sizes to the layer count
+                    g.stride = 1
                 except Exception:
-                    g.shape = (rows, cols)
-                g.stride = 1
-            except Exception:
-                pass
+                    pass
         except Exception as _e:
             print(f"[PyCAT] managed grid failed: {_e}")
         finally:
             self._grid_applying = False
+
+    def _restore_grid_removed_layers(self):
+        """Re-insert the non-image layers removed for grid mode, at their original
+        positions (best-effort), preserving their data."""
+        removed = getattr(self, '_grid_removed_nonimage', [])
+        # Restore in ascending index order so positions line up.
+        for idx, lyr in sorted(removed, key=lambda t: t[0]):
+            try:
+                if lyr not in list(self.viewer.layers):
+                    insert_at = min(idx, len(self.viewer.layers))
+                    self.viewer.layers.insert(insert_at, lyr)
+            except Exception:
+                try:
+                    self.viewer.layers.append(lyr)
+                except Exception:
+                    pass
+        self._grid_removed_nonimage = []
 
     def _on_grid_layer_vis_changed(self, *args):
         if getattr(self, '_pycat_grid_on', False):

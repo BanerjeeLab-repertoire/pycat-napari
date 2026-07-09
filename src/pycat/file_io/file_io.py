@@ -1388,6 +1388,136 @@ class FileIOClass:
 
 
 
+    def _read_pycat_signifier(self, file_path):
+        """Read PyCAT's saved-file signifier from a TIFF's ImageDescription, if
+        present. Returns 'image' / 'mask' / None. Lets a file PyCAT itself saved
+        be re-loaded with its type known exactly, without guessing."""
+        try:
+            import tifffile, json as _json
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext not in ('.tif', '.tiff'):
+                return None
+            with tifffile.TiffFile(file_path) as tf:
+                desc = None
+                try:
+                    desc = tf.pages[0].tags['ImageDescription'].value
+                except Exception:
+                    desc = getattr(tf, 'imagej_metadata', None)
+                if not desc:
+                    return None
+                if isinstance(desc, bytes):
+                    desc = desc.decode('utf-8', 'ignore')
+                # The description may be OME-XML or our JSON; only parse JSON.
+                desc = desc.strip()
+                if not desc.startswith('{'):
+                    return None
+                tag = _json.loads(desc)
+                if isinstance(tag, dict) and tag.get('pycat'):
+                    k = tag.get('kind')
+                    if k in ('image', 'mask'):
+                        return k
+        except Exception:
+            pass
+        return None
+
+    def _file_has_imaging_metadata(self, file_path):
+        """True if the file carries recognizable imaging-structure metadata
+        (dimension sizes / pixel size), i.e. AICSImage can read its dims. Used to
+        decide whether we must ask the user what they loaded."""
+        try:
+            from aicsimageio import AICSImage
+            img = AICSImage(file_path)
+            d = img.dims
+            # Any explicit non-trivial dim ordering counts as structure present.
+            return bool(getattr(d, 'order', None))
+        except Exception:
+            return False
+
+    def add_image_or_mask(self, file_path=None):
+        """Add a file to the CURRENT session without clearing, routing it to the
+        right layer type: Image layer for images, Labels layer for masks (so a
+        previously-generated mask can be brought in for colocalization / analysis
+        without re-running segmentation). Unifies the old "Open 2D Mask(s)".
+
+        Type is resolved in priority order:
+          1. PyCAT SIGNIFIER — if PyCAT saved this file, its embedded tag says
+             image-vs-mask exactly (no guessing, no prompt).
+          2. Otherwise, if the file has NO imaging-structure metadata AND no
+             signifier, ASK the user what they loaded (image or mask).
+          3. Otherwise fall back to a pixel-statistics guess (integer + few /
+             consecutive label IDs → mask), offered as the default in a prompt.
+        """
+        if not isinstance(file_path, str):
+            file_path = None
+        if file_path is None:
+            options = QFileDialog.Options()
+            file_path, _ = QFileDialog.getOpenFileName(
+                None, "Add Image / Mask (keep current)", "",
+                "Image / Mask Files (*.ims *.tif *.tiff *.czi *.png *.jpg);;All Files (*)",
+                options=options)
+        if not file_path:
+            return
+
+        # 1. PyCAT signifier — authoritative, no prompt.
+        sig = self._read_pycat_signifier(file_path)
+        if sig == 'mask':
+            self.open_2d_mask(file_paths=[file_path], clear_first=False)
+            return
+        if sig == 'image':
+            self.open_image_auto(file_path=file_path, clear_first=False)
+            return
+
+        # 2/3. No signifier — classify by pixel stats for a default, and decide
+        # whether we MUST ask (no imaging metadata at all).
+        looks_like_mask = False
+        try:
+            from aicsimageio import AICSImage
+            import numpy as _np
+            img = AICSImage(file_path)
+            plane = _np.asarray(img.get_image_data("YX", C=0, T=0, Z=0))
+            is_int = _np.issubdtype(plane.dtype, _np.integer)
+            uniq = _np.unique(plane)
+            n_unique = int(uniq.size)
+            if is_int and n_unique <= 256:
+                mx = int(uniq.max()) if n_unique else 0
+                if n_unique <= 16 or mx <= (n_unique + 2):
+                    looks_like_mask = True
+        except Exception as _e:
+            debug_log("file_io: add_image_or_mask classification failed", _e)
+
+        has_meta = self._file_has_imaging_metadata(file_path)
+
+        # Ask the user. When there's no imaging metadata AND no signifier we have
+        # nothing to go on, so the prompt is essential; otherwise it's a
+        # confirmation with the detected type pre-selected.
+        as_mask = looks_like_mask
+        try:
+            from qtpy.QtWidgets import QMessageBox
+            box = QMessageBox()
+            box.setWindowTitle("Add as image or mask?")
+            if not has_meta:
+                lead = (f"'{os.path.basename(file_path)}' has no imaging-structure "
+                        "metadata and no PyCAT signifier, so PyCAT can't tell what "
+                        "it is. Please choose:")
+            else:
+                guess = ("looks like a LABEL MASK" if looks_like_mask
+                         else "looks like an IMAGE")
+                lead = f"'{os.path.basename(file_path)}' {guess}. Load as:"
+            box.setText(lead + "\n\nMask → Labels layer (colocalization / analysis).\n"
+                               "Image → Image layer.")
+            mask_btn = box.addButton("Mask (Labels)", QMessageBox.AcceptRole)
+            img_btn = box.addButton("Image", QMessageBox.RejectRole)
+            box.setDefaultButton(mask_btn if looks_like_mask else img_btn)
+            box.exec_()
+            as_mask = (box.clickedButton() is mask_btn)
+        except Exception:
+            pass
+
+        if as_mask:
+            self.open_2d_mask(file_paths=[file_path], clear_first=False)
+        else:
+            self.open_image_auto(file_path=file_path, clear_first=False)
+
     def open_image_auto(self, file_path=None, clear_first=True):
         """Context-aware opener: inspect a file's dimensional structure
         (X, Y, Z, C, T, P) and route it to the right loader automatically, so
@@ -2229,19 +2359,33 @@ class FileIOClass:
                 'n_z': n_z,
             })
 
-    def open_2d_mask(self):
+    def open_2d_mask(self, file_paths=None, clear_first=False):
         """
         Opens a dialog for selecting and opening mask files. This method is similar to `open_2d_image` but is specifically 
         tailored for mask files, supporting operations such as assigning channels to masks if the mask file contains 
-        multiple channels.
+        multiple channels. Masks load as napari Labels layers (via load_into_viewer(is_mask=True)).
+
+        Parameters
+        ----------
+        file_paths : list[str] or None
+            Paths to open; None opens a file dialog.
+        clear_first : bool, default False
+            Masks default to ADD-without-clearing (their purpose is to bring a
+            previously-generated mask into a session that already holds the image,
+            e.g. for colocalization without re-analysis). Pass True to reset first.
 
         Notes
         -----
         The method supports a variety of file formats for masks, including TIFF, PNG, and JPG. It handles multichannel 
         masks by offering a dialog to assign specific channel roles, aiding in precise segmentation tasks.
         """
-        options = QFileDialog.Options()
-        file_paths, _ = QFileDialog.getOpenFileNames(None, "Open File(s)", "", "Mask Files (*.tiff *.tif *.png *.jpg);;All Files (*)", options=options)
+        if not isinstance(file_paths, (list, tuple)):
+            file_paths = None
+        if clear_first and not self._auto_clear_before_load():
+            return
+        if file_paths is None:
+            options = QFileDialog.Options()
+            file_paths, _ = QFileDialog.getOpenFileNames(None, "Open File(s)", "", "Mask Files (*.tiff *.tif *.png *.jpg);;All Files (*)", options=options)
 
         # Check if any files were selected
         if not file_paths:
@@ -2879,6 +3023,19 @@ class FileIOClass:
         Labels (3D stack) → <save_name>_<layer>_masks.tiff  (multi-page)
         """
         import tifffile
+        import json as _json
+
+        # PyCAT signifier: a small JSON tag embedded in the TIFF ImageDescription
+        # so a saved file can be re-loaded with its type known exactly (image vs
+        # label mask) instead of guessing from pixel statistics. Read back by
+        # add_image_or_mask / _read_pycat_signifier on load.
+        def _pycat_tag(kind):
+            try:
+                from pycat import __version__ as _ver
+            except Exception:
+                _ver = 'unknown'
+            return _json.dumps({'pycat': True, 'kind': kind,
+                                'pycat_version': _ver})
 
         is_lazy = hasattr(data, '_z') or hasattr(data, 'store')  # _ZarrStack or zarr.Array
 
@@ -2903,7 +3060,8 @@ class FileIOClass:
                 with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
                     for t in range(data.shape[0]):
                         tw.write(np.asarray(data[t]).astype(np.uint16),
-                                 contiguous=True)
+                                 contiguous=True,
+                                 description=_pycat_tag('mask') if t == 0 else None)
                 print(f"[PyCAT] Saved 3D label stack → {out_path}")
             else:
                 arr = np.asarray(data).astype(np.uint16)
@@ -2928,14 +3086,16 @@ class FileIOClass:
                 print(f"[PyCAT] Saving {n_t}-frame stack to {out_path} …")
                 with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
                     for t in range(n_t):
-                        tw.write(_to_uint16(_frame(t)), contiguous=True)
+                        tw.write(_to_uint16(_frame(t)), contiguous=True,
+                                 description=_pycat_tag('image') if t == 0 else None)
                 print(f"[PyCAT] Saved stack → {out_path}")
             else:
                 # 2D image or RGB
                 arr = np.asarray(data)
                 if arr.ndim == 2:
                     out_path = f"{save_name}_{safe_name}.tiff"
-                    tifffile.imwrite(out_path, _to_uint16(arr))
+                    tifffile.imwrite(out_path, _to_uint16(arr),
+                                     description=_pycat_tag('image'))
                 else:
                     out_path = f"{save_name}_{safe_name}.png"
                     sk.io.imsave(out_path, dtype_conversion_func(arr, 'uint8'))

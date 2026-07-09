@@ -23,6 +23,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.322] - 2026-07-09
+### Fixed (grid tiling of annotation layers — from live test)
+- **Grid mode no longer leaves empty tiles for annotation/drawing layers.** Hiding those
+  layers wasn't enough — napari's grid tiles by TOTAL layer count, so a hidden layer still
+  claimed a cell. The managed grid now temporarily REMOVES non-image layers (annotations,
+  shapes, points) from the viewer while grid is on — preserving each layer object and its
+  contents — so napari tiles exactly the image layers, and re-inserts them at their original
+  positions when grid is toggled off.
+- **A message now announces the set-aside.** When grid removes annotation/drawing layers, a
+  notification says they've been temporarily set aside (with their contents) and will return
+  on grid-off, so a drawing layer disappearing from the list isn't alarming. A matching
+  "restored" message appears on grid-off.
+
+### Added (saved-file type signifier — systemic fix for image-vs-mask ambiguity)
+- **PyCAT now stamps a signifier in the metadata of TIFFs it saves** (a small JSON tag in
+  the ImageDescription recording whether the layer is an image or a label mask, plus the
+  PyCAT version). This removes the guesswork when such a file is loaded back.
+- **"Add Image / Mask" resolves type in priority order:** (1) if the file carries PyCAT's
+  signifier, its type is known exactly — no prompt; (2) if it has NO imaging-structure
+  metadata AND no signifier, the user is ASKED what they loaded (image or mask); (3)
+  otherwise a pixel-statistics guess (integer + few / consecutive label IDs → mask) is
+  offered as the default in a confirmation prompt. Round-trip verified: PyCAT-saved images
+  and masks reload with their type recognized automatically.
+
+## [1.5.321] - 2026-07-09
+### Changed (consolidated "Open 2D Mask(s)" into the add-without-clear flow)
+- **"Open 2D Mask(s)" (a 1.0.0 holdover) is folded into a unified "Add Image / Mask (keep
+  current)".** The old separate mask opener existed only to load a previously-generated
+  mask into a session for colocalization without re-analysis — which is exactly
+  add-without-clearing, just producing a Labels layer instead of an Image layer. The new
+  unified opener peeks at the file, classifies it as a label mask (integer dtype with few /
+  consecutive label IDs) vs an image (float, or many spread values), and asks the user which
+  to load as — defaulting to the detected type. Masks load as napari **Labels** layers (for
+  coloc/analysis); images route through the context-aware 2D/stack opener. Both add without
+  clearing the current session.
+- `open_2d_mask` gained a `clear_first` parameter (defaults to False — masks add to the
+  existing session by design).
+- The File menu is now: Open Image (auto-detect) / Add Image / Mask (keep current) / Toggle
+  Side-by-Side / Load Previous Session / Save and Clear.
+
 ## [1.5.320] - 2026-07-09
 ### Fixed / Changed (from live test feedback)
 - **Removed the redundant "Open 2D Image(s)" and "Open Image Stack (T/Z / IMS)" menu items.**
