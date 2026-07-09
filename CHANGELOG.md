@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.328] - 2026-07-09
+### Fixed (napari File menu — hide the now-empty submenu containers)
+- The load-action lockdown (1.5.320) correctly removed napari's direct loaders (Open
+  File(s), Open as Stack, Open Folder, Open Sample, New Image from Clipboard), but left three
+  now-empty submenu CONTAINERS visible: "Open with Plugin" (all its entries were load actions
+  we hid), "IO Utilities", and "Acquire" (napari extension points holding only disabled
+  `empty_dummy` placeholders). The menu-tree walk now also hides a submenu container when,
+  after processing, every action inside it is hidden/disabled or an `empty_dummy` — so those
+  three vanish while genuinely-useful submenus (e.g. New Layer, which has live entries) are
+  left intact. Verified against the live napari 0.7.1 action dump.
+
 ## [1.5.327] - 2026-07-09
 ### Added (standalone Reference / Background Subtraction widget)
 - **New Toolbox → Image Processing → "Reference / Background Subtraction" widget.** A general

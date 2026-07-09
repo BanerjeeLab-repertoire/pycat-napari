@@ -3077,6 +3077,23 @@ class MenuManager:
                     sub = act.menu()
                     if sub is not None:
                         _disable_in_menu(sub, depth + 1)
+                        # Hide the submenu CONTAINER itself if, after processing,
+                        # it has no usable content left: either every real action
+                        # is now hidden (e.g. "Open with Plugin" — all its entries
+                        # are load actions we hid) or it holds only napari's
+                        # disabled "empty_dummy" placeholders ("IO Utilities",
+                        # "Acquire"). Leaves genuinely-useful submenus alone.
+                        try:
+                            subacts = [a for a in sub.actions()
+                                       if not a.isSeparator()]
+                            def _dead(a):
+                                on = a.objectName() or ''
+                                return ((not a.isVisible()) or (not a.isEnabled())
+                                        or on.endswith('empty_dummy'))
+                            if subacts and all(_dead(a) for a in subacts):
+                                act.setVisible(False)
+                        except Exception:
+                            pass
                         continue
                     try:
                         if _is_load_action(act):
