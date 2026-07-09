@@ -23,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.302] - 2026-07-08
+### Fixed (viscosity far too low in viscous samples — MSD localization-error offset)
+- **The MSD fit now separates static localization error from real diffusion, fixing viscosities
+  that came out ~30x too low in viscous samples.** In a viscous medium a probe bead barely moves
+  per frame, so the constant offset in the MSD from bead-centroid localization uncertainty (tens of
+  nm) can dwarf the real time-dependent signal. The previous fit (MSD = 4·D·τ^α, no offset) absorbed
+  that constant floor into D, inflating the diffusion coefficient and deflating Stokes-Einstein
+  viscosity by a large factor (e.g. a true ~7 Pa·s condensate reading ~0.2 Pa·s). The fit is now
+  MSD = 4·D·τ^α + 4·σ_loc², so D reflects only genuine motion; the fitted localization error is
+  reported (nm) in the results table as a sanity check. The offset fit recovers the same D as before
+  when the localization floor is negligible (fast / low-viscosity samples), so it is safe across the
+  range. This also improves the other MSD-based workflows (in-vitro fluorescence/brightfield,
+  condensate physics) which share the same fit.
+### Fixed (VPT trajectory layers rendered at the wrong scale)
+- Bead/Aggregate trajectory layers now inherit the bead image layer's spatial scale, so tracks and
+  image share one coordinate frame and overlay 1:1 when a micron pixel size is set (previously the
+  tracks rendered as a full-width streak beside a tiny image).
+
 ## [1.5.301] - 2026-07-08
 ### Fixed (VPT trajectory layers rendered at the wrong scale)
 - **Bead/Aggregate trajectory layers now overlay the image correctly when a pixel size is set.**

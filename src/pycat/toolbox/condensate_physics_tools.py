@@ -169,6 +169,7 @@ def compute_msd(
 def fit_anomalous_diffusion(
     msd_df: pd.DataFrame,
     max_lag_fit: int = None,
+    fit_localization_offset: bool = True,
 ) -> dict:
     """
     Fit MSD(τ) = 4D·τ^α (anomalous diffusion model) using log-log regression.
@@ -213,17 +214,39 @@ def fit_anomalous_diffusion(
     D_ll = float(np.exp(log_intercept) / 4.0)
     a_ll = float(log_slope)
     D, alpha = D_ll, a_ll
+    sigma_loc_um = float('nan')
     try:
         sigma = None
         if 'msd_sem' in df.columns:
             sem = df['msd_sem'].values.astype(float)
             if np.all(np.isfinite(sem)) and np.all(sem > 0):
                 sigma = sem
-        popt, _ = optimize.curve_fit(
-            lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
-            p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
-            bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
-        D, alpha = float(popt[0]), float(popt[1])
+        if fit_localization_offset:
+            # Fit MSD = 4·D·τ^α + 4·σ_loc², separating the STATIC LOCALIZATION
+            # ERROR (a constant offset from centroid uncertainty) from real
+            # diffusion. This matters enormously in viscous samples: when the
+            # medium is thick the bead barely moves per frame, so the constant
+            # localization floor can dwarf the real τ-dependent signal. A fit
+            # WITHOUT the offset absorbs that floor into D, inflating D (and thus
+            # deflating Stokes-Einstein viscosity) by a large factor. The offset
+            # term lets D reflect only the genuine time-dependent motion.
+            # Parameter 3 is σ_loc² (µm²); reported back as σ_loc (nm) for the
+            # user to sanity-check against their expected localization precision.
+            off0 = max(float(np.min(msd)) * 0.5, 1e-9)
+            popt, _ = optimize.curve_fit(
+                lambda tt, D_, a_, off_: 4.0 * D_ * tt ** a_ + 4.0 * off_,
+                tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll, off0], sigma=sigma,
+                absolute_sigma=False,
+                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, 1e3]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
+            sigma_loc_um = float(np.sqrt(max(popt[2], 0.0)))
+        else:
+            popt, _ = optimize.curve_fit(
+                lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
+                bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
     except Exception:
         pass  # keep the log-log estimate if the non-linear fit fails
 
@@ -235,7 +258,8 @@ def fit_anomalous_diffusion(
         motion_type = 'Brownian'
 
     tau_fit = tau
-    msd_fit = 4 * D * tau_fit ** alpha
+    _off = (sigma_loc_um ** 2) if np.isfinite(sigma_loc_um) else 0.0
+    msd_fit = 4 * D * tau_fit ** alpha + 4 * _off
     # R² of the (non-linear) model on the actual MSD values.
     ss_res = float(np.sum((msd - msd_fit) ** 2))
     ss_tot = float(np.sum((msd - msd.mean()) ** 2))
@@ -246,6 +270,8 @@ def fit_anomalous_diffusion(
         alpha=alpha,
         motion_type=motion_type,
         r_squared=float(r2),
+        localization_error_nm=(float(sigma_loc_um * 1000.0)
+                               if np.isfinite(sigma_loc_um) else float('nan')),
         fit_lags_s=tau_fit,
         fit_msd=msd_fit,
         log_log_slope=a_ll,

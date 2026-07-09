@@ -1006,6 +1006,9 @@ class VideoParticleTrackingUI:
                 'alpha': round(alpha, 3) if alpha == alpha else None,
                 'motion': motion,
                 'R²': round(r2, 3) if r2 == r2 else None,
+                'localization err (nm)': (round(fit.get('localization_error_nm'), 1)
+                                          if fit.get('localization_error_nm') ==
+                                          fit.get('localization_error_nm') else None),
                 'n_tracks': int(tracks['track_id'].nunique()),
             }])
             show_dataframes_dialog("VPT Microrheology Results",
