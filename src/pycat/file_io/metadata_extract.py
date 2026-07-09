@@ -33,6 +33,12 @@ partial file still produces a usable record.
 
 import os
 
+try:
+    from pycat.utils.general_utils import debug_log
+except Exception:  # pragma: no cover - fallback if utils unavailable
+    def debug_log(context, exc=None):
+        return
+
 
 def _safe_float(x):
     try:
@@ -286,7 +292,7 @@ def extract_tiff_metadata(file_path):
                         if _mm.get(_k) is not None and common.get(_k) is None:
                             common[_k] = _mm[_k]
             except Exception:
-                pass
+                debug_log("metadata_extract: TIFF MicroManager frame-times read failed")
     except Exception:
         pass
 
@@ -499,7 +505,7 @@ def extract_aicsimage_metadata(file_path, image=None):
             if z:
                 common['z_step_um'] = float(z)
         except Exception:
-            pass
+            debug_log("metadata_extract: OME pixel-size / z-step read failed")
 
         # Frame interval (seconds). Precedence, most authoritative first:
         #   1. Measured per-frame MicroManager ElapsedTime-ms deltas (the actual
@@ -523,7 +529,7 @@ def extract_aicsimage_metadata(file_path, image=None):
                     if _mm.get(_k) is not None and common.get(_k) is None:
                         common[_k] = _mm[_k]
         except Exception:
-            pass
+            debug_log("metadata_extract: MicroManager frame-times read failed")
         # If the measured cadence was unavailable, fall back to the OME model.
         if common.get('frame_interval_s') is None:
             try:
@@ -532,7 +538,7 @@ def extract_aicsimage_metadata(file_path, image=None):
                     common['frame_interval_s'] = float(_fi)
                     common['frame_interval_source'] = _src
             except Exception:
-                pass
+                debug_log("metadata_extract: OME frame-interval fallback failed")
 
         # Channel names.
         try:

@@ -23,6 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal pixels (non-near-zero) with a high upper percentile (99.8), preserving bright
   detail instead of clipping it to white.
 
+## [1.5.308] - 2026-07-09
+### Changed (diagnosability — health audit finding 2)
+- **Silent metadata-extraction failures now leave a breadcrumb.** In
+  `metadata_extract.py`, the `except: pass` blocks guarding the *downstream-critical*
+  acquisition fields — pixel size, Z step, and the frame-interval paths (MicroManager
+  ElapsedTime deltas + the OME fallback, on both the AICSImage and plain-TIFF routes) —
+  now call `debug_log(...)` instead of swallowing silently. Behaviour is unchanged in
+  normal use (still fails open to a usable partial record), but under `PYCAT_DEBUG=1` a
+  failed extraction of a field the user relies on (e.g. frame interval feeding viscosity)
+  now prints with a traceback instead of vanishing. Truly-optional fields (channel names,
+  raw OME dump) are left quiet. This directly targets the class of bug that made the
+  frame-interval and pixel-size issues hard to trace.
+
+### Added (measurement-correctness tests — health audit finding 3)
+- **Golden-master tests for the VPT microrheology chain** (`tests/test_vpt_viscosity_chain.py`).
+  Synthetic 2D Brownian trajectories with a KNOWN diffusion coefficient are pushed through
+  the full pipeline (`compute_msd` → `fit_anomalous_diffusion` → `viscosity_from_diffusion`),
+  asserting it recovers D (to ~1%), a Brownian exponent α≈1, the exact Stokes-Einstein
+  viscosity arithmetic, and the end-to-end viscosity (to ~3%), plus the NaN guards for
+  non-positive inputs. This encodes the "the measurements are actually correct" claim as a
+  deterministic regression test — and independently confirms the MSD/fit/viscosity *math*
+  is sound, locating the real-data viscosity discrepancy upstream in linking, not here.
+
+### Note
+- Observed during testing: `vpt_tools` imports `napari.utils.notifications` at module top,
+  so a pure-compute module can't be imported headless. Noted for a follow-up (move those to
+  function-local imports, as other modules do) — not changed here to keep this focused.
+
 ## [1.5.307] - 2026-07-09
 ### Fixed (latent frame-collapse bug across stack-consuming analyses — health audit)
 - **Six analysis UIs that read a time-series/stack via `np.asarray(layer.data)` now
