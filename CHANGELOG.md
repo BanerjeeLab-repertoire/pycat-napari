@@ -4,6 +4,21 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.338] - 2026-07-10
+### Fixed — dropped masks loaded as fluorescence images
+- **Drag-and-drop now classifies image vs mask.** Dropped files previously routed
+  straight through the image opener, so a dropped mask loaded as a fluorescence
+  Image layer. Drops now go through the same classifying path as File → Add Image
+  / Mask: the file TYPE is resolved (PyCAT signifier → pixel-statistics → prompt
+  if ambiguous) so a mask loads as a Labels layer and an image as an Image layer,
+  while structure is still auto-detected (IMS/TIFF/CZI stacks load lazily as
+  stacks, 2D through the channel pipeline). A multi-file drop still loads together
+  (first file starts a fresh session, the rest are added).
+- Note: canvas drag-and-drop itself requires PyCAT to be launched from a
+  NON-elevated terminal — Windows blocks drag-and-drop into an Administrator
+  process (the crossed-circle cursor), which is an OS security behaviour, not a
+  PyCAT bug.
+
 ## [1.5.337] - 2026-07-10
 ### Added — layer tagging system (foundation for tag-driven autopopulation)
 - **Structured, evidence-backed tags** now describe *what each layer is* and *how

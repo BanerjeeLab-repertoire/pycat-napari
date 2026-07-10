@@ -181,26 +181,24 @@ class _FileDropFilter(QObject):
         return True
 
     def _route(self, paths):
-        """Route dropped files through PyCAT's canonical context-aware opener,
-        so a drop behaves identically to File → Open Image: each file's structure
-        is inspected and it is sent to the right loader (IMS/TIFF/CZI stacks →
-        lazy stack loader; 2D → channel-assignment pipeline). This replaces an
-        earlier hand-rolled subset that forced every non-IMS file through the 2D
-        opener (which mis-loaded multi-frame TIFF/CZI stacks as single planes).
+        """Route dropped files through PyCAT's classifying open path, so a drop
+        behaves like File → Add Image / Mask: each file's TYPE is resolved
+        (PyCAT signifier → pixel-statistics → prompt) so a dropped MASK loads as a
+        Labels layer and a dropped image as an Image layer, and its STRUCTURE is
+        auto-detected (IMS/TIFF/CZI stacks load lazily as stacks, 2D through the
+        channel pipeline). Previously drops went straight to the image opener,
+        which loaded masks as fluorescence images.
 
-        Supported formats are whatever open_image_auto supports (.ims, .tif/.tiff,
-        .czi, .png, .jpg). A single multi-file drop loads together: the first file
-        clears (fresh session), the rest are added.
+        A multi-file drop loads together: the first file starts a fresh session
+        (clear_first=True), the rest are added.
         """
         import os
         try:
             for _i, p in enumerate(paths):
                 if not p or not os.path.exists(p):
                     continue
-                # First dropped file starts a fresh session; the rest add to it,
-                # matching the multi-select Open behaviour.
-                self._file_io.open_image_auto(
-                    file_path=p, clear_first=(_i == 0))
+                self._file_io._add_image_or_mask_single(
+                    p, clear_first=(_i == 0))
         except Exception as e:
             try:
                 from napari.utils.notifications import show_warning

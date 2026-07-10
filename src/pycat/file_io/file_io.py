@@ -1589,8 +1589,12 @@ class FileIOClass:
 
         self._add_image_or_mask_single(file_path)
 
-    def _add_image_or_mask_single(self, file_path):
-        """Route a SINGLE file to an Image or Labels layer (keep current session).
+    def _add_image_or_mask_single(self, file_path, clear_first=False):
+        """Route a SINGLE file to an Image or Labels layer, classifying
+        image-vs-mask (signifier → pixel-stats → prompt). clear_first controls
+        whether the session is cleared first: the menu "Add" path passes False
+        (keep current); the drop path passes True for the first file so a drop
+        starts a fresh session like Open does.
         (Extracted so add_image_or_mask can loop over a multi-file selection.)"""
         if not file_path:
             return
@@ -1598,10 +1602,10 @@ class FileIOClass:
         # 1. PyCAT signifier — authoritative, no prompt.
         sig = self._read_pycat_signifier(file_path)
         if sig == 'mask':
-            self.open_2d_mask(file_paths=[file_path], clear_first=False)
+            self.open_2d_mask(file_paths=[file_path], clear_first=clear_first)
             return
         if sig == 'image':
-            self.open_image_auto(file_path=file_path, clear_first=False)
+            self.open_image_auto(file_path=file_path, clear_first=clear_first)
             return
 
         # 2/3. No signifier — classify by pixel stats for a default, and decide
@@ -1659,9 +1663,9 @@ class FileIOClass:
             pass
 
         if as_mask:
-            self.open_2d_mask(file_paths=[file_path], clear_first=False)
+            self.open_2d_mask(file_paths=[file_path], clear_first=clear_first)
         else:
-            self.open_image_auto(file_path=file_path, clear_first=False)
+            self.open_image_auto(file_path=file_path, clear_first=clear_first)
 
     def open_image_auto(self, file_path=None, clear_first=True):
         """Context-aware opener: inspect a file's dimensional structure
