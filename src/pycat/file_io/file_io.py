@@ -1446,15 +1446,30 @@ class FileIOClass:
              signifier, ASK the user what they loaded (image or mask).
           3. Otherwise fall back to a pixel-statistics guess (integer + few /
              consecutive label IDs → mask), offered as the default in a prompt.
+
+        Multiple files may be selected in the dialog; each is routed independently
+        (a selection can mix images and masks, so each gets its own type check /
+        prompt). All are added to the current session without clearing.
         """
         if not isinstance(file_path, str):
             file_path = None
         if file_path is None:
             options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getOpenFileName(
-                None, "Add Image / Mask (keep current)", "",
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                None, "Add Image(s) / Mask(s) (keep current)", "",
                 "Image / Mask Files (*.ims *.tif *.tiff *.czi *.png *.jpg);;All Files (*)",
                 options=options)
+            if not file_paths:
+                return
+            for _fp in file_paths:
+                self._add_image_or_mask_single(_fp)
+            return
+
+        self._add_image_or_mask_single(file_path)
+
+    def _add_image_or_mask_single(self, file_path):
+        """Route a SINGLE file to an Image or Labels layer (keep current session).
+        (Extracted so add_image_or_mask can loop over a multi-file selection.)"""
         if not file_path:
             return
 
@@ -1544,16 +1559,35 @@ class FileIOClass:
         fall back to the 2D opener (which itself handles multi-channel).
 
         clear_first is forwarded so this can also add-without-clearing.
+
+        Multiple files may be selected in the dialog: the first is loaded honouring
+        clear_first, and each subsequent file is ADDED (clear_first=False) so the
+        selection loads together instead of replacing one another.
         """
+        # If no explicit path was given, open the dialog in MULTI-select mode.
         if not isinstance(file_path, str):
             file_path = None
         if file_path is None:
             options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getOpenFileName(
-                None, "Open Image",
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                None, "Open Image(s)",
                 "",
                 "Image Files (*.ims *.tif *.tiff *.czi *.png);;All Files (*)",
                 options=options)
+            if not file_paths:
+                return
+            for _i, _fp in enumerate(file_paths):
+                # First file respects clear_first; the rest add without clearing.
+                self._open_image_auto_single(
+                    _fp, clear_first=(clear_first if _i == 0 else False))
+            return
+
+        # Explicit single path (programmatic call).
+        self._open_image_auto_single(file_path, clear_first=clear_first)
+
+    def _open_image_auto_single(self, file_path, clear_first=True):
+        """Route a SINGLE file to the correct loader by inspecting its structure.
+        (Extracted so open_image_auto can loop over a multi-file selection.)"""
         if not file_path:
             return
 
@@ -2341,6 +2375,20 @@ class FileIOClass:
                 labels += ['Y', 'X']
                 if len(labels) == self.viewer.dims.ndim:
                     self.viewer.dims.axis_labels = labels
+        except Exception:
+            pass
+
+        # Open on the FIRST frame/slice, not napari's default centre. Most image
+        # viewers open a stack on index 0; napari initialises each slider to the
+        # middle of its axis, so a freshly-loaded time series or z-stack would
+        # otherwise start mid-movie. Set every non-displayed (slider) axis to 0.
+        # The last two axes are the displayed Y,X plane and are left untouched.
+        try:
+            if self.viewer.dims.ndim > 2:
+                step = list(self.viewer.dims.current_step)
+                for ax in range(self.viewer.dims.ndim - 2):
+                    step[ax] = 0
+                self.viewer.dims.current_step = tuple(step)
         except Exception:
             pass
 

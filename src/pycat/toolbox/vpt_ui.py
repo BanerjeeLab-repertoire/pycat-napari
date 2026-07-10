@@ -623,10 +623,17 @@ class VideoParticleTrackingUI:
                 return
 
         # Determinate progress bar (0..n_frames) so it visibly advances per
-        # frame, rather than an indeterminate spinner stuck at 0%.
+        # frame, rather than an indeterminate spinner stuck at 0%. Label the
+        # phase so the wait is self-explanatory: the bar first covers reading/
+        # decoding frames from disk (materialisation), then per-frame detection.
+        # Without the label the bar appears to "run twice" — it fills during
+        # detection after an unexplained pause while frames materialise.
         self._bead_prog.setVisible(True)
         self._bead_prog.setRange(0, max(1, n_frames))
         self._bead_prog.setValue(0)
+        self._bead_prog.setTextVisible(True)
+        self._bead_prog.setFormat("Preparing frames… %p%")
+        self._bead_detect_started = False
 
         subpixel = self._subpixel.isChecked()
         template_mode = ('per_frame' if self._template_per_frame.isChecked()
@@ -803,8 +810,15 @@ class VideoParticleTrackingUI:
             self._bead_prog.setVisible(False)
             napari_show_warning("Bead detection failed — see terminal.")
             print(msg)
+        def _on_bead_progress(i, n):
+            # First real per-frame tick means materialisation is done and
+            # detection has begun — relabel so the phase is explicit.
+            if not getattr(self, '_bead_detect_started', False) and i > 0:
+                self._bead_detect_started = True
+                self._bead_prog.setFormat("Detecting beads… %p%")
+            self._bead_prog.setValue(i)
         w.finished.connect(_done); w.error.connect(_err)
-        w.progress.connect(lambda i, n: self._bead_prog.setValue(i))
+        w.progress.connect(_on_bead_progress)
         self._bead_worker = w; w.start()
 
     # ── Step 4: trajectory linking ─────────────────────────────────────
@@ -1159,6 +1173,104 @@ class VideoParticleTrackingUI:
         except Exception as _e:
             print(f"[PyCAT VPT] track-length histogram skipped: {_e}")
 
+    def _reveal_track_in_viewer(self, track_id):
+        """Plot -> data brushing: clicking a track in the MSD plot reveals that
+        exact bead in the napari viewer — steps to its first frame, centres the
+        camera on it, drops a transient highlight marker, and surfaces its row.
+
+        napari's Tracks layer has no per-track selection API, so instead of
+        recolouring one track inside the layer we (a) centre + step the viewer to
+        the picked track and (b) add a short-lived Points highlight at the bead's
+        position, which is the clear visual cue the user asked for.
+        """
+        try:
+            import numpy as _np
+            tracks = self._dr().get('vpt_tracks')
+            if tracks is None or 'track_id' not in tracks:
+                return
+            g = tracks[tracks['track_id'] == track_id]
+            if g.empty:
+                return
+            g = g.sort_values('frame')
+            mpp = self._mpx()
+            # Track positions in PIXEL (layer-native) coordinates. tracks store
+            # y_um/x_um, so divide by the pixel size to get pixel indices.
+            ys = (g['y_um'].values / mpp)
+            xs = (g['x_um'].values / mpp)
+            f0 = int(g['frame'].iloc[0])
+            y0 = float(ys[0]); x0 = float(xs[0])
+
+            # Read the image layer's ACTUAL scale ONCE and use it for BOTH the
+            # highlight points and the camera, so they stay consistent even if the
+            # layer scale differs from self._mpx() (e.g. the pixel-size gate never
+            # fired and the image is at scale 1.0). Placing the points in the same
+            # world frame the image uses guarantees they overlay the bead, and the
+            # camera then centres on that same world point. (This is the exact
+            # µm-vs-px consistency that caused earlier confusion — pin it to one
+            # source of truth: the image layer's own scale.)
+            img_scale_yx = None
+            for _l in self.viewer.layers:
+                if _l.__class__.__name__ == 'Image':
+                    _s = _np.asarray(_l.scale, float)
+                    if _s.size >= 2:
+                        img_scale_yx = (float(_s[-2]), float(_s[-1]))
+                    break
+            sc_y, sc_x = img_scale_yx if img_scale_yx else (mpp, mpp)
+
+            # Select the Tracks layer if present (so the picked track is in focus).
+            if "Bead Trajectories" in self.viewer.layers:
+                try:
+                    self.viewer.layers.selection = {
+                        self.viewer.layers["Bead Trajectories"]}
+                except Exception:
+                    pass
+
+            # Step to the track's first frame (T axis is axis 0 for a movie).
+            try:
+                if self.viewer.dims.ndim > 2:
+                    step = list(self.viewer.dims.current_step)
+                    step[0] = f0
+                    self.viewer.dims.current_step = tuple(step)
+            except Exception:
+                pass
+
+            # Centre the camera on the bead, in the image's world frame.
+            try:
+                self.viewer.camera.center = (y0 * sc_y, x0 * sc_x)
+            except Exception:
+                pass
+
+            # Transient highlight marker at the bead (whole trajectory as faint
+            # points + a bright marker at the first frame). Reuse one layer.
+            try:
+                hl_name = "Picked track"
+                pts = _np.column_stack([ys, xs])  # y, x in pixel coords
+                if hl_name in self.viewer.layers:
+                    self.viewer.layers.remove(hl_name)
+                # Use the SAME scale as the camera/image (sc_y, sc_x resolved
+                # above) so the points overlay the bead 1:1 regardless of whether
+                # the image layer carries the pixel size or scale 1.0.
+                _kw = dict(name=hl_name, size=max(6, 0.6 / mpp),
+                           face_color='#ff8c00', border_color='white',
+                           opacity=0.9, scale=[sc_y, sc_x])
+                self.viewer.add_points(pts, **_kw)
+            except Exception:
+                pass
+
+            # Surface a one-line summary of the picked track.
+            try:
+                n = int(len(g))
+                step_nm = float(_np.median(_np.sqrt(
+                    _np.sum(_np.diff(g[['y_um', 'x_um']].values, axis=0) ** 2,
+                            axis=1)))) * 1000 if n > 1 else 0.0
+                napari_show_info(
+                    f"Track {int(track_id)}: {n} frames, starts frame {f0}, "
+                    f"median step {step_nm:.0f} nm — highlighted in viewer.")
+            except Exception:
+                pass
+        except Exception as _e:
+            print(f"[PyCAT VPT] reveal track failed: {_e}")
+
     # ── Step 5: microrheology ──────────────────────────────────────────
     def _add_microrheology(self, layout):
         grp  = QGroupBox("Step 5 — Microrheology (MSD → Viscosity)")
@@ -1413,7 +1525,8 @@ class VideoParticleTrackingUI:
                 min_track_length=self._min_track.value())
             plot_msd_trajectories(ptc, msd_df, fit,
                                   title="VPT MSD (per-track + ensemble)",
-                                  interactive=True)
+                                  interactive=True,
+                                  on_pick_track=self._reveal_track_in_viewer)
             _boot = (self._moduli_boot.isChecked()
                      if hasattr(self, '_moduli_boot') else False)
             if _boot:

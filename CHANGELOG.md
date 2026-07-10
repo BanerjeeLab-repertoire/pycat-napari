@@ -4,6 +4,50 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.336] - 2026-07-10
+### Added — command palette (Ctrl+Shift+P)
+- A fuzzy-search command palette opens methods, toolbox functions, and layers by
+  name. Menu-bar "⌕ Search" button or Ctrl+Shift+P. Type a few characters
+  (best-match ranked: contiguous matches win, e.g. "bead" → the Bead Detections
+  layer, "vpt" → Video Particle Tracking, "bg" → Background Removal); Enter or
+  click launches the method or selects+reveals the layer. The command registry is
+  accumulated automatically as menus are built, so every analysis method and
+  toolbox function is searchable with no per-item wiring. (Phase 1+2 — open
+  method/widget by name, find layer by name; finding a step *within* a widget is
+  left for later, pending step-addressing infrastructure.)
+
+### Added — MSD plot ↔ layer brushing in VPT
+- Clicking a per-track line in the VPT MSD spaghetti plot now reveals that exact
+  bead in the napari viewer: it steps to the track's first frame, centres the
+  camera on the bead, drops a transient "Picked track" highlight over the whole
+  trajectory, and reports the track's length / start frame / median step. The
+  picked line is emphasised on the plot too. First instance of the linked-
+  multiscale-navigation direction — the identity plumbing (track_id shared between
+  the plot, the tracks table, and the napari Tracks layer) already existed, so the
+  plot was made pickable via a decoupled on_pick_track callback the VPT UI
+  supplies. Highlight points and camera both derive from the image layer's own
+  scale, so they overlay the bead correctly whether or not the pixel-size gate
+  fired.
+
+### Changed — open on the first frame, clearer detection progress
+- **Freshly-loaded stacks open on frame 0**, not napari's default middle frame —
+  every non-displayed (T/Z) slider axis is set to 0 on load, matching standard
+  image-viewer behaviour.
+- **The Detect Beads progress bar is now phase-labelled** ("Preparing frames…"
+  then "Detecting beads… %p%") so it no longer appears to "run twice" — the
+  earlier confusion was the bar filling during detection after an unexplained
+  pause while frames materialised.
+
+### Fixed — multiple-file selection in the open dialogs
+- **"Open Image (auto-detect 2D / stack)" and "Add Image / Mask (keep current)"
+  now accept multiple files** in the dialog. Both used the singular
+  `getOpenFileName` (one file only); they now use `getOpenFileNames` and route
+  each selected file through the existing per-file logic. For Open Image, the
+  first file honours the clear-first behaviour and the rest are added; for Add
+  Image/Mask, each file is classified independently (a selection can mix images
+  and masks). Loading several higher-dimensional stacks at once may be slow but
+  is permitted.
+
 ## [1.5.334] - 2026-07-10
 ### Fixed — VPT linker shattered stable beads into short tracks (the core linking problem)
 - **Root cause 1 — gap-frame off-by-one.** The greedy linker's viability AND

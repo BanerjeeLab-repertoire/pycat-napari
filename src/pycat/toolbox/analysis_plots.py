@@ -18,7 +18,7 @@ def _show(fig, interactive):
 
 
 def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
-                          title="MSD", interactive=True):
+                          title="MSD", interactive=True, on_pick_track=None):
     """
     Log-log MSD spaghetti plot: every track's MSD(τ) semi-transparent, the
     ensemble mean MSD as a solid line, and (optionally) the fitted power law.
@@ -31,6 +31,11 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         compute_msd() — drawn as the solid mean with an error band.
     fit : optional dict from fit_anomalous_diffusion() — draws 4Dτ^α and labels
         D and α.
+    on_pick_track : optional callable(track_id). If given, each per-track line is
+        made pickable and clicking one calls this with the track_id — the hook
+        the VPT UI uses to highlight that track in the napari Tracks layer and
+        centre the viewer on it (plot -> data brushing). Kept as a callback so
+        this plotting module stays decoupled from napari/the viewer.
     """
     import matplotlib
     if not interactive:
@@ -44,6 +49,7 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     # hundred conveys the spread just as well; the quantitative result is the
     # ensemble mean and fit, which use ALL tracks regardless of this cap.
     MAX_SPAGHETTI = 400
+    _line_to_tid = {}
     if per_track_df is not None and len(per_track_df):
         all_tids = per_track_df['track_id'].unique()
         n_all = len(all_tids)
@@ -54,14 +60,21 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             plot_df = per_track_df[per_track_df['track_id'].isin(shown)]
         else:
             plot_df = per_track_df
+        _pickable = on_pick_track is not None
         for tid, g in plot_df.groupby('track_id'):
             g = g.sort_values('lag_s')
-            ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
-                    alpha=0.18, lw=0.8, zorder=1)
+            (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
+                            alpha=0.18, lw=0.8, zorder=1)
+            if _pickable:
+                # A generous pick radius so the thin faint lines are easy to hit.
+                ln.set_picker(5)
+                _line_to_tid[ln] = int(tid)
         # a proxy handle for the legend (report the TRUE track count)
         _lbl = (f"individual tracks (n={n_all}"
                 + (f"; showing {MAX_SPAGHETTI}" if n_all > MAX_SPAGHETTI else "")
                 + ")")
+        if on_pick_track is not None:
+            _lbl += " — click a track to reveal it in the viewer"
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0, label=_lbl)
 
     # solid ensemble mean with SEM band
@@ -90,6 +103,39 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     ax.grid(True, which='both', alpha=0.15)
     ax.legend(fontsize=8, loc='upper left')
     fig.tight_layout()
+
+    # Plot -> data brushing: clicking a per-track line calls back with its
+    # track_id (the VPT UI uses this to highlight the track in napari and centre
+    # the viewer). The last-picked line is emphasised so the selection is visible
+    # on the plot too.
+    if on_pick_track is not None and _line_to_tid:
+        _state = {'prev': None}
+
+        def _on_pick(event):
+            ln = event.artist
+            tid = _line_to_tid.get(ln)
+            if tid is None:
+                return
+            prev = _state['prev']
+            if prev is not None and prev in _line_to_tid:
+                prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+            ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
+            ln.set_zorder(5)
+            _state['prev'] = ln
+            try:
+                event.canvas.draw_idle()
+            except Exception:
+                pass
+            try:
+                on_pick_track(tid)
+            except Exception as _e:
+                print(f"[PyCAT VPT] pick callback failed: {_e}")
+
+        try:
+            fig.canvas.mpl_connect('pick_event', _on_pick)
+        except Exception:
+            pass
+
     return _show(fig, interactive)
 
 
