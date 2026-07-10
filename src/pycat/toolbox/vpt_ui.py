@@ -705,6 +705,28 @@ class VideoParticleTrackingUI:
                               f"{d:.3f} µm (per-frame motion ≈ {_mo:.0f} nm × "
                               f"k={_kfac}{', capped at bead footprint' if est.get('capped') else ''}). "
                               f"Editable in Step 4.")
+                        # Assess frame-to-frame linking reliability for THIS movie
+                        # (ratio of bead motion to nearest-neighbour spacing) and
+                        # surface it as an info tag by the linker choice.
+                        try:
+                            from pycat.toolbox.vpt_tools import assess_linking_conditions
+                            cond = assess_linking_conditions(
+                                det_df, motion_sigma_um=est.get('motion_sigma_um'),
+                                microns_per_pixel=self._mpx())
+                            self._dr()['vpt_linking_conditions'] = cond
+                            if hasattr(self, '_link_cond_lbl'):
+                                _colour = {'safe': '#2e7d32', 'caution': '#f9a825',
+                                           'risky': '#ef6c00', 'unsafe': '#c62828'}.get(
+                                               cond['level'], '#666')
+                                _tag = {'safe': 'SAFE', 'caution': 'CAUTION',
+                                        'risky': 'RISKY', 'unsafe': 'UNSAFE'}.get(
+                                            cond['level'], '')
+                                self._link_cond_lbl.setText(
+                                    f"<b style='color:{_colour}'>Linking conditions: "
+                                    f"{_tag}</b><br><span style='color:#888'>"
+                                    f"{cond['message']}</span>")
+                        except Exception as _e2:
+                            print(f"[PyCAT VPT] linking-conditions tag skipped: {_e2}")
             except Exception as _e:
                 print(f"[PyCAT VPT] linking-distance auto-estimate skipped: {_e}")
             # Add a points layer for visual confirmation, coloured by class
@@ -807,23 +829,50 @@ class VideoParticleTrackingUI:
             "of the reference workflow. This is the recommended linker for "
             "quantitative viscosity/microrheology.")
         self._rb_bayesian.setToolTip(
-            "PyCAT's native Hungarian/LAP linker with gap closing.\n\n"
-            "\u26a0 NOT YET VALIDATED for quantitative viscosity: this linker can "
-            "produce FRAGMENTED trajectories (many short tracks instead of long "
-            "continuous ones), which biases the ensemble MSD and the resulting "
-            "viscosity. Use TrackMate LAP for quantitative results; use this only "
-            "for exploration or where TrackMate is unavailable. Check the track "
-            "spanning report after linking \u2014 a healthy result has many tracks "
-            "spanning most of the movie.")
+            "PyCAT's native Bayesian/Hungarian linker with gap closing.\n\n"
+            "Since 1.5.334 (gap off-by-one fix + auto-estimated linking distance) "
+            "this produces clean full-length tracks and reproduces the reference "
+            "viscosity on validated data when the bead motion is small relative to "
+            "the inter-bead spacing. It does frame-to-frame assignment, so its "
+            "reliability depends on that ratio \u2014 see the linking-conditions tag "
+            "below, which is computed from your data. For fast/dense beads (high "
+            "ratio), prefer TrackMate LAP (global optimisation).")
         self._rb_greedy.setToolTip(
             "Fast greedy nearest-neighbour linker.\n\n"
-            "\u26a0 NOT YET VALIDATED for quantitative viscosity, and the most "
-            "fragmentation-prone of the three (no global optimisation or gap "
-            "closing \u2014 it commits to the nearest match each frame). Expect "
-            "short, broken tracks that bias the MSD. Use TrackMate LAP for "
-            "quantitative viscosity; use greedy only for a fast first look.")
+            "Since 1.5.334 (gap off-by-one fix + auto-estimated linking distance) "
+            "it produces clean tracks when bead motion is small relative to "
+            "inter-bead spacing. It commits to the nearest match each frame with no "
+            "global optimisation, so it is the most sensitive of the three to "
+            "identity ambiguity when beads move far or sit close together \u2014 see "
+            "the linking-conditions tag below (computed from your data). For "
+            "fast/dense beads, prefer TrackMate LAP.")
         for rb in (self._rb_trackmate, self._rb_bayesian, self._rb_greedy):
             ml.addWidget(rb)
+
+        # Live linking-conditions tag: the frame-to-frame linkers (greedy,
+        # Bayesian) are reliable only when a bead's per-frame displacement is
+        # small relative to the nearest-neighbour spacing. The ratio
+        # R = motion / NN_spacing is the governing quantity (displacement alone
+        # is not — a fast bead is trivially linkable if neighbours are far). This
+        # label is filled after Detect Beads from the measured motion and
+        # spacing, so the warning is specific to the user's movie, not generic.
+        self._link_cond_lbl = QLabel("")
+        self._link_cond_lbl.setWordWrap(True)
+        self._link_cond_lbl.setStyleSheet("QLabel { font-size: 11px; }")
+        self._link_cond_lbl.setToolTip(
+            "Ratio R = per-frame bead displacement / nearest-neighbour spacing, "
+            "measured from your detections (no tracking needed). Frame-to-frame "
+            "nearest-neighbour linking (greedy, Bayesian) is reliable when a bead's "
+            "step is small versus the distance to its neighbours:\n"
+            "  R < 0.10  SAFE   — NN linking reliable\n"
+            "  0.10–0.25 CAUTION — mostly fine, occasional identity swaps\n"
+            "  0.25–0.50 RISKY  — identity ambiguous; prefer TrackMate LAP (global)\n"
+            "  R > 0.50  UNSAFE — frame-to-frame linking unreliable; use TrackMate "
+            "LAP or acquire at a faster frame rate to shrink the displacement.\n\n"
+            "This does not block any linker — it reports the conditions so you can "
+            "choose. TrackMate's global optimisation tolerates higher R than the "
+            "greedy/Bayesian frame-to-frame linkers.")
+        ml.addWidget(self._link_cond_lbl)
         form.addRow(method_grp)
 
         self._max_link = QDoubleSpinBox()

@@ -1289,6 +1289,92 @@ def _detect_frame_worker(args):
     return int(t), [(float(y), float(x)) for (y, x) in coords]
 
 
+def assess_linking_conditions(detections, motion_sigma_um=None,
+                              bead_stack=None, microns_per_pixel=1.0):
+    """Assess whether frame-to-frame nearest-neighbour linking (greedy, Bayesian)
+    is reliable for this data, via the ambiguity ratio R = per-frame bead
+    displacement / nearest-neighbour spacing.
+
+    Rationale. Frame-to-frame NN linking assigns each bead to its closest match in
+    the next frame; it succeeds when a bead's own next position is unambiguously
+    closer to it than any *other* bead's position. The governing quantity is
+    therefore displacement RELATIVE TO SPACING, not displacement alone — a bead
+    moving 1 µm/frame is trivially linkable if neighbours are 50 µm away and
+    hopeless if they are 0.5 µm away. Thresholds:
+
+        R < 0.10   SAFE    — step ≪ spacing; NN linking reliable.
+        0.10-0.25  CAUTION — mostly reliable; occasional close-approach swaps.
+        0.25-0.50  RISKY   — identity ambiguous; global (TrackMate LAP) wins.
+        R > 0.50   UNSAFE  — bead routinely closer to a neighbour than itself;
+                             frame-to-frame identity fundamentally ambiguous —
+                             use TrackMate LAP or a faster frame rate (which
+                             shrinks displacement and lowers R).
+
+    Both inputs are available WITHOUT tracking: the per-frame displacement is the
+    projection-based ``motion_sigma`` (see estimate_linking_distance_um), and the
+    nearest-neighbour spacing is a single-frame kd-tree query over detections.
+
+    Parameters
+    ----------
+    detections : DataFrame with 'frame','y_um','x_um'.
+    motion_sigma_um : per-frame displacement (µm). If None and bead_stack given,
+        it is estimated via estimate_linking_distance_um.
+    bead_stack : optional stack, used only to estimate motion if not supplied.
+    microns_per_pixel : pixel size (for the motion estimate if needed).
+
+    Returns
+    -------
+    dict: ratio, motion_um, nn_spacing_um, level ('safe'/'caution'/'risky'/
+        'unsafe'), message.
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    if motion_sigma_um is None:
+        if bead_stack is None:
+            return dict(ratio=float('nan'), motion_um=float('nan'),
+                        nn_spacing_um=float('nan'), level='unknown',
+                        message="linking conditions unknown (no motion estimate)")
+        est = estimate_linking_distance_um(
+            bead_stack, microns_per_pixel=microns_per_pixel)
+        motion_sigma_um = est.get('motion_sigma_um', float('nan'))
+
+    # Nearest-neighbour spacing: median over frames of the median NN distance.
+    nns = []
+    for _f, g in detections.groupby('frame'):
+        pts = g[['y_um', 'x_um']].values
+        if len(pts) < 2:
+            continue
+        tree = cKDTree(pts)
+        dd, _ = tree.query(pts, k=2)  # self + nearest neighbour
+        nns.append(np.median(dd[:, 1]))
+    nn_um = float(np.median(nns)) if nns else float('nan')
+
+    if not (np.isfinite(motion_sigma_um) and np.isfinite(nn_um) and nn_um > 0):
+        return dict(ratio=float('nan'), motion_um=motion_sigma_um,
+                    nn_spacing_um=nn_um, level='unknown',
+                    message="linking conditions unknown")
+
+    R = motion_sigma_um / nn_um
+    if R < 0.10:
+        level = 'safe'
+        note = "nearest-neighbour linking (greedy/Bayesian) reliable"
+    elif R < 0.25:
+        level = 'caution'
+        note = "mostly reliable; occasional identity swaps possible"
+    elif R < 0.50:
+        level = 'risky'
+        note = "bead identity ambiguous — prefer TrackMate LAP (global linking)"
+    else:
+        level = 'unsafe'
+        note = ("frame-to-frame linking unreliable — use TrackMate LAP or a "
+                "faster frame rate")
+    msg = (f"R = {R:.2f} ({motion_sigma_um*1000:.0f} nm step / "
+           f"{nn_um*1000:.0f} nm spacing): {note}")
+    return dict(ratio=R, motion_um=motion_sigma_um, nn_spacing_um=nn_um,
+                level=level, message=msg)
+
+
 def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
                                  microns_per_pixel=1.0, k=2.5,
                                  window=8, n_beads=40, half=7,

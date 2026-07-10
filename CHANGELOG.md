@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The linker track-length histogram now opens as a dockable "Track lengths" panel
   (reused across relinks) instead of sitting inline in the Step-4 form.
 
+### Added — linking-conditions reliability tag on the automated linkers
+- The frame-to-frame linkers (greedy, Bayesian) are reliable only when a bead's
+  per-frame displacement is small relative to the nearest-neighbour spacing — the
+  governing quantity is the ratio **R = motion / NN-spacing**, not displacement
+  alone (a fast bead is trivially linkable if neighbours are far, and a slow bead
+  is ambiguous if they are close). `assess_linking_conditions()` computes R from
+  the detections WITHOUT tracking (projection-based per-frame motion ÷ single-frame
+  nearest-neighbour spacing) and Step 4 shows a colour-coded tag after Detect
+  Beads: SAFE (R<0.10), CAUTION (0.10–0.25), RISKY (0.25–0.50, prefer TrackMate
+  LAP), UNSAFE (>0.50, use TrackMate LAP or a faster frame rate). It does not block
+  any linker — it reports the conditions specific to the user's movie so they can
+  choose, and explains *why* the automated linkers are or aren't appropriate here
+  (anti-black-box). Linker tooltips updated to reflect the 1.5.334 fixes and point
+  to the tag. (Tonight's validated data: R=0.01, deep in SAFE — which is why the
+  automated linkers reproduced the reference viscosity.)
+
 ## [1.5.333] - 2026-07-10
 ### Added — VPT detection-variant staging + track-length histogram
 - **Detection-variant staging framework.** `detect_beads_stack` gained a

@@ -155,3 +155,112 @@ quantitative-measurement program. This is the flagship manuscript differentiator
 converts PyCAT from "image analysis" to "biophysical parameter extraction." PyCAT today
 has intensity-based ratios (partition coefficient, client enrichment) but zero
 `delta_g` / standard-curve-concentration code — that gap is the build.
+
+---
+
+## 5. Speculative pre-materialization (hide materialization latency behind config time)
+
+**Motivation.** In several pipelines the *materialization* step (reading/decoding the lazy
+stack into a concrete array) is roughly half the wall-clock runtime. The interaction
+sequence is: select method → choose layers/options → configure params → click Run →
+**materialize** → analyse. The configuration phase is dead time (10-60 s of the user
+picking layers, ROIs, thresholds, Cellpose params) during which the required array could
+already be loading in the background. Done right, this hides most materialization latency
+without touching any algorithm — it's the "time to first result" principle applied to the
+wait *after* Run. Fits the responsiveness / data-local thesis directly.
+
+**Trigger on input commitment, NOT panel-open.** Opening a method panel must not kick off a
+multi-GB load the user was only browsing (this would also defeat the lazy-by-default
+principle). Readiness progression: method opened → nothing; input layer selected → metadata
+only; **ROI / frame-range / channel selected → begin background materialization**; params
+edited → continue unless they change the required array; Run → consume the prepared array
+(or wait only for the remainder, or compute synchronously if prefetch never started).
+
+**Staleness protection is LOAD-BEARING (this is the dangerous part for us).** A stale
+prefetch publishing its array after the user changed ROI/channel/layer is exactly the
+"looks like the right array but isn't" trap we've hit twice (`_TiffPageStack.__array__`
+returning frame 0 only — temperature UI 1.5.253, VPT 1.5.273). And tonight's pixel-size
+episode showed how catastrophic a silent-wrong *input* is (a 10× pixel-size slip squared
+into a 100× viscosity error with no other symptom). So: a request key must include
+everything that determines the concrete array — `(layer_identity, layer_data_version,
+slice_selection, roi_bounds, frame_range, channel_selection, target_dtype)`. Method params
+(e.g. Cellpose diameter) do NOT invalidate; ROI/layer/channel changes DO. A key mismatch
+must force a synchronous recompute and MUST NEVER serve a stale array. Generation IDs +
+cancellation tokens; one active materialization per method instance.
+
+**The prefetched object must be the EXACT object the method consumes.** If the method then
+independently calls `np.asarray(lazy_data)` again, the array is duplicated and the benefit
+is erased. The clean seam already exists: `file_io.materialize_stack()` is the single
+chokepoint. Make it prefetch-aware — check a shared manager for a ready array matching the
+request key, return it if present, compute synchronously otherwise. Then every existing
+method benefits with no per-method changes.
+
+**Memory amplification is the real danger.** Prefetch does not reduce peak memory; it moves
+the allocation earlier. If the method then makes a float32 copy + probability maps + label
+arrays, several copies stack. Gate the prefetch on estimated headroom:
+`prefetched_input + expected_working_set + current_process_RSS < safe_fraction(available_RAM)`
+(psutil). If it won't fit: prefetch only the selected ROI/frame block, materialize
+incrementally, evict another prefetched result, or skip. On low-RAM boxes (e.g. Meet's
+CPU-only machine) aggressive prefetch could push into swap and be *slower* — so headroom-gated,
+low-priority, off the Qt main thread, subordinate to any explicit user action.
+
+**Recommended scope (two stages, low-risk first):**
+1. **Batch double-buffering** — materialize file N+1 while processing file N. Cleanest,
+   highest-value, lowest-risk: the "next file" is unambiguous, so there's no stale-key or
+   user-changes-inputs-mid-flight problem, and batch throughput is a manuscript-relevant
+   number. Provided memory permits holding active + next dataset.
+2. **Interactive method-level prefetch** — start after layer + ROI/frame selection, cancel
+   on input change, Run consumes the prepared array. Higher value, higher risk (all the
+   staleness/cancellation machinery above).
+
+**Profile first.** Confirm per-pipeline that materialization is actually the wall-clock cost
+*and* the user spends real configuration time — the win only exists where both hold. A
+method with instant materialization or auto-run gains nothing.
+
+**Architecture.** A shared `MaterializationManager` (request key → task state → cancellation
+token → completed array → estimated bytes → last access), states NOT_REQUESTED / QUEUED /
+MATERIALIZING / READY / FAILED / CANCELLED / STALE. Optional subtle "Preparing input…"
+status to explain background disk/CPU activity, but the work can be silent. This is closer
+to *anticipatory evaluation of a lazy computation graph* than to conventional array
+pre-warming — and PyCAT's guided step-by-step workflow structure makes it unusually well
+suited to it. (Distinct from the earlier, rejected "pre-warm reusable work buffers" idea:
+allocation churn is NOT the bottleneck; materialization latency is.)
+
+---
+
+## 6. Pixel-size sensitivity of VPT viscosity (2026-07-10 finding — cautionary)
+
+Viscosity from Stokes-Einstein scales as **1 / pixel_size²** (D ∝ pixel_size², η ∝ 1/D), so a
+pixel-size error is *squared* into the viscosity. Tonight: the automated linkers + revised
+detection gave ~0.1 Pa·s against a validated ~8.3 reference — a 75× gap that was NOT in
+detection, linking, gap-closing, track selection, or mislinks (all independently ruled out:
+clean full-length tracks, max step 0.74 px well under the linking ceiling, no track subset
+yields 8.3). The whole gap was the **pixel size: 0.067 µm/px, not 0.67** — a 10× decimal slip
+→ 100× viscosity factor. With 0.067, both automated linkers land at ~8.4 Pa·s (Greedy/Bayesian
+gap=1), matching the reference within a couple percent, through the automated path with no
+TrackMate and no manual pruning — i.e. the "opt-out-of-TrackMate" goal is met once the scale
+is right. (Pixel size to be confirmed against the actual acquisition, not inferred from the
+fact that it matches 8.3.) IMPLICATIONS: (1) strongest possible argument for the pixel-size
+acquisition-profiles feature + the load-time gate — a scale slip produces a huge physics error
+with no other visible symptom; (2) VPT should warn prominently that viscosity ∝ 1/pixel_size²
+and surface the pixel size used in the results; (3) this is the concrete case behind the
+"silent wrong input is catastrophic" caution in the pre-materialization staleness notes above.
+
+**Optical-train derivation of the true pixel size (the provenance the file lacked).** This
+data has NO pixel size in its metadata, so the scale must be reconstructed from the acquisition
+optics rather than read from the file. The rule: `pixel_size_at_sample = camera_pixel_pitch /
+total_magnification`. Setup: Zeiss 100× Plan-Apochromat 1.2 NA objective on a Zeiss Primovert,
+imaged through a 3D-printed ~10 cm top-path relay that preserves 1:1, onto a FLIR Blackfly USB3
+(Sony Pregius-family sensor, ~6.5-6.9 µm pitch). So `~6.5-6.9 µm / 100× = 0.065-0.069 µm/px` —
+i.e. **~0.067 µm/px**. The 0.67 that had been used would require a 67 µm camera pixel (10× larger
+than any sensor ever made) — physically impossible, confirming 0.67 was a decimal-place slip.
+Crucially this derivation is INDEPENDENT of the 8.3 target: the optics give ~0.067 on their own,
+and *then* that value makes the automated pipeline reproduce ~8.4 Pa·s — two independent lines of
+evidence converging, not a tuned fit. Remaining uncertainty is only in the exact sensor pitch
+(0.058 / 0.065 / 0.069 depending on the specific Blackfly model), and since η ∝ 1/px² even a
+0.065-vs-0.069 difference is a ~13% shift in the absolute viscosity — so read the exact model /
+sensor pitch off the camera (or SpinView/Spinnaker) to pin the absolute value to a few percent.
+GENERAL LESSON: when acquisition metadata omits the scale, the pixel size is recoverable from
+`objective_mag × relay_mag` and `camera_pixel_pitch` — this is exactly the information the
+pixel-size acquisition-profiles feature should let a user store per-instrument (a named profile
+like "Primovert-100x-1:1relay-Blackfly" encodes the optical train once).

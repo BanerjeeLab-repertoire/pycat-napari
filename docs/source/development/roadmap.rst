@@ -128,6 +128,27 @@ Design note: these are *views* on the shared per-condensate object record (the b
 object model direction), not disconnected pipelines — each new method enriches the same
 temporal object rather than emitting an isolated CSV.
 
+.. rubric:: Temporal-projection dynamics proxy (cheap pre-tracking mobility screen)
+
+A short-window time-projection encodes motion into a measurable width: a MAX (or STD)
+projection over a window of frames smears each object by how far it moved, so the projected
+width, broadened beyond the single-frame footprint, *is* a motion estimate. Recovered in
+quadrature: ``motion_sigma = sqrt(sigma_projected**2 - sigma_singleframe**2)``. Validated in
+VPT (2026-07) as the basis for the auto linking-distance estimate — it measures per-frame
+bead motion **without linking any tracks** (short window → per-frame step; all frames → the
+total displacement envelope).
+
+The trick generalises to the time-series / condensate pipelines as a near-free mobility
+screen *before* any tracking: stationary objects stay sharp, mobile ones blur, giving a
+per-object "is there dynamics here and roughly how much" readout. A STD/variance projection
+is especially natural — its per-pixel value *is* temporal variability (the same signal the
+VPT hot-pixel mask reads, just used for the opposite purpose). Caveat: it is a *proxy*,
+valid when motion << object size per window (small blur perturbation on the footprint); for
+fast movers or long windows it saturates into the total envelope, so it complements tracking
+rather than replacing it — a cheap first pass, not a substitute for MSD. Before building:
+sweep the time-series tools for any existing std/variance-over-time projection rather than
+assuming none exists.
+
 .. rubric:: Audit: acquisition parameters derived per data type and metadata structure
 
 Frame interval, pixel size, exposure, Z step and bit depth are now captured at the
