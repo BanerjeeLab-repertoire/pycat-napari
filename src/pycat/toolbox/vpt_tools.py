@@ -340,6 +340,7 @@ def detect_beads_frame(
     fit_window: int = 9,
     fast_fit: bool = False,
     use_gpu: bool = False,
+    return_sigma: bool = False,
 ) -> np.ndarray:
     """
     Detect beads in a single frame via Laplacian-of-Gaussian blob detection.
@@ -381,20 +382,29 @@ def detect_beads_frame(
             num_sigma=num_sigma, threshold=threshold)
 
     if blobs.shape[0] == 0:
+        if return_sigma:
+            return np.empty((0, 2)), np.empty((0,))
         return np.empty((0, 2))
 
     coords = blobs[:, :2]  # (y, x)
+    _sigmas = blobs[:, 2] if blobs.shape[1] >= 3 else None  # detected scale
 
     if host_mask is not None:
         hm = np.asarray(host_mask) > 0
         keep = []
-        for (y, x) in coords:
+        keep_sig = []
+        for _i, (y, x) in enumerate(coords):
             yi, xi = int(round(y)), int(round(x))
             if 0 <= yi < hm.shape[0] and 0 <= xi < hm.shape[1] and hm[yi, xi]:
                 keep.append((y, x))
+                if _sigmas is not None:
+                    keep_sig.append(_sigmas[_i])
         coords = np.array(keep) if keep else np.empty((0, 2))
+        _sigmas = (np.array(keep_sig) if keep_sig else None) if _sigmas is not None else None
 
     if not fit_quality:
+        if return_sigma:
+            return coords, _sigmas
         return coords
 
     # Per-bead 2D Gaussian quality fit
@@ -561,6 +571,211 @@ def build_airy_template(half, first_zero_px=None):
     return tmpl_z
 
 
+def build_hot_pixel_mask(bead_stack, cv_max=0.12, tstd_max=8.0,
+                         local_excess_min=8.0, median_size=5,
+                         max_frames=None):
+    """Identify fixed-location sensor hot/dead pixels from a stack's TEMPORAL
+    statistics (detection_variant='hot_pixel_reject').
+
+    Physics. A sensor hot/dead pixel is a FIXED (r, c) whose value is set by the
+    detector, not the scene, so across the movie it is essentially CONSTANT in
+    time — high (or anomalous) temporal MEAN but very LOW temporal VARIANCE. A
+    real bead location has HIGH temporal variance because the bead moves through /
+    jitters (it comes and goes). Verified on Gable's fluorescence VPT data
+    (2026-07): hot pixels have temporal std ~3-4 (cv≈0.05) while bead locations
+    have temporal std ~40-50 (cv≈0.3-0.5) — a wide, clean gap. This temporal
+    signature is SCENE-INDEPENDENT, so unlike a per-frame spike test it (a)
+    catches hot pixels sitting DOWN NEAR THE NOISE FLOOR (this camera does this in
+    some modes), and (b) will not falsely reject a genuinely stable bead, which
+    still jitters in time. It is computed once over the stack, not per frame.
+
+    A pixel is flagged hot when ALL hold:
+      * it stands out from its local neighbourhood in temporal MEAN
+        (local-median-subtracted excess ≥ ``local_excess_min``), AND
+      * it is temporally FLAT — coefficient of variation
+        (temporal_std / temporal_mean) ≤ ``cv_max`` OR absolute temporal
+        std ≤ ``tstd_max``.
+
+    Parameters
+    ----------
+    bead_stack : (T, H, W) stack (lazy or array). Streamed via iter_frames so the
+        whole movie is never held in memory.
+    cv_max : max coefficient of variation for a flat (hot) pixel.
+    tstd_max : max absolute temporal std for a flat (hot) pixel (catches
+        near-noise-floor hot pixels whose mean is low so cv is less reliable).
+    local_excess_min : min temporal-mean excess over the local median background
+        to be considered anomalous at all (avoids flagging ordinary background).
+    median_size : neighbourhood size for the local background estimate.
+    max_frames : cap frames used for the statistics (None = all). A few hundred
+        frames are plenty to estimate the temporal signature.
+
+    Returns
+    -------
+    (H, W) boolean mask, True at hot/dead sensor pixels.
+
+    STATUS (2026-07): mechanism validated CORRECT and SAFE on Gable's fluorescence
+    VPT data — the temporal signature cleanly separates hot pixels (temporal std
+    ~3-4) from beads (temporal std ~40-50), and wired as detection_variant=
+    'hot_pixel_reject' it drops hot pixels via a harsher NCC gate WITHOUT rejecting
+    real beads (every confirmed bead survived, including one adjacent to a hot
+    pixel). HOWEVER on that specific data it is nearly a no-op (~18 hot pixels
+    found but blob_log barely fires on them, so ~1 detection removed) — the beads
+    are clean and detection is already good there. It earns its place on data where
+    a camera/mode DOES turn hot/dead pixels into recurring false detections (e.g.
+    the brightfield near-noise-floor hot pixels this camera can produce). Kept and
+    wired, low-risk (baseline untouched); expect little effect on clean
+    fluorescence bead movies.
+    """
+    from pycat.file_io.file_io import iter_frames
+    # Streaming mean/variance (Welford) so we never hold the whole stack.
+    mean = None
+    M2 = None
+    n = 0
+    for t, frame in iter_frames(bead_stack):
+        f = np.asarray(frame, dtype=np.float64)
+        f = np.squeeze(f)
+        if f.ndim != 2:
+            continue
+        if mean is None:
+            mean = np.zeros_like(f)
+            M2 = np.zeros_like(f)
+        n += 1
+        delta = f - mean
+        mean += delta / n
+        M2 += delta * (f - mean)
+        if max_frames is not None and n >= int(max_frames):
+            break
+    if mean is None or n < 5:
+        # Not enough frames to estimate — flag nothing.
+        return np.zeros((1, 1), dtype=bool) if mean is None else \
+            np.zeros_like(mean, dtype=bool)
+    tvar = M2 / max(n - 1, 1)
+    tstd = np.sqrt(np.maximum(tvar, 0.0))
+    tmean = mean
+
+    from scipy.ndimage import median_filter
+    local_bg = median_filter(tmean, size=int(median_size))
+    excess = tmean - local_bg
+    cv = tstd / np.maximum(tmean, 1.0)
+
+    anomalous = excess >= float(local_excess_min)
+    flat = (cv <= float(cv_max)) | (tstd <= float(tstd_max))
+    hot = anomalous & flat
+    return hot
+
+
+def dedup_detections_ring_merge(coords, frame, sigmas=None,
+                                k_sigma=2.5, ring_dim_ratio=0.6,
+                                base_radius_px=None):
+    """Ring-merge deduplication (detection_variant='ring_merge').
+
+    ⚠ STATUS: BUILT BUT NOT YET VALIDATED — NEEDS DATA WITH RESOLVED AIRY RINGS.
+    ---------------------------------------------------------------------------
+    A/B comparison against baseline on Gable's 2026-07 bead data (100x/~1.2 NA,
+    0.67 µm/px, 200 nm beads) showed this variant is a near no-op there: the
+    beads are well-separated (median nearest-neighbour ~17.5 px, only ~4% within
+    5 px) and blob_log already returns ~one detection per bead, so there are
+    essentially no ring fragments to merge (it changed ~2 of ~2000 detections).
+    On THAT data the real detection-quality lever is hot-pixel rejection, not
+    ring-merge. This function is kept because the logic is sound and there is
+    almost certainly a use case — data with genuinely RESOLVED Airy rings that
+    fire as separate blobs (denser sampling, lower NA relative to bead size, or a
+    lower detection threshold that picks up ring shoulders). It is deliberately
+    NOT exposed in the VPT widget; wire it in and validate against such a dataset
+    (center+ring must collapse to ONE bead, two bright peaks must stay TWO)
+    before trusting/surfacing it. Reach it programmatically via
+    detect_beads_stack(..., detection_variant='ring_merge').
+
+    Improves on ``dedup_detections`` for large, non-diffraction-limited Airy-disk
+    beads, where blob_log fires on both the bright CENTRE and the dim Airy RING /
+    multi-scale shoulders of a single bead. Two corrections over the baseline:
+
+    1. **Self-scaling merge radius.** The merge radius is ``k_sigma × sigma`` of
+       the detected blob (not a fixed pixel count), so it tracks the imaged
+       footprint and stays correct under low NA / undersampling / astigmatism.
+       At 0.67 µm/px a 200 nm bead is sub-pixel, so keying off physical µm is
+       wrong — the detected blob sigma is the robust length scale.
+
+    2. **Merge only the DIM companion into the BRIGHT centre; keep two bright
+       peaks as two beads.** A ring fragment is always the DIM companion of a
+       bright peak (never itself bright+compact). So a neighbour is merged into a
+       kept centre only if it is DIM relative to that centre
+       (``neighbour_intensity ≤ ring_dim_ratio × centre_intensity``). If a nearby
+       detection is comparably BRIGHT, it is a second real bead and is kept —
+       trajectory linking resolves two genuinely-separate beads far better than
+       detection can, and collapsing them (as the baseline does) destroys a real
+       track. This is the key behavioural difference from ``dedup_detections``.
+
+    Parameters
+    ----------
+    coords : list/array of (y, x).
+    frame  : the image, used for local intensity of each detection.
+    sigmas : per-detection blob sigma (from blob_log column 3). If None, falls
+        back to ``base_radius_px`` (behaves like a fixed-radius dedup that still
+        respects the bright-vs-dim rule).
+    k_sigma : merge radius = k_sigma × sigma (default 2.5).
+    ring_dim_ratio : a neighbour is a mergeable ring fragment only if its local
+        intensity ≤ this fraction of the centre's (default 0.6). Higher = merges
+        more aggressively; lower = keeps more separate detections.
+    base_radius_px : fallback merge radius when sigmas is None.
+
+    Returns
+    -------
+    Filtered list of (y, x) — bright bead centres, with dim ring fragments folded
+    in and genuinely-separate bright beads preserved.
+    """
+    if coords is None or len(coords) == 0:
+        return coords
+    from scipy.spatial import cKDTree
+    pts = np.asarray([(float(y), float(x)) for (y, x) in coords], dtype=float)
+    raw = np.asarray(frame, dtype=np.float32)
+    raw = np.squeeze(raw)
+    if raw.ndim != 2:
+        return coords
+    H, W = raw.shape
+
+    def local_intensity(y, x, r=2):
+        yi, xi = int(round(y)), int(round(x))
+        y0, y1 = max(0, yi - r), min(H, yi + r + 1)
+        x0, x1 = max(0, xi - r), min(W, xi + r + 1)
+        if y1 <= y0 or x1 <= x0:
+            return -np.inf
+        return float(raw[y0:y1, x0:x1].max())
+
+    inten = np.array([local_intensity(y, x) for (y, x) in pts])
+    # Per-detection merge radius (sigma-scaled, or fixed fallback).
+    if sigmas is not None and len(sigmas) == len(pts):
+        radii = np.maximum(1.0, float(k_sigma) * np.asarray(sigmas, dtype=float))
+    elif base_radius_px:
+        radii = np.full(len(pts), float(base_radius_px))
+    else:
+        # No sigma and no fallback → nothing principled to merge on; keep all.
+        return [tuple(p) for p in pts]
+
+    tree = cKDTree(pts)
+    order = np.argsort(-inten)          # brightest first
+    used = np.zeros(len(pts), dtype=bool)
+    kept = []
+    for idx in order:
+        if used[idx]:
+            continue
+        kept.append(idx)
+        centre_I = inten[idx]
+        # Query within this centre's radius; fold in only DIM neighbours.
+        neighbours = tree.query_ball_point(pts[idx], r=float(radii[idx]))
+        for n in neighbours:
+            if n == idx or used[n]:
+                continue
+            # Merge only if the neighbour is a DIM ring fragment of this centre.
+            # A comparably-bright neighbour is a second real bead → leave it for
+            # its own turn in the brightness-ordered loop (kept separately).
+            if inten[n] <= ring_dim_ratio * centre_I:
+                used[n] = True
+        used[idx] = True
+    kept.sort()
+    return [tuple(pts[i]) for i in kept]
+
+
 def dedup_detections(coords, frame, merge_radius_px, keep='brightest'):
     """Merge detections that fall within merge_radius_px of one another, keeping
     a single representative per cluster. blob_log can fire multiple times on one
@@ -689,10 +904,18 @@ def classify_beads(beads_df: pd.DataFrame,
                    aggregate_intensity_factor: float = 1.6,
                    defocus_r2_max: float = 0.85,
                    sigma_outlier_factor: float = 1.5,
-                   strictness: float = 1.0) -> pd.DataFrame:
+                   strictness: float = 1.0,
+                   variant: str = 'baseline') -> pd.DataFrame:
     """
     Classify fitted beads into singlet / aggregate / out-of-plane using the
     2D-Gaussian quality metrics.
+
+    DETECTION-VARIANT STAGING (``variant``): 'baseline' is the 1.5.329-validated
+    classifier and is the default — it is never changed, so the validated
+    ~8.325-through-TrackMate path stays selectable and a revert is a one-arg
+    change. New variants are opt-in and additive, each implemented as its own
+    branch so they can be A/B-compared against baseline on the same detections
+    without touching the baseline code path. See ``_classify_variant_*`` helpers.
 
     The discriminating physics:
       - A singlet has a characteristic PSF width (sigma) and integrated
@@ -769,6 +992,20 @@ def classify_beads(beads_df: pd.DataFrame,
         # borderline-noise population consistently rejected.
         NCC_FLOOR = 0.55
         is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
+
+        # Hot-pixel reject variant: on a FIXED sensor hot pixel, apply a HARSHER
+        # acceptance test instead of a flat veto — a real bead can drift over a
+        # hot/dead pixel and must still be accepted if it brings genuine template
+        # evidence. A bare hot pixel is a flat/spiky single pixel that matches the
+        # bead PSF template poorly (low NCC), so a raised NCC floor on suspect
+        # pixels drops the naked hot pixel while a bead passing over (high NCC)
+        # survives. Baseline is untouched (no 'on_hot_pixel' column there).
+        if variant == 'hot_pixel_reject' and 'on_hot_pixel' in df.columns:
+            HOT_NCC_FLOOR = 0.75   # stricter than the 0.55 baseline floor
+            on_hot = df['on_hot_pixel'].fillna(False).to_numpy(dtype=bool)
+            # A detection on a hot pixel must clear the higher floor to be real.
+            harsh_ok = ~on_hot | (np.isfinite(ncc) & (ncc >= HOT_NCC_FLOOR))
+            is_real = is_real & harsh_ok
 
         # References computed over REAL beads only (so garbage doesn't skew them).
         rii = ii[is_real & np.isfinite(ii)]
@@ -1077,6 +1314,7 @@ def detect_beads_stack(
     n_workers: Optional[int] = None,
     strictness: float = 1.0,
     use_gpu: str = 'auto',
+    detection_variant: str = 'baseline',
 ) -> pd.DataFrame:
     """
     Detect beads across all frames of a (T, H, W) stack.
@@ -1181,8 +1419,28 @@ def detect_beads_stack(
             except Exception:
                 gpu_on = False
 
+    _variant = (detection_variant or 'baseline').lower()
+    # Hot-pixel reject: build the fixed-sensor-pixel mask ONCE from the stack's
+    # temporal statistics (scene-independent), then drop detections landing on
+    # those pixels. Needs all frames, so it's a stack-level pre-pass.
+    _hot_mask = None
+    if _variant == 'hot_pixel_reject':
+        try:
+            _hot_mask = build_hot_pixel_mask(bead_stack)
+            _n_hot = int(_hot_mask.sum()) if _hot_mask is not None else 0
+            if progress_callback is None:
+                print(f"[PyCAT VPT] hot_pixel_reject: flagged {_n_hot} fixed "
+                      f"sensor pixels from temporal statistics.")
+        except Exception as _e:
+            print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
+            _hot_mask = None
     precomputed_coords = None
-    if quality_mode == 'fast' and not gpu_on and parallel in ('auto', 'cpu', 'process'):
+    # Ring-merge needs per-detection sigma from blob_log, which the parallel
+    # worker path doesn't carry, so run detection serially for that variant.
+    # Hot-pixel reject also runs serially (it filters coords against the mask).
+    if quality_mode == 'fast' and not gpu_on \
+            and _variant not in ('ring_merge', 'hot_pixel_reject') \
+            and parallel in ('auto', 'cpu', 'process'):
         src_desc = _bead_source_descriptor(bead_stack)
         try:
             import os as _os
@@ -1236,14 +1494,24 @@ def detect_beads_stack(
                 # template building + scoring (both cheap).
                 coords = precomputed_coords[t]
             else:
-                coords = detect_beads_frame(
-                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                    num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
-                    use_gpu=gpu_on)
-                # De-duplicate multi-scale / ring detections on a single bead, if
-                # a merge radius is set (from the physical bead size upstream).
-                if merge_radius_px:
-                    coords = dedup_detections(coords, frame, merge_radius_px)
+                if _variant == 'ring_merge':
+                    coords, _sig = detect_beads_frame(
+                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                        num_sigma=num_sigma, threshold=threshold,
+                        host_mask=host_mask, use_gpu=gpu_on, return_sigma=True)
+                    # Ring-merge: sigma-scaled radius, merge dim ring fragments
+                    # into bright centres, keep two bright beads as two.
+                    coords = dedup_detections_ring_merge(
+                        coords, frame, sigmas=_sig,
+                        base_radius_px=merge_radius_px)
+                else:
+                    coords = detect_beads_frame(
+                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                        num_sigma=num_sigma, threshold=threshold,
+                        host_mask=host_mask, use_gpu=gpu_on)
+                    # Baseline de-dup (fixed radius, keep brightest per cluster).
+                    if merge_radius_px:
+                        coords = dedup_detections(coords, frame, merge_radius_px)
             if template_z is None or template_mode == 'per_frame':
                 if template_type == 'airy':
                     # Analytic Airy (Bessel J1) template — matches beads that
@@ -1256,14 +1524,23 @@ def detect_beads_stack(
             scored = score_beads_template(frame, coords, template_z,
                                           half=half, subpixel=subpixel)
             for i, b in enumerate(scored):
-                rows.append({
+                _row = {
                     'frame': t, 'object_id': i,
                     'y_um': float(b['y']) * microns_per_pixel,
                     'x_um': float(b['x']) * microns_per_pixel,
                     'area_um2': nominal_area,
                     'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
                     'amplitude': b['amplitude'],
-                    'integrated_intensity': b['integrated_intensity']})
+                    'integrated_intensity': b['integrated_intensity']}
+                # Flag detections sitting on a fixed sensor hot pixel so the
+                # classifier can apply a HARSHER acceptance test there (not a flat
+                # reject — a real bead can drift over a hot/dead pixel and should
+                # still be accepted if it brings real PSF/template evidence).
+                if _hot_mask is not None:
+                    yi = int(round(b['y'])); xi = int(round(b['x']))
+                    if 0 <= yi < _hot_mask.shape[0] and 0 <= xi < _hot_mask.shape[1]:
+                        _row['on_hot_pixel'] = bool(_hot_mask[yi, xi])
+                rows.append(_row)
         else:
             beads = detect_beads_frame(
                 frame, min_sigma=min_sigma, max_sigma=max_sigma,
@@ -1308,7 +1585,13 @@ def detect_beads_stack(
         return pd.DataFrame(columns=cols)
 
     df = pd.DataFrame(rows)
-    df = classify_beads(df, strictness=strictness)
+    # ── Detection-variant staging ────────────────────────────────────────────
+    # 'baseline' = the 1.5.329-validated classifier (recovers ~8.325 through
+    # TrackMate). New variants are OPT-IN and additive so the validated path
+    # stays selectable and a revert is a clean single-arg change. The variant is
+    # recorded on the frame for auditability and downstream comparison.
+    df = classify_beads(df, strictness=strictness, variant=_variant)
+    df.attrs['detection_variant'] = _variant
 
     if exclude_aggregates:
         df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
@@ -1770,3 +2053,70 @@ def _link(detections, linker, max_dist_um, max_gap, mpp, progress_callback=None)
             progress_callback=progress_callback)
     from pycat.toolbox.dynamic_spatial_tools import link_trajectories
     return link_trajectories(detections, max_dist_um, max_gap)
+
+
+def compare_detection_variants(
+    bead_stack,
+    variant_a: str = 'baseline',
+    variant_b: str = 'baseline',
+    microns_per_pixel: float = 1.0,
+    max_frames: Optional[int] = None,
+    **detect_kwargs,
+) -> dict:
+    """
+    Run bead detection under TWO variants on the SAME stack and report how the
+    detections/classifications differ. This is the staging safety net for the
+    detection rework: every proposed change is measured against the
+    1.5.329-validated baseline before it is trusted, and a regression is visible
+    immediately rather than only surfacing in the final viscosity.
+
+    Parameters
+    ----------
+    bead_stack : (T, H, W) stack (lazy or array).
+    variant_a, variant_b : detection_variant names to compare (default both
+        'baseline'; pass e.g. variant_b='ring_merge' to A/B a new variant).
+    microns_per_pixel : pixel size (passed through to detection).
+    max_frames : cap the number of frames for a fast comparison (None = all).
+    **detect_kwargs : forwarded to detect_beads_stack (quality_mode, parallel…).
+
+    Returns
+    -------
+    dict with:
+        counts_a / counts_b   : total detections per variant
+        class_counts_a / _b   : bead_class value-counts per variant
+        n_frames              : frames compared
+        summary               : human-readable one-line diff
+        det_a / det_b         : the two detection DataFrames (for deeper analysis)
+    """
+    import numpy as np
+    frame_indices = None
+    if max_frames is not None:
+        try:
+            T = int(np.asarray(bead_stack).shape[0]) if not hasattr(bead_stack, 'shape') \
+                else int(bead_stack.shape[0])
+            frame_indices = list(range(min(T, int(max_frames))))
+        except Exception:
+            frame_indices = None
+
+    det_a = detect_beads_stack(
+        bead_stack, microns_per_pixel=microns_per_pixel,
+        frame_indices=frame_indices, detection_variant=variant_a, **detect_kwargs)
+    det_b = detect_beads_stack(
+        bead_stack, microns_per_pixel=microns_per_pixel,
+        frame_indices=frame_indices, detection_variant=variant_b, **detect_kwargs)
+
+    cc_a = (det_a['bead_class'].value_counts().to_dict()
+            if 'bead_class' in det_a else {})
+    cc_b = (det_b['bead_class'].value_counts().to_dict()
+            if 'bead_class' in det_b else {})
+    n_frames = int(det_a['frame'].nunique()) if 'frame' in det_a else 0
+
+    summary = (
+        f"[{variant_a}] {len(det_a)} dets {cc_a}  vs  "
+        f"[{variant_b}] {len(det_b)} dets {cc_b}  over {n_frames} frames")
+
+    return dict(
+        counts_a=len(det_a), counts_b=len(det_b),
+        class_counts_a=cc_a, class_counts_b=cc_b,
+        n_frames=n_frames, summary=summary,
+        det_a=det_a, det_b=det_b)

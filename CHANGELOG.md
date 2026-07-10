@@ -4,6 +4,42 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.333] - 2026-07-10
+### Added — VPT detection-variant staging + track-length histogram
+- **Detection-variant staging framework.** `detect_beads_stack` gained a
+  `detection_variant` argument (default `'baseline'` = the 1.5.329-validated
+  path, byte-identical). New detection/classification approaches are opt-in
+  variants routed through their own branches, so the validated ~8.325-through-
+  TrackMate path stays selectable and any regression is a clean one-arg revert. A
+  `compare_detection_variants()` harness runs two variants on the same stack and
+  reports the classification diff, and the chosen variant is recorded on the
+  output DataFrame's attrs. This is the safety net for the detection rework —
+  every proposed change is A/B-measured against baseline before it is trusted.
+- **`ring_merge` variant** (`dedup_detections_ring_merge`) — sigma-scaled merge
+  radius that folds DIM Airy-ring fragments into their BRIGHT centre while keeping
+  two genuinely-bright nearby beads as two. Built and kept in the codebase but
+  **not surfaced in the widget and flagged as needing validation data with
+  resolved Airy rings**: A/B on the current bead data showed it is a near no-op
+  there (beads well-separated, blob_log already ~one detection per bead). Reach it
+  via `detection_variant='ring_merge'`.
+- **`hot_pixel_reject` variant** (`build_hot_pixel_mask` + harsher on-pixel NCC
+  gate) — identifies FIXED sensor hot/dead pixels from the stack's *temporal*
+  statistics (scene-independent: hot pixels are flat in time, tstd~3-4; beads are
+  variable, tstd~40-50), then applies a STRICTER acceptance test to detections
+  landing on them rather than a flat veto — so a real bead drifting over a hot/
+  dead pixel still survives on its template evidence. Validated correct and safe
+  (every confirmed bead survived, including one adjacent to a hot pixel). Nearly a
+  no-op on the current clean fluorescence data (~18 hot pixels found, blob_log
+  barely fires on them); earns its place on data/modes that turn hot pixels into
+  recurring false detections. Reach it via `detection_variant='hot_pixel_reject'`.
+- **Track-length histogram in the linker widget.** Step 4 (Link Trajectories) now
+  shows an embedded histogram of trajectory lengths (frames per track) after each
+  link. A healthy link piles mass toward long tracks; a fragmentation-prone linker
+  shows a spike of very short tracks. The title reports the track count and the
+  fraction spanning ≥½ the movie, and a dashed line marks the median — an
+  at-a-glance linker-quality check. Fails safe if matplotlib-Qt embedding is
+  unavailable.
+
 ## [1.5.332] - 2026-07-10
 ### Fixed — VPT classifier green↔yellow flicker on bright, well-matched beads
 - **A bright, high-NCC bead no longer flips singlet↔out_of_plane frame-to-frame.**

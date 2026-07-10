@@ -825,6 +825,24 @@ class VideoParticleTrackingUI:
         btn.clicked.connect(self._on_link)
         form.addRow(self._track_prog); from pycat.ui.field_status import button_with_circle as _bwc
         form.addRow(_bwc(btn))
+
+        # Embedded track-length histogram — shows the distribution of trajectory
+        # lengths (in frames) after linking. A healthy result has many long
+        # tracks (mass toward the right / spanning most of the movie); a
+        # fragmentation-prone linker shows a spike of very short tracks. This is
+        # useful every run, and doubles as an at-a-glance linker-quality check.
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+            self._tracklen_fig = Figure(figsize=(3.2, 1.7), tight_layout=True)
+            self._tracklen_canvas = FigureCanvasQTAgg(self._tracklen_fig)
+            self._tracklen_canvas.setMinimumHeight(150)
+            self._tracklen_canvas.setVisible(False)   # shown after first link
+            form.addRow(self._tracklen_canvas)
+        except Exception:
+            self._tracklen_fig = None
+            self._tracklen_canvas = None
+
         layout.addWidget(grp)
 
     def _linker_name(self):
@@ -974,6 +992,7 @@ class VideoParticleTrackingUI:
                    f"(drift-corrected) from the {pop_which} population.")
             if n_agg_tracks:
                 msg += f" Aggregate population: {n_agg_tracks} tracks."
+            self._update_tracklen_hist(tracks)
             napari_show_info(msg)
         def _err(msg):
             self._track_prog.setVisible(False)
@@ -981,6 +1000,46 @@ class VideoParticleTrackingUI:
         w.finished.connect(_done); w.error.connect(_err)
         w.progress.connect(lambda i, n: self._track_prog.setValue(i))
         self._track_worker = w; w.start()
+
+    def _update_tracklen_hist(self, tracks):
+        """Draw the track-length (frames-per-track) histogram in the linker
+        widget. A healthy link has many long tracks; a fragmentation-prone
+        linker piles up very short ones. Called after each link."""
+        if getattr(self, '_tracklen_canvas', None) is None \
+                or getattr(self, '_tracklen_fig', None) is None:
+            return
+        try:
+            if tracks is None or 'track_id' not in tracks or tracks.empty:
+                return
+            lengths = tracks.groupby('track_id').size().values
+            n_frames = int(tracks['frame'].nunique()) if 'frame' in tracks else 0
+            fig = self._tracklen_fig
+            fig.clear()
+            ax = fig.add_subplot(111)
+            import numpy as _np
+            Lmax = int(lengths.max()) if len(lengths) else 1
+            nbins = int(_np.clip(Lmax, 5, 40))
+            ax.hist(lengths, bins=nbins, color='#4c72b0',
+                    edgecolor='#2b4a72', linewidth=0.4)
+            med = float(_np.median(lengths)) if len(lengths) else 0.0
+            ax.axvline(med, color='#c44e52', ls='--', lw=1,
+                       label=f"median {med:.0f}")
+            # Fraction of tracks spanning most of the movie — the quality signal.
+            if n_frames > 0:
+                frac_long = float(_np.mean(lengths >= 0.5 * n_frames))
+                ax.set_title(
+                    f"{len(lengths)} tracks · {frac_long*100:.0f}% span ≥½ movie",
+                    fontsize=8)
+            else:
+                ax.set_title(f"{len(lengths)} tracks", fontsize=8)
+            ax.set_xlabel("track length (frames)", fontsize=8)
+            ax.set_ylabel("count", fontsize=8)
+            ax.tick_params(labelsize=7)
+            ax.legend(fontsize=7, frameon=False)
+            self._tracklen_canvas.setVisible(True)
+            self._tracklen_canvas.draw_idle()
+        except Exception as _e:
+            print(f"[PyCAT VPT] track-length histogram skipped: {_e}")
 
     # ── Step 5: microrheology ──────────────────────────────────────────
     def _add_microrheology(self, layout):
