@@ -4,6 +4,22 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.340] - 2026-07-10
+### Fixed — crash opening non-signifier files via drag-drop / "Add Image / Mask"
+- **Fixed ``'FileIOClass' object has no attribute '_file_has_imaging_metadata'``**
+  that crashed every drag-and-drop (and every menu "Add Image / Mask") of a file
+  without a PyCAT signifier. The image-vs-mask classification path called a helper
+  method that was never defined. Replaced with ``_file_has_imaging_metadata_safe``,
+  a defensive check (OME/ImageJ/resolution tags, format fallback) that can't raise
+  — since it only chooses the wording of the image-vs-mask prompt, any uncertainty
+  falls back to the softer "confirm" wording rather than failing the load. The
+  menu "Open Image (auto-detect)" path was unaffected (it doesn't classify), which
+  is why menu-open worked while drop crashed.
+- Note: the ``OME series failed to read … Missing data are zeroed`` lines from
+  tifffile on multi-file OME-TIFFs are a normal warning (a companion .ome.tif is
+  referenced but not fully resolvable; frames are zero-filled and the load
+  proceeds) — not related to this crash.
+
 ## [1.5.339] - 2026-07-10
 ### Added — slow-storage detection at file load
 - **PyCAT now warns before a slow load.** When a file is opened (menu Open, menu

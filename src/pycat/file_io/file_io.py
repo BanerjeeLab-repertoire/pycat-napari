@@ -1453,6 +1453,43 @@ class FileIOClass:
         except Exception as _e:
             debug_log("file_io: reapplying saved tags failed", _e)
 
+    def _file_has_imaging_metadata_safe(self, file_path):
+        """Best-effort check for whether a file carries real imaging-structure
+        metadata (pixel size, channels, dimensional axes). Used ONLY to choose the
+        wording of the image-vs-mask prompt, so it must never raise — any failure
+        returns True (softer 'looks like X, confirm' wording) rather than crashing
+        the load. (Replaces an earlier call to a method that was never defined,
+        which crashed every menu-Add / drop of a non-signifier file.)"""
+        try:
+            ext = os.path.splitext(file_path)[1].lower()
+            # Formats that inherently carry structured imaging metadata.
+            if ext in ('.ims', '.czi'):
+                return True
+            if ext in ('.tif', '.tiff'):
+                try:
+                    import tifffile
+                    with tifffile.TiffFile(file_path) as tf:
+                        # OME-XML, ImageJ metadata, or a resolution tag all count
+                        # as real imaging metadata.
+                        if getattr(tf, 'is_ome', False) or getattr(tf, 'is_imagej', False):
+                            return True
+                        p0 = tf.pages[0]
+                        for tag in ('XResolution', 'YResolution', 'ImageDescription'):
+                            try:
+                                if tag in p0.tags:
+                                    return True
+                            except Exception:
+                                pass
+                    return False
+                except Exception:
+                    return True  # can't tell -> assume metadata (softer prompt)
+            # PNG/JPG typically carry no imaging metadata.
+            if ext in ('.png', '.jpg', '.jpeg'):
+                return False
+            return True
+        except Exception:
+            return True
+
     def _read_pycat_signifier(self, file_path):
         """Read PyCAT's saved-file signifier from a TIFF's ImageDescription, if
         present. Returns 'image' / 'mask' / None. Lets a file PyCAT itself saved
@@ -1640,7 +1677,7 @@ class FileIOClass:
         except Exception as _e:
             debug_log("file_io: add_image_or_mask classification failed", _e)
 
-        has_meta = self._file_has_imaging_metadata(file_path)
+        has_meta = self._file_has_imaging_metadata_safe(file_path)
 
         # Ask the user. When there's no imaging metadata AND no signifier we have
         # nothing to go on, so the prompt is essential; otherwise it's a
