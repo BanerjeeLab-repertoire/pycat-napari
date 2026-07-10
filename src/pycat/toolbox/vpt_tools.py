@@ -651,6 +651,24 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
     amplitude, integrated_intensity.
     """
     raw = np.asarray(frame, dtype=np.float32)
+    # Guard against a degenerate (non-2D) frame reaching here. A multi-file
+    # OME-TIFF with a MISSING linked file (the loader zeros/truncates it) or a
+    # collapsed lazy stack can yield a 1-D array, which would crash on
+    # `H, W = raw.shape` with an opaque "not enough values to unpack" error.
+    # Squeeze and, if still not 2-D, skip scoring this frame with a clear warning
+    # instead of taking down the whole detection run.
+    raw = np.squeeze(raw)
+    if raw.ndim != 2:
+        try:
+            napari_show_warning(
+                f"Bead scoring skipped a frame with unexpected shape "
+                f"{np.asarray(frame).shape} (a linked OME-TIFF file may be "
+                f"missing, or the stack collapsed). Check the file set is complete.")
+        except Exception:
+            pass
+        return [dict(y=float(y), x=float(x), ncc=np.nan, snr=np.nan,
+                     symmetry=np.nan, amplitude=np.nan,
+                     integrated_intensity=np.nan) for (y, x) in coords]
     H, W = raw.shape
     w = 2 * half + 1
     out = []
