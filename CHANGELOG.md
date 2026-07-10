@@ -4,6 +4,61 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.337] - 2026-07-10
+### Added — layer tagging system (foundation for tag-driven autopopulation)
+- **Structured, evidence-backed tags** now describe *what each layer is* and *how
+  layers relate*, so autopopulation can query typed facts instead of matching
+  freeform names. New module ``pycat.utils.layer_tags``. A tag is
+  ``(key, value, source, confidence)``; the controlled core keys are role,
+  dimensionality, modality, scale, provenance, and channel, with free
+  ``user:``-prefixed tags also allowed. The canonical store lives in
+  ``layer.metadata['pycat_tags']`` (travels with the layer; removable as one key),
+  with a session index cache for cross-layer queries.
+- **Assigned at load time** from what the loaders already infer — role (image /
+  mask), dimensionality (2d / 2d+t / z-stack / multi-position), scale
+  (calibrated vs the 1.0 µm/px "uncalibrated" fallback), provenance, and channel.
+  No new detection; existing inferences are captured into the structured store.
+- **Lineage tracking.** Upscale, background-subtraction, and segmentation now
+  record relationship edges: a processed image is ``derived_from`` +
+  ``supersedes`` its source and inherits its identity tags; a segmentation mask
+  ``belongs_to`` the image it came from. This makes autopopulation lineage-aware —
+  a query for "the image to process" resolves to the **head of lineage** (most-
+  derived, e.g. the upscaled/background-subtracted version) rather than the raw
+  layer, while raw remains reachable for steps that need pre-processing pixels.
+- **Persistence.** Tags survive save→reload: the tag store rides in the same
+  embedded JSON blob as the existing image/mask signifier when a layer is saved to
+  TIFF, and is re-applied on load (saved user overrides take precedence). (PNG-
+  saved 2D labels / shapes / RGB do not yet carry tags — a later sidecar can add
+  that; the main image/stack/mask cases persist.)
+- **Layer Tag Inspector** (▣ Tags on the menu bar) — view every layer's tags with
+  their source and confidence, see its lineage, and override any tag. An override
+  is stored as ``user_set`` and **locks** against re-inference, so a hand-set tag
+  is never clobbered by a later automatic pass (anti-black-box: you can always see
+  *why* a tag is set and correct it).
+- **Deliberately not yet built:** the generic resolver and the external JSON
+  per-step binding table (which method field uses which tag query). Those are the
+  curation layer, kept out of code so re-pointing autopopulation later never
+  touches the tag engine. Autopopulation is not yet wired to tags — this release
+  is the trustworthy store + inspector first.
+
+### Fixed — drag-and-drop onto the canvas + drop routing
+- **Files dropped on the napari canvas now load** (previously the canvas showed
+  the red no-drop cursor). Root cause pinned via diagnostic: the drop target is
+  the vispy ``CanvasBackendDesktop`` widget, which vispy initialises with
+  ``acceptDrops=False`` and re-asserts *after* PyCAT's one-shot enable ran, so the
+  flag never stuck. Fix: re-assert ``acceptDrops=True`` on the vispy canvas via
+  short deferred timers once vispy has settled, and keep the drop event filter on
+  it. (If a canvas drop still shows the no-drop cursor on some GL backends, the
+  app-level filter and the layer-insertion backstop still catch the load.)
+- **Dropped files now route through the canonical auto-detect opener**
+  (``open_image_auto``), so a drop behaves exactly like File → Open Image: each
+  file's structure is inspected and sent to the right loader — IMS/TIFF/CZI stacks
+  load lazily as stacks, 2D images go through the channel-assignment pipeline, and
+  a multi-file drop loads together (first file starts a fresh session, the rest
+  add). This replaces an earlier hand-rolled path that forced every non-IMS file
+  through the 2D opener and mis-loaded multi-frame stacks as single planes. Drops
+  also pick up the new load-time tags.
+
 ## [1.5.336] - 2026-07-10
 ### Added — command palette (Ctrl+Shift+P)
 - A fuzzy-search command palette opens methods, toolbox functions, and layers by

@@ -611,6 +611,16 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
         else:
             add_image_with_default_colormap(upscaled_img, viewer, name=_out_name)
 
+        # Lineage: the upscaled layer is derived_from + supersedes the source, and
+        # inherits its role/modality/channel. This is what makes autopopulation
+        # prefer the upscaled version (head of lineage) automatically.
+        try:
+            from pycat.utils import layer_tags as _LT
+            if len(viewer.layers):
+                _LT.mark_derived(viewer.layers[-1], layer, via='upscale')
+        except Exception:
+            pass
+
         # Notification is best-effort and isolated: any failure here must not
         # affect the layer that was already added.
         try:
@@ -1434,6 +1444,12 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
 
     # Add the processed image as a new layer in the viewer
     add_image_with_default_colormap(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}')
+    try:
+        from pycat.utils import layer_tags as _LT
+        if len(viewer.layers):
+            _LT.mark_derived(viewer.layers[-1], active_layer, via='background_subtract')
+    except Exception:
+        pass
 
 
 def rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius, roi_mask=None):
@@ -1808,6 +1824,12 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
 
     # Add the processed image as a new layer with an indicative name
     add_image_with_default_colormap(enhanced_image, viewer, name=f'Enhanced Background Removed {active_layer.name}')
+    try:
+        from pycat.utils import layer_tags as _LT
+        if len(viewer.layers):
+            _LT.mark_derived(viewer.layers[-1], active_layer, via='background_subtract')
+    except Exception:
+        pass
 
 
 def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):

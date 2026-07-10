@@ -549,6 +549,15 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
 
     # Add the labeled cell masks to the viewer for visualization
     viewer.add_labels(labeled_cell_masks, name='Labeled Cell Mask')
+    # Lineage: the mask is derived_from + belongs_to the image it was segmented
+    # from (mark_derived tags role=mask + provenance=segmentation for the 'segment'
+    # via). This lets autopopulation find "the mask for this image" structurally.
+    try:
+        from pycat.utils import layer_tags as _LT
+        if len(viewer.layers) and image_layer is not None:
+            _LT.mark_derived(viewer.layers[-1], image_layer, via='segment')
+    except Exception:
+        pass
 
     # Display the cell statistics in a popup window
     tables_info = [("Cell Statistics", cell_df)]

@@ -1388,6 +1388,71 @@ class FileIOClass:
 
 
 
+    def _tag_loaded_layer(self, layer, role=None, n_t=1, n_z=1, n_p=1,
+                          microns_per_pixel=None, file_path=None,
+                          modality=None, channel=None, provenance='raw'):
+        """Populate tags on a freshly-loaded layer from what the load path already
+        knows — dimensionality, scale calibration, role, provenance, and (when
+        available) modality/channel. Also re-applies any tags saved inside the
+        file (PyCAT-saved TIFFs embed their tag store), with saved user overrides
+        taking precedence over freshly-inferred tags.
+
+        This is the single load-time tagging entry point; call it once per layer
+        after it is added to the viewer. No new detection is performed — it
+        captures inferences the loaders already made into the structured tag store
+        so autopopulation can query typed facts instead of matching names.
+        """
+        if layer is None:
+            return
+        try:
+            from pycat.utils import layer_tags as _LT
+        except Exception:
+            return
+
+        # 1. Inferred tags from load context.
+        try:
+            if role:
+                _LT.tag_layer(layer, 'role', role, source='inferred')
+
+            # Dimensionality from the axis sizes the loader parsed.
+            if n_p and n_p > 1:
+                dim = 'multi-position'
+            elif n_t and n_t > 1:
+                dim = '2d+t'
+            elif n_z and n_z > 1:
+                dim = 'z-stack'
+            else:
+                dim = '2d'
+            _LT.tag_layer(layer, 'dimensionality', dim, source='inferred')
+
+            # Scale calibration: a real pixel size is essentially never exactly
+            # 1.0 µm/px, so 1.0 means "no metadata / uncalibrated". Viscosity and
+            # any physical measurement depend on this, so it is a first-class tag.
+            if microns_per_pixel is not None:
+                calibrated = abs(float(microns_per_pixel) - 1.0) > 1e-9
+                _LT.tag_layer(layer, 'scale',
+                              'calibrated' if calibrated else 'uncalibrated',
+                              source=('from_metadata' if calibrated else 'inferred'))
+
+            _LT.tag_layer(layer, 'provenance', provenance, source='inferred')
+
+            if modality:
+                _LT.tag_layer(layer, 'modality', modality, source='inferred')
+            if channel:
+                _LT.tag_layer(layer, 'channel', channel, source='from_metadata')
+        except Exception as _e:
+            debug_log("file_io: load-time tagging failed", _e)
+
+        # 2. Re-apply any tags saved inside the file (overrides win). Applied
+        #    AFTER inference so a saved user_set tag locks over a fresh inference.
+        try:
+            if file_path:
+                saved = self._read_pycat_tags(file_path)
+                if saved:
+                    self._apply_saved_tags_to_layer(layer, saved)
+        except Exception as _e:
+            debug_log("file_io: reapplying saved tags failed", _e)
+
     def _read_pycat_signifier(self, file_path):
         """Read PyCAT's saved-file signifier from a TIFF's ImageDescription, if
         present. Returns 'image' / 'mask' / None. Lets a file PyCAT itself saved
@@ -1420,7 +1485,64 @@ class FileIOClass:
             pass
         return None
 
-    def _file_has_imaging_metadata(self, file_path):
+    def _read_pycat_tags(self, file_path):
+        """Read PyCAT's embedded tag store ({'tags':[...],'edges':[...]}) from a
+        saved TIFF's ImageDescription, if present. Returns the dict or None. This
+        is how layer tags (role/modality/lineage/etc.) survive save→reload —
+        they ride in the same JSON blob as the image/mask signifier."""
+        try:
+            import tifffile, json as _json
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext not in ('.tif', '.tiff'):
+                return None
+            with tifffile.TiffFile(file_path) as tf:
+                try:
+                    desc = tf.pages[0].tags['ImageDescription'].value
+                except Exception:
+                    desc = getattr(tf, 'imagej_metadata', None)
+                if not desc:
+                    return None
+                if isinstance(desc, bytes):
+                    desc = desc.decode('utf-8', 'ignore')
+                desc = desc.strip()
+                if not desc.startswith('{'):
+                    return None
+                tag = _json.loads(desc)
+                if isinstance(tag, dict) and tag.get('pycat'):
+                    ts = tag.get('pycat_tags')
+                    if isinstance(ts, dict):
+                        return ts
+        except Exception:
+            pass
+        return None
+
+    def _apply_saved_tags_to_layer(self, layer, tag_store):
+        """Re-apply a saved tag store to a freshly-loaded layer via the tag
+        engine, preserving each tag's original source/confidence. Edges are
+        restored as-is (their targets are tag-ids that resolve once all layers
+        of a session are loaded)."""
+        if not tag_store or layer is None:
+            return
+        try:
+            from pycat.utils import layer_tags as _LT
+            for t in tag_store.get('tags', []):
+                try:
+                    _LT.tag_layer(layer, t.get('key'), t.get('value'),
+                                  source=t.get('source', 'inferred'),
+                                  confidence=t.get('confidence'),
+                                  overwrite=True)
+                except Exception:
+                    pass
+            # Restore edges directly into the canonical store.
+            md = getattr(layer, 'metadata', None)
+            if isinstance(md, dict):
+                store = md.setdefault('pycat_tags', {'tags': [], 'edges': []})
+                store.setdefault('edges', [])
+                for e in tag_store.get('edges', []):
+                    if e not in store['edges']:
+                        store['edges'].append(e)
+        except Exception as _e:
+            debug_log("file_io: applying saved tags failed", _e)
         """True if the file carries recognizable imaging-structure metadata
         (dimension sizes / pixel size), i.e. AICSImage can read its dims. Used to
         decide whether we must ask the user what they loaded."""
@@ -2395,6 +2517,27 @@ class FileIOClass:
         # Auto scale bar for the freshly-loaded stack.
         self._enable_auto_scale_bar()
 
+        # ── Tag the freshly-loaded stack layers ──────────────────────────────
+        # Populate the structured tag store from the load context (role, the
+        # dimensionality just parsed, scale calibration, provenance) so downstream
+        # autopopulation can query typed facts rather than matching names. Tag
+        # only Image layers that are not yet tagged (i.e. the ones just added);
+        # channel identity is left to metadata-driven naming already applied.
+        try:
+            import napari as _np_napari
+            from pycat.utils import layer_tags as _LT
+            for _lyr in self.viewer.layers:
+                if _lyr.__class__.__name__ != 'Image':
+                    continue
+                if _LT.get_tag(_lyr, 'role') is not None:
+                    continue  # already tagged (not freshly added)
+                self._tag_loaded_layer(
+                    _lyr, role='image', n_t=n_t, n_z=n_z,
+                    microns_per_pixel=microns_per_pixel, file_path=file_path,
+                    channel=getattr(_lyr, 'name', None), provenance='raw')
+        except Exception as _e:
+            debug_log("file_io: stack layer tagging failed", _e)
+
         # Fit the canvas to the newly-loaded image. Deferred long enough that the
         # scale bar has been applied and all layer-insert scale-alignment events
         # have flushed — otherwise the fit reads a stale extent and the image
@@ -2704,6 +2847,20 @@ class FileIOClass:
                 data = data.astype(int) if not np.issubdtype(data.dtype, int) else data
             # Add the mask to the viewer
             self.viewer.add_labels(data, name=name)
+            # Tag: this is a mask (role/provenance), 2D dimensionality.
+            try:
+                if len(self.viewer.layers):
+                    _mpp = None
+                    try:
+                        _mps = self.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
+                        _mpp = (float(_mps) ** 0.5) if _mps else None
+                    except Exception:
+                        _mpp = None
+                    self._tag_loaded_layer(
+                        self.viewer.layers[-1], role='mask', n_t=1, n_z=1,
+                        microns_per_pixel=_mpp, provenance='segmentation')
+            except Exception as _e:
+                debug_log("file_io: 2D mask tagging failed", _e)
         else:
             # Handle as before for images
             if np.issubdtype(data.dtype, np.integer):
@@ -2727,6 +2884,24 @@ class FileIOClass:
                     self.viewer.layers[-1].metadata['pycat_file_metadata'] = _md
             except Exception:
                 pass
+            # Tag: this is a 2D image (role/dimensionality/scale/provenance);
+            # channel identity from the layer name (metadata-driven naming already
+            # applied it upstream).
+            try:
+                if len(self.viewer.layers):
+                    _mpp = None
+                    try:
+                        _mps = self.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
+                        _mpp = (float(_mps) ** 0.5) if _mps else None
+                    except Exception:
+                        _mpp = None
+                    self._tag_loaded_layer(
+                        self.viewer.layers[-1], role='image', n_t=1, n_z=1,
+                        microns_per_pixel=_mpp,
+                        channel=getattr(self.viewer.layers[-1], 'name', None),
+                        provenance='raw')
+            except Exception as _e:
+                debug_log("file_io: 2D image tagging failed", _e)
             # Auto scale bar for the freshly-loaded 2D image.
             self._enable_auto_scale_bar()
 
@@ -2975,8 +3150,16 @@ class FileIOClass:
                     layer_data = layer.data
                     layer_type = type(layer).__name__
                     safe_name  = layer_name.replace(' ', '_').lower()
+                    # Pull the layer's tag store so tags persist through the save.
+                    _tag_store = None
+                    try:
+                        _md = getattr(layer, 'metadata', None)
+                        if isinstance(_md, dict):
+                            _tag_store = _md.get('pycat_tags')
+                    except Exception:
+                        _tag_store = None
                     self._save_layer(layer_data, layer_type,
-                                     save_name, safe_name)
+                                     save_name, safe_name, tag_store=_tag_store)
             
             # Save only the selected dataframes
             dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
@@ -3069,7 +3252,8 @@ class FileIOClass:
         except Exception:
             pass
 
-    def _save_layer(self, data, layer_type: str, save_name: str, safe_name: str):
+    def _save_layer(self, data, layer_type: str, save_name: str, safe_name: str,
+                    tag_store=None):
         """
         Save a layer to disk, handling zarr-backed lazy stacks, regular
         numpy arrays, and label/shape layers.
@@ -3079,6 +3263,10 @@ class FileIOClass:
         TIFF so the full stack is never held in RAM simultaneously.  This
         is essential for 600-frame 2048×2048 stacks that would otherwise
         require ~5 GB of RAM just for the save operation.
+
+        tag_store : optional dict — the layer's pycat_tags store
+        ({'tags':[...], 'edges':[...]}). Embedded in the TIFF description JSON
+        alongside the image/mask signifier so tags survive save→reload.
 
         Naming convention
         -----------------
@@ -3093,14 +3281,23 @@ class FileIOClass:
         # PyCAT signifier: a small JSON tag embedded in the TIFF ImageDescription
         # so a saved file can be re-loaded with its type known exactly (image vs
         # label mask) instead of guessing from pixel statistics. Read back by
-        # add_image_or_mask / _read_pycat_signifier on load.
+        # add_image_or_mask / _read_pycat_signifier on load. The layer's tag store
+        # (role/modality/lineage/etc.) rides in the same blob so tags persist.
         def _pycat_tag(kind):
             try:
                 from pycat import __version__ as _ver
             except Exception:
                 _ver = 'unknown'
-            return _json.dumps({'pycat': True, 'kind': kind,
-                                'pycat_version': _ver})
+            blob = {'pycat': True, 'kind': kind, 'pycat_version': _ver}
+            if tag_store:
+                try:
+                    blob['pycat_tags'] = {
+                        'tags': list(tag_store.get('tags', [])),
+                        'edges': list(tag_store.get('edges', [])),
+                    }
+                except Exception:
+                    pass
+            return _json.dumps(blob, default=str)
 
         is_lazy = hasattr(data, '_z') or hasattr(data, 'store')  # _ZarrStack or zarr.Array
 
