@@ -830,7 +830,7 @@ class VideoParticleTrackingUI:
             "quantitative viscosity/microrheology.")
         self._rb_bayesian.setToolTip(
             "PyCAT's native Bayesian/Hungarian linker with gap closing.\n\n"
-            "Since 1.5.334 (gap off-by-one fix + auto-estimated linking distance) "
+            "Since 1.5.335 (gap off-by-one fix + auto-estimated linking distance) "
             "this produces clean full-length tracks and reproduces the reference "
             "viscosity on validated data when the bead motion is small relative to "
             "the inter-bead spacing. It does frame-to-frame assignment, so its "
@@ -839,7 +839,7 @@ class VideoParticleTrackingUI:
             "ratio), prefer TrackMate LAP (global optimisation).")
         self._rb_greedy.setToolTip(
             "Fast greedy nearest-neighbour linker.\n\n"
-            "Since 1.5.334 (gap off-by-one fix + auto-estimated linking distance) "
+            "Since 1.5.335 (gap off-by-one fix + auto-estimated linking distance) "
             "it produces clean tracks when bead motion is small relative to "
             "inter-bead spacing. It commits to the nearest match each frame with no "
             "global optimisation, so it is the most sensitive of the three to "
