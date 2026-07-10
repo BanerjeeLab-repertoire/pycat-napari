@@ -4,6 +4,31 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.339] - 2026-07-10
+### Added — slow-storage detection at file load
+- **PyCAT now warns before a slow load.** When a file is opened (menu Open, menu
+  Add, or drag-and-drop) PyCAT quickly probes where it lives and how fast it
+  reads, and if the storage is genuinely slow — a network share, a slow external
+  drive, or a cloud online-only placeholder that must download first — it shows a
+  notice that loading may take a while (with the option to copy to a fast local
+  drive if you'll work with the file repeatedly). New module
+  ``pycat.file_io.storage_probe``.
+- **Measurement-led, so it doesn't cry wolf.** The "is it slow" decision comes from
+  a quick *timed read* of the first few MB (sustained throughput, measured after a
+  warm-up chunk so a cold-but-fast drive isn't mis-flagged), not from the storage
+  bus type — a USB 3.x SSD stays silent, an old spinning disk or busy network
+  share warns. Path type is used only as a hint and to detect network / cloud
+  locations. Cloud-sync online-only files (OneDrive/Dropbox/Drive) are detected via
+  their recall-on-access attribute, so PyCAT can warn that opening will trigger a
+  download (and does not touch the file to measure, which would force that
+  download).
+- **No warning flash.** Fast storage stays completely silent; the notice appears
+  only for slow storage, where the load itself keeps the app busy long enough for
+  the message to be read (rather than a fixed-timer popup that clears before you
+  can process it).
+- Scoped as the detection + warning layer. A copy-to-local opt-in and a slow-load
+  progress bar are planned follow-ons.
+
 ## [1.5.338] - 2026-07-10
 ### Fixed — dropped masks loaded as fluorescence images
 - **Drag-and-drop now classifies image vs mask.** Dropped files previously routed

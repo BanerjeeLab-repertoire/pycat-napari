@@ -1599,13 +1599,19 @@ class FileIOClass:
         if not file_path:
             return
 
+        # Probe storage once here (this router runs for menu-Add and for drops);
+        # delegated open_image_auto calls below pass _skip_storage_probe so the
+        # few-MB probe read happens only once.
+        self._warn_if_slow_storage(file_path)
+
         # 1. PyCAT signifier — authoritative, no prompt.
         sig = self._read_pycat_signifier(file_path)
         if sig == 'mask':
             self.open_2d_mask(file_paths=[file_path], clear_first=clear_first)
             return
         if sig == 'image':
-            self.open_image_auto(file_path=file_path, clear_first=clear_first)
+            self._open_image_auto_single(file_path, clear_first=clear_first,
+                                         _skip_storage_probe=True)
             return
 
         # 2/3. No signifier — classify by pixel stats for a default, and decide
@@ -1665,7 +1671,8 @@ class FileIOClass:
         if as_mask:
             self.open_2d_mask(file_paths=[file_path], clear_first=clear_first)
         else:
-            self.open_image_auto(file_path=file_path, clear_first=clear_first)
+            self._open_image_auto_single(file_path, clear_first=clear_first,
+                                         _skip_storage_probe=True)
 
     def open_image_auto(self, file_path=None, clear_first=True):
         """Context-aware opener: inspect a file's dimensional structure
@@ -1711,11 +1718,18 @@ class FileIOClass:
         # Explicit single path (programmatic call).
         self._open_image_auto_single(file_path, clear_first=clear_first)
 
-    def _open_image_auto_single(self, file_path, clear_first=True):
+    def _open_image_auto_single(self, file_path, clear_first=True,
+                                _skip_storage_probe=False):
         """Route a SINGLE file to the correct loader by inspecting its structure.
         (Extracted so open_image_auto can loop over a multi-file selection.)"""
         if not file_path:
             return
+
+        # Warn if this file is on slow storage / a cloud placeholder before the
+        # potentially long load begins. Skipped when a caller (e.g.
+        # _add_image_or_mask_single) has already probed, to avoid a double read.
+        if not _skip_storage_probe:
+            self._warn_if_slow_storage(file_path)
 
         ext = os.path.splitext(file_path)[1].lower()
         # IMS is always a stack format (T/C/Z), route directly.
@@ -1749,6 +1763,41 @@ class FileIOClass:
             self.open_stack(file_path=file_path, clear_first=clear_first)
         else:
             self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
+
+    def _warn_if_slow_storage(self, file_path):
+        """Probe where a file lives and, if it is on slow storage (network share,
+        slow external drive) or a cloud online-only placeholder, warn the user
+        that loading may take a while. Returns the StorageVerdict (or None).
+
+        The warning is deliberately shown ONLY when the storage is genuinely slow
+        — and because a slow load then keeps the app busy for a while, the notice
+        naturally stays on screen long enough to read (it does not flash-and-clear
+        the way a fixed-timer popup would). Fast storage stays silent.
+
+        The probe reads a few MB, so it is run here on the load path (already off
+        the UI thread for the heavy loaders); it is cheap on fast media and its
+        cost on slow media is itself part of the signal.
+        """
+        try:
+            from pycat.file_io.storage_probe import probe_path
+        except Exception:
+            return None
+        try:
+            verdict = probe_path(file_path)
+        except Exception:
+            return None
+        if verdict is None or not verdict.message:
+            return verdict
+        if verdict.slow or verdict.needs_download:
+            # Persistent-ish notice: napari warning + terminal line so it is
+            # visible in the notification area and the log while the load runs.
+            try:
+                from napari.utils.notifications import show_warning
+                show_warning("PyCAT: " + verdict.message)
+            except Exception:
+                pass
+            print(f"[PyCAT storage] {verdict!r} :: {verdict.message}")
+        return verdict
 
     def open_stack(self, file_path=None, clear_first=True):
         """
