@@ -4,6 +4,42 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.332] - 2026-07-10
+### Fixed — VPT classifier green↔yellow flicker on bright, well-matched beads
+- **A bright, high-NCC bead no longer flips singlet↔out_of_plane frame-to-frame.**
+  The out_of_plane (yellow) class used a per-frame amplitude/SNR percentile, so
+  when the bead population is uniformly low-quality a genuinely good bead sitting
+  near the moving percentile line was demoted ~a quarter of the time — driven
+  mainly by a `low-SNR OR` clause that could yellow a bead whose amplitude was
+  fine. Fix: (1) require the AMPLITUDE to actually be low for the dim class (SNR
+  is now only a secondary confirmation, never demotes a bright bead on its own),
+  and (2) add a high-NCC singlet guard (NCC ≥ 0.80) so a well-matched bead is
+  immune to the dim percentile. Verified on real data: the previously-flickering
+  bead (amp~164, NCC~0.94) is now singlet in 1000/1000 frames (was ~76%), while a
+  genuinely dim bead (amp~75, NCC~0.76) correctly STAYS out_of_plane — the garbage
+  rejection (NCC floor) and aggregate class are untouched. This preserves the
+  hard-won hot-pixel/ring/noise rejection while stopping the erroneous demotion of
+  real beads.
+
+### Added — MSD lag-window fit gate (hardware-defensible fit bounds)
+- `fit_anomalous_diffusion` now computes a **defensible MSD lag window** bounded
+  by the frame rate (high-frequency cutoff = frame interval) and the acquisition
+  duration (low-frequency cutoff), and by default confines the D/α fit to it.
+  Fitting outside this band (only sub-second lags, dominated by the localization
+  floor, or out toward the full duration, where a handful of pairs dominate)
+  produces a wrong D/α. Exposed under the VPT "Show advanced fit / moduli options"
+  expander:
+  - **Upper-lag rule** (user-selectable, with tooltips): *Fraction of track length*
+    (default, 0.25), *Fixed frequency window* (set the upper lag in seconds), or
+    *Minimum independent pairs* (keep a lag only while ≥ N independent tracks span
+    it).
+  - **"Confine fit to scientifically defensible bounds"** toggle (default ON) —
+    clips the fit to the window; turn off to fit the full range at your own risk.
+  - The gate **warns, never blocks**: if the acquisition can't cover the requested
+    window (too-short clip), it emits a clear warning and falls back gracefully.
+  Validated on real data across all three rules + the confine toggle + the
+  too-short-data warning path.
+
 ## [1.5.331] - 2026-07-10
 ### Added — Evans (2009) viscoelastic moduli + bootstrap confidence bands
 - **G′/G″ (storage/loss moduli) now use the Evans et al. (2009) direct

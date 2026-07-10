@@ -221,15 +221,55 @@ def fit_anomalous_diffusion(
     msd_df: pd.DataFrame,
     max_lag_fit: int = None,
     fit_localization_offset: bool = True,
+    frame_interval_s: float = None,
+    upper_lag_rule: str = 'fraction',
+    upper_lag_fraction: float = 0.25,
+    upper_lag_fixed_s: float = None,
+    min_independent_pairs: int = 10,
+    confine_to_defensible_bounds: bool = True,
 ) -> dict:
     """
     Fit MSD(τ) = 4D·τ^α (anomalous diffusion model) using log-log regression.
 
+    LAG-WINDOW FIT GATE
+    -------------------
+    The reliable MSD lag window is bounded by hardware on both ends:
+
+    * **High-frequency cutoff = frame rate.** The shortest resolvable lag is one
+      frame interval; nothing faster is sampled.
+    * **Low-frequency cutoff = acquisition duration.** At long lags there are very
+      few independent displacement pairs, so the MSD becomes unreliable well
+      before the full record length.
+
+    Fitting outside this band (e.g. only the first fraction of a second, where the
+    curve is dominated by the localization-noise floor, or out toward the full
+    duration, where a handful of pairs dominate) produces a wrong D/α. The gate
+    computes a defensible ``[lag_lo, lag_hi]`` and, when
+    ``confine_to_defensible_bounds`` is on (default), fits only within it. It
+    **warns rather than blocks** when the data can't cover the requested window.
+
     Parameters
     ----------
-    msd_df : output of compute_msd()
-    max_lag_fit : number of lag points to include in fit.
-        Default: all points with n_pairs > 10.
+    msd_df : output of compute_msd() (needs lag_s, msd_um2, n_pairs; n_tracks used
+        for the min-pairs rule when present).
+    max_lag_fit : legacy cap on the number of head lags (kept for back-compat;
+        applied before the window gate if given).
+    fit_localization_offset : fit the +4σ_loc² localization-offset term.
+    frame_interval_s : seconds per frame; sets the high-frequency cutoff
+        (lag_lo = frame_interval_s). If None, inferred from the smallest lag.
+    upper_lag_rule : how to set the low-frequency (upper-lag) cutoff:
+        * 'fraction'    — lag_hi = upper_lag_fraction × (max track duration).
+                          The standard convention; conservative.
+        * 'fixed'       — lag_hi = upper_lag_fixed_s (a hardware-defensible band,
+                          e.g. matching routine lab practice).
+        * 'min_pairs'   — keep lags while ≥ min_independent_pairs independent
+                          tracks span them (statistically principled; adapts to
+                          how many/how long the tracks are).
+    upper_lag_fraction : fraction for the 'fraction' rule (default 0.25).
+    upper_lag_fixed_s : upper lag (s) for the 'fixed' rule.
+    min_independent_pairs : threshold for the 'min_pairs' rule.
+    confine_to_defensible_bounds : if True (default), clip the fit to the computed
+        window; if False, fit the full available range (at the user's risk).
 
     Returns
     -------
@@ -242,15 +282,67 @@ def fit_anomalous_diffusion(
         fit_msd         : fitted MSD values (array)
         log_log_slope   : raw slope from log-log regression (= alpha)
         log_log_intercept : raw intercept (log(4D))
+        fit_window_s    : (lag_lo, lag_hi) the defensible window used
+        fit_window_warning : str or None — set when data can't cover the window
     """
     df = msd_df[msd_df['n_pairs'] > 5].copy()
     if max_lag_fit is not None:
         df = df.head(max_lag_fit)
+
+    # ── Lag-window fit gate ──────────────────────────────────────────────────
+    window_warning = None
+    lag_lo = lag_hi = None
+    if 'lag_s' in df.columns and len(df):
+        all_lags = df['lag_s'].values.astype(float)
+        # High-frequency cutoff = one frame interval.
+        lag_lo = float(frame_interval_s) if (frame_interval_s and frame_interval_s > 0) \
+            else float(np.min(all_lags))
+        # Low-frequency (upper-lag) cutoff per the chosen rule.
+        max_lag_available = float(np.max(all_lags))
+        rule = (upper_lag_rule or 'fraction').lower()
+        if rule == 'fixed' and upper_lag_fixed_s and upper_lag_fixed_s > 0:
+            lag_hi = float(upper_lag_fixed_s)
+        elif rule == 'min_pairs' and 'n_tracks' in df.columns:
+            ok = df[df['n_tracks'] >= int(min_independent_pairs)]
+            lag_hi = float(ok['lag_s'].max()) if len(ok) else lag_lo
+        else:  # 'fraction' (default)
+            lag_hi = float(upper_lag_fraction) * max_lag_available
+
+        # Sanity + coverage warnings (warn, never block).
+        if lag_hi <= lag_lo:
+            window_warning = (
+                f"Requested lag window collapses (lag_lo={lag_lo:.3g}s ≥ "
+                f"lag_hi={lag_hi:.3g}s). The acquisition is too short, or the "
+                f"upper-lag rule is too strict, to define a fit band. Fitting the "
+                f"full available range instead.")
+            lag_hi = max_lag_available
+        elif lag_hi > max_lag_available + 1e-12:
+            window_warning = (
+                f"Requested upper lag ({lag_hi:.3g}s) exceeds the longest "
+                f"available lag ({max_lag_available:.3g}s): the acquisition "
+                f"duration is too short to reach the low-frequency cutoff, so "
+                f"G(τ)/viscosity may be under-resolved at long lags.")
+            lag_hi = max_lag_available
+
+        if confine_to_defensible_bounds:
+            gated = df[(df['lag_s'] >= lag_lo - 1e-12)
+                       & (df['lag_s'] <= lag_hi + 1e-12)]
+            if len(gated) >= 3:
+                df = gated
+            else:
+                window_warning = (
+                    (window_warning + " ") if window_warning else ""
+                ) + (f"Only {len(gated)} lag(s) fall inside the defensible "
+                     f"window [{lag_lo:.3g}, {lag_hi:.3g}]s — too few to fit; "
+                     f"using the full available range instead.")
+
     if len(df) < 3:
         return dict(D_um2_per_s=np.nan, alpha=np.nan, motion_type='unknown',
                     r_squared=np.nan, fit_lags_s=np.array([]),
                     fit_msd=np.array([]), log_log_slope=np.nan,
-                    log_log_intercept=np.nan)
+                    log_log_intercept=np.nan,
+                    fit_window_s=(lag_lo, lag_hi),
+                    fit_window_warning=window_warning)
 
     tau = df['lag_s'].values.astype(float)
     msd = df['msd_um2'].values.astype(float)
@@ -332,6 +424,8 @@ def fit_anomalous_diffusion(
         fit_msd=msd_fit,
         log_log_slope=a_ll,
         log_log_intercept=log_intercept,
+        fit_window_s=(lag_lo, lag_hi),
+        fit_window_warning=window_warning,
     )
 
 

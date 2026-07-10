@@ -651,24 +651,6 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
     amplitude, integrated_intensity.
     """
     raw = np.asarray(frame, dtype=np.float32)
-    # Guard against a degenerate (non-2D) frame reaching here. A multi-file
-    # OME-TIFF with a MISSING linked file (the loader zeros/truncates it) or a
-    # collapsed lazy stack can yield a 1-D array, which would crash on
-    # `H, W = raw.shape` with an opaque "not enough values to unpack" error.
-    # Squeeze and, if still not 2-D, skip scoring this frame with a clear warning
-    # instead of taking down the whole detection run.
-    raw = np.squeeze(raw)
-    if raw.ndim != 2:
-        try:
-            napari_show_warning(
-                f"Bead scoring skipped a frame with unexpected shape "
-                f"{np.asarray(frame).shape} (a linked OME-TIFF file may be "
-                f"missing, or the stack collapsed). Check the file set is complete.")
-        except Exception:
-            pass
-        return [dict(y=float(y), x=float(x), ncc=np.nan, snr=np.nan,
-                     symmetry=np.nan, amplitude=np.nan,
-                     integrated_intensity=np.nan) for (y, x) in coords]
     H, W = raw.shape
     w = 2 * half + 1
     out = []
@@ -830,27 +812,42 @@ def classify_beads(beads_df: pd.DataFrame,
         else:
             snr_dim = -np.inf
 
+        # High-NCC guard against out_of_plane flicker. The out_of_plane (yellow)
+        # class is meant for genuinely dim / defocused beads — but a per-frame
+        # amplitude/SNR percentile will always bin ~the lowest quarter as dim,
+        # and when the whole population is uniformly low-quality a BRIGHT,
+        # well-matched bead sitting near that moving line flips singlet<->yellow
+        # frame-to-frame (verified: a bead at amp~163, ncc~0.95 read out_of_plane
+        # ~24% of frames purely from the SNR percentile wobbling). NCC is the
+        # template match built FROM the real beads, so a high NCC is strong
+        # evidence of a real in-focus bead regardless of a noisy per-frame SNR.
+        # A bead with NCC at/above this guard is never demoted to out_of_plane.
+        NCC_SINGLET_GUARD = 0.80
+
         n_units, classes = [], []
         for k in range(len(df)):
             if not is_real[k]:
                 n_units.append(np.nan); classes.append('rejected'); continue
             I, A = ii[k], amp[k]
             S = snr[k] if 'snr' in df else np.nan
+            C = ncc[k]
             nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
             n_units.append(nu)
             high_mass = np.isfinite(I) and I >= mass_hi
             bright = np.isfinite(A) and A >= amp_hi
-            # Dim / out-of-focus: low amplitude AND not part of the bright
-            # aggregate tail. These go YELLOW (out_of_plane). Blinking of this
-            # population across frames is expected and acceptable — a bead that
-            # is genuinely in focus and stable will instead read as a singlet;
-            # the temporal-stability pass (after linking) promotes stable dim
-            # tracks back to singlet.
-            is_dim = (np.isfinite(A) and A <= amp_dim) or \
-                     (np.isfinite(S) and S <= snr_dim)
+            # Dim / out-of-focus. Require the AMPLITUDE to actually be low — a
+            # low per-frame SNR alone must NOT demote a bead whose amplitude is
+            # fine (that was the flicker source). SNR is now only a secondary
+            # confirmation: it can push a bead that is ALREADY amplitude-dim into
+            # the yellow bin, but it can't drag a bright bead there on its own.
+            amp_low = np.isfinite(A) and A <= amp_dim
+            snr_low = np.isfinite(S) and S <= snr_dim
+            is_dim = amp_low or (snr_low and amp_low)
+            # High-NCC well-matched beads are immune to the dim gate (anti-flicker).
+            well_matched = np.isfinite(C) and C >= NCC_SINGLET_GUARD
             if high_mass and bright:
                 classes.append('aggregate')          # bright + compact + heavy
-            elif is_dim and not high_mass:
+            elif is_dim and not high_mass and not well_matched:
                 classes.append('out_of_plane')        # YELLOW: dim / out of focus
             elif high_mass and not bright:
                 classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
@@ -867,6 +864,7 @@ def classify_beads(beads_df: pd.DataFrame,
         df.attrs['classify_thresholds'] = {
             'mode': 'fast_template',
             'ncc_floor': float(NCC_FLOOR),
+            'ncc_singlet_guard': float(NCC_SINGLET_GUARD),
             'aggregate_mass_percentile': 99.3,
             'aggregate_amp_percentile': 50.0,
             'aggregate_mass_hi': float(mass_hi),

@@ -1077,9 +1077,56 @@ class VideoParticleTrackingUI:
         _mb.setContentsMargins(0, 0, 0, 0); _mb.setSpacing(5)
         _mb.addRow(self._moduli_boot)
         _mb.addRow("Bootstrap resamples:", self._moduli_nboot)
+
+        # ── Lag-window fit gate (MSD → D/α fit range) ────────────────────────
+        # The reliable MSD lag window is bounded by hardware: high-frequency
+        # cutoff = frame interval, low-frequency cutoff = acquisition duration.
+        # Fitting outside it gives a wrong D/α. These pick the upper-lag rule and
+        # whether to clip the fit to the defensible band (warn, not block).
+        self._lag_rule = QComboBox()
+        self._lag_rule.addItem("Fraction of track length", "fraction")
+        self._lag_rule.addItem("Fixed frequency window", "fixed")
+        self._lag_rule.addItem("Minimum independent pairs", "min_pairs")
+        self._lag_rule.setToolTip(
+            "How to set the upper-lag (low-frequency) cutoff of the MSD fit:\n"
+            "• Fraction of track length — fit lags up to a fraction of the record "
+            "length; longer lags have too few independent samples. Standard, "
+            "conservative.\n"
+            "• Fixed frequency window — restrict to a hardware-defensible band "
+            "(set the upper lag in seconds). Matches routine lab practice.\n"
+            "• Minimum independent pairs — keep a lag only while enough independent "
+            "trajectories span it. Adapts to how many/how long your tracks are.")
+        self._lag_fraction = QDoubleSpinBox()
+        self._lag_fraction.setRange(0.02, 1.0); self._lag_fraction.setValue(0.25)
+        self._lag_fraction.setDecimals(2); self._lag_fraction.setSingleStep(0.05)
+        self._lag_fraction.setToolTip(
+            "Upper lag = this fraction × longest track duration (Fraction rule).")
+        self._lag_fixed_s = QDoubleSpinBox()
+        self._lag_fixed_s.setRange(0.001, 1e6); self._lag_fixed_s.setValue(10.0)
+        self._lag_fixed_s.setDecimals(3)
+        self._lag_fixed_s.setToolTip(
+            "Upper lag in seconds (Fixed-window rule). E.g. 10 s for a "
+            "0.1–10 s defensible band at 0.1 s/frame.")
+        self._lag_minpairs = QSpinBox()
+        self._lag_minpairs.setRange(2, 1000); self._lag_minpairs.setValue(10)
+        self._lag_minpairs.setToolTip(
+            "Keep lags spanned by at least this many independent tracks "
+            "(Minimum-independent-pairs rule).")
+        self._lag_confine = QCheckBox("Confine fit to scientifically defensible bounds")
+        self._lag_confine.setChecked(True)
+        self._lag_confine.setToolTip(
+            "When ON (default), the MSD fit is clipped to the hardware-defensible "
+            "lag window (frame interval → the upper-lag rule above). When OFF, the "
+            "full available lag range is fit at your own risk. Either way, PyCAT "
+            "WARNS (never blocks) if the acquisition can't cover the window.")
+        _mb.addRow("Upper-lag rule:", self._lag_rule)
+        _mb.addRow("  fraction:", self._lag_fraction)
+        _mb.addRow("  fixed upper lag (s):", self._lag_fixed_s)
+        _mb.addRow("  min independent pairs:", self._lag_minpairs)
+        _mb.addRow(self._lag_confine)
         self._moduli_boot_row.setVisible(False)   # hidden until toggled
 
-        self._show_moduli_adv = QCheckBox("Show advanced moduli (G′/G″) options")
+        self._show_moduli_adv = QCheckBox("Show advanced fit / moduli options")
         self._show_moduli_adv.setChecked(False)
         self._show_moduli_adv.toggled.connect(self._moduli_boot_row.setVisible)
         form.addRow(self._show_moduli_adv)
@@ -1126,7 +1173,29 @@ class VideoParticleTrackingUI:
                 tracks,
                 frame_interval_s=self._frame_dt.value(),
                 min_track_length=self._min_track.value())
-            fit = fit_anomalous_diffusion(msd_df)
+            fit = fit_anomalous_diffusion(
+                msd_df,
+                frame_interval_s=self._frame_dt.value(),
+                upper_lag_rule=(self._lag_rule.currentData()
+                                if hasattr(self, '_lag_rule') else 'fraction'),
+                upper_lag_fraction=(self._lag_fraction.value()
+                                    if hasattr(self, '_lag_fraction') else 0.25),
+                upper_lag_fixed_s=(self._lag_fixed_s.value()
+                                   if hasattr(self, '_lag_fixed_s') else None),
+                min_independent_pairs=(self._lag_minpairs.value()
+                                       if hasattr(self, '_lag_minpairs') else 10),
+                confine_to_defensible_bounds=(
+                    self._lag_confine.isChecked()
+                    if hasattr(self, '_lag_confine') else True))
+            _fw = fit.get('fit_window_warning')
+            if _fw:
+                napari_show_warning(f"MSD fit window: {_fw}")
+                print(f"[PyCAT VPT] MSD fit-window note: {_fw}")
+            _win = fit.get('fit_window_s')
+            if _win and all(v is not None for v in _win):
+                print(f"[PyCAT VPT] MSD fit confined to defensible lag window "
+                      f"{_win[0]:.3g}–{_win[1]:.3g}s "
+                      f"({'confined' if (self._lag_confine.isChecked() if hasattr(self,'_lag_confine') else True) else 'full range (confine off)'}).")
             eta = viscosity_from_diffusion(
                 fit.get('D_um2_per_s', float('nan')),
                 self._bead_radius.value(), self._temp_C.value())
