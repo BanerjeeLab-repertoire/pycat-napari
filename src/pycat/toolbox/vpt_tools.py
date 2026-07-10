@@ -1289,6 +1289,133 @@ def _detect_frame_worker(args):
     return int(t), [(float(y), float(x)) for (y, x) in coords]
 
 
+def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
+                                 microns_per_pixel=1.0, k=2.5,
+                                 window=8, n_beads=40, half=7,
+                                 min_distance_um=0.05):
+    """Estimate a physically-grounded max linking distance (µm) WITHOUT linking
+    any tracks, via a short-window time-projection of the bead motion.
+
+    Idea (Gable's). A short-window MAX-projection of the stack smears each bead
+    into a blob whose width = its single-frame PSF width broadened by how far the
+    bead MOVED over that window. The motion contribution is recovered by
+    subtracting the single-frame PSF width in quadrature:
+
+        motion_sigma = sqrt( sigma_projected^2 - sigma_singleframe^2 )
+
+    That ``motion_sigma`` is the per-frame displacement scale (a short window ≈ a
+    few frames of motion), which is exactly the quantity a frame-to-frame linker
+    must bridge. The linking distance is ``k × motion_sigma`` (k gives margin for
+    the jitter tail), computed robustly over many beads. It is CAPPED at the bead
+    footprint (a few × the PSF sigma) so it can never exceed one bead's own size
+    and start grabbing neighbours in a dense field.
+
+    Why this beats a fixed default or a PSF-width rule: these 200 nm beads image
+    as a ~2 px PSF but move only ~0.5 px/frame, so motion ≪ bead size — a
+    PSF-width distance (2-3 µm) would be far too generous, while the motion scale
+    (~0.3-0.5 µm here) is what actually needs bridging. It is also
+    viscosity-adaptive: slow (viscous) beads → tight distance, fast beads →
+    looser, with no user guessing and no provisional linking pass.
+
+    Parameters
+    ----------
+    bead_stack : (T, H, W) stack (lazy or array).
+    coords_by_frame : optional {frame_index: [(y_px, x_px), ...]} of detections
+        to sample bead locations from. If None, a quick blob_log on the first
+        frame is used.
+    microns_per_pixel : pixel size.
+    k : margin factor on the per-frame motion sigma (default 2.5).
+    window : number of frames for the short projection (default 8).
+    n_beads : max beads to sample for the robust estimate.
+    half : half-window (px) of the patch fit around each bead.
+    min_distance_um : floor so the estimate is never absurdly small.
+
+    Returns
+    -------
+    dict: linking_distance_um, motion_sigma_um, psf_sigma_um, capped (bool),
+        n_beads_used — the derived distance plus the quantities behind it
+        (anti-black-box: the caller can show what was measured and why).
+    """
+    import numpy as np
+    from scipy.optimize import curve_fit
+    from pycat.file_io.file_io import materialize_stack
+
+    def _fit_sigma(patch, h):
+        p = np.asarray(patch, dtype=float)
+        p = p - p.min()
+        if p.max() <= 0:
+            return np.nan
+        yy, xx = np.mgrid[0:p.shape[0], 0:p.shape[1]]
+
+        def g(c, A, x0, y0, s, o):
+            x, y = c
+            return (A * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * s ** 2)) + o).ravel()
+        try:
+            popt, _ = curve_fit(g, (xx, yy), p.ravel(),
+                                p0=[p.max(), h, h, 1.5, 0.0], maxfev=4000)
+            return abs(float(popt[3]))
+        except Exception:
+            return np.nan
+
+    # Materialise only the projection window (small), not the whole movie.
+    try:
+        arr = np.asarray(materialize_stack(bead_stack))
+    except Exception:
+        arr = np.asarray(bead_stack)
+    if arr.ndim == 2:
+        arr = arr[None]
+    T, H, W = arr.shape
+    win = int(min(max(2, window), T))
+
+    # Sample bead centres.
+    centres = []
+    if coords_by_frame:
+        f0 = sorted(coords_by_frame.keys())[0]
+        centres = [(int(round(y)), int(round(x)))
+                   for (y, x) in coords_by_frame[f0]]
+    if not centres:
+        c0 = detect_beads_frame(arr[0].astype(np.float32))
+        centres = [(int(round(y)), int(round(x))) for (y, x) in c0]
+    if not centres:
+        return dict(linking_distance_um=float('nan'), motion_sigma_um=float('nan'),
+                    psf_sigma_um=float('nan'), capped=False, n_beads_used=0)
+
+    rng = np.random.default_rng(0)
+    if len(centres) > n_beads:
+        idx = rng.choice(len(centres), n_beads, replace=False)
+        centres = [centres[i] for i in idx]
+
+    proj_win = arr[:win].max(axis=0)
+    psf_sigmas, motion_sigmas = [], []
+    for (yi, xi) in centres:
+        if yi - half < 0 or xi - half < 0 or yi + half + 1 > H or xi + half + 1 > W:
+            continue
+        s1 = _fit_sigma(arr[0][yi - half:yi + half + 1, xi - half:xi + half + 1], half)
+        sp = _fit_sigma(proj_win[yi - half:yi + half + 1, xi - half:xi + half + 1], half)
+        if not (np.isfinite(s1) and np.isfinite(sp)):
+            continue
+        psf_sigmas.append(s1)
+        motion_sigmas.append(np.sqrt(max(sp ** 2 - s1 ** 2, 0.0)))
+    if not motion_sigmas:
+        return dict(linking_distance_um=float('nan'), motion_sigma_um=float('nan'),
+                    psf_sigma_um=float('nan'), capped=False, n_beads_used=0)
+
+    motion_sigma_px = float(np.median(motion_sigmas))
+    psf_sigma_px = float(np.median(psf_sigmas))
+    dist_px = float(k) * motion_sigma_px
+    # Cap at the bead footprint (never link farther than ~the bead's own size).
+    cap_px = 3.0 * psf_sigma_px
+    capped = dist_px > cap_px
+    dist_px = min(dist_px, cap_px)
+    dist_um = max(dist_px * microns_per_pixel, float(min_distance_um))
+    return dict(
+        linking_distance_um=dist_um,
+        motion_sigma_um=motion_sigma_px * microns_per_pixel,
+        psf_sigma_um=psf_sigma_px * microns_per_pixel,
+        capped=bool(capped),
+        n_beads_used=len(motion_sigmas))
+
+
 def detect_beads_stack(
     bead_stack: np.ndarray,
     host_mask: Optional[np.ndarray] = None,

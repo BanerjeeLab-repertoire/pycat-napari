@@ -332,9 +332,12 @@ def link_trajectories_bayesian(
                 assigned_dets.add(c)
             # else: death (r < n_viable, c >= n_curr) — track ends naturally
 
-        # Expire tracks not seen for too long
+        # Expire tracks not seen for too long. Must match the viability filter
+        # above (t - last_frame <= max_gap_frames + 1); using the bare
+        # max_gap_frames here expired tracks one frame too early, so a track was
+        # admitted as viable next frame but could already have been dropped.
         active = {tid: info for tid, info in active.items()
-                  if t - info['last_frame'] <= max_gap_frames}
+                  if t - info['last_frame'] <= max_gap_frames + 1}
 
     # ── Gap closing: second pass ──────────────────────────────────────────
     if max_gap_frames > 0:
@@ -470,9 +473,17 @@ def link_trajectories(
         curr = df[df['frame'] == t].copy()
         curr_pts = curr[['y_um', 'x_um']].values
 
-        # Find which active tracks are still linkable (within gap window)
+        # Find which active tracks are still linkable (within gap window).
+        # max_gap_frames = number of MISSING frames tolerated, so a track last
+        # seen at frame f is linkable at frame t when (t - f) - 1 <= max_gap,
+        # i.e. t - f <= max_gap + 1. gap=0 therefore links CONSECUTIVE frames
+        # (t - f == 1), gap=1 bridges one missing frame (t - f == 2), etc.
+        # (Previously this used `t - f <= max_gap`, an off-by-one that made
+        # gap=0 reject even the immediately-previous frame — collapsing every
+        # track to length 1. Beads present in consecutive frames must link at
+        # gap=0.)
         viable = {tid: info for tid, info in active_tracks.items()
-                  if t - info[2] <= max_gap_frames}
+                  if t - info[2] <= max_gap_frames + 1}
 
         if not viable or len(curr_pts) == 0:
             # Start new tracks for all detections this frame
@@ -516,9 +527,10 @@ def link_trajectories(
                     df.at[df_idx, 'y_um'], df.at[df_idx, 'x_um'], t)
                 next_track += 1
 
-        # Remove expired tracks
+        # Remove expired tracks (same gap semantics as the viability filter:
+        # keep a track while it could still be linked at the next frame).
         active_tracks = {tid: info for tid, info in active_tracks.items()
-                         if t - info[2] <= max_gap_frames}
+                         if t - info[2] <= max_gap_frames + 1}
 
     return df
 

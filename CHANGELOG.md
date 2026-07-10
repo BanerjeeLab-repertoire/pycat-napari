@@ -4,6 +4,43 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.334] - 2026-07-10
+### Fixed — VPT linker shattered stable beads into short tracks (the core linking problem)
+- **Root cause 1 — gap-frame off-by-one.** The greedy linker's viability AND
+  expiry checks used `t - last_frame <= max_gap_frames`, which at `gap=0` rejects
+  even the immediately-previous frame — collapsing every detection into its own
+  length-1 "track" (and hanging/crashing the GUI when it then tried to build a
+  Tracks layer from tens of thousands of singletons). Fixed to
+  `<= max_gap_frames + 1` so `gap=0` links consecutive frames, `gap=1` bridges one
+  missing frame, etc. The Bayesian linker had the same off-by-one in its expiry
+  check only (inconsistent with its own viability filter, which was already
+  correct) — also fixed. Verified on real data: a confirmed stable bead present in
+  1000/1000 frames now links into ONE 1000-frame track instead of shattering.
+- **Root cause 2 — max linking distance too tight, now auto-derived from bead
+  motion.** The dominant problem: the default linking distance (~0.4 µm) was below
+  the beads' own frame-to-frame jitter tail (they move up to ~340 nm/frame), so it
+  clipped real motion and broke stable beads into short fragments that cannot
+  support the MSD measurement window. **New `estimate_linking_distance_um()`
+  derives a physically-grounded distance WITHOUT linking any tracks**, via a
+  short-window MAX-projection of the stack: the projected bead width broadened
+  beyond the single-frame PSF width gives the per-frame displacement scale
+  (`motion_σ = √(σ²_proj − σ²_psf)`), and the distance is `k × motion_σ` (k margin,
+  default 2.5), capped at the bead footprint so it can't grab neighbours. It is
+  viscosity-adaptive (slow beads → tight, fast beads → loose) and needs no
+  provisional linking pass. Auto-filled into the Step-4 linker field after Detect
+  Beads (shown and editable; anti-black-box), with the margin `k` exposed under a
+  new "Show advanced linking options" expander. Validated on real data: derives
+  0.58 µm (per-frame motion ~232 nm × 2.5), and linking there yields full
+  1000-frame tracks — 10% of tracks now span ≥80% of the movie (was ~0%),
+  i.e. measurement-grade trajectories.
+- **GUI crash guard.** If a link still comes out degenerate (>2000 tracks and
+  >90% single-frame), PyCAT warns and skips building the Tracks layer instead of
+  freezing.
+
+### Changed — track-length histogram pops out
+- The linker track-length histogram now opens as a dockable "Track lengths" panel
+  (reused across relinks) instead of sitting inline in the Step-4 form.
+
 ## [1.5.333] - 2026-07-10
 ### Added — VPT detection-variant staging + track-length histogram
 - **Detection-variant staging framework.** `detect_beads_stack` gained a

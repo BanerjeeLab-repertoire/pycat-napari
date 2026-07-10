@@ -670,6 +670,43 @@ class VideoParticleTrackingUI:
                     "No beads detected inside the eroded host mask. Lower the "
                     "threshold, widen the sigma range, or reduce erosion depth.")
                 return
+            # Auto-estimate a physically-grounded max linking distance from the
+            # bead MOTION (short-window time-projection: proj width vs single-
+            # frame PSF width → per-frame displacement), and pre-fill the linker
+            # field. Anti-black-box: the derived value is shown and remains
+            # user-editable. This fixes the core linker failure where a too-tight
+            # default clipped the beads' own jitter and shattered stable beads
+            # into short tracks that can't support the MSD measurement window.
+            try:
+                from pycat.toolbox.vpt_tools import estimate_linking_distance_um
+                _bname = self._bead_dd.currentText()
+                _stack = self.viewer.layers[_bname].data if _bname in self.viewer.layers else None
+                # Sample coords from the first detected frame for the estimate.
+                _cbf = None
+                if _stack is not None and 'frame' in det_df:
+                    f0 = int(det_df['frame'].min())
+                    sub = det_df[det_df['frame'] == f0]
+                    _cbf = {f0: list(zip(sub['y_um'] / self._mpx(),
+                                         sub['x_um'] / self._mpx()))}
+                _kfac = (self._link_k.value()
+                         if hasattr(self, '_link_k') else 2.5)
+                if _stack is not None:
+                    est = estimate_linking_distance_um(
+                        _stack, coords_by_frame=_cbf,
+                        microns_per_pixel=self._mpx(), k=_kfac)
+                    d = est.get('linking_distance_um')
+                    if d and np.isfinite(d) and d > 0:
+                        self._max_link.blockSignals(True)
+                        self._max_link.setValue(round(float(d), 3))
+                        self._max_link.blockSignals(False)
+                        self._dr()['vpt_link_distance_estimate'] = est
+                        _mo = est.get('motion_sigma_um', float('nan')) * 1000
+                        print(f"[PyCAT VPT] Auto-set max linking distance = "
+                              f"{d:.3f} µm (per-frame motion ≈ {_mo:.0f} nm × "
+                              f"k={_kfac}{', capped at bead footprint' if est.get('capped') else ''}). "
+                              f"Editable in Step 4.")
+            except Exception as _e:
+                print(f"[PyCAT VPT] linking-distance auto-estimate skipped: {_e}")
             # Add a points layer for visual confirmation, coloured by class
             pts = det_df[['frame', 'y_um', 'x_um']].copy()
             pts['y_px'] = pts['y_um'] / self._mpx()
@@ -803,11 +840,35 @@ class VideoParticleTrackingUI:
         self._max_link.setValue(max(0.05, round(2.0 * _bead_um, 3)))
         self._max_link.setSingleStep(0.05); self._max_link.setDecimals(3)
         self._max_link.setToolTip(
-            "Maximum bead displacement between frames (µm). A physically grounded "
-            "default is about 2× the bead size — a bead should not travel much "
-            "more than its own diameter per frame in a viscous sample; larger "
-            "values invite spurious links.")
+            "Maximum bead displacement between frames (µm). Auto-filled after "
+            "Detect Beads from the measured per-frame bead MOTION (a short-window "
+            "time-projection width vs the single-frame PSF width gives the "
+            "displacement scale), times the margin factor k below. A too-small "
+            "value clips the beads' own jitter and shatters stable beads into "
+            "short tracks; this estimate is set from the data. Editable — override "
+            "if needed.")
         form.addRow("Max linking dist (µm):", self._max_link)
+
+        # Advanced: margin factor k on the auto-estimated linking distance.
+        self._link_k = QDoubleSpinBox()
+        self._link_k.setRange(1.0, 6.0); self._link_k.setValue(2.5)
+        self._link_k.setSingleStep(0.5); self._link_k.setDecimals(1)
+        self._link_k.setToolTip(
+            "Margin factor applied to the measured per-frame bead motion when "
+            "auto-setting the max linking distance (distance ≈ k × motion σ). "
+            "Higher k = more tolerant linking (bridges bigger jumps, risks "
+            "mis-links in dense fields); lower k = stricter. 2.5 is a good "
+            "default. Takes effect on the next Detect Beads run.")
+        self._link_k_row = QWidget()
+        _lk = QFormLayout(self._link_k_row)
+        _lk.setContentsMargins(0, 0, 0, 0); _lk.setSpacing(5)
+        _lk.addRow("Linking-distance margin k:", self._link_k)
+        self._link_k_row.setVisible(False)
+        self._show_link_adv = QCheckBox("Show advanced linking options")
+        self._show_link_adv.setChecked(False)
+        self._show_link_adv.toggled.connect(self._link_k_row.setVisible)
+        form.addRow(self._show_link_adv)
+        form.addRow(self._link_k_row)
 
         self._max_gap = QSpinBox()
         self._max_gap.setRange(0, 20); self._max_gap.setValue(0)
@@ -825,23 +886,6 @@ class VideoParticleTrackingUI:
         btn.clicked.connect(self._on_link)
         form.addRow(self._track_prog); from pycat.ui.field_status import button_with_circle as _bwc
         form.addRow(_bwc(btn))
-
-        # Embedded track-length histogram — shows the distribution of trajectory
-        # lengths (in frames) after linking. A healthy result has many long
-        # tracks (mass toward the right / spanning most of the movie); a
-        # fragmentation-prone linker shows a spike of very short tracks. This is
-        # useful every run, and doubles as an at-a-glance linker-quality check.
-        try:
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-            self._tracklen_fig = Figure(figsize=(3.2, 1.7), tight_layout=True)
-            self._tracklen_canvas = FigureCanvasQTAgg(self._tracklen_fig)
-            self._tracklen_canvas.setMinimumHeight(150)
-            self._tracklen_canvas.setVisible(False)   # shown after first link
-            form.addRow(self._tracklen_canvas)
-        except Exception:
-            self._tracklen_fig = None
-            self._tracklen_canvas = None
 
         layout.addWidget(grp)
 
@@ -917,6 +961,27 @@ class VideoParticleTrackingUI:
             if tracks.empty:
                 napari_show_warning("Linking produced no trajectories."); return
             tracks = tracks[tracks['track_id'] != -1] if 'track_id' in tracks else tracks
+            # Guard against a degenerate link (almost every detection its own
+            # single-frame "track"). Building a napari Tracks layer + histogram
+            # from tens of thousands of length-1 tracks can hang/crash the GUI.
+            # This should not happen after the gap off-by-one fix, but a bad
+            # parameter combination could still produce it, so fail loudly
+            # instead of freezing.
+            try:
+                _tl = tracks.groupby('track_id').size()
+                _n_tracks = int(len(_tl))
+                _frac_singleton = float((_tl <= 1).mean()) if _n_tracks else 0.0
+                if _n_tracks > 2000 and _frac_singleton > 0.9:
+                    napari_show_warning(
+                        f"Linking looks degenerate: {_n_tracks} tracks and "
+                        f"{_frac_singleton*100:.0f}% are single-frame — almost "
+                        f"nothing linked. Check the linker settings (max linking "
+                        f"distance may be too small, or the population empty). "
+                        f"Not building the trajectory layer to avoid freezing.")
+                    self._update_tracklen_hist(tracks)
+                    return
+            except Exception:
+                pass
             self._dr()['vpt_tracks'] = tracks
             mpp = self._mpx()
 
@@ -1002,21 +1067,19 @@ class VideoParticleTrackingUI:
         self._track_worker = w; w.start()
 
     def _update_tracklen_hist(self, tracks):
-        """Draw the track-length (frames-per-track) histogram in the linker
-        widget. A healthy link has many long tracks; a fragmentation-prone
+        """Draw the track-length (frames-per-track) histogram in a popped-out
+        dock widget. A healthy link has many long tracks; a fragmentation-prone
         linker piles up very short ones. Called after each link."""
-        if getattr(self, '_tracklen_canvas', None) is None \
-                or getattr(self, '_tracklen_fig', None) is None:
-            return
         try:
             if tracks is None or 'track_id' not in tracks or tracks.empty:
                 return
+            import numpy as _np
             lengths = tracks.groupby('track_id').size().values
             n_frames = int(tracks['frame'].nunique()) if 'frame' in tracks else 0
-            fig = self._tracklen_fig
-            fig.clear()
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+            fig = Figure(figsize=(4.2, 2.6), tight_layout=True)
             ax = fig.add_subplot(111)
-            import numpy as _np
             Lmax = int(lengths.max()) if len(lengths) else 1
             nbins = int(_np.clip(Lmax, 5, 40))
             ax.hist(lengths, bins=nbins, color='#4c72b0',
@@ -1024,20 +1087,26 @@ class VideoParticleTrackingUI:
             med = float(_np.median(lengths)) if len(lengths) else 0.0
             ax.axvline(med, color='#c44e52', ls='--', lw=1,
                        label=f"median {med:.0f}")
-            # Fraction of tracks spanning most of the movie — the quality signal.
             if n_frames > 0:
                 frac_long = float(_np.mean(lengths >= 0.5 * n_frames))
                 ax.set_title(
                     f"{len(lengths)} tracks · {frac_long*100:.0f}% span ≥½ movie",
-                    fontsize=8)
+                    fontsize=9)
             else:
-                ax.set_title(f"{len(lengths)} tracks", fontsize=8)
-            ax.set_xlabel("track length (frames)", fontsize=8)
-            ax.set_ylabel("count", fontsize=8)
-            ax.tick_params(labelsize=7)
-            ax.legend(fontsize=7, frameon=False)
-            self._tracklen_canvas.setVisible(True)
-            self._tracklen_canvas.draw_idle()
+                ax.set_title(f"{len(lengths)} tracks", fontsize=9)
+            ax.set_xlabel("track length (frames)", fontsize=9)
+            ax.set_ylabel("count", fontsize=9)
+            ax.tick_params(labelsize=8)
+            ax.legend(fontsize=8, frameon=False)
+            canvas = FigureCanvasQTAgg(fig)
+            # Reuse a single dock so repeated links replace it instead of stacking.
+            try:
+                if getattr(self, '_tracklen_dock', None) is not None:
+                    self.viewer.window.remove_dock_widget(self._tracklen_dock)
+            except Exception:
+                pass
+            self._tracklen_dock = self.viewer.window.add_dock_widget(
+                canvas, name="Track lengths", area='right')
         except Exception as _e:
             print(f"[PyCAT VPT] track-length histogram skipped: {_e}")
 
