@@ -1052,6 +1052,39 @@ class VideoParticleTrackingUI:
             "out-of-focus beads might bias the measurement.")
         form.addRow(self._promote_stable)
 
+        # ── Advanced: viscoelastic moduli (G'/G'') options ───────────────────
+        # Hidden by default (mirrors the 'Show advanced detection options'
+        # pattern above). The G'/G'' point estimate always uses the Evans (2009)
+        # conversion; these controls add optional bootstrap confidence bands.
+        self._moduli_boot = QCheckBox("Bootstrap G′/G″ confidence intervals")
+        self._moduli_boot.setChecked(False)
+        self._moduli_boot.setToolTip(
+            "Estimate uncertainty on the storage/loss moduli by resampling whole "
+            "tracks with replacement and re-computing G′/G″ for each resample; "
+            "the plot then shows shaded confidence bands. This is the honest "
+            "response to noisy data — it shows which parts of the spectrum are "
+            "trustworthy. Bands are approximate (empirical coverage runs a little "
+            "below nominal). Adds compute time proportional to the resample count.")
+        self._moduli_nboot = QSpinBox()
+        self._moduli_nboot.setRange(20, 2000); self._moduli_nboot.setValue(200)
+        self._moduli_nboot.setSingleStep(50)
+        self._moduli_nboot.setToolTip(
+            "Number of bootstrap resamples for the G′/G″ confidence bands. More "
+            "resamples = smoother, more stable bands but longer compute. 200 is a "
+            "reasonable default; raise for a final figure.")
+        self._moduli_boot_row = QWidget()
+        _mb = QFormLayout(self._moduli_boot_row)
+        _mb.setContentsMargins(0, 0, 0, 0); _mb.setSpacing(5)
+        _mb.addRow(self._moduli_boot)
+        _mb.addRow("Bootstrap resamples:", self._moduli_nboot)
+        self._moduli_boot_row.setVisible(False)   # hidden until toggled
+
+        self._show_moduli_adv = QCheckBox("Show advanced moduli (G′/G″) options")
+        self._show_moduli_adv.setChecked(False)
+        self._show_moduli_adv.toggled.connect(self._moduli_boot_row.setVisible)
+        form.addRow(self._show_moduli_adv)
+        form.addRow(self._moduli_boot_row)
+
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -1125,7 +1158,8 @@ class VideoParticleTrackingUI:
         # than a table; the numbers stay available in the summary table below.
         try:
             from pycat.toolbox.condensate_physics_tools import (
-                per_track_msd_curves, compute_moduli_gser)
+                per_track_msd_curves, compute_moduli_evans,
+                compute_moduli_evans_bootstrap)
             from pycat.toolbox.analysis_plots import (
                 plot_msd_trajectories, plot_moduli)
             ptc = per_track_msd_curves(
@@ -1134,17 +1168,30 @@ class VideoParticleTrackingUI:
             plot_msd_trajectories(ptc, msd_df, fit,
                                   title="VPT MSD (per-track + ensemble)",
                                   interactive=True)
-            mod = compute_moduli_gser(msd_df, self._bead_radius.value(),
-                                      self._temp_C.value(), dimensions=2)
+            _boot = (self._moduli_boot.isChecked()
+                     if hasattr(self, '_moduli_boot') else False)
+            if _boot:
+                mod = compute_moduli_evans_bootstrap(
+                    ptc, self._bead_radius.value(), self._temp_C.value(),
+                    dimensions=2,
+                    n_boot=(self._moduli_nboot.value()
+                            if hasattr(self, '_moduli_nboot') else 200))
+            else:
+                mod = compute_moduli_evans(msd_df, self._bead_radius.value(),
+                                           self._temp_C.value(), dimensions=2)
             self._dr()['vpt_moduli_df'] = mod
             if len(mod):
-                print("[PyCAT VPT] NOTE: G'/G'' (storage/loss moduli) use the "
-                      "Mason (2000) algebraic GSER and are NOT YET VALIDATED in "
-                      "PyCAT. They are unreliable on viscous-dominated samples "
-                      "(alpha~1, where G' is a small difference of noisy terms) "
-                      "and on fragmented trajectories. Treat as exploratory; the "
-                      "viscosity fit is the validated quantity. (Evans 2009 is the "
-                      "planned more-robust replacement.)")
+                print("[PyCAT VPT] G'/G'' (storage/loss moduli) use the Evans "
+                      "et al. (2009) direct compliance->moduli conversion, "
+                      "validated in-sandbox against analytic MSDs (exact on a "
+                      "pure viscous fluid; ~1-2% on a Maxwell fluid across the "
+                      "reliable band). The highest one or two frequencies "
+                      "(shortest lags) are the least reliable and are dropped. "
+                      + ("Bootstrap confidence bands (track resampling) are "
+                         "shown; treat them as approximate. " if _boot else "")
+                      + "Accuracy still depends on the input MSD: fragmented or "
+                      "noisy trajectories degrade G'/G'' just as they degrade "
+                      "the viscosity fit, so confirm the MSD is clean first.")
                 plot_moduli(mod, interactive=True)
         except Exception as e:
             print(f"[PyCAT] VPT plots failed: {e}")

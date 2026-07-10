@@ -396,6 +396,69 @@ supporting Category B, because PyCAT's point-based spatial statistics are alread
 what localization-cluster analysis needs.
 
 
+Near-term UX & interaction
+--------------------------
+
+Small, mostly self-contained quality-of-life items that improve responsiveness and
+keep the scientist engaged with their data. None are architectural; each can ship
+independently.
+
+.. rubric:: Default to the first frame on load
+
+Most image viewers open a stack on frame 0; PyCAT currently opens on the middle
+frame. Change the default so a freshly loaded stack shows frame 0 (set the viewer's
+current step on the T axis to 0 after load), matching viewer convention.
+
+.. rubric:: Materialization progress on stack-consuming methods
+
+Where a method must read/decode a whole stack before working (e.g. bead detection),
+the progress indication should read as one continuous 0→100% pass rather than
+reaching 100% twice (once for materialization, once for the work). The reusable
+``PhasedProgress`` helper already exists; the remaining work is rolling it out to the
+other stack-consuming workflows so a materialization wait is always labelled and never
+double-counts. Useful app-wide, since materialization is a common shared wait.
+
+.. rubric:: Pixel-size acquisition profiles
+
+Users repeatedly image files from the same microscope with the same missing-metadata
+flaw (no pixel size, often no magnification either), so re-entering the scale every
+load is friction. The robust design is **named acquisition profiles**: the user
+creates and names a profile (storing its pixel size), saved to a small JSON on disk,
+and selects it (or it is remembered as default) at load time. This sidesteps the
+metadata problem by having the human supply the key the file cannot. When camera +
+magnification *are* present in metadata, auto-fill the pixel size as a bonus. Scoped
+as an additive picker on the existing load-time pixel-size dialog, composing with the
+existing "persist through session" option — not a rewrite. (Metadata-only
+auto-recovery was considered and rejected as the primary mechanism, because the exact
+scopes this targets omit the metadata needed to compute the scale.)
+
+.. rubric:: Command palette / search bar
+
+A search bar (command-palette pattern, à la VS Code Ctrl+Shift+P or Spotlight) to
+find and jump to functionality by name, in three scopes of increasing difficulty:
+(1) open a method/widget by name — easy, a fuzzy filter over the existing
+analysis-method registry calling the same launch function the menu does; (2) find a
+layer by name — trivial, a thin wrapper over the viewer's layer list; (3) find a
+step/process within a widget by name — harder, requires steps to be enumerable and
+addressable (name → widget + the control that runs it + a scroll-to/highlight). Ship
+1 + 2 first as a simple palette; extend to steps once step-addressing infrastructure
+firms up (the same "steps as first-class addressable things" requirement also serves
+the pipeline-step-diagnostics dropdown and the linked-navigation object model).
+
+.. rubric:: VPT/MSD plot ↔ layer brushing (first instance of linked navigation)
+
+A concrete, near-term instance of the linked multiscale navigation idea (see the
+biological object model section): click a trajectory in the MSD plot → highlight that
+bead and its track in the canvas and surface its data row, so browsing the plot leads
+back to the data in the image. This is a small build for VPT specifically because the
+identity plumbing already exists end-to-end — every MSD line carries a track id, and
+the tracks layer holds those trajectories keyed by the same id. The missing piece is
+narrow: make the (currently static) MSD plot pickable, map the picked line → track id,
+then select/centre that track in the viewer and surface its row. Once proven here it
+generalizes to the other plots (partition-coefficient scatter → condensate;
+enrichment plot → cell).
+
+
 Calibrated Thermodynamic & Quantitative Condensate Reporting
 ------------------------------------------------------------
 

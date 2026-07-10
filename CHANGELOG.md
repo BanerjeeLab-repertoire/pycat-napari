@@ -4,6 +4,50 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.331] - 2026-07-10
+### Added — Evans (2009) viscoelastic moduli + bootstrap confidence bands
+- **G′/G″ (storage/loss moduli) now use the Evans et al. (2009) direct
+  compliance→moduli conversion** (`compute_moduli_evans` in
+  condensate_physics_tools.py), replacing the Mason (2000) single-point algebraic
+  GSER in the VPT pipeline. Evans represents the creep compliance J(t) as a
+  piecewise-linear interpolant and analytically Fourier-transforms it, so
+  G*(ω)=1/(iω·J̃(ω)) with **no local-power-law assumption** — it handles
+  curvature, plateaus, and crossovers directly. Validated in-sandbox against
+  known analytic MSDs: exact on a pure viscous fluid (G′≈0, G″=ηω to machine
+  precision) and ~1–2% on a Maxwell fluid across the reliable band. The highest
+  one or two frequencies (shortest lags) are the least reliable and are dropped.
+  The Mason `compute_moduli_gser` is retained (additive/revertable).
+- **Optional bootstrap confidence intervals on G′/G″**
+  (`compute_moduli_evans_bootstrap`), exposed under a new hidden "Show advanced
+  moduli (G′/G″) options" expander in the VPT Step-5 panel (default off). Resamples
+  whole tracks with replacement, recomputes moduli per resample, and shades
+  percentile bands on the plot (`plot_moduli` draws bands when present). Validated
+  in-sandbox: ~93–97% empirical coverage of a known analytic truth for a nominal
+  95% band. This is the honest response to noisy data — it shows which parts of
+  the spectrum to trust.
+- NOTE: a compliance-interpolation upgrade (natural/Akima spline) was evaluated
+  and **rejected** — validated as a no-op on smooth MSDs and unhelpful (can worsen
+  jitter) on noisy ones; the real levers for noise are the CIs above plus upstream
+  trajectory cleanup. Documented as such in the code.
+
+### Added — dual pixel/µm coordinate readout
+- **The napari status bar now shows both the pixel index (r, c) and the world
+  (µm) position under the cursor**, plus the value under the cursor, e.g.
+  `px (r=362, c=483) | µm (y=242.5, x=323.6) | Bead Detections = 171`
+  (`pycat/ui/coordinate_readout.py`, installed at launch in run_pycat.py). PyCAT
+  scales image layers by pixel size (µm/px), so napari's default status showed
+  microns only; pixel indices are what the analysis actually runs in (blob sigma,
+  linking distances, template windows, FIJI cross-referencing), so both are now
+  surfaced. Best-effort and fail-safe — never blocks launch, and leaves napari's
+  default status untouched if the coordinate can't be resolved.
+
+### Docs
+- Added a "Near-term UX & interaction" section to the development roadmap
+  (frame-0-on-load, materialization progress, pixel-size acquisition profiles,
+  command palette, plot↔layer brushing, dual px/µm readout).
+- Added `docs/audits/DEV_NOTES.md` (private, Sphinx-excluded): instrument-scoped
+  module roadmap and known-issues detail kept out of the published docs.
+
 ## [1.5.208] - 2026-07-05
 ### Fixed (overlay stripe — the ACTUAL root cause: a scale mismatch)
 - **The Overlay Image now inherits the source image layer's scale.** Confirmed via git

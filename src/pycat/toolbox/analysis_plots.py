@@ -97,7 +97,7 @@ def plot_moduli(moduli_df, title="Viscoelastic moduli (microrheology)",
                 interactive=True):
     """
     Log-log plot of storage G'(ω) and loss G''(ω) vs angular frequency, from
-    compute_moduli_gser(). The crossover (G'=G'') marks the viscoelastic
+    compute_moduli_evans() (or compute_moduli_gser()). The crossover (G'=G'') marks the viscoelastic
     relaxation frequency.
     """
     import matplotlib
@@ -114,6 +114,18 @@ def plot_moduli(moduli_df, title="Viscoelastic moduli (microrheology)",
     w = d['omega_rad_s'].values
     gp = d['g_prime_pa'].values
     gpp = d['g_double_prime_pa'].values
+
+    # Optional bootstrap confidence bands (drawn only if the columns are present,
+    # produced by compute_moduli_evans_bootstrap). Shaded region behind the lines.
+    if {'g_prime_lo', 'g_prime_hi'}.issubset(d.columns):
+        ax.fill_between(w, np.clip(d['g_prime_lo'].values, 1e-12, None),
+                        np.clip(d['g_prime_hi'].values, 1e-12, None),
+                        color='#c44e52', alpha=0.18, linewidth=0)
+    if {'g_double_prime_lo', 'g_double_prime_hi'}.issubset(d.columns):
+        ax.fill_between(w, np.clip(d['g_double_prime_lo'].values, 1e-12, None),
+                        np.clip(d['g_double_prime_hi'].values, 1e-12, None),
+                        color='#4c72b0', alpha=0.18, linewidth=0)
+
     # only positive values are meaningful on log axes
     ax.plot(w, np.clip(gp, 1e-12, None), '-o', ms=4, color='#c44e52',
             label="G′ (storage / elastic)")

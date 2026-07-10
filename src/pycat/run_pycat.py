@@ -322,6 +322,16 @@ def run_pycat_func():
     # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
     viewer = napari.Viewer(title="PyCAT-Napari")
 
+    # Dual pixel / micron coordinate readout in the status bar. PyCAT scales
+    # layers by pixel size (µm/px), so napari's default status shows microns
+    # only; this surfaces the raw pixel index alongside it (px is what the
+    # analysis runs in). Best-effort — never blocks launch.
+    try:
+        from pycat.ui.coordinate_readout import install_coordinate_readout
+        install_coordinate_readout(viewer)
+    except Exception as _e:
+        print(f"[PyCAT] Coordinate readout not installed: {_e}")
+
     if os.environ.get('PYCAT_SKIP_WARMUP', '') not in ('1', 'true', 'True'):
         import threading
         def _warmup():
