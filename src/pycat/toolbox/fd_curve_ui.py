@@ -146,7 +146,9 @@ class FDCurveUI:
         self._load_status.setText(
             f"<span style='color:#8f8;'>Loaded {os.path.basename(path)}: "
             f"{len(data['force'])} samples. Force '{data['force_channel']}', "
-            f"distance '{data['distance_channel']}'.</span>")
+            f"distance '{data['distance_channel']}' "
+            f"(auto-selected the force channel that best tracks distance — "
+            f"switch above and 'Use selected channels' if needed).</span>")
         napari_show_info(
             f"Loaded FD trace: {len(data['force'])} samples "
             f"(F={data['force_channel']}, d={data['distance_channel']}).")

@@ -285,6 +285,49 @@ def load_lumicks_fusion(h5_path: str) -> dict:
 # Lumicks C-Trap force-distance curves (DNA tethering)
 # ---------------------------------------------------------------------------
 
+def _best_fd_force_channel(f, force_group, force_channels, dist_obj):
+    """Pick the force channel that best shows the force-distance signal.
+
+    On a dual-trap C-Trap only the tether-bearing trap's force rises with
+    distance; the others are ~flat. We score each candidate by the strength of
+    the force↔distance relationship — |Pearson correlation| between force and
+    distance, weighted by the force dynamic range so a flat-but-noisy channel
+    doesn't win. Returns the best channel name, or None if scoring fails (caller
+    then falls back to the first channel).
+    """
+    try:
+        distance = np.asarray(dist_obj.data, dtype=float)
+    except Exception:
+        return None
+    best_name, best_score = None, -np.inf
+    for name in force_channels:
+        try:
+            force = np.asarray(f[force_group][name].data, dtype=float)
+            n = min(len(force), len(distance))
+            if n < 10:
+                continue
+            fo, di = force[:n], distance[:n]
+            m = np.isfinite(fo) & np.isfinite(di)
+            if m.sum() < 10:
+                continue
+            fo, di = fo[m], di[m]
+            frange = float(np.nanmax(fo) - np.nanmin(fo))
+            if frange <= 0:
+                continue
+            sd_f, sd_d = np.std(fo), np.std(di)
+            if sd_f <= 0 or sd_d <= 0:
+                continue
+            corr = abs(float(np.corrcoef(fo, di)[0, 1]))
+            # Score: correlation (does force track distance?) × dynamic range
+            # (is there real force signal, not just noise?).
+            score = corr * frange
+            if score > best_score:
+                best_score, best_name = score, name
+        except Exception:
+            continue
+    return best_name
+
+
 def load_lumicks_fd(h5_path: str,
                     force_channel: str = None,
                     distance_channel: str = None) -> dict:
@@ -343,7 +386,18 @@ def load_lumicks_fd(h5_path: str,
         raise ValueError(f"No Force channels found in {h5_path}.")
 
     dch = distance_channel if (distance_channel in dist_channels) else dist_channels[0]
-    fch = force_channel if (force_channel in force_channels) else force_channels[0]
+
+    # Smart default force channel: on a dual-trap C-Trap several force channels
+    # exist (Trap 1/Trap 2, Force 1x/2x, …) and only the tether-bearing one shows
+    # the FD signal — the others are ~flat, so defaulting to the first
+    # alphabetically often picks a channel where the curve doesn't "go up".
+    # When the caller doesn't specify a force channel, score each candidate by how
+    # strongly its force RESPONDS to distance (the FD signal) and pick the best.
+    if force_channel in force_channels:
+        fch = force_channel
+    else:
+        fch = _best_fd_force_channel(f, force_group, force_channels,
+                                     f['Distance'][dch]) or force_channels[0]
 
     dist_obj = f['Distance'][dch]
     force_obj = f[force_group][fch]

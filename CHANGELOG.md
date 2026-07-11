@@ -4,6 +4,17 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.355] - 2026-07-10
+### Improved — Force-Distance: smart default force channel
+- **The FD loader now auto-selects the force channel that actually shows the
+  force-distance signal**, instead of defaulting to the first channel
+  alphabetically. On a dual-trap C-Trap several force channels exist (Trap 1/Trap
+  2, Force 1x/2x, …) but only the tether-bearing one's force rises with distance;
+  picking the wrong one gave a flat curve that didn't "go up". Each candidate is
+  now scored by how strongly its force tracks distance (|correlation| × dynamic
+  range) and the best is chosen. The load message notes the auto-selection and
+  that you can still switch channels and press "Use selected channels".
+
 ## [1.5.354] - 2026-07-10
 ### Added — Droplet Fusion: interactive fit-range selection on the signal plot
 - **Drag to select the fit window.** The fusion signal plot (Step 2) now has a
