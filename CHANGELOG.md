@@ -4,6 +4,15 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.354] - 2026-07-10
+### Added — Droplet Fusion: interactive fit-range selection on the signal plot
+- **Drag to select the fit window.** The fusion signal plot (Step 2) now has a
+  span selector: drag horizontally across the fusion event to set the fit window,
+  which syncs live to the Step-3 Fit start/end fields. A **"Fit this range"**
+  button on the plot fits the selected span directly, so you can go from signal →
+  window → fit without leaving the plot. Typing the values in Step 3 still works
+  (the plot and fields stay in sync).
+
 ## [1.5.353] - 2026-07-10
 ### Improved — Droplet Fusion: visible signal, sampling period entry, labelled fit
 - **The fusion signal is now plotted** as soon as it's built (Step 2), so the

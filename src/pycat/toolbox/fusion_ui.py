@@ -320,19 +320,72 @@ class DropletFusionUI:
     def _plot_fusion_signal(self, time, sig, src):
         """Show the built fusion signal (force profile or aspect ratio) so the
         analysis isn't a black box — the user sees what's being fit and can pick
-        a fit window off the plot."""
+        the fit window INTERACTIVELY by dragging a span on the plot (which syncs
+        to the Fit start/end fields), with a "Fit this range" button right on the
+        plot so they can fit without leaving it."""
         import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(7.0, 4.4))
+        from matplotlib.widgets import SpanSelector, Button
+        import numpy as _np
+        fig, ax = plt.subplots(figsize=(7.4, 5.0))
+        fig.subplots_adjust(bottom=0.2)
         ax.plot(time, sig, '-', lw=0.9, color='#4c72b0')
         ax.set_xlabel("time (s)"); ax.set_ylabel(f"signal ({src})")
-        ax.set_title("Fusion signal (before fitting)", fontweight='bold')
+        ax.set_title("Fusion signal — drag to select the fit window",
+                     fontweight='bold')
         ax.grid(True, alpha=0.15)
         ax.text(0.5, 0.97,
-                "Set the fit window (Step 3) to bracket the fusion event —\n"
-                "exclude the flat baseline before contact and post-fusion drift.",
+                "Drag across the fusion event to set the fit window "
+                "(excludes flat baseline + post-fusion drift), then 'Fit this "
+                "range' — or type the values in Step 3.",
                 transform=ax.transAxes, ha='center', va='top', fontsize=8,
                 color='#666')
-        fig.tight_layout()
+
+        state = {'lo': None, 'hi': None}
+
+        def _on_span(lo, hi):
+            if hi <= lo:
+                return
+            state['lo'], state['hi'] = float(lo), float(hi)
+            # Sync to the Step-3 spinboxes so the panel and plot agree.
+            try:
+                self._t_start.setValue(float(lo))
+                self._t_end.setValue(float(hi))
+            except Exception:
+                pass
+
+        # Hold a reference on self so the selector isn't garbage-collected (a
+        # matplotlib gotcha: a SpanSelector with no surviving reference stops
+        # responding immediately). Construct defensively: the 'props' kwarg was
+        # 'rectprops' before mpl 3.5, and 'drag_from_anywhere'/'interactive' were
+        # added later — fall back to a minimal selector if the modern kwargs are
+        # rejected, so this works across matplotlib versions.
+        self._fusion_span = None
+        for _kwargs in (
+            dict(useblit=True, props=dict(alpha=0.15, facecolor='#f0a500'),
+                 interactive=True, drag_from_anywhere=True),
+            dict(useblit=True, rectprops=dict(alpha=0.15, facecolor='#f0a500')),
+            dict(useblit=True),
+            dict(),
+        ):
+            try:
+                self._fusion_span = SpanSelector(
+                    ax, _on_span, 'horizontal', **_kwargs)
+                break
+            except TypeError:
+                continue
+
+        # "Fit this range" button on the plot → fits the current span directly.
+        axbtn = fig.add_axes([0.78, 0.02, 0.2, 0.06])
+        btn = Button(axbtn, 'Fit this range')
+        def _fit_span(_evt):
+            if state['lo'] is not None and state['hi'] is not None:
+                self._t_start.setValue(state['lo'])
+                self._t_end.setValue(state['hi'])
+            self._on_fit()
+        btn.on_clicked(_fit_span)
+        self._fusion_fit_btn = btn  # keep ref alive
+
+        fig.tight_layout(rect=[0, 0.1, 1, 1])
         try:
             plt.show(block=False)
         except Exception:
