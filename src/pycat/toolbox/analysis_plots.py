@@ -241,10 +241,13 @@ def _draw_van_hove(ax, tracks_df, lag_frames=1, frame_interval_s=1.0, bins=60):
 
 
 def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
-                   max_spaghetti=400):
+                   max_spaghetti=400, line_registry=None, pickable=False):
     """Draw the MSD spaghetti + ensemble mean + fit onto a supplied Axes (the
-    consolidated-panel version; the standalone plot_msd_trajectories keeps the
-    interactive pick-brushing)."""
+    consolidated-panel version). If line_registry is given it is populated with
+    {track_id: Line2D} (and, when pickable, each line is given a pick radius) so
+    the consolidated panel supports the same table↔plot brushing as the
+    standalone plot."""
+    tid_to_line = {}
     if per_track_df is not None and len(per_track_df):
         tids = per_track_df['track_id'].unique()
         n_all = len(tids)
@@ -256,9 +259,16 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
             pdf = per_track_df
         for tid, g in pdf.groupby('track_id'):
             g = g.sort_values('lag_s')
-            ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0', alpha=0.18, lw=0.8)
+            (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
+                            alpha=0.18, lw=0.8)
+            if pickable:
+                ln.set_picker(5)
+            tid_to_line[int(tid)] = ln
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
                 label=f"individual tracks (n={n_all})")
+    if line_registry is not None:
+        line_registry['lines'] = tid_to_line
+        line_registry.setdefault('state', {'prev': None})
     if ensemble_msd_df is not None and len(ensemble_msd_df):
         e = ensemble_msd_df.sort_values('lag_s')
         ax.plot(e['lag_s'], e['msd_um2'], color='#c44e52', lw=2.4,
@@ -293,7 +303,8 @@ def _draw_moduli_into(ax, moduli_df):
 
 def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                    tracks_df=None, frame_interval_s=1.0, van_hove_lag=1,
-                   consolidated=True, interactive=True):
+                   consolidated=True, interactive=True,
+                   line_registry=None, on_pick_track=None):
     """Render the four VPT plots — MSD spaghetti, Evans G′/G″, centered
     trajectories, and the van Hove displacement distribution — either as a single
     2×2 subplot figure (consolidated, the default) or as four separate windows.
@@ -301,6 +312,12 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
 
     tracks_df : the raw per-detection tracks (track_id, frame, x_um, y_um), used
         by the two spread plots. If None, those panels show a placeholder.
+    line_registry : optional dict, populated with the consolidated MSD panel's
+        {track_id: Line2D} map + canvas so table/image selections can highlight a
+        curve here too (consolidated-mode brushing).
+    on_pick_track : optional callable(track_id); if given, the consolidated MSD
+        panel's per-track lines are pickable and clicking one calls it (plot→other
+        brushing from the consolidated panel).
     """
     import matplotlib
     if not interactive:
@@ -319,12 +336,48 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
 
     def _render_consolidated():
         fig, axes = plt.subplots(2, 2, figsize=(12.5, 10.0))
-        _draw_msd_into(axes[0, 0], per_track_df, ensemble_msd_df, fit)
+        _pickable = on_pick_track is not None
+        _reg = line_registry if line_registry is not None else {}
+        _draw_msd_into(axes[0, 0], per_track_df, ensemble_msd_df, fit,
+                       line_registry=_reg, pickable=_pickable)
         _draw_moduli_into(axes[0, 1], moduli_df)
         _draw_centered_tracks(axes[1, 0], tracks_df)
         _draw_van_hove(axes[1, 1], tracks_df, van_hove_lag, frame_interval_s)
         fig.suptitle("VPT microrheology", fontweight='bold', fontsize=13)
         fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+        # Register the canvas so external (table/image) selections can redraw.
+        if line_registry is not None:
+            line_registry['canvas'] = fig.canvas
+        # Plot→other brushing from the consolidated MSD panel.
+        if _pickable:
+            _lines = _reg.get('lines', {})
+            _line_to_tid = {ln: tid for tid, ln in _lines.items()}
+            _pstate = {'prev': None}
+            def _on_pick(event):
+                tid = _line_to_tid.get(event.artist)
+                if tid is None:
+                    return
+                prev = _pstate['prev']
+                if prev is not None and prev in _line_to_tid:
+                    try:
+                        prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                    except Exception:
+                        pass
+                try:
+                    event.artist.set_color('#ff8c00'); event.artist.set_alpha(1.0)
+                    event.artist.set_linewidth(2.2); event.artist.set_zorder(5)
+                    _pstate['prev'] = event.artist
+                    event.canvas.draw_idle()
+                except Exception:
+                    pass
+                try:
+                    on_pick_track(tid)
+                except Exception as _e:
+                    print(f"[PyCAT VPT] consolidated pick callback failed: {_e}")
+            try:
+                fig.canvas.mpl_connect('pick_event', _on_pick)
+            except Exception:
+                pass
         # Live toggle: a button that closes this figure and opens separate windows.
         try:
             from matplotlib.widgets import Button

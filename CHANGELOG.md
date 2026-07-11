@@ -4,6 +4,17 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.352] - 2026-07-10
+### Added — VPT linked brushing now works in the consolidated plot panel too
+- **The consolidated 2×2 plot panel's MSD curves are now clickable and
+  registered**, so the full linked-selection web works whether plots are shown
+  consolidated or in separate windows. Clicking a curve in the 2×2 panel selects
+  that track everywhere (bead in the image + row in the per-track table), and
+  selecting a track from the table or image highlights its curve in the panel.
+  Previously this brushing only worked in separate-windows mode; the consolidated
+  MSD panel didn't expose per-track lines. This completes the plot↔image↔table
+  linked navigation in every layout.
+
 ## [1.5.351] - 2026-07-10
 ### Fixed — unlabelled multipage TIFFs now load as stacks (broad loader fix)
 - **A multipage TIFF with no axis metadata now loads as a stack, not as

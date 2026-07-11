@@ -1852,10 +1852,16 @@ class VideoParticleTrackingUI:
             if hasattr(self, '_plots_consolidated'):
                 _consolidated = self._plots_consolidated.isChecked()
             if _consolidated:
+                # Register the consolidated MSD panel's lines so table/image
+                # selections can highlight a curve here too, and route its picks
+                # through the dispatcher (consolidated-mode brushing).
+                self._msd_line_registry = {}
                 plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
                                frame_interval_s=self._frame_dt.value(),
                                van_hove_lag=1, consolidated=True,
-                               interactive=True)
+                               interactive=True,
+                               line_registry=self._msd_line_registry,
+                               on_pick_track=lambda tid: self._select_track(tid, source='plot'))
             else:
                 # Separate windows: use the interactive MSD plot (with brushing)
                 # + the standalone spread/moduli windows. Route picks through the
