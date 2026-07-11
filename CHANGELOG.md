@@ -4,6 +4,21 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.353] - 2026-07-10
+### Improved — Droplet Fusion: visible signal, sampling period entry, labelled fit
+- **The fusion signal is now plotted** as soon as it's built (Step 2), so the
+  analysis isn't a black box — you see the force/aspect-ratio profile you're about
+  to fit and can read off a sensible fit window.
+- **Sampling can be entered as a period in microseconds** (e.g. 12.8 µs), not just
+  as a rate in Hz. The old Hz field only allowed 1 decimal, which couldn't
+  represent the C-Trap force sampling precision; a new "sample period (µs)" field
+  (4 decimals) is kept in sync with the Hz field (12.8 µs ↔ 78125 Hz).
+- **The fit is now shown with the model equation and labelled parameters** (like
+  the FRAP module). Step 3 displays S(t) = a·e^(−t/τ) + b·t + d with each term
+  explained, and after fitting a plot overlays the fitted curve on the signal
+  (fit window shaded) with τ, a, b, d, and R² labelled — a visual check of fit
+  quality instead of a cryptic numbers table.
+
 ## [1.5.352] - 2026-07-10
 ### Added — VPT linked brushing now works in the consolidated plot panel too
 - **The consolidated 2×2 plot panel's MSD curves are now clickable and

@@ -174,13 +174,48 @@ class DropletFusionUI:
         form = QFormLayout(grp)
         form.setContentsMargins(4, 20, 4, 4); form.setSpacing(5)
 
+        # Sampling can be entered either as a rate (Hz) or, more naturally for
+        # C-Trap force data, as the sampling PERIOD in microseconds (e.g. 12.8 µs
+        # = 78125 Hz). The period field carries enough decimals for sub-µs values;
+        # the two stay in sync. Leaving both at 0 auto-uses the .h5 value.
         self._sample_rate = QDoubleSpinBox()
-        self._sample_rate.setRange(0.0, 1e7); self._sample_rate.setValue(0.0)
-        self._sample_rate.setDecimals(1)
+        self._sample_rate.setRange(0.0, 1e8); self._sample_rate.setValue(0.0)
+        self._sample_rate.setDecimals(2)
         self._sample_rate.setToolTip(
             "Force sampling rate (Hz). Leave 0 to auto-use the value read "
-            "from the .h5; the time axis is built from this.")
+            "from the .h5. Kept in sync with the sampling period below.")
         form.addRow("Force sample rate (Hz):", self._sample_rate)
+
+        self._sample_period_us = QDoubleSpinBox()
+        self._sample_period_us.setRange(0.0, 1e6); self._sample_period_us.setValue(0.0)
+        self._sample_period_us.setDecimals(4)   # sub-µs precision (e.g. 12.8000)
+        self._sample_period_us.setSingleStep(0.1)
+        self._sample_period_us.setToolTip(
+            "Force sampling PERIOD in microseconds (the time between samples). "
+            "For many C-Trap force channels this is fixed, e.g. 12.8 µs "
+            "(= 78125 Hz). Entering it here fills the rate above automatically.")
+        form.addRow("…or sample period (µs):", self._sample_period_us)
+
+        # Keep the two in sync without recursing (guard flag).
+        self._sr_sync = False
+        def _rate_changed(v):
+            if self._sr_sync:
+                return
+            self._sr_sync = True
+            try:
+                self._sample_period_us.setValue((1e6 / v) if v > 0 else 0.0)
+            finally:
+                self._sr_sync = False
+        def _period_changed(v):
+            if self._sr_sync:
+                return
+            self._sr_sync = True
+            try:
+                self._sample_rate.setValue((1e6 / v) if v > 0 else 0.0)
+            finally:
+                self._sr_sync = False
+        self._sample_rate.valueChanged.connect(_rate_changed)
+        self._sample_period_us.valueChanged.connect(_period_changed)
 
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(1.0)
@@ -226,6 +261,13 @@ class DropletFusionUI:
         # Pre-fill the fit window with the full range
         self._t_start.setValue(float(np.nanmin(time)))
         self._t_end.setValue(float(np.nanmax(time)))
+        # Show the built signal immediately so the analysis isn't a black box —
+        # the user sees the force/aspect-ratio profile they're about to fit and
+        # can read off a sensible fit window.
+        try:
+            self._plot_fusion_signal(time, sig, src)
+        except Exception as e:
+            print(f"[PyCAT Fusion] signal plot failed: {e}")
         self._record('fusion_build_signal', {
             'source': src,
             'n_samples': int(len(sig))})
@@ -246,6 +288,19 @@ class DropletFusionUI:
             "flat baseline before contact and any post-fusion drift).</span>")
         note.setWordWrap(True); form.addRow(note)
 
+        # Show the fit model + what each parameter means (mirrors the FRAP module),
+        # so the fitted numbers aren't cryptic.
+        eqn = QLabel(
+            "<span style='font-size:9pt;'>"
+            "<b>Model:</b> S(t) = a·e<sup>−t/τ</sup> + b·t + d<br>"
+            "<b>τ</b> = fusion relaxation time (the result) · "
+            "<b>a</b> = relaxation amplitude · "
+            "<b>b</b> = slow linear drift · "
+            "<b>d</b> = baseline offset</span>")
+        eqn.setWordWrap(True)
+        eqn.setStyleSheet("padding:4px; background:#232323; border-radius:4px;")
+        form.addRow(eqn)
+
         self._t_start = QDoubleSpinBox()
         self._t_start.setRange(-1e9, 1e9); self._t_start.setDecimals(4)
         self._t_start.setToolTip("Fit window start (s).")
@@ -261,6 +316,65 @@ class DropletFusionUI:
         btn.clicked.connect(self._on_fit)
         form.addRow(btn)
         layout.addWidget(grp)
+
+    def _plot_fusion_signal(self, time, sig, src):
+        """Show the built fusion signal (force profile or aspect ratio) so the
+        analysis isn't a black box — the user sees what's being fit and can pick
+        a fit window off the plot."""
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(7.0, 4.4))
+        ax.plot(time, sig, '-', lw=0.9, color='#4c72b0')
+        ax.set_xlabel("time (s)"); ax.set_ylabel(f"signal ({src})")
+        ax.set_title("Fusion signal (before fitting)", fontweight='bold')
+        ax.grid(True, alpha=0.15)
+        ax.text(0.5, 0.97,
+                "Set the fit window (Step 3) to bracket the fusion event —\n"
+                "exclude the flat baseline before contact and post-fusion drift.",
+                transform=ax.transAxes, ha='center', va='top', fontsize=8,
+                color='#666')
+        fig.tight_layout()
+        try:
+            plt.show(block=False)
+        except Exception:
+            pass
+
+    def _plot_fusion_fit(self, time, sig, fit):
+        """Plot the fusion signal with the fitted relaxation curve overlaid, the
+        model equation, and the fitted parameters — so the user sees how well the
+        fit matches and what the numbers mean (mirrors the FRAP fit plot)."""
+        import matplotlib.pyplot as plt
+        import numpy as _np
+        fig, ax = plt.subplots(figsize=(7.0, 5.0))
+        ax.plot(time, sig, '.', ms=2, color='#4c72b0', alpha=0.5,
+                label="fusion signal")
+        ft = fit.get('fit_time'); fc = fit.get('fit_curve')
+        if ft is not None and fc is not None and len(ft):
+            ax.plot(ft, fc, '-', color='#c44e52', lw=2.2, label="fit")
+        # Shade the fit window.
+        ts, te = fit.get('t_start'), fit.get('t_end')
+        if ts == ts and te == te:
+            ax.axvspan(ts, te, color='#f0a500', alpha=0.08)
+        ax.set_xlabel("time (s)"); ax.set_ylabel("fusion signal")
+        ax.set_title("Droplet fusion relaxation fit", fontweight='bold')
+        ax.grid(True, alpha=0.15)
+        # Parameter box with the equation + fitted values.
+        tau = fit.get('tau_s'); a = fit.get('a'); b = fit.get('b')
+        d = fit.get('d'); r2 = fit.get('r_squared')
+        txt = ("S(t) = a·e^(−t/τ) + b·t + d\n"
+               f"τ = {tau:.4g} s\n"
+               f"a = {a:.4g}\n"
+               f"b = {b:.4g} (drift)\n"
+               f"d = {d:.4g} (offset)\n"
+               f"R² = {r2:.4g}")
+        ax.text(0.97, 0.03, txt, transform=ax.transAxes, ha='right', va='bottom',
+                fontsize=9, family='monospace',
+                bbox=dict(boxstyle='round', facecolor='#f7f7f7', alpha=0.9))
+        ax.legend(fontsize=9, loc='upper right')
+        fig.tight_layout()
+        try:
+            plt.show(block=False)
+        except Exception:
+            pass
 
     def _on_fit(self):
         from pycat.toolbox.fusion_tools import fit_fusion_relaxation
@@ -282,6 +396,14 @@ class DropletFusionUI:
             'r_squared': fit.get('r_squared'),
             't_start': fit.get('t_start'),
             't_end': fit.get('t_end')})
+
+        # Plot the fusion signal with the fitted curve overlaid, the equation, and
+        # the fitted parameters labelled — a visual check of fit quality (the
+        # numbers-only table is cryptic on its own).
+        try:
+            self._plot_fusion_fit(time, sig, fit)
+        except Exception as e:
+            print(f"[PyCAT Fusion] fit plot failed: {e}")
 
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
