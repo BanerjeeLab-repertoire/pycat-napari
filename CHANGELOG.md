@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.365] - 2026-07-10
+### Fixed — Exploratory dock crashed on open (Client Enrichment import bug)
+- **Fixed a crash that prevented the Exploratory Analysis dock from opening.** The
+  Client Partition / Enrichment tool referenced ``QSizePolicy`` without importing
+  it — a latent bug that only surfaced now that the Exploratory workbench builds
+  every tool at open. Added the missing import.
+- **Hardened the Exploratory dock against any single tool failing to build.** Each
+  tool is now added through a guarded wrapper, so if one tool errors during
+  construction it logs the traceback and shows a small "unavailable" note in its
+  section instead of taking down the entire dock — the rest of the workbench still
+  loads.
+
 ## [1.5.364] - 2026-07-10
 ### Changed — Exploratory Analysis rebuilt as a full-toolbox workbench (stage 2 of 3)
 - **Exploratory Analysis now exposes the whole toolbox**, grouped into collapsible

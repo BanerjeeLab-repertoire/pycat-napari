@@ -2973,108 +2973,127 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
             L.addWidget(sec)
             return sec.content_layout
 
+        def add(fn, layout):
+            """Add one tool to a section, but never let a single tool's
+            construction error tear down the whole dock — log it and continue so
+            the rest of the workbench still builds."""
+            try:
+                fn(layout=layout)
+            except Exception as e:
+                import traceback
+                name = getattr(fn, '__name__', str(fn))
+                print(f"[PyCAT Exploratory] tool '{name}' failed to load: {e}")
+                traceback.print_exc()
+                try:
+                    warn = QLabel(f"\u26a0 {name} unavailable (see terminal)")
+                    warn.setStyleSheet("color:#c66; font-size:9pt;")
+                    warn.setWordWrap(True)
+                    layout.addWidget(warn)
+                except Exception:
+                    pass
+
         # ── Setup (expanded) ────────────────────────────────────────────────
         s = section("Setup & Measure", expanded=True)
-        tf._add_measure_line(layout=s)
-        tf._add_run_upscaling(layout=s)
-        tf._add_pre_process(layout=s)
+        add(tf._add_measure_line, s)
+        add(tf._add_run_upscaling, s)
+        add(tf._add_pre_process, s)
 
         # ── Image Processing (collapsed) ────────────────────────────────────
         s = section("Image Processing")
-        tf._add_run_reference_subtraction(layout=s)
-        tf._add_run_apply_rescale_intensity(layout=s)
-        tf._add_run_invert_image(layout=s)
-        tf._add_run_rb_gaussian_background_removal(layout=s)
-        tf._add_run_enhanced_rb_gaussian_bg_removal(layout=s)
-        tf._add_run_calibration_correction(layout=s)
-        tf._add_run_wbns(layout=s)
-        tf._add_run_wavelet_noise_subtraction(layout=s)
-        tf._add_run_apply_bilateral_filter(layout=s)
-        tf._add_run_clahe(layout=s)
-        tf._add_run_peak_and_edge_enhancement(layout=s)
-        tf._add_run_morphological_gaussian_filter(layout=s)
-        tf._add_run_apply_laplace_of_gauss_filter(layout=s)
-        tf._add_run_dpr(layout=s)
-        tf._add_run_fft_bandpass(layout=s)
+        add(tf._add_run_reference_subtraction, s)
+        add(tf._add_run_apply_rescale_intensity, s)
+        add(tf._add_run_invert_image, s)
+        add(tf._add_run_rb_gaussian_background_removal, s)
+        add(tf._add_run_enhanced_rb_gaussian_bg_removal, s)
+        add(tf._add_run_calibration_correction, s)
+        add(tf._add_run_wbns, s)
+        add(tf._add_run_wavelet_noise_subtraction, s)
+        add(tf._add_run_apply_bilateral_filter, s)
+        add(tf._add_run_clahe, s)
+        add(tf._add_run_peak_and_edge_enhancement, s)
+        add(tf._add_run_morphological_gaussian_filter, s)
+        add(tf._add_run_apply_laplace_of_gauss_filter, s)
+        add(tf._add_run_dpr, s)
+        add(tf._add_run_fft_bandpass, s)
 
         # ── Segmentation (expanded — common starting point) ─────────────────
         s = section("Segmentation", expanded=True)
-        tf._add_run_train_and_apply_rf_classifier(layout=s)
-        tf._add_run_local_thresholding(layout=s)
-        tf._add_run_im2bw(layout=s)
-        tf._add_run_cellpose_segmentation(layout=s)
-        tf._add_run_fz_segmentation_and_merging(layout=s)
-        tf._add_gaussian_localization(layout=s)
-        tf._add_contrast_cascade(layout=s)
+        add(tf._add_run_train_and_apply_rf_classifier, s)
+        add(tf._add_run_local_thresholding, s)
+        add(tf._add_run_im2bw, s)
+        add(tf._add_run_cellpose_segmentation, s)
+        add(tf._add_run_fz_segmentation_and_merging, s)
+        add(tf._add_gaussian_localization, s)
+        add(tf._add_contrast_cascade, s)
 
         # ── Labels & Masks (collapsed) ──────────────────────────────────────
         s = section("Labels & Masks")
-        tf._add_run_binary_morph_operation(layout=s)
-        tf._add_run_measure_binary_mask(layout=s)
-        tf._add_run_label_binary_mask(layout=s)
-        tf._add_run_update_labels(layout=s)
-        tf._add_run_convert_labels_to_mask(layout=s)
-        tf._add_run_expand_labels(layout=s)
-        tf._add_run_measure_region_props(layout=s)
+        add(tf._add_run_binary_morph_operation, s)
+        add(tf._add_run_measure_binary_mask, s)
+        add(tf._add_run_label_binary_mask, s)
+        add(tf._add_run_update_labels, s)
+        add(tf._add_run_convert_labels_to_mask, s)
+        add(tf._add_run_expand_labels, s)
+        add(tf._add_run_measure_region_props, s)
 
         # ── Layer Operations (collapsed) ────────────────────────────────────
         s = section("Layer Operations")
-        tf._add_run_simple_multi_merge(layout=s)
-        tf._add_run_advanced_two_layer_merge(layout=s)
-        tf._add_run_mask_logic_merge(layout=s)
+        add(tf._add_run_simple_multi_merge, s)
+        add(tf._add_run_advanced_two_layer_merge, s)
+        add(tf._add_run_mask_logic_merge, s)
 
         # ── Cell & Object Analyzers (collapsed) ─────────────────────────────
         s = section("Cell & Object Analyzers")
-        tf._add_run_cell_analysis_func(layout=s)
-        tf._add_run_segment_subcellular_objects(layout=s)
-        tf._add_run_puncta_analysis_func(layout=s)
+        add(tf._add_run_cell_analysis_func, s)
+        add(tf._add_run_segment_subcellular_objects, s)
+        add(tf._add_run_puncta_analysis_func, s)
 
         # ── Colocalization / Correlation (collapsed) ────────────────────────
         s = section("Colocalization / Correlation")
-        tf._add_run_autocorrelation_analysis(layout=s)
-        tf._add_client_enrichment(layout=s)
-        tf._add_run_pwcca(layout=s)
-        tf._add_run_ccf_analysis(layout=s)
-        tf._add_run_obca(layout=s)
-        tf._add_run_manders_coloc(layout=s)
+        add(tf._add_run_autocorrelation_analysis, s)
+        add(tf._add_client_enrichment, s)
+        add(tf._add_run_pwcca, s)
+        add(tf._add_run_ccf_analysis, s)
+        add(tf._add_run_obca, s)
+        add(tf._add_run_manders_coloc, s)
 
         # ── Spatial Metrology (collapsed) ───────────────────────────────────
         s = section("Spatial Metrology")
-        tf._add_run_sacf_analysis(layout=s)
-        tf._add_spatial_metrology(layout=s)
-        tf._add_spatial_randomness(layout=s)
-        tf._add_intensity_profile(layout=s)
-        tf._add_morphological_complexity(layout=s)
-        tf._add_fibril_analysis(layout=s)
+        add(tf._add_run_sacf_analysis, s)
+        add(tf._add_spatial_metrology, s)
+        add(tf._add_spatial_randomness, s)
+        add(tf._add_intensity_profile, s)
+        add(tf._add_morphological_complexity, s)
+        add(tf._add_fibril_analysis, s)
 
         # ── Advanced Analysis (collapsed) ───────────────────────────────────
         s = section("Advanced Analysis")
-        tf._add_advanced_analysis(layout=s)
-        tf._add_condensate_physics(layout=s)
-        tf._add_molecular_counting(layout=s)
-        tf._add_spida(layout=s)
-        tf._add_number_and_brightness(layout=s)
+        add(tf._add_advanced_analysis, s)
+        add(tf._add_condensate_physics, s)
+        add(tf._add_molecular_counting, s)
+        add(tf._add_spida, s)
+        add(tf._add_number_and_brightness, s)
 
         # ── Structure Estimators (collapsed) ────────────────────────────────
         s = section("Structure Estimators")
-        tf._add_chromatin_topology(layout=s)
-        tf._add_nucleolus_void_estimator(layout=s)
+        add(tf._add_chromatin_topology, s)
+        add(tf._add_nucleolus_void_estimator, s)
 
         # ── Diagnostics & QC (collapsed) ────────────────────────────────────
         s = section("Diagnostics & QC")
-        tf._add_pipeline_diagnostics(layout=s)
-        tf._add_pipeline_snr_analysis(layout=s)
-        tf._add_foreground_suppression_tuner(layout=s)
-        tf._add_temporal_enhancement_optimizer(layout=s)
-        tf._add_segmentation_benchmark(layout=s)
-        tf._add_segmentation_speed_comparison(layout=s)
-        tf._add_display_diagnostics(layout=s)
-        tf._add_data_qc(layout=s)
-        tf._add_plotting_widget(layout=s)
+        add(tf._add_pipeline_diagnostics, s)
+        add(tf._add_pipeline_snr_analysis, s)
+        add(tf._add_foreground_suppression_tuner, s)
+        add(tf._add_temporal_enhancement_optimizer, s)
+        add(tf._add_segmentation_benchmark, s)
+        add(tf._add_segmentation_speed_comparison, s)
+        add(tf._add_display_diagnostics, s)
+        add(tf._add_data_qc, s)
+        add(tf._add_plotting_widget, s)
 
         # ── Save (expanded) ─────────────────────────────────────────────────
         s = section("Save & Clear", expanded=True)
-        tf._add_save_and_clear(layout=s)
+        add(tf._add_save_and_clear, s)
 
         # Create a main widget to contain everything
         main_widget = QWidget()

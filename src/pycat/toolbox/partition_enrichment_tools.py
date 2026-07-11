@@ -267,7 +267,7 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
     import napari
     from PyQt5.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
-        QProgressBar)
+        QProgressBar, QSizePolicy)
 
     grp  = QGroupBox("Client Partition / Enrichment")
     form = QFormLayout(grp)
