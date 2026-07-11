@@ -4,6 +4,20 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.362] - 2026-07-10
+### Changed — analysis-method IA: Exploratory rename + Fibril split/move (stage 1 of 3)
+- **"General Analysis" is now "Exploratory Analysis"** (menu entry + dock title).
+  (The full rebuild that gives it all toolbox tools in collapsible sections is
+  staged as a following release.)
+- **Fibril Analysis is split into "Cellular Fibril Analysis" and "In Vitro Fibril
+  Analysis"**, matching the cellular/in-vitro split used by the object-analysis
+  pipelines, and **moved under Analysis Methods → Cell and Object Analyses** (it
+  was a loose top-level entry). The cellular variant adds cell segmentation so
+  fibrils get per-cell context; the in-vitro variant analyses the whole field.
+  The standalone "Fibril Analysis" tool under Toolbox → Spatial Metrology is
+  unchanged. (This is stage 1 of a 3-part information-architecture pass; the
+  Exploratory rebuild and a toolbox-coverage audit follow.)
+
 ## [1.5.361] - 2026-07-10
 ### Added — per-cell colocalization over time (+ threaded run)
 - **Condensate coloc over time is now per-cell**, following each cell's

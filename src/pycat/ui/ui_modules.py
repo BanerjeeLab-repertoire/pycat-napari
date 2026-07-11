@@ -1855,16 +1855,21 @@ class AnalysisMethodsUI(BaseUIClass):
         self._switch_analysis(BaseDataClass, GeneralAnalysisUI, *args, **kwargs)
 
     def _switch_to_fibril_analysis(self, *args, **kwargs):
-        """
-        Switches the analysis interface to fibril analysis, focusing on the study of fibril structures.
+        """Back-compat: defaults to the in-vitro fibril pipeline."""
+        self._switch_to_fibril_analysis_vitro(*args, **kwargs)
 
-        Parameters
-        ----------
-        *args :
-            Arguments to pass to the `AnalysisDataClass`.
-        **kwargs :
-            Keyword arguments to pass to the `AnalysisDataClass`.
-        """
+    def _switch_to_fibril_analysis_cellulo(self, *args, **kwargs):
+        """Switch to fibril analysis tuned for fibrils IN CELLS (cellular context:
+        membranes/cells present, so cell segmentation + per-cell context apply)."""
+        kwargs.pop('fibril_context', None)
+        self.central_manager._fibril_context = 'cellulo'
+        self._switch_analysis(BaseDataClass, FibrilAnalysisUI, *args, **kwargs)
+
+    def _switch_to_fibril_analysis_vitro(self, *args, **kwargs):
+        """Switch to fibril analysis tuned for IN-VITRO fibrils (purified/
+        reconstituted: no cells, whole-field fibril morphometry)."""
+        kwargs.pop('fibril_context', None)
+        self.central_manager._fibril_context = 'vitro'
         self._switch_analysis(BaseDataClass, FibrilAnalysisUI, *args, **kwargs)
 
 
@@ -2937,7 +2942,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
-        self.viewer.window.add_dock_widget(scroll_area, name="General Analysis Dock")
+        self.viewer.window.add_dock_widget(scroll_area, name="Exploratory Analysis Dock")
 
         # Configure size policies to ensure UI components and scroll area expand appropriately
         main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -3022,7 +3027,15 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         except Exception:
             pass
 
+        # In-cellulo vs in-vitro: cellular fibrils sit inside cells, so we add cell
+        # segmentation to give per-cell context; in-vitro fibrils are analysed over
+        # the whole field. Default to in-vitro (back-compat) if unset.
+        context = getattr(self.central_manager, '_fibril_context', 'vitro')
+        is_cellulo = (context == 'cellulo')
+
         # Setup the specific UI components for fibril analysis
+        header = ("Cellular Fibril Analysis" if is_cellulo
+                  else "In Vitro Fibril Analysis")
         self._add_workflow_header(self.fibril_layout, include_pixel_gate=True)
         self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.fibril_layout)
@@ -3033,6 +3046,10 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         self.central_manager.toolbox_functions_ui._add_run_morphological_gaussian_filter(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_local_thresholding(layout=self.fibril_layout)
+        # In cells: segment cells so fibrils can be attributed to a cell (per-cell
+        # context). In vitro: skip — fibrils are analysed across the whole field.
+        if is_cellulo:
+            self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_label_binary_mask(layout=self.fibril_layout)
         self.central_manager.toolbox_functions_ui._add_run_measure_binary_mask(layout=self.fibril_layout)
 
@@ -3062,7 +3079,10 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
         scroll_area.setWidget(main_widget)
 
         # Add the scroll area to the viewer as a dock widget
-        self.viewer.window.add_dock_widget(scroll_area, name="Fibril Analysis Dock")
+        self.viewer.window.add_dock_widget(
+            scroll_area,
+            name=("Cellular Fibril Analysis Dock" if is_cellulo
+                  else "In Vitro Fibril Analysis Dock"))
 
         # Set the size policy of the main widget and scroll area
         main_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -4845,6 +4865,8 @@ class MenuManager:
             'Time Series Cellular Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_timeseries_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
             'Time Series In Vitro Object Analysis (Fluorescence)': (self.central_manager.analysis_methods_ui._switch_to_ts_invitro_fluor_analysis, {}),
             'Z-Stack (3D) Object Analysis': (self.central_manager.analysis_methods_ui._switch_to_zstack_analysis, {}),
+            'Cellular Fibril Analysis': (self.central_manager.analysis_methods_ui._switch_to_fibril_analysis_cellulo, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'In Vitro Fibril Analysis': (self.central_manager.analysis_methods_ui._switch_to_fibril_analysis_vitro, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
         }
         self._add_actions_to_menu(condensate_cell_analysis_dict, condensate_cell_analysis_submenu)
 
@@ -4868,8 +4890,7 @@ class MenuManager:
         self._add_actions_to_menu(coloc_analysis_actions, coloc_analysis_submenu)
 
         analysis_methods_dict = {
-            'General Analysis': (self.central_manager.analysis_methods_ui._switch_to_general_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
-            'Fibril Analysis': (self.central_manager.analysis_methods_ui._switch_to_fibril_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository})
+            'Exploratory Analysis': (self.central_manager.analysis_methods_ui._switch_to_general_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
         }
         self._add_actions_to_menu(analysis_methods_dict, self.analysis_methods_menu)
 
