@@ -4,6 +4,27 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.358] - 2026-07-10
+### Fixed — colocalization no longer silently analyses frame 0 of a lazy stack
+- **The lazy-stack "frame 0" trap is now guarded in all colocalization paths.**
+  Reading a lazy time-series/z-stack layer with ``np.asarray(layer.data)`` returns
+  only the first frame (the ``_TiffPageStack`` wrapper truncates ``__array__`` on
+  purpose), so colocalization pointed at a stacked channel silently measured
+  frame 0 regardless of the frame being viewed. All four coloc entry points
+  (two-channel condensate, pixel-wise correlation, Manders, object-based) now
+  detect a stack input and extract a real 2-D plane — the **current viewer frame**
+  where available (two-channel, pixel-wise), or the first frame with a warning
+  where the viewer frame isn't reachable (Manders, object-based) — instead of
+  silently grabbing frame 0. A follow-on will add sequential per-frame
+  colocalization so the time-evolution of coloc can be tracked frame by frame.
+- **New reusable helpers** ``layer_is_stack()`` and ``extract_2d_plane()`` in
+  ``file_io`` let any 2-D analysis safely take one plane from a possibly-lazy
+  layer without hitting the trap.
+- Audited the sibling **time-series condensate** tool for the same pattern and
+  confirmed it's clean (it already reads frames one at a time), and deliberately
+  left the ~35 other ``np.asarray(...data)`` sites untouched, since they operate
+  on genuine 2-D images/masks where the call is correct.
+
 ## [1.5.357] - 2026-07-10
 ### Added — assumed-axis warning wired into axis-dependent analyses; small fixes
 - **The assumed-axis warning (1.5.351) now actually fires** where it matters. When

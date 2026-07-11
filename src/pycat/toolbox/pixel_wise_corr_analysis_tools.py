@@ -1237,10 +1237,30 @@ def run_pwcca(image_layer1, image_layer2, roi_mask_layer, data_instance, viewer)
     The analysis can handle both simple binary masks and more complex labeled masks, facilitating detailed
     region-specific analyses.
     """
-    # Extract the image data from the layers.
-    image1 = image_layer1.data
-    image2 = image_layer2.data
-    roi_mask = roi_mask_layer.data if roi_mask_layer is not None else None
+    # Extract the image data from the layers. Colocalization is a 2D operation;
+    # if an input is a lazy time-series / z-stack, np.asarray(...data) would
+    # silently grab frame 0 (the _TiffPageStack trap), so pull the CURRENT VIEWER
+    # FRAME explicitly instead (per-frame-over-time is a planned follow-on).
+    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    _any_stack = (layer_is_stack(image_layer1.data)
+                  or layer_is_stack(image_layer2.data)
+                  or (roi_mask_layer is not None and layer_is_stack(roi_mask_layer.data)))
+    _cur = 0
+    if _any_stack:
+        try:
+            _cur = int(viewer.dims.current_step[0])
+        except Exception:
+            _cur = 0
+        try:
+            from napari.utils.notifications import show_warning as _sw
+            _sw(f"Pixel-wise coloc: input is a stack — measuring current frame "
+                f"(t={_cur}). Step to the frame you want and re-run.")
+        except Exception:
+            pass
+    image1 = extract_2d_plane(image_layer1.data, frame_index=_cur, dtype=None)
+    image2 = extract_2d_plane(image_layer2.data, frame_index=_cur, dtype=None)
+    roi_mask = (extract_2d_plane(roi_mask_layer.data, frame_index=_cur, dtype=None)
+                if roi_mask_layer is not None else None)
 
     # Ensure input images and the ROI mask have the same shape.
     if image1.shape != image2.shape:

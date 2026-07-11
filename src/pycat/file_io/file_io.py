@@ -1016,6 +1016,51 @@ def iter_frames(stack_like, dtype=np.float32, indices=None):
             yield int(t), arr[t]
 
 
+def layer_is_stack(layer_data):
+    """True if this layer data is a multi-frame (T/Z, H, W) stack — whether a
+    plain 3D numpy array or one of PyCAT's lazy wrappers. Used by 2D analyses to
+    decide whether an input is genuinely 2D or a stack that needs a frame chosen
+    (or sequential processing). Safe on anything (returns False on failure)."""
+    try:
+        shp = getattr(layer_data, 'shape', None)
+        return shp is not None and len(shp) == 3 and int(shp[0]) > 1
+    except Exception:
+        return False
+
+
+def extract_2d_plane(layer_data, frame_index=0, dtype=np.float32):
+    """Safely extract ONE 2D plane from possibly-lazy layer data.
+
+    This is the correct way for a 2D analysis to read a single frame from a layer
+    that MIGHT be a lazy stack — using ``np.asarray(layer.data)`` there would
+    trigger the deliberately-truncated ``__array__`` and silently return frame 0
+    regardless of which frame the user is viewing. This indexes the requested
+    frame explicitly (the fast per-frame path on lazy wrappers) and returns a real
+    2D array. A genuinely 2D input is returned as-is.
+
+    frame_index : which frame to take from a stack (e.g. the current viewer step).
+    """
+    try:
+        shp = getattr(layer_data, 'shape', None)
+        if shp is not None and len(shp) == 3:
+            n = int(shp[0])
+            t = int(frame_index)
+            t = 0 if t < 0 else (n - 1 if t >= n else t)
+            frame = layer_data[t]
+            if hasattr(frame, 'compute'):
+                frame = frame.compute()
+            out = np.asarray(frame)
+            return out if dtype is None else out.astype(dtype)
+        # 2D (or unknown) — materialize a single plane defensively.
+        out = np.asarray(layer_data)
+        if out.ndim == 3:                       # a wrapper that slipped through
+            out = out[min(int(frame_index), out.shape[0] - 1)]
+        return out if dtype is None else out.astype(dtype)
+    except Exception:
+        out = np.asarray(layer_data)
+        return out if dtype is None else out.astype(dtype)
+
+
 class _ZarrTYX_generic:
     """
     Lightweight napari-compatible wrapper around a plain zarr Array

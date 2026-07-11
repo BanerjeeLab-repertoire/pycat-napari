@@ -319,14 +319,47 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
 
     def _on_run():
         try:
-            ch1_raw  = ui_instance.viewer.layers[ch1_raw_dropdown.currentText()].data
-            ch1_proc = ui_instance.viewer.layers[ch1_proc_dropdown.currentText()].data
-            ch2_raw  = ui_instance.viewer.layers[ch2_raw_dropdown.currentText()].data
-            ch2_proc = ui_instance.viewer.layers[ch2_proc_dropdown.currentText()].data
-            cell_mask = ui_instance.viewer.layers[cell_mask_dropdown.currentText()].data
+            ch1_raw_layer  = ui_instance.viewer.layers[ch1_raw_dropdown.currentText()]
+            ch1_proc_layer = ui_instance.viewer.layers[ch1_proc_dropdown.currentText()]
+            ch2_raw_layer  = ui_instance.viewer.layers[ch2_raw_dropdown.currentText()]
+            ch2_proc_layer = ui_instance.viewer.layers[ch2_proc_dropdown.currentText()]
+            cell_mask_layer = ui_instance.viewer.layers[cell_mask_dropdown.currentText()]
         except KeyError as e:
             napari_show_warning(f"Two-Channel Coloc: layer not found — {e}")
             return
+
+        # Colocalization is a 2D operation (two channels of ONE field). If any
+        # input is actually a lazy time-series / z-stack, reading it with
+        # np.asarray would silently grab frame 0 (the _TiffPageStack trap). Detect
+        # that, and use the CURRENT VIEWER FRAME instead — warning the user which
+        # frame was used. (Sequential per-frame colocalization over time is a
+        # planned follow-on; for now this measures the frame you're looking at.)
+        from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+        any_stack = any(layer_is_stack(l.data) for l in
+                        (ch1_raw_layer, ch1_proc_layer, ch2_raw_layer,
+                         ch2_proc_layer, cell_mask_layer))
+        cur_frame = 0
+        if any_stack:
+            try:
+                cur_frame = int(ui_instance.viewer.dims.current_step[0])
+            except Exception:
+                cur_frame = 0
+            napari_show_warning(
+                f"Two-Channel Coloc: one or more inputs is a stack — measuring "
+                f"the current frame (t={cur_frame}). Per-frame colocalization over "
+                f"time is coming; for now, step to the frame you want and re-run.")
+
+        def _plane(layer, floaty=True):
+            arr = extract_2d_plane(layer.data, frame_index=cur_frame,
+                                   dtype=(np.float32 if floaty else None))
+            return arr
+
+        ch1_raw  = _plane(ch1_raw_layer)
+        ch1_proc = _plane(ch1_proc_layer)
+        ch2_raw  = _plane(ch2_raw_layer)
+        ch2_proc = _plane(ch2_proc_layer)
+        # Mask must keep its integer labels — do not float it.
+        cell_mask = _plane(cell_mask_layer, floaty=False)
 
         if ch1_raw.shape != ch2_raw.shape:
             napari_show_warning("Two-Channel Coloc: channel images must have the same shape.")
@@ -352,10 +385,10 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
         run_btn.setEnabled(False)
 
         kwargs = dict(
-            image_ch1=ch1_raw.astype(np.float32),
-            preprocessed_ch1=ch1_proc.astype(np.float32),
-            image_ch2=ch2_raw.astype(np.float32),
-            preprocessed_ch2=ch2_proc.astype(np.float32),
+            image_ch1=ch1_raw,
+            preprocessed_ch1=ch1_proc,
+            image_ch2=ch2_raw,
+            preprocessed_ch2=ch2_proc,
             labeled_cell_mask=cell_mask,
             ball_radius=ball_radius,
             microns_per_pixel_sq=mpx_sq,

@@ -105,6 +105,23 @@ def run_manders_coloc(image_layer1, mask_layer2, roi_mask_layer, data_instance):
     image1 = image_layer1.data
     mask2 = mask_layer2.data
     roi_mask = roi_mask_layer.data.astype(bool) if roi_mask_layer is not None else None
+    # Colocalization is 2D. If an input is a lazy stack, np.asarray would silently
+    # take frame 0 (the _TiffPageStack trap); extract frame 0 explicitly and warn
+    # (this path has no viewer to read the current frame — per-frame-over-time is
+    # a planned follow-on).
+    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    if (layer_is_stack(image1) or layer_is_stack(mask2)
+            or (roi_mask is not None and layer_is_stack(roi_mask))):
+        try:
+            from napari.utils.notifications import show_warning as _sw
+            _sw("Manders coloc: an input is a stack — measuring the first frame. "
+                "For a specific frame, split it out to a 2D layer first.")
+        except Exception:
+            pass
+        image1 = extract_2d_plane(image1, frame_index=0, dtype=None)
+        mask2 = extract_2d_plane(mask2, frame_index=0, dtype=None)
+        if roi_mask is not None:
+            roi_mask = extract_2d_plane(roi_mask, frame_index=0, dtype=None).astype(bool)
 
     # Validating the shapes of the input images and the ROI mask, if provided
     if image1.shape != mask2.shape:
@@ -874,6 +891,20 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
     mask1 = mask_layer1.data
     mask2 = mask_layer2.data
     roi_mask = roi_mask_layer.data if roi_mask_layer is not None else None
+    # Colocalization is 2D — guard against the lazy-stack frame-0 trap.
+    from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+    if (layer_is_stack(mask1) or layer_is_stack(mask2)
+            or (roi_mask is not None and layer_is_stack(roi_mask))):
+        try:
+            from napari.utils.notifications import show_warning as _sw
+            _sw("Object coloc: an input is a stack — measuring the first frame. "
+                "For a specific frame, split it out to a 2D layer first.")
+        except Exception:
+            pass
+        mask1 = extract_2d_plane(mask1, frame_index=0, dtype=None)
+        mask2 = extract_2d_plane(mask2, frame_index=0, dtype=None)
+        if roi_mask is not None:
+            roi_mask = extract_2d_plane(roi_mask, frame_index=0, dtype=None)
 
     # Validate input masks' shapes.
     if mask1.shape != mask2.shape:
