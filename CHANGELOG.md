@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.341] - 2026-07-10
+### Changed — drag-and-drop: no more image/mask prompt, clear-or-add instead
+- **Dropped files no longer prompt "image or mask?".** A dropped file loads as an
+  image unless it carries a PyCAT signifier marking it a mask (then it loads as a
+  Labels layer). PyCAT isn't intended to ingest foreign masks, so an unsignified
+  file is simply treated as an image — no dialog, no pixel-statistics guessing.
+  This removes the friction of the prompt appearing for e.g. dropped IMS files
+  (always real acquisition images) and also removes the classification path that
+  had been a source of crashes. (Accepting foreign masks is a possible future
+  feature.)
+- **New clear-or-add prompt.** If an image is already loaded when you drop a
+  file, PyCAT now asks ONCE whether to clear the current session and load the
+  dropped file(s), or add them to what's open — the choice applies to the whole
+  dropped batch. If nothing is loaded yet, the file(s) load with no prompt. The
+  prompt defaults to "Add" if it can't be shown, so current work is never
+  discarded silently.
+- Slow-storage detection still runs on dropped images; the menu "Add Image /
+  Mask" path is unchanged (it still classifies image-vs-mask).
+
 ## [1.5.340] - 2026-07-10
 ### Fixed — crash opening non-signifier files via drag-drop / "Add Image / Mask"
 - **Fixed ``'FileIOClass' object has no attribute '_file_has_imaging_metadata'``**

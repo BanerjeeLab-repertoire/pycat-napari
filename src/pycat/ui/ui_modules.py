@@ -181,30 +181,97 @@ class _FileDropFilter(QObject):
         return True
 
     def _route(self, paths):
-        """Route dropped files through PyCAT's classifying open path, so a drop
-        behaves like File → Add Image / Mask: each file's TYPE is resolved
-        (PyCAT signifier → pixel-statistics → prompt) so a dropped MASK loads as a
-        Labels layer and a dropped image as an Image layer, and its STRUCTURE is
-        auto-detected (IMS/TIFF/CZI stacks load lazily as stacks, 2D through the
-        channel pipeline). Previously drops went straight to the image opener,
-        which loaded masks as fluorescence images.
+        """Route dropped files.
 
-        A multi-file drop loads together: the first file starts a fresh session
-        (clear_first=True), the rest are added.
+        Type: a dropped file loads as an IMAGE unless it carries a PyCAT
+        signifier saying it is a mask (then it loads as a Labels layer). There is
+        NO image-vs-mask prompt — PyCAT isn't intended to ingest foreign masks, so
+        an unsignified file is treated as an image. Structure is still
+        auto-detected (IMS/TIFF/CZI stacks load lazily; 2D through the channel
+        pipeline).
+
+        Session: if an image layer is already loaded, the user is asked ONCE
+        whether to CLEAR the current session and load the dropped file(s), or ADD
+        them to it — this applies to the whole dropped batch. If nothing is loaded
+        yet, the file(s) load with no prompt.
         """
         import os
+        paths = [p for p in (paths or []) if p and os.path.exists(p)]
+        if not paths:
+            return
+
+        # Decide clear-vs-add once, up front, based on whether an image is present.
+        clear_session = False
+        if self._image_layer_present():
+            choice = self._ask_clear_or_add(len(paths))
+            if choice == 'cancel':
+                return
+            clear_session = (choice == 'clear')
+
         try:
             for _i, p in enumerate(paths):
-                if not p or not os.path.exists(p):
-                    continue
-                self._file_io._add_image_or_mask_single(
-                    p, clear_first=(_i == 0))
+                # Only the FIRST file clears (when the user chose clear); the rest
+                # always add so the whole batch ends up loaded together.
+                first = (_i == 0)
+                self._route_one(p, clear_first=(clear_session and first))
         except Exception as e:
             try:
                 from napari.utils.notifications import show_warning
                 show_warning(f"PyCAT could not open dropped file(s): {e}")
             except Exception:
                 print(f"[PyCAT] Drop-open error: {e}")
+
+    def _route_one(self, file_path, clear_first):
+        """Load a single dropped file: mask only if PyCAT-signified, else image
+        (structure auto-detected). No image-vs-mask prompt."""
+        fio = self._file_io
+        try:
+            sig = fio._read_pycat_signifier(file_path)
+        except Exception:
+            sig = None
+        if sig == 'mask':
+            fio.open_2d_mask(file_paths=[file_path], clear_first=clear_first)
+        else:
+            fio._open_image_auto_single(file_path, clear_first=clear_first)
+
+    def _image_layer_present(self):
+        """True if the viewer currently holds at least one Image layer."""
+        try:
+            viewer = getattr(self._file_io, 'viewer', None)
+            if viewer is None:
+                return False
+            for lyr in viewer.layers:
+                if lyr.__class__.__name__ == 'Image':
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _ask_clear_or_add(self, n_files):
+        """Ask whether to clear the current session or add the dropped file(s).
+        Returns 'clear', 'add', or 'cancel'. Defaults to 'add' if the dialog
+        can't be shown (safer — never discards the user's current work silently)."""
+        try:
+            from qtpy.QtWidgets import QMessageBox
+            box = QMessageBox()
+            box.setWindowTitle("Clear or add?")
+            what = "this file" if n_files == 1 else f"these {n_files} files"
+            box.setText(
+                f"An image is already loaded.\n\nClear the current session and "
+                f"load {what}, or add to what's already open?")
+            clear_btn = box.addButton("Clear && load", QMessageBox.DestructiveRole)
+            add_btn = box.addButton("Add", QMessageBox.AcceptRole)
+            cancel_btn = box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(add_btn)
+            box.exec_()
+            clicked = box.clickedButton()
+            if clicked is clear_btn:
+                return 'clear'
+            if clicked is cancel_btn:
+                return 'cancel'
+            return 'add'
+        except Exception:
+            return 'add'
 
 
 def _relax_min_widths(widget):
