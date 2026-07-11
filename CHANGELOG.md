@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.347] - 2026-07-10
+### Added — VPT: consolidated plot panel + trajectory-spread & van Hove plots
+- **Two new microrheology plots.** A **centered-trajectories** plot overlays every
+  track shifted to start at (0,0) at t=0, showing the spatial spread of the
+  ensemble; and a **van Hove displacement distribution** histograms single-axis
+  displacements at a fixed lag against the Gaussian of matching variance, with the
+  non-Gaussian parameter α₂ reported — the direct visual test of whether the
+  motion is Brownian (Gaussian ⇒ Brownian; heavy tails / α₂≫0 ⇒ heterogeneous).
+- **Consolidated 2×2 plot panel (default).** After "Compute MSD & Viscosity", the
+  MSD spaghetti, Evans G′/G″ moduli, centered trajectories, and van Hove
+  distribution now appear together in ONE window instead of separate pop-ups. A
+  **"Separate windows" button on the figure** re-renders them as individual
+  resizable windows live, and a **"Show all plots in one window" checkbox** in the
+  VPT panel sets the default layout. In separate-window mode the MSD plot keeps
+  click-a-track-to-reveal-it-in-the-viewer brushing.
+- The G′/G″ panel is explicitly labelled as the Evans (2009) method — the same
+  algorithm PyCAT already used, verified in-sandbox to reproduce the reference
+  implementation to machine precision on a known viscous fluid.
+
 ## [1.5.346] - 2026-07-10
 ### Added — user-created layers are auto-tagged (completes tag coverage)
 - **Layers created through napari's own menus** (the native "new points / shapes /

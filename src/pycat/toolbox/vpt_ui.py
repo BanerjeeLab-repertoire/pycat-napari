@@ -1421,6 +1421,19 @@ class VideoParticleTrackingUI:
         form.addRow(self._show_moduli_adv)
         form.addRow(self._moduli_boot_row)
 
+        # Plot layout preference: one consolidated 2×2 window (default) vs separate
+        # pop-out windows. There is also a live toggle button on the consolidated
+        # window, so this only sets the initial layout.
+        self._plots_consolidated = QCheckBox("Show all plots in one window (2×2)")
+        self._plots_consolidated.setChecked(True)
+        self._plots_consolidated.setToolTip(
+            "ON (default): MSD, Evans G′/G″, centered trajectories, and the van "
+            "Hove displacement distribution appear together in one 2×2 figure "
+            "(with a button to pop them into separate windows). OFF: each plot "
+            "opens in its own resizable window, and the MSD plot supports "
+            "click-a-track-to-reveal-it-in-the-viewer.")
+        form.addRow(self._plots_consolidated)
+
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -1511,22 +1524,19 @@ class VideoParticleTrackingUI:
                                           if hasattr(self, '_promote_stable') else True),
             'D_um2_per_s': D, 'alpha': alpha, 'eta_Pa_s': eta})
 
-        # Graphs: the MSD spaghetti plot (per-track + ensemble mean + fit) and
-        # the viscoelastic moduli G'/G''. These communicate the result far better
-        # than a table; the numbers stay available in the summary table below.
+        # Graphs: consolidated 2×2 panel (MSD spaghetti, Evans G′/G″, centered
+        # trajectories, van Hove displacement distribution) in one window by
+        # default, with a button to pop them into separate windows. The MSD panel
+        # keeps click-to-reveal brushing via the standalone plot when separate.
         try:
             from pycat.toolbox.condensate_physics_tools import (
                 per_track_msd_curves, compute_moduli_evans,
                 compute_moduli_evans_bootstrap)
             from pycat.toolbox.analysis_plots import (
-                plot_msd_trajectories, plot_moduli)
+                plot_msd_trajectories, plot_moduli, plot_vpt_panel)
             ptc = per_track_msd_curves(
                 tracks, frame_interval_s=self._frame_dt.value(),
                 min_track_length=self._min_track.value())
-            plot_msd_trajectories(ptc, msd_df, fit,
-                                  title="VPT MSD (per-track + ensemble)",
-                                  interactive=True,
-                                  on_pick_track=self._reveal_track_in_viewer)
             _boot = (self._moduli_boot.isChecked()
                      if hasattr(self, '_moduli_boot') else False)
             if _boot:
@@ -1551,7 +1561,28 @@ class VideoParticleTrackingUI:
                       + "Accuracy still depends on the input MSD: fragmented or "
                       "noisy trajectories degrade G'/G'' just as they degrade "
                       "the viscosity fit, so confirm the MSD is clean first.")
-                plot_moduli(mod, interactive=True)
+            # Consolidated by default; the checkbox lets the user prefer separate
+            # pop-out windows (each resizable, and the MSD one gets click-to-reveal
+            # brushing via the standalone interactive plot).
+            _consolidated = True
+            if hasattr(self, '_plots_consolidated'):
+                _consolidated = self._plots_consolidated.isChecked()
+            if _consolidated:
+                plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
+                               frame_interval_s=self._frame_dt.value(),
+                               van_hove_lag=1, consolidated=True,
+                               interactive=True)
+            else:
+                # Separate windows: use the interactive MSD plot (with brushing)
+                # + the standalone spread/moduli windows.
+                plot_msd_trajectories(ptc, msd_df, fit,
+                                      title="VPT MSD (per-track + ensemble)",
+                                      interactive=True,
+                                      on_pick_track=self._reveal_track_in_viewer)
+                plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
+                               frame_interval_s=self._frame_dt.value(),
+                               van_hove_lag=1, consolidated=False,
+                               interactive=True)
         except Exception as e:
             print(f"[PyCAT] VPT plots failed: {e}")
 

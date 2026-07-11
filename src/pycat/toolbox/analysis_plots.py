@@ -139,7 +139,198 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     return _show(fig, interactive)
 
 
-def plot_moduli(moduli_df, title="Viscoelastic moduli (microrheology)",
+def _draw_centered_tracks(ax, tracks_df, max_tracks=400):
+    """Draw every trajectory translated so it starts at (0,0) at its first frame,
+    overlaid on one x–y axes. The fan-out from the origin shows the spatial spread
+    of the ensemble; for Brownian motion the cloud is isotropic and grows with
+    time. Draws onto a supplied Axes (so it can be a subplot or its own window)."""
+    if tracks_df is None or not len(tracks_df):
+        ax.text(0.5, 0.5, "No tracks", ha='center', va='center')
+        return
+    tids = tracks_df['track_id'].unique()
+    tids = tids[tids >= 0]
+    if len(tids) > max_tracks:
+        rng = np.random.default_rng(0)
+        tids = rng.choice(tids, max_tracks, replace=False)
+    for tid in tids:
+        g = tracks_df[tracks_df['track_id'] == tid].sort_values('frame')
+        if len(g) < 2:
+            continue
+        x = g['x_um'].values.astype(float)
+        y = g['y_um'].values.astype(float)
+        ax.plot(x - x[0], y - y[0], color='#4c72b0', alpha=0.15, lw=0.7)
+    ax.set_aspect('equal', adjustable='datalim')
+    ax.axhline(0, color='0.7', lw=0.6); ax.axvline(0, color='0.7', lw=0.6)
+    ax.set_xlabel("Δx from start (µm)")
+    ax.set_ylabel("Δy from start (µm)")
+    ax.set_title("Centered trajectories (origin at t=0)", fontweight='bold')
+    ax.grid(True, alpha=0.15)
+
+
+def _draw_van_hove(ax, tracks_df, lag_frames=1, frame_interval_s=1.0, bins=60):
+    """Van Hove self-correlation: histogram of single-axis displacements at a
+    fixed lag, overlaid with the Gaussian of matching variance. For purely
+    Brownian motion the displacement distribution is Gaussian, so a data histogram
+    that tracks the dashed Gaussian ⇒ Brownian; heavier tails ⇒ heterogeneous /
+    non-Gaussian dynamics. Pools Δx and Δy (isotropic assumption) for statistics.
+    Draws onto a supplied Axes."""
+    if tracks_df is None or not len(tracks_df):
+        ax.text(0.5, 0.5, "No tracks", ha='center', va='center')
+        return
+    disps = []
+    for tid, g in tracks_df.groupby('track_id'):
+        if tid < 0:
+            continue
+        g = g.sort_values('frame')
+        t = g['frame'].values.astype(int)
+        x = g['x_um'].values.astype(float)
+        y = g['y_um'].values.astype(float)
+        f0, f1 = t.min(), t.max()
+        span = f1 - f0 + 1
+        xs = np.full(span, np.nan); ys = np.full(span, np.nan)
+        xs[t - f0] = x; ys[t - f0] = y
+        if lag_frames >= span:
+            continue
+        dx = xs[lag_frames:] - xs[:-lag_frames]
+        dy = ys[lag_frames:] - ys[:-lag_frames]
+        disps.append(dx[np.isfinite(dx)])
+        disps.append(dy[np.isfinite(dy)])
+    if not disps:
+        ax.text(0.5, 0.5, "Not enough data at this lag", ha='center', va='center')
+        return
+    d = np.concatenate(disps)
+    d = d[np.isfinite(d)]
+    if d.size < 10:
+        ax.text(0.5, 0.5, "Too few displacements", ha='center', va='center')
+        return
+    sigma = np.std(d)
+    ax.hist(d, bins=bins, density=True, color='#4c72b0', alpha=0.55,
+            label=f"data (σ={sigma:.3g} µm)")
+    # Gaussian reference (same σ) — the Brownian expectation.
+    xs_g = np.linspace(d.min(), d.max(), 200)
+    if sigma > 0:
+        gauss = np.exp(-xs_g ** 2 / (2 * sigma ** 2)) / (sigma * np.sqrt(2 * np.pi))
+        ax.plot(xs_g, gauss, 'r--', lw=1.8, label="Gaussian (Brownian)")
+    # A non-Gaussian parameter α₂ = ⟨d⁴⟩/(3⟨d²⟩²) − 1 (0 for a Gaussian).
+    m2 = np.mean(d ** 2); m4 = np.mean(d ** 4)
+    a2 = (m4 / (3 * m2 ** 2) - 1.0) if m2 > 0 else np.nan
+    lag_s = lag_frames * frame_interval_s
+    ax.set_title(f"Van Hove displacement dist. (lag={lag_s:.3g}s, α₂={a2:.2f})",
+                 fontweight='bold')
+    ax.set_xlabel("displacement (µm)")
+    ax.set_ylabel("probability density")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.15)
+
+
+def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
+                   max_spaghetti=400):
+    """Draw the MSD spaghetti + ensemble mean + fit onto a supplied Axes (the
+    consolidated-panel version; the standalone plot_msd_trajectories keeps the
+    interactive pick-brushing)."""
+    if per_track_df is not None and len(per_track_df):
+        tids = per_track_df['track_id'].unique()
+        n_all = len(tids)
+        if n_all > max_spaghetti:
+            rng = np.random.default_rng(0)
+            shown = set(rng.choice(tids, max_spaghetti, replace=False))
+            pdf = per_track_df[per_track_df['track_id'].isin(shown)]
+        else:
+            pdf = per_track_df
+        for tid, g in pdf.groupby('track_id'):
+            g = g.sort_values('lag_s')
+            ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0', alpha=0.18, lw=0.8)
+        ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
+                label=f"individual tracks (n={n_all})")
+    if ensemble_msd_df is not None and len(ensemble_msd_df):
+        e = ensemble_msd_df.sort_values('lag_s')
+        ax.plot(e['lag_s'], e['msd_um2'], color='#c44e52', lw=2.4,
+                label="ensemble mean MSD")
+    if fit and np.isfinite(fit.get('D_um2_per_s', np.nan)):
+        tf = np.asarray(fit['fit_lags_s']); mf = np.asarray(fit['fit_msd'])
+        if tf.size:
+            ax.plot(tf, mf, '--', color='k', lw=1.6,
+                    label=(f"fit: D={fit['D_um2_per_s']:.3g} µm²/s, "
+                           f"α={fit['alpha']:.2f}"))
+    ax.set_xscale('log'); ax.set_yscale('log')
+    ax.set_xlabel("lag time τ (s)"); ax.set_ylabel("MSD ⟨Δr²⟩ (µm²)")
+    ax.set_title("MSD (per-track + ensemble)", fontweight='bold')
+    ax.grid(True, which='both', alpha=0.15); ax.legend(fontsize=7, loc='upper left')
+
+
+def _draw_moduli_into(ax, moduli_df):
+    """Draw G′/G″ (Evans) onto a supplied Axes (consolidated-panel version)."""
+    if moduli_df is None or not len(moduli_df):
+        ax.text(0.5, 0.5, "No moduli", ha='center', va='center'); return
+    d = moduli_df.sort_values('omega_rad_s')
+    w = d['omega_rad_s'].values
+    ax.plot(w, np.clip(d['g_prime_pa'].values, 1e-12, None), '-o', ms=3,
+            color='#c44e52', label="G′ (storage)")
+    ax.plot(w, np.clip(d['g_double_prime_pa'].values, 1e-12, None), '-s', ms=3,
+            color='#4c72b0', label="G″ (loss)")
+    ax.set_xscale('log'); ax.set_yscale('log')
+    ax.set_xlabel("angular frequency ω (rad/s)"); ax.set_ylabel("modulus (Pa)")
+    ax.set_title("Complex moduli G′/G″ — Evans method", fontweight='bold')
+    ax.grid(True, which='both', alpha=0.15); ax.legend(fontsize=8)
+
+
+def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
+                   tracks_df=None, frame_interval_s=1.0, van_hove_lag=1,
+                   consolidated=True, interactive=True):
+    """Render the four VPT plots — MSD spaghetti, Evans G′/G″, centered
+    trajectories, and the van Hove displacement distribution — either as a single
+    2×2 subplot figure (consolidated, the default) or as four separate windows.
+    A button on the consolidated window re-renders the other way live.
+
+    tracks_df : the raw per-detection tracks (track_id, frame, x_um, y_um), used
+        by the two spread plots. If None, those panels show a placeholder.
+    """
+    import matplotlib
+    if not interactive:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    def _render_separate():
+        figs = []
+        f1, a1 = plt.subplots(figsize=(6.2, 5.0)); _draw_msd_into(a1, per_track_df, ensemble_msd_df, fit); f1.tight_layout(); figs.append(f1)
+        f2, a2 = plt.subplots(figsize=(6.0, 5.0)); _draw_moduli_into(a2, moduli_df); f2.tight_layout(); figs.append(f2)
+        f3, a3 = plt.subplots(figsize=(5.4, 5.2)); _draw_centered_tracks(a3, tracks_df); f3.tight_layout(); figs.append(f3)
+        f4, a4 = plt.subplots(figsize=(6.0, 4.6)); _draw_van_hove(a4, tracks_df, van_hove_lag, frame_interval_s); f4.tight_layout(); figs.append(f4)
+        if interactive:
+            plt.show(block=False)
+        return figs
+
+    def _render_consolidated():
+        fig, axes = plt.subplots(2, 2, figsize=(12.5, 10.0))
+        _draw_msd_into(axes[0, 0], per_track_df, ensemble_msd_df, fit)
+        _draw_moduli_into(axes[0, 1], moduli_df)
+        _draw_centered_tracks(axes[1, 0], tracks_df)
+        _draw_van_hove(axes[1, 1], tracks_df, van_hove_lag, frame_interval_s)
+        fig.suptitle("VPT microrheology", fontweight='bold', fontsize=13)
+        fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+        # Live toggle: a button that closes this figure and opens separate windows.
+        try:
+            from matplotlib.widgets import Button
+            axbtn = fig.add_axes([0.85, 0.005, 0.14, 0.03])
+            btn = Button(axbtn, 'Separate windows')
+            def _switch(_evt):
+                try:
+                    plt.close(fig)
+                except Exception:
+                    pass
+                _render_separate()
+            btn.on_clicked(_switch)
+            fig._pycat_toggle_btn = btn  # keep a ref so it isn't GC'd
+        except Exception:
+            pass
+        if interactive:
+            plt.show(block=False)
+        return fig
+
+    return _render_consolidated() if consolidated else _render_separate()
+
+
+def plot_moduli(moduli_df, title="Complex moduli G′/G″ — Evans method (microrheology)",
                 interactive=True):
     """
     Log-log plot of storage G'(ω) and loss G''(ω) vs angular frequency, from
