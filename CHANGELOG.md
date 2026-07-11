@@ -4,6 +4,27 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.342] - 2026-07-10
+### Added — tagged drawing-layer factory + a 'purpose' tag (foundation)
+- **New shared primitive ``pycat.toolbox.drawing_layers.add_drawing_layer()``**
+  creates annotation/drawing layers (measurement lines, ROIs, point markers) that
+  are used for a PURPOSE in a method — the intended replacement for both the eager
+  load-time diameter layers and the ad-hoc per-method Shapes creation. Each layer
+  it makes is: seeded (for Shapes) so an empty layer reports a finite extent
+  (guards the NaN-extent / Home-button crash), put into the right draw mode and
+  selected so the user can draw immediately, and TAGGED with role + purpose via
+  the layer-tag engine so the drawing layer is visible to the Tag Inspector and to
+  future tag-driven autopopulation.
+- **New ``purpose`` tag key** describing what an annotation layer is FOR
+  (cell_diameter, object_diameter, roi_background, roi_measure, line_profile, …).
+  It is an OPEN vocabulary: the common purposes are suggested (for consistency and
+  UI discovery via ``SUGGESTED_VALUES``) but any user-defined value is accepted, so
+  a user can coin their own purpose for exploration — unlike the strict core keys
+  (role/modality/…), which still reject unknown values.
+- This is the foundation only. Wiring per-method "Add Measure Line / ROI" buttons
+  to this primitive (replacing the load-time diameter layers), and auto-tagging
+  layers created through napari's own menus, are the next staged steps.
+
 ## [1.5.341] - 2026-07-10
 ### Changed — drag-and-drop: no more image/mask prompt, clear-or-add instead
 - **Dropped files no longer prompt "image or mask?".** A dropped file loads as an

@@ -65,6 +65,7 @@ CORE_KEYS = {
     'channel',       # fluorophore / stain identity (free value from metadata)
     'scale',         # calibrated / uncalibrated
     'provenance',    # raw / derived / segmentation / pycat-generated
+    'purpose',       # what an annotation/drawing layer is FOR (open vocabulary)
 }
 
 CORE_VALUES = {
@@ -75,6 +76,21 @@ CORE_VALUES = {
     'scale': {'calibrated', 'uncalibrated'},
     'provenance': {'raw', 'derived', 'segmentation', 'pycat-generated'},
     # 'channel' has free values (fluorophore names vary by microscope).
+    # 'purpose' is intentionally NOT here — it uses SUGGESTED_VALUES (open
+    # vocabulary) so users can coin their own purposes for exploration.
+}
+
+# Open-vocabulary keys: values are SUGGESTED (for discovery / UI dropdowns and to
+# keep common purposes consistent) but ANY value is accepted, unlike CORE_VALUES
+# which reject unknown values.
+SUGGESTED_VALUES = {
+    'purpose': {
+        'cell_diameter', 'object_diameter',   # measurement lines
+        'roi_measure', 'roi_background',       # region annotations
+        'roi_exclude', 'roi_include',
+        'line_profile',                        # intensity line-scan
+        'scratch',                             # freeform / exploratory
+    },
 }
 
 VALID_SOURCES = {'from_metadata', 'inferred', 'derived', 'user_set'}
