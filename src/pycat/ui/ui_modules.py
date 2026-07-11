@@ -1130,7 +1130,11 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         from PyQt5.QtWidgets import QCheckBox
         measure_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(measure_layout, 'Measure Object Diameters', bold=True) # Add widget title label
-        measure_button = QPushButton("Measure Line(s)") # Create a button widget
+        # Single cycling button: Draw Lines → Measure Lines → Clear Lines → …
+        # The label is state-driven (reads actual layer/line/measurement state) so
+        # it's always honest. Starts as "Draw Lines" (layers are created on demand,
+        # not at file load).
+        measure_button = QPushButton("Draw Lines")
         def _arm_line_drawing():
             """Activate a diameter Shapes layer in add_line mode so the user can
             draw. Creates the 'Object Diameter' / 'Cell Diameter' layers on demand
@@ -1189,14 +1193,118 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 import os as _os
                 if _os.environ.get('PYCAT_DEBUG'):
                     print(f"[PyCAT] arm line drawing failed: {_e}")
-        def _on_measure_line():
+        def _diameter_layers():
+            """Return (object_layer, cell_layer) or (None, None) for missing."""
+            o = self.viewer.layers['Object Diameter'] if 'Object Diameter' in self.viewer.layers else None
+            c = self.viewer.layers['Cell Diameter'] if 'Cell Diameter' in self.viewer.layers else None
+            return o, c
+
+        def _count_real_lines(layer):
+            """Number of non-seed lines on a Shapes layer (seed is ~0-length)."""
+            import numpy as _np
+            n = 0
+            for d in getattr(layer, 'data', []) or []:
+                try:
+                    if _np.ptp(_np.asarray(d), axis=0).max() > 1e-2:
+                        n += 1
+                except Exception:
+                    pass
+            return n
+
+        def _measure_state():
+            """Derive the button state from ACTUAL layer/line/measurement state so
+            the label is always honest, even if the user drew/deleted/switched
+            methods in between. Returns one of:
+              'draw'    — no diameter layers exist yet
+              'measure' — layers exist (drawn or empty); next action is measure
+              'clear'   — a measurement has been taken; next action is clear
+            """
+            o, c = _diameter_layers()
+            if o is None and c is None:
+                return 'draw'
+            dr = self.central_manager.active_data_class.data_repository
+            # "measured" = calculate_length has populated a real value this cycle.
+            if dr.get('_diameter_measured'):
+                return 'clear'
+            return 'measure'
+
+        def _relabel():
+            st = _measure_state()
+            label = {'draw': 'Draw Lines', 'measure': 'Measure Lines',
+                     'clear': 'Clear Lines'}[st]
+            try:
+                measure_button.setText(label)
+            except Exception:
+                pass
+
+        def _do_draw():
+            """Create the diameter layers (seeded + tagged) and arm drawing."""
+            _arm_line_drawing()  # create-if-missing + arm (defined above)
+
+        def _do_measure():
             self.on_general_button_clicked(
                 self.central_manager.active_data_class.calculate_length, None, self.viewer)
+            # Mark measured so the button advances to Clear.
+            try:
+                o, c = _diameter_layers()
+                any_real = ((o is not None and _count_real_lines(o) > 0) or
+                            (c is not None and _count_real_lines(c) > 0))
+                self.central_manager.active_data_class.data_repository['_diameter_measured'] = bool(any_real)
+            except Exception:
+                pass
             self._record('measure_line', {
                 'object_size': self.central_manager.active_data_class.data_repository.get('object_size'),
                 'cell_diameter': self.central_manager.active_data_class.data_repository.get('cell_diameter'),
                 'ball_radius': self.central_manager.active_data_class.data_repository.get('ball_radius'),
             })
+
+        def _do_clear():
+            """Delete drawn lines from both layers, reset measured values, re-seed
+            for a finite extent, and re-arm drawing for a smooth draw→measure→
+            clear→draw loop. Layers are NOT removed (they persist across methods)."""
+            import numpy as _np
+            o, c = _diameter_layers()
+            for lyr in (o, c):
+                if lyr is None:
+                    continue
+                try:
+                    lyr.data = []  # remove all shapes
+                    # Re-seed one invisible near-zero line so the empty layer keeps
+                    # a finite extent (guards the Home-button NaN crash).
+                    lyr.add(_np.array([[0.0, 0.0], [0.0, 1e-4]]),
+                            shape_type='line', edge_width=0.0)
+                except Exception:
+                    pass
+            # Reset measured values to defaults unless the user chose to persist.
+            try:
+                dr = self.central_manager.active_data_class.data_repository
+                dr['_diameter_measured'] = False
+                if not getattr(self.central_manager, 'persist_measurements', False):
+                    for k in ('object_size', 'cell_diameter', 'ball_radius'):
+                        dr.pop(k, None)
+            except Exception:
+                pass
+            # Revert the red/green status circle to its initial (unmeasured) state.
+            try:
+                w = getattr(self, '_measure_line_status', None)
+                if w is not None and hasattr(w, 'reset'):
+                    w.reset()
+            except Exception:
+                pass
+            _arm_line_drawing()  # re-arm so the user can draw again immediately
+
+        def _on_measure_line():
+            """Single cycling button: Draw → Measure → Clear → (Measure) …,
+            with the label always reflecting actual state."""
+            st = _measure_state()
+            if st == 'draw':
+                _do_draw()
+            elif st == 'measure':
+                _do_measure()
+            else:  # clear
+                _do_clear()
+            _relabel()
+
         measure_button.clicked.connect(_on_measure_line)
 
         # "Measure Line(s)" is the only button here — drawing happens directly on
@@ -1211,15 +1319,17 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         except Exception:
             measure_layout.addWidget(measure_button)
 
-        # Arm line drawing automatically so the diameter Shapes layer is ready to
-        # draw on as soon as this step is shown — no separate "Draw" button needed.
-        # Deferred so the layer exists and the dock has finished building.
+        # On show, set the button label from the CURRENT state instead of
+        # auto-creating the layers — if the user already drew/measured on a
+        # previous visit (the layers persist across methods), the label reflects
+        # that; otherwise it reads "Draw Lines". Deferred so the dock has finished
+        # building and any persisted layers are present.
         try:
             from PyQt5.QtCore import QTimer as _QTarm
-            _QTarm.singleShot(0, _arm_line_drawing)
+            _QTarm.singleShot(0, _relabel)
         except Exception:
             try:
-                _arm_line_drawing()
+                _relabel()
             except Exception:
                 pass
 

@@ -4,6 +4,24 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.344] - 2026-07-10
+### Changed — diameter measurement is now a single self-explaining cycling button
+- **The measure-diameters control is one button that cycles Draw → Measure →
+  Clear**, with the label always reflecting the actual state (so it's obvious what
+  it does, instead of "Measure Line(s)" secretly also creating the layers):
+  - **Draw Lines** (when no diameter layers exist) — creates the seeded, tagged
+    'Object Diameter' / 'Cell Diameter' layers and arms line drawing.
+  - **Measure Lines** — runs the diameter measurement; if lines were actually
+    drawn, advances to Clear (and the status circle turns green).
+  - **Clear Lines** — deletes the drawn lines, resets the measured values (unless
+    "Remember measurements across clears" is on), re-seeds the layers for a finite
+    extent, resets the status circle, and re-arms drawing for a smooth
+    draw→measure→clear→draw loop. The layers are NOT removed, so they persist if
+    you switch to a method that doesn't use them.
+- **State-driven label.** The button reads the real layer/line/measurement state
+  on show and after every click, so it stays honest even if you drew directly in
+  napari, switched methods, or deleted a layer.
+
 ## [1.5.343] - 2026-07-10
 ### Changed — diameter measurement layers are created on demand, not at load
 - **The 'Object Diameter' / 'Cell Diameter' annotation layers are no longer
