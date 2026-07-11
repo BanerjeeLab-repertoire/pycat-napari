@@ -4,6 +4,19 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.363] - 2026-07-10
+### Fixed — Cellpose prewarm re-ran on every launch (misleading "one-time" message)
+- **The Cellpose prewarm now correctly detects an already-cached model.** The old
+  check looked for a file named exactly ``~/.cellpose/models/cyto2``, but Cellpose
+  saves weights under suffixed names (e.g. ``cyto2torch_0``, ``cyto2_cp3``,
+  ``cpsam``), so the check always missed — the prewarm subprocess ran on every
+  launch and printed the "downloading it once now… ONE-TIME setup" message even
+  when the model was already cached (Cellpose itself didn't actually re-download,
+  but the spurious subprocess + message were confusing). The prewarm now scans the
+  known cache locations (including a ``CELLPOSE_LOCAL_MODELS_PATH`` override) for
+  any weight file whose name starts with the model name, so a cached model is
+  recognised and skipped with an accurate message.
+
 ## [1.5.362] - 2026-07-10
 ### Changed — analysis-method IA: Exploratory rename + Fibril split/move (stage 1 of 3)
 - **"General Analysis" is now "Exploratory Analysis"** (menu entry + dock title).

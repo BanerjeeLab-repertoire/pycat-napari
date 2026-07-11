@@ -154,6 +154,41 @@ def _is_macos_arch_mismatch():
     return False
 
 
+def _cellpose_model_cached(model_name):
+    """Return True if a Cellpose weight file for `model_name` is already cached.
+
+    Cellpose stores weights under version-dependent directories and with suffixed
+    filenames (e.g. `cyto2torch_0`, `cyto2_cp3`, `cpsam`), NOT as a bare file named
+    exactly `model_name`. So we scan the known cache locations for any file whose
+    name starts with the model name. Also honours the CELLPOSE_LOCAL_MODELS_PATH
+    override some installs use. Safe: any error returns False (prewarm proceeds).
+    """
+    try:
+        from pathlib import Path
+        import os
+        candidates = []
+        env_dir = os.environ.get('CELLPOSE_LOCAL_MODELS_PATH')
+        if env_dir:
+            candidates.append(Path(env_dir))
+        home = Path.home()
+        candidates += [
+            home / '.cellpose' / 'models',   # Cellpose <4 default
+            home / '.cellpose',              # some builds drop weights one level up
+        ]
+        for d in candidates:
+            try:
+                if not d.is_dir():
+                    continue
+                for f in d.iterdir():
+                    if f.is_file() and f.name.startswith(model_name):
+                        return True
+            except Exception:
+                continue
+        return False
+    except Exception:
+        return False
+
+
 def _prewarm_cellpose_model():
     """
     Pre-downloads and caches the Cellpose model on first launch so users don't experience
@@ -199,16 +234,23 @@ def _prewarm_cellpose_model():
             model_name = default_cellpose_model()
         except Exception:
             model_name = 'cyto2'
-        model_cache = Path.home() / '.cellpose' / 'models' / model_name
-        if model_cache.exists():
-            log.info("Cellpose model '%s' found in local cache (%s) — no download "
-                     "needed; it will load from disk when you run segmentation.",
-                     model_name, model_cache)
+        # Cellpose does NOT save weights as a bare file named exactly `cyto2` — the
+        # real cached filenames are variants like `cyto2torch_0`, `cyto2_cp3`, or
+        # `cpsam` (and the dir differs across Cellpose versions). Checking for an
+        # exact `.cellpose/models/<model_name>` path therefore always missed, so
+        # the prewarm subprocess ran on EVERY launch and printed the misleading
+        # "one-time download" message even though Cellpose already had it cached.
+        # Instead, look for ANY cached weight file whose name starts with the model
+        # name, across the known cache locations.
+        if _cellpose_model_cached(model_name):
+            log.info("Cellpose model '%s' already cached — no download needed; "
+                     "it will load from disk when you run segmentation.",
+                     model_name)
             return
         log.info("Cellpose model '%s' not in the local cache yet — downloading it "
-                 "once now. This is a ONE-TIME setup (it's saved to %s and reused "
-                 "on every future launch), and may take a minute...",
-                 model_name, model_cache.parent)
+                 "once now. This is a ONE-TIME setup (it's saved to your "
+                 "~/.cellpose cache and reused on every future launch), and may "
+                 "take a minute...", model_name)
 
         # (2) Subprocess isolation — load via PyCAT's version-aware builder so the
         # child uses the correct Cellpose API (model_type vs pretrained_model) for
