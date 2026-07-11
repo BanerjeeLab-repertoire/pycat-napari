@@ -1293,6 +1293,35 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 pass
             _arm_line_drawing()  # re-arm so the user can draw again immediately
 
+        def _has_clearable():
+            """True if there are real drawn lines or measured values to lose."""
+            o, c = _diameter_layers()
+            if (o is not None and _count_real_lines(o) > 0) or \
+               (c is not None and _count_real_lines(c) > 0):
+                return True
+            dr = self.central_manager.active_data_class.data_repository
+            return any(dr.get(k) is not None
+                       for k in ('object_size', 'cell_diameter', 'ball_radius'))
+
+        def _confirm_clear():
+            """Ask before clearing, but only when there's something to lose.
+            Returns True to proceed. Defaults to proceeding if the dialog can't be
+            shown (matches the button's stated action)."""
+            if not _has_clearable():
+                return True
+            try:
+                from PyQt5.QtWidgets import QMessageBox
+                box = QMessageBox()
+                box.setWindowTitle("Clear measurements?")
+                box.setIcon(QMessageBox.Question)
+                box.setText("Clear the drawn diameter line(s) and reset the "
+                            "measured object size, cell diameter, and ball radius?")
+                box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+                box.setDefaultButton(QMessageBox.Cancel)
+                return box.exec_() == QMessageBox.Ok
+            except Exception:
+                return True
+
         def _on_measure_line():
             """Single cycling button: Draw → Measure → Clear → (Measure) …,
             with the label always reflecting actual state."""
@@ -1302,6 +1331,8 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             elif st == 'measure':
                 _do_measure()
             else:  # clear
+                if not _confirm_clear():
+                    return  # cancelled — leave state (and label) as "Clear Lines"
                 _do_clear()
             _relabel()
 

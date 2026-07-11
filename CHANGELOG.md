@@ -4,6 +4,14 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.345] - 2026-07-10
+### Added — confirmation before clearing diameter measurements
+- **"Clear Lines" now asks for confirmation (OK / Cancel)** before deleting the
+  drawn diameter line(s) and resetting the measured values — but only when there
+  is actually something to lose (real lines drawn or measured values present);
+  clearing an already-empty set does not prompt. Cancelling leaves everything
+  intact and the button stays on "Clear Lines".
+
 ## [1.5.344] - 2026-07-10
 ### Changed — diameter measurement is now a single self-explaining cycling button
 - **The measure-diameters control is one button that cycles Draw → Measure →
