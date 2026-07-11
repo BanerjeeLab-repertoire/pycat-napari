@@ -1201,6 +1201,118 @@ def process_pwcca_methods(selected_methods, method_functions, image1, image2, ro
     return data_table1
 
 
+def coloc_time_trace(stack1, stack2, selected_methods, roi_stack=None,
+                     frame_interval_s=1.0, progress_callback=None):
+    """Run pixel-wise colocalization frame-by-frame over a time-series (or
+    z-stack) and return a tidy per-frame time trace.
+
+    This is the reusable foundation for tracking how colocalization EVOLVES over
+    time (e.g. during fusion, maturation, or recruitment) — it can be driven from
+    either the colocalization widget or a time-series method. It streams frames one
+    at a time (never materialising the whole stack) and applies the same scalar
+    coloc metrics used by the single-frame analysis, so the per-frame numbers match
+    what the single-frame tool would report on each frame.
+
+    Parameters
+    ----------
+    stack1, stack2 : (T, H, W) array-like or lazy wrappers — the two channels.
+    selected_methods : list of metric names (see the SCALAR_METRICS keys below).
+        Only scalar-per-frame metrics are supported here; matrix/plot/Costes
+        methods are single-frame-only and are ignored for the trace.
+    roi_stack : optional (T, H, W) mask stack, or a single (H, W) mask applied to
+        every frame, or None (whole frame).
+    frame_interval_s : seconds per frame, for the time_s column.
+    progress_callback : optional callable(done, total).
+
+    Returns
+    -------
+    pandas.DataFrame with columns: frame, time_s, and one column per selected
+    scalar metric (the coefficient for that frame). Empty if no scalar metric was
+    selected.
+    """
+    from pycat.file_io.file_io import iter_frames, layer_is_stack
+
+    # The scalar-per-frame metrics (coefficient we can trend over time). Matrix /
+    # histogram / Costes / thresholding methods don't reduce to one number per
+    # frame, so they're excluded from the trace.
+    scalar_metrics = {
+        "Pearson's R value": pearsons_correlation,
+        "Spearman's R value": spearman_r_calculation,
+        "Kendall's Tau value": kendall_tau_calculation,
+        "Weighted Tau value": weighted_tau_calculation,
+        "Li's ICQ value": li_intensity_correlation,
+        "Mander's Overlap Coefficient": manders_overlap,
+        "Mander's k1 value": manders_k1_calculation,
+        "Mander's k2 value": manders_k2_calculation,
+    }
+    use = [m for m in selected_methods if m in scalar_metrics]
+    if not use:
+        return pd.DataFrame(columns=['frame', 'time_s'])
+
+    # Determine frame count from the first stack.
+    shp1 = getattr(stack1, 'shape', None)
+    n_t = int(shp1[0]) if (shp1 is not None and len(shp1) == 3) else 1
+
+    # A single 2-D ROI is broadcast to every frame; a 3-D ROI is indexed per frame.
+    roi_is_stack = roi_stack is not None and layer_is_stack(roi_stack)
+    roi_2d = None
+    if roi_stack is not None and not roi_is_stack:
+        roi_2d = np.asarray(roi_stack)
+        if roi_2d.ndim == 3:                 # a wrapper that returned one plane
+            roi_2d = roi_2d[0]
+        roi_2d = roi_2d > 0
+
+    rows = []
+    it1 = iter_frames(stack1)
+    it2 = iter_frames(stack2)
+    for (t, f1), (_, f2) in zip(it1, it2):
+        if roi_is_stack:
+            roi_f = (np.asarray(roi_stack[t]) > 0)
+        else:
+            roi_f = roi_2d
+        row = {'frame': int(t), 'time_s': float(t) * float(frame_interval_s)}
+        for m in use:
+            try:
+                coeff, _p = scalar_metrics[m](f1, f2, roi_f)
+            except Exception:
+                coeff = np.nan
+            row[m] = coeff
+        rows.append(row)
+        if progress_callback is not None:
+            try:
+                progress_callback(t + 1, n_t)
+            except Exception:
+                pass
+
+    return pd.DataFrame(rows)
+
+
+def plot_coloc_time_trace(trace_df, title="Colocalization over time"):
+    """Plot a coloc time-trace DataFrame (one line per metric vs time). Returns
+    the matplotlib figure (or None if nothing to plot)."""
+    if trace_df is None or trace_df.empty:
+        return None
+    metric_cols = [c for c in trace_df.columns if c not in ('frame', 'time_s')]
+    if not metric_cols:
+        return None
+    import matplotlib.pyplot as plt
+    x = trace_df['time_s'] if 'time_s' in trace_df else trace_df['frame']
+    xlabel = "time (s)" if 'time_s' in trace_df else "frame"
+    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    for c in metric_cols:
+        ax.plot(x, trace_df[c], '-o', ms=3, lw=1.4, label=c)
+    ax.set_xlabel(xlabel); ax.set_ylabel("coefficient")
+    ax.set_title(title, fontweight='bold')
+    ax.grid(True, alpha=0.15); ax.legend(fontsize=8)
+    ax.axhline(0, color='#888', lw=0.8, alpha=0.5)
+    fig.tight_layout()
+    try:
+        plt.show(block=False)
+    except Exception:
+        pass
+    return fig
+
+
 def run_pwcca(image_layer1, image_layer2, roi_mask_layer, data_instance, viewer):
     """
     Executes Pixel-Wise Correlation Coefficient Analysis (PWCCA) on two image layers with an optional

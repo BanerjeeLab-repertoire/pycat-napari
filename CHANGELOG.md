@@ -4,6 +4,23 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.359] - 2026-07-10
+### Added — colocalization over time (per-frame coloc time trace)
+- **Colocalization can now be tracked frame-by-frame across a stack**, so you can
+  see how it evolves during fusion, maturation, or recruitment. A new reusable
+  backend ``coloc_time_trace()`` streams a time-series (or z-stack) one frame at a
+  time and applies the scalar coloc metrics (Pearson, Spearman, Kendall, weighted
+  τ, Li's ICQ, Manders overlap/k1/k2) per frame, returning a tidy per-frame table
+  with a time axis; ``plot_coloc_time_trace()`` plots the coefficient(s) vs time.
+  It uses the same metric functions as the single-frame analysis, so the numbers
+  match frame-for-frame.
+- **UI:** the Pixel-Wise Correlation widget gains a **"Coloc over time (all
+  frames)"** button that runs a default trend set (Pearson + Spearman + Manders
+  overlap) over the selected stacks, stores the trace, plots it, and shows the
+  per-frame table. (The single-frame "Calculate PWCCA" is unchanged.) This is the
+  foundation for the linked time-series ↔ colocalization workflows; it deliberately
+  lives in the coloc backend so a time-series method can call it too.
+
 ## [1.5.358] - 2026-07-10
 ### Fixed — colocalization no longer silently analyses frame 0 of a lazy stack
 - **The lazy-stack "frame 0" trap is now guarded in all colocalization paths.**

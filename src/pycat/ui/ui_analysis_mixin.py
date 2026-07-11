@@ -191,9 +191,88 @@ class _AnalysisWidgetsMixin:
         PWCCA_button.clicked.connect(lambda: self.on_general_button_clicked(
             run_pwcca, self.viewer, PWCCA_image1_dropdown, PWCCA_image2_dropdown, PWCCA_roi_dropdown, self.central_manager.active_data_class, self.viewer))
         PWCCA_layout.addWidget(PWCCA_button) # Add the button to the layout
+
+        # Coloc over time: run pixel-wise coloc frame-by-frame across a stack to
+        # get a time trace (how colocalization evolves during fusion / maturation
+        # / recruitment). Only meaningful when the inputs are time-series / stacks.
+        PWCCA_time_button = QPushButton("Coloc over time (all frames)")
+        PWCCA_time_button.setToolTip(
+            "Run colocalization on every frame of the selected stacks and plot the "
+            "coefficient(s) vs time. Use this when Image 1 / Image 2 are a "
+            "time-series (or z-stack).")
+        PWCCA_time_button.clicked.connect(lambda: self._run_coloc_time_trace(
+            PWCCA_image1_dropdown, PWCCA_image2_dropdown, PWCCA_roi_dropdown))
+        PWCCA_layout.addWidget(PWCCA_time_button)
         PWCCA_widget = QWidget() # Create a main widget to contain the input widget
         PWCCA_widget.setLayout(PWCCA_layout) # Set the layout for the widget
         self._add_widget_to_layout_or_dock(PWCCA_widget, layout, separate_widget, "PWCCA Dock")
+
+    def _run_coloc_time_trace(self, img1_dd, img2_dd, roi_dd):
+        """Run pixel-wise colocalization frame-by-frame across a stack and plot the
+        coefficient(s) vs time. The reusable backend is coloc_time_trace() in
+        pixel_wise_corr_analysis_tools — this driver just resolves the selected
+        layers, checks they're stacks, runs a default metric set, stores + plots."""
+        from pycat.toolbox.pixel_wise_corr_analysis_tools import (
+            coloc_time_trace, plot_coloc_time_trace)
+        from pycat.file_io.file_io import layer_is_stack
+        from napari.utils.notifications import show_warning, show_info
+        try:
+            l1 = self.viewer.layers[img1_dd.currentText()]
+            l2 = self.viewer.layers[img2_dd.currentText()]
+        except KeyError as e:
+            show_warning(f"Coloc over time: layer not found — {e}"); return
+        roi = None
+        if roi_dd.currentText() not in ("None", ""):
+            try:
+                roi = self.viewer.layers[roi_dd.currentText()].data
+            except KeyError:
+                roi = None
+        if not (layer_is_stack(l1.data) or layer_is_stack(l2.data)):
+            show_warning(
+                "Coloc over time needs a stack (time-series or z-stack) — the "
+                "selected images look 2-D. Use 'Calculate PWCCA' for single frames.")
+            return
+
+        # A sensible default metric set for a trend; the single-frame widget still
+        # exposes the full method list. (Pearson + Manders overlap are the usual
+        # trend metrics; Spearman adds a rank-based check.)
+        methods = ["Pearson's R value", "Spearman's R value",
+                   "Mander's Overlap Coefficient"]
+        # Frame interval from captured metadata if present, else 1.0 (frames).
+        dr = self.central_manager.active_data_class.data_repository
+        try:
+            fi = ((dr.get('file_metadata') or {}).get('common') or {}).get(
+                'frame_interval_s') or 1.0
+        except Exception:
+            fi = 1.0
+
+        try:
+            trace = coloc_time_trace(l1.data, l2.data, methods, roi_stack=roi,
+                                     frame_interval_s=float(fi))
+        except Exception as e:
+            show_warning(f"Coloc over time failed: {e}"); return
+        if trace is None or trace.empty:
+            show_info("Coloc over time: no frames produced a result."); return
+
+        dr['coloc_time_trace_df'] = trace
+        try:
+            self._record('coloc_time_trace', {
+                'image1': img1_dd.currentText(),
+                'image2': img2_dd.currentText(),
+                'roi': roi_dd.currentText(),
+                'methods': methods,
+                'n_frames': int(len(trace)),
+                'frame_interval_s': float(fi)})
+        except Exception:
+            pass
+        plot_coloc_time_trace(trace, title="Colocalization over time")
+        try:
+            from pycat.ui.ui_utils import show_dataframes_dialog
+            show_dataframes_dialog("Colocalization Over Time",
+                                   [("Per-frame coloc", trace.round(4))])
+        except Exception:
+            pass
+        show_info(f"Coloc over time: {len(trace)} frames analysed.")
 
 
     # Object-Based Colocalization Functions
