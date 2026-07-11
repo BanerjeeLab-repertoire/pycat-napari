@@ -4,6 +4,26 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.366] - 2026-07-10
+### Changed — branding + toolbar declutter (menus stay on top, actions move to the PyCAT bar)
+- **The top menu bar is now mostly menus.** The action buttons that used to sit on
+  it moved into the PyCAT bar (the gray "Batch: / Layer Actions: / Information:"
+  toolbar), grouped sensibly:
+  - **Recorded Steps** → Batch section, next to Batch Run / Record / Save Config,
+    with a distinct clipboard icon (📋) instead of the ☰ hamburger that looked like
+    a napari menu.
+  - **Clear + Home** → the Layer Actions section.
+  - **Metadata + Tags** → a new Information section.
+  - (The Search command palette stays on the top bar.)
+- **The PyCAT bar's "Layers:" section is renamed "Layer Actions:"** (the old label
+  next to the "👁 Layers" button read confusingly as "Layers … Layers").
+- **The show/hide-all button now cycles like the colormap button**: its label shows
+  the action the next click performs — "👁 Show" → click shows all → "🚫 Hide" →
+  click hides all → back to "👁 Show".
+- **Window title is now just "PyCAT"** (was "PyCAT-Napari").
+- **The "PyCAT" menu-bar marker is brighter** — cornflower blue (#6495ED) instead
+  of the darker blue, so it stands out against the dark bar.
+
 ## [1.5.365] - 2026-07-10
 ### Fixed — Exploratory dock crashed on open (Client Enrichment import bug)
 - **Fixed a crash that prevented the Exploratory Analysis dock from opening.** The

@@ -362,7 +362,7 @@ def run_pycat_func():
     # safe to initialise concurrently. Creating the viewer first lets Qt finish
     # its main-thread setup before the warmup thread starts. The warmup can also
     # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
-    viewer = napari.Viewer(title="PyCAT-Napari")
+    viewer = napari.Viewer(title="PyCAT")
 
     # Dual pixel / micron coordinate readout in the status bar. PyCAT scales
     # layers by pixel size (µm/px), so napari's default status shows microns

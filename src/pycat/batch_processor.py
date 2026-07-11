@@ -811,38 +811,79 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
     save_action.triggered.connect(_make_save_handler(processor))
     toolbar.addAction(save_action)
 
-    # ── Separator: Batch section (above) | Layers section (below) ──────────
+    # Recorded Steps viewer — belongs with the Batch controls (it's the batch
+    # workflow you're recording). Uses a distinct clipboard/checklist glyph, NOT
+    # the ☰ hamburger (which reads as a napari-style menu). Wired to the
+    # MenuManager's dialog via the central manager.
+    _cm = getattr(processor, '_central_manager', None)
+    _mm = getattr(_cm, 'menu_manager', None) if _cm is not None else None
+    if _mm is not None and hasattr(_mm, '_show_recorded_steps_dialog'):
+        recorded_action = QAction("\U0001F4CB  Recorded Steps", main_window)  # 📋 clipboard
+        recorded_action.setToolTip(
+            "View the batch workflow recorded so far — each step and the "
+            "layers/parameters it used.")
+        recorded_action.triggered.connect(_mm._show_recorded_steps_dialog)
+        toolbar.addAction(recorded_action)
+
+    # ── Separator: Batch section (above) | Layer Actions section (below) ────
     toolbar.addSeparator()
-    _layers_lbl = QAction("Layers:", main_window)
+    _layers_lbl = QAction("Layer Actions:", main_window)
     _layers_lbl.setEnabled(False)   # non-clickable section label
     toolbar.addAction(_layers_lbl)
+
+    # Clear + Home moved here from the top menu bar — they act on the
+    # layers/view, so they belong in Layer Actions. Wired to the MenuManager /
+    # file_io via the central manager.
+    if _cm is not None:
+        clear_action = QAction("\u2620  Clear", main_window)   # ☠ hazard
+        clear_action.setToolTip(
+            "Clear all layers and data WITHOUT saving — resets to the start of a "
+            "workflow.")
+        try:
+            _fio = _cm.file_io
+            clear_action.triggered.connect(
+                lambda: _fio.clear_all_without_saving(viewer, confirm=True))
+            toolbar.addAction(clear_action)
+        except Exception:
+            pass
+    if _mm is not None and hasattr(_mm, '_home_fit_view'):
+        home_action = QAction("\u2302  Home", main_window)     # ⌂ house
+        home_action.setToolTip("Fit the view to the selected image or ROI layer.")
+        home_action.triggered.connect(_mm._home_fit_view)
+        toolbar.addAction(home_action)
 
     # Show/hide-all-layers eye toggle. As layers accumulate, toggling each layer's
     # eye in the layer list is tedious; this flips every layer's visibility in one
     # click. The icon/tooltip reflect the action that the next click performs.
-    eye_action = QAction("👁  Layers", main_window)
-    eye_action.setToolTip("Show / hide all layers (toggles every layer at once)")
+    # Show/hide-all-layers eye toggle. As layers accumulate, toggling each layer's
+    # eye in the layer list is tedious; this flips every layer's visibility in one
+    # click. Like the Gray/Viridis colormap button, the label shows the ACTION the
+    # NEXT click will perform and cycles on each click: "👁 Show" → click shows all
+    # → becomes "🚫 Hide" → click hides all → back to "👁 Show".
+    eye_action = QAction("👁  Show", main_window)
+    eye_action._pycat_next = 'show'   # the action the NEXT click will perform
+    eye_action.setToolTip("Show all layers (click again to hide all).")
 
     def _toggle_all_layers():
         try:
             layers = list(viewer.layers)
             if not layers:
                 return
-            # If any layer is currently visible, hide all; otherwise show all.
-            any_visible = any(getattr(l, 'visible', False) for l in layers)
-            new_state = not any_visible
+            target_show = getattr(eye_action, '_pycat_next', 'show') == 'show'
             for l in layers:
                 try:
-                    l.visible = new_state
+                    l.visible = target_show
                 except Exception:
                     pass
-            # Reflect the state that the NEXT click will produce.
-            if new_state:
-                eye_action.setText("🚫  Layers")
-                eye_action.setToolTip("Hide all layers")
+            # Flip the label/tooltip to the action the NEXT click will perform.
+            if target_show:
+                eye_action._pycat_next = 'hide'
+                eye_action.setText("🚫  Hide")
+                eye_action.setToolTip("Hide all layers (click again to show all).")
             else:
-                eye_action.setText("👁  Layers")
-                eye_action.setToolTip("Show all layers")
+                eye_action._pycat_next = 'show'
+                eye_action.setText("👁  Show")
+                eye_action.setToolTip("Show all layers (click again to hide all).")
         except Exception as e:
             print(f"[PyCAT] Show/hide all layers failed: {e}")
 
@@ -911,6 +952,32 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
 
     grid_action.triggered.connect(_toggle_grid)
     toolbar.addAction(grid_action)
+
+    # ── Information section: Metadata + Tags ───────────────────────────────
+    # Moved here from the top menu bar. Both are "inspect information about the
+    # current data/layers" actions, so they're grouped in their own section.
+    if _mm is not None and (hasattr(_mm, '_show_metadata_dialog')
+                            or hasattr(_mm, 'open_tag_inspector')):
+        toolbar.addSeparator()
+        _info_lbl = QAction("Information:", main_window)
+        _info_lbl.setEnabled(False)   # non-clickable section label
+        toolbar.addAction(_info_lbl)
+
+        if hasattr(_mm, '_show_metadata_dialog'):
+            meta_action = QAction("\u24d8  Metadata", main_window)   # ⓘ info
+            meta_action.setToolTip(
+                "View acquisition metadata (pixel size, objective, wavelengths, "
+                "dimensions, date) for the loaded file.")
+            meta_action.triggered.connect(_mm._show_metadata_dialog)
+            toolbar.addAction(meta_action)
+
+        if hasattr(_mm, 'open_tag_inspector'):
+            tags_action = QAction("\u25a3  Tags", main_window)       # ▣ tag
+            tags_action.setToolTip(
+                "Layer Tag Inspector — view and override the structured tags and "
+                "lineage assigned to each layer.")
+            tags_action.triggered.connect(_mm.open_tag_inspector)
+            toolbar.addAction(tags_action)
 
     main_window.addToolBar(Qt.TopToolBarArea, toolbar)
     print("[PyCAT Batch] Batch toolbar added.")

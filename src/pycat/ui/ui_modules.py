@@ -3670,10 +3670,13 @@ class MenuManager:
         self._pycat_marker_action.setFont(_mfont)
         # Make the disabled action's text render in an accent colour rather than
         # the greyed-out default, so it reads as a heading not a dead menu.
+        # Cornflower blue stands out better against the dark menu bar than the
+        # previous darker blue. The napari-native menus (File/View/Window/Help/
+        # Plugins) are de-emphasised in gray so the PyCAT menus read as primary.
         try:
             _menubar.setStyleSheet(
                 _menubar.styleSheet() +
-                "\nQMenuBar::item:disabled { color: #2d7dd2; font-weight: bold; }")
+                "\nQMenuBar::item:disabled { color: #6495ED; font-weight: bold; }")
         except Exception:
             pass
         _menubar.addAction(self._pycat_marker_action)
@@ -3689,42 +3692,13 @@ class MenuManager:
         self.file_menu = self.viewer.window._qt_window.menuBar().addMenu('★ Open/Save File(s)')
         self._add_file_io_methods_to_menu()
 
-        # Clear button directly on the menu bar, next to Open/Save, with a
-        # hazard icon. Resets the workspace to the workflow start WITHOUT saving.
-        self.clear_action = QAction('\u2620 Clear', self.viewer.window._qt_window)
-        self.clear_action.setToolTip(
-            'Clear all layers and data WITHOUT saving — resets to the start of a workflow.')
-        self.clear_action.triggered.connect(
-            lambda: self.central_manager.file_io.clear_all_without_saving(self.viewer, confirm=True))
-        self.viewer.window._qt_window.menuBar().addAction(self.clear_action)
-
-        # Home / fill-view button: refit the camera to the selected layer if it
-        # is an Image or ROI (Shapes/Labels); does nothing for an arbitrary
-        # line/points selection. Useful when the image scrolls out of view.
-        self.home_action = QAction('\u2302 Home', self.viewer.window._qt_window)
-        self.home_action.setToolTip(
-            'Fit the view to the selected image or ROI layer.')
-        self.home_action.triggered.connect(self._home_fit_view)
-        self.viewer.window._qt_window.menuBar().addAction(self.home_action)
-
-        # Metadata viewer: shows the curated acquisition metadata for the loaded
-        # file, with a toggle to reveal the full raw metadata dump.
-        self.metadata_action = QAction('\u24d8 Metadata', self.viewer.window._qt_window)
-        self.metadata_action.setToolTip(
-            'View acquisition metadata (pixel size, objective, wavelengths, '
-            'dimensions, date) for the loaded file.')
-        self.metadata_action.triggered.connect(self._show_metadata_dialog)
-        self.viewer.window._qt_window.menuBar().addAction(self.metadata_action)
-
-        # Recorded-steps viewer: shows the batch workflow recorded so far, with
-        # each step expandable to reveal the layers/parameters it used.
-        self.recorded_steps_action = QAction('\u2630 Recorded Steps',
-                                             self.viewer.window._qt_window)
-        self.recorded_steps_action.setToolTip(
-            'View the batch workflow recorded so far — each step and the '
-            'layers/parameters it used.')
-        self.recorded_steps_action.triggered.connect(self._show_recorded_steps_dialog)
-        self.viewer.window._qt_window.menuBar().addAction(self.recorded_steps_action)
+        # NOTE: the action buttons that used to sit here on the menu bar (Clear,
+        # Home, Metadata, Recorded Steps, Tags) now live in the PyCAT bar (the
+        # gray "Batch:/Layers:/Information:" toolbar) so the top menu bar stays
+        # mostly menus. They're created in add_batch_toolbar_button()
+        # (batch_processor.py) and call back into these same MenuManager methods
+        # (_home_fit_view, _show_metadata_dialog, _show_recorded_steps_dialog,
+        # open_tag_inspector, and file_io.clear_all_without_saving).
 
         # Command palette: fuzzy-search to open any analysis method / toolbox
         # function or select a layer by name. Menu-bar button + Ctrl+Shift+P.
@@ -3738,20 +3712,6 @@ class MenuManager:
             self.palette_action.setShortcut(QKeySequence('Ctrl+Shift+P'))
             self.palette_action.triggered.connect(self.open_command_palette)
             self.viewer.window._qt_window.menuBar().addAction(self.palette_action)
-        except Exception:
-            pass
-
-        # Layer Tag Inspector: see/edit the structured tags assigned at load time
-        # (role, modality, dimensionality, scale, provenance, channel) and layer
-        # lineage, with per-tag source/confidence and user override.
-        try:
-            self.tags_action = QAction('\u25a3 Tags',
-                                       self.viewer.window._qt_window)
-            self.tags_action.setToolTip(
-                'Layer Tag Inspector — view and override the structured tags and '
-                'lineage assigned to each layer.')
-            self.tags_action.triggered.connect(self.open_tag_inspector)
-            self.viewer.window._qt_window.menuBar().addAction(self.tags_action)
         except Exception:
             pass
 
