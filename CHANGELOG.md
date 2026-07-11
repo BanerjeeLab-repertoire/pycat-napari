@@ -4,6 +4,61 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.370] - 2026-07-10
+### Added — Motion Scale Estimator: measure displacement without linking anything
+- **The VPT time-projection trick is now a general Toolbox tool** (Toolbox ▸ Data
+  Visualization ▸ *Motion Scale Estimator*). A short-window MAX-projection smears
+  each object into a blob whose width is its single-frame width broadened by how
+  far it MOVED; subtracting the single-frame width in quadrature recovers the
+  motion scale — **with no tracking pass at all**:
+
+      motion = sqrt(sigma_projected^2 - sigma_single_frame^2)
+
+  This answers the question every linker asks and every user is otherwise forced
+  to *guess*: "how far do my objects move between frames?" It was previously
+  locked inside VPT (``estimate_linking_distance_um``) even though it applies to
+  any dynamic localisation problem — puncta, vesicles, condensates, beads.
+- It reports the suggested max linking distance **plus the quantities behind it**
+  (per-frame motion, the measured window smear, the single-frame object size, the
+  object count), and gives a **trackability verdict**: when per-frame motion
+  approaches or exceeds the object size, frame-to-frame linking is unreliable and
+  the acquisition is too slow — a QC answer that's otherwise only discovered after
+  a tracking run produces nonsense. The projection is added as a layer so the
+  smear the estimate came from is visible.
+- Honest about its limits: fitting a Gaussian to the projected envelope
+  under-estimates the true spread (~25% low on a synthetic random walk with known
+  step), which is what the margin factor *k* absorbs. It is stated in the widget as
+  a well-grounded starting value, not a precise displacement measurement.
+
+## [1.5.369] - 2026-07-10
+### Added — general techniques promoted out of single-method pipelines
+- Re-audited the codebase for **reusable techniques that were implemented inside
+  one analysis method** and had no standalone access — the class of gap the
+  ``_add_*``-based audit couldn't see, because these are plain functions with no
+  widget of their own. Four are now standalone Toolbox tools (and appear in the
+  Exploratory workbench). None are reimplemented — the new widgets call the
+  existing, tested functions, and the original pipelines are untouched:
+  - **Image Registration (subpixel)** → Toolbox ▸ Image Processing. Guizar-Sicairos
+    phase-cross-correlation alignment lived in ``fibril_tools`` and was reachable
+    only from the Fibril widget, despite having nothing to do with fibrils — it's
+    the general tool for channel alignment, drift correction, and before/after
+    comparison. Adds the registered image plus a difference image and reports the
+    subpixel shift.
+  - **Photobleach Correction** → Toolbox ▸ Image Processing. Fitting an exponential
+    to the mean trace and dividing it out was locked in the condensate-physics
+    widget, though bleaching affects every fluorescence time-series. Plots the
+    measured trace, the fitted decay, and the corrected result, and reports the
+    bleach time constant (it declines to "correct" when the fit doesn't converge,
+    rather than silently applying a meaningless factor).
+  - **Detrend Stack (drift / bleaching)** → Toolbox ▸ Image Processing. Removing the
+    slow temporal trend was locked in N&B, but it's a prerequisite for *any*
+    fluctuation measurement — an undetrended decay inflates the temporal variance.
+  - **Frame Quality / Focus QC** → Toolbox ▸ Data Visualization. Per-frame Brenner
+    focus scoring, entropy, out-of-focus flagging, and sharpest-frame selection
+    existed across ``temperature_tools`` and ``condensate_physics_tools`` but were
+    only reachable from those workflows; "which frames of this stack are usable?"
+    is a question every time-series and z-stack analysis needs to answer.
+
 ## [1.5.368] - 2026-07-10
 ### Fixed — "PyCAT" wordmark now shows next to the logo mark
 - **The menu bar showed the logo roundel but dropped the "PyCAT" text.** A plain

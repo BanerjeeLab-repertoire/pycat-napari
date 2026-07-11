@@ -1051,6 +1051,19 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         self._add_data_qc = lambda **kw: _add_data_qc(self, **kw)
         self._add_contrast_cascade = lambda **kw: _add_contrast_cascade(self, **kw)
         self._add_condensate_physics = lambda **kw: _add_condensate_physics(self, **kw)
+        # General-purpose techniques promoted out of method-specific pipelines
+        # (registration was fibril-only, focus/entropy QC was temperature-only,
+        # bleach correction was condensate-physics-only, detrending was N&B-only)
+        # — see pycat/toolbox/general_image_tools.py.
+        from pycat.toolbox.general_image_tools import (
+            _add_image_registration, _add_frame_quality_qc,
+            _add_bleach_correction, _add_detrend_stack,
+            _add_motion_scale_estimator)
+        self._add_image_registration = lambda **kw: _add_image_registration(self, **kw)
+        self._add_frame_quality_qc = lambda **kw: _add_frame_quality_qc(self, **kw)
+        self._add_bleach_correction = lambda **kw: _add_bleach_correction(self, **kw)
+        self._add_detrend_stack = lambda **kw: _add_detrend_stack(self, **kw)
+        self._add_motion_scale_estimator = lambda **kw: _add_motion_scale_estimator(self, **kw)
         # New pipeline UI entry points exposed as standalone toolbox tools.
         # These use the same (ui_instance, layout=None, separate_widget=False)
         # calling convention as _add_spatial_metrology so they slot directly
@@ -3018,6 +3031,10 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         # Stack / time-series variants (operate on a whole (T,H,W) stack).
         add(tf._add_ts_upscale_stack, s)
         add(tf._add_lazy_preprocess_stack, s)
+        # General techniques promoted out of single-method pipelines.
+        add(tf._add_image_registration, s)
+        add(tf._add_bleach_correction, s)
+        add(tf._add_detrend_stack, s)
 
         # ── Segmentation (expanded — common starting point) ─────────────────
         s = section("Segmentation", expanded=True)
@@ -3094,6 +3111,8 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_segmentation_speed_comparison, s)
         add(tf._add_display_diagnostics, s)
         add(tf._add_data_qc, s)
+        add(tf._add_frame_quality_qc, s)
+        add(tf._add_motion_scale_estimator, s)
         add(tf._add_plotting_widget, s)
         add(tf._add_export_timeseries_video, s)
 
@@ -5112,6 +5131,10 @@ class MenuManager:
         image_processing_actions = {
             'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True}),
             'Reference / Background Subtraction': (self.central_manager.toolbox_functions_ui._add_run_reference_subtraction, {'separate_widget': True}),
+            # General techniques promoted out of single-method pipelines:
+            'Image Registration (subpixel)': (self.central_manager.toolbox_functions_ui._add_image_registration, {'separate_widget': True}),
+            'Photobleach Correction': (self.central_manager.toolbox_functions_ui._add_bleach_correction, {'separate_widget': True}),
+            'Detrend Stack (drift / bleaching)': (self.central_manager.toolbox_functions_ui._add_detrend_stack, {'separate_widget': True}),
             'Pipeline Step Diagnostics': (self.central_manager.toolbox_functions_ui._add_pipeline_diagnostics, {'separate_widget': True}),
             'Pipeline SNR Analysis': (self.central_manager.toolbox_functions_ui._add_pipeline_snr_analysis, {'separate_widget': True}),
             'Foreground Suppression Tuner': (self.central_manager.toolbox_functions_ui._add_foreground_suppression_tuner, {'separate_widget': True}),
@@ -5309,6 +5332,13 @@ class MenuManager:
         data_visualization_actions = {
             'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True}),
             'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True}),
+            # Per-frame focus/entropy/out-of-focus scoring for ANY stack (was
+            # reachable only from the temperature + brightfield workflows).
+            'Frame Quality / Focus QC': (self.central_manager.toolbox_functions_ui._add_frame_quality_qc, {'separate_widget': True}),
+            # "How far do my objects move per frame, and can I even track them?"
+            # — measured from a time-projection with no linking pass. Was locked
+            # inside VPT as estimate_linking_distance_um.
+            'Motion Scale Estimator (linking distance)': (self.central_manager.toolbox_functions_ui._add_motion_scale_estimator, {'separate_widget': True}),
             # Video export works on any time-series stack, not just the
             # time-series condensate pipeline it was previously locked inside.
             'Export Time-Series Video': (self.central_manager.toolbox_functions_ui._add_export_timeseries_video, {'separate_widget': True}),
