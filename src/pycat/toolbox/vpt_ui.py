@@ -54,6 +54,200 @@ class VideoParticleTrackingUI:
     def _dr(self):
         return self.central_manager.active_data_class.data_repository
 
+    # ── Linked-selection dispatcher (plot ↔ image ↔ table brushing) ──────────
+    # One hub owns "the currently selected track". Each view calls _select_track
+    # with its source tag; the hub updates the OTHER views. A re-entrancy guard
+    # stops the highlight it triggers in view B from firing B's own emit and
+    # looping back. The shared key is track_id, which already threads through the
+    # Tracks layer, the per-track MSD curves, and the summary table.
+    def _select_track(self, track_id, source=None):
+        """Select a track everywhere. source is the view that initiated it
+        ('plot'|'image'|'table') and is skipped when propagating, so a view never
+        re-highlights from its own action."""
+        if track_id is None:
+            return
+        if getattr(self, '_sel_busy', False):
+            return
+        self._sel_busy = True
+        try:
+            self._selected_track_id = int(track_id)
+            if source != 'image':
+                try:
+                    self._reveal_track_in_viewer(int(track_id))
+                except Exception as e:
+                    print(f"[PyCAT VPT] link→image failed: {e}")
+            if source != 'plot':
+                try:
+                    self._highlight_track_in_plot(int(track_id))
+                except Exception as e:
+                    print(f"[PyCAT VPT] link→plot failed: {e}")
+            if source != 'table':
+                try:
+                    self._highlight_track_in_table(int(track_id))
+                except Exception as e:
+                    print(f"[PyCAT VPT] link→table failed: {e}")
+        finally:
+            self._sel_busy = False
+
+    def _highlight_track_in_plot(self, track_id):
+        """Emphasise a track's MSD curve in the live plot (if one is open and its
+        line map was registered). No-op if the plot isn't showing."""
+        reg = getattr(self, '_msd_line_registry', None)
+        if not reg:
+            return
+        lines = reg.get('lines'); canvas = reg.get('canvas')
+        state = reg.setdefault('state', {'prev': None})
+        if not lines:
+            return
+        prev = state.get('prev')
+        if prev is not None and prev in lines.values():
+            try:
+                prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+            except Exception:
+                pass
+        ln = lines.get(int(track_id))
+        if ln is not None:
+            try:
+                ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
+                ln.set_zorder(5)
+                state['prev'] = ln
+                if canvas is not None:
+                    canvas.draw_idle()
+            except Exception:
+                pass
+
+    def _highlight_track_in_table(self, track_id):
+        """Select the track's row in the summary table (if the linked table is
+        open and registered)."""
+        reg = getattr(self, '_track_table_registry', None)
+        if not reg:
+            return
+        table = reg.get('table'); id_col = reg.get('id_col', 0)
+        row_for_id = reg.get('row_for_id')
+        if table is None or row_for_id is None:
+            return
+        r = row_for_id.get(int(track_id))
+        if r is None:
+            return
+        try:
+            table.blockSignals(True)
+            table.selectRow(r)
+            table.scrollToItem(table.item(r, id_col))
+        except Exception:
+            pass
+        finally:
+            try:
+                table.blockSignals(False)
+            except Exception:
+                pass
+
+    def _build_per_track_metrics(self, tracks, ptc):
+        """Per-track summary rows: track_id, n_frames, duration, and a per-track
+        D/α from a quick power-law fit of that track's own MSD curve. Returns a
+        DataFrame (one row per track) for the linked per-track table."""
+        import numpy as _np
+        import pandas as _pd
+        rows = []
+        dt = self._frame_dt.value()
+        # group per-track MSD once
+        by_tid = {tid: g.sort_values('lag_s')
+                  for tid, g in ptc.groupby('track_id')} if ptc is not None else {}
+        for tid, g in tracks.groupby('track_id'):
+            if tid < 0:
+                continue
+            n = int(len(g))
+            dur = n * dt
+            D = _np.nan; alpha = _np.nan
+            mg = by_tid.get(tid)
+            if mg is not None and len(mg) >= 3:
+                lag = mg['lag_s'].values.astype(float)
+                msd = mg['msd_um2'].values.astype(float)
+                ok = (lag > 0) & (msd > 0)
+                if ok.sum() >= 3:
+                    # log-log linear fit: slope = alpha, intercept -> D (msd=4Dτ^α)
+                    p = _np.polyfit(_np.log(lag[ok]), _np.log(msd[ok]), 1)
+                    alpha = float(p[0])
+                    D = float(_np.exp(p[1]) / 4.0)
+            rows.append({'track_id': int(tid), 'n_frames': n,
+                         'duration_s': round(dur, 3),
+                         'D_um2_per_s': (round(D, 5) if D == D else None),
+                         'alpha': (round(alpha, 3) if alpha == alpha else None)})
+        return _pd.DataFrame(rows).sort_values('track_id').reset_index(drop=True)
+
+    def _show_per_track_table(self, per_track_metrics):
+        """Non-modal per-track results table. Clicking a row selects that track
+        everywhere (row → plot curve + image bead) via the dispatcher, and the
+        dispatcher can select a row here when the selection comes from elsewhere.
+        Registers _track_table_registry {table, row_for_id, id_col}."""
+        try:
+            from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTableWidget,
+                                         QTableWidgetItem, QLabel)
+            from PyQt5.QtCore import Qt
+        except Exception:
+            return
+        if per_track_metrics is None or per_track_metrics.empty:
+            return
+        dlg = QDialog(self.viewer.window._qt_window)
+        dlg.setWindowTitle("VPT — per-track results (click a row to highlight)")
+        dlg.setMinimumSize(460, 420)
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel("Click a track row to reveal it in the image and "
+                           "highlight its MSD curve."))
+        cols = list(per_track_metrics.columns)
+        table = QTableWidget(len(per_track_metrics), len(cols))
+        table.setHorizontalHeaderLabels(cols)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        id_col = cols.index('track_id') if 'track_id' in cols else 0
+        row_for_id = {}
+        for r in range(len(per_track_metrics)):
+            for c, col in enumerate(cols):
+                val = per_track_metrics.iloc[r][col]
+                table.setItem(r, c, QTableWidgetItem('' if val is None else str(val)))
+            try:
+                row_for_id[int(per_track_metrics.iloc[r]['track_id'])] = r
+            except Exception:
+                pass
+        table.resizeColumnsToContents()
+        v.addWidget(table)
+
+        # Register for dispatcher-driven highlighting.
+        self._track_table_registry = {'table': table, 'row_for_id': row_for_id,
+                                      'id_col': id_col}
+
+        # Row-click → select that track everywhere. blockSignals during
+        # dispatcher-driven selectRow (in _highlight_track_in_table) prevents the
+        # loop; here we also guard via the dispatcher's _sel_busy.
+        def _on_row(*_):
+            if getattr(self, '_sel_busy', False):
+                return
+            items = table.selectedItems()
+            if not items:
+                return
+            r = items[0].row()
+            try:
+                tid = int(table.item(r, id_col).text())
+            except Exception:
+                return
+            self._select_track(tid, source='table')
+        table.itemSelectionChanged.connect(_on_row)
+
+        # Clean up the registry when the table closes so the dispatcher stops
+        # trying to drive a dead widget.
+        def _closeEvent(ev):
+            try:
+                if getattr(self, '_track_table_registry', None) \
+                        and self._track_table_registry.get('table') is table:
+                    self._track_table_registry = None
+            except Exception:
+                pass
+            ev.accept()
+        dlg.closeEvent = _closeEvent
+
+        dlg.setModal(False)
+        dlg.show()
+        self._per_track_dialog = dlg  # keep a ref so it isn't GC'd
+
     def _mpx(self):
         return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
 
@@ -1574,17 +1768,34 @@ class VideoParticleTrackingUI:
                                interactive=True)
             else:
                 # Separate windows: use the interactive MSD plot (with brushing)
-                # + the standalone spread/moduli windows.
-                plot_msd_trajectories(ptc, msd_df, fit,
-                                      title="VPT MSD (per-track + ensemble)",
-                                      interactive=True,
-                                      on_pick_track=self._reveal_track_in_viewer)
+                # + the standalone spread/moduli windows. Route picks through the
+                # linked-selection dispatcher and register the line map so
+                # image/table selections can highlight the curve too.
+                self._msd_line_registry = {}
+                plot_msd_trajectories(
+                    ptc, msd_df, fit,
+                    title="VPT MSD (per-track + ensemble)",
+                    interactive=True,
+                    on_pick_track=lambda tid: self._select_track(tid, source='plot'),
+                    line_registry=self._msd_line_registry)
                 plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
                                frame_interval_s=self._frame_dt.value(),
                                van_hove_lag=1, consolidated=False,
                                interactive=True)
         except Exception as e:
             print(f"[PyCAT] VPT plots failed: {e}")
+
+        # Per-track results table — one row per track, click a row to highlight
+        # that track everywhere (row -> MSD curve + image bead) via the linked
+        # selection dispatcher. Non-modal so it stays open alongside the plots.
+        # Shown BEFORE the modal summary dialog below (which blocks until closed).
+        try:
+            _ptc_for_tbl = ptc if 'ptc' in dir() else None
+            _ptm = self._build_per_track_metrics(tracks, _ptc_for_tbl)
+            self._dr()['vpt_per_track_metrics'] = _ptm
+            self._show_per_track_table(_ptm)
+        except Exception as e:
+            print(f"[PyCAT VPT] per-track table failed: {e}")
 
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog

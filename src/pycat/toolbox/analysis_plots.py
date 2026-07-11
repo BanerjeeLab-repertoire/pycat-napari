@@ -18,7 +18,8 @@ def _show(fig, interactive):
 
 
 def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
-                          title="MSD", interactive=True, on_pick_track=None):
+                          title="MSD", interactive=True, on_pick_track=None,
+                          line_registry=None):
     """
     Log-log MSD spaghetti plot: every track's MSD(τ) semi-transparent, the
     ensemble mean MSD as a solid line, and (optionally) the fitted power law.
@@ -36,6 +37,10 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         the VPT UI uses to highlight that track in the napari Tracks layer and
         centre the viewer on it (plot -> data brushing). Kept as a callback so
         this plotting module stays decoupled from napari/the viewer.
+    line_registry : optional dict. If given, it is populated with
+        {'lines': {track_id: Line2D}, 'canvas': FigureCanvas} so the caller's
+        linked-selection dispatcher can emphasise a track's curve when the
+        selection is driven from another view (image/table -> plot brushing).
     """
     import matplotlib
     if not interactive:
@@ -50,6 +55,7 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     # ensemble mean and fit, which use ALL tracks regardless of this cap.
     MAX_SPAGHETTI = 400
     _line_to_tid = {}
+    _tid_to_line = {}
     if per_track_df is not None and len(per_track_df):
         all_tids = per_track_df['track_id'].unique()
         n_all = len(all_tids)
@@ -69,6 +75,7 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
                 # A generous pick radius so the thin faint lines are easy to hit.
                 ln.set_picker(5)
                 _line_to_tid[ln] = int(tid)
+            _tid_to_line[int(tid)] = ln
         # a proxy handle for the legend (report the TRUE track count)
         _lbl = (f"individual tracks (n={n_all}"
                 + (f"; showing {MAX_SPAGHETTI}" if n_all > MAX_SPAGHETTI else "")
@@ -133,6 +140,16 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
 
         try:
             fig.canvas.mpl_connect('pick_event', _on_pick)
+        except Exception:
+            pass
+
+    # Expose the track_id -> Line2D map + canvas so a linked-selection dispatcher
+    # can highlight a curve when the selection comes from another view.
+    if line_registry is not None:
+        try:
+            line_registry['lines'] = _tid_to_line
+            line_registry['canvas'] = fig.canvas
+            line_registry['state'] = {'prev': None}
         except Exception:
             pass
 

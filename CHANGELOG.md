@@ -4,6 +4,42 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.349] - 2026-07-10
+### Added — VPT per-track results table with linked selection
+- **A new non-modal per-track results table** appears after "Compute MSD &
+  Viscosity": one row per trajectory with track_id, frame count, duration, and a
+  per-track D and α (from a power-law fit of that track's own MSD). Clicking a row
+  selects that track everywhere through the linked-selection dispatcher — it
+  reveals the bead in the image and (when the MSD plot is open in separate-windows
+  mode) emphasises that track's MSD curve. Conversely, selecting a track from the
+  plot highlights its row here.
+- The table stays open alongside the plots (non-modal) and cleans up its dispatcher
+  registration when closed. Table→image linking works in both plot layouts;
+  table↔plot-curve highlighting currently works when the MSD plot is shown in
+  separate-windows mode (the consolidated 2×2 panel doesn't yet expose clickable
+  per-track lines — a planned follow-on). The full picture is now: plot→image
+  (1.5.336/348), table→image and table→plot and plot→table (this release), with
+  image→plot (clicking a bead) still to come via a pickable identity layer.
+
+## [1.5.348] - 2026-07-10
+### Added — VPT linked-selection dispatcher (foundation for plot↔image↔table brushing)
+- **A central selection hub** now coordinates highlighting a track across views:
+  clicking a track's MSD curve selects that track everywhere it can. One
+  ``_select_track(track_id, source)`` owns the current selection and propagates it
+  to the OTHER views, with a re-entrancy guard so a highlight it triggers can't
+  fire that view's own selection and loop (verified in isolation). The shared key
+  is ``track_id``, which already threads through the Tracks layer, the per-track
+  MSD curves, and the results.
+- The existing plot→image brushing (click an MSD curve → reveal the bead in the
+  viewer, shipped 1.5.336) now routes through this hub, and the MSD plot exposes
+  its ``track_id → curve`` line map so a selection driven from elsewhere can
+  emphasise the matching curve. All highlight paths are safe no-ops when their
+  view isn't open, so nothing errors if a plot or table is closed.
+- Foundation only: full three-way linking needs two further additive pieces — a
+  PER-TRACK results table (the current table is an ensemble summary) and a
+  pickable Points layer carrying track identity (napari Tracks layers have no
+  per-track click API). Those are the next increments.
+
 ## [1.5.347] - 2026-07-10
 ### Added — VPT: consolidated plot panel + trajectory-spread & van Hove plots
 - **Two new microrheology plots.** A **centered-trajectories** plot overlays every
