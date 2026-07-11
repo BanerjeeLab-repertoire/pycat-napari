@@ -4,6 +4,45 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.351] - 2026-07-10
+### Fixed — unlabelled multipage TIFFs now load as stacks (broad loader fix)
+- **A multipage TIFF with no axis metadata now loads as a stack, not as
+  individual images.** Previously the context-aware opener decided stack-vs-2D
+  purely from declared T/Z/P metadata, so a plain "save as TIFF" (e.g. a FRAP
+  recovery exported from a Lumicks .h5, or split/stacked exports from Andor,
+  Zeiss, Leica) — whose stack axis tifffile labels as unknown ('Q') — was
+  mis-routed to the 2D loader and opened as separate planes. Now such files are
+  detected and the user is **asked** whether it's a **time-series (T)**, a
+  **z-stack (Z)**, or **genuinely separate 2D images**, with a *remember my
+  choice this session* option. T and Z load identically (both 3-D); the label is
+  recorded so axis-dependent steps can warn if the axis was assumed
+  (``warn_if_assumed_axis``). Properly-tagged TIFFs (ImageJ/OME), declared
+  z-stacks, single 2-D images, and .czi/.ims are unaffected.
+- **FRAP safety net.** If a recovery layer is 2-D but several same-sized 2-D
+  image layers are open (the "loaded as individual images" case), the FRAP
+  analysis now offers to stack them into a (T, H, W) recovery series instead of
+  just refusing. This, plus the loader fix above, resolves the reported
+  ``τ½ = nans`` (which was downstream of the recovery loading as 2-D).
+- **Clearer Lumicks/pylake guidance.** The FRAP Step-1 panel now shows a hint
+  when ``lumicks.pylake`` isn't installed (with the one-line install command),
+  and the on-click message explains it's an optional package for C-Trap .h5.
+
+## [1.5.350] - 2026-07-10
+### Added — VPT pickable bead layer (image→plot/table brushing) completes the link
+- **A new "Bead Picker" Points layer** carries one point per bead per frame, each
+  tagged with its track_id. Clicking a bead in the image now selects that track
+  everywhere through the linked-selection dispatcher — it highlights that track's
+  MSD curve (separate-windows plot) and its row in the per-track table. This is the
+  direction napari's Tracks layer couldn't provide (Tracks has no per-track pick
+  API), so it's done with a pickable Points layer that resolves a clicked point to
+  its track_id. The points overlay the beads by matching the image layer's scale,
+  and are faint/hollow so they don't obscure the data.
+- **The linked-brushing web is now bidirectional across all three views:**
+  plot↔image, plot↔table, and image↔table all highlight the same track. The one
+  remaining follow-on is table↔plot-curve highlighting in the *consolidated* 2×2
+  panel (works today in separate-windows mode); the 2×2 panel doesn't yet expose
+  clickable per-track lines.
+
 ## [1.5.349] - 2026-07-10
 ### Added — VPT per-track results table with linked selection
 - **A new non-modal per-track results table** appears after "Compute MSD &

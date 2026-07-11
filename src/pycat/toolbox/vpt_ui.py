@@ -248,6 +248,84 @@ class VideoParticleTrackingUI:
         dlg.show()
         self._per_track_dialog = dlg  # keep a ref so it isn't GC'd
 
+    def _add_pickable_bead_points(self, tracks, img_layer, mpp):
+        """Add/refresh a Points layer with one point per bead per frame, each
+        carrying its track_id, so clicking a bead selects that track everywhere
+        (image->plot/table brushing). Matches the image layer's scale so points
+        overlay the beads. The click handler resolves the nearest point to its
+        track_id and drives the linked-selection dispatcher."""
+        import numpy as _np
+        if tracks is None or 'track_id' not in tracks or tracks.empty:
+            return
+        tr = tracks[tracks['track_id'] >= 0]
+        if tr.empty:
+            return
+        ycol = 'y_um_raw' if 'y_um_raw' in tr else 'y_um'
+        xcol = 'x_um_raw' if 'x_um_raw' in tr else 'x_um'
+        frames = tr['frame'].values.astype(float)
+        ys = (tr[ycol].values / mpp).astype(float)
+        xs = (tr[xcol].values / mpp).astype(float)
+        tids = tr['track_id'].values.astype(int)
+        pts = _np.column_stack([frames, ys, xs])   # (T, Y, X)
+
+        name = "Bead Picker"
+        if name in self.viewer.layers:
+            try:
+                self.viewer.layers.remove(name)
+            except Exception:
+                pass
+
+        add_kwargs = {'name': name, 'size': 8, 'opacity': 0.35,
+                      'face_color': 'transparent', 'border_color': 'yellow',
+                      'properties': {'track_id': tids}}
+        # Match the image layer's spatial (y, x) scale, like the Tracks layer.
+        if img_layer is not None:
+            try:
+                isc = _np.asarray(img_layer.scale, float)
+                if isc.size >= 2:
+                    yx = isc[-2:]
+                    add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
+            except Exception:
+                pass
+        try:
+            layer = self.viewer.add_points(pts, **add_kwargs)
+        except Exception:
+            # Older napari uses edge_color rather than border_color.
+            add_kwargs.pop('border_color', None)
+            add_kwargs['edge_color'] = 'yellow'
+            layer = self.viewer.add_points(pts, **add_kwargs)
+
+        self._bead_picker_tids = tids
+
+        # Click -> select that track everywhere. Uses the layer's own
+        # mouse_drag_callbacks so it only fires when the picker layer is active;
+        # get_value returns the index of the point under the cursor.
+        def _on_click(layer, event):
+            if getattr(self, '_sel_busy', False):
+                return
+            try:
+                idx = layer.get_value(
+                    event.position, view_direction=event.view_direction,
+                    dims_displayed=event.dims_displayed)
+            except Exception:
+                try:
+                    idx = layer.get_value(event.position)
+                except Exception:
+                    idx = None
+            if idx is None:
+                return
+            try:
+                tid = int(self._bead_picker_tids[int(idx)])
+            except Exception:
+                return
+            self._select_track(tid, source='image')
+
+        try:
+            layer.mouse_drag_callbacks.append(_on_click)
+        except Exception:
+            pass
+        self._bead_picker_layer = layer
+
     def _mpx(self):
         return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
 
@@ -1284,6 +1362,18 @@ class VideoParticleTrackingUI:
                     **add_kwargs)
 
             _tracks_layer(tracks, "Bead Trajectories")
+
+            # Companion PICKABLE Points layer carrying per-point track identity.
+            # napari Tracks layers expose no per-track click/pick API, so to make
+            # the image->plot direction work (click a bead -> highlight its MSD
+            # curve + its table row) we add a Points layer where every point knows
+            # its track_id. Clicking a point resolves to that track_id and drives
+            # the linked-selection dispatcher. One point per bead per frame so a
+            # bead is clickable on whatever frame the user is viewing.
+            try:
+                self._add_pickable_bead_points(tracks, _img_layer, mpp)
+            except Exception as _e:
+                print(f"[PyCAT VPT] pickable bead layer failed: {_e}")
 
             # Secondary aggregate population
             atracks = res.get('aggregate_tracks')

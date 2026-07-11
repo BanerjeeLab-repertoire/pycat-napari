@@ -1806,8 +1806,131 @@ class FileIOClass:
         # Multi-position (P>1) or any real Z/T axis → stack loader.
         if parsed and (n_t > 1 or n_z > 1 or n_p > 1):
             self.open_stack(file_path=file_path, clear_first=clear_first)
-        else:
-            self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
+            return
+
+        # Undeclared multipage TIFF: a TIFF whose metadata declares no T/Z/P axis
+        # but which nonetheless has multiple pages (a plain writer / non-ImageJ
+        # "save as TIFF" leaves the stack axis unlabelled — tifffile calls it 'Q').
+        # Most microscopy platforms (Andor, Zeiss, Leica, saved-from-.h5) can emit
+        # such split/stacked TIFFs, so this is common, not a FRAP quirk. The old
+        # behaviour mis-routed these to the 2D loader → "loaded as individual
+        # images". Now: detect the case and ASK whether it's a time-series,
+        # z-stack, or genuinely separate images (with a remember-choice option).
+        if ext in ('.tif', '.tiff'):
+            n_pages, undeclared = self._tiff_multipage_undeclared(file_path)
+            if undeclared and n_pages > 1:
+                choice = self._ask_multipage_axis(file_path, n_pages)
+                if choice in ('T', 'Z'):
+                    # Both T and Z are 3D and load the same way; the label is
+                    # recorded so downstream steps can warn if an unknown/assumed
+                    # axis is used in an axis-dependent operation.
+                    self.central_manager.active_data_class.data_repository['stack_axis_label'] = choice
+                    self.central_manager.active_data_class.data_repository['stack_axis_assumed'] = True
+                    self.open_stack(file_path=file_path, clear_first=clear_first)
+                    return
+                elif choice == 'separate':
+                    self.open_2d_image(file_paths=[file_path],
+                                       clear_first=clear_first)
+                    return
+                # choice is None (dialog failed) → fall through to 2D as before.
+
+        self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
+
+    def warn_if_assumed_axis(self, operation="this analysis"):
+        """Flash a one-time warning if the current stack's axis type was ASSUMED
+        (an undeclared multipage TIFF the user labelled T or Z at load) and an
+        axis-dependent operation is about to use it. T and Z load identically, so
+        a wrong label is harmless for loading/viewing, but an axis-dependent step
+        (e.g. treating frames as time for a rate, or as z for a projection) should
+        remind the user the axis was assumed. Fires at most once per stack per
+        session. Safe no-op if the axis was declared in metadata.
+
+        Analysis steps that depend on the axis being time vs z can call this;
+        full propagation across every analysis is a follow-on — for now it's
+        available for the axis-sensitive paths to invoke."""
+        try:
+            dr = self.central_manager.active_data_class.data_repository
+        except Exception:
+            return
+        if not dr.get('stack_axis_assumed'):
+            return
+        if dr.get('_axis_warned'):
+            return
+        label = dr.get('stack_axis_label', '?')
+        try:
+            from napari.utils.notifications import show_warning
+            show_warning(
+                f"Note: this stack's axis was assumed to be '{label}' (the file "
+                f"had no axis metadata). {operation} depends on the axis type — "
+                f"if it's actually the other kind, reopen and relabel.")
+        except Exception:
+            pass
+        dr['_axis_warned'] = True
+
+    def _tiff_multipage_undeclared(self, file_path):
+        """Return (n_pages, is_undeclared) for a TIFF: n_pages is the page count of
+        the first series; is_undeclared is True when the file carries no ImageJ/OME
+        axis metadata AND the series' leading axis is unlabelled ('Q'), i.e. a
+        plain multipage TIFF whose stack axis type is unknown. Safe: any failure
+        returns (1, False) so the caller falls back to the normal 2D path."""
+        try:
+            import tifffile
+            with tifffile.TiffFile(file_path) as t:
+                if t.is_imagej or t.is_ome:
+                    return (len(t.pages), False)  # metadata present → not our case
+                series = t.series[0]
+                axes = getattr(series, 'axes', '') or ''
+                n_pages = len(t.pages)
+                # Undeclared when the leading (non-YX) axis is 'Q' (unknown) or the
+                # shape has >1 in a leading position with no T/Z label.
+                lead = axes[:-2] if len(axes) >= 2 else axes
+                undeclared = n_pages > 1 and (('T' not in lead) and ('Z' not in lead))
+                return (n_pages, undeclared)
+        except Exception:
+            return (1, False)
+
+    def _ask_multipage_axis(self, file_path, n_pages):
+        """Prompt for how to interpret an undeclared multipage TIFF: time-series
+        (T), z-stack (Z), or genuinely separate 2D images. Returns 'T', 'Z',
+        'separate', or None (dialog unavailable). A 'remember this choice'
+        checkbox skips the prompt for later undeclared TIFFs this session."""
+        # Honour a remembered choice from earlier this session.
+        remembered = getattr(self, '_multipage_axis_choice', None)
+        if remembered is not None:
+            return remembered
+        try:
+            from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel,
+                                         QRadioButton, QCheckBox, QPushButton,
+                                         QButtonGroup)
+        except Exception:
+            return None
+        import os as _os
+        dlg = QDialog()
+        dlg.setWindowTitle("Unlabelled multipage TIFF")
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel(
+            f"'{_os.path.basename(file_path)}' has {n_pages} pages but no axis "
+            "metadata (the stack axis type is unknown).\n\nHow should PyCAT load "
+            "it? (Time-series and z-stack load the same way — the label only "
+            "affects axis-dependent analysis steps, which will warn if the axis "
+            "was assumed.)"))
+        grp = QButtonGroup(dlg)
+        rb_t = QRadioButton("Time-series (T) — a movie / recovery / tracking stack")
+        rb_z = QRadioButton("Z-stack (Z) — an axial slice series")
+        rb_s = QRadioButton("Separate 2D images — unrelated planes, load individually")
+        rb_t.setChecked(True)
+        for rb in (rb_t, rb_z, rb_s):
+            grp.addButton(rb); v.addWidget(rb)
+        remember = QCheckBox("Remember my choice for other unlabelled TIFFs this session")
+        v.addWidget(remember)
+        ok = QPushButton("Load"); ok.clicked.connect(dlg.accept)
+        v.addWidget(ok)
+        if dlg.exec_() != QDialog.Accepted:
+            return None
+        choice = 'T' if rb_t.isChecked() else ('Z' if rb_z.isChecked() else 'separate')
+        if remember.isChecked():
+            self._multipage_axis_choice = choice
+        return choice
 
     def _warn_if_slow_storage(self, file_path):
         """Probe where a file lives and, if it is on slow storage (network share,

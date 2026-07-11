@@ -125,6 +125,18 @@ class FRAPUI:
             "recovery scan, frame interval, and bleach→recovery lag automatically.")
         lumicks_btn.clicked.connect(self._on_load_lumicks)
         form.addRow(lumicks_btn)
+        # Proactive hint: if pylake isn't installed, say so here (before the user
+        # clicks and hits a failure), with the one-line install command.
+        try:
+            from pycat.file_io.frap_io import lumicks_available
+            if not lumicks_available():
+                _pk = QLabel("⚠ Lumicks .h5 needs 'lumicks.pylake' "
+                             "(not installed): pip install lumicks.pylake")
+                _pk.setWordWrap(True)
+                _pk.setStyleSheet("color: #b06000; font-size: 9pt;")
+                form.addRow(_pk)
+        except Exception:
+            pass
 
         self._rec_dd = self.create_layer_dropdown(napari.layers.Image)
         self._rec_dd.setToolTip("Recovery time-series (T, H, W) to analyze.")
@@ -223,7 +235,11 @@ class FRAPUI:
             lumicks_available, load_lumicks_frap, compute_lumicks_timelag)
         if not lumicks_available():
             napari_show_warning(
-                "lumicks.pylake not installed. Run: pip install lumicks.pylake")
+                "Lumicks .h5 files need the optional 'lumicks.pylake' package, "
+                "which isn't installed. Install it, then restart PyCAT:\n"
+                "    pip install lumicks.pylake\n"
+                "(Only C-Trap .h5 loading needs it; the rest of PyCAT works "
+                "without it.)")
             return
         path, _ = QFileDialog.getOpenFileName(
             None, "Open Lumicks C-Trap FRAP .h5", "", "Lumicks HDF5 (*.h5)")
@@ -400,6 +416,59 @@ class FRAPUI:
         form.addRow(_bwc(btn))
         layout.addWidget(grp)
 
+    def _offer_stack_2d_images(self, current_name, current_stack):
+        """When the chosen recovery layer is 2D (the 'loaded as individual images'
+        case), collect all same-shaped 2D Image layers, and — if there are ≥2 —
+        offer to stack them into a (T, H, W) array (ordered by layer name, which
+        typically carries the frame index). Returns the stacked array, or None if
+        the user declines or there aren't enough matching layers."""
+        try:
+            import numpy as _np
+            import napari
+            from pycat.file_io.file_io import materialize_stack
+            H, W = current_stack.shape[-2:]
+            candidates = []
+            for l in self.viewer.layers:
+                if isinstance(l, napari.layers.Image):
+                    try:
+                        a = materialize_stack(l.data)
+                    except Exception:
+                        continue
+                    if a.ndim == 2 and a.shape == (H, W):
+                        candidates.append((l.name, a))
+            if len(candidates) < 2:
+                return None
+            # Order by name (frame indices usually embedded), current layer first
+            # is not required — natural/name order is the safest default.
+            candidates.sort(key=lambda t: t[0])
+            from PyQt5.QtWidgets import QMessageBox
+            box = QMessageBox()
+            box.setWindowTitle("Stack 2D images into a recovery series?")
+            box.setIcon(QMessageBox.Question)
+            box.setText(
+                f"The recovery layer is 2D, but {len(candidates)} same-sized 2D "
+                "image layers are open. Stack them into a single (T, H, W) "
+                "recovery time-series (ordered by layer name)?")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            if box.exec_() != QMessageBox.Yes:
+                return None
+            arr = _np.stack([a for _, a in candidates], axis=0)
+            # Add the stacked series as a new layer and select it in the dropdown.
+            new_name = "FRAP recovery (stacked)"
+            self.viewer.add_image(arr, name=new_name)
+            try:
+                self.central_manager.toolbox_functions_ui.update_dropdown_items(
+                    self._rec_dd, napari.layers.Image)
+                idx = self._rec_dd.findText(new_name)
+                if idx != -1:
+                    self._rec_dd.setCurrentIndex(idx)
+            except Exception:
+                pass
+            return arr
+        except Exception as _e:
+            print(f"[PyCAT FRAP] stack-2D-images failed: {_e}")
+            return None
+
     def _on_analyze(self):
         from pycat.toolbox.frap_tools import (
             run_frap_analysis, run_frap_analysis_multi, masks_from_shapes_multi)
@@ -409,7 +478,19 @@ class FRAPUI:
         from pycat.file_io.file_io import materialize_stack
         stack = materialize_stack(self.viewer.layers[name].data)
         if stack.ndim != 3:
-            napari_show_warning("Recovery stack must be a 3D (T, H, W) time series."); return
+            # Safety net for the "recovery loaded as individual 2D images" case
+            # (a multipage TIFF that wasn't recognised as a stack). If several
+            # same-sized 2D Image layers exist, offer to stack them into a
+            # (T, H, W) series so the user isn't stuck.
+            stacked = self._offer_stack_2d_images(name, stack)
+            if stacked is None:
+                napari_show_warning(
+                    "Recovery stack must be a 3D (T, H, W) time series. This "
+                    "layer is 2D — if your recovery loaded as separate images, "
+                    "reopen the file and choose 'Time-series' at the prompt, or "
+                    "use the offer to stack the open 2D images.")
+                return
+            stack = stacked
 
         norm_mode = 'taylor' if self._taylor.isChecked() else 'prebleach'
         dt   = self._frame_dt.value()
