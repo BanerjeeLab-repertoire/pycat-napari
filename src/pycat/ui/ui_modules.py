@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
     QLineEdit, QWidget, QComboBox, QSlider, QScrollArea, QSizePolicy, QAction,
-    QTabWidget)
+    QTabWidget, QToolButton, QFrame)
 from PyQt5.QtCore import Qt, QObject
 
 # Local application imports
@@ -2866,6 +2866,50 @@ class ColocalizationAnalysisUI(AnalysisMethodsUI):
                 continue
 
 
+class CollapsibleSection(QWidget):
+    """A titled, collapsible container. Clicking the header toggles a content area
+    whose inner layout (``content_layout``) tools can populate via the usual
+    ``_add_*(layout=...)`` methods. Used to group the many toolbox tools in the
+    Exploratory Analysis dock into coherent, expandable sections that start
+    collapsed so the panel isn't overwhelming.
+    """
+    def __init__(self, title, expanded=False, parent=None):
+        super().__init__(parent)
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setSpacing(0)
+
+        self._toggle = QToolButton()
+        self._toggle.setText(title)
+        self._toggle.setCheckable(True)
+        self._toggle.setChecked(expanded)
+        self._toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self._toggle.setStyleSheet(
+            "QToolButton { border: none; font-weight: bold; padding: 6px 4px; "
+            "text-align: left; background: #2b2b2b; }"
+            "QToolButton:hover { background: #353535; }")
+        self._toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._toggle.toggled.connect(self._on_toggled)
+        self._outer.addWidget(self._toggle)
+
+        # Content area
+        self._content = QFrame()
+        self._content.setFrameShape(QFrame.NoFrame)
+        self.content_layout = QVBoxLayout(self._content)
+        self.content_layout.setContentsMargins(8, 4, 4, 8)
+        self.content_layout.setSpacing(4)
+        self._content.setVisible(expanded)
+        self._outer.addWidget(self._content)
+
+    def _on_toggled(self, checked):
+        self._toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self._content.setVisible(checked)
+
+    def set_expanded(self, expanded):
+        self._toggle.setChecked(expanded)
+
+
 class GeneralAnalysisUI(AnalysisMethodsUI):
     """
     A user interface (UI) class designed for general analysis purposes within a broader
@@ -2909,22 +2953,128 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
 
     def setup_ui(self):
         """
-        Sets up the UI components specifically required for general analysis, detailing the
-        process flow and enabling comprehensive analysis features through a structured UI layout.
+        Build the Exploratory Analysis dock: a "workbench" giving access to the
+        full toolbox, grouped into collapsible sections that mirror the Toolbox
+        menu structure. Most sections start collapsed so the panel isn't
+        overwhelming; a couple of common starting points (Setup, Segmentation,
+        Save) start expanded. Tools that only make sense inside a dedicated,
+        stateful pipeline (whole cellular/in-vitro/time-series/z-stack pipelines,
+        the biophysics single-tether methods) are intentionally NOT duplicated
+        here — this dock is for mixing individual tools, not re-hosting pipelines.
         """
-        # Setup the specific UI components for a general analysis
-        self._add_workflow_header(self.general_layout, include_pixel_gate=True)
-        self.central_manager.toolbox_functions_ui._add_measure_line(layout=self.general_layout)
-        self.central_manager.toolbox_functions_ui._add_run_upscaling(layout=self.general_layout)
-        self.central_manager.toolbox_functions_ui._add_pre_process(layout=self.general_layout)
-        # (Enhanced BG removal is now produced by the Pre-process Image button — merged in 1.5.136)
-        self.central_manager.toolbox_functions_ui._add_run_train_and_apply_rf_classifier(layout=self.general_layout)
-        self.central_manager.toolbox_functions_ui._add_run_local_thresholding(layout=self.general_layout)   
-        self.central_manager.toolbox_functions_ui._add_run_label_binary_mask(layout=self.general_layout)  
-        self.central_manager.toolbox_functions_ui._add_run_measure_region_props(layout=self.general_layout) 
-        self.central_manager.toolbox_functions_ui._add_run_autocorrelation_analysis(layout=self.general_layout)  
-        self.central_manager.toolbox_functions_ui._add_save_and_clear(layout=self.general_layout)
-        # ... Add other components in the order you want ...
+        tf = self.central_manager.toolbox_functions_ui
+        L = self.general_layout
+
+        # Always-visible header (file IO + pixel gate + measure).
+        self._add_workflow_header(L, include_pixel_gate=True)
+
+        def section(title, expanded=False):
+            sec = CollapsibleSection(title, expanded=expanded)
+            L.addWidget(sec)
+            return sec.content_layout
+
+        # ── Setup (expanded) ────────────────────────────────────────────────
+        s = section("Setup & Measure", expanded=True)
+        tf._add_measure_line(layout=s)
+        tf._add_run_upscaling(layout=s)
+        tf._add_pre_process(layout=s)
+
+        # ── Image Processing (collapsed) ────────────────────────────────────
+        s = section("Image Processing")
+        tf._add_run_reference_subtraction(layout=s)
+        tf._add_run_apply_rescale_intensity(layout=s)
+        tf._add_run_invert_image(layout=s)
+        tf._add_run_rb_gaussian_background_removal(layout=s)
+        tf._add_run_enhanced_rb_gaussian_bg_removal(layout=s)
+        tf._add_run_calibration_correction(layout=s)
+        tf._add_run_wbns(layout=s)
+        tf._add_run_wavelet_noise_subtraction(layout=s)
+        tf._add_run_apply_bilateral_filter(layout=s)
+        tf._add_run_clahe(layout=s)
+        tf._add_run_peak_and_edge_enhancement(layout=s)
+        tf._add_run_morphological_gaussian_filter(layout=s)
+        tf._add_run_apply_laplace_of_gauss_filter(layout=s)
+        tf._add_run_dpr(layout=s)
+        tf._add_run_fft_bandpass(layout=s)
+
+        # ── Segmentation (expanded — common starting point) ─────────────────
+        s = section("Segmentation", expanded=True)
+        tf._add_run_train_and_apply_rf_classifier(layout=s)
+        tf._add_run_local_thresholding(layout=s)
+        tf._add_run_im2bw(layout=s)
+        tf._add_run_cellpose_segmentation(layout=s)
+        tf._add_run_fz_segmentation_and_merging(layout=s)
+        tf._add_gaussian_localization(layout=s)
+        tf._add_contrast_cascade(layout=s)
+
+        # ── Labels & Masks (collapsed) ──────────────────────────────────────
+        s = section("Labels & Masks")
+        tf._add_run_binary_morph_operation(layout=s)
+        tf._add_run_measure_binary_mask(layout=s)
+        tf._add_run_label_binary_mask(layout=s)
+        tf._add_run_update_labels(layout=s)
+        tf._add_run_convert_labels_to_mask(layout=s)
+        tf._add_run_expand_labels(layout=s)
+        tf._add_run_measure_region_props(layout=s)
+
+        # ── Layer Operations (collapsed) ────────────────────────────────────
+        s = section("Layer Operations")
+        tf._add_run_simple_multi_merge(layout=s)
+        tf._add_run_advanced_two_layer_merge(layout=s)
+        tf._add_run_mask_logic_merge(layout=s)
+
+        # ── Cell & Object Analyzers (collapsed) ─────────────────────────────
+        s = section("Cell & Object Analyzers")
+        tf._add_run_cell_analysis_func(layout=s)
+        tf._add_run_segment_subcellular_objects(layout=s)
+        tf._add_run_puncta_analysis_func(layout=s)
+
+        # ── Colocalization / Correlation (collapsed) ────────────────────────
+        s = section("Colocalization / Correlation")
+        tf._add_run_autocorrelation_analysis(layout=s)
+        tf._add_client_enrichment(layout=s)
+        tf._add_run_pwcca(layout=s)
+        tf._add_run_ccf_analysis(layout=s)
+        tf._add_run_obca(layout=s)
+        tf._add_run_manders_coloc(layout=s)
+
+        # ── Spatial Metrology (collapsed) ───────────────────────────────────
+        s = section("Spatial Metrology")
+        tf._add_run_sacf_analysis(layout=s)
+        tf._add_spatial_metrology(layout=s)
+        tf._add_spatial_randomness(layout=s)
+        tf._add_intensity_profile(layout=s)
+        tf._add_morphological_complexity(layout=s)
+        tf._add_fibril_analysis(layout=s)
+
+        # ── Advanced Analysis (collapsed) ───────────────────────────────────
+        s = section("Advanced Analysis")
+        tf._add_advanced_analysis(layout=s)
+        tf._add_condensate_physics(layout=s)
+        tf._add_molecular_counting(layout=s)
+        tf._add_spida(layout=s)
+        tf._add_number_and_brightness(layout=s)
+
+        # ── Structure Estimators (collapsed) ────────────────────────────────
+        s = section("Structure Estimators")
+        tf._add_chromatin_topology(layout=s)
+        tf._add_nucleolus_void_estimator(layout=s)
+
+        # ── Diagnostics & QC (collapsed) ────────────────────────────────────
+        s = section("Diagnostics & QC")
+        tf._add_pipeline_diagnostics(layout=s)
+        tf._add_pipeline_snr_analysis(layout=s)
+        tf._add_foreground_suppression_tuner(layout=s)
+        tf._add_temporal_enhancement_optimizer(layout=s)
+        tf._add_segmentation_benchmark(layout=s)
+        tf._add_segmentation_speed_comparison(layout=s)
+        tf._add_display_diagnostics(layout=s)
+        tf._add_data_qc(layout=s)
+        tf._add_plotting_widget(layout=s)
+
+        # ── Save (expanded) ─────────────────────────────────────────────────
+        s = section("Save & Clear", expanded=True)
+        tf._add_save_and_clear(layout=s)
 
         # Create a main widget to contain everything
         main_widget = QWidget()

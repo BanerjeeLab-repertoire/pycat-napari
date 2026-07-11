@@ -4,6 +4,21 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.364] - 2026-07-10
+### Changed — Exploratory Analysis rebuilt as a full-toolbox workbench (stage 2 of 3)
+- **Exploratory Analysis now exposes the whole toolbox**, grouped into collapsible
+  sections that mirror the Toolbox menu: Setup & Measure, Image Processing,
+  Segmentation, Labels & Masks, Layer Operations, Cell & Object Analyzers,
+  Colocalization / Correlation, Spatial Metrology, Advanced Analysis, Structure
+  Estimators, Diagnostics & QC, and Save & Clear. Previously it offered only a
+  fixed handful of tools in a flat list.
+- **Sections start collapsed** so the panel isn't overwhelming, except a few common
+  starting points that start expanded (Setup & Measure, Segmentation, Save &
+  Clear). A new lightweight ``CollapsibleSection`` widget provides the expandable
+  headers. Whole dedicated pipelines (the cellular/in-vitro/time-series/z-stack
+  object analyses and the biophysics single-tether methods) are intentionally not
+  duplicated here — this dock is for freely mixing individual tools.
+
 ## [1.5.363] - 2026-07-10
 ### Fixed — Cellpose prewarm re-ran on every launch (misleading "one-time" message)
 - **The Cellpose prewarm now correctly detects an already-cached model.** The old
