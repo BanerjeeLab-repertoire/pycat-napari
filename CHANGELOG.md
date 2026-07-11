@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.356] - 2026-07-10
+### Added — copy slow-storage files to local cache with a progress bar
+- **When a file is on slow storage** (network share, removable drive, cloud
+  online-only placeholder), PyCAT now offers to **copy it to fast local temp
+  storage first**, then load from the copy — instead of only warning. The copy
+  runs in 8 MB chunks behind a **progress dialog with a Cancel button** (the copy
+  is the slow I/O, so this doubles as the slow-load progress indicator). An
+  "always do this for slow files this session" option avoids re-prompting, a
+  cancelled copy cleans up its partial file, and a file already cached locally
+  (same size) is reused instead of re-copied. Fast storage is unaffected and
+  silent, as before.
+
 ## [1.5.355] - 2026-07-10
 ### Improved — Force-Distance: smart default force channel
 - **The FD loader now auto-selects the force channel that actually shows the

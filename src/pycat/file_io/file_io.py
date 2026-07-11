@@ -1646,8 +1646,8 @@ class FileIOClass:
 
         # Probe storage once here (this router runs for menu-Add and for drops);
         # delegated open_image_auto calls below pass _skip_storage_probe so the
-        # few-MB probe read happens only once.
-        self._warn_if_slow_storage(file_path)
+        # few-MB probe read happens only once. May redirect to a fast local copy.
+        file_path = self._warn_if_slow_storage(file_path) or file_path
 
         # 1. PyCAT signifier — authoritative, no prompt.
         sig = self._read_pycat_signifier(file_path)
@@ -1771,10 +1771,11 @@ class FileIOClass:
             return
 
         # Warn if this file is on slow storage / a cloud placeholder before the
-        # potentially long load begins. Skipped when a caller (e.g.
-        # _add_image_or_mask_single) has already probed, to avoid a double read.
+        # potentially long load begins, and optionally copy it local (with a
+        # progress bar) — returning the path to actually load from. Skipped when a
+        # caller (e.g. _add_image_or_mask_single) has already probed/redirected.
         if not _skip_storage_probe:
-            self._warn_if_slow_storage(file_path)
+            file_path = self._warn_if_slow_storage(file_path) or file_path
 
         ext = os.path.splitext(file_path)[1].lower()
         # IMS is always a stack format (T/C/Z), route directly.
@@ -1935,37 +1936,167 @@ class FileIOClass:
     def _warn_if_slow_storage(self, file_path):
         """Probe where a file lives and, if it is on slow storage (network share,
         slow external drive) or a cloud online-only placeholder, warn the user
-        that loading may take a while. Returns the StorageVerdict (or None).
+        that loading may take a while — and OFFER to copy it to fast local storage
+        first (with a progress bar). Returns the path to load from: the original
+        path, or a local copy if the user accepted the copy. Callers should load
+        from the returned path.
 
-        The warning is deliberately shown ONLY when the storage is genuinely slow
-        — and because a slow load then keeps the app busy for a while, the notice
-        naturally stays on screen long enough to read (it does not flash-and-clear
-        the way a fixed-timer popup would). Fast storage stays silent.
-
-        The probe reads a few MB, so it is run here on the load path (already off
-        the UI thread for the heavy loaders); it is cheap on fast media and its
-        cost on slow media is itself part of the signal.
+        The warning is shown ONLY when the storage is genuinely slow. Fast storage
+        stays silent and the original path is returned unchanged.
         """
         try:
             from pycat.file_io.storage_probe import probe_path
         except Exception:
-            return None
+            return file_path
         try:
             verdict = probe_path(file_path)
         except Exception:
-            return None
+            return file_path
         if verdict is None or not verdict.message:
-            return verdict
-        if verdict.slow or verdict.needs_download:
-            # Persistent-ish notice: napari warning + terminal line so it is
-            # visible in the notification area and the log while the load runs.
+            return file_path
+        if not (verdict.slow or verdict.needs_download):
+            return file_path
+
+        # Persistent-ish notice: napari warning + terminal line so it is visible
+        # in the notification area and the log while the load runs.
+        try:
+            from napari.utils.notifications import show_warning
+            show_warning("PyCAT: " + verdict.message)
+        except Exception:
+            pass
+        print(f"[PyCAT storage] {verdict!r} :: {verdict.message}")
+
+        # Offer to copy to fast local storage first. Skipped if the user chose
+        # "always/never" earlier this session.
+        pref = getattr(self, '_copy_to_local_pref', None)  # None | 'always' | 'never'
+        if pref == 'never':
+            return file_path
+        if pref != 'always':
+            decision = self._ask_copy_to_local(file_path, verdict)
+            if decision in ('never', 'no'):
+                if decision == 'never':
+                    self._copy_to_local_pref = 'never'
+                return file_path
+            if decision == 'always':
+                self._copy_to_local_pref = 'always'
+            # decision in ('yes','always') → proceed to copy
+        local = self._copy_to_local_with_progress(file_path, verdict)
+        return local or file_path
+
+    def _ask_copy_to_local(self, file_path, verdict):
+        """Ask whether to copy a slow-storage file to fast local temp storage
+        before loading. Returns 'yes'|'no'|'always'|'never' (or 'no' if the dialog
+        can't be shown)."""
+        try:
+            from PyQt5.QtWidgets import QMessageBox, QCheckBox
+        except Exception:
+            return 'no'
+        import os as _os
+        try:
+            size_mb = (verdict.size_bytes or 0) / (1024 * 1024)
+        except Exception:
+            size_mb = 0
+        where = {'network': 'a network location', 'removable': 'a removable drive',
+                 'cloud_placeholder': 'cloud storage (will download)'}.get(
+                     getattr(verdict, 'location', ''), 'slow storage')
+        box = QMessageBox()
+        box.setWindowTitle("Copy to local storage first?")
+        box.setIcon(QMessageBox.Question)
+        box.setText(
+            f"'{_os.path.basename(file_path)}' ({size_mb:.0f} MB) is on {where}, "
+            "which loads slowly. Copy it to fast local temp storage first (with a "
+            "progress bar), then load from the copy?")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        always = QCheckBox("Always do this for slow files this session")
+        box.setCheckBox(always)
+        res = box.exec_()
+        if res == QMessageBox.Yes:
+            return 'always' if always.isChecked() else 'yes'
+        return 'never' if always.isChecked() else 'no'
+
+    def _copy_to_local_with_progress(self, file_path, verdict):
+        """Copy a (slow-storage) file to a local temp dir in chunks, showing a Qt
+        progress bar (the copy IS the slow I/O, so this doubles as the slow-load
+        progress indicator). Returns the local path, or None on failure/cancel."""
+        import os as _os
+        import tempfile
+        try:
+            from PyQt5.QtWidgets import QProgressDialog
+            from PyQt5.QtCore import Qt
+        except Exception:
+            QProgressDialog = None
+        try:
+            total = _os.path.getsize(file_path)
+        except Exception:
+            total = getattr(verdict, 'size_bytes', 0) or 0
+        dst_dir = _os.path.join(tempfile.gettempdir(), 'pycat_local_cache')
+        try:
+            _os.makedirs(dst_dir, exist_ok=True)
+        except Exception:
+            return None
+        dst = _os.path.join(dst_dir, _os.path.basename(file_path))
+        # If a fresh local copy already exists (same size), reuse it.
+        try:
+            if _os.path.exists(dst) and total and _os.path.getsize(dst) == total:
+                print(f"[PyCAT storage] reusing local copy: {dst}")
+                return dst
+        except Exception:
+            pass
+
+        dlg = None
+        if QProgressDialog is not None:
             try:
-                from napari.utils.notifications import show_warning
-                show_warning("PyCAT: " + verdict.message)
+                dlg = QProgressDialog(
+                    f"Copying {_os.path.basename(file_path)} to local storage…",
+                    "Cancel", 0, 100)
+                dlg.setWindowTitle("Copying to local storage")
+                dlg.setWindowModality(Qt.WindowModal)
+                dlg.setMinimumDuration(0)
+                dlg.setValue(0)
+            except Exception:
+                dlg = None
+
+        CHUNK = 8 * 1024 * 1024  # 8 MB chunks
+        copied = 0
+        try:
+            with open(file_path, 'rb') as fsrc, open(dst, 'wb') as fdst:
+                while True:
+                    buf = fsrc.read(CHUNK)
+                    if not buf:
+                        break
+                    fdst.write(buf)
+                    copied += len(buf)
+                    if dlg is not None and total:
+                        pct = int(copied * 100 / total)
+                        dlg.setValue(min(pct, 100))
+                        from PyQt5.QtWidgets import QApplication
+                        QApplication.processEvents()
+                        if dlg.wasCanceled():
+                            fdst.close()
+                            try:
+                                _os.remove(dst)
+                            except Exception:
+                                pass
+                            print("[PyCAT storage] copy cancelled by user")
+                            return None
+            if dlg is not None:
+                dlg.setValue(100)
+            print(f"[PyCAT storage] copied to local cache: {dst} "
+                  f"({copied/(1024*1024):.0f} MB)")
+            # Track for optional cleanup at session end.
+            if not hasattr(self, '_local_cache_files'):
+                self._local_cache_files = []
+            self._local_cache_files.append(dst)
+            return dst
+        except Exception as e:
+            print(f"[PyCAT storage] copy-to-local failed: {e}")
+            try:
+                if _os.path.exists(dst):
+                    _os.remove(dst)
             except Exception:
                 pass
-            print(f"[PyCAT storage] {verdict!r} :: {verdict.message}")
-        return verdict
+            return None
 
     def open_stack(self, file_path=None, clear_first=True):
         """
