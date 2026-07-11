@@ -185,6 +185,101 @@ def run_two_channel_condensate_colocalization(
     return results_df, puncta_mask_ch1, puncta_mask_ch2
 
 
+def condensate_coloc_time_trace(
+    stack_ch1, stack_proc_ch1, stack_ch2, stack_proc_ch2, cell_mask_stack,
+    ball_radius, microns_per_pixel_sq, refinement_params_ch1,
+    refinement_params_ch2, coloc_methods, frame_interval_s=1.0,
+    per_cell=True, progress_callback=None, cancel_check=None):
+    """Run object-based two-channel condensate colocalization frame-by-frame and
+    return a time trace — per cell (default) or aggregated per frame.
+
+    Cell identity across frames comes from the LABELED cell mask, exactly as the
+    time-series condensate pipeline does it: a labeled mask carries stable cell
+    IDs, so the same label = the same cell frame-to-frame. Supply either a single
+    (H, W) labeled mask (propagated to every frame — the cell doesn't move) or a
+    (T, H, W) labeled stack (each frame's own segmentation; consistent labels
+    track moving cells). No separate tracking step is needed — the segmentation's
+    labels ARE the identity.
+
+    per_cell : if True (default) keep one row per (frame, cell_label) so each
+        cell's colocalization can be followed over time; if False, average across
+        cells for a single per-frame trace (the old behaviour).
+    cancel_check : optional callable() -> bool; when it returns True the run stops
+        early and returns what's been computed so far.
+
+    Returns a tidy DataFrame:
+      per_cell=True  → frame, time_s, cell_label, <each coloc metric column>
+      per_cell=False → frame, time_s, n_cells, mean_<metric> …
+    Inputs may be lazy stacks; frames are streamed one at a time.
+    """
+    from pycat.file_io.file_io import iter_frames, layer_is_stack, extract_2d_plane
+
+    shp = getattr(stack_ch1, 'shape', None)
+    n_t = int(shp[0]) if (shp is not None and len(shp) == 3) else 1
+    mask_is_stack = layer_is_stack(cell_mask_stack)
+    static_mask = None
+    if not mask_is_stack:
+        static_mask = extract_2d_plane(cell_mask_stack, frame_index=0, dtype=None)
+
+    rows = []
+    it1 = iter_frames(stack_ch1);  it1p = iter_frames(stack_proc_ch1)
+    it2 = iter_frames(stack_ch2);  it2p = iter_frames(stack_proc_ch2)
+    for (t, f1), (_, f1p), (_, f2), (_, f2p) in zip(it1, it1p, it2, it2p):
+        if cancel_check is not None:
+            try:
+                if cancel_check():
+                    break
+            except Exception:
+                pass
+        cmask = (np.asarray(cell_mask_stack[t]) if mask_is_stack else static_mask)
+        try:
+            per_cell_df, _m1, _m2 = run_two_channel_condensate_colocalization(
+                image_ch1=f1, preprocessed_ch1=f1p,
+                image_ch2=f2, preprocessed_ch2=f2p,
+                labeled_cell_mask=cmask, ball_radius=ball_radius,
+                microns_per_pixel_sq=microns_per_pixel_sq,
+                refinement_params_ch1=refinement_params_ch1,
+                refinement_params_ch2=refinement_params_ch2,
+                coloc_methods=coloc_methods, cell_df=None)
+        except Exception:
+            per_cell_df = pd.DataFrame()
+
+        time_s = float(t) * float(frame_interval_s)
+        if per_cell:
+            # One row per cell, preserving cell_label so each cell can be tracked
+            # through time. (Empty frames contribute no rows.)
+            for _, r in per_cell_df.iterrows():
+                row = {'frame': int(t), 'time_s': time_s}
+                # keep the cell identity column under a stable name
+                cl = r.get('cell_label', r.get('cell_id', None))
+                row['cell_label'] = int(cl) if cl is not None and cl == cl else -1
+                for col in per_cell_df.columns:
+                    if col in ('cell_label', 'cell_id'):
+                        continue
+                    v = pd.to_numeric(pd.Series([r[col]]), errors='coerce').iloc[0]
+                    row[col] = v
+                rows.append(row)
+        else:
+            row = {'frame': int(t), 'time_s': time_s,
+                   'n_cells': int(len(per_cell_df))}
+            if len(per_cell_df):
+                for col in per_cell_df.columns:
+                    if col in ('cell_label', 'cell_id'):
+                        continue
+                    vals = pd.to_numeric(per_cell_df[col], errors='coerce')
+                    if vals.notna().any():
+                        row[f'mean_{col}'] = float(vals.mean())
+            rows.append(row)
+
+        if progress_callback is not None:
+            try:
+                progress_callback(t + 1, n_t)
+            except Exception:
+                pass
+
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------
 # Background worker
 # ---------------------------------------------------------------------------
@@ -206,6 +301,35 @@ class TwoChannelColocWorker(QThread):
                 progress_callback=_cb, **self._kwargs
             )
             self.finished.emit(results_df, mask1, mask2)
+        except Exception:
+            import traceback
+            self.error.emit(traceback.format_exc())
+
+
+class CondensateColocTimeWorker(QThread):
+    """Runs condensate_coloc_time_trace off the UI thread (frame-by-frame over a
+    stack can be slow), reporting per-frame progress and supporting cancellation."""
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(object)      # the trace DataFrame
+    error    = pyqtSignal(str)
+
+    def __init__(self, kwargs: dict, parent=None):
+        super().__init__(parent)
+        self._kwargs = kwargs
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            def _cb(done, total):
+                self.progress.emit(done, total)
+            trace = condensate_coloc_time_trace(
+                progress_callback=_cb,
+                cancel_check=lambda: self._cancel,
+                **self._kwargs)
+            self.finished.emit(trace)
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -316,6 +440,15 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     run_btn = QPushButton("▶  Run Two-Channel Colocalization")
     run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     main_layout.addWidget(run_btn)
+
+    time_btn = QPushButton("▶  Coloc Over Time (all frames)")
+    time_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    time_btn.setToolTip(
+        "Run object-based condensate colocalization on every frame of the "
+        "selected stacks and plot the per-frame mean coloc metrics vs time. Use "
+        "when the channels are a time-series. Cells are not tracked across frames, "
+        "so the trace is the per-frame average across cells.")
+    main_layout.addWidget(time_btn)
 
     def _on_run():
         try:
@@ -451,6 +584,105 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
         print(f"[PyCAT TwoChannelColoc] ERROR:\n{msg}")
 
     run_btn.clicked.connect(_on_run)
+
+    def _on_run_time():
+        # Condensate coloc frame-by-frame over the selected stacks → per-frame
+        # trace. Reuses the same dropdowns and refinement settings as _on_run.
+        try:
+            l_ch1_raw  = ui_instance.viewer.layers[ch1_raw_dropdown.currentText()]
+            l_ch1_proc = ui_instance.viewer.layers[ch1_proc_dropdown.currentText()]
+            l_ch2_raw  = ui_instance.viewer.layers[ch2_raw_dropdown.currentText()]
+            l_ch2_proc = ui_instance.viewer.layers[ch2_proc_dropdown.currentText()]
+            l_cell     = ui_instance.viewer.layers[cell_mask_dropdown.currentText()]
+        except KeyError as e:
+            napari_show_warning(f"Coloc over time: layer not found — {e}"); return
+
+        from pycat.file_io.file_io import layer_is_stack
+        if not (layer_is_stack(l_ch1_raw.data) or layer_is_stack(l_ch2_raw.data)):
+            napari_show_warning(
+                "Coloc over time needs a stack (time-series) — the selected "
+                "channels look 2-D. Use the single-frame run button instead.")
+            return
+
+        data_instance = ui_instance.central_manager.active_data_class
+        ball_radius = float(data_instance.data_repository.get('ball_radius', 50))
+        mpx_sq = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
+        refine1 = {k: s.value() for k, s in ch1_spins.items()}
+        refine2 = {k: s.value() for k, s in ch2_spins.items()}
+        methods = [name for name, cb in method_checks.items() if cb.isChecked()]
+        if not methods:
+            napari_show_warning("Select at least one colocalization metric."); return
+        try:
+            fi = ((data_instance.data_repository.get('file_metadata') or {}
+                   ).get('common') or {}).get('frame_interval_s') or 1.0
+        except Exception:
+            fi = 1.0
+
+        from pycat.toolbox.two_channel_coloc_tools import CondensateColocTimeWorker
+        progress_bar.setVisible(True); progress_bar.setValue(0)
+        shp = getattr(l_ch1_raw.data, 'shape', None)
+        n_t = int(shp[0]) if (shp and len(shp) == 3) else 1
+        progress_bar.setMaximum(max(1, n_t))
+        run_btn.setEnabled(False); time_btn.setEnabled(False)
+
+        worker = CondensateColocTimeWorker(dict(
+            stack_ch1=l_ch1_raw.data, stack_proc_ch1=l_ch1_proc.data,
+            stack_ch2=l_ch2_raw.data, stack_proc_ch2=l_ch2_proc.data,
+            cell_mask_stack=l_cell.data, ball_radius=ball_radius,
+            microns_per_pixel_sq=mpx_sq, refinement_params_ch1=refine1,
+            refinement_params_ch2=refine2, coloc_methods=methods,
+            frame_interval_s=float(fi), per_cell=True))
+        # keep a reference so the thread isn't GC'd mid-run
+        ui_instance._condensate_coloc_time_worker = worker
+
+        def _on_prog(done, total):
+            progress_bar.setValue(done)
+        def _on_done(trace):
+            progress_bar.setVisible(False)
+            run_btn.setEnabled(True); time_btn.setEnabled(True)
+            if trace is None or trace.empty:
+                napari_show_info("Coloc over time: no frames produced a result.")
+                return
+            data_instance.data_repository['condensate_coloc_time_trace_df'] = trace
+            try:
+                ui_instance._record('condensate_coloc_time_trace', {
+                    'methods': methods, 'n_frames': int(trace['frame'].nunique()),
+                    'n_cells': int(trace['cell_label'].nunique()),
+                    'frame_interval_s': float(fi), 'per_cell': True})
+            except Exception:
+                pass
+            from pycat.toolbox.pixel_wise_corr_analysis_tools import (
+                plot_per_cell_coloc_time_trace)
+            def _jump(fr):
+                try:
+                    step = list(ui_instance.viewer.dims.current_step)
+                    step[0] = int(fr)
+                    ui_instance.viewer.dims.current_step = tuple(step)
+                except Exception:
+                    pass
+            plot_per_cell_coloc_time_trace(
+                trace, title="Per-cell condensate colocalization over time",
+                on_pick_frame=_jump)
+            try:
+                show_dataframes_dialog("Per-Cell Condensate Coloc Over Time",
+                                       [("Per (frame, cell)", trace.round(4))])
+            except Exception:
+                pass
+            napari_show_info(
+                f"Per-cell coloc over time: {trace['frame'].nunique()} frames × "
+                f"{trace['cell_label'].nunique()} cells.")
+        def _on_err(msg):
+            progress_bar.setVisible(False)
+            run_btn.setEnabled(True); time_btn.setEnabled(True)
+            napari_show_warning("Coloc over time error — see terminal.")
+            print(f"[PyCAT CondensateColocTime] ERROR:\n{msg}")
+
+        worker.progress.connect(_on_prog)
+        worker.finished.connect(_on_done)
+        worker.error.connect(_on_err)
+        worker.start()
+
+    time_btn.clicked.connect(_on_run_time)
 
     widget = QWidget()
     widget.setLayout(main_layout)

@@ -265,7 +265,16 @@ class _AnalysisWidgetsMixin:
                 'frame_interval_s': float(fi)})
         except Exception:
             pass
-        plot_coloc_time_trace(trace, title="Colocalization over time")
+        # Clicking a point on the trace jumps the viewer to that frame.
+        def _jump(fr):
+            try:
+                step = list(self.viewer.dims.current_step)
+                step[0] = int(fr)
+                self.viewer.dims.current_step = tuple(step)
+            except Exception:
+                pass
+        plot_coloc_time_trace(trace, title="Colocalization over time",
+                              on_pick_frame=_jump)
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog
             show_dataframes_dialog("Colocalization Over Time",

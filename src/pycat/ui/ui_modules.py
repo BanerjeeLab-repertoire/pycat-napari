@@ -4863,6 +4863,7 @@ class MenuManager:
         coloc_analysis_submenu = self.analysis_methods_menu.addMenu('Colocalization Analysis')
         coloc_analysis_actions = {
             'Colocalization Analysis (Pixel-wise + Object-based)': (self.central_manager.analysis_methods_ui._switch_to_coloc_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Colocalization Over Time (time-series)': (self.central_manager.toolbox_functions_ui._add_run_pwcca, {'separate_widget': True}),
         }
         self._add_actions_to_menu(coloc_analysis_actions, coloc_analysis_submenu)
 

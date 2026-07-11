@@ -1287,24 +1287,144 @@ def coloc_time_trace(stack1, stack2, selected_methods, roi_stack=None,
     return pd.DataFrame(rows)
 
 
-def plot_coloc_time_trace(trace_df, title="Colocalization over time"):
+def plot_per_cell_coloc_time_trace(trace_df, metric=None,
+                                   title="Per-cell colocalization over time",
+                                   on_pick_frame=None):
+    """Plot a PER-CELL coloc time trace: one line per cell (identified by
+    cell_label) for a chosen metric, vs time. Expects columns frame, time_s,
+    cell_label, and metric columns. If metric is None, the first metric column is
+    used. Returns the figure (or None).
+
+    on_pick_frame : optional callable(frame_index) — clicking a point jumps the
+        viewer to that frame (plot→viewer brushing)."""
+    if trace_df is None or trace_df.empty or 'cell_label' not in trace_df:
+        return None
+    metric_cols = [c for c in trace_df.columns
+                   if c not in ('frame', 'time_s', 'cell_label', 'n_cells')]
+    if not metric_cols:
+        return None
+    m = metric if (metric in metric_cols) else metric_cols[0]
+    import matplotlib.pyplot as plt
+    xcol = 'time_s' if 'time_s' in trace_df else 'frame'
+    xlabel = "time (s)" if xcol == 'time_s' else "frame"
+    fig, ax = plt.subplots(figsize=(7.8, 4.8))
+    pickable = on_pick_frame is not None
+    frames_all = trace_df['frame'].values
+    xvals_all = trace_df[xcol].values
+    for cl, g in trace_df.groupby('cell_label'):
+        g = g.sort_values(xcol)
+        ln, = ax.plot(g[xcol], g[m], '-o', ms=3, lw=1.2, label=f"cell {int(cl)}")
+        if pickable:
+            ln.set_picker(5)
+    ax.set_xlabel(xlabel); ax.set_ylabel(m)
+    ax.set_title(title + ("  (click a point to jump to that frame)"
+                          if pickable else ""), fontweight='bold')
+    ax.grid(True, alpha=0.15)
+    # Only show a legend if the cell count is manageable.
+    n_cells = trace_df['cell_label'].nunique()
+    if n_cells <= 12:
+        ax.legend(fontsize=8, ncol=2)
+    else:
+        ax.text(0.99, 0.01, f"{n_cells} cells", transform=ax.transAxes,
+                ha='right', va='bottom', fontsize=8, color='#888')
+    sel_line = ax.axvline(xvals_all[0] if len(xvals_all) else 0,
+                          color='#ff8c00', lw=1.5, alpha=0.0)
+    if pickable:
+        def _on_pick(event):
+            try:
+                ind = event.ind[0] if hasattr(event, 'ind') and len(event.ind) else None
+            except Exception:
+                ind = None
+            if ind is None:
+                return
+            # event.artist is the picked cell's line; map its x back to a frame.
+            try:
+                xd = event.artist.get_xdata()[ind]
+            except Exception:
+                return
+            # nearest frame for that x
+            j = int(np.argmin(np.abs(xvals_all - xd)))
+            fr = int(frames_all[j])
+            try:
+                sel_line.set_xdata([xd, xd]); sel_line.set_alpha(0.9)
+                event.canvas.draw_idle()
+            except Exception:
+                pass
+            try:
+                on_pick_frame(fr)
+            except Exception as _e:
+                print(f"[PyCAT coloc] per-cell frame-jump failed: {_e}")
+        try:
+            fig.canvas.mpl_connect('pick_event', _on_pick)
+        except Exception:
+            pass
+    fig.tight_layout()
+    try:
+        plt.show(block=False)
+    except Exception:
+        pass
+    return fig
+
+
+def plot_coloc_time_trace(trace_df, title="Colocalization over time",
+                          on_pick_frame=None):
     """Plot a coloc time-trace DataFrame (one line per metric vs time). Returns
-    the matplotlib figure (or None if nothing to plot)."""
+    the matplotlib figure (or None if nothing to plot).
+
+    on_pick_frame : optional callable(frame_index). If given, the trace markers
+        are pickable and clicking a point calls it with that frame's index — used
+        to jump the napari viewer to the clicked frame (plot→viewer brushing)."""
     if trace_df is None or trace_df.empty:
         return None
-    metric_cols = [c for c in trace_df.columns if c not in ('frame', 'time_s')]
+    metric_cols = [c for c in trace_df.columns
+                   if c not in ('frame', 'time_s', 'n_cells')]
     if not metric_cols:
         return None
     import matplotlib.pyplot as plt
     x = trace_df['time_s'] if 'time_s' in trace_df else trace_df['frame']
     xlabel = "time (s)" if 'time_s' in trace_df else "frame"
+    frames = trace_df['frame'].values if 'frame' in trace_df else np.arange(len(trace_df))
     fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    pickable = on_pick_frame is not None
     for c in metric_cols:
-        ax.plot(x, trace_df[c], '-o', ms=3, lw=1.4, label=c)
+        ln, = ax.plot(x, trace_df[c], '-o', ms=4, lw=1.4, label=c)
+        if pickable:
+            ln.set_picker(5)
     ax.set_xlabel(xlabel); ax.set_ylabel("coefficient")
-    ax.set_title(title, fontweight='bold')
+    ax.set_title(title + ("  (click a point to jump to that frame)"
+                          if pickable else ""), fontweight='bold')
     ax.grid(True, alpha=0.15); ax.legend(fontsize=8)
     ax.axhline(0, color='#888', lw=0.8, alpha=0.5)
+    # A movable marker showing the currently-selected frame.
+    sel_line = ax.axvline(x.iloc[0] if hasattr(x, 'iloc') else x[0],
+                          color='#ff8c00', lw=1.5, alpha=0.0)
+
+    if pickable:
+        xvals = np.asarray(x)
+        def _on_pick(event):
+            try:
+                ind = event.ind[0] if hasattr(event, 'ind') and len(event.ind) else None
+            except Exception:
+                ind = None
+            if ind is None:
+                return
+            fr = int(frames[ind])
+            # Move the selection marker and jump the viewer.
+            try:
+                sel_line.set_xdata([xvals[ind], xvals[ind]])
+                sel_line.set_alpha(0.9)
+                event.canvas.draw_idle()
+            except Exception:
+                pass
+            try:
+                on_pick_frame(fr)
+            except Exception as _e:
+                print(f"[PyCAT coloc] frame-jump callback failed: {_e}")
+        try:
+            fig.canvas.mpl_connect('pick_event', _on_pick)
+        except Exception:
+            pass
+
     fig.tight_layout()
     try:
         plt.show(block=False)

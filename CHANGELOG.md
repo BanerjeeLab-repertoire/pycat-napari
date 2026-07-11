@@ -4,6 +4,39 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.361] - 2026-07-10
+### Added — per-cell colocalization over time (+ threaded run)
+- **Condensate coloc over time is now per-cell**, following each cell's
+  colocalization through the movie rather than only a field average. It uses the
+  cell segmentation's own labels as identity — exactly as the time-series
+  condensate pipeline does: a labeled mask carries stable cell IDs, and a labeled
+  (T, H, W) mask stack tracks moving cells (consistent labels = same cell), so no
+  separate tracking step is needed. ``condensate_coloc_time_trace`` gained a
+  ``per_cell`` flag (default on) that keeps one row per (frame, cell_label); the
+  new ``plot_per_cell_coloc_time_trace`` draws one trajectory per cell, with
+  click-a-point-to-jump-to-that-frame brushing. The per-frame-average mode is
+  still available (``per_cell=False``).
+- **The condensate coloc-over-time run is now threaded** (``CondensateColocTimeWorker``),
+  so a long movie no longer blocks the UI — the progress bar updates per frame and
+  the run is cancellable, instead of the previous synchronous ``processEvents`` loop.
+
+## [1.5.360] - 2026-07-10
+### Added — condensate coloc over time, time-series menu entry, trace brushing
+- **Object-based condensate colocalization can now run over time.** The
+  Two-Channel Colocalization widget gains a "Coloc Over Time (all frames)" button
+  that runs the per-cell condensate coloc on every frame and plots the per-frame
+  mean metrics vs time (backend ``condensate_coloc_time_trace``). Cells aren't
+  tracked across frames, so the trace is the per-frame average across cells with
+  an ``n_cells`` column; per-cell-over-time would need cell tracking (a separate
+  build).
+- **Colocalization Over Time is now a first-class menu entry** under Analysis
+  Methods → Colocalization Analysis, so the time-series colocalization workflow is
+  discoverable there and not only via the widget button.
+- **Coloc time-trace plots are now clickable** — clicking a point on either trace
+  (pixel-wise or condensate) jumps the napari viewer to that frame, with a marker
+  showing the selected frame. This is the same plot→viewer brushing idea used for
+  VPT, applied to the coloc time-series.
+
 ## [1.5.359] - 2026-07-10
 ### Added — colocalization over time (per-frame coloc time trace)
 - **Colocalization can now be tracked frame-by-frame across a stack**, so you can
