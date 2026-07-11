@@ -3015,6 +3015,9 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_run_apply_laplace_of_gauss_filter, s)
         add(tf._add_run_dpr, s)
         add(tf._add_run_fft_bandpass, s)
+        # Stack / time-series variants (operate on a whole (T,H,W) stack).
+        add(tf._add_ts_upscale_stack, s)
+        add(tf._add_lazy_preprocess_stack, s)
 
         # ── Segmentation (expanded — common starting point) ─────────────────
         s = section("Segmentation", expanded=True)
@@ -3022,6 +3025,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_run_local_thresholding, s)
         add(tf._add_run_im2bw, s)
         add(tf._add_run_cellpose_segmentation, s)
+        add(tf._add_run_ts_cellpose, s)
         add(tf._add_run_fz_segmentation_and_merging, s)
         add(tf._add_gaussian_localization, s)
         add(tf._add_contrast_cascade, s)
@@ -3056,6 +3060,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_run_ccf_analysis, s)
         add(tf._add_run_obca, s)
         add(tf._add_run_manders_coloc, s)
+        add(tf._add_run_two_channel_coloc, s)
 
         # ── Spatial Metrology (collapsed) ───────────────────────────────────
         s = section("Spatial Metrology")
@@ -3090,6 +3095,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_display_diagnostics, s)
         add(tf._add_data_qc, s)
         add(tf._add_plotting_widget, s)
+        add(tf._add_export_timeseries_video, s)
 
         # ── Save (expanded) ─────────────────────────────────────────────────
         s = section("Save & Clear", expanded=True)
@@ -3662,45 +3668,88 @@ class MenuManager:
         # divider so everything to its right reads as "PyCAT".
         from PyQt5.QtGui import QFont as _QFont, QColor as _QColor, QIcon as _QIcon
         _menubar = self.viewer.window._qt_window.menuBar()
-        # Use the reduced PyCAT logo mark (the snake/helix roundel, no wordmark) as
-        # the section marker instead of a generic ◆ diamond, so the divider is
-        # actually branded. Falls back to the diamond if the icon can't be loaded.
-        _marker_text = 'PyCAT \u25b8'
-        _marker_icon = None
+        # Branded section marker: the reduced PyCAT logo mark (snake/helix roundel,
+        # no wordmark) followed by the "PyCAT" wordmark.
+        #
+        # NOTE: a plain QAction with BOTH an icon and text renders ICON-ONLY on a
+        # QMenuBar (Qt drops the text), which is why the earlier version showed the
+        # roundel but no "PyCAT". A QWidgetAction wrapping a real QLabel paints
+        # exactly what we put in it, so the icon and the wordmark both appear.
+        self._pycat_marker_action = None
         try:
-            import importlib.resources as _res
+            from PyQt5.QtWidgets import QWidgetAction, QLabel as _QLabel
             from PyQt5.QtGui import QPixmap as _QPixmap
-            # Load the pixmap INSIDE the as_file() block: on zipped/bundled
-            # installs the resource is extracted to a temp file that is removed
-            # when the block exits, so building the QIcon from the path afterwards
-            # would silently load nothing (same gotcha as the window icon below).
-            _mark_res = _res.files('pycat') / 'icons' / 'pycat_mark.png'
-            with _res.as_file(_mark_res) as _mp:
-                _pm = _QPixmap(str(_mp))
-            if not _pm.isNull():
-                _marker_icon = _QIcon(_pm)
+            import importlib.resources as _res
+
+            _pm = None
+            try:
+                # Build the pixmap INSIDE the as_file() block: on zipped/bundled
+                # installs the extracted temp file is removed when the block exits.
+                _mark_res = _res.files('pycat') / 'icons' / 'pycat_mark.png'
+                with _res.as_file(_mark_res) as _mp:
+                    _cand = _QPixmap(str(_mp))
+                if not _cand.isNull():
+                    _pm = _cand
+            except Exception:
+                _pm = None
+
+            _lbl = _QLabel()
+            _lbl.setTextFormat(Qt.RichText)
+            _lbl.setStyleSheet(
+                "QLabel { color: #6495ED; font-weight: bold; padding: 0px 6px; "
+                "background: transparent; }")
+            _lf = _QFont()
+            _lf.setBold(True)
+            _lf.setPointSize(_lf.pointSize() + 1)
+            _lbl.setFont(_lf)
+
+            if _pm is not None:
+                # Scale the mark to menu-bar height and lay it out beside the text.
+                _icon_px = 18
+                _scaled = _pm.scaled(_icon_px, _icon_px, Qt.KeepAspectRatio,
+                                     Qt.SmoothTransformation)
+                _holder = QWidget()
+                _hl = QHBoxLayout(_holder)
+                _hl.setContentsMargins(6, 0, 6, 0)
+                _hl.setSpacing(5)
+                _pic = _QLabel()
+                _pic.setPixmap(_scaled)
+                _pic.setStyleSheet("background: transparent;")
+                _txt = _QLabel("PyCAT \u25b8")
+                _txt.setFont(_lf)
+                _txt.setStyleSheet(
+                    "QLabel { color: #6495ED; font-weight: bold; "
+                    "background: transparent; }")
+                _hl.addWidget(_pic)
+                _hl.addWidget(_txt)
+                _holder.setStyleSheet("background: transparent;")
+                _wa = QWidgetAction(self.viewer.window._qt_window)
+                _wa.setDefaultWidget(_holder)
+                self._pycat_marker_action = _wa
+            else:
+                # No icon available — fall back to the original diamond + text.
+                _lbl.setText("\u25c6 PyCAT \u25b8")
+                _wa = QWidgetAction(self.viewer.window._qt_window)
+                _wa.setDefaultWidget(_lbl)
+                self._pycat_marker_action = _wa
         except Exception:
-            _marker_icon = None
-        if _marker_icon is None:
-            _marker_text = '\u25c6 PyCAT \u25b8'   # fallback: original diamond
-        self._pycat_marker_action = QAction(_marker_text, self.viewer.window._qt_window)
-        if _marker_icon is not None:
-            self._pycat_marker_action.setIcon(_marker_icon)
-        self._pycat_marker_action.setEnabled(False)   # non-clickable divider
-        _mfont = _QFont()
-        _mfont.setBold(True)
-        _mfont.setPointSize(_mfont.pointSize() + 1)
-        self._pycat_marker_action.setFont(_mfont)
-        # Make the disabled action's text render in an accent colour rather than
-        # the greyed-out default, so it reads as a heading not a dead menu.
-        # Cornflower blue stands out better against the dark menu bar than the
-        # previous darker blue. The napari-native menus (File/View/Window/Help/
-        # Plugins) are de-emphasised in gray so the PyCAT menus read as primary.
+            self._pycat_marker_action = None
+
+        if self._pycat_marker_action is None:
+            # Last-resort fallback: plain (text-only) disabled action.
+            self._pycat_marker_action = QAction('\u25c6 PyCAT \u25b8',
+                                                self.viewer.window._qt_window)
+            self._pycat_marker_action.setEnabled(False)
+            _mfont = _QFont()
+            _mfont.setBold(True)
+            _mfont.setPointSize(_mfont.pointSize() + 1)
+            self._pycat_marker_action.setFont(_mfont)
+        # Accent colour for the text-only fallback marker (the QWidgetAction path
+        # above styles its own labels directly).
         try:
             _menubar.setStyleSheet(
                 _menubar.styleSheet() +
-                "\nQMenuBar::item:disabled { color: #6495ED; font-weight: bold; }"
-                "\nQMenuBar { icon-size: 18px; }")
+                "\nQMenuBar::item:disabled { color: #6495ED; font-weight: bold; }")
         except Exception:
             pass
         _menubar.addAction(self._pycat_marker_action)
@@ -5084,6 +5133,18 @@ class MenuManager:
         }
         self._add_actions_to_menu(image_adjustment_actions, image_adjustments_sub_submenu)
 
+        # Stack / time-series variants of the image-processing tools. These
+        # operate on a whole (T, H, W) stack rather than a single 2-D frame. They
+        # previously existed only inside the Time-Series Condensate pipeline even
+        # though they're general-purpose, so they're surfaced here too.
+        stack_tools_submenu = image_processing_submenu.addMenu('Stack / Time-Series Tools')
+        stack_tools_actions = {
+            'Upscale Stack': (self.central_manager.toolbox_functions_ui._add_ts_upscale_stack, {'separate_widget': True}),
+            'Pre-Process Stack (lazy)': (self.central_manager.toolbox_functions_ui._add_lazy_preprocess_stack, {'separate_widget': True}),
+            'Cellpose Segmentation (stack)': (self.central_manager.toolbox_functions_ui._add_run_ts_cellpose, {'separate_widget': True}),
+        }
+        self._add_actions_to_menu(stack_tools_actions, stack_tools_submenu)
+
         # Create sub-sub-menu for background and noise correction functions
         background_noise_correction_submenu = image_processing_submenu.addMenu('Background and Noise Correction')
         background_noise_correction_actions = {
@@ -5172,7 +5233,11 @@ class MenuManager:
         obj_coloc_tools_sub_submenu = colocalization_tools_submenu.addMenu('Object-Based Colocalization Analysis')
         obj_coloc_tools_actions = {
             'Object Based Colocalization Analysis': (self.central_manager.toolbox_functions_ui._add_run_obca, {'separate_widget': True}),
-            'Manders Colocalization Coefficient': (self.central_manager.toolbox_functions_ui._add_run_manders_coloc, {'separate_widget': True})
+            'Manders Colocalization Coefficient': (self.central_manager.toolbox_functions_ui._add_run_manders_coloc, {'separate_widget': True}),
+            # Two-channel condensate coloc was only reachable from inside the
+            # Colocalization Analysis pipeline, even though its siblings (OBCA,
+            # Manders) are standalone tools here. Surfaced for consistency.
+            'Two-Channel Condensate Colocalization': (self.central_manager.toolbox_functions_ui._add_run_two_channel_coloc, {'separate_widget': True}),
         }
         self._add_actions_to_menu(obj_coloc_tools_actions, obj_coloc_tools_sub_submenu)
 
@@ -5243,6 +5308,9 @@ class MenuManager:
         data_visualization_submenu = self.toolbox_menu.addMenu('Data Visualization')
         data_visualization_actions = {
             'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True}),
-            'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True})
+            'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True}),
+            # Video export works on any time-series stack, not just the
+            # time-series condensate pipeline it was previously locked inside.
+            'Export Time-Series Video': (self.central_manager.toolbox_functions_ui._add_export_timeseries_video, {'separate_widget': True}),
         }
         self._add_actions_to_menu(data_visualization_actions, data_visualization_submenu)

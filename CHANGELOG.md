@@ -4,6 +4,32 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.368] - 2026-07-10
+### Fixed — "PyCAT" wordmark now shows next to the logo mark
+- **The menu bar showed the logo roundel but dropped the "PyCAT" text.** A plain
+  QAction carrying both an icon and a label renders icon-only on a QMenuBar (Qt
+  discards the text). The marker is now a QWidgetAction wrapping a real label, so
+  the mark and the "PyCAT ▸" wordmark both render, in that order.
+
+### Changed — toolbox coverage audit (stage 3 of 3): pipeline-locked tools surfaced
+- Audited every tool builder against the Toolbox menu. Most tools were already
+  correctly placed; the audit found a consistent gap — **general-purpose tools that
+  existed only inside a pipeline**, chiefly the stack/time-series variants of tools
+  whose 2-D versions were already in the Toolbox. These are now reachable from the
+  Toolbox (and the Exploratory workbench) in coherent locations:
+  - **Two-Channel Condensate Colocalization** → Toolbox ▸ Colocalization/Correlation
+    ▸ Object-Based Colocalization (it was only in the Colocalization pipeline, even
+    though its siblings OBCA and Manders were standalone tools).
+  - **Export Time-Series Video** → Toolbox ▸ Data Visualization (works on any stack,
+    was locked in the Time-Series Condensate pipeline).
+  - **Upscale Stack**, **Pre-Process Stack (lazy)**, and **Cellpose Segmentation
+    (stack)** → new Toolbox ▸ Image Processing ▸ **Stack / Time-Series Tools**
+    sub-menu (all were locked in the Time-Series Condensate pipeline despite being
+    general stack operations whose 2-D counterparts are already in the Toolbox).
+- Pipeline-internal *steps* (VPT bead detection / tracking / microrheology, FRAP
+  and Fusion step builders, per-pipeline load/export, etc.) were deliberately left
+  where they are — they're workflow steps, not standalone tools.
+
 ## [1.5.367] - 2026-07-10
 ### Changed — PyCAT logo mark replaces the ◆ diamond
 - **The menu-bar section marker is now the actual PyCAT logo mark** (the reduced
