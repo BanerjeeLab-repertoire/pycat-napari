@@ -3704,6 +3704,54 @@ class MenuManager:
         except Exception as _e:
             print(f"[PyCAT] Could not install layer-insertion backstop: {_e}")
 
+        # Auto-tag USER-CREATED layers (made via napari's own "new points / shapes
+        # / labels layer" menu buttons). Such a layer has no PyCAT tags and no
+        # reader source path, so neither PyCAT's load-time tagging nor the
+        # foreign-layer reroute above touches it — leaving it invisible to the tag
+        # system. Stamp a light, low-confidence default role from the layer TYPE so
+        # it is at least visible/queryable; the user can refine it in the Tag
+        # Inspector, and that refinement (user_set) locks over this default.
+        try:
+            def _autotag_user_layer(event):
+                try:
+                    layer = event.value
+                except Exception:
+                    layer = getattr(event, 'source', None)
+                if layer is None:
+                    return
+                try:
+                    from pycat.utils import layer_tags as _LT
+                    # Already tagged (PyCAT-created, or restored from a saved file)?
+                    if _LT.get_tag(layer, 'role') is not None:
+                        return
+                    # Reader-loaded foreign file layers are handled/rerouted by the
+                    # backstop above and re-tagged when re-opened through PyCAT;
+                    # skip them here so we don't tag a layer that's about to be
+                    # removed and replaced.
+                    try:
+                        src = getattr(layer, 'source', None)
+                        if src is not None and getattr(src, 'path', None):
+                            return
+                    except Exception:
+                        pass
+                    # Default role by layer type.
+                    cls = layer.__class__.__name__
+                    role = {'Shapes': 'annotation', 'Points': 'annotation',
+                            'Labels': 'mask', 'Image': 'image'}.get(cls)
+                    if role is None:
+                        return
+                    _LT.tag_layer(layer, 'role', role, source='inferred',
+                                  confidence=0.4)
+                    _LT.tag_layer(layer, 'provenance', 'user-created',
+                                  source='inferred', confidence=0.4)
+                except Exception:
+                    pass
+
+            self._autotag_user_layer = _autotag_user_layer
+            self.viewer.layers.events.inserted.connect(_autotag_user_layer)
+        except Exception as _e:
+            print(f"[PyCAT] Could not install user-layer auto-tagger: {_e}")
+
         # Hide napari's native File menu (and disable its Open* actions) so users
         # can't accidentally load data through napari's reader, which routes
         # around PyCAT's channel-assignment / metadata pipeline and crashes the

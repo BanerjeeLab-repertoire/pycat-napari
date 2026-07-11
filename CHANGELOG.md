@@ -4,6 +4,20 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.346] - 2026-07-10
+### Added — user-created layers are auto-tagged (completes tag coverage)
+- **Layers created through napari's own menus** (the native "new points / shapes /
+  labels layer" buttons) now get a light default tag on insertion, so they are no
+  longer invisible to the tag system. A new ``layers.events.inserted`` hook stamps
+  a role from the layer TYPE — Shapes/Points → ``annotation``, Labels → ``mask``,
+  Image → ``image`` — plus ``provenance=user-created``, at LOW confidence (0.4) so
+  a user's refinement in the Tag Inspector (``user_set``) always locks over it.
+- The hook is careful: it skips layers that already carry tags (PyCAT-created or
+  restored from a saved file) so it never stomps richer tags, and skips
+  reader-loaded foreign file layers (handled and re-tagged by the existing
+  load-reroute backstop). Combined with load-time tagging (1.5.337) and derivation
+  lineage, every layer in the viewer now carries at least a role tag.
+
 ## [1.5.345] - 2026-07-10
 ### Added — confirmation before clearing diameter measurements
 - **"Clear Lines" now asks for confirmation (OK / Cancel)** before deleting the

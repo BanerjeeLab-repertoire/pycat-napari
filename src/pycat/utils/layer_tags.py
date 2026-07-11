@@ -74,7 +74,8 @@ CORE_VALUES = {
     'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
     'modality': {'fluorescence', 'brightfield'},
     'scale': {'calibrated', 'uncalibrated'},
-    'provenance': {'raw', 'derived', 'segmentation', 'pycat-generated'},
+    'provenance': {'raw', 'derived', 'segmentation', 'pycat-generated',
+                   'user-created'},
     # 'channel' has free values (fluorophore names vary by microscope).
     # 'purpose' is intentionally NOT here — it uses SUGGESTED_VALUES (open
     # vocabulary) so users can coin their own purposes for exploration.
