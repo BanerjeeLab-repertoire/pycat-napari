@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.343] - 2026-07-10
+### Changed — diameter measurement layers are created on demand, not at load
+- **The 'Object Diameter' / 'Cell Diameter' annotation layers are no longer
+  created at every file load.** They were being added eagerly on load even though
+  most sessions never measure diameters, cluttering the layer list. They are now
+  created ON DEMAND by the measure widget (the "Measure Line(s)" button) the first
+  time you measure, via the shared tagged drawing-layer factory added in 1.5.342 —
+  so they arrive seeded (finite extent) and tagged (role=annotation,
+  purpose=cell_diameter/object_diameter).
+- **Home-button safety preserved.** The empty-Shapes-layer NaN-extent crash that
+  the eager seeding guarded against only occurs when an empty Shapes layer is
+  present; with on-demand creation, no diameter layer exists until the user makes
+  one (and the factory seeds it), so the interim is safe. A module flag
+  ``EAGER_DIAMETER_LAYERS`` (default False) restores the old eager behaviour as a
+  one-line revert if ever needed.
+- ``calculate_length`` and the measure widget already tolerated the layers being
+  absent (they fall back to defaults), so no downstream measurement behaviour
+  changes — only when the layers appear.
+
 ## [1.5.342] - 2026-07-10
 ### Added — tagged drawing-layer factory + a 'purpose' tag (foundation)
 - **New shared primitive ``pycat.toolbox.drawing_layers.add_drawing_layer()``**

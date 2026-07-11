@@ -1133,11 +1133,28 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         measure_button = QPushButton("Measure Line(s)") # Create a button widget
         def _arm_line_drawing():
             """Activate a diameter Shapes layer in add_line mode so the user can
-            draw. Clicking an image layer's eyeball (napari default) steals the
-            active layer, silently disabling line drawing even though the Shapes
-            layer still looks selected; this re-arms it deterministically."""
+            draw. Creates the 'Object Diameter' / 'Cell Diameter' layers on demand
+            (via the shared tagged drawing-layer factory) if they don't exist yet —
+            they are no longer created eagerly at every file load. Clicking an
+            image layer's eyeball (napari default) steals the active layer,
+            silently disabling line drawing even though the Shapes layer still
+            looks selected; this re-arms it deterministically."""
             try:
                 import numpy as _np
+                # Create-if-missing via the factory (seeds against the NaN-extent
+                # Home-button crash and tags role=annotation + purpose).
+                try:
+                    from pycat.toolbox.drawing_layers import add_drawing_layer
+                    for _nm, _purpose in (('Object Diameter', 'object_diameter'),
+                                          ('Cell Diameter', 'cell_diameter')):
+                        if _nm not in self.viewer.layers:
+                            add_drawing_layer(self.viewer, kind='line',
+                                              purpose=_purpose, name=_nm,
+                                              activate=False)
+                except Exception as _ce:
+                    import os as _os
+                    if _os.environ.get('PYCAT_DEBUG'):
+                        print(f"[PyCAT] diameter layer create failed: {_ce}")
                 target = None
                 for _nm in ('Object Diameter', 'Cell Diameter'):
                     if _nm in self.viewer.layers:

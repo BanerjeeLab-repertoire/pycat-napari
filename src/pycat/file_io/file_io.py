@@ -1048,6 +1048,14 @@ class _ZarrTYX_generic:
         return np.asarray(self._z[0]).astype(np.float32)[np.newaxis]
 
 
+# When True, the 'Object Diameter' / 'Cell Diameter' annotation layers are created
+# eagerly at every file load (legacy behaviour). When False (default), they are
+# created ON DEMAND by the measure widget the first time the user measures, so a
+# session that never measures diameters isn't cluttered with them. Flip to True to
+# revert if the on-demand path ever misbehaves (e.g. the native Home button).
+EAGER_DIAMETER_LAYERS = False
+
+
 class FileIOClass:
     """
     A class for handling file input/output operations related to image analysis, including
@@ -2795,7 +2803,23 @@ class FileIOClass:
         Shapes layers report a FINITE extent. An empty Shapes layer reports a NaN
         extent in this napari build, which makes reset_view (the Home button)
         compute a NaN camera zoom and crash the scale-bar overlay. The seed is
-        ignored by calculate_length, which measures the last non-degenerate line."""
+        ignored by calculate_length, which measures the last non-degenerate line.
+
+        As of the drawing-layer rework these layers are created ON DEMAND by the
+        measure widget (via pycat.toolbox.drawing_layers.add_drawing_layer) instead
+        of eagerly at every file load, so a session that never measures diameters
+        isn't cluttered with two annotation layers. The module flag
+        EAGER_DIAMETER_LAYERS restores the old eager behaviour if needed (a one-line
+        revert): when False (default) this method is a no-op at load time; the
+        measure widget creates the seeded, tagged layers when first used.
+
+        NOTE on the Home-button crash: the NaN-extent crash only occurs when an
+        EMPTY Shapes layer is present. With eager creation off, no diameter layer
+        exists until the user makes one (and the factory seeds it), so the interim
+        is safe — the absence of a layer cannot NaN the extent.
+        """
+        if not EAGER_DIAMETER_LAYERS:
+            return
         import numpy as _np
         for _nm, _ec, _ew in (('Object Diameter', 'red', 2),
                               ('Cell Diameter', 'white', 5)):
