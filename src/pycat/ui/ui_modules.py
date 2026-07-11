@@ -3660,9 +3660,32 @@ class MenuManager:
         # Window/Help). Without a visual break, users can't tell where napari ends
         # and PyCAT begins. Insert a bold, non-clickable marker as an obvious
         # divider so everything to its right reads as "PyCAT".
-        from PyQt5.QtGui import QFont as _QFont, QColor as _QColor
+        from PyQt5.QtGui import QFont as _QFont, QColor as _QColor, QIcon as _QIcon
         _menubar = self.viewer.window._qt_window.menuBar()
-        self._pycat_marker_action = QAction('◆ PyCAT ▸', self.viewer.window._qt_window)
+        # Use the reduced PyCAT logo mark (the snake/helix roundel, no wordmark) as
+        # the section marker instead of a generic ◆ diamond, so the divider is
+        # actually branded. Falls back to the diamond if the icon can't be loaded.
+        _marker_text = 'PyCAT \u25b8'
+        _marker_icon = None
+        try:
+            import importlib.resources as _res
+            from PyQt5.QtGui import QPixmap as _QPixmap
+            # Load the pixmap INSIDE the as_file() block: on zipped/bundled
+            # installs the resource is extracted to a temp file that is removed
+            # when the block exits, so building the QIcon from the path afterwards
+            # would silently load nothing (same gotcha as the window icon below).
+            _mark_res = _res.files('pycat') / 'icons' / 'pycat_mark.png'
+            with _res.as_file(_mark_res) as _mp:
+                _pm = _QPixmap(str(_mp))
+            if not _pm.isNull():
+                _marker_icon = _QIcon(_pm)
+        except Exception:
+            _marker_icon = None
+        if _marker_icon is None:
+            _marker_text = '\u25c6 PyCAT \u25b8'   # fallback: original diamond
+        self._pycat_marker_action = QAction(_marker_text, self.viewer.window._qt_window)
+        if _marker_icon is not None:
+            self._pycat_marker_action.setIcon(_marker_icon)
         self._pycat_marker_action.setEnabled(False)   # non-clickable divider
         _mfont = _QFont()
         _mfont.setBold(True)
@@ -3676,7 +3699,8 @@ class MenuManager:
         try:
             _menubar.setStyleSheet(
                 _menubar.styleSheet() +
-                "\nQMenuBar::item:disabled { color: #6495ED; font-weight: bold; }")
+                "\nQMenuBar::item:disabled { color: #6495ED; font-weight: bold; }"
+                "\nQMenuBar { icon-size: 18px; }")
         except Exception:
             pass
         _menubar.addAction(self._pycat_marker_action)

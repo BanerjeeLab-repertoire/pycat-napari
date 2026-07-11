@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.367] - 2026-07-10
+### Changed — PyCAT logo mark replaces the ◆ diamond
+- **The menu-bar section marker is now the actual PyCAT logo mark** (the reduced
+  snake/helix roundel, no wordmark) instead of a generic ◆ diamond, so the divider
+  between napari's menus and PyCAT's is properly branded. The mark ships as
+  ``src/pycat/icons/pycat_mark.png`` with a transparent background (the source
+  artwork was on white, which would have rendered as a white box on the dark menu
+  bar), and it falls back to the old diamond if the icon can't be loaded.
+- **The window / taskbar icon now uses the mark too** — at those sizes the full
+  logo's wordmark is illegible, while the roundel stays crisp. The welcome-screen
+  graphic still uses the full logo, where the wordmark belongs.
+
 ## [1.5.366] - 2026-07-10
 ### Changed — branding + toolbar declutter (menus stay on top, actions move to the PyCAT bar)
 - **The top menu bar is now mostly menus.** The action buttons that used to sit on

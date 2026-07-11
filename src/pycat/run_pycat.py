@@ -339,13 +339,24 @@ def run_pycat_func():
         # into a QPixmap here reads the bytes while the file is guaranteed to
         # exist, so the icon no longer depends on the path persisting.
         from PyQt5.QtGui import QPixmap as _QPixmap
-        logo_path = resources.files('pycat') / 'icons' / 'pycat_logo_512.png'
-        with resources.as_file(logo_path) as icon_path:
-            _pm = _QPixmap(str(icon_path))
-            if not _pm.isNull():
-                app.setWindowIcon(QIcon(_pm))
-            else:
-                log.warning("The PyCAT logo could not be loaded as a pixmap.")
+        # Prefer the reduced mark (roundel only, no wordmark): at taskbar/titlebar
+        # sizes the full logo's text is illegible, while the mark stays crisp.
+        # Fall back to the full logo if the mark isn't present.
+        _pm = None
+        for _name in ('pycat_mark.png', 'pycat_logo_512.png'):
+            try:
+                logo_path = resources.files('pycat') / 'icons' / _name
+                with resources.as_file(logo_path) as icon_path:
+                    _candidate = _QPixmap(str(icon_path))
+                if not _candidate.isNull():
+                    _pm = _candidate
+                    break
+            except Exception:
+                continue
+        if _pm is not None and not _pm.isNull():
+            app.setWindowIcon(QIcon(_pm))
+        else:
+            log.warning("The PyCAT logo could not be loaded as a pixmap.")
     except FileNotFoundError:
         log.warning("The PyCAT logo file was not found.")
     except ModuleNotFoundError:
