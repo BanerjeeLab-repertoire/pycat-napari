@@ -477,6 +477,14 @@ class FRAPUI:
             napari_show_warning(f"Recovery stack '{name}' not found."); return
         from pycat.file_io.file_io import materialize_stack
         stack = materialize_stack(self.viewer.layers[name].data)
+        # FRAP treats frames as TIME (recovery curve) — warn once if the axis was
+        # assumed at load.
+        try:
+            from pycat.file_io.file_io import warn_if_assumed_axis
+            warn_if_assumed_axis(self._dr(),
+                                 "FRAP recovery (treats frames as time)")
+        except Exception:
+            pass
         if stack.ndim != 3:
             # Safety net for the "recovery loaded as individual 2D images" case
             # (a multipage TIFF that wasn't recognised as a stack). If several

@@ -1748,6 +1748,14 @@ class VideoParticleTrackingUI:
         from pycat.toolbox.condensate_physics_tools import (
             compute_msd, fit_anomalous_diffusion)
         from pycat.toolbox.vpt_tools import viscosity_from_diffusion
+        # VPT treats frames as TIME (MSD, viscosity) — if the stack's axis was
+        # assumed at load (undeclared multipage TIFF), warn once.
+        try:
+            from pycat.file_io.file_io import warn_if_assumed_axis
+            warn_if_assumed_axis(self._dr(),
+                                 "Video particle tracking (treats frames as time)")
+        except Exception:
+            pass
         # Pull the frame interval from the file's captured metadata if available.
         self._sync_frame_interval_from_metadata()
         tracks = self._dr().get('vpt_tracks')

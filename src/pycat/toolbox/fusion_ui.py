@@ -249,6 +249,14 @@ class DropletFusionUI:
                 napari_show_warning(f"Image stack '{name}' not found."); return
             from pycat.file_io.file_io import materialize_stack
             stack = materialize_stack(self.viewer.layers[name].data)
+            # Image-mode fusion treats frames as TIME (aspect-ratio relaxation) —
+            # warn once if the stack's axis was assumed at load.
+            try:
+                from pycat.file_io.file_io import warn_if_assumed_axis
+                warn_if_assumed_axis(self._dr(),
+                                     "Droplet fusion (treats frames as time)")
+            except Exception:
+                pass
             try:
                 time, sig = aspect_ratio_signal(
                     stack, frame_interval_s=self._frame_dt.value())

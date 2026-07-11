@@ -428,6 +428,14 @@ def _add_zstack_metrics(ui, layout):
 
     def _on_run():
         from pycat.toolbox.zstack_segmentation_tools import condensate_metrics_3d
+        # 3-D metrics treat the stack axis as Z (volumes, sphericity) — warn once
+        # if the axis was assumed at load.
+        try:
+            from pycat.file_io.file_io import warn_if_assumed_axis
+            warn_if_assumed_axis(ui._dr(),
+                                 "3-D metrics (treats the stack axis as z / depth)")
+        except Exception:
+            pass
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
             intensity = ui._vol(int_dd)

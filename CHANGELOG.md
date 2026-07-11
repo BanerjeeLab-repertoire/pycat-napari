@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.357] - 2026-07-10
+### Added — assumed-axis warning wired into axis-dependent analyses; small fixes
+- **The assumed-axis warning (1.5.351) now actually fires** where it matters. When
+  a stack's axis type was assumed at load (an undeclared multipage TIFF the user
+  labelled T or Z), the analyses that depend on the axis type now warn once:
+  VPT, FRAP, and image-mode Droplet Fusion (which treat frames as **time**) and
+  z-stack 3-D metrics (which treats the axis as **z**). ``warn_if_assumed_axis``
+  is now a module-level function any analysis can call with its data repository.
+- **Housekeeping:** the slow-storage local cache (1.5.356) now opportunistically
+  removes cached copies older than ~24h so it doesn't grow unbounded; the README
+  version string was updated (it was stale at 1.5.0).
+
 ## [1.5.356] - 2026-07-10
 ### Added — copy slow-storage files to local cache with a progress bar
 - **When a file is on slow storage** (network share, removable drive, cloud

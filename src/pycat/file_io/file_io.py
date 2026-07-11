@@ -1056,6 +1056,36 @@ class _ZarrTYX_generic:
 EAGER_DIAMETER_LAYERS = False
 
 
+def warn_if_assumed_axis(data_repository, operation="this analysis"):
+    """Flash a one-time warning if the active stack's axis type was ASSUMED (an
+    undeclared multipage TIFF the user labelled T or Z at load; see 1.5.351) and
+    an axis-dependent operation is about to use it. T and Z load identically, so a
+    wrong label is harmless for loading/viewing, but a step that treats frames as
+    TIME (rates, MSD, recovery) or as Z (projections, 3-D metrics) should remind
+    the user the axis was assumed. Fires at most once per stack per session.
+    Safe no-op if the axis was declared in metadata or the repo is unavailable.
+
+    This is a module-level function (not a FileIOClass method) so any analysis UI
+    can call it directly with the data_repository it already holds, without
+    reaching back into the file-IO instance."""
+    try:
+        dr = data_repository
+        if not dr or not dr.get('stack_axis_assumed') or dr.get('_axis_warned'):
+            return
+        label = dr.get('stack_axis_label', '?')
+        try:
+            from napari.utils.notifications import show_warning
+            show_warning(
+                f"Note: this stack's axis was assumed to be '{label}' (the file "
+                f"had no axis metadata). {operation} depends on the axis type — "
+                f"if it's actually the other kind, reopen and relabel.")
+        except Exception:
+            pass
+        dr['_axis_warned'] = True
+    except Exception:
+        pass
+
+
 class FileIOClass:
     """
     A class for handling file input/output operations related to image analysis, including
@@ -1837,37 +1867,6 @@ class FileIOClass:
 
         self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
 
-    def warn_if_assumed_axis(self, operation="this analysis"):
-        """Flash a one-time warning if the current stack's axis type was ASSUMED
-        (an undeclared multipage TIFF the user labelled T or Z at load) and an
-        axis-dependent operation is about to use it. T and Z load identically, so
-        a wrong label is harmless for loading/viewing, but an axis-dependent step
-        (e.g. treating frames as time for a rate, or as z for a projection) should
-        remind the user the axis was assumed. Fires at most once per stack per
-        session. Safe no-op if the axis was declared in metadata.
-
-        Analysis steps that depend on the axis being time vs z can call this;
-        full propagation across every analysis is a follow-on — for now it's
-        available for the axis-sensitive paths to invoke."""
-        try:
-            dr = self.central_manager.active_data_class.data_repository
-        except Exception:
-            return
-        if not dr.get('stack_axis_assumed'):
-            return
-        if dr.get('_axis_warned'):
-            return
-        label = dr.get('stack_axis_label', '?')
-        try:
-            from napari.utils.notifications import show_warning
-            show_warning(
-                f"Note: this stack's axis was assumed to be '{label}' (the file "
-                f"had no axis metadata). {operation} depends on the axis type — "
-                f"if it's actually the other kind, reopen and relabel.")
-        except Exception:
-            pass
-        dr['_axis_warned'] = True
-
     def _tiff_multipage_undeclared(self, file_path):
         """Return (n_pages, is_undeclared) for a TIFF: n_pages is the page count of
         the first series; is_undeclared is True when the file carries no ImageJ/OME
@@ -2035,6 +2034,21 @@ class FileIOClass:
             _os.makedirs(dst_dir, exist_ok=True)
         except Exception:
             return None
+        # Opportunistic cleanup: remove cached copies older than ~24h so the
+        # cache doesn't grow unbounded across sessions (the OS clears the temp
+        # dir eventually, but this keeps it tidy between reboots).
+        try:
+            import time as _time
+            now = _time.time()
+            for _f in _os.listdir(dst_dir):
+                _p = _os.path.join(dst_dir, _f)
+                try:
+                    if now - _os.path.getmtime(_p) > 86400:
+                        _os.remove(_p)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         dst = _os.path.join(dst_dir, _os.path.basename(file_path))
         # If a fresh local copy already exists (same size), reuse it.
         try:

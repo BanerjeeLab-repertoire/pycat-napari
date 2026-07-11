@@ -807,7 +807,7 @@ pip install "numpy<2.0"
 
 ## Project Status & Roadmap
 
-Current Version: 1.5.0
+Current Version: 1.5.357
 
 ### Recent Updates
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
