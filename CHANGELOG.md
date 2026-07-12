@@ -4,6 +4,40 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.433] - 2026-07-10
+### Added — ``tools/run_core_tests.py``: run the CI suite the way CI runs it
+Two guard bugs shipped in a row (1.5.428, 1.5.432) for the same reason: **the development check
+was more forgiving than the runner it stood in for.** This makes the faithful run a script, so
+the convenience cannot creep back in.
+
+**What "faithful" means, and each point cost a red build:**
+
+- **Execute the module; call the test functions; inject nothing.** The previous check ``exec``'d
+  test *bodies* with paths injected into the namespace — so a bare ``SRC`` (the module defines
+  ``_SRC``) was resolved by the harness and never looked up.
+- **Block the GUI stack at the meta-path**, so the import raises a real ``ImportError``.
+  ``sys.modules[x] = None`` produces misleading ``AttributeError``\\ s — it made four science
+  modules look broken when they were fine.
+- **Emulate ``pip install --no-deps -e .`` and nothing more.** A dev check doing
+  ``sys.path.insert(0, 'src')`` hid the fact that PyCAT is a **src-layout** package that must be
+  installed before ``import pycat`` works at all (1.5.409: *every* test failed).
+- **Supply the parametrize values.** Skipping the parametrized tests left **five of eight
+  unchecked** — and those are precisely the ones covering all 13 science modules and both
+  spatial statistics.
+
+**Verified against the bug that shipped.** Reintroducing the bare ``SRC`` makes the script fail
+with the exact ``NameError`` that went red in CI, and exit 1. Restoring it: **35/35 passed**
+(3 + 26 + 6 parametrized cases), exit 0.
+
+### The lesson, now enforced rather than written down
+I wrote this in 1.5.409:
+
+> *A test environment that differs from the real one in a convenient way will hide exactly the
+> bugs that matter.*
+
+Then did it again, in the same file, with a different convenience. **A lesson recorded in a
+changelog is not a control.** The script is.
+
 ## [1.5.432] - 2026-07-10
 ### FIXED — the undefined-name guard shipped with an undefined name
 ``test_no_infinite_self_recursion`` (added in 1.5.428) referenced a bare ``SRC``. The module
