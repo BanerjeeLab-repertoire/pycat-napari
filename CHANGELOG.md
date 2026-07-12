@@ -4,6 +4,54 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.446] - 2026-07-10
+### Fixed — FRAP reported half-times the data could not determine, with R² = 0.99
+``fit_frap_recovery`` did ``popt, _ = curve_fit(...)``. **The second return value is the
+parameter covariance** — and it is the only thing in the fit that knows whether the data can
+*determine* the parameters at all. It was being thrown away.
+
+**R² cannot answer that question.** It measures how well the curve fits the points you *have*;
+it cannot know that those points do not *constrain* the parameter. Measured, with a true
+half-time of 8.0 s and 2 % noise, over 30 noise realisations:
+
+| observation window | t_half (sd) | mean R² |
+|---|---|---|
+| 60 s, 40 pts | 7.9 (0.7) | 0.982 |
+| 20 s, 20 pts | 8.0 (1.4) | 0.984 |
+| **8 s, 10 pts** | **10.6 (6.6)** | 0.978 |
+| **4 s, 6 pts** | **12.6 (9.9)** | **0.963** |
+
+**At a four-second window the half-time is 12.6 ± 9.9 — essentially unconstrained — and R² is
+0.963.** The fit also returns a mobile fraction of **1.209**, which is physically impossible.
+
+**The covariance already knew.** The 95 % CI on the half-time at that window is **[−0.2,
+15.1]** — it does not even exclude a *negative* half-time. That is the definition of *"this data
+cannot determine this parameter"*, and it was available all along.
+
+Every parameter now carries the interval the data actually supports:
+
+| window | t_half | R² | identifiable? |
+|---|---|---|---|
+| 60 s | 8.57 | 0.988 | **yes** — CI [7.4, 9.8] |
+| 8 s | 5.98 | 0.984 | **no** — CI [2.6, 9.4] |
+| **4 s** | 7.43 | **0.991** | **no** — CI **[−0.2, 15.1]** |
+
+A parameter whose CI is wider than its own value triggers a warning that says so plainly, names
+the usual cause (*an observation window shorter than the recovery — you cannot measure a
+half-time you did not wait for*), and states that **R² being high is not a contradiction**.
+
+Guarded by ``test_frap_reports_when_the_data_cannot_determine_the_half_time``. **101/101 core
+tests passing.**
+
+### The pattern, again
+This is the fifth instance of the same failure this session: **a fit statistic used as a quality
+gate answers a different question from the one being asked.** R² asks *"does the model explain
+the variance?"* — not *"is the parameter determined?"*, not *"is the model right?"*, not *"is
+this in focus?"*
+
+The fix is never a better threshold on R². It is to compute the quantity that actually answers
+the question — here, the covariance the fit was already producing and discarding.
+
 ## [1.5.445] - 2026-07-10
 ### FIXED — ``networkx`` was imported at module scope and never declared
 Chasing the CI dependency drift (1.5.442, 1.5.444) to its root: I compared **every** third-party

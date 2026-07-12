@@ -94,3 +94,67 @@ def test_fit_recovers_params_under_noise():
                                 noise_sigma=NOISY_FIT_NOISE_SIGMA, seed=3)
     res = fit_frap_recovery(t, y)
     assert res['mobile_fraction'] == pytest.approx(mobile, abs=NOISY_FIT_MOBILE_TOL)
+
+
+@pytest.mark.core
+def test_frap_reports_when_the_data_cannot_determine_the_half_time():
+    """R² cannot tell you that the data does not CONSTRAIN the parameter.
+
+    R² measures how well the curve fits the points you *have*. It cannot know that those
+    points do not determine the parameter — that is a different question, and only the fit
+    covariance can answer it.
+
+    Measured, with a true half-time of 8.0 s and 2 % noise, over 30 noise realisations:
+
+    ================  ==============  ========
+    window            t_half (sd)     mean R²
+    ================  ==============  ========
+    60 s, 40 pts      7.9  (0.7)      0.982
+    20 s, 20 pts      8.0  (1.4)      0.984
+    **8 s, 10 pts**   **10.6 (6.6)**  0.978
+    **4 s, 6 pts**    **12.6 (9.9)**  0.963
+    ================  ==============  ========
+
+    **At a four-second window the half-time is 12.6 ± 9.9 — essentially unconstrained — and
+    R² is 0.963.** The fit also reports a mobile fraction of 1.209, which is physically
+    impossible.
+
+    ``curve_fit`` already returns the covariance, and it already knew: the 95 % CI on the
+    half-time at that window is **[-0.2, 15.1]**, which includes a *negative* half-time. The
+    information was there and was being thrown away (``popt, _ = curve_fit(...)``).
+    """
+    from pycat.toolbox.frap_tools import frap_recovery_model
+
+    true_half_time = 8.0
+
+    # A window long enough to see the recovery: the half-time IS determined.
+    t_long = np.linspace(0, 60, 40)
+    rng = np.random.default_rng(0)
+    y_long = frap_recovery_model(t_long, 0.2, 0.9, true_half_time) + rng.normal(0, 0.02, 40)
+    good = fit_frap_recovery(t_long, y_long)
+
+    assert good["identifiable"], (
+        f"a 60-second window on an 8-second recovery is plenty, and the fit was still called "
+        f"unidentifiable: {good.get('identifiability')}"
+    )
+
+    # Half a half-time of data: the parameter is NOT determined, whatever R² says.
+    t_short = np.linspace(0, 4, 6)
+    rng = np.random.default_rng(0)
+    y_short = frap_recovery_model(t_short, 0.2, 0.9, true_half_time) + rng.normal(0, 0.02, 6)
+    bad = fit_frap_recovery(t_short, y_short)
+
+    assert not bad["identifiable"], (
+        f"The fit reported a half-time of {bad['half_time_s']:.2f} s from FOUR SECONDS of "
+        f"data on an eight-second recovery, with R² = {bad['r_squared']:.3f}, and called it "
+        f"identifiable. The 95% CI is "
+        f"{bad['identifiability']['tau_half']['ci']} — it does not even exclude a NEGATIVE "
+        f"half-time. R² is high because the curve fits the six points that exist; it cannot "
+        f"know that six points spanning half a half-time do not constrain the parameter."
+    )
+
+    low, high = bad["identifiability"]["tau_half"]["ci"]
+    assert high - low > abs(bad["half_time_s"]), (
+        "the confidence interval must be wider than the value itself for this to count as "
+        "unidentifiable — that is the definition being used"
+    )
