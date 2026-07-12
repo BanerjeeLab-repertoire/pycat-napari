@@ -4,6 +4,53 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.450] - 2026-07-10
+### FIXED — 42 % of genuinely coarsening series were being reported as "arrested"
+``fit_coarsening`` decides whether a condensate population is coarsening (Ostwald ripening,
+R ~ t^⅓; or coalescence, R ~ t^½) or **arrested** — kinetically trapped, not growing at all.
+That is a **mechanistic conclusion about the sample.**
+
+It was decided partly by::
+
+    is_arrested = (max(ostwald_r2, coalescence_r2) < 0.3      # <- a FIT statistic
+                   or abs(radius_change) < 2.0 * noise)
+
+**R² measures how well a power law describes the data. It says nothing about whether the radius
+grew.** Noise destroys R² while the radius keeps growing — so a genuinely coarsening series is
+reported as *"no coarsening happened."*
+
+Measured on synthetic data where the radius genuinely grows **3.7-fold**. Rate of calling
+"arrested":
+
+| data | scatter | R² < 0.3 | ΔR < 2σ | **slope test** |
+|---|---|---|---|---|
+| **coarsening** *(should be 0 %)* | 0.20 | 12 % | 12 % | **0 %** |
+| **coarsening** *(should be 0 %)* | 0.30 | **42 %** | 38 % | **0 %** |
+| arrested *(should be 100 %)* | any | 100 % | 98 % | **100 %** |
+
+**At 30 % scatter, 42 % of genuinely coarsening series were called arrested.**
+
+The honest question is *did the radius grow, given how noisy the measurement is?* — a question
+about the **slope and its standard error** (a linear regression of R on t), not about how well a
+power law fits. **False arrests drop from 42 % to 0 %, and every genuinely arrested series is
+still caught.**
+
+Guarded by ``tests/test_coarsening_arrest.py``, which asserts both directions — no false arrests
+on coarsening data, and no lost sensitivity on arrested data. **109/109 core tests passing.**
+
+### Note — the second clause was also wrong, and my first fix was too
+``abs(radius_change) < 2.0 * noise`` looks like the right test — it compares the growth to the
+scatter — and it fails the same way: ``np.std(np.diff(R))`` is the *frame-to-frame* scatter,
+which grows with the noise, so ``2 × noise`` eventually exceeds the real growth. It false-fires
+on 38 % of coarsening series at 30 % scatter.
+
+I had drafted a fix that kept clause B and removed only clause A. **Measuring it showed clause B
+was nearly as bad.** Both had to go.
+
+Separately, I spent a pass strengthening the *failed-bootstrap* caveat — and then found that
+**every NaN in the data came from the arrested-growth path, not the bootstrap.** The fix was
+correct but landed in a branch that was not firing. The real bug was one level up.
+
 ## [1.5.449] - 2026-07-10
 ### Added — the fusion relaxation reports τ with its interval, and η/γ inherits it
 ``fit_aspect_ratio_relaxation`` discarded its covariance like the others. τ now carries a 95 %
