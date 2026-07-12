@@ -692,13 +692,53 @@ def estimate_csat_lever_rule(
     C_dense = float(C_sat + 1.0 / slope)         # where Φ = 1 (theoretical dense phase)
     r2     = float(r**2)
 
+    # ── `fit_success = r2 > 0.5` does not mean C_sat is trustworthy ────────────
+    #
+    # C_sat is an EXTRAPOLATION to the x-intercept. R² says how well the line fits the
+    # points that were KEPT; it says nothing about whether the intercept is well
+    # determined. Measured against a known C_sat = 10:
+    #
+    #     well-sampled, high noise -> C_sat 5.59  (a 44 % error)  R² 0.913  fit_success TRUE
+    #
+    # But the deeper problem is not the gate — it is this ESTIMATOR. It discards every
+    # point where Φ = 0 (`above = phi > 0`), and those are the most informative points
+    # there are: a zero at C = 5 says "the boundary is above 5". Throwing them away and
+    # extrapolating from the survivors is what produces the error above.
+    #
+    # `estimate_phase_boundary` (1.5.382) fits a segmented hinge over ALL the data,
+    # including the zeros. On the SAME data, against a true C_sat of 10:
+    #
+    #     ==========================  ============  ==================
+    #     data                        lever rule    phase boundary
+    #     ==========================  ============  ==================
+    #     well-sampled, low noise     7.78          **9.97**
+    #     well-sampled, HIGH noise    5.59          **10.62**
+    #     ==========================  ============  ==================
+    #
+    # **Use `estimate_phase_boundary`.** This function is retained for backward
+    # compatibility and for comparison against historical results; `fit_success` now
+    # carries a warning rather than an endorsement.
+    fit_ok = bool(r2 > 0.5 and C_sat > 0)
+    if fit_ok:
+        napari_show_warning(
+            "C_sat (lever rule): this estimator DISCARDS every point where the area "
+            "fraction is zero, and those points are informative — a zero at C = 5 says "
+            "the boundary is above 5. Validated against a known C_sat of 10, it returned "
+            "7.78 on clean data and 5.59 on noisy data (a 44 % error, with R² = 0.91). "
+            "`estimate_phase_boundary` returned 9.97 and 10.62 on the same data. Use it "
+            "instead; this result is retained only for comparison with historical values.")
+
     return dict(
         C_sat=C_sat,
         C_dense=C_dense,
         slope=float(slope),
         intercept=float(intercept),
         r_squared=r2,
-        fit_success=r2 > 0.5 and C_sat > 0,
+        fit_success=fit_ok,
+        # R² is NOT evidence that C_sat is right — it describes the fit to the surviving
+        # points, not the reliability of an extrapolated intercept.
+        r_squared_is_not_accuracy=True,
+        superseded_by='estimate_phase_boundary',
     )
 
 

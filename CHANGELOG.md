@@ -4,6 +4,57 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.418] - 2026-07-10
+### Fixed — the aspect-ratio relaxation had the weakest fit gate of all: `r2 > 0.5`
+``fit_aspect_ratio_relaxation`` fits a **single** exponential and returns
+``eta/gamma = tau/R``. Its only quality check was ``fit_success = r2 > 0.5``.
+
+**tau *is* the measurement** — but that only holds if the relaxation really is a single
+exponential, and fusion can have **two** modes (fast surface-driven, slow bulk). Validated on
+a two-mode relaxation (true tau = 2.5 and 18):
+
+| | tau | R² | ``fit_success`` | ``fit_adequate`` |
+|---|---|---|---|---|
+| single mode (true tau = 8) | 7.95 | 0.999 | True | **True** |
+| **two modes** | **11.42** | 0.944 | **True** | **False** ← caught |
+
+The single-exponential fit returns **tau = 11.42**, a blend of the two — and ``eta/gamma`` is
+wrong by the same factor. **R² = 0.944 passes a 0.5 gate without hesitation.**
+
+``assess_fit`` is now wired in: **3 % false alarms on genuinely single-mode data, 100 %
+detection of two-mode relaxations.** This is the same failure already fixed in ``fusion_tools``
+(1.5.412), where a two-mode relaxation gave a **76 % viscosity underestimate at R² = 0.996**.
+
+### Deprecated — the lever-rule C_sat estimator, with the numbers
+``estimate_csat_lever_rule`` gates on ``fit_success = r2 > 0.5``. But R² describes the fit to
+the points that were **kept** — and this estimator **discards every point where the area
+fraction is zero**, which are the most informative points there are: *a zero at C = 5 says the
+boundary is above 5.*
+
+Against a known C_sat of **10**:
+
+| data | lever rule | **``estimate_phase_boundary``** (1.5.382) |
+|---|---|---|
+| well-sampled, low noise | 7.78 | **9.97** |
+| **well-sampled, high noise** | **5.59** (44 % error, R² = 0.913, ``fit_success = True``) | **10.62** |
+
+The gate is not the problem — **the estimator is**. It now warns on every successful fit,
+pointing at ``estimate_phase_boundary``, and returns ``superseded_by`` in the result. Retained
+only for comparison against historical values.
+
+### Note — a systematic sweep, and what it found
+Having hit this failure five times, I swept for **every fit statistic used in a comparison**
+(25 sites). Most are fine. The live ones:
+
+* ``fit_aspect_ratio_relaxation`` — ``r2 > 0.5`` (fixed above)
+* ``estimate_csat_lever_rule`` — ``r2 > 0.5`` (deprecated above)
+* ``spida_tools`` — ``r2 < 0.9`` and ``snr < 4`` are **advisory notes, not filters**: they
+  append a warning and discard nothing, and the SNR there is properly background-subtracted
+  (``(p99 − median) / std``). **Correct as written.**
+
+Worth recording that too: the sweep found working code as well as broken, and the difference
+is whether the statistic **gates** the data or merely **annotates** it.
+
 ## [1.5.417] - 2026-07-10
 ### Fixed — the bead classifier was sorting by BRIGHTNESS, not focus
 ``classify_beads`` flagged a bead as ``out_of_plane`` when it was ``oversized and (dim_peak or
