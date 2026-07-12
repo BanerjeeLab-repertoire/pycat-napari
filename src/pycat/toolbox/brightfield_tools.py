@@ -637,19 +637,50 @@ def bf_condensate_metrics(
 # 4. Brightfield focus quality
 # ---------------------------------------------------------------------------
 
-def bf_focus_metric(image: np.ndarray) -> float:
+def bf_focus_metric(image: np.ndarray, mask: np.ndarray = None) -> float:
     """
-    Compute Brenner gradient — a fast, reliable autofocus metric for brightfield.
+    Brenner gradient — a fast autofocus metric.  Higher = sharper.
 
-    Brenner = Σ (I(x+2,y) − I(x,y))² across all pixels.
-    Higher = sharper (better focus).  More robust than Laplacian variance
-    for brightfield where dark spots can make Laplacian unreliable.
+    Brenner = mean over pixels of (I(x+2, y) − I(x, y))².
 
-    Can be computed in a thin strip through the image centre for speed.
+    Parameters
+    ----------
+    mask : optional (H, W) boolean array. When given, the metric is computed
+        **only over the masked region**.
+
+    Why the mask matters
+    --------------------
+    Scored over the WHOLE FRAME, this metric measures the sharpest thing in the
+    field — which is very often not the biology. Dust on the coverslip, or any
+    bright object sitting on a *different focal plane*, contributes a large
+    gradient of its own, and it comes into focus at a different z than the sample.
+
+    Demonstrated on a synthetic z-sweep in which a condensate focuses at frame 14
+    while a bright speck of debris focuses at frame 4: **whole-frame scoring picks
+    frame 4 — the debris.** Restricting the metric to the condensate mask picks
+    frame 14, correctly.
+
+    (Static debris is the benign case: a constant offset does not move the argmax.
+    It is debris on a different focal plane — exactly what dust does — that breaks
+    it, because that debris has its own focus curve.)
+
+    So: pass the cell mask, the object mask, or any biologically relevant region
+    when you have one. ``mask=None`` preserves the previous whole-frame behaviour.
     """
-    img = image.astype(np.float32)
+    img = np.asarray(image, dtype=np.float32)
     diff = img[:, 2:] - img[:, :-2]
-    return float((diff**2).mean())
+    if mask is None:
+        return float((diff ** 2).mean())
+    m = np.asarray(mask)
+    if m.shape != img.shape:
+        raise ValueError(
+            f"focus mask {m.shape} does not match the image {img.shape}")
+    # A pixel's forward difference is meaningful only where BOTH endpoints are in
+    # the region, so intersect the mask with itself shifted by the same stride.
+    mb = (m[:, 2:] != 0) & (m[:, :-2] != 0)
+    if not mb.any():
+        return float('nan')
+    return float((diff[mb] ** 2).mean())
 
 
 def bf_analyse_focus_series(

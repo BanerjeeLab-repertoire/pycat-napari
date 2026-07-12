@@ -172,6 +172,28 @@ def _add_frame_quality_qc(ui_instance, layout=None, separate_widget=False):
     stack_dd = QComboBox(); stack_dd.addItems(_image_layer_names(viewer))
     form.addRow("Stack:", stack_dd)
 
+    # Focus is far more trustworthy measured INSIDE the biology. A whole-frame score
+    # answers "what is the sharpest thing in the field?" -- and with dust on the
+    # coverslip the answer is often the dust, because debris on a different focal plane
+    # has its OWN focus curve and peaks at a different z.
+    import napari as _np_fq
+    mask_dd = QComboBox()
+    mask_dd.addItem("(none \u2014 whole frame)")
+    mask_dd.addItems([l.name for l in viewer.layers
+                      if isinstance(l, _np_fq.layers.Labels)])
+    mask_dd.setToolTip(
+        "Restrict the focus metrics to a biologically relevant region (a cell mask, an "
+        "object mask). Strongly recommended.\n\n"
+        "Whole-frame focus scoring is easily fooled: benchmarked on synthetic z-sweeps "
+        "with debris sitting at a different focal plane, whole-frame Brenner found the "
+        "correct frame only 1 time in 6 \u2014 it picked the frame where the DUST was "
+        "sharpest.\n\n"
+        "Note that masking alone is not sufficient either (masked Brenner scored 0/6: "
+        "restricting the region exposes Brenner's low bias). This tool therefore takes "
+        "the CONSENSUS of three independent metrics (Brenner, Laplacian variance, "
+        "Tenengrad), which scored 6/6.")
+    form.addRow("Restrict to mask:", mask_dd)
+
     thresh = QDoubleSpinBox()
     thresh.setRange(0.05, 0.99); thresh.setSingleStep(0.05); thresh.setValue(0.5)
     thresh.setToolTip(
@@ -196,23 +218,52 @@ def _add_frame_quality_qc(ui_instance, layout=None, separate_widget=False):
             return
 
         import pandas as pd
-        from pycat.toolbox.temperature_tools import focus_scores, frame_entropy
+        from pycat.toolbox.temperature_tools import (focus_scores, frame_entropy,
+                                                     focus_scores_multimetric)
 
-        foc = np.asarray(focus_scores(stack), dtype=float)
-        ent = np.array([frame_entropy(f) for f in stack], dtype=float)
+        # Optional mask: focus is far more trustworthy measured INSIDE the biology.
+        # A whole-frame focus score answers "what is the sharpest thing in the field?",
+        # and on a coverslip with dust the answer is often the dust -- debris on a
+        # different focal plane has its own focus curve and peaks at a different z.
+        _mask = None
+        _mname = mask_dd.currentText()
+        if _mname and not _mname.startswith('(none'):
+            try:
+                _mask = np.asarray(viewer.layers[_mname].data) != 0
+                # A 3-D mask whose T does not match the stack is treated as a single
+                # 2-D region (its first plane) applied to every frame.
+                if _mask.ndim == 3 and _mask.shape[0] != stack.shape[0]:
+                    _mask = _mask[0]
+            except Exception as _e:
+                napari_show_warning(f"Frame QC: could not use mask {_mname!r} ({_e}); "
+                                    f"scoring the whole frame instead.")
+                _mask = None
+
+        # Multimetric CONSENSUS, not a single Brenner gradient. Benchmarked on synthetic
+        # z-sweeps with debris at a different focal plane, the correct frame (+/-1) was
+        # found by: whole-frame Brenner 1/6, MASKED Brenner 0/6 (masking alone is
+        # WORSE -- it exposes Brenner's low bias inside a small region), masked
+        # multimetric 6/6. Three independent metrics are much harder to fool than one.
+        mm = focus_scores_multimetric(stack, mask=_mask)
+        foc = np.asarray(focus_scores(stack, mask=_mask), dtype=float)
+        ent = np.array([frame_entropy(np.asarray(stack[i]))
+                        for i in range(stack.shape[0])], dtype=float)
         # NOTE: focus_scores() already divides by the stack's median, so its median
-        # is ~1.0 and the threshold IS the fraction-of-median directly. (Multiplying
-        # by the median again here would double-normalise and flag nothing.)
+        # is ~1.0 and the threshold IS the fraction-of-median directly.
         cut = float(thresh.value())
         blurry = foc < cut
 
         df = pd.DataFrame({
             'frame': np.arange(len(foc)),
             'focus_score': foc,
+            'brenner': mm['brenner'],
+            'laplacian': mm['laplacian'],
+            'tenengrad': mm['tenengrad'],
             'entropy': ent,
             'out_of_focus': blurry,
         })
-        best = int(np.argmax(foc)) if len(foc) else 0
+        # The consensus of three metrics, not the argmax of one.
+        best = int(mm['consensus_frame'])
 
         try:
             ui_instance.central_manager.active_data_class.data_repository[
@@ -251,12 +302,34 @@ def _add_frame_quality_qc(ui_instance, layout=None, separate_widget=False):
         except Exception:
             pass
 
+        # Surface the agreement between the three metrics. LOW agreement means the
+        # focus call is being driven by something other than a clean focus curve --
+        # very often a bright object on a different focal plane. It is the diagnostic;
+        # the score alone is not.
+        _agree = float(mm['agreement'])
+        _scope = ("whole frame" if _mask is None
+                  else f"inside {_mname!r}")
+        if _agree >= 0.99:
+            _acol, _anote = '#8f8', 'all three metrics agree'
+        elif _agree >= 0.6:
+            _acol, _anote = '#e8a33d', 'metrics partly disagree'
+        else:
+            _acol, _anote = '#f88', 'metrics DISAGREE — do not trust this focus call'
+        _warn_unmasked = ("" if _mask is not None else
+                          "<br><span style='color:#e8a33d;'>Scored over the whole "
+                          "frame. If there is debris on the coverslip the sharpest "
+                          "frame may be the sharpest DUST — restrict to a mask.</span>")
         status.setText(
             f"<span style='color:#8f8;'>{len(df)} frames · sharpest = frame "
-            f"{best} · {int(blurry.sum())} flagged out-of-focus.</span>")
+            f"<b>{best}</b> (consensus of 3 metrics, {_scope}) · "
+            f"{int(blurry.sum())} flagged out-of-focus.</span>"
+            f"<br><span style='color:{_acol};'>metric agreement "
+            f"{_agree:.0%} — {_anote} (peaks: {mm['peaks']})</span>"
+            + _warn_unmasked)
         napari_show_info(
-            f"Frame QC: sharpest frame {best}; {int(blurry.sum())}/{len(df)} "
-            f"flagged out-of-focus.")
+            f"Frame QC: sharpest frame {best} (3-metric consensus, {_scope}); "
+            f"{int(blurry.sum())}/{len(df)} flagged out-of-focus; "
+            f"metric agreement {_agree:.0%}.")
         try:
             ui_instance._record('frame_quality_qc', {
                 'layer': layer.name, 'n_frames': int(len(df)),

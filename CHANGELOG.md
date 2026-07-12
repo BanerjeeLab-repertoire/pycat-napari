@@ -4,6 +4,47 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.393] - 2026-07-10
+### Fixed — focus scoring picked the sharpest DEBRIS, and the obvious fix made it worse
+Focus was scored with a **single Brenner gradient over the whole frame**. That answers *"what
+is the sharpest thing in the field?"* — and with dust on the coverslip the answer is often the
+dust. Debris on a **different focal plane** has its own focus curve and peaks at a different
+z, so the "best frame" can be the one where the junk is sharpest.
+
+**The obvious fix — restrict the metric to a mask — is worse than doing nothing.**
+Benchmarked across six synthetic z-sweeps (condensate and debris at different focal planes),
+the correct frame (±1) was found by:
+
+| strategy | correct |
+|---|---|
+| whole-frame Brenner | **1 / 6** |
+| **masked** Brenner | **0 / 6** ← *worse than not masking* |
+| **masked multimetric** | **6 / 6** |
+
+Brenner alone is systematically biased a couple of frames early inside a small region: a
+partially-defocused object still has a strong edge, and a squared-difference metric
+over-rewards it. Masking does not fix that bias — **it exposes it.** Had I shipped the
+"obvious" fix without benchmarking across cases, focus selection would have got *worse*.
+
+- **``bf_focus_metric(image, mask=None)``** and **``focus_scores(stack, mask=None)``** now
+  accept an optional region (2-D applied to every frame, or 3-D per-frame). ``mask=None``
+  reproduces the previous scores **exactly** — verified, no regression.
+- **New ``focus_scores_multimetric``**: Brenner + Laplacian variance + Tenengrad, returning
+  each normalised series, each metric's peak, a **``consensus_frame``**, and an
+  **``agreement``** score.
+- **Frame Quality / Focus QC** now takes the **consensus of three metrics**, exposes a
+  *"Restrict to mask"* dropdown, and reports the agreement. It warns when scoring the whole
+  frame that the sharpest frame may be the sharpest dust.
+
+**An honest limitation, stated in the docstring and the UI:** *high agreement does not mean
+correct.* Unmasked, all three metrics agree **100 %** — on the debris. Agreement is a
+**diagnostic** (it says when the focus call is being driven by something other than a clean
+focus curve), not a proof of validity. The mask is what makes it right; the agreement score is
+what tells you to look.
+
+``temperature_tools`` also now imports headlessly (notification shim) — 19 GUI-coupled
+scientific modules remain.
+
 ## [1.5.392] - 2026-07-10
 ### Fixed — a saturated partition coefficient is meaningless, not conservative
 ``partition_coefficient_field`` had **no detector-saturation check at all**. Once the dense

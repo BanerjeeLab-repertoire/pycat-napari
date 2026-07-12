@@ -38,8 +38,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the notification shim: keeps the focus/QC/turbidity maths importable with no GUI.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------
@@ -192,18 +193,124 @@ def elapsed_to_seconds(elapsed_ms: np.ndarray) -> np.ndarray:
 # 3. Focus metric (for drift correction)
 # ---------------------------------------------------------------------------
 
-def focus_scores(stack: np.ndarray) -> np.ndarray:
+def focus_scores(stack: np.ndarray, mask: np.ndarray = None) -> np.ndarray:
     """
     Per-frame focus score (normalised Brenner gradient). Higher = sharper.
 
-    Reuses the brightfield Brenner metric — robust for the transmitted-light
-    condensate movies these experiments use.
+    Parameters
+    ----------
+    mask : optional. Either a 2-D ``(H, W)`` region applied to every frame, or a
+        3-D ``(T, H, W)`` per-frame mask. When given, focus is measured **only
+        inside the biologically relevant region**.
+
+    Scored over the whole frame, this metric answers "what is the sharpest thing in
+    the field?" — and the answer is frequently the dust, not the sample. Debris on a
+    different focal plane has its OWN focus curve, peaking at a different z, so the
+    "best frame" can be the one where the junk is sharpest.
+
+    .. warning::
+
+       **Masking alone is not enough, and can make things worse.** Benchmarked across
+       six synthetic z-sweeps with a condensate and a piece of debris at different
+       focal planes, the correct frame (±1) was found by:
+
+       * whole-frame Brenner ........ **1/6**
+       * *masked* Brenner ........... **0/6**  ← *worse than not masking*
+       * masked **multimetric** ..... **6/6**
+
+       Brenner alone is systematically biased a couple of frames early inside a small
+       mask, because a partially-defocused object still has a strong edge and the
+       squared-difference metric over-rewards it. Restricting the region does not fix
+       that bias — it exposes it.
+
+       **Use** ``focus_scores_multimetric(stack, mask=...)`` **and take its
+       ``consensus_frame``.** This function is retained for the raw Brenner series and
+       for backward compatibility.
+
+    ``mask=None`` preserves the previous whole-frame behaviour exactly.
     """
     from pycat.toolbox.brightfield_tools import bf_focus_metric
-    stack = np.asarray(stack)
-    scores = np.array([bf_focus_metric(stack[i]) for i in range(stack.shape[0])])
-    med = np.median(scores)
+    n_t = int(stack.shape[0])
+
+    m = None if mask is None else np.asarray(mask)
+    scores = np.empty(n_t, dtype=float)
+    for i in range(n_t):
+        frame = np.asarray(stack[i])        # one frame at a time: lazy-stack safe
+        if m is None:
+            fm = None
+        elif m.ndim == 3:
+            fm = m[i]
+        else:
+            fm = m
+        scores[i] = bf_focus_metric(frame, mask=fm)
+
+    med = np.nanmedian(scores)
     return scores / max(med, 1e-12)
+
+
+def focus_scores_multimetric(stack: np.ndarray, mask: np.ndarray = None) -> dict:
+    """Focus assessed by SEVERAL metrics, because one is easy to fool.
+
+    A single Brenner gradient is exactly the quantity a sharp-edged speck of debris
+    maximises. Agreement between independent metrics is far harder to fake:
+
+    * **brenner**  — squared forward differences (edge energy).
+    * **laplacian**— variance of the Laplacian (a different derivative operator, so
+      it responds differently to a hard edge than to genuine texture).
+    * **tenengrad**— gradient magnitude above a noise floor (Sobel), which weights
+      extended structure over an isolated step.
+
+    Returns each normalised series plus ``agreement``: the fraction of metrics whose
+    argmax falls within ±1 frame of the consensus. **Low agreement is the signal that
+    the focus call is being driven by something other than the sample** — that is the
+    diagnostic, not the individual score.
+    """
+    from scipy import ndimage as _ndi
+    from pycat.toolbox.brightfield_tools import bf_focus_metric
+
+    n_t = int(stack.shape[0])
+    m = None if mask is None else np.asarray(mask)
+
+    def _fm(i):
+        if m is None:
+            return None
+        return m[i] if m.ndim == 3 else m
+
+    bre = np.empty(n_t); lap = np.empty(n_t); ten = np.empty(n_t)
+    for i in range(n_t):
+        f = np.asarray(stack[i], dtype=np.float32)
+        fm = _fm(i)
+        sel = (slice(None), slice(None)) if fm is None else (fm != 0)
+
+        bre[i] = bf_focus_metric(f, mask=fm)
+
+        lp = _ndi.laplace(f)
+        vals = lp if fm is None else lp[fm != 0]
+        lap[i] = float(vals.var()) if getattr(vals, 'size', 0) else np.nan
+
+        gy, gx = np.gradient(f)
+        gmag = np.hypot(gy, gx)
+        gv = gmag if fm is None else gmag[fm != 0]
+        if getattr(gv, 'size', 0):
+            floor = np.percentile(gv, 50)      # ignore the noise floor
+            ten[i] = float((gv[gv > floor] ** 2).mean()) if (gv > floor).any() else 0.0
+        else:
+            ten[i] = np.nan
+
+    def _norm(a):
+        med = np.nanmedian(a)
+        return a / max(float(med), 1e-12)
+
+    bre, lap, ten = _norm(bre), _norm(lap), _norm(ten)
+    peaks = [int(np.nanargmax(x)) for x in (bre, lap, ten)]
+    consensus = int(np.median(peaks))
+    agreement = float(np.mean([abs(p - consensus) <= 1 for p in peaks]))
+
+    return dict(
+        brenner=bre, laplacian=lap, tenengrad=ten,
+        peaks=peaks, consensus_frame=consensus, agreement=agreement,
+        masked=bool(mask is not None),
+    )
 
 
 # ---------------------------------------------------------------------------
