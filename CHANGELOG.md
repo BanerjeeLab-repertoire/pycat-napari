@@ -4,6 +4,39 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.409] - 2026-07-10
+### Fixed — the CI never installed PyCAT
+The real cause, and it is embarrassingly basic: **PyCAT uses a src-layout**
+(``src/pycat/``), so ``import pycat`` does **not** work from a checkout — the package must be
+installed. The workflow installed the *dependencies* and never installed *PyCAT*.
+
+The failure log said so plainly, once read properly:
+
+* **all 13** ``test_module_actually_imports`` cases failed — including
+  ``partial_volume_tools`` and ``segmentation_scale_advisor``, which need nothing beyond
+  numpy and scipy. A missing third-party dependency cannot explain that.
+* coverage reported ``Module pycat was never imported`` and ``No data was collected``.
+
+The fix is one line — ``pip install --no-deps -e .`` — and the ``--no-deps`` is essential: a
+plain ``pip install -e .`` would pull in the pyproject dependencies (**napari, pyqt5, torch,
+cellpose**) and defeat the entire purpose of a headless job.
+
+Verified by reproducing the exact runner condition (no ``sys.path`` manipulation):
+``ModuleNotFoundError: No module named 'pycat'``. And by simulating the post-install state
+(package importable, GUI stack and heavy deps *genuinely unimportable* via a meta-path
+blocker): **``import pycat`` succeeds and 13/13 science modules import.**
+
+**Why I did not catch this.** Every check I ran in development began with
+``sys.path.insert(0, 'src')``. That one habit hid a whole class of failure — the CI does not
+do it, and neither does any real installation. *A test environment that differs from the real
+one in a convenient way will hide exactly the bugs that matter.*
+
+### Changed — the core test step no longer reports coverage
+``--cov=pycat`` was producing "No data was collected" warnings that read like failures. The
+``core`` marker currently selects only the two guard files, so a coverage report there is
+near-zero and meaningless. It is worth adding once the numerical kernels themselves carry the
+marker; until then it is noise.
+
 ## [1.5.408] - 2026-07-10
 ### Fixed — CI, continued: the dependency list is now derived, not guessed
 1.5.407 fixed the two failures I could reproduce. This release closes the gaps I could **not**

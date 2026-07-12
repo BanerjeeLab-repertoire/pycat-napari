@@ -62,6 +62,17 @@ jobs:
           pip install numpy scipy scikit-image pandas matplotlib
           pip install opencv-python-headless pywavelets simpleitk
           pip install pytest pytest-cov ruff
+          # PyCAT uses a SRC-LAYOUT (src/pycat/), so `import pycat` does NOT work from a
+          # checkout — the package must be installed. Without this, every test that
+          # imports pycat fails with ModuleNotFoundError, which is exactly what happened:
+          # all 13 `test_module_actually_imports` cases failed, including ones that need
+          # nothing but numpy, and coverage reported "Module pycat was never imported".
+          #
+          # `--no-deps` is essential. A plain `pip install -e .` would pull in the
+          # pyproject dependencies — napari, pyqt5, torch, cellpose — and defeat the
+          # entire purpose of a headless job. This installs PyCAT itself and nothing else;
+          # its compute dependencies are the explicit list above.
+          pip install --no-deps -e .
 
       - name: Ruff — correctness rules (ADVISORY until first seen green)
         # This subset is where every rule has caught a real, shipped bug here:
@@ -123,5 +134,15 @@ jobs:
         #
         # A "just in case" fallback turns a clean signal into a confusing one. If the
         # marker selects nothing, that is a fact worth surfacing, not papering over.
+        #
+        # `--cov` is deliberately NOT used here. The `core` marker currently selects only
+        # the two guard files, so a coverage report would be near-zero and meaningless —
+        # and pytest-cov then emits "No data was collected" warnings that look like
+        # failures. Coverage is worth adding when the numerical kernels themselves carry
+        # the marker; until then it is noise.
+        #
+        # `--exitfirst` is off on purpose: when this breaks, seeing ALL the failures at
+        # once is what told us the real cause (all 13 failing, including numpy-only
+        # modules, meant `pycat` itself was not importable — not a missing dependency).
         run: |
-          pytest -m core -v --cov=pycat --cov-report=term-missing
+          pytest -m core -v
