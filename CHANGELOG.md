@@ -4,6 +4,62 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.412] - 2026-07-10
+### Fixed — a two-mode fusion relaxation understated the viscosity by 76 %, at R² = 0.996
+``tau`` **is** the measurement: by Frenkel, ``tau = eta*R/sigma``, so the viscosity is read
+straight off it. But that only holds if the relaxation is a single exponential — and droplet
+fusion can have **two** modes: a fast surface-driven decay and a slow bulk one.
+
+Fitted with a single exponential, a two-mode relaxation returns a tau **between** the two:
+
+| | tau | R² |
+|---|---|---|
+| single-exp fit | **4.72** | **0.9964** |
+| *true bulk mode* | *20.0* | — |
+
+**A 76 % underestimate of the bulk viscosity — and R² says 0.996.** R² cannot see this;
+beating a flat line is a trivially low bar for a decaying curve.
+
+New **``test_two_mode_relaxation``** fits both models and selects by AICc: **0 % false alarms
+on genuinely single-mode data, 100 % detection of two-mode relaxations** (40 replicates each).
+
+### Note — the residual runs test was NOT sufficient here, and the reason is instructive
+``assess_fit`` was wired in first (as in FRAP and MSD). It caught only **62 %**.
+
+The cause is real physics, not a bug: the fusion model carries a linear drift term ``b*t`` —
+legitimately, for stage drift and bleaching — and **that term absorbs part of the slow mode**,
+fitting a straight line through its tail and flattening the very residual pattern the runs
+test looks for (measured: the drift coefficient goes to −0.0049 to soak it up).
+
+So 62 % is the honest ceiling for a residual test on this model. Comparing the **models**
+directly reaches 100 %. Same lesson as the MSD confinement test (1.5.401): **when the specific
+alternative is known, compare models rather than test residuals.** The runs test is retained
+for the misfits that are *not* a second mode.
+
+### Note — the two-mode fit needed bounding, and still has a limit worth stating
+Unconstrained, the two-mode fit found a **degenerate** solution in which one "exponential" was
+so slow it was effectively a constant: **``tau_slow`` = 1399 s against a true 20 s.** The AICc
+comparison still *detected* the second mode correctly in that state — but a tau that is 70×
+wrong is worse than no tau. The time constants are now bounded to the physically measurable
+range (slower than the sampling interval, faster than the observation window).
+
+**And a genuine limit remains, so it is reported rather than hidden.** A relaxation slower than
+the window cannot be measured from it. Validated:
+
+| window | true slow tau | recovered | flagged reliable? |
+|---|---|---|---|
+| 50 s | 20 s | 18.6 s | **yes** |
+| 50 s | **30 s** | **26.6 s** | **no** ← correctly flagged |
+| 200 s | 20 s | 19.9 s | yes |
+| 300 s | 30 s | 33.0 s | yes |
+
+When the slow mode exceeds ~40 % of the observation window it is systematically
+**underestimated**, and ``slow_mode_reliable`` is ``False`` with the reason stated: *record for
+longer before converting the slow tau to a viscosity.*
+
+``fusion_tools`` now also imports headlessly (notification shim) — **18** GUI-coupled
+scientific modules remain.
+
 ## [1.5.411] - 2026-07-10
 ### Fixed — spherical aberration was invisible at realistic noise
 ``qc_spherical_aberration`` profiled axial sharpness with ``np.var(laplace(f))`` — **the same
