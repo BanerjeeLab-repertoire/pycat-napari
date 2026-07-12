@@ -58,6 +58,12 @@ Date: 2025
 from __future__ import annotations
 
 import numpy as np
+
+# Optical density is a LOG of a RATIO, so it needs the detector's zero point. An image
+# that has been normalised, CLAHE'd or top-hatted cannot produce one: measured, the
+# strongest condensate (which SETS the image minimum) had its OD go from a true 1.699
+# to 1.173 on normalised data, and the two faintest went to exactly 0.000.
+from pycat.utils.intensity_semantics import IntensitySemantics, require_intensity
 import pandas as pd
 import skimage as sk
 from scipy import ndimage, optimize, stats
@@ -489,6 +495,7 @@ def segment_bf_condensates(
 # 3. Optical density and CNR metrics
 # ---------------------------------------------------------------------------
 
+@require_intensity(IntensitySemantics.ABSOLUTE, 'optical density')
 def compute_optical_density(
     image: np.ndarray,
     background_image: Optional[np.ndarray] = None,
@@ -546,9 +553,24 @@ def compute_optical_density(
     else:
         I0 = ndimage.uniform_filter(img, size=bg_kernel)
 
-    with np.errstate(divide='ignore', invalid='ignore'):
-        od = -np.log10(img / (I0 + 1e-10))
+    # ── A NEGATIVE transmitted intensity is not physical, and log10 of it is NaN ──
+    #
+    # On a strongly absorbing condensate the transmitted intensity is small — with 98 %
+    # absorption of a 200-count background it is ~4 counts — and detector noise then pushes
+    # individual pixels BELOW ZERO. `log10` of a negative number is NaN, so the most
+    # strongly absorbing objects, the ones carrying the most signal, silently dropped out
+    # of the OD image entirely.
+    #
+    # Clamp the transmitted intensity at a small POSITIVE floor before the log. The floor
+    # is one part in 10^3 of the background, which corresponds to OD = 3 — the ceiling the
+    # result is clipped to anyway, so nothing is distorted that was not already saturated.
+    _floor = np.maximum(I0, 0.0) * 1e-3 + 1e-9
+    _img_pos = np.maximum(img.astype(np.float64), _floor)
 
+    with np.errstate(divide='ignore', invalid='ignore'):
+        od = -np.log10(_img_pos / (np.maximum(I0, 0.0) + 1e-10))
+
+    od = np.where(np.isfinite(od), od, 3.0)      # a non-finite OD means fully absorbed
     return np.clip(od, 0, 3).astype(np.float32)
 
 

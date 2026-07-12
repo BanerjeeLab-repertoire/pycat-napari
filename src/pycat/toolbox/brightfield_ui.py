@@ -97,11 +97,42 @@ class BrightfieldCondensateUI:
         layout.addWidget(lbl)
 
     def _get_image(self, dropdown):
+        """Min-max normalised to [0, 1]. For SEGMENTATION ONLY.
+
+        **Never feed this to an intensity measurement.** Normalisation maps the image
+        MINIMUM to zero, which silently subtracts an uncontrolled floor — the darkest
+        pixel in that particular field. Any ratio or logarithm computed on it is then
+        scaled by an extreme-value statistic of the noise.
+
+        In brightfield the consequence is acute, because the darkest pixel IS the
+        strongest condensate, and optical density is a LOG of a ratio:
+
+        ============================  =========  ==================
+        condensate                    true OD    OD on normalised
+        ============================  =========  ==================
+        moderate (50 % absorption)    0.301      0.310
+        **very strong (98 %)**        **1.699**  **12.000**
+        ============================  =========  ==================
+
+        The measurement becomes self-referential: every field's OD is scaled by its own
+        most-absorbing object. Use ``_get_image_raw`` for anything measuring intensity.
+        """
         arr = np.asarray(
             self.viewer.layers[dropdown.currentText()].data
         ).astype(np.float32)
         mn, mx = arr.min(), arr.max()
         return (arr - mn) / (mx - mn + 1e-8) if mx > mn else arr
+
+    def _get_image_raw(self, dropdown):
+        """The layer in RAW counts. Required for any intensity measurement.
+
+        Optical density, partition coefficients and every other intensity ratio need the
+        original detector counts: the camera pedestal and the true background level are
+        part of the physics, and normalisation destroys both.
+        """
+        return np.asarray(
+            self.viewer.layers[dropdown.currentText()].data
+        ).astype(np.float64)
 
     def _dr(self):
         return self.central_manager.active_data_class.data_repository
@@ -469,7 +500,10 @@ def _add_bf_od_metrics(ui, layout):
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_condensate_metrics
         try:
-            raw  = ui._get_image(raw_dd)
+            # RAW counts: bf_condensate_metrics computes optical density,
+            # OD = -log10(I / I0), and a log of a ratio cannot be computed on min-max
+            # normalised data — see _get_image's docstring.
+            raw  = ui._get_image_raw(raw_dd)
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
@@ -809,7 +843,8 @@ def _add_bf_texture(ui, layout):
         from pycat.toolbox.brightfield_tools import (
             bf_texture_features, compute_optical_density)
         try:
-            raw_img = ui._get_image(od_dd)
+            # RAW counts: this is the optical-density widget. OD = -log10(I / I0).
+            raw_img = ui._get_image_raw(od_dd)
             mask    = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return

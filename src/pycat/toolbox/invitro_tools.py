@@ -57,7 +57,14 @@ def field_summary(
     Parameters
     ----------
     labeled_droplets : (H, W) integer label mask (0 = background / buffer)
-    image : (H, W) float32 fluorescence or OD image in [0, 1]
+    image : (H, W) fluorescence or OD image in **RAW COUNTS**.
+
+        **Not normalised.** This function reports intensity statistics, and min-max
+        normalisation maps the image minimum to zero — which silently subtracts an
+        uncontrolled floor (the darkest noise pixel in that field) and makes every ratio
+        a function of the exposure. The docstring previously said "in [0, 1]", and the
+        in-vitro widget duly fed it normalised data; the reported partition coefficient
+        then swung from 323 to 22 with the noise level alone, against a true value of 30.
     microns_per_pixel : µm per pixel
     field_area_um2 : total imaged area in µm².  If None, computed from mask shape.
 
@@ -80,7 +87,13 @@ def field_summary(
                                     fluorescence intensity, **not a concentration**
                                     — see the note below.
         bulk_intensity            : DEPRECATED alias of dilute_phase_intensity.
-        partition_coefficient     : mean_droplet_intensity / dilute_phase_intensity.
+        intensity_ratio           : mean_droplet_intensity / dilute_phase_intensity. This
+                                    is NOT a partition coefficient — no camera floor is
+                                    removed, so it is biased toward 1 (a true Kp of 30
+                                    reads as 5.8 on a 500-count pedestal). Use
+                                    `partition_coefficient_local` for a real Kp.
+        dense_dilute_contrast     : I_dense − I_dilute. EXACT — the pedestal cancels.
+        partition_coefficient     : DEPRECATED alias of intensity_ratio.
                                     An apparent, intensity-based partition
                                     coefficient (dimensionless ratio of signals), not
                                     a thermodynamic one.
@@ -161,7 +174,36 @@ def field_summary(
         mean_droplet_intensity=cond_int,
         dilute_phase_intensity=bulk_int,
         bulk_intensity=bulk_int,                  # DEPRECATED alias
-        partition_coefficient=part,               # apparent, intensity-based
+
+        # ── This is an INTENSITY RATIO, not a partition coefficient ────────────
+        #
+        # Kp = (I_dense - floor) / (I_dilute - floor). This is I_dense / I_dilute, with no
+        # camera floor removed — so it is dragged toward 1 by the pedestal. Measured with a
+        # TRUE Kp of 30 and a 500-count pedestal, it returns **5.83**.
+        #
+        # And if the caller feeds a MIN-MAX NORMALISED image (which the in-vitro widget did
+        # until 1.5.424, and which this function's own docstring still invited by saying
+        # "image in [0, 1]"), it is worse than biased — it becomes a function of the noise,
+        # because normalisation maps the image MINIMUM to zero and the minimum is a noise
+        # excursion below the dilute phase:
+        #
+        #     noise sd    reported "partition"   (true Kp = 30)
+        #        2               323.5
+        #        5               130.0
+        #       15                44.0
+        #       30                22.5
+        #
+        # A 14x swing driven entirely by the exposure. It is not a measurement of anything.
+        #
+        # The name is therefore changed to say what it is. `partition_coefficient` is kept
+        # as a DEPRECATED alias so existing callers do not break, but it carries the same
+        # caveat. For a real Kp, use `partition_coefficient_local` with a dark reference
+        # (in vitro) or a cell mask (cellular) — see 1.5.423.
+        intensity_ratio=part,
+        partition_coefficient=part,               # DEPRECATED: this is NOT Kp — see above
+        # The CONTRAST is exact regardless of any pedestal: it cancels in the difference.
+        dense_dilute_contrast=float(cond_int - bulk_int),
+
         total_droplet_area_um2=total_area,
         field_area_um2=field_area_um2,
     )
@@ -796,7 +838,8 @@ def estimate_csat_lever_rule(
 def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
                                 dark_reference=None, cell_mask=None,
                                 allow_no_reference=False,
-                                gap_px=None, ring_width_px=6, saturation_level=None):
+                                gap_px=None, ring_width_px=6, saturation_level=None,
+                                image_layer=None):
     """Kp from a LOCAL annular dilute phase, with an optional dark reference.
 
     Why a local annulus, and why it needs a gap
@@ -847,6 +890,39 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
     gap_px : distance from the droplet edge to the inner edge of the annulus. Default:
         3 x the estimated interface width (min 5 px).
     """
+    # ── Is this image even a valid input for an INTENSITY measurement? ─────────
+    #
+    # Kp is a ratio of intensities, so it is only meaningful on an image whose pixel values
+    # still relate to photon count. Several routine preprocessing steps destroy that — which
+    # is what they are FOR — and nothing previously stopped their output being fed here.
+    # Measured on a droplet field with a TRUE Kp of 30:
+    #
+    #     raw counts            ratio    5.83
+    #     min-max normalised    ratio  130.01   (and it swings with the noise)
+    #     after white top-hat   ratio  199.27   (background REMOVED -> dilute ~ 0)
+    #     after top-hat + LoG   ratio  -11.96   (LoG is SIGNED -> a NEGATIVE Kp)
+    #     after CLAHE           ratio   64.77   (measures the algorithm, not the sample)
+    #
+    # The information needed to catch this is in the PROVENANCE, not the pixels: a
+    # background-subtracted image looks like an image with a dark background. So the
+    # operations record what they did, and the measurement checks. Pass `image_layer` (the
+    # napari layer) to enable the check; without it the measurement proceeds unchecked.
+    if image_layer is not None:
+        try:
+            from pycat.utils.intensity_semantics import (IntensitySemantics,
+                                                         check_measurement_input)
+            _ok, _why = check_measurement_input(
+                image_layer, IntensitySemantics.ABSOLUTE, 'the partition coefficient')
+            if not _ok:
+                napari_show_warning("Partition coefficient: " + _why)
+                return dict(partition_coefficient=np.nan, contrast=np.nan,
+                            is_true_kp=False, floor_source='none',
+                            per_droplet_df=pd.DataFrame(), verdict=_why)
+            elif _why:
+                napari_show_warning("Partition coefficient: " + _why)
+        except Exception as _exc:
+            debug_log("intensity-semantics check unavailable", _exc)
+
     img = np.asarray(image, dtype=float)
     lab = np.asarray(labeled_droplets)
     ids = np.unique(lab)

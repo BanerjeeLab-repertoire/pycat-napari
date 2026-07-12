@@ -303,3 +303,79 @@ def test_no_duplicate_definitions():
           "these had two non-equivalent versions, and keeping the 'clearer first' one "
           "would have broken it."
     )
+
+
+# ─────────────────────── infinite recursion in a lazy-import shim ───────────────────────
+#
+# `image_processing_tools._add_image` was:
+#
+#     def _add_image(image, viewer, **kw):
+#         """Lazy wrapper for the viewer helper..."""
+#         return _add_image(image, viewer, **kw)      # <- ITSELF
+#
+# It was meant to call `add_image_with_default_colormap`, and was almost certainly written
+# during the headless decoupling, when a module-scope import was replaced with a lazy shim
+# and the body was not updated. **Every one of the 19 call sites in that module would have
+# blown the stack** — every "add the processed image to the viewer" path.
+#
+# The pattern is specific and checkable: a function whose body calls ITSELF, with no local
+# import shadowing the name, and no branch that could terminate the recursion.
+#
+# The shadowing exception is real and must be honoured. `ui_diagnostics_mixin` has:
+#
+#     def _add_pipeline_snr_analysis(self, ...):
+#         from pycat.toolbox.pipeline_snr_tools import _add_pipeline_snr_analysis
+#         _add_pipeline_snr_analysis(self, ...)       # resolves to the IMPORT, not the method
+#
+# which is safe. A naive "does it call its own name?" check flags it; this one does not.
+
+def _infinite_self_recursion(path):
+    """Functions that call themselves with no shadowing import and no terminating branch."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return []
+
+    out = []
+    for fn in [n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        self_calls = [c for c in ast.walk(fn)
+                      if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                      and c.func.id == fn.name]
+        if not self_calls:
+            continue
+
+        # A local import of the same name SHADOWS the function — the call goes there.
+        shadowed = any(
+            isinstance(n, ast.ImportFrom)
+            and any(a.asname == fn.name or a.name == fn.name for a in n.names)
+            for n in ast.walk(fn)
+        )
+        if shadowed:
+            continue
+
+        # Any branch could terminate the recursion. Without one it is unconditional.
+        has_branch = any(isinstance(n, (ast.If, ast.Try, ast.While, ast.For))
+                         for n in ast.walk(fn))
+        if not has_branch:
+            out.append((fn.lineno, fn.name))
+    return out
+
+
+@pytest.mark.core
+def test_no_infinite_self_recursion():
+    """A function that unconditionally calls itself will blow the stack on first use."""
+    offenders = []
+    for path in sorted(SRC.rglob("*.py")):
+        for lineno, name in _infinite_self_recursion(path):
+            offenders.append(f"{path.relative_to(SRC)}:{lineno}: {name}() calls itself "
+                             f"unconditionally")
+
+    assert not offenders, (
+        "Unconditional self-recursion — these will blow the stack on the first call:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nThis is how `_add_image` shipped: a lazy-import shim whose body was never "
+          "updated to call the real helper, so it called itself. If the intent is to "
+          "delegate to a same-named function in another module, import it locally — that "
+          "shadows the name and this check honours it."
+    )

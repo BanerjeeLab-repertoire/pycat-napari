@@ -33,11 +33,31 @@ from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.notify import show_info as napari_show_info
 
 
-def _add_image(image, viewer, **kw):
-    """Lazy wrapper for the viewer helper (importing it at module scope would pull
-    in Qt and block headless import of this module's array functions)."""
-    # ui_utils pulls in Qt -> imported at CALL time inside _add_image().
-    return _add_image(image, viewer, **kw)
+def _add_image(image, viewer, operation=None, **kw):
+    """Lazy wrapper for the viewer helper, plus the intensity-semantics tag.
+
+    **This used to call ITSELF** — ``return _add_image(image, viewer, **kw)`` — which is
+    infinite recursion, and every one of the 19 call sites in this module would have blown
+    the stack. It was meant to lazily import ``add_image_with_default_colormap`` (importing
+    it at module scope would pull in Qt and block the headless import of this module's array
+    functions).
+
+    ``operation`` records what produced this layer, so that measurements can refuse an input
+    whose intensity semantics have been destroyed. See ``pycat.utils.intensity_semantics``:
+    a white top-hat removes the background, a Laplacian-of-Gaussian is signed and centred on
+    zero (giving a NEGATIVE partition coefficient), and CLAHE measures the contrast-
+    enhancement algorithm rather than the sample. The information is in the provenance, not
+    the pixels — so it is recorded here, where the operation happens.
+    """
+    from pycat.ui.ui_utils import add_image_with_default_colormap
+    layer = add_image_with_default_colormap(image, viewer, **kw)
+    if operation is not None and layer is not None:
+        try:
+            from pycat.utils.intensity_semantics import mark_intensity_semantics
+            mark_intensity_semantics(layer, operation)
+        except Exception:
+            pass          # tagging must never break the operation itself
+    return layer
 
 
 def _napari():
@@ -330,7 +350,7 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     rescaled_image = apply_rescale_intensity(image, out_min, out_max)
 
     # Add the rescaled image to the viewer
-    _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}")
+    _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}", operation='rescale_intensity')
 
 
 def invert_image(image):
@@ -397,7 +417,7 @@ def run_invert_image(viewer):
     inverted_image = invert_image(image)
 
     # Add the inverted image to the viewer
-    _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}")
+    _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}", operation='rescale_intensity')
 
 
 def upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor=2, pad=False):
@@ -627,7 +647,7 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
             _add_image(upscaled_img, viewer,
                                             name=_out_name, scale=_new_scale)
         else:
-            _add_image(upscaled_img, viewer, name=_out_name)
+            _add_image(upscaled_img, viewer, name=_out_name, operation='upscale')
 
         # Lineage: the upscaled layer is derived_from + supersedes the source, and
         # inherits its role/modality/channel. This is what makes autopopulation
@@ -826,7 +846,7 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   enhanced_image = peak_and_edge_enhancement_func(image, ball_radius)
 
   # Add the enhanced image as a new layer to the viewer with a descriptive name
-  _add_image(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}")
+  _add_image(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}", operation='log_enhance')
 
 
 def apply_laplace_of_gauss_filter(image, sigma=3):
@@ -936,7 +956,7 @@ def run_apply_laplace_of_gauss_filter(sigma_input, viewer):
     LoG_image = apply_laplace_of_gauss_filter(image, sigma)
 
     # Add the LoG filtered image to the viewer
-    _add_image(LoG_image, viewer, name=f"LoG of {active_layer.name}")
+    _add_image(LoG_image, viewer, name=f"LoG of {active_layer.name}", operation='log_enhance')
 
 
 def run_morphological_gaussian_filter(filter_size_input, viewer):
@@ -997,7 +1017,7 @@ def run_morphological_gaussian_filter(filter_size_input, viewer):
     image = dtype_conversion_func(img, output_bit_depth=input_dtype)
 
     # Add the processed image as a new layer to the viewer with a descriptive name
-    _add_image(image, viewer, name=f"Filtered {active_layer.name}")
+    _add_image(image, viewer, name=f"Filtered {active_layer.name}", operation='gaussian_blur')
 
 
 def run_clahe(clip_input, k_size_input, viewer):
@@ -1055,7 +1075,7 @@ def run_clahe(clip_input, k_size_input, viewer):
     CLAHE_img = dtype_conversion_func(CLAHE_img, output_bit_depth=input_dtype)
 
     # Add the CLAHE-enhanced image as a new layer to the Napari viewer
-    _add_image(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}")
+    _add_image(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}", operation='clahe')
 
 
 def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
@@ -1205,7 +1225,7 @@ def run_dpr(psf_input, gain_input, data_instance, viewer):
     DPR_img, _ = deblur_by_pixel_reassignment(active_layer.data, psf_0, gain_0, window_size)
 
     # Display the processed image in the viewer
-    _add_image(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}")
+    _add_image(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}", operation='preprocess')
 
 
 # Background and Noise Correction # 
@@ -1461,7 +1481,7 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
     bg_removed_image = rb_gaussian_background_removal(image, ball_radius, equalize_intensity=equalize_intensity_input)
 
     # Add the processed image as a new layer in the viewer
-    _add_image(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}')
+    _add_image(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}', operation='background_subtract')
     try:
         from pycat.utils import layer_tags as _LT
         if len(viewer.layers):
@@ -2377,7 +2397,8 @@ def run_pre_process_image(data_instance, viewer):
         suppression_params=suppression_params)
 
     # Add the pre-processed image to the viewer with a default colormap
-    _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}")
+    _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}",
+               operation='preprocess')
 
 
 # ---------------------------------------------------------------------------

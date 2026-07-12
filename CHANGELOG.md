@@ -4,6 +4,358 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.430] - 2026-07-10
+### Gated — molecule counting, and a correction to my own classification of FRAP
+Extending the intensity-semantics gate meant **verifying each requirement rather than asserting
+it**, and one of my assertions was wrong.
+
+**Molecule counting requires LINEAR — confirmed.** It fits a variance-vs-intensity slope, and a
+camera pedestal adds a constant to the **intensity** but nothing to the **variance**. The line
+is shifted horizontally and the slope through the origin is wrong:
+
+| pedestal | reported N (true N = 20) |
+|---|---|
+| 0 | 36.5 |
+| 500 | 67.8 |
+| **2000** | **89.8** |
+
+A **2.5× inflation**. Gated. A background-subtracted image now passes (LINEAR is satisfied —
+and the offset removal is *helpful* here), while a CLAHE'd one is refused.
+
+### Corrected — FRAP is pedestal-INVARIANT, and I nearly gated it wrongly
+I classified FRAP as requiring LINEAR. **That is wrong**, and gating it so would have blocked
+perfectly valid inputs.
+
+``taylor_normalize`` is ``(I − I₀) / (I_pre − I₀)`` — a **ratio of DIFFERENCES**. An additive
+offset appears in both numerator and denominator and **cancels exactly**:
+
+| pedestal | **taylor** (differences) | **prebleach** (bare ratio) |
+|---|---|---|
+| 0 | **0.8728** | 0.8983 |
+| 500 | **0.8728** | 0.9322 |
+| 2000 | **0.8728** | **0.9661** |
+
+*(true mobile fraction 0.873)*
+
+**The requirement belongs on the normalisation, not the module.** ``taylor_normalize`` needs
+only MONOTONIC and is safe on an un-subtracted image; ``prebleach_normalize`` is a bare ratio,
+the offset does **not** cancel, and it inflates the apparent mobile fraction toward 1. Both are
+now documented with the measured numbers, so the choice between them is informed.
+
+### Note — the classification is the hard part, not the plumbing
+Three measurements, three different requirements, and the differences are not intuitive:
+
+* **optical density** needs the pedestal **present** (``ABSOLUTE``) — it is a log of a ratio to
+  the true incident intensity.
+* **N&B and molecule counting** need the pedestal **removed** (``LINEAR``) — they compare
+  variance to mean, and a constant adds to one and not the other.
+* **Taylor-normalised FRAP** does not care (``MONOTONIC``) — the offset cancels in a ratio of
+  differences.
+
+**Getting these backwards would have blocked correct inputs while letting wrong ones through** —
+strictly worse than no gate at all. Each was measured against ground truth before being wired.
+
+## [1.5.429] - 2026-07-10
+### Added — ``@require_intensity``, and the optical density is now gated
+The intensity-semantics gate (1.5.427) protected only the partition coefficient. A
+``@require_intensity`` decorator makes it one line per measurement, and ``compute_optical_density``
+is the first to take it — because OD is a **log of a ratio**, so it needs the detector's zero
+point more than anything else does. On min-max normalised data the two faintest condensates
+returned **exactly 0.000** against true ODs of 0.046 and 0.301.
+
+### Verified — N&B requires LINEAR, not ABSOLUTE, and the reason matters
+Before gating anything, the classification had to be checked rather than asserted. N&B computes
+brightness ``B = variance / mean``, and **the camera pedestal adds to the mean but not to the
+variance** — it is a constant. So it drags B down and inflates N:
+
+| trace | B | N |
+|---|---|---|
+| signal (no pedestal) | 1.02 | **49.0** |
+| **with pedestal** | 0.09 | **5954** ← 120× wrong |
+| **pedestal subtracted** | 1.02 | **49.0** ← restored |
+
+Subtraction **restores it exactly**. So N&B needs the zero point to be right (``LINEAR``) and
+does *not* care about the absolute scale — a background-subtracted image is exactly right for
+it, and an unsubtracted one is wrong. That is the opposite requirement from optical density,
+which needs the pedestal **present**.
+
+The distinction is real, and getting it backwards would have blocked correct inputs while
+letting wrong ones through.
+
+### Note — a refusal must be CLEARER than the bug it prevents, not a different crash
+The decorator first returned a dict carrying the reason. That is fine for a function that
+returns a dict — and **wrong for one that returns an array.** ``compute_optical_density``
+returns an ``ndarray``, so a caller doing ``od.mean()`` or ``od[mask]`` got an
+``AttributeError`` on a dict: a crash, with no indication of why.
+
+It now raises ``MeasurementRefused``, carrying the reason and naming the operation responsible.
+An exception reaches the caller regardless of what the function normally returns.
+
+**Caught by asking what the function actually returns before shipping the guard** — the same
+question that has now found four bugs in this session (the FRAP model equation, the vibration
+harness, the batch preprocessing input, and this).
+
+## [1.5.428] - 2026-07-10
+### Added — a guard for infinite self-recursion, and a sweep for more of them
+``_add_image`` (fixed in 1.5.427) called **itself**:
+
+```python
+def _add_image(image, viewer, **kw):
+    """Lazy wrapper for the viewer helper..."""
+    return _add_image(image, viewer, **kw)      # <- ITSELF
+```
+
+**Every one of the 19 call sites in that module would have blown the stack.** It was meant to
+call ``add_image_with_default_colormap``, and was almost certainly written during the headless
+decoupling — a module-scope import replaced with a lazy shim, and the body never updated.
+
+That is a specific, checkable pattern, and the guard now checks it. Verified against four
+cases, **4/4 correct**:
+
+| case | verdict |
+|---|---|
+| the actual ``_add_image`` bug | **flagged** |
+| the fix (calls the real helper) | allowed |
+| a *shadowed* delegate (see below) | allowed |
+| legitimate recursion with a base case | allowed |
+
+**The shadowing exception is real and had to be honoured.** ``ui_diagnostics_mixin`` has:
+
+```python
+def _add_pipeline_snr_analysis(self, layout=None):
+    from pycat.toolbox.pipeline_snr_tools import _add_pipeline_snr_analysis
+    _add_pipeline_snr_analysis(self, layout=layout)   # resolves to the IMPORT
+```
+
+A naive *"does it call its own name?"* check flags this; it is safe, because the local import
+shadows the method. The guard checks for the shadowing import and does not flag it. **``_add_image``
+had no such import — which is exactly why it recursed.**
+
+### Swept — no other broken shims
+The headless decoupling produced the ``_add_image`` shim, so I swept the whole tree for others
+of the same shape (a small function whose job is to lazily import and delegate). **Twelve
+candidates, all false positives** — they call module-level names or builtins that a crude
+textual check cannot see, and the undefined-name guard already covers them properly.
+
+``_add_image`` was the only genuine one, and it is now guarded against.
+
+## [1.5.427] - 2026-07-10
+### Added — intensity semantics: operations declare what they destroyed, measurements refuse it
+Gable's proposal, and it is the right architecture. The normalisation bugs (1.5.424–426) were
+instances of a general problem: **a measurement is only valid on an image whose intensities
+still mean something**, and several routine preprocessing steps deliberately destroy that
+meaning — because that is what they are for.
+
+Measured on a droplet field with a **true Kp of 30**:
+
+| image | I_dense | I_dilute | ratio |
+|---|---|---|---|
+| raw counts | 3500.1 | 600.0 | 5.83 |
+| min-max normalised | — | — | **130.01** (and it swings with the noise) |
+| after white top-hat | 2914.4 | **14.6** | **199.27** |
+| **after top-hat + LoG** | 48.6 | **−4.1** | **−11.96** |
+| after CLAHE | 1.000 | 0.015 | **64.77** |
+
+**A Laplacian-of-Gaussian is a signed operator centred on zero**, so the dilute-phase mean goes
+*negative* — and **a ratio of two numbers straddling zero is not a physical quantity at all.**
+A negative partition coefficient.
+
+New **``pycat/utils/intensity_semantics.py``**. Each operation declares what it did
+(``ABSOLUTE`` → ``LINEAR`` → ``MONOTONIC`` → ``DESTROYED``); each measurement declares what it
+requires; ``check_measurement_input`` refuses when the requirement is violated **and names the
+operation responsible**.
+
+Deliberately **not** a heuristic on the pixels. *A background-subtracted image looks like an
+image with a dark background; a LoG output looks like a noisy image.* **The information is in
+the provenance, not the pixels** — so it is recorded when the operation happens and read when
+the measurement happens.
+
+Validated end-to-end:
+
+| input layer | Kp | refused? |
+|---|---|---|
+| raw | **29.61** | no |
+| **Pre-Processed (top-hat + LoG)** | **NaN** | **yes** |
+| **CLAHE** | **NaN** | **yes** |
+
+Ten operations in ``image_processing_tools`` now tag their output. ``partition_coefficient_local``
+checks. It **fails open** on untagged layers — with a warning saying so — because the tag system
+is not yet everywhere, and refusing untagged input would break every existing workflow.
+
+### FIXED — ``_add_image`` called itself: infinite recursion in 19 call sites
+Found while wiring the tags. The lazy Qt-import shim in ``image_processing_tools`` was::
+
+    def _add_image(image, viewer, **kw):
+        return _add_image(image, viewer, **kw)      # <- ITSELF
+
+It was meant to call ``add_image_with_default_colormap``. **Every one of the 19 call sites in
+that module would have blown the stack** — every "add the processed image to the viewer" path.
+Almost certainly introduced during the headless decoupling, when the direct import was replaced
+with a lazy shim.
+
+### Fixed — the batch in-vitro path was reading `preprocessed`, not the original image
+``_ivf_droplet_mask_and_image`` did ``state.get('preprocessed', state.get('image'))`` —
+**preferring** the preprocessed image, which is the top-hat + LoG + wavelet output. So the
+partition coefficient was being computed on a signed, background-removed image. It now takes
+the original.
+
+Checked the other ten ``preprocessed`` call sites in the batch registry: **all are segmentation
+or preprocessing steps, where using it is correct.** The in-vitro intensity path was the only
+consumer that needed the original.
+
+## [1.5.426] - 2026-07-10
+### Fixed — the BATCH path normalised too, and ``field_summary`` called an intensity ratio a partition coefficient
+Having found the normalisation bug in two UIs (1.5.424, 1.5.425), I swept every intensity-
+measuring function against the accessors that feed it. Two more:
+
+**1. ``field_summary`` reported ``partition_coefficient = I_dense / I_dilute``** — a bare
+ratio, with no camera floor removed. Its own docstring said *"image in [0, 1]"*, **inviting**
+the normalised input that made it worse than biased:
+
+| noise sd | reported "partition" (true Kp = 30) |
+|---|---|
+| 2 | **323.5** |
+| 5 | 130.0 |
+| 15 | 44.0 |
+| 30 | **22.5** |
+
+**A 14× swing driven entirely by the exposure.** Renamed to ``intensity_ratio``, which is what
+it is; ``partition_coefficient`` is kept as a deprecated alias so callers do not break, but it
+carries the caveat. ``dense_dilute_contrast`` is added and is **exact** — the pedestal cancels
+in the difference. The docstring now says **raw counts**, and explains why.
+
+On raw counts the ratio is at least **stable** (5.83 at every noise level) — an honest,
+uncorrected number, correctly named. For a real Kp, ``partition_coefficient_local`` with a dark
+reference (in vitro) or a cell mask (cellular).
+
+**2. The batch registry normalises.** ``_ivf_droplet_mask_and_image`` ran every image through
+``_normalize_to_float`` — the same min-max — before handing it to ``field_summary`` and the
+partition coefficient. **So every batch-processed in-vitro partition coefficient carried the
+noise-dependent bug**, and batch is precisely where many files are processed unattended and
+nobody looks at each number.
+
+A ``_raw_counts`` accessor is added beside the normalising one, and the in-vitro intensity path
+uses it. Verified safe: of the three callers of that accessor, only the intensity one uses the
+image at all — the other two take the mask and discard it (``mask, _ = ...``).
+
+### The pattern, stated once
+**Min-max normalisation is correct for segmentation and fatal for intensity.** It maps the
+image *minimum* to zero, which silently subtracts an uncontrolled floor — the darkest noise
+pixel in that particular field. Every ratio built on it becomes a function of the exposure;
+every logarithm of a ratio (optical density) becomes self-referential, scaled by the field's
+own most-extreme object.
+
+Four call sites across three modules and the batch registry were feeding intensity measurements
+normalised data. They are now on raw counts, and the normalising accessors carry docstrings
+saying what they are for.
+
+## [1.5.425] - 2026-07-10
+### Fixed — optical density was computed on min-max NORMALISED data, and the strongest condensates vanished
+The normalisation bug found in the in-vitro widget (1.5.424) is not isolated. **Four UIs**
+define a min-max normalising image accessor, and a sweep of their call sites found **three more
+feeding an intensity measurement** — all of them optical density.
+
+``OD = −log10(I / I0)``. It is a **logarithm of a ratio**, so moving the zero point does not
+merely bias it — **it changes the functional form.** And min-max normalisation maps the image
+**minimum** to zero, which in brightfield **is the strongest condensate**:
+
+| condensate | true OD | **OD on normalised data** |
+|---|---|---|
+| faint (10 % absorption) | 0.046 | **0.000** |
+| moderate (50 %) | 0.301 | **0.000** |
+| strong (90 %) | 1.000 | 0.623 |
+| very strong (98 %) | 1.699 | 1.173 |
+
+**The measurement was self-referential:** every field's OD was scaled by its own most-absorbing
+object. From raw counts, all four recover **exactly** (0.045 / 0.301 / 1.000 / 1.699).
+
+Fixed in ``brightfield_ui`` (2 sites) and ``invitro_bf_ui`` (1 site). A ``_get_image_raw``
+accessor is added alongside the normalising one, and the normalising accessor now carries a
+docstring stating plainly that it is **for segmentation only**.
+
+### Fixed — a negative transmitted intensity made the most absorbing condensates NaN
+Found while validating the above. On a strongly absorbing condensate the transmitted intensity
+is small — 98 % absorption of a 200-count background leaves ~4 counts — and **detector noise
+then pushes individual pixels below zero.** ``log10`` of a negative number is ``NaN``.
+
+**So the most strongly absorbing objects — the ones carrying the most signal — silently dropped
+out of the OD image entirely.** The transmitted intensity is now clamped at a small positive
+floor (one part in 10³ of the background, i.e. OD = 3, the ceiling the result is clipped to
+anyway). The 98 % condensate now returns **1.699 against a truth of 1.699**, where it
+previously returned ``NaN``.
+
+### Fixed — `od_proxy = 1 - raw` was not an optical density
+``invitro_bf_ui`` built its OD proxy as ``1 − raw``, which only means anything on [0, 1] data —
+i.e. it *depended on* the normalisation bug. On raw counts it is negative and meaningless.
+Replaced with the real thing: ``−log10(I / I0)``, with ``I0`` taken from the background.
+
+This is not cosmetic. **Optical density is what relates a brightfield image to concentration**
+(Beer–Lambert); ``1 − I`` is a linear proxy that is *monotonic* with OD but not *proportional*
+to it, so any concentration or partition estimate built on it was distorted.
+
+### Note — my own validation was wrong first, twice
+The first OD test fed **no background image**, so the function inferred ``I0`` from a 50 px
+local kernel that **partially contained the condensates** — biasing every OD low and producing
+a NaN I nearly attributed to the code. That was the test's fault.
+
+The second attempt supplied a proper background and revealed the *real* NaN — the negative
+transmission. **Both were only visible because the test had ground truth to compare against.**
+A validation without a known answer would have shown four plausible numbers and nothing wrong.
+
+## [1.5.424] - 2026-07-10
+### FIXED — every in-vitro partition coefficient was computed on min-max NORMALISED data
+Wiring ``partition_coefficient_local`` (1.5.423) into the in-vitro widget exposed something
+worse than the missing camera floor.
+
+The widget fed the image through ``ui._img()``, which **min-max normalises to [0, 1]**. That is
+fine for segmentation. **For an intensity ratio it is fatal**, and not merely biased:
+
+Normalisation maps the image **minimum** to zero. In a droplet field the minimum is a **noise
+excursion below the dilute phase** — so the denominator of Kp is driven toward zero by
+whatever the darkest pixel in the field happened to be.
+
+**The reported Kp was therefore a function of the noise level.** Measured with a **true Kp of
+30** throughout:
+
+| noise sd | reported Kp | spread over 8 seeds |
+|---|---|---|
+| 2 | **515** | 451–589 |
+| 5 | **207** | 181–237 |
+| 15 | **70** | 61–80 |
+| 30 | **36** | 31–41 |
+
+**A 14× swing driven entirely by the noise.** A *cleaner* image reports a *higher* partition
+coefficient. **Two images of the same sample at different exposures report different partition
+coefficients.** It was not a measurement of anything.
+
+The widget now reads the layer **raw**, in counts. Intensity ratios require raw data — this is
+the same class of error as an unsubtracted pedestal (1.5.415, 1.5.416, 1.5.422), except that
+normalisation subtracts an *uncontrolled* floor rather than leaving a known one in place.
+
+### Wired — the in-vitro widget now uses the local annular dilute phase and a dark reference
+``partition_coefficient_local`` was built in 1.5.423 and **called nowhere** — exactly the trap
+from 1.5.421. It is now wired into the in-vitro fluorescence widget, with:
+
+- ``sample_type='in_vitro'`` — not a guess: this **is** the in-vitro widget, so the tool knows
+  it must not try to auto-detect the camera floor (it cannot be done — see 1.5.423).
+- a new **"Dark reference (buffer, no dye)"** layer dropdown, defaulting to *none*, with the
+  reason stated in the widget: *one extra frame of buffer with no dye, at the same camera
+  settings.*
+- without one, the raw ratio is still returned so work can proceed — labelled **"raw ratio (NOT
+  Kₚ — no dark reference)"** in the status line, and flagged ``is_true_kp=False`` in the
+  result.
+- the **contrast** (``I_dense − I_dilute``) is reported in every case and is **exact**, because
+  the pedestal cancels in the difference.
+
+### Note — this was found only by wiring the fix in
+The camera-floor problem was diagnosed, solved and validated in 1.5.423 against synthetic data.
+The normalisation bug was invisible there, because the synthetic tests called the function
+directly with raw arrays.
+
+**It surfaced the moment the function met the real call path.** Building the correct estimator
+and validating it in isolation was not enough — the input it would actually be given was
+broken, in a way that made the output depend on the exposure time.
+
 ## [1.5.423] - 2026-07-10
 ### Added — ``partition_coefficient_local``: a local dilute phase, and an honest camera floor
 Kp = ``(I_dense − floor) / (I_dilute − floor)``. Get the floor wrong and Kp is dragged toward

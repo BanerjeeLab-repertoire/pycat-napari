@@ -44,6 +44,17 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+
+# Molecule counting fits a VARIANCE-vs-INTENSITY slope. A camera pedestal adds a constant
+# to the intensity but NOTHING to the variance, so it shifts that line horizontally and the
+# slope through the origin is wrong. Measured, with a TRUE N of 20:
+#
+#     pedestal 0    -> N = 36.5
+#     pedestal 500  -> N = 67.8
+#     pedestal 2000 -> N = 89.8
+#
+# A 2.5x inflation. It needs the OFFSET removed (LINEAR), not the original scale.
+from pycat.utils.intensity_semantics import IntensitySemantics, require_intensity
 import pandas as pd
 from scipy.optimize import curve_fit
 
@@ -195,6 +206,7 @@ def count_molecules_single(trace: np.ndarray, fast: int = 4,
 # Pooled (population) counting — preferred
 # ---------------------------------------------------------------------------
 
+@require_intensity(IntensitySemantics.LINEAR, 'molecule counting')
 def count_molecules_pooled(traces: list, fast: int = 4,
                            r2_min: float = 0.0) -> dict:
     """

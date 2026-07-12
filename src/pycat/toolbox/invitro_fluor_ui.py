@@ -617,6 +617,34 @@ def _ivf_field_summary(ui, layout):
     mask_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow("Fluorescence image:", img_dd)
     form.addRow("Droplet mask:", mask_dd)
+
+    # ── The dark reference, and why in vitro it is not optional ────────────────
+    #
+    # Kp = (I_dense − floor) / (I_dilute − floor). The floor is the camera pedestal. Leave
+    # it in and Kp is dragged toward 1 — with a TRUE Kp of 30 and a 500-count pedestal, the
+    # uncorrected ratio returns 5.81. An 81 % error that looks like a plausible number.
+    #
+    # **In vitro that floor cannot be recovered from the image.** Droplets sit in bulk
+    # buffer: every pixel is (pedestal + dilute) or (pedestal + dense), so NO region
+    # contains the pedestal alone. The camera floor and the dilute phase are inseparable in
+    # principle. (An automatic threshold was tried, and it returned the DILUTE PHASE as the
+    # "camera floor" — Kp = 5.77 against a true 30, reported confidently. See 1.5.423.)
+    #
+    # One extra frame fixes it: buffer, no fluorophore, same camera settings.
+    dark_dd = ui.create_layer_dropdown(napari.layers.Image)
+    dark_dd.insertItem(0, "\u2014 none (no dark reference) \u2014")
+    dark_dd.setCurrentIndex(0)
+    form.addRow("Dark reference (buffer, no dye):", dark_dd)
+    form.addRow(QLabel(
+        "<span style='color:#888;font-size:10px'>"
+        "<b>Required for a true partition coefficient.</b> In vitro the camera floor "
+        "cannot be measured from the image — every pixel contains the dilute phase, so "
+        "there is no fluorophore-free region to reference. Without it, the reported ratio "
+        "is biased toward 1 by an unknowable amount (a true K<sub>p</sub> of 30 reads as "
+        "5.8 on a 500-count pedestal). Acquire one frame of buffer with no dye, at the "
+        "same camera settings. The <b>contrast</b> (I<sub>dense</sub> − I<sub>dilute</sub>) "
+        "is exact either way.</span>"))
+
     run = QPushButton("▶  Compute Field Summary")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     from pycat.ui.field_status import button_with_circle as _bwc
@@ -625,13 +653,45 @@ def _ivf_field_summary(ui, layout):
     def _on_run():
         from pycat.toolbox.invitro_tools import field_summary, partition_coefficient_field
         try:
-            img  = ui._img(img_dd)
+            # ── RAW counts, NOT ui._img() ───────────────────────────────────────
+            #
+            # `ui._img()` min-max normalises to [0, 1]. That is fine for segmentation, and
+            # **fatal for a partition coefficient**: Kp = (I_dense − floor)/(I_dilute −
+            # floor), and normalisation maps the image MINIMUM to zero — which silently
+            # subtracts an arbitrary floor of its own, and makes the values
+            # incommensurable with a dark reference in raw counts.
+            #
+            # Concretely, with a pedestal of 500 and a dilute phase at 600 counts:
+            # normalisation puts the dilute phase at 0.033, and subtracting a raw dark
+            # reference of 500 gives **−500**. Nonsense.
+            #
+            # Intensity ratios need RAW data. Read the layer directly.
+            img  = np.asarray(ui.viewer.layers[img_dd.currentText()].data,
+                              dtype=np.float64)
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
 
         mpx = ui._mpx()
         summ = field_summary(mask, img, mpx)
-        part = partition_coefficient_field(img, mask)
+
+        # Local annular dilute phase + the camera floor from the dark reference (if given).
+        # `sample_type='in_vitro'` is not a guess: this is the IN VITRO fluorescence widget,
+        # so the tool knows it must not try to auto-detect the floor.
+        from pycat.toolbox.invitro_tools import partition_coefficient_local
+        _dark = None
+        _dark_name = dark_dd.currentText() if dark_dd is not None else ""
+        if _dark_name and _dark_name not in ("", "None", "—"):
+            try:
+                _dark = np.asarray(ui.viewer.layers[_dark_name].data)
+            except KeyError:
+                _dark = None
+        part = partition_coefficient_local(
+            img, mask.astype(np.int32), sample_type='in_vitro',
+            dark_reference=_dark,
+            # Without a dark frame, still return the raw ratio so the analysis proceeds —
+            # flagged `is_true_kp=False` so it cannot be mistaken for a partition
+            # coefficient. The contrast is exact regardless.
+            allow_no_reference=(_dark is None))
         ui._dr()['ivf_field_summary']   = summ
         ui._dr()['ivf_partition_coeff'] = part
         ui._record('ivf_field_summary', {
@@ -646,12 +706,17 @@ def _ivf_field_summary(ui, layout):
             ("Field statistics", summ_df),
             ("Per-droplet partition", part_df),
         ])
+        _kp = part.get('partition_coefficient', float('nan'))
+        _true = bool(part.get('is_true_kp', False))
+        _label = ("K\u209a" if _true else
+                  "raw ratio (NOT K\u209a \u2014 no dark reference)")
         napari_show_info(
             f"area fraction={summ['projected_area_fraction']:.3f} "
             f"(2D projection, not a volume fraction), "
             f"n={summ['n_droplets']}, "
-            f"mean R={summ['mean_radius_um']:.2f}µm, "
-            f"partition={summ['partition_coefficient']:.1f}×"
+            f"mean R={summ['mean_radius_um']:.2f}\u00b5m, "
+            f"{_label}={_kp:.1f}, "
+            f"contrast={part.get('contrast', float('nan')):.0f} (exact)"
         )
     run.clicked.connect(_on_run)
     import skimage as sk

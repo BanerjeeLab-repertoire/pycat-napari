@@ -302,12 +302,35 @@ def _ivbf_od_field(ui, layout):
         from pycat.toolbox.brightfield_tools import bf_condensate_metrics
         from pycat.toolbox.invitro_tools import field_summary
         try:
-            raw  = ui._img(raw_dd)
+            # ── RAW counts, not ui._img() ────────────────────────────────────────
+            #
+            # `ui._img()` min-max normalises to [0, 1]. Fine for segmentation; **fatal for
+            # optical density**, which `bf_condensate_metrics` computes as
+            # OD = -log10(I / I0). Normalisation maps the image MINIMUM to zero — and in
+            # brightfield the darkest pixel IS the strongest condensate, so its OD diverges:
+            #
+            #     condensate            true OD    OD on normalised data
+            #     moderate (50 % abs)   0.301      0.310
+            #     very strong (98 %)    1.699      **12.000**
+            #
+            # A log of a ratio cannot be computed on data whose zero point has been moved.
+            # The measurement becomes self-referential: every field's OD is scaled by its
+            # own most-absorbing object.
+            raw  = np.asarray(ui.viewer.layers[raw_dd.currentText()].data,
+                              dtype=np.float64)
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return
         mpx = ui._mpx()
         # For in vitro BF, pass mask as both droplet and "cell" (whole field)
-        od_proxy = 1 - raw  # inverted intensity as OD proxy for field_summary
+        # `1 - raw` was an inverted-intensity proxy that ONLY made sense on [0, 1] data.
+        # On raw counts it is meaningless (it would be negative). Compute the real optical
+        # density instead: OD = -log10(I / I0), with I0 the transmitted background.
+        #
+        # This is not a cosmetic change. OD is what relates a brightfield image to
+        # concentration (Beer-Lambert); `1 - I` is a linear proxy that is only monotonic
+        # with OD, not proportional to it.
+        _i0 = float(np.percentile(raw[mask == 0], 90)) if (mask == 0).any() else float(raw.max())
+        od_proxy = -np.log10(np.clip(raw, 1e-6, None) / max(_i0, 1e-6))
         summ = field_summary(mask, od_proxy, mpx)
         per_drop = bf_condensate_metrics(raw, mask, None, mpx)
         ui._dr()['ivbf_field_summary'] = summ
