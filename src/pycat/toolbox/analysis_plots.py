@@ -500,6 +500,19 @@ def plot_moduli(moduli_df, title="Complex moduli G′/G″ — Evans method (mic
     gp_ok = gp_arr > 0
     gpp_ok = gpp_arr > 0
 
+    # Respect the per-frequency validity class, when the moduli carry one. An
+    # EDGE-AFFECTED point can be positive and still unreliable (the Evans transform
+    # needs neighbours on both sides, so the spectral endpoints are systematically
+    # off) -- positivity alone is not enough to justify plotting it as a measurement.
+    # These points used to be silently DROPPED upstream; they are now returned and
+    # labelled, so the plot must show them for what they are rather than as data.
+    _edge = np.zeros(len(gp_arr), dtype=bool)
+    if 'validity' in d.columns:
+        _val = d['validity'].values
+        _edge = (_val == 'edge_affected')
+        gp_ok = gp_ok & ~_edge
+        gpp_ok = gpp_ok & ~_edge
+
     def _band(lo_c, hi_c, colour):
         if not {lo_c, hi_c}.issubset(d.columns):
             return 0
@@ -550,6 +563,9 @@ def plot_moduli(moduli_df, title="Complex moduli G′/G″ — Evans method (mic
         if n_straddle:
             _msg.append(f"{n_straddle} G\u2032 CI band(s) straddle zero \u2014 consistent "
                         f"with NO elasticity.")
+        if _edge.any():
+            _msg.append(f"{int(_edge.sum())} edge-affected frequency/ies excluded "
+                        f"(the transform is unreliable at the spectral endpoints).")
         _msg.append("Expected for a viscous-dominated medium. Passive VPT cannot "
                     "resolve a G\u2032/G\u2033 crossover \u2014 use active microrheology.")
         ax.text(0.02, 0.02, "\n".join(_msg), transform=ax.transAxes,

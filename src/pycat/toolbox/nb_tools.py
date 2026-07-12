@@ -71,6 +71,69 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Core computation
 # ---------------------------------------------------------------------------
+def frame_count_adequacy(n_frames: int) -> dict:
+    """How much can a variance measured from ``n_frames`` samples be trusted?
+
+    N&B measures a **variance**, and the sampling error of a variance estimate is
+    ``sqrt(2 / (T - 1))`` — a hard statistical floor that no amount of care in the
+    acquisition removes. That single expression is the whole story, and it is why a
+    4-frame minimum is mathematically sufficient but scientifically useless:
+
+    ======  ==================  ============================================
+    frames  rel. SD of variance  what that means for apparent brightness
+    ======  ==================  ============================================
+    4       **82 %**            95 % range [0.08, 3.07] for a true value of 1.0 —
+                                the answer can be 12x too low or 3x too high
+    8       53 %                [0.24, 2.26]
+    16      37 %                [0.42, 1.81]
+    32      25 %                [0.56, 1.56]
+    64      18 %                [0.68, 1.40]
+    128     13 %                [0.77, 1.26]
+    256     9 %                 [0.84, 1.18]
+    ======  ==================  ============================================
+
+    (The intervals are from a Monte-Carlo of Poisson counts and agree with the
+    closed-form ``sqrt(2/(T-1))`` to within a percent.)
+
+    So the tiers below are not arbitrary round numbers — each is the frame count at
+    which the variance's own relative error crosses a threshold:
+
+    * ``cannot_compute``    (< 4)   — the variance is not defined.
+    * ``computes_but_unreliable`` (4–15, rel. SD > ~37 %) — a number comes out, and
+      it should not be believed. This is the range the old code accepted **silently**.
+    * ``usable``            (16–63, rel. SD 18–37 %) — fine for a relative comparison
+      between conditions acquired identically; not for an absolute brightness.
+    * ``recommended``       (64–255, rel. SD 9–18 %)
+    * ``well_sampled``      (>= 256, rel. SD < 9 %)
+
+    Returns the tier, the relative SD, and a plain-English verdict.
+    """
+    T = int(n_frames)
+    if T < 4:
+        return dict(tier='cannot_compute', n_frames=T, rel_sd=float('inf'),
+                    ok=False,
+                    verdict=(f"{T} frames: a variance is not defined. N&B needs at "
+                             f"least 4, and realistically >= 64."))
+    rel_sd = float(np.sqrt(2.0 / (T - 1)))
+    if T < 16:
+        tier, ok = 'computes_but_unreliable', False
+        msg = (f"{T} frames: a number will come out, but the variance itself carries "
+               f"~{rel_sd:.0%} relative error, so the brightness can be several-fold "
+               f"wrong in either direction. Do not report this as a measurement.")
+    elif T < 64:
+        tier, ok = 'usable', True
+        msg = (f"{T} frames: variance error ~{rel_sd:.0%}. Usable for RELATIVE "
+               f"comparison between conditions acquired identically; not for an "
+               f"absolute brightness.")
+    elif T < 256:
+        tier, ok = 'recommended', True
+        msg = f"{T} frames: variance error ~{rel_sd:.0%}. Adequate."
+    else:
+        tier, ok = 'well_sampled', True
+        msg = f"{T} frames: variance error ~{rel_sd:.0%}. Well sampled."
+    return dict(tier=tier, n_frames=T, rel_sd=rel_sd, ok=ok, verdict=msg)
+
+
 def detrend_timeseries(stack, method='boxcar', window=8):
     """
     Remove slow bleaching/drift that would otherwise inflate the temporal variance
@@ -165,8 +228,15 @@ def number_and_brightness(stack, gain=1.0, offset=0.0, read_variance=0.0,
     if s.ndim != 3:
         raise ValueError(f"N&B needs a 3D (T,H,W) stack; got shape {s.shape}.")
     T = s.shape[0]
-    if T < 4:
-        raise ValueError(f"N&B needs several frames (got {T}); >=~20 recommended.")
+    # Frame-count adequacy: 4 frames is MATHEMATICALLY sufficient to form a variance
+    # and SCIENTIFICALLY useless. The old code raised below 4 and then proceeded in
+    # silence -- so a 5-frame stack produced a brightness map with no indication that
+    # the variance behind it carried ~70% relative error. State the tier instead.
+    adequacy = frame_count_adequacy(T)
+    if adequacy['tier'] == 'cannot_compute':
+        raise ValueError(adequacy['verdict'])
+    if not adequacy['ok']:
+        napari_show_warning("N&B: " + adequacy['verdict'])
 
     s = detrend_timeseries(s, method=detrend, window=detrend_window)
 
@@ -184,6 +254,41 @@ def number_and_brightness(stack, gain=1.0, offset=0.0, read_variance=0.0,
     eps[valid] = var_corr[valid] / (g * mean_corr[valid])
     num[valid] = (g * mean_corr[valid]) / np.maximum(eps[valid], 1e-12)
 
+    # ── Is this brightness CALIBRATED, or merely apparent? ──────────────────
+    #
+    # With the defaults (gain=1, offset=0, read_variance=0) the "brightness" is
+    # sigma^2/<I> in raw detector units. That is an APPARENT brightness: it is
+    # monotonic with the true molecular brightness and fine for comparing conditions
+    # acquired identically, but it is NOT a molecular brightness and must not be read
+    # as an oligomeric state. Converting it requires:
+    #
+    #   * the camera's gain (ADU per photoelectron) and offset,
+    #   * its read variance -- ideally a PER-PIXEL map for an sCMOS, since sCMOS read
+    #     noise is not uniform across the sensor (a scalar is an approximation),
+    #   * and a MONOMERIC REFERENCE measured on the same instrument, without which
+    #     there is no scale on which "this is a dimer" means anything.
+    #
+    # The result now says which of these it has, so a downstream consumer cannot
+    # silently treat an uncalibrated number as a molecular brightness.
+    _has_gain = abs(float(gain) - 1.0) > 1e-9
+    _has_read = float(read_variance) > 0.0
+    _calibrated = bool(_has_gain and _has_read)
+    _brightness_kind = 'calibrated' if _calibrated else 'apparent'
+    _cal_notes = []
+    if not _has_gain:
+        _cal_notes.append("no camera gain supplied (gain=1)")
+    if not _has_read:
+        _cal_notes.append("no read variance supplied")
+    _cal_notes.append("no monomeric reference: an absolute oligomeric state cannot "
+                      "be claimed from these numbers")
+
+    if not _calibrated:
+        napari_show_warning(
+            "N&B: reporting APPARENT brightness (" + "; ".join(_cal_notes[:-1]) +
+            "). It is monotonic with molecular brightness and fine for comparing "
+            "conditions acquired identically, but it is not a molecular brightness "
+            "and must not be read as an oligomeric state.")
+
     return {
         'mean': mean,
         'variance': var,
@@ -194,6 +299,11 @@ def number_and_brightness(stack, gain=1.0, offset=0.0, read_variance=0.0,
         'gain': g,
         'offset': float(offset),
         'read_variance': float(read_variance),
+        # Provenance of the number, travelling WITH it.
+        'brightness_kind': _brightness_kind,      # 'apparent' | 'calibrated'
+        'calibrated': _calibrated,
+        'calibration_notes': _cal_notes,
+        'frame_count_adequacy': adequacy,         # tier / rel_sd / verdict
     }
 
 

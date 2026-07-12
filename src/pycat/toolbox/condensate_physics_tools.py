@@ -58,6 +58,9 @@ from __future__ import annotations
 import warnings
 import numpy as np
 import pandas as pd
+
+# Notifications via the shim: keeps the physics importable with no GUI stack (1.5.378).
+from pycat.utils.notify import show_warning as napari_show_warning
 from scipy import optimize, stats, ndimage
 
 
@@ -1447,10 +1450,61 @@ def compute_moduli_evans(
         'g_prime_pa': g_prime, 'g_double_prime_pa': g_double,
     }).sort_values('omega_rad_s').reset_index(drop=True)
 
-    # Drop the least-reliable spectral endpoints (edge effect of the transform).
+    # ── Validity class per frequency ────────────────────────────────────────
+    #
+    # The moduli PLOT already knows which points cannot be trusted (1.5.380 stopped it
+    # clipping negative G' onto a log axis). The DATA did not: anyone reading
+    # `g_prime_pa` from the DataFrame, a CSV export or a table got a bare number with
+    # no indication that it is meaningless at that frequency. Say so in the data.
+    #
+    #   supported            — both moduli positive; the conversion is reliable here.
+    #   edge_affected        — within `drop_edges` of a spectral endpoint. The Evans
+    #                          transform needs neighbours on both sides, so the first
+    #                          and last points are systematically unreliable. These used
+    #                          to be SILENTLY DROPPED, so the user never learned those
+    #                          frequencies existed; they are now returned and labelled.
+    #   sign_inconsistent    — a modulus came out <= 0. That is not a material property:
+    #                          it is the conversion telling you it is not locally valid.
+    #                          EXPECTED in a viscous-dominated medium, where G' is
+    #                          genuinely ~0 and noise pushes it negative -- see the
+    #                          moduli plot's note. Not an error; a null result.
+    #   under_constrained    — fewer than ~3 lag points contribute in that neighbourhood.
     d = int(max(0, drop_edges))
-    if d and len(out) > 2 * d + 2:
-        out = out.iloc[d:len(out) - d].reset_index(drop=True)
+    n = len(out)
+    validity = np.full(n, 'supported', dtype=object)
+
+    edge = np.zeros(n, dtype=bool)
+    if d:
+        edge[:d] = True
+        edge[max(0, n - d):] = True
+    validity[edge] = 'edge_affected'
+
+    bad_sign = (out['g_prime_pa'].values <= 0) | (out['g_double_prime_pa'].values <= 0)
+    validity[bad_sign & ~edge] = 'sign_inconsistent'
+
+    # Too few lag points to constrain the local slope the transform depends on.
+    if n < 5:
+        validity[:] = 'under_constrained'
+
+    out['validity'] = validity
+    out['reliable'] = (out['validity'] == 'supported')
+
+    n_sign = int((out['validity'] == 'sign_inconsistent').sum())
+    n_edge = int((out['validity'] == 'edge_affected').sum())
+    if n_sign:
+        napari_show_warning(
+            f"Evans moduli: {n_sign}/{n} frequencies are sign-inconsistent (a modulus "
+            f"came out <= 0). This is EXPECTED for a viscous-dominated medium -- G' is "
+            f"genuinely near zero and noise pushes it negative. Those frequencies are "
+            f"labelled in the 'validity' column and are NOT a measurement of "
+            f"elasticity. Passive VPT cannot resolve a G'/G'' crossover in this "
+            f"regime; active microrheology can.")
+
+    # The edge points are RETURNED (labelled), not dropped -- dropping them hid the
+    # fact that the accessible frequency band is narrower than it appears.
+    if d and n_edge:
+        print(f"[PyCAT VPT] Evans: {n_edge} edge-affected frequencies retained and "
+              f"labelled (previously dropped silently).")
     return out
 
 

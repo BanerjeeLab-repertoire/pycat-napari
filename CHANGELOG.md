@@ -4,6 +4,71 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.394] - 2026-07-10
+### Fixed — N&B accepted 4 frames in silence, where the answer can be 12× wrong
+The 4-frame minimum is **mathematically sufficient** to form a variance and
+**scientifically useless**. N&B measures a *variance*, and the sampling error of a variance
+estimate is a hard statistical floor: ``sqrt(2 / (T − 1))``.
+
+| frames | rel. SD of the variance | 95 % range for a true brightness of 1.0 |
+|---|---|---|
+| **4** | **82 %** | **[0.08, 3.07]** — the answer can be 12× too low or 3× too high |
+| 8 | 53 % | [0.24, 2.26] |
+| 16 | 37 % | [0.42, 1.81] |
+| 64 | 18 % | [0.68, 1.40] |
+| 256 | 9 % | [0.84, 1.18] |
+
+(Monte-Carlo of Poisson counts; agrees with the closed form to within a percent.) The old
+code raised below 4 and then **proceeded in silence** — a 5-frame stack produced a brightness
+map with no hint that the variance behind it carried ~71 % relative error.
+
+**New ``frame_count_adequacy(n_frames)``** returns an explicit tier. The boundaries are
+*derived* from the statistics, not chosen: 16 is exactly where the relative SD crosses ~37 %.
+
+- ``cannot_compute`` (< 4) — raises, as before.
+- ``computes_but_unreliable`` (4–15) — **warns**. A number comes out; it should not be
+  believed.
+- ``usable`` (16–63) — fine for a *relative* comparison between conditions acquired
+  identically; not for an absolute brightness.
+- ``recommended`` (64–255) / ``well_sampled`` (≥ 256).
+
+### Fixed — N&B did not say whether its brightness was calibrated
+With the defaults (``gain=1``, ``read_variance=0``) the output is **apparent** brightness —
+σ²/⟨I⟩ in raw detector units. It is monotonic with molecular brightness and fine for comparing
+conditions acquired identically, but it is **not a molecular brightness** and must not be read
+as an oligomeric state. The result carried no indication of which it was.
+
+The result now returns ``brightness_kind`` (``'apparent'`` / ``'calibrated'``),
+``calibrated``, and ``calibration_notes`` — including that **without a monomeric reference
+there is no scale on which "this is a dimer" means anything**, regardless of how good the
+camera calibration is. A warning fires when reporting an apparent brightness.
+
+### Fixed — the Evans moduli data did not say which frequencies were invalid
+1.5.380 stopped the *plot* from clipping negative G′ onto a log axis. But the **data** still
+said nothing: anyone reading ``g_prime_pa`` from the DataFrame, a CSV export or a table got a
+bare number with no indication that it is meaningless at that frequency.
+
+New ``validity`` and ``reliable`` columns, with four classes:
+
+- ``supported`` — both moduli positive; the conversion is reliable.
+- ``edge_affected`` — the Evans transform needs neighbours on both sides, so the spectral
+  endpoints are systematically unreliable. **These used to be silently DROPPED**, so the user
+  never learned the usable band was narrower than it appeared. They are now **returned and
+  labelled**, and the plot excludes them (a point can be positive and still unreliable).
+- ``sign_inconsistent`` — a modulus came out ≤ 0. **Expected** in a viscous-dominated medium,
+  where G′ is genuinely ≈ 0 and noise pushes it negative. A null result, not an error.
+- ``under_constrained`` — too few lag points contribute.
+
+On a synthetic viscous medium (the regime PyCAT actually measures): **5 of 25 frequencies are
+``supported``**, 18 are sign-inconsistent, 2 edge-affected. Previously a user exporting the
+moduli got 25 numbers with no indication that 20 of them were meaningless.
+
+### Note — the guard earned its keep
+While adding the Evans warning I used ``napari_show_warning`` without importing it. The
+undefined-name guard **caught it in the edit loop**, immediately — the same mistake that in
+1.5.392 was found the slow way, through a functional test. Both ``condensate_physics_tools``
+and ``nb_tools`` still import headlessly.
+
 ## [1.5.393] - 2026-07-10
 ### Fixed — focus scoring picked the sharpest DEBRIS, and the obvious fix made it worse
 Focus was scored with a **single Brenner gradient over the whole frame**. That answers *"what
