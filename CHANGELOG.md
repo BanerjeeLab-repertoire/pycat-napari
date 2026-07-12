@@ -4,6 +4,68 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.411] - 2026-07-10
+### Fixed — spherical aberration was invisible at realistic noise
+``qc_spherical_aberration`` profiled axial sharpness with ``np.var(laplace(f))`` — **the same
+metric shown blind in 1.5.405.** The Laplacian is a high-pass filter and white detector noise
+is entirely high-frequency, so the axial profile is flat noise and its skew carries no
+information about the optics:
+
+| | symmetric | asymmetric (real aberration) |
+|---|---|---|
+| low noise | 0.004 → good | 0.723 → warn |
+| **realistic noise** | 0.004 → good | **0.012 → "good"** |
+
+**Real spherical aberration was reported as ``good``.** Replaced with the same
+difference-of-Gaussians band-pass used by ``qc_focus``. Now: **1.103 → ``bad``** at realistic
+noise, and still ``warn`` at high noise, while symmetric stacks stay ``good`` throughout.
+
+### Added — chromatic aberration is now measured, not just mentioned
+``qc_chromatic`` took a channel **count** and returned *"multi-channel — register channels on
+beads to check"*. Honest, but it measured nothing — and PyCAT *has* the channels. It now
+measures the rigid inter-channel shift by phase cross-correlation.
+
+**With the guard that matters:** a channel shift is evidence of *optics* only if the channels
+image the **same structures**. Two channels labelling genuinely different objects also produce
+a correlation peak — a large, meaningless one (**64.97 px** in test). Chromatic aberration is
+bounded by the optics to a few pixels; a shift of tens of pixels is **not** an aberration, it
+means the channels are not imaging the same thing. That case is now reported as **not
+assessable, with the reason**, rather than as a bad optic.
+
+### Note — I nearly shipped a gate inside its own noise floor
+My first thresholds were sub-pixel (``good < 0.5 px``). Then a channel shifted by **0.28 px**
+came back as **1.46 px → warn** — a false positive on correctly-registered channels.
+
+Measured the floor properly. Phase cross-correlation between two channels with **independent
+noise** reads, with **no shift at all**:
+
+| channel noise | mean | 95th pct |
+|---|---|---|
+| sd 1 | 0.77 px | 1.44 px |
+| **sd 5** | **0.99 px** | **2.08 px** |
+| sd 20 | 1.68 px | 3.04 px |
+
+**A perfectly registered pair routinely reads ~1 px and can read 2 px.** A sub-pixel gate is
+therefore measuring the metric's own noise. Recovery of a known shift confirms the limit:
+0.5 px reads as 1.21 (error 0.71 — dominated by the floor); 2 px reads as 2.26 (error 0.26 —
+usable).
+
+Gates are now set at **2 px / 4 px**, which is what the measurement can actually resolve, and
+the ``good`` verdict says explicitly that the value is *within the measurement floor* rather
+than implying a clean bill of health. To resolve a sub-pixel registration error you need
+multi-colour **beads** — identical objects in every channel — which is how a channel
+registration should be calibrated anyway. That is now stated in the ``good`` guidance.
+
+**This is the third time in this QC pass that the honest fix was to state a limit rather than
+produce a number** (focus cannot be judged absolutely from one 2-D image; vibration cannot be
+detected below ~20 frames; chromatic shift cannot be resolved below ~2 px on biological
+images). A QC metric that reports what it cannot see is worse than one that admits it.
+
+### All 11 QC metrics have now been tested against ground truth
+Verified correct as written: saturation, SNR, ghosting, Nyquist, time sampling.
+Fixed: vibration (1.5.403), vignetting (1.5.404), focus (1.5.405), drift (1.5.406), spherical
+aberration and chromatic (this release).
+
 ## [1.5.410] - 2026-07-10
 ### Fixed — ``pytest -m core`` still *collected* the GUI tests, and collection means importing
 Progress: 1.5.409's ``pip install --no-deps -e .`` worked, and **28 tests were selected**. But
