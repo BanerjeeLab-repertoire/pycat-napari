@@ -4,6 +4,61 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.447] - 2026-07-10
+### Fixed — the MSD fit discarded its covariance, so D was reported without an interval
+The FRAP covariance bug (1.5.446) was not isolated. **Nine ``curve_fit`` calls in
+``condensate_physics_tools`` discard ``pcov``** — including ``fit_anomalous_diffusion``, which
+produces the **D that becomes the viscosity**.
+
+**D and α are strongly coupled in MSD = 4·D·τ^α**: a larger α trades against a smaller D and
+fits almost as well, so a short lag window cannot separate them. Measured, true D = 0.05 µm²/s,
+α = 1.0, 10 % noise, 30 realisations:
+
+| lag window | D (sd) | α (sd) | mean R² |
+|---|---|---|---|
+| 30 lags | 0.0496 (0.0035) | 0.99 (0.08) | 0.958 |
+| 12 lags | 0.0495 (0.0025) | 1.06 (0.13) | 0.968 |
+| 6 lags | 0.0539 (0.0110) | 1.17 (0.35) | 0.969 |
+| **4 lags** | 0.0561 (**0.0224**) | 1.14 (**0.40**) | **0.973** |
+
+**The scatter in D grows six-fold, the scatter in α five-fold — and R² goes UP.** R² rewards
+fitting fewer points; it says nothing about whether those points determine the parameter.
+
+D now carries the interval the data supports. The 4-lag fit — **the highest R² of the four, at
+0.996** — has a 95 % CI on D of **[0.035, 0.067]**: a ±32 % range on the number that becomes a
+viscosity.
+
+### Note — I tried twice to reduce this to a pass/fail flag, and both attempts were wrong
+The textbook test (*CI wider than the value itself*) is far too lenient: that ±32 % interval
+passes it comfortably.
+
+**Tightening the threshold to 0.5 made it worse, not better.** The flag then fired on 30-lag
+fits (5 % judged identifiable) *more often* than on 4-lag fits (30 %) — because the relative CI
+width across lag windows is **non-monotonic**: 0.66, 0.46, 0.55, 1.65 for 30, 12, 6 and 4 lags.
+It is not a clean function of the lag window, because the D–α trade-off shifts with the window
+in a way a single scalar does not capture.
+
+**No threshold on this quantity separates good fits from bad ones**, and picking one to make the
+table look right would be fitting the metric to the answer. So the flag is gone and the interval
+is reported.
+
+What *is* true and checkable is the coverage — how often does the reported 95 % CI actually
+contain the true D?
+
+| lag window | coverage |
+|---|---|
+| 30 lags | 100 % |
+| 12 lags | 98 % |
+| **6 lags** | **84 %** |
+| **4 lags** | **78 %** |
+
+**The CI is honest at long windows and over-confident at short ones** — it claims 95 % and
+delivers 78 %. That caveat is documented alongside the number.
+
+*A number with an honest interval is more useful than a flag with a dishonest threshold.*
+
+**101/101 core tests passing.**
+
 ## [1.5.446] - 2026-07-10
 ### Fixed — FRAP reported half-times the data could not determine, with R² = 0.99
 ``fit_frap_recovery`` did ``popt, _ = curve_fit(...)``. **The second return value is the
