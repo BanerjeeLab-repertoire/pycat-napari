@@ -1066,7 +1066,28 @@ fitted with one component; a confined trajectory fitted with a free power law) a
 that ``assess_fit`` marks it inadequate while accepting data generated from the correct
 model, with a false-alarm rate near 5 %.
 
-.. rubric:: The object-feature table as a first-class artifact (audit points 7 & 8)
+.. rubric:: The object-feature table (audit points 7 & 8) — MEASURED AND LARGELY REJECTED
+
+.. note::
+
+   **Measured, and the audit's premise does not hold.** Recorded rather than quietly dropped,
+   because "the audit said so" is not evidence.
+
+   * **It is not duplication.** The audit claimed the Ripley/PCF pass re-derives centroids the
+     primary pass already computed. It does not: the primary pass builds centroids for every
+     object in the frame, while ``get_puncta_centroids`` returns them **grouped by parent
+     cell**, which is what a per-cell Ripley analysis genuinely needs. Different computations.
+   * **The performance case is weak.** One ``regionprops`` pass on a 512x512 frame with 80
+     objects is **13 ms** — so the supposed duplication costs **2.7 s** across a 200-frame
+     series. That is not a performance problem.
+
+   **The real bug was next to it:** the time-series Ripley pass was still using the CSR null
+   (fixed in 1.5.419).
+
+   What survives of this item is the *shared-schema* idea, not the deduplication: a single
+   per-object record that every consumer reads is worth having for **consistency and
+   provenance**, not for speed. Pursue it under the Biological Object Model rubric, on those
+   grounds, or not at all.
 
 Several workflows independently call ``skimage.measure.regionprops_table`` on the same
 mask, each asking for a different subset of centroids / areas / equivalent diameters /

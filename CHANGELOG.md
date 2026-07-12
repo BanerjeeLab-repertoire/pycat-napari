@@ -4,6 +4,92 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.420] - 2026-07-10
+### Fixed — the Spatial Metrology widget (the path users actually click) still used the CSR null
+1.5.397 built the compartment-constrained null. 1.5.419 wired it into the time-series pass.
+**``spatial_metrology_ui`` was still calling bare ``ripleys_l``** — it builds its own per-metric
+calls rather than going through ``run_all_spatial_metrics``, so it never picked the null up.
+
+That is the widget a user clicks. Every interactive Ripley result has been read against the CSR
+line, which on objects placed **uniformly at random inside a real non-convex cell** gives
+``L(r) = −4.95`` ("strong regularity") at one scale and ``+6.18`` ("strong clustering") at
+another. **The artefact points in either direction depending on the scale.** Now wired, with
+``ripleys_l_null`` alongside the curve.
+
+### Fixed — ``spatial_null_envelope(statistic='pcf')`` had NEVER worked
+Shipped in 1.5.397, and **every call raised ``TypeError``**: it passed ``r_values`` to
+``pair_correlation_function``, which takes ``r_max``/``dr``. A branch nothing exercised, so
+nothing caught it — the undefined-name guard cannot see a signature mismatch.
+
+Fixed, and the PCF is now evaluated on the same radial grid as L(r) so observed and null share
+an axis. Validated: random-inside-the-cell **p = 0.660** (not significant), genuinely clustered
+**p = 0.010** (significant).
+
+### Added — ``tests/test_spatial_nulls.py``
+Guards both failures: that the code path **runs at all** (which is how the PCF branch shipped
+broken), and that the null is **calibrated** and **retains power**. Measured over 40 seeds:
+
+| statistic | false positives | power |
+|---|---|---|
+| ``ripley_l`` | **5 %** | **100 %** |
+| ``pcf`` | 2 % | **100 %** |
+
+A 5 % false-positive rate at α = 0.05 is **exactly correct**.
+
+### Note — my first version of the test was wrong, and it failed for the right reason
+It asserted ``not significant`` on **one seed**, and duly failed at p = 0.040. I nearly went
+looking for a bug in the null.
+
+**A statistical test at α = 0.05 is *supposed* to reject 5 % of null-true cases.** A
+single-seed assertion on a stochastic test will fail about that often *by construction* — the
+test was wrong, not the code. It now asserts the **rate** across many seeds, which is the thing
+that actually needs to hold.
+
+This is the third time this session that a test, not the code, was the thing that was broken
+(the FRAP validation used the wrong model equation, 1.5.400; the vibration harness produced no
+measurable signal, 1.5.403). **A failing test is a hypothesis, not a verdict.**
+
+## [1.5.419] - 2026-07-10
+### Fixed — the time-series Ripley pass never used the null model built for it
+1.5.397 replaced the CSR line with a **compartment-constrained** Monte-Carlo null, because CSR
+assumes an object could land *anywhere* in the area — and it cannot: condensates are confined
+to a cell, which is irregular and usually non-convex, and **the confinement itself produces an
+apparent signal.**
+
+**The time-series Ripley/PCF pass was still calling bare ``ripleys_l(coords, area)``.** It has
+been reading every result against the CSR line — the module that runs Ripley most often, using
+the null that was already known to be wrong.
+
+Now wired to ``spatial_null_envelope``, which randomises the points **within the same cell**.
+Validated on the exact per-cell path:
+
+| condensate arrangement | CSR L(r) max | **null p** |
+|---|---|---|
+| **placed at RANDOM inside the cell** | **6.41** (reads as *strong clustering*) | **0.580 → not significant** |
+| genuinely clustered | 12.10 | **0.020 → significant** |
+
+**The CSR L(r) is large in both cases** — it cannot tell them apart, because the cell's shape
+generates a signal of its own. The constrained null separates them cleanly. Results now carry
+``null_p_value`` and ``null_significant`` alongside L(r).
+
+### Note — the audit's "object-feature table" (points 7 & 8) was wrong, and it is worth saying so
+The audit claimed the Ripley/PCF pass **re-derives centroids the primary pass already
+computed**, and proposed a shared object-feature table to eliminate the duplication.
+
+**Checked, and it is not duplication.** The primary pass builds centroids for every object in
+the frame; ``get_puncta_centroids`` returns centroids **grouped by parent cell**, which is what
+the per-cell Ripley analysis genuinely needs. They compute different things.
+
+**And the performance case does not hold either.** Measured: one ``regionprops`` pass on a
+512×512 frame with 80 objects is **13 ms**, so the supposed duplication costs **2.7 s** across a
+200-frame series. That is not a performance problem, and building an abstraction to remove it
+would be solving a problem that does not exist.
+
+The real bug was sitting next to it: the null model. Recorded here rather than quietly dropped,
+because *"the audit said so"* is not evidence — and this is the second audit recommendation
+this session that measurement has overturned (the first: ``scipy.ndimage.mean`` being **slower**
+than the loop it was meant to replace, 1.5.390).
+
 ## [1.5.418] - 2026-07-10
 ### Fixed — the aspect-ratio relaxation had the weakest fit gate of all: `r2 > 0.5`
 ``fit_aspect_ratio_relaxation`` fits a **single** exponential and returns

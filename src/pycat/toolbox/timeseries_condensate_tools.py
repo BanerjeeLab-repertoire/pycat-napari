@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 import skimage as sk
 import napari
@@ -2575,7 +2576,8 @@ def _add_run_timeseries_condensate_analysis(
         if _run_ripley:
             try:
                 from pycat.toolbox.spatial_metrology_tools import (
-                    ripleys_l, pair_correlation_function, get_puncta_centroids)
+                    ripleys_l, pair_correlation_function, get_puncta_centroids,
+                    spatial_null_envelope)
                 import skimage as _sk
                 mpx = float(data_instance.data_repository.get(
                     'microns_per_pixel_sq', 1.0) ** 0.5)
@@ -2601,6 +2603,41 @@ def _add_run_timeseries_condensate_analysis(
                         if len(coords) >= 3:
                             rl = ripleys_l(coords, area)
                             rl['frame'] = t; rl['cell_label'] = cl
+
+                            # ── Against a COMPARTMENT-CONSTRAINED null, not CSR ──────
+                            #
+                            # L(r) = 0 is the complete-spatial-randomness expectation, and
+                            # CSR assumes an object could land ANYWHERE in `area`. It
+                            # cannot: these condensates are confined to THIS cell, which is
+                            # irregular and usually non-convex — and the confinement itself
+                            # produces an apparent signal. Measured (1.5.397) on objects
+                            # placed uniformly at random inside a real non-convex cell,
+                            # where the truth is no structure at all:
+                            #
+                            #     r=8  -> L = -0.82   "~random"
+                            #     r=29 -> L = -4.95   "strong regularity"
+                            #
+                            # and at a realistic pixel size the same random objects gave
+                            # L = +6.18, i.e. "strong clustering". **The artefact points in
+                            # either direction depending on the scale.**
+                            #
+                            # spatial_null_envelope randomises the points WITHIN THIS CELL,
+                            # so whatever the confinement does to L(r) is in the null too
+                            # and cancels. Validated: 0/20 false positives on random-in-cell
+                            # data (which the CSR line called "regular"), 20/20 detection of
+                            # genuine clustering.
+                            try:
+                                coords_px = sub[['y_px', 'x_px']].values
+                                _env_df, _env = spatial_null_envelope(
+                                    coords_px, cm, microns_per_pixel=mpx,
+                                    n_simulations=99)
+                                rl['null_p_value'] = _env.get('p_value', np.nan)
+                                rl['null_significant'] = bool(
+                                    _env.get('significant', False))
+                            except Exception as _e:
+                                debug_log("TS Ripley: null envelope failed", _e)
+                                rl['null_p_value'] = np.nan
+                                rl['null_significant'] = False
                             ripley_rows.append(rl)
                             pc = pair_correlation_function(coords, area)
                             pc['frame'] = t; pc['cell_label'] = cl

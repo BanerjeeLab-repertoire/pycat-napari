@@ -48,8 +48,7 @@ class _SpatialWorker(QThread):
                 nearest_neighbour_distance, radial_localization_profile,
                 local_object_density, ripleys_l, pair_correlation_function,
                 voronoi_metrics, delaunay_metrics, minimum_spanning_tree,
-                convex_hull_metrics, distance_to_roi,
-            )
+                convex_hull_metrics, distance_to_roi, spatial_null_envelope)
 
             df    = self._coords_df
             lc    = self._labeled_cells
@@ -83,6 +82,42 @@ class _SpatialWorker(QThread):
                     bdist = edt_um[yx_px[:, 0], yx_px[:, 1]]
                     r['ripleys_l'] = ripleys_l(coords, cell_area,
                                                boundary_dist_um=bdist)
+
+                    # ── Against a COMPARTMENT-CONSTRAINED null, not the CSR line ──
+                    #
+                    # L(r) = 0 is the complete-spatial-randomness expectation, and CSR
+                    # assumes an object could land ANYWHERE in the area. It cannot: these
+                    # objects are confined to THIS cell, which is irregular and usually
+                    # non-convex — and the confinement itself produces an apparent signal.
+                    #
+                    # Measured (1.5.397) on objects placed uniformly at random inside a
+                    # real non-convex cell, where the truth is NO structure at all:
+                    #
+                    #     r=8  -> L = -0.82   read as "~random"
+                    #     r=29 -> L = -4.95   read as "strong regularity"
+                    #
+                    # and at a realistic pixel size the same random objects gave L = +6.18,
+                    # i.e. "strong clustering". The artefact points in EITHER direction
+                    # depending on the scale, so eyeballing L(r) against the CSR line is
+                    # worse than useless.
+                    #
+                    # This widget is the path a user actually clicks, and it was building
+                    # its own metric calls rather than going through run_all_spatial_metrics
+                    # — so it never picked up the null envelope added in 1.5.397.
+                    try:
+                        _env_df, _env = spatial_null_envelope(
+                            (coords / mpx), cmask, microns_per_pixel=mpx,
+                            n_simulations=99)
+                        r['ripleys_l_envelope'] = _env_df
+                        r['ripleys_l_null'] = _env
+                    except Exception as _exc:
+                        r['ripleys_l_null'] = dict(
+                            p_value=float('nan'),
+                            verdict=(f"Null envelope unavailable ({_exc}); L(r) is "
+                                     f"reported against the CSR line, which does not "
+                                     f"account for the cell's shape and can look "
+                                     f"'regular' OR 'clustered' for objects that are in "
+                                     f"fact randomly placed."))
                 if c.get('pcf'):
                     r['pcf'] = pair_correlation_function(coords, cell_area)
                 if c.get('voronoi'):

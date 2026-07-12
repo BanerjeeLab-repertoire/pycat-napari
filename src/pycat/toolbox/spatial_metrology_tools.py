@@ -302,9 +302,22 @@ def spatial_null_envelope(coords, region_mask, microns_per_pixel=1.0,
         bd = bdist[p_px[:, 0].astype(int).clip(0, mask.shape[0] - 1),
                    p_px[:, 1].astype(int).clip(0, mask.shape[1] - 1)]
         if statistic == 'pcf':
-            df = pair_correlation_function(p_um, area_um2, r_values=r_values)
+            # `pair_correlation_function` takes r_max/dr, NOT r_values — passing r_values
+            # raised TypeError, so statistic='pcf' had never worked. Derive r_max and dr
+            # from the requested radii so the PCF is evaluated on the same grid as L(r).
+            _rv = np.asarray(r_values, dtype=float)
+            _dr = float(np.median(np.diff(_rv))) if _rv.size > 1 else float(_rv[0])
+            df = pair_correlation_function(p_um, area_um2,
+                                           r_max=float(_rv[-1]), dr=max(_dr, 1e-9))
             col = [c for c in df.columns if c.lower().startswith('g')]
-            return df[col[0]].to_numpy(dtype=float) if col else np.full(len(r_values), np.nan)
+            if not col:
+                return np.full(_rv.size, np.nan)
+            # Interpolate onto the requested radii so observed and null share a grid.
+            rcol = [c for c in df.columns if c.lower().startswith('r')]
+            if rcol:
+                return np.interp(_rv, df[rcol[0]].to_numpy(dtype=float),
+                                 df[col[0]].to_numpy(dtype=float))
+            return df[col[0]].to_numpy(dtype=float)[:_rv.size]
         df = ripleys_l(p_um, area_um2, r_values=r_values,
                        edge_correct=edge_correct,
                        boundary_dist_um=bd if edge_correct else None)
