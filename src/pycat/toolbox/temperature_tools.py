@@ -793,7 +793,8 @@ def run_temperature_batch(
                     corrected = apply_static_pattern_correction(stack, g['index'])
                     base = os.path.splitext(os.path.basename(tiff))[0]
                     corr_path = os.path.join(os.path.dirname(tiff), f"{base}_corrected.tif")
-                    _tf.imwrite(corr_path, corrected.astype(np.float32))
+                    _tf.imwrite(corr_path, corrected.astype(np.float32),
+                                compression='zlib')
                     row['corrected'] = os.path.basename(corr_path)
                 except Exception as _ce:
                     row['corrected'] = f'corrected error: {_ce}'

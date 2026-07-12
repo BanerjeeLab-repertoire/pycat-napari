@@ -3744,14 +3744,41 @@ class FileIOClass:
 
         if layer_type in ('Labels',):
             if hasattr(data, 'shape') and len(data.shape) == 3:
-                # 3D label stack (e.g. TS Cell Masks) → multi-page TIFF
+                # 3D label stack (e.g. TS Cell Masks) → compressed multi-page TIFF.
+                #
+                # Masks are the bulk of a PyCAT project's disk usage and they
+                # compress enormously (a 1024² uint16 label mask: 2.1 MB raw →
+                # 13 kB zlib, ~160×, lossless, for ~7 ms). The stack MUST be
+                # written in one imwrite call with the axis DECLARED:
+                #   * per-frame writes with compression lose the series structure
+                #     (imread collapses the stack to a single plane);
+                #   * a whole-stack write without `axes` metadata produces an
+                #     UNDECLARED 'Q' axis — the very case that makes PyCAT prompt
+                #     "is this T or Z?" when reopening its own file (see 1.5.351).
                 out_path = f"{save_name}_{safe_name}_masks.tiff"
-                with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
-                    for t in range(data.shape[0]):
-                        tw.write(np.asarray(data[t]).astype(np.uint16),
-                                 contiguous=True,
-                                 description=_pycat_tag('mask') if t == 0 else None)
-                print(f"[PyCAT] Saved 3D label stack → {out_path}")
+                _axes = 'TYX'
+                try:
+                    _dr = self.central_manager.active_data_class.data_repository
+                    _lbl = str(_dr.get('stack_axis_label') or 'T').upper()
+                    _axes = 'ZYX' if _lbl.startswith('Z') else 'TYX'
+                except Exception:
+                    pass
+                _n, _h, _w = (int(data.shape[0]), int(data.shape[1]),
+                              int(data.shape[2]))
+
+                def _mask_frames():
+                    for t in range(_n):
+                        yield np.asarray(data[t]).astype(np.uint16)
+
+                tifffile.imwrite(
+                    out_path, _mask_frames(),
+                    shape=(_n, _h, _w), dtype=np.uint16,
+                    compression='zlib',
+                    metadata={'axes': _axes},
+                    description=_pycat_tag('mask'),
+                    bigtiff=True)
+                print(f"[PyCAT] Saved 3D label stack → {out_path} "
+                      f"(compressed, axes={_axes})")
             else:
                 arr = np.asarray(data).astype(np.uint16)
                 out_path = f"{save_name}_{safe_name}.png"
@@ -3769,28 +3796,54 @@ class FileIOClass:
             if shape is not None and len(shape) == 3 and not (
                 shape[2] in (3, 4) and shape[0] < 10
             ):
-                # 3D grayscale stack — save as multi-page TIFF, one frame at a time
+                # 3D grayscale stack — compressed multi-page TIFF with the axis
+                # DECLARED (see the label-stack note above: per-frame compressed
+                # writes lose the series, and an undeclared axis reopens as 'Q').
+                # Images compress far less than masks (typically 1.3–2×, since
+                # they carry real noise), but it is free correctness and still a
+                # saving; the mask paths are where the big win is.
                 n_t = shape[0]
                 out_path = f"{save_name}_{safe_name}_stack.tiff"
                 print(f"[PyCAT] Saving {n_t}-frame stack to {out_path} …")
-                with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
+                _axes = 'TYX'
+                try:
+                    _dr = self.central_manager.active_data_class.data_repository
+                    _lbl = str(_dr.get('stack_axis_label') or 'T').upper()
+                    _axes = 'ZYX' if _lbl.startswith('Z') else 'TYX'
+                except Exception:
+                    pass
+                # Stream the frames: imwrite accepts a generator with shape=/dtype=,
+                # so we get compression + a declared axis WITHOUT materialising the
+                # whole movie in RAM (the original per-frame writer streamed too).
+                _h, _w = int(shape[1]), int(shape[2])
+
+                def _frames():
                     for t in range(n_t):
-                        tw.write(_to_uint16(_frame(t)), contiguous=True,
-                                 description=_pycat_tag('image') if t == 0 else None)
-                print(f"[PyCAT] Saved stack → {out_path}")
+                        yield _to_uint16(_frame(t))
+
+                tifffile.imwrite(
+                    out_path, _frames(),
+                    shape=(n_t, _h, _w), dtype=np.uint16,
+                    compression='zlib',
+                    metadata={'axes': _axes},
+                    description=_pycat_tag('image'),
+                    bigtiff=True)
+                print(f"[PyCAT] Saved stack → {out_path} (compressed, axes={_axes})")
             else:
                 # 2D image or RGB
                 arr = np.asarray(data)
                 if arr.ndim == 2:
                     out_path = f"{save_name}_{safe_name}.tiff"
                     tifffile.imwrite(out_path, _to_uint16(arr),
+                                     compression='zlib',
                                      description=_pycat_tag('image'))
                 else:
                     out_path = f"{save_name}_{safe_name}.png"
                     sk.io.imsave(out_path, dtype_conversion_func(arr, 'uint8'))
         else:
-            # Unknown — save raw
-            np.save(f"{save_name}_{safe_name}.npy", np.asarray(data))
+            # Unknown — save raw (compressed: .npz costs nothing vs .npy)
+            np.savez_compressed(f"{save_name}_{safe_name}.npz",
+                                data=np.asarray(data))
 
     def determine_file_format_and_process_data(self, layer_type, data):
         """Legacy helper kept for compatibility; new code uses _save_layer."""

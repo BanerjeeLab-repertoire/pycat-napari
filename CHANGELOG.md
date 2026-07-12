@@ -4,6 +4,36 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.371] - 2026-07-10
+### Fixed — PyCAT was saving masks and stacks completely UNCOMPRESSED (~100× larger)
+- **Masks, label stacks, and image stacks are now written compressed.** Every save
+  path omitted a ``compression=`` argument, and the multi-page writer passed
+  ``contiguous=True``, which *forces* uncompressed output — so a 1024² uint16 label
+  mask was written as a 2.1 MB file that compresses losslessly to 13 kB. Measured on
+  realistic masks: **~100–160× smaller**, lossless, for about 7 ms per mask. Image
+  data compresses far less (it carries real noise), but masks are the bulk of a
+  project's disk usage and they are now the size they should be.
+- **The saved stacks also declared no axis.** Written the old way, PyCAT's own
+  multi-page files came back with an undeclared ``Q`` axis — the exact case that
+  makes PyCAT prompt *"is this a time-series or a z-stack?"* when reopening its own
+  output (the 1.5.351 case). Stacks now declare ``TYX``/``ZYX`` from the data
+  repository's axis label, so they reopen cleanly with no prompt.
+- Stack writes still **stream frame-by-frame** (via a generator passed to
+  ``imwrite`` with ``shape=``/``dtype=``), so a large movie is never materialised in
+  RAM just to be saved — the previous per-frame streaming behaviour is preserved.
+- The ``.npy`` fallback is now ``.npz`` (compressed), and the float32 TIFF exports in
+  the image-operations and temperature-batch paths are compressed too.
+
+### Notes — measured, so we *didn't* build the elaborate storage architecture
+- Benchmarked the proposed schemes against plain compression on realistic masks
+  before building any of them. **Run-length encoding is *worse* than plain zlib**
+  (28× vs 39×) — the generic compressor already finds the runs and RLE's explicit
+  triples add overhead. **Keyframes + XOR deltas buy ~8%**, not worth the
+  reconstruction complexity and corruption surface. Per-object bounding-box storage
+  is a genuine 1.5–1.8× over zlib but *plain lzma beats it*; its real value would be
+  viewport-limited loading, not size. Turning compression on captures essentially the
+  entire win at zero complexity and zero reproducibility risk.
+
 ## [1.5.370] - 2026-07-10
 ### Added — Motion Scale Estimator: measure displacement without linking anything
 - **The VPT time-projection trick is now a general Toolbox tool** (Toolbox ▸ Data

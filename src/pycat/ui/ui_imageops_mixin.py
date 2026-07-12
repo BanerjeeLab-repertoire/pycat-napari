@@ -261,8 +261,9 @@ class _ImageOpsWidgetsMixin:
             try:
                 import tifffile
                 arr = np.asarray(corrected)
-                # Preserve float32; downstream PyCAT reads floats fine.
-                tifffile.imwrite(out, arr.astype(np.float32))
+                # Preserve float32; downstream PyCAT reads floats fine. Compress:
+                # lossless, costs a few ms, and float stacks are large.
+                tifffile.imwrite(out, arr.astype(np.float32), compression='zlib')
                 napari.utils.notifications.show_info(f"Saved {out}")
             except Exception as e:
                 napari.utils.notifications.show_warning(f"TIFF export failed: {e}")
