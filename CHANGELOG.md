@@ -4,6 +4,51 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.392] - 2026-07-10
+### Fixed — a saturated partition coefficient is meaningless, not conservative
+``partition_coefficient_field`` had **no detector-saturation check at all**. Once the dense
+phase clips at the sensor ceiling, the numerator of Kp has been **truncated by an unknown
+amount** and the measured value pins at the clip level:
+
+| true dense | true Kp | previously reported |
+|---|---|---|
+| 65 000 | 650 | 650 |
+| 150 000 | **1 500** | **655** |
+| 400 000 | **4 000** | **655** |
+
+A true Kp of 655, 1 500 or 4 000 **all silently read as 655** (bulk = 100, 16-bit sensor).
+
+**And it is not a lower bound.** That is the tempting reading, and it is wrong: you cannot
+say how far the true value lies above the measured one, because you do not know how much
+signal the detector discarded. Reporting a number invites exactly that misreading — 655 looks
+like a measurement, not a floor.
+
+So a saturated Kp is now returned as **NaN**, not as a number:
+
+- The saturation ceiling is inferred from the dtype (uint16 → 65535; a float image normalised
+  to [0, 1] → 1.0) and can be overridden with ``saturation_level=`` when the full-well
+  capacity is known.
+- Both the **field-level** coefficient and each **per-droplet** coefficient are invalidated
+  independently, so one blown-out droplet does not condemn the rest of the field.
+- ``saturated``, ``saturated_fraction``, ``saturation_level`` and ``n_saturated_droplets``
+  travel **with the result**, so a downstream consumer cannot use the number without seeing
+  why it is (or is not) trustworthy.
+- A warning states the affected fraction, how many droplets are involved, and what to do
+  (shorter exposure, lower gain).
+
+Threshold: >0.1 % of dense-phase pixels at the ceiling. Below that the truncation is
+negligible against the other uncertainties; a handful of hot pixels should not condemn an
+otherwise sound measurement. Validated against ground truth: no false positive on clean data
+(Kp = 300 recovered exactly), correct invalidation above the ceiling, and correct behaviour on
+both uint16 and float [0, 1] images.
+
+### Note — the guard caught nothing because I did not run it
+While writing the above I used ``napari_show_warning`` without importing it — an undefined
+name, in a module that had been decoupled from napari (1.5.383). ``tests/test_no_undefined_names``
+**would have caught it immediately**; it was found instead by a functional test, the slow way.
+The guards belong in the **edit loop**, not only in CI. (The import now goes through the
+``pycat.utils.notify`` shim, and ``invitro_tools`` still imports headlessly.)
+
 ## [1.5.391] - 2026-07-10
 ### Added — CI that enforces every guard from this audit
 The audit's final "immediate blocker" was *"add Ruff correctness checks to CI"*. The other

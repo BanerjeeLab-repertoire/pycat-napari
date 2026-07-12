@@ -31,6 +31,9 @@ from __future__ import annotations
 import warnings
 import numpy as np
 import pandas as pd
+
+# Notifications via the shim: keeps this module importable with no GUI stack (1.5.378).
+from pycat.utils.notify import show_warning as napari_show_warning
 import skimage as sk
 from scipy import ndimage, optimize, stats
 from typing import Optional
@@ -861,6 +864,7 @@ def partition_coefficient_field(
     image: np.ndarray,
     labeled_droplets: np.ndarray,
     percentile_bulk: float = 10.0,
+    saturation_level: float = None,
 ) -> dict:
     """
     Compute the fluorescence partition coefficient for in vitro droplets.
@@ -910,23 +914,85 @@ def partition_coefficient_field(
     bulk_div = bulk if bulk > 1e-6 else (float(image.mean()) if image.mean() > 1e-6 else 1.0)
 
     dense  = float(image[cond_mask].mean()) if cond_mask.sum() > 0 else np.nan
+
+    # ── Detector saturation INVALIDATES the partition coefficient ────────────
+    #
+    # If the dense phase clips at the detector maximum, the numerator of Kp has been
+    # TRUNCATED BY AN UNKNOWN AMOUNT. The measured Kp then pins at the clip ceiling: with
+    # a bulk of 100 and a 16-bit sensor, a true Kp of 655, 1500 or 4000 ALL read as 655.
+    #
+    # The tempting move is to call it a lower bound. It is not: you cannot say how far the
+    # true value lies above the measured one, because you do not know how much signal the
+    # detector threw away. Reporting a number invites exactly that misreading -- a Kp of
+    # 655 looks like a measurement, not a floor. So the coefficient is marked INVALID and
+    # the reason is returned with it.
+    #
+    # The saturation ceiling is inferred from the dtype where possible (a uint16 image
+    # clips at 65535, a float image normalised to [0,1] clips at 1.0). Callers with a
+    # known full-well capacity can override it.
+    sat_level = saturation_level
+    if sat_level is None:
+        if np.issubdtype(image.dtype, np.integer):
+            sat_level = float(np.iinfo(image.dtype).max)
+        else:
+            mx = float(np.nanmax(image)) if image.size else 1.0
+            sat_level = 1.0 if mx <= 1.0 + 1e-6 else mx
+
+    tol = 1e-6 * max(abs(sat_level), 1.0)
+    dense_px = image[cond_mask] if cond_mask.sum() > 0 else np.array([])
+    n_sat = int((dense_px >= sat_level - tol).sum()) if dense_px.size else 0
+    frac_sat = (n_sat / dense_px.size) if dense_px.size else 0.0
+    # Even a small clipped fraction biases the mean downward; but a handful of hot pixels
+    # should not condemn an otherwise fine measurement. 0.1% is the point at which the
+    # truncation is no longer negligible against the other uncertainties here.
+    saturated = bool(frac_sat > 0.001)
+
     part   = dense / bulk_div
     enrich = (dense - bulk) / bulk_div
+    if saturated:
+        part = np.nan
+        enrich = np.nan
 
     rows = []
     for prop in sk.measure.regionprops(labeled_droplets, intensity_image=image):
+        vals = prop.image_intensity[prop.image] if hasattr(prop, 'image_intensity') \
+               else np.array([])
+        d_nsat = int((vals >= sat_level - tol).sum()) if vals.size else 0
+        d_frac = (d_nsat / vals.size) if vals.size else 0.0
+        d_sat = bool(d_frac > 0.001)
         rows.append({
-            'droplet_label':     prop.label,
-            'mean_intensity':    float(prop.intensity_mean),
-            'partition_coeff':   float(prop.intensity_mean / bulk_div),
-            'area_um2':          np.nan,  # caller can fill from microns_per_pixel
+            'droplet_label':      prop.label,
+            'mean_intensity':     float(prop.intensity_mean),
+            # A saturated droplet's Kp is NOT a lower bound -- it is meaningless. NaN,
+            # with the reason in the neighbouring columns.
+            'partition_coeff':    (np.nan if d_sat
+                                   else float(prop.intensity_mean / bulk_div)),
+            'saturated':          d_sat,
+            'saturated_fraction': float(d_frac),
+            'area_um2':           np.nan,  # caller can fill from microns_per_pixel
         })
+
+    n_sat_droplets = int(sum(r['saturated'] for r in rows))
+    if saturated or n_sat_droplets:
+        napari_show_warning(
+            f"Partition coefficient: the dense phase is SATURATED "
+            f"({frac_sat:.1%} of dense-phase pixels at the detector ceiling "
+            f"{sat_level:g}; {n_sat_droplets}/{len(rows)} droplets affected). "
+            f"Kp is reported as NaN, not as a lower bound: the numerator has been "
+            f"truncated by an unknown amount, so the true value cannot be bounded. "
+            f"Re-acquire with a shorter exposure or lower gain.")
 
     return dict(
         c_sat_proxy=bulk,
         c_dense_proxy=dense,
         partition_coeff=part,
         enrichment=enrich,
+        # Saturation diagnostics travel WITH the result, so a downstream consumer cannot
+        # use the number without seeing why it is (or is not) trustworthy.
+        saturated=saturated,
+        saturated_fraction=float(frac_sat),
+        saturation_level=float(sat_level),
+        n_saturated_droplets=n_sat_droplets,
         per_droplet_df=pd.DataFrame(rows),
     )
 
