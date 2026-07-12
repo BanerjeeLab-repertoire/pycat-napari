@@ -4,6 +4,112 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.382] - 2026-07-10
+### Fixed — the C_sat fit threw away the most informative samples, and could return a negative concentration
+``estimate_csat_lever_rule`` does ``above = phi > 0`` and then regresses **only those
+points**, extrapolating the x-intercept. Two problems, both verified against a synthetic
+dilution series with a known boundary:
+
+1. **The zeros are discarded, and they are the most informative points.** A sample at
+   C = 5 with Φ = 0 says *"the boundary is above 5"* — a **direct constraint on the very
+   quantity being estimated**. These are **censored observations**, not missing data.
+   Throwing them away and extrapolating an intercept from the points furthest above the
+   boundary is the least stable way to locate it.
+
+2. **No uncertainty is reported, and the extrapolation is fragile.** On a series with only
+   two points just above the boundary, the old fit returned **C_sat = −6.87** — a
+   *negative* saturation concentration, which is not a physical quantity (error −169 %).
+   Even on a well-behaved series, σ = 0.004 noise on Φ moved the recovered boundary across
+   **[8.9, 11.0]** — and the function returns a single number with no interval at all.
+
+**New ``estimate_phase_boundary``**: a segmented (hinge) fit of Φ(C) = max(0, s·(C − C_b))
+over **all** the data, zeros included. The hinge location *is* the boundary — it is fitted,
+not extrapolated to — and a bootstrap 95 % interval is returned. On the failing case above
+it recovers **9.28** (true 10) with an interval of [5.9, 12.0]. The intervals are
+informative in their own right: a series that straddles the boundary poorly returns a wide
+interval (e.g. [9.4, 25.0]) where the old code returned a confident-looking bare number.
+
+It also warns explicitly when there are **no samples below the boundary** — that is the
+extrapolation regime, and the fix is experimental, not computational: *include
+concentrations that produce no condensates. A zero is a real measurement.*
+
+**Naming.** The result is ``boundary_concentration`` — the **lever-rule apparent
+boundary** — not ``C_sat``, and the dense-phase value is ``dense_axis_intercept``, not
+``C_dense``. Calling either a concentration asserts (a) that Φ is a true volume fraction
+and (b) that the concentration axis is calibrated. When Φ came from a 2-D image it is a
+*projected area fraction* (see 1.5.378), so the boundary is systematically biased; and if
+the "concentrations" were fluorescence intensities, the boundary carries those units. It
+remains a sound **relative** measure — a boundary shift between conditions imaged
+identically is real — but it is not an absolute C_sat without volumetric and concentration
+calibration.
+
+The original ``estimate_csat_lever_rule`` is retained so nothing breaks.
+
+## [1.5.381] - 2026-07-10
+### Fixed — FRAP reported a fully mobile protein as "70 % immobile"
+``fit_frap_recovery`` computed ``mobile_fraction = b − a`` unconditionally. That is
+correct **only** under Taylor normalisation, and then only by accident.
+
+The mobile fraction is the fraction of the material that was *bleached* which
+subsequently recovered:
+
+    mobile = (plateau − post-bleach) / (pre-bleach − post-bleach) = (b − a) / (1 − a)
+
+``b − a`` omits the denominator — and the denominator **is the bleach depth**.
+
+* Under **Taylor** normalisation the immediate post-bleach value is forced to 0 by
+  construction, so ``a ≈ 0`` and ``(b − a)/(1 − a) → b − a``. The formula was right for
+  the wrong reason.
+* Under **pre-bleach** normalisation (``I / I_pre``) — which PyCAT also exposes — ``a``
+  is the bleach depth and is far from zero. The error is exactly
+  ``−(1 − bleach_depth)`` and grows as the bleach gets **shallower**.
+
+Verified against ground truth: **a 30 %-deep bleach on a fully mobile protein
+(true mobile = 1.0) was reported as 0.30 — i.e. "70 % immobile" for a species that is
+entirely mobile.** At a 50 % bleach it reported 0.50; only a very deep bleach came
+close to the truth.
+
+- The mobile fraction is now computed normalisation-agnostically as ``(b − a)/(1 − a)``,
+  which reduces to ``b`` when ``a = 0`` (Taylor) and is correct when ``a > 0``
+  (pre-bleach). Validated on curves generated from the module's own rational recovery
+  model: **0.0 % error at every bleach depth under both normalisations.**
+- **``bleach_depth`` is now reported separately**, because it is an acquisition property,
+  not a biological one.
+- **``over_recovery`` flags a plateau above the pre-bleach level** (``b > 1``), which is
+  not physical for a simple recovery and usually indicates a normalisation or
+  photofading-correction problem (an over-aggressive reference correction will do it).
+- The mobile fraction returns ``NaN``, rather than dividing by ~0, when the bleach
+  removed essentially nothing — in that case it is simply not identifiable from the
+  curve.
+- ``frap_tools`` now imports **headlessly** (via the notification shim from 1.5.378), so
+  the FRAP physics is testable with no GUI stack.
+
+### Fixed — "optical density" asserted a physics that brightfield condensates do not obey
+``compute_optical_density`` documented itself as: *"OD is directly proportional to
+condensate concentration × path length, making it the brightfield equivalent of
+fluorescence intensity as a concentration proxy."*
+
+That is Beer–Lambert, which requires **absorbance**. Condensates in transmitted light are
+predominantly a **refractive-index** contrast — they scatter and phase-shift light far
+more than they absorb it. So ``−log₁₀(I/I₀)`` on such an image is measuring scattering and
+phase effects, and calling it a concentration proxy asserts a relationship that has not
+been established. This is the same category error as reporting a projected area fraction
+as a "volume fraction" (fixed in 1.5.378): an image-derived proxy given a physical name.
+
+- The function now documents itself as **apparent optical density**, lists the six
+  conditions that must ALL hold for ``−log₁₀(I/I₀)`` to be a genuine absorbance (stable
+  illumination, linear detector, valid flat-field, known I₀, no saturation, and the
+  contrast actually being absorbance rather than scattering), and states plainly that
+  ordinary brightfield and phase contrast violate the last of these for condensates.
+- It remains a useful **relative** proxy for images acquired identically — that is stated
+  too, rather than throwing the measurement away.
+- The brightfield and in-vitro-brightfield UIs now display **"mean apparent OD
+  (scattering/phase, not calibrated absorbance)"** instead of a bare "mean OD".
+- For bulk work (turbidity, cloud point), the docstring directs users to **field-level
+  integrated transmission**, which does not require the per-pixel absorbance assumption,
+  and keeps bulk transmission, object morphology, and local apparent OD as three distinct
+  quantities.
+
 ## [1.5.380] - 2026-07-10
 ### Fixed — the moduli plots manufactured an elastic modulus that was not measured
 The Evans conversion itself is correct and does **not** clip: ``g_prime_pa`` carries

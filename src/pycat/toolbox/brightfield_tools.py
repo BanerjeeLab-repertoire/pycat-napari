@@ -495,14 +495,40 @@ def compute_optical_density(
     bg_kernel: int = 50,
 ) -> np.ndarray:
     """
-    Convert brightfield intensity to optical density (OD / absorbance).
+    Convert brightfield intensity to APPARENT optical density.
 
-    Beer-Lambert law: OD = −log₁₀(I / I₀)
-    where I₀ is the local background (incident light estimate).
+        apparent OD = -log10(I / I0)
 
-    OD is directly proportional to condensate concentration × path length
-    (thickness), making it the brightfield equivalent of fluorescence
-    intensity as a concentration proxy.
+    where I0 is the local background (incident-light estimate).
+
+    WARNING -- this is NOT calibrated absorbance, and for condensates it is usually
+    not absorbance at all.
+
+    The Beer-Lambert law relates OD to concentration x path length FOR AN ABSORBING
+    SPECIES. Biomolecular condensates in transmitted light are predominantly a
+    REFRACTIVE-INDEX contrast: they scatter and phase-shift light far more than they
+    absorb it. -log10(I/I0) computed on such an image therefore measures scattering
+    and phase effects, and calling the result a concentration proxy asserts a physical
+    relationship that has not been established.
+
+    For -log10(I/I0) to be a true absorbance, ALL of the following must hold:
+      * illumination is stable over the acquisition;
+      * detector response is linear (no gamma, no auto-exposure);
+      * flat-field correction is valid;
+      * the incident intensity I0 is genuinely known, not inferred from a local
+        background estimate;
+      * no pixel is saturated or at the digitisation floor;
+      * the contrast really is absorbance -- not scattering or phase contrast.
+
+    Ordinary brightfield and (especially) phase contrast violate the last of these for
+    condensates. Treat the output as an APPARENT OD: a monotonic, comparable proxy,
+    useful for RELATIVE comparisons between images acquired identically, but not a
+    calibrated concentration.
+
+    For bulk measurements (turbidity, cloud point) FIELD-LEVEL integrated transmission
+    is far more robust than local per-pixel OD, because it does not require the
+    per-pixel absorbance assumption. Keep three quantities distinct: bulk
+    transmission/turbidity, object morphology, and local apparent OD.
 
     Parameters
     ----------

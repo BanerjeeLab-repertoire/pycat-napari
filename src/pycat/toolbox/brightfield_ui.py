@@ -495,7 +495,8 @@ def _add_bf_od_metrics(ui, layout):
                                     [("Per-condensate OD metrics", df.round(4))])
             napari_show_info(
                 f"OD metrics: {len(df)} condensates — "
-                f"mean OD={df['mean_od'].mean():.3f}, "
+                f"mean apparent OD={df['mean_od'].mean():.3f} (scattering/phase, "
+                f"not calibrated absorbance), "
                 f"mean CNR={df['cnr'].mean():.1f}, "
                 f"mean partition={df['od_partition_coeff'].mean():.2f}"
             )

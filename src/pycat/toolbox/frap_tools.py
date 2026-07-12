@@ -40,8 +40,10 @@ import pandas as pd
 from scipy.optimize import curve_fit
 from scipy.interpolate import InterpolatedUnivariateSpline
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the notification shim: keeps the FRAP physics (normalisation, recovery fitting,
+# mobile-fraction calculation) importable and testable with no GUI stack.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------
@@ -190,11 +192,44 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
     -------
     dict with:
         a, b, tau_half        : fit parameters
-        mobile_fraction       : b − a  (plateau minus immediate post-bleach)
-        immobile_fraction     : 1 − (b − a)  (clipped to [0,1])
+        mobile_fraction       : (b − a) / (1 − a)  — the fraction of the BLEACHED
+                                material that recovered. See the note below: this is
+                                NOT simply b − a.
+        immobile_fraction     : 1 − mobile_fraction (clipped to [0,1])
+        bleach_depth          : 1 − a  — how much signal the bleach removed, in the
+                                units of the normalised curve. Reported separately
+                                because it is an acquisition property, not a
+                                biological one.
+        over_recovery         : True if the plateau exceeds the pre-bleach level
+                                (b > 1), which is not physical for a simple recovery
+                                and usually indicates a normalisation or
+                                photofading-correction problem.
         half_time_s           : τ½
         r_squared             : goodness of fit
         fit_time, fit_curve   : arrays for plotting the fitted curve
+
+    Why the mobile fraction is NOT ``b − a``
+    ---------------------------------------
+    The mobile fraction is the fraction of the material that was BLEACHED which
+    subsequently recovered:
+
+        mobile = (plateau − post-bleach) / (pre-bleach − post-bleach)
+               = (b − a) / (1 − a)
+
+    ``b − a`` alone omits the denominator, and the denominator is the bleach depth.
+    That omission is invisible under **Taylor** normalisation, where the immediate
+    post-bleach value is forced to 0 by construction, so ``a ≈ 0`` and
+    ``(b − a)/(1 − a) → b − a``. It is NOT invisible under **pre-bleach**
+    normalisation (``I / I_pre``), where ``a`` is the bleach depth and is far from
+    zero.
+
+    The error is exactly ``−(1 − bleach_depth)`` and grows as the bleach gets
+    SHALLOWER. A 30 %-deep bleach on a fully mobile protein (true mobile = 1.0) was
+    reported as **0.30** — i.e. "70 % immobile" for a species that is entirely
+    mobile. Verified numerically against ground truth.
+
+    The expression below is normalisation-agnostic: it reduces to ``b`` when
+    ``a = 0`` (Taylor) and is correct when ``a > 0`` (pre-bleach).
     """
     t = np.asarray(time, dtype=float)
     y = np.asarray(norm_intensity, dtype=float)
@@ -203,6 +238,7 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
     if len(t) < 4:
         return dict(a=np.nan, b=np.nan, tau_half=np.nan,
                     mobile_fraction=np.nan, immobile_fraction=np.nan,
+                    bleach_depth=np.nan, over_recovery=False,
                     half_time_s=np.nan, r_squared=np.nan,
                     fit_time=np.array([]), fit_curve=np.array([]))
 
@@ -221,17 +257,38 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
         ss_res = np.sum((y - fit_curve) ** 2)
         ss_tot = np.sum((y - np.mean(y)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
-        mobile = float(b - a)
+        # Normalisation-aware mobile fraction: the fraction of the BLEACHED material
+        # that recovered. Reduces to b when a == 0 (Taylor); correct when a > 0
+        # (pre-bleach normalisation), where the old `b - a` under-reported it by
+        # exactly -(1 - bleach_depth).
+        bleach_depth = float(1.0 - a)
+        if abs(bleach_depth) < 1e-6:
+            # The bleach removed (essentially) nothing: the mobile fraction is not
+            # identifiable from this curve. Say so rather than dividing by ~0.
+            mobile = float('nan')
+        else:
+            mobile = float((b - a) / bleach_depth)
+        over_recovery = bool(np.isfinite(b) and b > 1.0 + 1e-6)
+        if over_recovery:
+            napari_show_warning(
+                "FRAP: the recovery plateau exceeds the pre-bleach level "
+                f"(b = {b:.3f} > 1). That is not physical for a simple recovery — "
+                "check the normalisation and the photofading correction (an "
+                "over-aggressive reference correction will do this).")
         return dict(
             a=float(a), b=float(b), tau_half=float(tau_half),
             mobile_fraction=mobile,
-            immobile_fraction=float(np.clip(1.0 - mobile, 0.0, 1.0)),
+            immobile_fraction=(float(np.clip(1.0 - mobile, 0.0, 1.0))
+                               if np.isfinite(mobile) else float('nan')),
+            bleach_depth=bleach_depth,
+            over_recovery=over_recovery,
             half_time_s=float(tau_half), r_squared=float(r2),
             fit_time=t, fit_curve=fit_curve)
     except Exception as e:
         napari_show_warning(f"FRAP fit failed: {e}")
         return dict(a=np.nan, b=np.nan, tau_half=np.nan,
                     mobile_fraction=np.nan, immobile_fraction=np.nan,
+                    bleach_depth=np.nan, over_recovery=False,
                     half_time_s=np.nan, r_squared=np.nan,
                     fit_time=np.array([]), fit_curve=np.array([]))
 

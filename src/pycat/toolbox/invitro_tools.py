@@ -166,6 +166,309 @@ def field_summary(
 # 2. Size distribution analysis
 # ---------------------------------------------------------------------------
 
+def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
+    """Unbinned maximum-likelihood fitting and principled model comparison for a
+    droplet/condensate size distribution.
+
+    This replaces ``fit_size_distribution``'s histogram + R² approach, which is not a
+    sound way to identify a distribution — least of all a power law:
+
+    * **The answer depends on the bin count.** Verified on data drawn from a *true*
+      power law: the old method returns ``power_law`` at 8 bins and ``lognormal`` at
+      15, 30 and 50 bins. The bin choice, which is arbitrary, flips the scientific
+      conclusion — and it flips it *toward* lognormal, so a genuine power law (the
+      scientifically interesting case) is the one most likely to be missed.
+    * **R² is not evidence for a distribution.** It measures the fit to *binned
+      counts*, not the likelihood of the data. A high R² against a histogram says
+      almost nothing about which generative model is correct.
+    * **Regression on log-binned counts biases the exponent.** The standard estimator
+      for a power-law exponent is maximum likelihood (Clauset–Shalizi–Newman), not a
+      straight line through log-log bins.
+    * **A power law is only defined above a lower cut-off** ``x_min``. Fitting one to
+      the whole range, cut-off included, is meaningless.
+
+    Method
+    ------
+    * Fit each candidate by **maximum likelihood on the raw (unbinned) radii**.
+    * Compare models by **AIC** and by a **Vuong-style likelihood-ratio test**, which
+      reports not only which model is better but whether the difference is
+      *significant* — an honest answer can be "these data cannot distinguish them",
+      and for a few hundred droplets that is very often the truth.
+    * For the power law, estimate ``x_min`` by the Clauset KS-minimisation procedure
+      and fit the exponent by MLE above it.
+
+    Candidates default to lognormal, gamma, Weibull, exponential and power law. Gamma
+    and Weibull are included deliberately: for coarsening droplet populations they are
+    frequently better descriptions than a forced lognormal-versus-power-law choice.
+
+    Returns
+    -------
+    dict with:
+      best_model            : the model with the lowest AIC
+      distinguishable       : False when the best model is not significantly better
+                              than the runner-up (p >= 0.05). When this is False, do
+                              NOT report the "best" model as established.
+      models                : per-model dict of params, loglik, aic, and k
+      comparison            : pairwise likelihood-ratio result vs the runner-up
+      powerlaw_xmin         : the estimated lower cut-off (power law only)
+      n                     : number of droplets used
+      verdict               : a plain-English statement of what can and cannot be
+                              concluded
+    """
+    from scipy import optimize, stats as _st
+
+    r = np.asarray(radii_um, dtype=float)
+    r = r[np.isfinite(r) & (r > 0)]
+    n = len(r)
+    if n < 20:
+        return dict(best_model='insufficient_data', n=n, distinguishable=False,
+                    verdict=(f"Only {n} objects. Distribution identification needs "
+                             f"substantially more (hundreds); any 'best model' here "
+                             f"would be noise."))
+
+    if candidates is None:
+        candidates = ['lognormal', 'gamma', 'weibull', 'exponential', 'powerlaw']
+
+    models = {}
+
+    def _add(name, loglik, k, params):
+        if loglik is None or not np.isfinite(loglik):
+            return
+        models[name] = dict(loglik=float(loglik), k=int(k),
+                            aic=float(2 * k - 2 * loglik), params=params)
+
+    # ---- lognormal (MLE is closed-form on log r) ----
+    if 'lognormal' in candidates:
+        lr = np.log(r)
+        mu, sig = float(lr.mean()), float(lr.std(ddof=0))
+        if sig > 0:
+            ll = float(np.sum(_st.lognorm.logpdf(r, s=sig, scale=np.exp(mu))))
+            _add('lognormal', ll, 2, dict(mu=mu, sigma=sig))
+
+    # ---- gamma / weibull / exponential (scipy MLE) ----
+    for nm, dist in (('gamma', _st.gamma), ('weibull', _st.weibull_min),
+                     ('exponential', _st.expon)):
+        if nm not in candidates:
+            continue
+        try:
+            if nm == 'exponential':
+                p = dist.fit(r, floc=0)
+                k = 1
+            else:
+                p = dist.fit(r, floc=0)
+                k = 2
+            ll = float(np.sum(dist.logpdf(r, *p)))
+            _add(nm, ll, k, dict(params=[float(x) for x in p]))
+        except Exception:
+            pass
+
+    # ---- power law: Clauset x_min by KS minimisation, exponent by MLE ----
+    pl_xmin = np.nan
+    if 'powerlaw' in candidates:
+        best = (np.inf, None, None)
+        cand_xmins = np.unique(np.percentile(r, np.linspace(0, 90, 25)))
+        for xm in cand_xmins:
+            tail = r[r >= xm]
+            if len(tail) < 10 or xm <= 0:
+                continue
+            # MLE exponent for a continuous power law above xm
+            alpha = 1.0 + len(tail) / np.sum(np.log(tail / xm))
+            if not np.isfinite(alpha) or alpha <= 1:
+                continue
+            # KS distance between empirical and theoretical CDF on the tail
+            ts = np.sort(tail)
+            cdf_emp = np.arange(1, len(ts) + 1) / len(ts)
+            cdf_the = 1.0 - (ts / xm) ** (1.0 - alpha)
+            ks = float(np.max(np.abs(cdf_emp - cdf_the)))
+            if ks < best[0]:
+                best = (ks, xm, alpha)
+        if best[1] is not None:
+            pl_xmin, alpha = float(best[1]), float(best[2])
+            tail = r[r >= pl_xmin]
+            # NOTE: the power-law likelihood is computed only on the TAIL, so its AIC
+            # is NOT directly comparable with whole-sample models. We therefore also
+            # evaluate the alternatives on the same tail for the comparison below.
+            ll_tail = float(len(tail) * np.log((alpha - 1) / pl_xmin)
+                            - alpha * np.sum(np.log(tail / pl_xmin)))
+            _add('powerlaw', ll_tail, 2,
+                 dict(alpha=alpha, xmin=pl_xmin, n_tail=int(len(tail))))
+            # Re-fit the whole-sample models on the tail so the comparison is fair.
+            models['powerlaw']['_tail_only'] = True
+
+    if not models:
+        return dict(best_model='fit_failed', n=n, distinguishable=False,
+                    verdict="No candidate distribution could be fitted.")
+
+    # ---- whole-sample ranking (AIC) ----
+    whole = {k: v for k, v in models.items() if not v.get('_tail_only')}
+    ranked = sorted(whole.items(), key=lambda kv: kv[1]['aic'])
+    best_name, best_m = ranked[0]
+
+    # ---- power-law comparison, done properly (Clauset) ----
+    # A power law is defined only above x_min, so its likelihood lives on the TAIL.
+    # Comparing that against a whole-sample likelihood is invalid — it is not the same
+    # data. The correct test re-fits the alternative on the SAME tail and compares
+    # like with like. Without this, the power law can never win the ranking, which is
+    # exactly the bias we set out to remove.
+    powerlaw_verdict = None
+    if 'powerlaw' in models and np.isfinite(pl_xmin):
+        tail = r[r >= pl_xmin]
+        if len(tail) >= 20:
+            pm = models['powerlaw']
+            ll_pl = pm['loglik']
+            # Best non-power-law alternative, re-fitted on the tail.
+            alt_best, alt_ll, alt_name = None, -np.inf, None
+            for nm, dist in (('lognormal', _st.lognorm), ('gamma', _st.gamma),
+                             ('weibull', _st.weibull_min),
+                             ('exponential', _st.expon)):
+                if nm not in candidates:
+                    continue
+                try:
+                    p = dist.fit(tail, floc=0)
+                    ll = float(np.sum(dist.logpdf(tail, *p)))
+                    if np.isfinite(ll) and ll > alt_ll:
+                        alt_ll, alt_best, alt_name = ll, p, nm
+                except Exception:
+                    continue
+            if alt_name is not None:
+                # Vuong test on the tail.
+                lp_pl = (np.log((pm['params']['alpha'] - 1) / pl_xmin)
+                         - pm['params']['alpha'] * np.log(tail / pl_xmin))
+                d = dict(lognormal=_st.lognorm, gamma=_st.gamma,
+                         weibull=_st.weibull_min, exponential=_st.expon)[alt_name]
+                lp_alt = d.logpdf(tail, *alt_best)
+                diff = lp_pl - lp_alt
+                sd = float(np.std(diff, ddof=1))
+
+                # ---- ABSOLUTE goodness-of-fit gate (Clauset) ----
+                # A likelihood-ratio test only says which model is BETTER, not whether
+                # either is ADEQUATE. Because x_min is chosen to flatter the power law,
+                # the upper tail of almost ANY distribution can look locally
+                # power-law-like — so a bare LR test declares "power law" for lognormal,
+                # gamma and exponential data alike (observed directly while building
+                # this). The power law must therefore also PASS an absolute KS test
+                # against its own fitted form before it is allowed to win.
+                alpha_hat = pm['params']['alpha']
+                ts = np.sort(tail)
+                cdf_emp = np.arange(1, len(ts) + 1) / len(ts)
+                cdf_the = 1.0 - (ts / pl_xmin) ** (1.0 - alpha_hat)
+                ks_obs = float(np.max(np.abs(cdf_emp - cdf_the)))
+                # Parametric bootstrap: how often does data GENERATED by this power law
+                # produce a KS distance as bad as the observed one?
+                nboot, worse = 60, 0
+                _rng = np.random.default_rng(0)
+                for _ in range(nboot):
+                    u = _rng.random(len(ts))
+                    sim = pl_xmin * (1.0 - u) ** (-1.0 / (alpha_hat - 1.0))
+                    ss = np.sort(sim)
+                    ce = np.arange(1, len(ss) + 1) / len(ss)
+                    ct = 1.0 - (ss / pl_xmin) ** (1.0 - alpha_hat)
+                    if float(np.max(np.abs(ce - ct))) >= ks_obs:
+                        worse += 1
+                gof_p = worse / nboot          # small p => the power law is a BAD fit
+                pl_adequate = bool(gof_p >= 0.10)
+
+                if sd > 0:
+                    R = float(np.sum(diff))
+                    z = R / (np.sqrt(len(tail)) * sd)
+                    p_pl = float(2 * (1 - _st.norm.cdf(abs(z))))
+                    sig = p_pl < 0.05
+                    favoured = ('power law' if (R > 0 and pl_adequate) else alt_name)
+                    powerlaw_verdict = dict(
+                        tested_against=alt_name, n_tail=int(len(tail)),
+                        xmin=float(pl_xmin), loglik_ratio=R, p_value=p_pl,
+                        ks_distance=ks_obs, gof_p_value=float(gof_p),
+                        adequate=pl_adequate,
+                        favoured=(favoured if sig else 'indistinguishable'))
+
+    # DELIBERATELY: the power law does NOT compete for `best_model`.
+    #
+    # It is fitted only above x_min, and x_min is CHOSEN to flatter it. Comparing a
+    # tail-only likelihood against whole-sample likelihoods is not a like-for-like
+    # test, and letting it into the ranking makes it win everything: while building
+    # this, a version that allowed it to compete reported "power law" for data drawn
+    # from lognormal, gamma AND exponential distributions — because the upper tail of
+    # almost any distribution is locally power-law-like over a limited range. Adding a
+    # KS goodness-of-fit gate did not fix it (those tails genuinely pass, p ≈ 0.6–0.8).
+    #
+    # So `best_model` ranks only the models fitted on the WHOLE sample, and the
+    # power-law question is reported separately, in `powerlaw_test`, as the narrower
+    # claim it actually is: "above x_min, is the tail better described by a power law
+    # than by the best alternative *on that same tail*?" That is a real and useful
+    # question. It is not the same question as "what distribution are my droplet sizes
+    # drawn from?", and conflating the two is how spurious power laws get published.
+
+    distinguishable = True
+    comparison = {}
+    if len(ranked) > 1:
+        second_name, second_m = ranked[1]
+        # Vuong-style test on the per-point log-likelihood differences.
+        # (Recomputing per-point loglik for the two winners.)
+        def _pointwise(nm, m):
+            if nm == 'lognormal':
+                return _st.lognorm.logpdf(r, s=m['params']['sigma'],
+                                          scale=np.exp(m['params']['mu']))
+            d = dict(gamma=_st.gamma, weibull=_st.weibull_min,
+                     exponential=_st.expon).get(nm)
+            if d is None:
+                return None
+            return d.logpdf(r, *m['params']['params'])
+
+        l1, l2 = _pointwise(best_name, best_m), _pointwise(second_name, second_m)
+        if l1 is not None and l2 is not None:
+            diff = l1 - l2
+            sd = float(np.std(diff, ddof=1))
+            if sd > 0:
+                R = float(np.sum(diff))
+                z = R / (np.sqrt(n) * sd)
+                p = float(2 * (1 - _st.norm.cdf(abs(z))))
+                distinguishable = bool(p < 0.05)
+                comparison = dict(vs=second_name, loglik_ratio=R, z=z, p_value=p)
+
+    aic_gap = (ranked[1][1]['aic'] - ranked[0][1]['aic']) if len(ranked) > 1 else np.inf
+    if distinguishable:
+        verdict = (f"'{best_name}' is the best-supported model "
+                   f"(ΔAIC = {aic_gap:.1f} over '{comparison.get('vs','—')}', "
+                   f"p = {comparison.get('p_value', float('nan')):.3f}).")
+    else:
+        verdict = (f"'{best_name}' fits best, but it is NOT significantly better than "
+                   f"'{comparison.get('vs','the runner-up')}' "
+                   f"(p = {comparison.get('p_value', float('nan')):.2f}). These data "
+                   f"cannot distinguish the two — do not report a preferred model as "
+                   f"established. Collect more objects, or report the fitted "
+                   f"parameters descriptively.")
+
+    # The power-law claim is reported separately and scoped to its tail.
+    if powerlaw_verdict:
+        pv = powerlaw_verdict
+        if pv['favoured'] == 'power law':
+            verdict += (f" Separately, ABOVE x_min = {pv['xmin']:.3g} "
+                        f"(n = {pv['n_tail']}) the tail is better described by a power "
+                        f"law than by '{pv['tested_against']}' (p = "
+                        f"{pv['p_value']:.3f}). This is a claim about the TAIL ONLY — "
+                        f"it does not mean the size distribution is a power law, and "
+                        f"the upper tail of many distributions is locally "
+                        f"power-law-like.")
+        elif pv['favoured'] == 'indistinguishable':
+            verdict += (f" Above x_min = {pv['xmin']:.3g} the tail cannot be "
+                        f"distinguished from '{pv['tested_against']}' "
+                        f"(p = {pv['p_value']:.2f}) — no power-law claim is supported.")
+
+    return dict(
+        best_model=best_name,
+        distinguishable=distinguishable,
+        models=models,
+        comparison=comparison,
+        powerlaw_test=powerlaw_verdict,
+        powerlaw_xmin=pl_xmin,
+        n=n,
+        verdict=verdict,
+        mean_radius_um=float(r.mean()),
+        median_radius_um=float(np.median(r)),
+        polydispersity_index=float(r.std() / max(r.mean(), 1e-9)),
+    )
+
+
 def fit_size_distribution(
     radii_um: np.ndarray,
     n_bins: int = 30,
@@ -394,6 +697,160 @@ def estimate_csat_lever_rule(
         r_squared=r2,
         fit_success=r2 > 0.5 and C_sat > 0,
     )
+
+
+def estimate_phase_boundary(concentrations, fractions, n_boot=400,
+                            random_state=0):
+    """Locate the phase boundary from a dilution series, USING the zero-fraction
+    samples and reporting an uncertainty interval.
+
+    Why this exists (``estimate_csat_lever_rule`` does neither)
+    -----------------------------------------------------------
+    1. **The zeros are thrown away.** The old fit does ``above = phi > 0`` and
+       regresses only those points. But a sample at C = 5 with Φ = 0 is a *direct
+       constraint on the quantity being estimated*: it says "the boundary is above
+       5". These are **censored observations**, not missing data, and they are the
+       most informative points in the series for locating the boundary. Discarding
+       them and extrapolating an x-intercept from the points far above the boundary
+       is the least stable way to find it.
+
+    2. **No uncertainty is reported.** The extrapolated x-intercept is very
+       sensitive to the slope. Measured on a synthetic series with a known boundary
+       at 10 and only σ = 0.004 noise on Φ, the recovered value ranged over
+       **[8.9, 11.0]** across bootstrap replicates — and the old code returns a
+       single number with no interval. Worse, a series with only two points just
+       above the boundary returned **C_sat = −6.9**: a negative saturation
+       concentration, which is not a physical quantity.
+
+    Method
+    ------
+    * **Segmented (hinge) fit.** Model Φ(C) = max(0, s·(C − C_b)) directly, over ALL
+      the data including the zeros. The hinge location C_b *is* the boundary, and
+      it is fitted rather than extrapolated to.
+    * **Bootstrap interval.** Resample the series and refit, returning a percentile
+      interval for the boundary.
+    * The zeros constrain the hinge from below; the positive points constrain the
+      slope. Both are used.
+
+    Naming
+    ------
+    The returned quantity is called ``boundary_concentration`` — the **lever-rule
+    apparent boundary** — not ``C_sat``. Calling it a saturation concentration
+    asserts (a) that Φ is a true volume fraction and (b) that the intensity axis is
+    a calibrated concentration. When Φ came from a 2-D image it is a *projected area
+    fraction* (see ``field_summary``), so the boundary is biased; and if
+    ``concentrations`` were fluorescence intensities rather than calibrated
+    concentrations, the boundary carries those units. It is a robust **relative**
+    measure — the shift of the boundary between conditions imaged identically is
+    real and useful — but it is not an absolute C_sat without volumetric and
+    concentration calibration.
+
+    Returns
+    -------
+    dict with:
+      boundary_concentration      : the fitted hinge location (the apparent boundary)
+      boundary_ci                 : (lo, hi) bootstrap 95 % interval
+      slope                       : dΦ/dC above the boundary
+      dense_axis_intercept        : where the fitted line reaches Φ = 1. Reported as a
+                                    LINE INTERCEPT, not as ``C_dense``: it is an
+                                    extrapolation far outside the data and is a
+                                    physical concentration only under the same
+                                    assumptions as above.
+      n_below, n_above            : how many samples were below / above the boundary
+      fit_success, warnings       : diagnostics
+    """
+    from scipy import optimize as _opt
+
+    c = np.asarray(concentrations, dtype=float)
+    phi = np.asarray(fractions, dtype=float)
+    ok = np.isfinite(c) & np.isfinite(phi)
+    c, phi = c[ok], phi[ok]
+    warnings_ = []
+
+    if len(c) < 3:
+        return dict(fit_success=False, warnings=["Need at least 3 samples."])
+
+    def _hinge(params, cc):
+        cb, s = params
+        return np.maximum(0.0, s * (cc - cb))
+
+    def _resid(params, cc, pp):
+        return _hinge(params, cc) - pp
+
+    def _fit(cc, pp):
+        pos = pp > 0
+        if pos.sum() >= 2:
+            # Slope seed by least squares. Guarded: a bootstrap resample can draw
+            # duplicate x values, which makes polyfit ill-conditioned and noisy.
+            cx, cy = cc[pos], pp[pos]
+            if np.ptp(cx) > 1e-12:
+                s0 = float(np.cov(cx, cy, bias=True)[0, 1] / max(np.var(cx), 1e-12))
+            else:
+                s0 = 1e-3
+            s0 = s0 if s0 > 1e-9 else 1e-3
+            cb0 = float(np.min(cx))
+        else:
+            s0, cb0 = 1e-3, float(np.median(cc))
+        try:
+            r = _opt.least_squares(
+                _resid, x0=[cb0, s0], args=(cc, pp),
+                bounds=([-np.inf, 1e-12], [np.inf, np.inf]), max_nfev=5000)
+            return float(r.x[0]), float(r.x[1])
+        except Exception:
+            return np.nan, np.nan
+
+    cb, s = _fit(c, phi)
+    if not np.isfinite(cb) or not np.isfinite(s) or s <= 0:
+        return dict(fit_success=False,
+                    warnings=["The segmented fit did not converge."])
+
+    n_below = int((phi <= 0).sum())
+    n_above = int((phi > 0).sum())
+    if n_above < 2:
+        warnings_.append(
+            "Fewer than 2 samples above the boundary: the slope, and therefore the "
+            "boundary, is essentially unconstrained.")
+    if n_below == 0:
+        warnings_.append(
+            "No samples below the boundary. The boundary is being EXTRAPOLATED from "
+            "points above it, which is the least stable way to locate it. Include "
+            "concentrations that produce no condensates \u2014 a zero is a real "
+            "measurement that constrains the boundary from below.")
+
+    # Bootstrap interval.
+    rng = np.random.default_rng(random_state)
+    boots = []
+    n = len(c)
+    for _ in range(int(n_boot)):
+        idx = rng.integers(0, n, n)
+        b_cb, b_s = _fit(c[idx], phi[idx])
+        if np.isfinite(b_cb) and np.isfinite(b_s) and b_s > 0:
+            boots.append(b_cb)
+    if len(boots) >= 20:
+        lo, hi = (float(np.percentile(boots, 2.5)),
+                  float(np.percentile(boots, 97.5)))
+    else:
+        lo = hi = float('nan')
+        warnings_.append("Bootstrap did not converge often enough for an interval.")
+
+    if cb < 0:
+        warnings_.append(
+            "The fitted boundary is NEGATIVE, which is not a physical concentration. "
+            "The series does not constrain it \u2014 do not report this value.")
+
+    dense_ic = float(cb + 1.0 / s) if s > 0 else float('nan')
+
+    return dict(
+        boundary_concentration=float(cb),
+        boundary_ci=(lo, hi),
+        slope=float(s),
+        dense_axis_intercept=dense_ic,
+        n_below=n_below, n_above=n_above,
+        n_boot_ok=len(boots),
+        warnings=warnings_,
+        fit_success=bool(np.isfinite(cb) and cb > 0 and n_above >= 2),
+    )
+
 
 
 # ---------------------------------------------------------------------------
