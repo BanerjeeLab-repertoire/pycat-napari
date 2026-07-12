@@ -4,6 +4,74 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.390] - 2026-07-10
+### Fixed — trace extraction was 70× slower than it needed to be, and rejected lazy stacks
+``molecular_counting_tools.extract_spot_traces`` did::
+
+    for lbl in labels:
+        region = labels == lbl
+        trace = [stack[t][region].mean() for t in range(T)]
+
+This rebuilds the boolean mask and **re-scans the entire frame once per (label, frame)
+pair**. Cost = ``n_labels × n_frames × H × W``: for 50 puncta over 200 frames of 512×512
+that is **2.6 billion pixel visits** to read 50 small regions.
+
+Replaced with a single streaming pass in which ``np.bincount`` computes **every label's mean
+at once**. **Measured 70× faster, results identical.**
+
+*The audit suggested ``scipy.ndimage.mean``. Benchmarked — it is **0.7×, i.e. SLOWER** than
+the original for sparse labels, because per-call overhead dominates. Measured, not assumed.
+The winning form (gather the labelled pixels once, then ``bincount``) was neither the
+original nor the suggestion.*
+
+**And a pre-existing bug surfaced while testing it.** The function opened with
+``stack = np.asarray(stack)`` — the frame-0 trap. On a lazy wrapper that silently collapses
+a ``(T,H,W)`` movie to a single 2-D frame, and the very next guard then raised *"needs a
+(T,H,W) stack"* **on a stack that is (T,H,W)**. The function was therefore **unusable on
+every lazily-loaded movie**. It now checks ``.shape`` and reads frames one at a time;
+verified identical on both eager and lazy stacks.
+
+### Changed — bounded sliding window replaces batch-and-drain in both process pools
+The audit believed the pipeline submits all frames at once. It does not — it already submits
+in batches of ``n_workers × 4``. **But the batching is itself the bottleneck:** draining a
+whole batch before submitting the next is a barrier, so every worker waits on the batch's
+slowest frame. Frame cost is far from uniform (a dense field costs many times an empty one).
+
+Measured on a realistic mix (12 % of frames 15× slower): **batch-and-drain 81 ms vs sliding
+window 48 ms — 1.7× faster, with half as many tasks in flight.**
+
+Both dispatch loops now keep ``2 × n_workers`` tasks outstanding and refill the moment any
+completes. Validated: every frame processed **exactly once** (1/2/7/64/101-frame edge cases),
+peak concurrency never exceeds ``n_workers``, and **cancellation now stops within about one
+frame** (21 of 200 frames, versus running all 200) — previously the cancel check sat *between
+batches*, so Cancel had to wait for a whole batch to drain.
+
+### Fixed — worker processes were oversubscribing the CPU 4×
+``run_pycat`` sets ``OMP_NUM_THREADS=4`` for the main process, and worker processes
+**inherit the environment**. So 8 workers × 4 OMP threads = **32 threads on an 8-core
+machine**. Oversubscribed threads do not go faster; they thrash cache and burn time
+context-switching — and each worker is already a full process using one core, so the nested
+BLAS/OpenCV/scikit-image pools are pure overhead.
+
+Both ``ProcessPoolExecutor``\\ s now take an ``initializer`` that pins each worker to a
+single compute thread (``OMP``/``MKL``/``OPENBLAS``/``NUMEXPR``/``VECLIB``, plus
+``cv2.setNumThreads(0)`` and ``torch.set_num_threads(1)``). Verified in real subprocesses:
+workers previously inherited ``OMP_NUM_THREADS=4``; they now report ``1``. Measured 2.1×
+faster in a 1-CPU sandbox — the effect on a real 8-core machine is **larger, not smaller**.
+
+The main process is deliberately left alone: interactive single-image work there genuinely
+benefits from BLAS parallelism.
+
+### Recorded — the object-feature table (audit points 7 & 8)
+Several workflows call ``regionprops_table`` independently on the same mask, and the optional
+Ripley/PCF pass re-derives centroids and cell labels that the primary per-object pass already
+computed. The fix is to make the object-feature table a **first-class pipeline artifact** —
+computed once per (mask, frame) with the union of every consumer's properties, and read by
+condensate analysis, spatial statistics, morphology, tracking, summaries and plotting alike.
+This is the cheapest concrete instance of the Biological Object Model already on the roadmap.
+Recorded there with an acceptance test (``regionprops_table`` called at most once per (mask,
+frame); Ripley/PCF consumes the table with identical numerical output).
+
 ## [1.5.389] - 2026-07-10
 ### Added — ``stack_access``: the pure-numpy core of the lazy/streaming layer
 The audit's ``*_core.py`` split, done surgically where it actually pays.

@@ -852,6 +852,39 @@ sensitivity must be *reported*, not hidden).
   is a **correctness** hazard, not a performance one: it will silently serve a result
   computed with different parameters. This belongs in the correctness bucket.
 
+.. rubric:: The object-feature table as a first-class artifact (audit points 7 & 8)
+
+Several workflows independently call ``skimage.measure.regionprops_table`` on the same
+mask, each asking for a different subset of centroids / areas / equivalent diameters /
+bounding boxes / intensity summaries / morphology. ``regionprops_table`` is not cheap, and
+running it once per consumer is pure duplication.
+
+Worse, the optional Ripley/PCF pass **re-derives what it already has**::
+
+    for t in range(n_frames):
+        get_puncta_centroids(...)          # re-scans the mask
+        for cell:
+            ripleys_l(...)
+
+The centroids and cell labels were already computed during the primary per-object pass.
+
+**Where:** the per-frame object records built in ``timeseries_condensate_tools`` (the
+``records`` list fed into the results DataFrame), and the Ripley/PCF block in
+``_on_finished``.
+
+**The design:** make the object-feature table a **pipeline artifact**, computed once per
+(mask, frame) with the UNION of every consumer's required properties::
+
+    frame | cell_label | object_label | centroid_y | centroid_x | area | ... 
+
+and have condensate analysis, spatial statistics, morphology, tracking, summary tables and
+plotting all read from it. This is the same object-model idea already pinned in the
+Biological Object Model rubric — this is its cheapest, most concrete first instance.
+
+**Acceptance:** ``regionprops_table`` is called at most once per (mask, frame) in a full
+time-series run (assert via a call counter in a test), and the Ripley/PCF pass consumes the
+existing table rather than re-scanning masks — with identical numerical output to today.
+
 .. rubric:: Consolidate the stack helpers into stack_access (a follow-up I failed twice)
 
 ``pycat/file_io/stack_access.py`` (1.5.389) now holds the pure-numpy lazy/streaming layer —
