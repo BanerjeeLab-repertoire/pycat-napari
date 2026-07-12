@@ -60,6 +60,21 @@ SCIENTIFIC_MODULES = [
     # import for a handful of viewer functions. The puncta filter had NEVER been tested (see
     # tests/test_puncta_refinement.py); its SNR gate was found completely dead in 1.5.416.
     "segmentation_tools",
+    # 1.5.441: `filter_cells_by_transfection` decides which cells are analysed AT ALL, and
+    # its SNR was a pedestal-dependent ratio until 1.5.415 (on a 500-count pedestal, EVERY
+    # transfected cell was called untransfected). Neither analysis function in this module
+    # uses a single Qt symbol — the module-scope import was pure overhead that stopped them
+    # being tested. See tests/test_transfection_filter.py.
+    "ts_cellpose_tools",
+    # 1.5.442: the last three science modules. `spatial_acf_tools` had ONE of its 14 objects
+    # using a GUI symbol (a widget builder) and the other 13 — the spatial autocorrelation
+    # analysis itself — blocked behind it. `two_channel_coloc_tools` and
+    # `timeseries_condensate_tools` each hid their analysis behind QThread workers whose base
+    # class resolves at CLASS-DEFINITION time, so the import could not simply move into a
+    # method; those are now built in lazy factories.
+    "spatial_acf_tools",
+    "two_channel_coloc_tools",
+    "timeseries_condensate_tools",
     "correlation_func_analysis_tools",
     "layer_tools",
     "clean_spot_detection_tools",

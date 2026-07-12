@@ -43,21 +43,17 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import skimage as sk
-import napari
-from napari.utils.notifications import (
-    show_info as napari_show_info,
-    show_warning as napari_show_warning,
-)
-from PyQt5.QtWidgets import (
-    QSizePolicy,
-    QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
-    QFormLayout, QDoubleSpinBox, QCheckBox, QProgressBar,
-)
-from PyQt5.QtCore import QThread, pyqtSignal
+# ── napari and Qt are imported LAZILY ─────────────────────────────────────────
+#
+# The analysis in this module — `condensate_coloc_time_trace` — uses no GUI symbol at all.
+# The Qt imports feed two QThread workers and one widget builder; napari feeds the layer
+# dropdowns. A module-scope import blocked the headless import of the analysis for the sake
+# of the widgets, so it could not be tested in CI.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 from pycat.toolbox.segmentation_tools import segment_subcellular_objects
 from pycat.toolbox.obj_based_coloc_analysis_tools import object_based_colocalization_analysis
-from pycat.ui.ui_utils import show_dataframes_dialog
 
 
 # ---------------------------------------------------------------------------
@@ -284,55 +280,95 @@ def condensate_coloc_time_trace(
 # Background worker
 # ---------------------------------------------------------------------------
 
-class TwoChannelColocWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object, object, object)
-    error    = pyqtSignal(str)
+def _make_twochannelcolocworker():
+    """Build the QThread worker ON FIRST USE, so Qt is not needed to import this module.
 
-    def __init__(self, kwargs: dict, parent=None):
-        super().__init__(parent)
-        self._kwargs = kwargs
+    `class TwoChannelColocWorker(QThread)` resolves `QThread` at CLASS-DEFINITION time, which runs at
+    import — so the Qt import cannot simply move into a method; the base class needs it.
+    Cached after the first call.
+    """
+    global _TWOCHANNELCOLOCWORKER_CLS
+    if _TWOCHANNELCOLOCWORKER_CLS is not None:
+        return _TWOCHANNELCOLOCWORKER_CLS
 
-    def run(self):
-        try:
-            def _cb(i, total):
-                self.progress.emit(i, total)
-            results_df, mask1, mask2 = run_two_channel_condensate_colocalization(
-                progress_callback=_cb, **self._kwargs
-            )
-            self.finished.emit(results_df, mask1, mask2)
-        except Exception:
-            import traceback
-            self.error.emit(traceback.format_exc())
+    from PyQt5.QtCore import QThread, pyqtSignal
+
+    class TwoChannelColocWorker(QThread):
+        progress = pyqtSignal(int, int)
+        finished = pyqtSignal(object, object, object)
+        error    = pyqtSignal(str)
+
+        def __init__(self, kwargs: dict, parent=None):
+            super().__init__(parent)
+            self._kwargs = kwargs
+
+        def run(self):
+            try:
+                def _cb(i, total):
+                    self.progress.emit(i, total)
+                results_df, mask1, mask2 = run_two_channel_condensate_colocalization(
+                    progress_callback=_cb, **self._kwargs
+                )
+                self.finished.emit(results_df, mask1, mask2)
+            except Exception:
+                import traceback
+                self.error.emit(traceback.format_exc())
+
+    _TWOCHANNELCOLOCWORKER_CLS = TwoChannelColocWorker
+    return TwoChannelColocWorker
 
 
-class CondensateColocTimeWorker(QThread):
-    """Runs condensate_coloc_time_trace off the UI thread (frame-by-frame over a
-    stack can be slow), reporting per-frame progress and supporting cancellation."""
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object)      # the trace DataFrame
-    error    = pyqtSignal(str)
+_TWOCHANNELCOLOCWORKER_CLS = None
 
-    def __init__(self, kwargs: dict, parent=None):
-        super().__init__(parent)
-        self._kwargs = kwargs
-        self._cancel = False
 
-    def cancel(self):
-        self._cancel = True
 
-    def run(self):
-        try:
-            def _cb(done, total):
-                self.progress.emit(done, total)
-            trace = condensate_coloc_time_trace(
-                progress_callback=_cb,
-                cancel_check=lambda: self._cancel,
-                **self._kwargs)
-            self.finished.emit(trace)
-        except Exception:
-            import traceback
-            self.error.emit(traceback.format_exc())
+def _make_condensatecoloctimeworker():
+    """Build the QThread worker ON FIRST USE, so Qt is not needed to import this module.
+
+    `class CondensateColocTimeWorker(QThread)` resolves `QThread` at CLASS-DEFINITION time, which runs at
+    import — so the Qt import cannot simply move into a method; the base class needs it.
+    Cached after the first call.
+    """
+    global _CONDENSATECOLOCTIMEWORKER_CLS
+    if _CONDENSATECOLOCTIMEWORKER_CLS is not None:
+        return _CONDENSATECOLOCTIMEWORKER_CLS
+
+    from PyQt5.QtCore import QThread, pyqtSignal
+
+    class CondensateColocTimeWorker(QThread):
+        """Runs condensate_coloc_time_trace off the UI thread (frame-by-frame over a
+        stack can be slow), reporting per-frame progress and supporting cancellation."""
+        progress = pyqtSignal(int, int)
+        finished = pyqtSignal(object)      # the trace DataFrame
+        error    = pyqtSignal(str)
+
+        def __init__(self, kwargs: dict, parent=None):
+            super().__init__(parent)
+            self._kwargs = kwargs
+            self._cancel = False
+
+        def cancel(self):
+            self._cancel = True
+
+        def run(self):
+            try:
+                def _cb(done, total):
+                    self.progress.emit(done, total)
+                trace = condensate_coloc_time_trace(
+                    progress_callback=_cb,
+                    cancel_check=lambda: self._cancel,
+                    **self._kwargs)
+                self.finished.emit(trace)
+            except Exception:
+                import traceback
+                self.error.emit(traceback.format_exc())
+
+    _CONDENSATECOLOCTIMEWORKER_CLS = CondensateColocTimeWorker
+    return CondensateColocTimeWorker
+
+
+_CONDENSATECOLOCTIMEWORKER_CLS = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +383,10 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
     as an alternative entry point to manual mask selection — this widget
     handles segmentation of both channels automatically before running OBCA.
     """
+    # GUI imported here, not at module scope — the analysis in this module needs none.
+    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+    import napari
+    from pycat.ui.ui_utils import show_dataframes_dialog
     main_layout = QVBoxLayout()
     ui_instance.add_text_label(main_layout, 'Two-Channel Condensate Colocalization', bold=True)
     ui_instance.add_text_label(
@@ -531,7 +571,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
             cell_df=cell_df,
         )
 
-        worker = TwoChannelColocWorker(kwargs)
+        worker = _make_twochannelcolocworker()(kwargs)
         ui_instance._two_channel_worker = worker  # keep alive
 
         worker.progress.connect(lambda i, t: progress_bar.setValue(i))
@@ -625,7 +665,7 @@ def _add_run_two_channel_coloc(ui_instance, layout=None, separate_widget=False):
         progress_bar.setMaximum(max(1, n_t))
         run_btn.setEnabled(False); time_btn.setEnabled(False)
 
-        worker = CondensateColocTimeWorker(dict(
+        worker = _make_condensatecoloctimeworker()(dict(
             stack_ch1=l_ch1_raw.data, stack_proc_ch1=l_ch1_proc.data,
             stack_ch2=l_ch2_raw.data, stack_proc_ch2=l_ch2_proc.data,
             cell_mask_stack=l_cell.data, ball_radius=ball_radius,

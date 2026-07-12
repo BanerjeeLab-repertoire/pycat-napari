@@ -40,17 +40,42 @@ Date
 from __future__ import annotations
 
 import numpy as np
-import napari
-from napari.utils.notifications import (
-    show_info  as napari_show_info,
-    show_warning as napari_show_warning,
-)
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
-    QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
-    QRadioButton,
-)
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+# ── napari and Qt are imported LAZILY, via a proxy ────────────────────────────
+#
+# `filter_cells_by_transfection` decides which cells are analysed AT ALL, and until 1.5.415
+# its SNR was a pedestal-dependent RATIO: on a camera with a 500-count pedestal, **every
+# transfected cell was called untransfected**. Nothing has ever tested that fix, because a
+# module-scope `import napari` blocked the headless import of the whole module.
+#
+# `napari` is used only for `napari.layers.Image` / `.Labels` inside the UI-facing functions.
+# A proxy resolves the real module on first ATTRIBUTE access, so every call site works
+# unchanged and the import happens when the GUI is actually present — no line-by-line surgery
+# (which broke a multi-line Qt expression on the first attempt).
+class _LazyModule:
+    """Imports the named module on first attribute access."""
+
+    def __init__(self, name):
+        self.__dict__['_name'] = name
+        self.__dict__['_mod'] = None
+
+    def _load(self):
+        if self.__dict__['_mod'] is None:
+            import importlib
+            self.__dict__['_mod'] = importlib.import_module(self.__dict__['_name'])
+        return self.__dict__['_mod']
+
+    def __getattr__(self, attr):
+        return getattr(self._load(), attr)
+
+
+napari = _LazyModule('napari')
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
+# Qt is used by exactly TWO objects in this module — the QThread worker and the widget
+# builder — and by NONE of the analysis functions. `filter_cells_by_transfection` and
+# `apply_transfection_filter_to_stack` use no Qt symbol at all, so importing it at module
+# scope was pure overhead that blocked them from being imported (and therefore tested)
+# without a GUI. It is imported inside the two objects that need it.
 
 
 # ---------------------------------------------------------------------------
@@ -259,40 +284,60 @@ def run_keyframe_stardist(
 # Background worker
 # ---------------------------------------------------------------------------
 
-class _KeyframeCellposeWorker(QThread):
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(object, object)   # (mask_stack, keyframe_indices)
-    error    = pyqtSignal(str)
+def _make_keyframe_cellpose_worker():
+    """Build the QThread worker ON FIRST USE, so Qt is not needed to import this module.
 
-    def __init__(self, stack, cell_diameter, interval, parent=None,
-                 upscale_factor=1, use_stardist=False, model_name=None):
-        super().__init__(parent)
-        self._stack       = stack
-        self._diameter    = cell_diameter
-        self._interval    = interval
-        self._upscale     = upscale_factor
-        self._use_stardist = use_stardist
-        self._model_name  = model_name
+    ``class _KeyframeCellposeWorker(QThread)`` resolves ``QThread`` at CLASS-DEFINITION time,
+    which runs at import — so the Qt import cannot simply be moved inside a method; the base
+    class itself needs it. Cached after the first call.
+    """
+    global _KEYFRAME_WORKER_CLS
+    if _KEYFRAME_WORKER_CLS is not None:
+        return _KEYFRAME_WORKER_CLS
 
-    def run(self):
-        try:
-            def _cb(done, total):
-                self.progress.emit(done, total)
-            if self._use_stardist:
-                mask_stack, kf = run_keyframe_stardist(
-                    self._stack, self._interval, _cb,
-                    upscale_factor=self._upscale,
-                )
-            else:
-                mask_stack, kf = run_keyframe_cellpose(
-                    self._stack, self._diameter, self._interval, _cb,
-                    upscale_factor=self._upscale,
-                    model_name=self._model_name,
-                )
-            self.finished.emit(mask_stack, kf)
-        except Exception:
-            import traceback
-            self.error.emit(traceback.format_exc())
+    from PyQt5.QtCore import QThread, pyqtSignal
+
+    class _KeyframeCellposeWorker(QThread):
+        progress = pyqtSignal(int, int)
+        finished = pyqtSignal(object, object)   # (mask_stack, keyframe_indices)
+        error    = pyqtSignal(str)
+
+        def __init__(self, stack, cell_diameter, interval, parent=None,
+                     upscale_factor=1, use_stardist=False, model_name=None):
+            super().__init__(parent)
+            self._stack       = stack
+            self._diameter    = cell_diameter
+            self._interval    = interval
+            self._upscale     = upscale_factor
+            self._use_stardist = use_stardist
+            self._model_name  = model_name
+
+        def run(self):
+            try:
+                def _cb(done, total):
+                    self.progress.emit(done, total)
+                if self._use_stardist:
+                    mask_stack, kf = run_keyframe_stardist(
+                        self._stack, self._interval, _cb,
+                        upscale_factor=self._upscale,
+                    )
+                else:
+                    mask_stack, kf = run_keyframe_cellpose(
+                        self._stack, self._diameter, self._interval, _cb,
+                        upscale_factor=self._upscale,
+                        model_name=self._model_name,
+                    )
+                self.finished.emit(mask_stack, kf)
+            except Exception:
+                import traceback
+                self.error.emit(traceback.format_exc())
+
+    _KEYFRAME_WORKER_CLS = _KeyframeCellposeWorker
+    return _KeyframeCellposeWorker
+
+
+_KEYFRAME_WORKER_CLS = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +483,14 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     segmentation algorithm. When no dedicated channel is available, 
     Multi-Otsu thresholding provides a DNA-stain-free fallback.
     """
+    # Qt is imported here, not at module scope — the analysis functions in this
+    # module use none of it, and a module-scope import blocked their headless import.
+    from PyQt5.QtWidgets import (
+        QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
+        QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
+        QRadioButton,
+    )
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
     grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
     form  = QFormLayout(grp)
@@ -801,7 +854,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
 
         upscale = upscale_spin.value() if upscale_check.isChecked() else 1
         _cp_model = 'nuclei' if (rb_cellpose.isChecked() and nuclei_check.isChecked()) else None
-        worker = _KeyframeCellposeWorker(
+        worker = _make_keyframe_cellpose_worker()(
             stack_np, cell_diameter, interval,
             upscale_factor=upscale,
             use_stardist=rb_stardist.isChecked(),

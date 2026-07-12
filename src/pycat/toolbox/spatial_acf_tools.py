@@ -67,23 +67,25 @@ import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import largestinteriorrectangle as lir
+# `largestinteriorrectangle` is used by exactly one function (`_lir_crop`) and is not part
+# of the minimal compute set the CI installs. A module-scope import made the whole module
+# unimportable there — which is how the headless test caught this: my sandbox had STUBBED
+# the package, so it looked fine locally and failed in CI. Imported lazily, inside the one
+# function that needs it.
 from scipy.optimize import curve_fit
 from scipy.signal import argrelextrema
-import napari
-from napari.utils.notifications import (
-    show_warning as napari_show_warning,
-    show_info as napari_show_info,
-)
-from PyQt5.QtWidgets import (
-    QSizePolicy,
-    QVBoxLayout, QLabel, QPushButton, QWidget, QComboBox, QButtonGroup,
-    QRadioButton, QHBoxLayout,
-)
+# ── napari and Qt are imported LAZILY ─────────────────────────────────────────
+#
+# Of the 14 top-level objects in this module, exactly ONE uses a GUI symbol: the widget
+# builder `_add_run_sacf_analysis`. The other 13 — the spatial autocorrelation analysis
+# itself (`sacf_single_roi`, `sacf_lir_mode`, `sacf_drawn_rect_mode` and the rest) — use
+# none. A module-scope import of napari and Qt therefore blocked the headless import of all
+# thirteen, so none of them could be tested in CI, for the sake of one widget.
+from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.notify import show_info as napari_show_info
 
 # Local application imports
 from pycat.toolbox.correlation_func_analysis_tools import calculate_autocorrelation
-from pycat.ui.ui_utils import show_dataframes_dialog
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +109,7 @@ def _lir_crop(image, binary_mask):
         (< 4 px in either dimension).
     rect : tuple (x, y, w, h) in pixel coords, or None
     """
+    import largestinteriorrectangle as lir
     rect = lir.lir(binary_mask.astype(bool))
     x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
     print(f"[PyCAT SACF]     LIR result: x={x} y={y} w={w} h={h} (mask area={binary_mask.sum()}px)")
@@ -574,6 +577,8 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
         std_diameter_y_um=('diameter_y_um', 'std'),
     ).round(4).reset_index()
 
+    # ui_utils imports napari — imported here so the 13 analysis functions stay headless.
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog("Spatial ACF Analysis", [
         ("SACF Results", results_df.round(4)),
         ("SACF Summary (per slice)", summary),
@@ -594,6 +599,15 @@ def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
     Build the SACF widget.  Three radio buttons select the ROI mode; the
     relevant layer dropdowns show/hide accordingly.
     """
+    # Qt, napari and ui_utils are imported HERE, not at module scope — the 13 analysis
+    # functions in this module use none of them.
+    import napari
+    from PyQt5.QtWidgets import (
+        QSizePolicy,
+        QVBoxLayout, QLabel, QPushButton, QWidget, QComboBox, QButtonGroup,
+        QRadioButton, QHBoxLayout,
+    )
+    from pycat.ui.ui_utils import show_dataframes_dialog
     sacf_layout = QVBoxLayout()
     ui_instance.add_text_label(sacf_layout, 'Spatial ACF Analysis', bold=True)
 

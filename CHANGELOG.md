@@ -4,6 +4,76 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.442] - 2026-07-10
+### Decoupled — the last three science modules. Every analysis function now imports headlessly.
+**24 GUI-coupled science modules → 15 → 8 → 7 → 6 → 3** — and the remaining three
+(``data_viz_tools``, ``general_image_tools``, ``video_export_tools``) are **genuinely UI, with
+zero analysis functions between them.** The decoupling is complete.
+
+- **``spatial_acf_tools``** — **1 of its 14 objects** used a GUI symbol (a widget builder). The
+  other 13 — the spatial autocorrelation analysis itself — were blocked behind it.
+- **``two_channel_coloc_tools``** and **``timeseries_condensate_tools``** — each hid their
+  analysis behind ``QThread`` workers. ``class Worker(QThread)`` resolves its base class **at
+  class-definition time**, which runs at import, so the Qt import cannot simply move into a
+  method. Five workers are now built in lazy factories, cached after first use.
+  ``timeseries_condensate_tools`` also had a **nested** ``_UpWorker(QThread)`` inside a widget
+  builder — already lazy by virtue of nesting; it just needed the names in scope.
+
+**90/90 core tests passing.**
+
+### Note — the CI-faithful runner earned its keep
+``spatial_acf_tools`` passed in my sandbox and **failed in the real headless test**:
+``largestinteriorrectangle`` is a declared dependency but **not part of the minimal compute set
+CI installs**, and a module-scope import made the whole module unimportable there.
+
+**My sandbox had stubbed the package**, so it looked fine locally. ``run_core_tests.py``
+(1.5.433) runs without those stubs — which is the entire reason it exists — and caught it
+immediately. Now imported lazily, inside the single function that uses it.
+
+*This is the third time the "sandbox more forgiving than CI" trap has appeared (1.5.409,
+1.5.432, here). The difference is that this time it was caught before the push.*
+
+## [1.5.441] - 2026-07-10
+### Decoupled — ``ts_cellpose_tools``, and the transfection filter is tested for the first time
+**24 GUI-coupled science modules → 15 → 8 → 7 → 6.**
+
+``filter_cells_by_transfection`` decides **which cells are analysed at all** — it runs before
+everything else, so a mistake there is a selection effect on the *entire dataset*. Until 1.5.415
+its SNR was a bare **ratio**, and the camera pedestal appears in both the numerator and the
+denominator:
+
+| pedestal | expr = 60 | expr = 200 | transfected fraction |
+|---|---|---|---|
+| 0 | **KEEP** | KEEP | 0.50 |
+| 100 | drop | KEEP | 0.25 |
+| **500** | **drop** | **drop** | **0.00** |
+| **2000** | **drop** | **drop** | **0.00** |
+
+**On a camera with a 500-count pedestal, every transfected cell was called untransfected.**
+
+That fix was measured against synthetic data — but **nothing in the codebase exercised it**,
+because the module imported napari and Qt at scope and could not be imported without a GUI.
+**Neither analysis function in it uses a single Qt symbol**; the import was pure overhead that
+stopped them being tested.
+
+Now decoupled — the ``QThread`` worker is built in a lazy factory (its base class resolves at
+*class-definition* time, so the import cannot simply move into a method), and Qt is imported
+inside the one widget builder that needs it.
+
+New ``tests/test_transfection_filter.py`` asserts **pedestal invariance** at 0, 100, 500 and
+2000 counts. Verified: the untransfected cell is dropped, all three real cells kept, and the
+transfected fraction is **0.75 at every pedestal**. **84/84 core tests passing.**
+
+### Note — my first attempt broke the file, and the guard caught it
+I tried injecting lazy imports line-by-line before each use. It placed an ``import napari``
+*inside a multi-line Qt expression* and produced a ``SyntaxError``.
+
+Reverted, and looked at the structure instead: **only two objects in the module use Qt at all**
+— the worker class and one widget builder. The analysis functions use none. That made the fix
+obvious and safe: defer the import into those two, and leave everything else alone.
+
+*Line surgery on a file you have not read the structure of is a way to break it.*
+
 ## [1.5.440] - 2026-07-10
 ### Fixed — the puncta filter threw objects away and told nobody why
 Eight conditions decide which detections survive into **every downstream count**. The reason a
