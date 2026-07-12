@@ -2284,12 +2284,20 @@ def _add_run_timeseries_condensate_analysis(
 
     _worker_ref  = [None]   # mutable container so closure can update it
     _run_ripley_ref = [False]  # mutable: set in _on_run, read in _on_finished
+    # Same pattern, and for the same reason: `mask_name` is a LOCAL of _on_run, and
+    # _on_finished is a SIBLING nested function, not an inner one -- siblings do not
+    # share locals. Reading it directly from _on_finished raised NameError, which was
+    # then swallowed by the `except Exception` around the Ripley block, so ticking
+    # 'Ripley's L / PCF' silently produced NO Ripley or PCF results at all: no crash,
+    # no warning, just missing output.
+    _mask_name_ref = [None]    # mutable: set in _on_run, read in _on_finished
 
     def _on_run():
         # Validate inputs
         stack_name = stack_dropdown.currentText()
         proc_name  = proc_dropdown.currentText()
         mask_name  = mask_dropdown.currentText()
+        _mask_name_ref[0] = mask_name   # hand it to _on_finished (see above)
 
         try:
             stack_layer = ui_instance.viewer.layers[stack_name]
@@ -2454,7 +2462,12 @@ def _add_run_timeseries_condensate_analysis(
                 import skimage as _sk
                 mpx = float(data_instance.data_repository.get(
                     'microns_per_pixel_sq', 1.0) ** 0.5)
-                cell_mask_layer = ui_instance.viewer.layers[mask_name]
+                _mask_name = _mask_name_ref[0]
+                if not _mask_name:
+                    raise RuntimeError(
+                        'Ripley/PCF: the cell-mask layer name was not carried '
+                        'over from the run.')
+                cell_mask_layer = ui_instance.viewer.layers[_mask_name]
                 cmask = cell_mask_layer.data
 
                 ripley_rows, pcf_rows = [], []

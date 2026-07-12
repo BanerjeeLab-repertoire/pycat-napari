@@ -328,8 +328,15 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
     import napari
     import numpy as np
     import pandas as pd
+    # QSizePolicy is imported HERE, not only in the separate-widget branch below.
+    # It is used a few lines down (setSizePolicy on the radio buttons / checkboxes /
+    # run button). Because the ONLY other import of it sat in a later `else:` branch
+    # of this same function, Python treated QSizePolicy as a function-LOCAL for the
+    # whole scope -- so the earlier use raised UnboundLocalError UNCONDITIONALLY and
+    # this widget could never be constructed. The later branch's import is harmless
+    # but redundant.
     from PyQt5.QtWidgets import (
-        QGroupBox, QFormLayout, QLabel, QPushButton, QCheckBox, QProgressBar)
+        QGroupBox, QFormLayout, QLabel, QPushButton, QCheckBox, QProgressBar, QSizePolicy)
 
     grp  = QGroupBox("Morphological Complexity")
     form = QFormLayout(grp)

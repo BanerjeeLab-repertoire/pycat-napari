@@ -245,9 +245,16 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
     per-region molecule counts.
     """
     import napari
+    # QSizePolicy is imported HERE, not only in the separate-widget branch below.
+    # It is used a few lines down (setSizePolicy on the radio buttons / checkboxes /
+    # run button). Because the ONLY other import of it sat in a later `else:` branch
+    # of this same function, Python treated QSizePolicy as a function-LOCAL for the
+    # whole scope -- so the earlier use raised UnboundLocalError UNCONDITIONALLY and
+    # this widget could never be constructed. The later branch's import is harmless
+    # but redundant.
     from PyQt5.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
-        QProgressBar)
+        QProgressBar, QSizePolicy)
 
     grp  = QGroupBox("Molecular Counting by Photobleaching")
     form = QFormLayout(grp)

@@ -417,6 +417,448 @@ supporting Category B, because PyCAT's point-based spatial statistics are alread
 what localization-cluster analysis needs.
 
 
+Scientific validity backlog (from the 2026-07 external code audit)
+------------------------------------------------------------------
+
+An external audit reviewed the scientific methods module by module. The **bugs** it
+surfaced were verified against ground truth and fixed in 1.5.378-1.5.385 (mis-named
+quantities, a FRAP mobile fraction that reported a fully mobile protein as "70 %
+immobile", moduli plots that manufactured elasticity from noise, an SNR diagnostic that
+told users background subtraction destroyed their data, distribution selection by R-squared
+on a histogram, a C_sat fit that could return a negative concentration, and scientific
+modules that could not be imported without a GUI so their tests never ran).
+
+What remains are the audit's **architectural** recommendations: real, but builds rather
+than bug fixes. They are recorded here so they are not lost, roughly in the audit's own
+priority order.
+
+.. note::
+
+   One audit claim was tested and **rejected**: that ``compute_msd``'s IQR fence selects
+   tracks on the outcome variable (MSD -> D -> viscosity). Measured on a synthetic mixed
+   population it rejects honest *long* tracks at 2 % (the noise-tail rate of any IQR
+   fence), honest *short* tracks at 22 %, and *mis-linked* tracks at 70 % — i.e. it does
+   what it claims. On clean Brownian data it biases D by +1.1 %. No change was made; the
+   reasoning is in the 1.5.380 changelog so it is not "fixed" later by someone reading the
+   audit.
+
+.. rubric:: How to resume any item below
+
+Each item names **where** (file:line), **what done looks like** (an acceptance test that
+can be written before the code), and **what is already settled** (so a question is not
+re-litigated). Where an item lacks an acceptance test, that is itself the first task:
+*write the failing test, then fix it.*
+
+Standing acceptance criteria for the whole backlog:
+
+* Every fix ships with a **ground-truth test** — synthetic data where the right answer is
+  known by construction. This is how every bug in 1.5.378-1.5.385 was caught and how each
+  fix was verified; several "obvious" fixes were **wrong on first attempt** and only the
+  ground-truth test revealed it.
+* Every new scientific function must be **importable with no napari and no Qt**
+  (``tests/test_headless_science.py`` enforces this for guarded modules; add new ones to
+  its list).
+* A number that can be wrong in a *named* way should say so — see
+  ``pycat.utils.measurement``.
+
+.. rubric:: BUG (not architecture) — puncta SNR is the same un-subtracted ratio fixed in 1.5.379
+
+**Where:** ``segmentation_tools.py:1342-1344`` in ``puncta_refinement_filtering_func``::
+
+    local_snr  = img_dilated_object_mean / img_local_bg_std     # no bg subtraction
+    global_snr = img_dilated_object_mean / cell_bg_std          # same
+
+This is the **identical** defect corrected in ``pipeline_snr_tools`` (1.5.379): the
+background mean is not subtracted, so the ratio is inflated by the camera pedestal. There,
+it was a misleading *diagnostic*. Here it is a **rejection criterion deciding which puncta
+survive** — so ``local_snr_threshold`` means something different on every camera, and
+something different again after a background-subtraction step. Measured on a synthetic
+image with a real contrast of 50 over noise sigma 5: pedestals of 0/100/500/2000 counts
+gave "SNR" of 28/78/282/1049 — the same image.
+
+**Fix:** use ``(object_mean - background_mean) / background_std`` (contrast-to-noise), and
+recalibrate the default thresholds against it — they were tuned to the inflated quantity,
+so changing the formula without re-tuning will change which puncta pass.
+
+**Acceptance:** on a synthetic punctum field with known positions and a known contrast,
+detection must be **invariant to an added constant pedestal**. Currently it is not.
+
+
+.. rubric:: Immediate — finish the decoupling and the provenance model
+
+* **Decouple the remaining 20 scientific modules from napari/Qt.** 28 of 48 are clean and
+  ``tests/test_headless_science.py`` guards 13 of them.
+
+  **Where** (as of 1.5.385) — ``clean_spot_detection_tools``,
+  ``correlation_func_analysis_tools``, ``data_viz_tools``, ``fd_curve_tools``,
+  ``fft_bandpass_tools``, ``fusion_tools``, ``gaussian_localization_tools``,
+  ``general_image_tools``, ``intensity_profile_tools``, ``layer_tools``,
+  ``molecular_counting_tools``, ``obj_based_coloc_analysis_tools``, ``segmentation_tools``,
+  ``spatial_acf_tools``, ``spatial_randomness_tools``, ``temperature_tools``,
+  ``timeseries_condensate_tools``, ``ts_cellpose_tools``, ``two_channel_coloc_tools``,
+  ``video_export_tools``.
+
+  **Recipe** (proven on 8 modules already): notifications -> ``pycat.utils.notify``;
+  ``napari.layers`` isinstance checks -> a lazy ``_napari()`` accessor called inside the
+  viewer-facing function; Qt widgets -> ``try: from PyQt5 ... except ImportError`` with a
+  stub class that raises only if the dialog is actually opened; ``pycat.ui.*`` helpers ->
+  imported at call time. The coupling is **transitive**, so start at the leaves of the
+  import graph (``segmentation_tools`` and ``timeseries_condensate_tools`` block the most).
+
+  **Acceptance:** add each module to ``SCIENTIFIC_MODULES`` in
+  ``tests/test_headless_science.py`` and the test passes. Done when all 20 are listed.
+* **Extend the ``Measurement`` model beyond viscosity.** ``pycat.utils.measurement``
+  (1.5.384) gives a value its parameters (with ``ParameterSource`` provenance), its
+  assumptions (``HOLDS`` / ``VIOLATED`` / ``UNCHECKED``), its uncertainty and a
+  ``ValidationLevel``. ``viscosity_measurement`` demonstrates it.
+
+  **Where** the same pattern is owed (file:line as of 1.5.385):
+
+  * ``invitro_tools.py:860`` ``partition_coefficient_field`` — assumptions: neither phase
+    saturated; background subtracted before the ratio; dilute phase measured locally, not
+    from a global percentile.
+  * ``invitro_tools.py:702`` ``estimate_phase_boundary`` — assumptions: Phi is a true volume
+    fraction (it is **not**, from a 2-D image — see 1.5.378); the concentration axis is
+    calibrated; the series spans the boundary.
+  * ``frap_tools.py:187`` ``fit_frap_recovery`` — assumptions: the normalisation is recorded
+    (1.5.381); the bleach was fast relative to recovery; the plateau was reached.
+  * ``condensate_physics_tools.py:1341`` ``compute_moduli_evans`` — assumptions: 2D-to-3D
+    isotropy; the frequency band is within the supported range (see the VPT rubric).
+  * N&B brightness in ``nb_tools.py`` — assumptions: camera calibration supplied; a
+    monomeric reference exists. Without both, the output is **apparent** brightness.
+
+  **Acceptance:** each returns a ``Measurement`` whose ``interpretability`` becomes
+  ``NOT_INTERPRETABLE`` in a constructed case where an assumption genuinely fails (e.g. a
+  saturated dense phase for the partition coefficient), and ``INTERPRETABLE`` when it does
+  not.
+* **Uncertainty everywhere a number is reported.** Present in the MSD fit and the new phase
+  boundary; missing from partition coefficients, coarsening exponents, FRAP plateaus and
+  N&B outputs.
+
+.. rubric:: Validation framework — the tier that would earn the labels
+
+``ValidationLevel`` currently *asserts* a level. Nothing yet *earns* it. The audit's
+three-layer scheme is the right one and would convert an assertion into a fact:
+
+1. **Analytical** — Brownian tracks with known D; anomalous tracks with known alpha;
+   Newtonian and Maxwell MSD curves with known moduli; FRAP curves from known parameters;
+   images with known puncta positions/intensities/PSF; controlled colocalization overlap;
+   N&B movies with known N and B; droplet masks with known size evolution.
+2. **Imaging-realistic simulation** — add Poisson noise, sCMOS read-noise and offset maps,
+   blur and axial defocus, illumination gradients, photobleaching, drift, finite-exposure
+   motion blur, pixelation, saturation, object overlap, segmentation error.
+3. **Experimental standards** — fluorescent beads (PSF, localization); glycerol/water
+   viscosity standards (**VPT** — the single most valuable control PyCAT could adopt, and
+   the "no host / full frame" mode exists precisely for it); monomer/dimer controls (N&B,
+   SpIDA); immobilised dual-colour beads (registration, colocalization); known diffusion
+   standards (FRAP).
+
+**Where:** a new ``tests/validation/`` tier, plus a synthetic-data generator module (the
+existing ``tests/fixtures_synthetic.py`` is the seed). ``ValidationLevel`` in
+``pycat.utils.measurement`` is the label each method would then *earn* rather than assert.
+
+**Start here — the cheapest, highest-value single test:** ``fit_anomalous_diffusion`` +
+``viscosity_from_diffusion`` against Brownian tracks with a **known D**. It exercises the
+whole chain (MSD -> D -> Stokes-Einstein), the truth is known by construction, and it takes
+an afternoon. Then add: known alpha (anomalous), a Maxwell fluid with known moduli, FRAP
+curves from known parameters, and puncta images with a known PSF.
+
+**Acceptance (per method):** recovers the known parameter within a stated tolerance, and the
+*reported uncertainty covers the truth at the stated rate* (a 95 % interval must contain the
+truth ~95 % of the time across repeated realisations — an interval that is merely *reported*
+but not *calibrated* is worse than none, because it invites confidence). Only then may the
+method claim ``ANALYTICALLY_VALIDATED``.
+
+**Then layer 2:** re-run every layer-1 test with Poisson noise, an sCMOS offset/variance map,
+blur, drift and bleaching switched on. A method that passes layer 1 and fails layer 2 is a
+method that works on paper and not on a microscope — that is exactly the gap worth knowing
+about.
+
+This is the highest-leverage remaining item: it is what separates "the code runs" from "the
+number is right".
+
+.. rubric:: Puncta detection — staged, probabilistic
+
+The current refinement applies a sequence of hard thresholds (kurtosis, local/global SNR,
+gradient magnitude, intensity-width, local thresholding, size filters). A biologically real
+punctum can fail any one of them for several unrelated reasons — low expression, local
+background, defocus, axial motion, saturation, genuinely diffuse morphology — and the
+interaction of the rules makes the final selection hard to interpret.
+
+Recommended architecture::
+
+    candidate generation (permissive)  ->  per-candidate feature table
+      ->  probabilistic classification  ->  resolution-aware reporting
+
+with a feature table per candidate (peak and integrated intensity, local background and
+noise, fitted PSF width, fit residual, eccentricity, edge distance, local contrast,
+temporal persistence, saturation overlap, axial-defocus evidence), classified by an
+interpretable logistic model, a calibrated random forest, or explicit quality tiers —
+rather than deleting candidates sequentially with hard cut-offs.
+
+**Where:** ``segmentation_tools.py:1192`` ``puncta_refinement_filtering_func`` (the
+cascade), and its SNR bug at 1342-1344 (see the BUG rubric above — fix that first, since
+the thresholds are calibrated against the wrong quantity).
+
+**Acceptance:** on a synthetic punctum field with known positions, intensities and PSF,
+report a precision/recall curve. The staged detector must **dominate** the current cascade
+(equal or better recall at every precision) — if it does not, do not ship it. Each rejected
+candidate must carry a *reason*, so a user can see why a punctum they can see was dropped.
+
+.. rubric:: Resolution-aware measurement, made mandatory
+
+``partial_volume_tools`` already provides PSF estimation, sub-resolution detection,
+effective sample size, weighted measurement and the size-dependent bias model. It is not
+yet *central*. The main condensate pipelines should automatically attach
+``equivalent_radius / PSF_radius`` and classify each object as **unresolved**, **marginally
+resolved** or **adequately resolved** — reporting integrated intensity and localisation for
+unresolved objects rather than apparent morphology or concentration. Upscaling must never
+change the classification.
+
+**Where:** the consumers are ``feature_analysis_tools.py`` (``cell_analysis_func``,
+``puncta_analysis_func``) and the 7 remaining ``regionprops(..., intensity_image=...)`` call
+sites listed in ``docs/audits/upscaling_and_measurement_audit_2026-07-10.md``. The engine
+(``partial_volume_tools``) is done.
+
+**Acceptance:** an object of radius ~1 PSF sigma is classified **unresolved**, and its
+morphology columns are ``NaN`` rather than a number; the classification is *identical*
+whether or not the image was upscaled first (this is the test that catches the whole
+class of error).
+
+.. rubric:: FRAP — model identifiability
+
+The reaction-diffusion model jointly fits mobile fraction, bound fraction, D and k_off. A
+single recovery curve commonly cannot identify all four, and a numeric Hessian does not
+detect *structural* non-identifiability — it will happily return standard errors for a
+parameter the data cannot constrain. Needed: profile likelihood; a parameter-correlation
+matrix; fixed-k_off / fixed-D / pure-diffusion alternatives; AICc or cross-validation;
+simulation-based identifiability checks using the *actual* acquisition schedule; and an
+explicit **"descriptive only"** state when the models are indistinguishable.
+
+Also: normalisation-aware bleach-depth estimation (the 30-point quadratic extrapolation is
+unstable and sampling-rate dependent), reference-trace quality scoring for the photofading
+correction, and ROI-geometry checks for the Soumpasis (circular) and rectangular models.
+
+**Where:** ``frap_tools.py`` — the reaction-diffusion fit and its numeric Hessian.
+
+**Acceptance:** generate FRAP curves from **known** (mobile fraction, bound fraction, D,
+k_off) using the *actual* acquisition schedule (frame interval, bleach duration, number of
+pre-bleach frames). The fit must either (a) recover all four within a stated tolerance, or
+(b) report ``descriptive_only`` — and it must **not** return four confident numbers when the
+data cannot constrain them. Construct at least one deliberately non-identifiable case (fast
+binding, slow sampling) and assert that it is *detected*, not fitted.
+
+.. rubric:: VPT — heterogeneity, reference frame, identifiability
+
+* **Bulk-sampling is assumed, not demonstrated.** Interface exclusion helps but does not
+  prove homogeneous bulk sampling. Needed: viscosity vs distance from the interface;
+  D vs local condensate intensity; D vs bead brightness / aggregate class; spatial
+  variation across the host; trajectory confinement; immobile/stuck fractions. Report a
+  single viscosity **only** if these are reasonably homogeneous. (The ``Measurement``
+  assumption ``bulk_sampling`` exists and is currently accepted on trust.)
+* **Drift correction conflates reference frames.** Centre-of-mass correction can subtract
+  genuine coherent material motion. Offer explicit modes — stage drift from an external
+  reference, global image registration, host-condensate translation, median probe
+  displacement, none — and **store which physical frame of reference was used**.
+* **D-alpha-sigma_loc covariance.** Over a short lag range these are strongly correlated.
+  Add profile-likelihood or bootstrap intervals and a correlation diagnostic. Do not infer
+  anomalous diffusion from an unconstrained point estimate of alpha — in viscous-dominated
+  media the true alpha *is* 1, so a fitted alpha far from it usually indicates linking
+  artefacts, not physics.
+* **Evans conversion.** The plots no longer hide negative moduli (1.5.380). Still owed:
+  explicit output classes (supported / edge-affected / sign-inconsistent / insufficiently
+  constrained frequency ranges) and acknowledgement that the 2D-to-3D isotropy conversion
+  is an assumption.
+* **Active microrheology module** (optical tweezers, C-Trap). This is the *correct*
+  technique when the G'/G'' crossover is the question — passive VPT cannot reach it for
+  condensate-range viscosities. The moduli plot now says so; the module is the follow-through.
+
+**Where:** ``vpt_tools.py`` (``viscosity_measurement`` already declares the
+``bulk_sampling`` assumption and currently accepts it **on trust** — that is the hook);
+``condensate_physics_tools.py:1341`` for the Evans output classes; ``vpt_ui.py`` for the
+drift-mode selector.
+
+**Acceptance (bulk sampling):** the ``bulk_sampling`` assumption must be *computed*, not
+passed in. Concretely: correlate per-track D against distance-from-interface and against
+bead brightness; if either correlation is significant, mark the assumption ``VIOLATED`` and
+the viscosity ``NOT_INTERPRETABLE``. Construct a synthetic case where beads near the
+boundary genuinely diffuse more slowly and assert it is caught.
+
+**Acceptance (alpha):** on Brownian tracks with a known alpha = 1, the fitted alpha must not
+be reported as anomalous. Add a profile-likelihood or bootstrap interval for alpha and assert
+it **contains 1** — the current point estimate can wander from 1 through D-alpha-sigma
+covariance alone, and in viscous-dominated media that is *always* an artefact.
+
+**Acceptance (drift):** applying centre-of-mass drift correction to a synthetic dataset in
+which the host condensate genuinely translates must **not** remove the real motion silently —
+the chosen reference frame must be recorded with the result.
+
+.. rubric:: Colocalization — question-first, with honest nulls
+
+* **Classify the question before offering coefficients**: intensity covariation
+  (Pearson/Spearman/ICQ); fractional enrichment (thresholded Manders); binary overlap
+  (Jaccard/Dice); object association (centroid/interface distance with a null model);
+  spatial displacement (cross-correlation and lag). At present a user can generate a large
+  table of correlated metrics without knowing which one answers their question.
+* **Threshold sensitivity.** Manders without a defensible threshold is dominated by
+  background. Report M1/M2 over a threshold grid and quantify stability; distinguish masks
+  derived independently from masks derived from the same images.
+* **Null models.** Pixel scrambling violates spatial autocorrelation and inflates
+  significance. Block scrambling is better, but the block size should be **inferred from the
+  measured spatial correlation length**, not typed in. For object-based coloc, use spatial
+  nulls constrained by cell shape, compartment, forbidden regions, object-size distribution
+  and boundary preference — uniform randomisation inside a cell is usually not adequate.
+* **Replication unit.** Pixels and objects within one cell are not biological replicates.
+  Output hierarchical tables (pixel/object -> cell -> field -> experiment) and identify the
+  correct inferential unit.
+
+**Where:** ``pixel_wise_corr_analysis_tools.py`` (coefficients + the scrambling null),
+``obj_based_coloc_analysis_tools.py``, ``two_channel_coloc_tools.py``.
+
+**Acceptance:** on two channels that are **independent by construction** but each spatially
+autocorrelated (smoothed noise), the null must return a non-significant p-value. Pixel
+scrambling **fails this test** — that is the whole point. Block scrambling with a block size
+inferred from the measured correlation length must pass it.
+
+.. rubric:: N&B and SpIDA — calibration before absolute claims
+
+* **N&B**: support per-pixel sCMOS offset and variance maps; account for gain and excess
+  noise factor; estimate temporal autocorrelation and the *effective* independent frame
+  count; detect immobile structure and slow drift; flag saturated and digitisation-limited
+  pixels; consider covariance-based / time-lagged variance to reduce shot-noise bias.
+  Until a camera calibration map **and** a monomeric reference are supplied, label the
+  output **apparent brightness**. Replace the 4-frame minimum with explicit adequacy tiers
+  (cannot compute / computes but unreliable / recommended / well sampled) — 4 frames is
+  mathematically sufficient and scientifically useless.
+* **SpIDA**: validate against synthetic images generated with the *same* PSF, detector
+  noise, pixelation and occupancy assumptions; add exact or numerically-convolved
+  single-particle basis functions; fit by likelihood/deviance rather than least squares on
+  histogram counts; propagate background, gain and PSF uncertainty; reject multimodal or
+  spatially heterogeneous ROIs. Return an assumptions/QC table alongside the fitted states.
+
+**Where:** ``nb_tools.py`` (the 4-frame minimum is at lines 104 and 168), ``spida_tools.py``.
+
+**Acceptance (N&B):** simulate a movie of *known* N and B with Poisson shot noise, an sCMOS
+offset/variance map and a known gain; recover N and B within a stated tolerance. Then verify
+the frame-count tiers are honest: at 4 frames the tool must say **"computes but unreliable"**
+and demonstrate (by repetition) that the variance estimate is not stable.
+
+**Acceptance (SpIDA):** recover a known monomer/dimer mixing ratio from images synthesised
+with the same PSF, detector noise, pixelation and occupancy. Until it does, label the output
+exploratory.
+
+.. rubric:: In-vitro thermodynamics and dynamics
+
+* **Partition coefficient**: estimate the dilute phase from an **annular / local** region
+  per droplet, excluding the interface, neighbouring droplets, illumination gradients and
+  out-of-sample background. Subtract the background offset **before** forming the ratio.
+  **Detector saturation should invalidate the coefficient, not lower-bound it** — a
+  saturated dense phase makes the ratio meaningless, not merely conservative. (Small,
+  self-contained, and worth doing early.)
+* **Coarsening**: a fitted radius-time exponent cannot distinguish Ostwald ripening,
+  Brownian coalescence, sedimentation-driven coalescence, active growth, or *changing
+  segmentation sensitivity* — that last one is the insidious case. Report the supporting
+  signatures (number density vs time, total dense-phase area, size distribution,
+  disappearance without contact, fusion-event rate, centroid velocity, sedimentation
+  direction, mass/intensity conservation) and label the exponent **descriptive** unless
+  they are consistent.
+* **Fusion**: verify that a fusion actually occurred (two objects became one; no third
+  entered; segmentation stayed stable; the post-fusion object reached a plateau; enough
+  early-time samples exist) before fitting a relaxation time, and do not convert it to an
+  inverse capillary velocity unless the geometric and material assumptions hold. Merge/
+  fission classification from overlap alone confuses true fusion with axial crossing,
+  threshold-induced joining, projection overlap and transient segmentation failure — use
+  intensity conservation, contour evolution and pre/post topology to assign an event
+  confidence.
+
+**Where:** ``invitro_tools.py:860`` ``partition_coefficient_field`` (saturation + local
+background — **small, self-contained, do this first**); coarsening and fusion fits in the
+same module and ``fusion_tools.py``.
+
+**Acceptance (partition):** on a synthetic image where the dense phase is **clipped at the
+detector maximum**, the coefficient must be returned as *invalid*, not as a number. A
+saturated ratio is not a lower bound — it is meaningless, because the numerator has been
+truncated by an unknown amount.
+
+**Acceptance (coarsening):** generate droplet populations under Ostwald ripening and under
+Brownian coalescence with the *same* radius-time exponent, and show that the supporting
+signatures (number density, total area, mass conservation) distinguish them. If they do not,
+the exponent must be labelled descriptive.
+
+.. rubric:: Spatial statistics and topology
+
+* **Edge correction and null models** for Ripley's K/L, pair correlation and
+  nearest-neighbour distance: irregular cell boundaries, spatially varying available area,
+  object exclusion radius, inhomogeneous density, finite object size, multiple cells and
+  fields. Report **Monte Carlo envelopes** from the relevant null, not just the observed
+  statistic. An inhomogeneous Poisson or compartment-constrained null is usually more
+  appropriate than complete spatial randomness.
+* **Voronoi/Delaunay** metrics are unstable near boundaries: exclude or correct boundary
+  objects and report the affected fraction.
+* **Persistent topology** — the audit's view (and ours) is that this is the most
+  *differentiating* direction available, and that threshold dependence is the blocker. The
+  stronger design is ``image -> physically calibrated scale space -> filtration ->
+  persistence -> summary`` rather than ``image -> one normalised threshold series ->
+  topology``. Add persistence diagrams and landscapes, bootstrap stability, intensity- and
+  scale-based filtration, explicit mask-boundary treatment, topology on synthetic nulls,
+  separation of object topology from nuclear-territory topology, and a PSF-aware minimum
+  feature persistence.
+
+**Where:** ``spatial_randomness_tools.py``, ``spatial_acf_tools.py``, ``topology_tools.py``.
+
+**Acceptance (nulls):** place objects with a *known* clustering strength inside an irregular
+compartment. A CSR null must report significant clustering for objects that are, in truth,
+uniformly distributed *within the available area* — that is the failure mode. The
+compartment-constrained null must not.
+
+**Acceptance (topology):** the persistence summary of a synthetic structure must be
+**stable** under a change of intensity scaling and under added noise at the PSF scale.
+Threshold dependence is the current blocker; this is the test that demonstrates it is
+solved.
+
+.. rubric:: Force-distance
+
+Model fitting should account for force- and extension-calibration uncertainty, trap
+compliance, baseline drift, loading-rate dependence and correlated residuals; select between
+extensible and inextensible forms; and check persistence- vs contour-length identifiability.
+Rip detection should return a confidence and its sensitivity to the smoothing parameters,
+and smoothing should be defined relative to the physical loading rate and bandwidth rather
+than a point count. Contour increments converted to nucleotide counts should **propagate
+uncertainty** rather than round a point estimate.
+
+**Where:** ``fd_curve_tools.py``.
+
+**Acceptance:** on synthetic FD curves with a known contour-length increment, the reported
+nucleotide count must come with an interval that **contains the truth**, and the rip-detection
+confidence must fall when the smoothing window is varied across a reasonable range (i.e. the
+sensitivity must be *reported*, not hidden).
+
+.. rubric:: Performance (none of these affect correctness — except the last)
+
+* **Fuse the repeated frame passes.** Global min/max, temporal-correlation estimation,
+  preprocessing and QC each currently touch every frame. One streaming pass: read frame ->
+  update intensity stats -> update QC -> preprocess -> write.
+* **Bound the process-pool submission** to ~2-4x ``n_workers`` rather than one future per
+  frame (memory on long movies).
+* **Remove the remaining full-stack zarr materialisations** (temporal smoothing, tri-planar
+  operations); use overlapping temporal chunks and write incrementally.
+* **Choose zarr chunk shape by access pattern** and select compression by benchmark rather
+  than globally.
+* **Do not parallelise tiny frames indiscriminately** — process startup, serialisation and
+  disk contention can exceed the compute saving. Auto-select serial/thread/process/GPU by
+  workload.
+* **Cache identity must include the code version and every scientifically relevant
+  parameter.** ``ts_cache_manager`` is a good base, but a cache keyed on incomplete identity
+  is a **correctness** hazard, not a performance one: it will silently serve a result
+  computed with different parameters. This belongs in the correctness bucket.
+
+.. rubric:: Packaging
+
+``requires-python = ">=3.12,<3.13"`` blocked the auditor's 3.13 environment. Decide whether
+that upper pin reflects a real dependency constraint or is merely conservative.
+
+
+
 Near-term UX & interaction
 --------------------------
 

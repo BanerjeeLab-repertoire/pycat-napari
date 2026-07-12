@@ -1346,7 +1346,6 @@ _STEP_MAP = {
     'sacf_analysis':            replay_sacf_analysis,
     'ts_cellpose_keyframe':      replay_ts_cellpose_keyframe,
     'spatial_metrology':        lambda s,p,pa,o: print('[PyCAT Batch]   Spatial metrology skipped in headless mode.'),
-    'morphological_complexity':        lambda s,p,pa,o: print('[PyCAT Batch]   morphological_complexity skipped.'),
     'dynamic_spatial':        lambda s,p,pa,o: print('[PyCAT Batch]   dynamic_spatial skipped.'),
     'organizational_metrics':        lambda s,p,pa,o: print('[PyCAT Batch]   organizational_metrics skipped.'),
     'export_timeseries_video':            lambda s,p,pa,o: print('[PyCAT Batch]   Video export skipped in headless mode.'),
@@ -1463,6 +1462,37 @@ _STEP_MAP = {
 
 
 def register_all_steps(bp: "BatchProcessor"):
+    # A duplicate key in _STEP_MAP is silently swallowed by Python (the later
+    # entry wins), which makes it a latent trap: someone implements a real
+    # replay handler, a stale skip-stub further down the dict overrides it, and
+    # they debug a handler that never runs. `morphological_complexity` was
+    # registered twice for exactly this reason. The dict literal cannot report
+    # it, so check the SOURCE for repeated keys at import time and say so.
+    _warn_on_duplicate_step_keys()
     for name, fn in _STEP_MAP.items():
         bp.register_step(name, fn)
     print(f"[PyCAT Batch] Registered {len(_STEP_MAP)} headless replay steps.")
+
+
+def _warn_on_duplicate_step_keys():
+    """Report any step name written more than once in the _STEP_MAP literal."""
+    try:
+        import ast, inspect, collections
+        tree = ast.parse(inspect.getsource(inspect.getmodule(register_all_steps)))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(t, ast.Name) and t.id == "_STEP_MAP"
+                       for t in node.targets):
+                continue
+            if not isinstance(node.value, ast.Dict):
+                continue
+            keys = [k.value for k in node.value.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+            dups = [k for k, n in collections.Counter(keys).items() if n > 1]
+            if dups:
+                print("[PyCAT Batch] WARNING: duplicate replay step name(s) in "
+                      f"_STEP_MAP: {dups}. The LAST definition wins and the "
+                      "earlier one is silently discarded.")
+    except Exception:
+        pass

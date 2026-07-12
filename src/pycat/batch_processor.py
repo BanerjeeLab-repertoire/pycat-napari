@@ -669,7 +669,19 @@ class BatchProcessor:
 
         The callable signature must be:
             fn(viewer, image_path: Path, params: dict, output_dir: Path) -> None
+
+        Registering the same NAME twice is REJECTED, not silently overwritten.
+        A plain dict assignment keeps the last writer and discards the first, which
+        makes the registry a latent trap: implement a real replay handler, let a stale
+        skip-stub further down the map override it, and you debug a handler that never
+        runs. `morphological_complexity` was registered twice for exactly this reason.
+        Both were no-ops so nothing broke -- but the next one might not be.
         """
+        if name in self.step_registry and self.step_registry[name] is not fn:
+            raise ValueError(
+                f"Batch step {name!r} is already registered. Registering it twice "
+                f"would silently discard the earlier handler. Remove the duplicate "
+                f"rather than letting the last one win.")
         self.step_registry[name] = fn
 
     # ------------------------------------------------------------------

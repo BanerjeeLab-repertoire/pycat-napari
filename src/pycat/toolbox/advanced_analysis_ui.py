@@ -362,7 +362,13 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
         dr  = ui_instance.central_manager.active_data_class.data_repository
         mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
-        prog_d.setMaximum(5); progress_emit and progress_emit(0, 5); prog_d.setVisible(True)
+        # NOTE: this used to call `progress_emit(0, 5)` here. `progress_emit` is a
+        # PARAMETER of the nested `_task` below, not a variable of this scope, so the
+        # name did not exist yet and this line raised NameError — killing the handler
+        # before the worker was even created. The Dynamic Spatial Analysis button
+        # could never have run. There is nothing to emit TO at this point anyway (no
+        # worker exists), so the progress bar is simply set directly.
+        prog_d.setMaximum(5); prog_d.setValue(0); prog_d.setVisible(True)
         run_d.setEnabled(False)
 
         def _task(progress_emit=None, should_cancel=None):

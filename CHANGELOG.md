@@ -4,6 +4,196 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.387] - 2026-07-10
+### Fixed — three widgets could never be constructed (UnboundLocalError, not NameError)
+``intensity_profile_tools``, ``molecular_counting_tools`` and
+``morphological_complexity_tools`` each use ``QSizePolicy`` a few lines into the widget
+builder — but the **only** import of it sat in a *later* ``else:`` branch of the **same
+function**.
+
+Because Python sees the name assigned somewhere in the function, it treats ``QSizePolicy``
+as a function-**local** for the entire scope. The earlier use therefore raises
+**``UnboundLocalError``**, not ``NameError`` — and it fires **unconditionally**, because the
+``else:`` branch is irrelevant to the hoisting. **Intensity Profile, Molecular Counting and
+Morphological Complexity were dead on arrival: the widgets could not be built at all.**
+
+Fixed by adding ``QSizePolicy`` to the early Qt import in each module, where it is actually
+first used.
+
+### Fixed — the guard from 1.5.386 missed this, so it has been extended
+The undefined-name guard checked only for names bound **nowhere** (``NameError``). It did
+not model **execution order**, so it saw the late import and considered the name bound. That
+is a guard giving a false sense of safety, which is worse than no guard.
+
+``tests/test_no_undefined_names.py`` now checks **two** shapes:
+
+1. **Unbound** — bound nowhere in the enclosing scope chain (``NameError``).
+2. **Used before assignment** — the name *is* a local of the scope, but every binding of it
+   occurs *after* the use (``UnboundLocalError``).
+
+Check (2) is deliberately restricted to names bound **only by import statements**, where the
+binding line is unambiguous and no control-flow analysis is needed — that is where the real
+bugs were, and it keeps the check free of false positives. Validated three ways: it **now
+catches** the ``QSizePolicy`` bug it previously missed, it **passes** on the current codebase
+(0 findings), and it produces **no false positives** on legitimate late, conditional, or
+nested-function imports.
+
+### Changed — the batch registry now REJECTS duplicates instead of warning about them
+1.5.386 added a warning when ``_STEP_MAP`` contained a repeated key. The audit's stronger
+suggestion is right: reject at construction. ``BatchProcessor.register_step`` now raises if a
+name is registered twice with a *different* handler (re-registering the *same* function stays
+idempotent, so a reload does not break). This catches registry drift from **any** source, not
+just the dict literal. 68 steps, zero duplicates.
+
+### Note — the thread-safety concern about the Ripley block does not apply
+The audit suggested the ``mask_name`` fix (1.5.386) should also stop the worker from reading
+napari layers, since "reading napari layers from worker code creates thread/process-safety
+problems". Checked: ``_on_finished`` is connected to ``worker.finished``, a Qt signal
+delivered on the **UI thread** — it is not worker code, and the layer access there is
+legitimate. Separately, an AST sweep confirms **no ``QThread.run()`` body in the codebase
+touches ``viewer.layers``**. The general principle is sound; it simply is not violated here.
+Recorded so the correct code is not "fixed" into something worse.
+
+## [1.5.386] - 2026-07-10
+### Fixed — ticking "Ripley's L / PCF" silently produced no Ripley and no PCF
+A scope-correct static analysis of the whole codebase found one remaining undefined name,
+in the time-series pipeline the audit flagged but did not detail.
+
+``timeseries_condensate_tools.py`` reads ``mask_name`` inside ``_on_finished``, but
+``mask_name`` is a **local of ``_on_run``** — a *sibling* nested function. Siblings do not
+share locals: a closure sees the *enclosing* scope, not another nested function's frame.
+So the line raised ``NameError``.
+
+**And the error was swallowed.** The Ripley block sits inside ``try: ... except Exception``,
+so there was no crash and no warning — the user ticked the box, the analysis ran, and the
+**Ripley's L and PCF results simply never appeared**. That is worse than a crash: a crash
+gets reported; a silent omission gets accepted.
+
+Fixed using the idiom the file already uses for exactly this problem — a one-element list
+as a mutable cell (``_run_ripley_ref`` sits three lines above, with the comment *"mutable:
+set in _on_run, read in _on_finished"*). ``mask_name`` simply never got the same treatment.
+
+### Added — a guard so this class of bug cannot return silently
+``tests/test_no_undefined_names.py`` models Python's scoping properly (closures,
+comprehensions, lambdas, class bodies, ``global``/``nonlocal``) and fails on any name bound
+**nowhere** in its enclosing chain. Validated three ways: it passes on the current codebase
+(0 findings), it **catches all three** real bugs when they are reconstructed, and it
+produces **no false positives** on legitimate closures.
+
+This matters because Python does not catch these at import time. A ``NameError`` from a
+misplaced variable fires only when that *line* runs, so it can sit in a button handler
+indefinitely — and all three instances in this codebase were then wrapped in an
+``except Exception`` that converted the crash into a feature that quietly did nothing:
+
+* ``advanced_analysis_ui.py`` — ``progress_emit`` used three lines *before* the nested
+  ``_task`` that declares it as a parameter. The Dynamic Spatial Analysis button died
+  before the worker was created; it could never have run. (Fixed in this cycle.)
+* ``file_io.py`` — the body of a ``_has_structured_metadata`` method had been accidentally
+  merged into the tail of ``_apply_saved_tags_to_layer``, referencing a ``file_path`` that
+  is not a parameter there. It raised on **every tagged layer load** and swallowed it in
+  its own ``except Exception: return False``. Not restored: the job it described is already
+  done, and done better, by ``_tiff_multipage_undeclared`` (1.5.351), which checks the
+  actual axis *label* rather than merely whether some dims can be read.
+* ``timeseries_condensate_tools.py`` — the ``mask_name`` bug above.
+
+**The codebase now has zero undefined names.**
+
+### Fixed — a duplicate batch-registry entry, and a guard against the next one
+``_STEP_MAP`` registered ``'morphological_complexity'`` twice; Python silently keeps the
+later one. Both were no-op skip stubs here, so nothing broke — but it is a **latent trap**:
+implement a real replay handler at the first location, and a stale stub further down the
+dict overrides it, and you debug a handler that never runs. The duplicate is removed, and
+``register_all_steps`` now inspects the source and **warns loudly** if a step name is ever
+written twice. 68 steps, zero duplicates.
+
+## [1.5.385] - 2026-07-10
+### Changed — bead-radius provenance: a dropdown, not an essay (and the default is right)
+Corrections to 1.5.384 after review. The framework was right; the ergonomics and one
+default were not.
+
+- **The default radius source is now ``manufacturer``**, not ``assumed``. That is the
+  realistic case — bead radii come from the specification sheet — and it should not read
+  as a deficiency in the report.
+- **Deriving a radius from the image is flagged, not treated as fatal.** The physics is
+  still worth stating: the imaged blob is the bead **convolved with the PSF**, and for a
+  200 nm bead at ~1.2 NA the PSF is comparable to the bead itself, so the apparent size is
+  dominated by the optics — you would be measuring the microscope, and the viscosity would
+  come out too low. But comparing the apparent size to the specification as a **sanity
+  check** (does this look like the beads I bought? are they aggregated? is this the right
+  vial?) is good practice, and the warning now says so instead of implying the check itself
+  is an error.
+- **Provenance is captured as a dropdown** (``manufacturer`` / ``calibrated`` / ``metadata``
+  / ``assumed``) plus an optional free-text note, not as a sentence to retype every run. A
+  dropdown is one click and it is **structured** — it can be batched, queried and exported,
+  which a free-text string cannot. The full standard ("0.100 µm, manufacturer spec, ±5 %")
+  lives in the **tooltip**, where it teaches without demanding.
+- The source and note are stored with the result and in the recorded workflow step, so a
+  replayed or batched run carries the same provenance.
+- **Parameters that are *supposed* to be fitted are no longer flagged.** A diffusion
+  coefficient **is** the output of an MSD fit; marking it "not independently established"
+  is pedantic noise, and noise is how warnings get ignored. ``Parameter.expected_fitted``
+  distinguishes a legitimately-fitted value from one that should have come from a
+  specification. Temperature remains flagged — it is usually a room-temperature assumption,
+  and it sits inside *kT*.
+
+The viscosity summary is printed to the terminal after each microrheology run, so the
+number arrives with its assumptions attached rather than alone.
+
+## [1.5.384] - 2026-07-10
+### Added — measurements that can account for themselves (the audit's central thesis)
+The audit's summary is that PyCAT should move from *"can compute"* to
+*"can compute → passes assumptions → quantified uncertainty → physically interpretable"*,
+and that most methods stop at the first stage. Scored against the code, that is right:
+uncertainty exists in several places, but **nothing records what a number rests on**, and
+**nothing states when an assumption has failed**.
+
+``viscosity_from_diffusion`` is the sharpest example. It takes a bare ``float`` bead
+radius and returns a bare ``float`` viscosity. That float cannot tell you the two things
+most likely to make it wrong:
+
+* **Where the bead radius came from.** η = kT/(6πRD), so **η ∝ 1/R** — a radius 30 % wrong
+  makes the viscosity 30 % wrong, silently. Critically, a radius *measured from the image*
+  is **not** the physical radius: the imaged blob is broadened by the PSF, so a fitted
+  optical radius is systematically **too large** and the viscosity correspondingly **too
+  small**. Only a manufacturer specification or a bead-batch calibration should enter
+  Stokes-Einstein.
+* **Whether the probes sampled bulk material.** Stokes-Einstein assumes a bead in a
+  homogeneous continuum away from interfaces. Excluding beads near the host boundary helps
+  but does not *prove* bulk sampling — beads stick, sit in heterogeneous regions, or become
+  confined. If that fails, the number is not a bulk viscosity whatever the arithmetic says.
+
+**New ``pycat.utils.measurement``**: a ``Measurement`` carries its value **with** its
+uncertainty, the ``Parameter``s it depended on (each tagged ``CALIBRATED`` /
+``MANUFACTURER`` / ``METADATA`` / ``FITTED`` / ``ASSUMED`` / ``UNKNOWN``), the
+``Assumption``s it rests on (each ``HOLDS`` / ``VIOLATED`` / ``UNCHECKED``), and the
+``ValidationLevel`` of the method (``IMPLEMENTED`` → ``ANALYTICALLY_VALIDATED`` →
+``SIMULATION_VALIDATED`` → ``EXPERIMENTALLY_VALIDATED``). It derives an
+``Interpretability`` state, and when an assumption has failed it says so in plain English:
+
+> *"An assumption FAILED (physical_probe_radius). The number exists, but it should not be
+> reported as viscosity."*
+
+**New ``viscosity_measurement``** demonstrates it on PyCAT's deepest dependency chain
+(pixel size → detection → linking → MSD → D → Stokes-Einstein). Same arithmetic, three
+outcomes:
+
+* radius from a **manufacturer spec**, α = 1.01, bulk sampling verified → **interpretable**,
+  0.484 Pa·s [0.427, 0.544].
+* radius **fitted from the image** → **0.322 Pa·s (−33 %)** and marked **not
+  interpretable**, with the reason. The old function returns 0.322 with no indication
+  anything is wrong.
+* **α = 0.62** (not Brownian) and D correlating with distance from the interface → **both
+  assumptions fail**. Stokes-Einstein does not apply; the number is not a viscosity.
+
+The diffusion interval is propagated to a viscosity interval (η ∝ 1/D, so the bounds
+invert), and a fitted α far from 1 is flagged — because in the viscous-dominated media
+PyCAT normally measures, the **true α is 1**, so a fitted value far from it usually
+indicates linking artefacts or D–α–σ_loc covariance rather than genuine anomalous
+diffusion.
+
+``viscosity_from_diffusion`` is unchanged, so nothing breaks. This is the pattern the other
+physical outputs (partition coefficient, C_sat, FRAP mobile fraction, moduli) should adopt.
+
 ## [1.5.383] - 2026-07-10
 ### Fixed — the scientific tests could not run at all
 The audit reported that the test suite fails during **collection** because scientific

@@ -264,3 +264,85 @@ GENERAL LESSON: when acquisition metadata omits the scale, the pixel size is rec
 `objective_mag × relay_mag` and `camera_pixel_pitch` — this is exactly the information the
 pixel-size acquisition-profiles feature should let a user store per-instrument (a named profile
 like "Primovert-100x-1:1relay-Blackfly" encodes the optical train once).
+
+---
+
+## 7. Audit follow-ups that are lab-specific (2026-07 external code audit)
+
+The public, methodological backlog from this audit lives in
+`docs/source/development/roadmap.rst` under *"Scientific validity backlog"*. The items
+below reference **our** instruments, samples and workflow, so they stay here.
+
+### 7.1 The glycerol standard is the single highest-value validation we can run
+
+The audit's strongest recommendation is a three-tier validation scheme (analytical →
+imaging-realistic simulation → experimental standard). `ValidationLevel` in
+`pycat.utils.measurement` can now *declare* a level; nothing yet *earns* one.
+
+For VPT, the experimental tier is cheap and we already have the machinery:
+
+* A **glycerol/water dilution series** spans ~1 mPa·s to ~1 Pa·s with viscosities known
+  from published tables to better than a few percent, at a stated temperature.
+* VPT's **"no host / full frame"** mode was built precisely for this (bulk medium, no
+  condensate to segment).
+* It validates the *entire* chain at once — pixel size → detection → linking → MSD →
+  D → Stokes-Einstein — which is exactly the chain where a single wrong input (a pixel
+  size, a frame interval, a bead radius) silently propagates.
+
+This would move VPT from `EXPERIMENTALLY_VALIDATED` as an *assertion* (currently backed
+only by agreement with a hand analysis at ~8.3 Pa·s) to a fact with a quoted accuracy.
+**Do this before publishing any absolute viscosity.**
+
+Temperature matters here: glycerol viscosity is steeply temperature-dependent, and `kT`
+sits in Stokes-Einstein. Record the stage temperature, not the room temperature.
+
+### 7.2 Bead radius provenance — our actual practice
+
+Recorded so the code's guard rails match reality:
+
+* We take the bead radius from the **manufacturer's specification** (this is now the
+  default `radius_source` in the VPT panel).
+* We **do** compare the apparent imaged size against that specification as a sanity
+  check — it catches a wrong vial, aggregation, or a mis-set pixel size.
+* We would **never** feed an image-derived radius into Stokes-Einstein. The imaged blob
+  is the bead convolved with the PSF; for our 200 nm beads at ~1.2 NA the PSF is
+  comparable to the bead itself, so the apparent size is dominated by the optics. Doing so
+  would bias η low.
+
+The `physical_probe_radius` assumption in `viscosity_measurement` encodes this. It flags
+`FITTED` as a warning (not a fatal error), because the *check* is good practice — it is
+using it as the *input* that is wrong.
+
+### 7.3 Active microrheology (C-Trap) — the correct tool for the crossover
+
+Our condensates run from roughly water to well past honey. In that regime, at the lag
+times a camera can reach, the material is **viscous-dominated**: G′ is genuinely ≈ 0, and
+noise pushes it negative routinely (on a synthetic η = 7 Pa·s medium, 11 of 20 G′ points
+came out negative and 19 of 20 bootstrap CI bands straddled zero — *correct physics*, not
+error).
+
+**Passive VPT cannot resolve a G′/G″ crossover for these materials.** The moduli plots now
+say so explicitly (1.5.380) and point at active microrheology.
+
+The follow-through is the **optical-tweezers active-microrheology module** on the LUMICKS
+C-Trap: drive a trapped bead at known frequency and amplitude, measure the phase lag and
+amplitude response, and get G′/G″ directly across a frequency range passive tracking cannot
+reach. This is the module the plot is telling users they need.
+
+### 7.4 Sample-specific null models for spatial statistics
+
+The audit's point that "uniform randomisation inside a cell is usually not an adequate
+null" is particularly true for our systems: nuclear condensates are excluded from
+nucleoli, constrained by chromatin territories, and often boundary-preferring. A CSR null
+will report significant clustering for a spatial arrangement that is entirely explained by
+the compartment geometry. Any spatial-statistics claim we publish needs a
+compartment-constrained null, not CSR.
+
+### 7.5 Segmentation sensitivity as a coarsening confound
+
+The audit flags that a fitted coarsening exponent cannot distinguish Ostwald ripening from
+Brownian coalescence from **changing segmentation sensitivity over time**. That last one is
+ours to worry about: as condensates grow and brighten, a fixed threshold detects *more* of
+them and detects them *larger* — which mimics a growth law. Any coarsening exponent we
+report should be accompanied by the supporting signatures (number density, total dense-phase
+area, mass conservation) and by evidence that the segmentation did not drift.

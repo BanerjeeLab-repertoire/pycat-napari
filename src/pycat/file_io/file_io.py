@@ -272,25 +272,104 @@ class LayerDataframeSelectionDialog(QDialog):
         
         layout = QVBoxLayout()
 
-        # List all available layers with checkboxes
+        # List all available layers with checkboxes, annotated with their
+        # estimated on-disk size and whether they are RECONSTRUCTABLE.
+        #
+        # Two kinds of waste motivated this:
+        #  * An UPSCALED IMAGE carries no information its source didn't — it is a
+        #    pure interpolation, so saving a 4x upscale costs 16x the pixels for
+        #    nothing (measured: 484 kB -> 7.7 MB). It is reconstructable from the
+        #    source + the factor, so it is flagged and unticked by default.
+        #  * A MASK SEGMENTED AT HIGH RESOLUTION is NOT redundant — its sub-pixel
+        #    boundaries are real information that downscaling destroys (it can
+        #    merge touching objects). Those are never flagged as disposable.
         layout.addWidget(QLabel("Select Layers to Save:"))
+        _hint = QLabel(
+            "<span style='color:#aaa;font-size:9pt;'>Sizes are the compressed "
+            "estimate. Layers marked <span style='color:#e8a33d;'>reconstructable"
+            "</span> are pure interpolations of another layer (an upscale carries "
+            "no new information) — they're unticked by default. Masks segmented at "
+            "high resolution are <i>not</i> reconstructable and are never flagged."
+            "</span>")
+        _hint.setWordWrap(True)
+        layout.addWidget(_hint)
+
         self.layer_checkboxes = {}
-        # Create checkboxes for each layer
+
+        def _est_size_mb(layer):
+            """Rough compressed-size estimate: masks/labels compress ~100x, images
+            ~1.5x. Cheap heuristic — no need to actually compress to inform a
+            checkbox."""
+            try:
+                d = layer.data
+                n = int(np.prod(d.shape))
+                # right-sized bytes-per-pixel (matches what the saver now writes)
+                is_label = (type(layer).__name__ == 'Labels')
+                if is_label:
+                    try:
+                        mx = int(np.asarray(d[0] if d.ndim == 3 else d).max())
+                    except Exception:
+                        mx = 65535
+                    bpp = 1 if mx <= 255 else 2
+                    ratio = 100.0           # masks compress enormously
+                else:
+                    bpp = 2
+                    ratio = 1.5             # real image data barely compresses
+                return (n * bpp / ratio) / (1024 * 1024)
+            except Exception:
+                return 0.0
+
+        def _is_reconstructable(layer):
+            """True only for layers that are pure interpolations of another layer
+            (upscaled IMAGES). Deliberately conservative: never flags a mask, since
+            a mask segmented at high res holds real sub-pixel information."""
+            try:
+                if type(layer).__name__ == 'Labels':
+                    return False            # never call a segmentation disposable
+                name = str(layer.name).lower()
+                if 'upscal' in name:
+                    return True
+                # Tag-based: provenance says it was derived by an upscale step.
+                try:
+                    from pycat.utils.layer_tags import get_tags
+                    tags = get_tags(layer) or {}
+                    op = str(tags.get('operation', '')).lower()
+                    if 'upscal' in op:
+                        return True
+                except Exception:
+                    pass
+                return False
+            except Exception:
+                return False
+
+        default_checked_layers = [
+            "Labeled Cell Mask",
+            "Cell Labeled Puncta Mask",
+            "Overlay Image",
+            "Pre-Processed Fluorescence Image",
+        ]
+
+        _total_all = 0.0
         for layer in self.layers:
-            checkbox = QCheckBox(layer.name)
-            self.layer_checkboxes[layer.name] = checkbox  # Use dictionary assignment instead of append
+            mb = _est_size_mb(layer)
+            _total_all += mb
+            recon = _is_reconstructable(layer)
+            label = f"{layer.name}   ({mb:.1f} MB)"
+            if recon:
+                label += "   — reconstructable (upscale of another layer)"
+            checkbox = QCheckBox(label)
+            if recon:
+                checkbox.setStyleSheet("color: #e8a33d;")
+                checkbox.setToolTip(
+                    "This layer is an upscaled copy of another layer. Upscaling "
+                    "adds no information — it can be recreated from the source "
+                    "layer and the scale factor, so saving it wastes space "
+                    "(a 4x upscale is 16x the pixels). Unticked by default.")
+            self.layer_checkboxes[layer.name] = checkbox
             layout.addWidget(checkbox)
 
-            # List of default checked layer names
-            default_checked_layers = [
-                "Labeled Cell Mask", 
-                "Cell Labeled Puncta Mask", 
-                "Overlay Image", 
-                "Pre-Processed Fluorescence Image"
-            ]
-
-            # Set the default state of some checkboxes
-            if layer.name in default_checked_layers:
+            # Default on for the usual results; never default-on a reconstructable.
+            if layer.name in default_checked_layers and not recon:
                 checkbox.setChecked(True)
 
 
@@ -1663,17 +1742,20 @@ class FileIOClass:
                         store['edges'].append(e)
         except Exception as _e:
             debug_log("file_io: applying saved tags failed", _e)
-        """True if the file carries recognizable imaging-structure metadata
-        (dimension sizes / pixel size), i.e. AICSImage can read its dims. Used to
-        decide whether we must ask the user what they loaded."""
-        try:
-            from aicsimageio import AICSImage
-            img = AICSImage(file_path)
-            d = img.dims
-            # Any explicit non-trivial dim ordering counts as structure present.
-            return bool(getattr(d, 'order', None))
-        except Exception:
-            return False
+        # NOTE: an orphaned block used to sit here — the body of a
+        # `_has_structured_metadata` method (docstring and all) that had been
+        # accidentally merged into this one. It referenced `file_path`, which is
+        # not a parameter of this method, so it raised NameError on EVERY tagged
+        # layer load and swallowed it in its own `except Exception: return False`
+        # — silent, and it also made this method return False instead of None.
+        #
+        # It was NOT restored, because the job it described ("decide whether we
+        # must ask the user what they loaded") is already done, and done better,
+        # by `_tiff_multipage_undeclared` (1.5.351): that checks the actual axis
+        # LABEL rather than merely whether AICSImage can read some dims, which is
+        # the distinction that matters (a plain multipage TIFF has dims but no
+        # declared T/Z axis). Reinstating the weaker check would add a redundant
+        # code path that nothing calls.
 
     def add_image_or_mask(self, file_path=None):
         """Add a file to the CURRENT session without clearing, routing it to the
@@ -3733,14 +3815,65 @@ class FileIOClass:
             f = data[t]
             return np.asarray(f).astype(np.float32) if layer_type == 'Image' else np.asarray(f)
 
+        def _minimal_label_dtype(arr):
+            """Smallest lossless integer dtype for a label/mask array.
+
+            Everything used to be force-cast to uint16, which wastes headroom: a
+            BINARY mask needs 1 bit and a 40-cell label mask needs 6. Compression
+            hides most of that (the high byte is all zeros), but not all of it —
+            measured ~1.3x on masks — and it is free to just not waste it.
+            """
+            a = np.asarray(arr)
+            try:
+                mx = int(a.max()) if a.size else 0
+            except Exception:
+                return np.uint16
+            if mx <= 1:
+                return np.uint8       # binary mask (TIFF has no 1-bit path here)
+            if mx <= 255:
+                return np.uint8       # up to 255 labels
+            if mx <= 65535:
+                return np.uint16
+            return np.uint32          # >65k objects: don't silently wrap!
+
+        def _to_label_array(arr):
+            return np.asarray(arr).astype(_minimal_label_dtype(arr))
+
         def _to_uint16(arr):
-            arr = np.asarray(arr).astype(np.float32)
-            mn, mx = arr.min(), arr.max()
-            if mx <= 1.0:
-                arr = arr * 65535
-            elif mx > 65535:
-                arr = (arr - mn) / (mx - mn + 1e-8) * 65535
-            return arr.astype(np.uint16)
+            """Convert an IMAGE for saving without inventing precision.
+
+            The previous version rescaled anything with max<=1.0 by 65535 and
+            min-max stretched anything above 65535 — i.e. it CHANGED THE PIXEL
+            VALUES, fabricating 16-bit precision for 8-bit data and silently
+            renormalising floats. That is a correctness problem, not just a size
+            one. Now: integer data is preserved as-is in the smallest lossless
+            integer type, and float data is only converted when it is safe to do
+            so (float images that are genuinely outside integer range keep their
+            float dtype, handled by the caller).
+            """
+            a = np.asarray(arr)
+            if np.issubdtype(a.dtype, np.integer):
+                mx = int(a.max()) if a.size else 0
+                if mx <= 255:
+                    return a.astype(np.uint8)      # don't upcast 8-bit sources
+                if mx <= 65535:
+                    return a.astype(np.uint16)
+                return a.astype(np.uint32)
+            # Floating point: preserve values; only narrow when lossless.
+            af = a.astype(np.float32)
+            finite = af[np.isfinite(af)] if af.size else af
+            if finite.size and float(np.min(finite)) >= 0:
+                mx = float(np.max(finite))
+                # Integral-valued floats (e.g. a mask or a counted image) can be
+                # stored exactly as ints.
+                if np.all(finite == np.rint(finite)):
+                    if mx <= 255:
+                        return af.astype(np.uint8)
+                    if mx <= 65535:
+                        return af.astype(np.uint16)
+            # Genuine continuous float data — keep float32 rather than quantising
+            # it (quantising is lossy and the old code did it silently).
+            return af
 
         if layer_type in ('Labels',):
             if hasattr(data, 'shape') and len(data.shape) == 3:
@@ -3765,22 +3898,38 @@ class FileIOClass:
                     pass
                 _n, _h, _w = (int(data.shape[0]), int(data.shape[1]),
                               int(data.shape[2]))
+                # Right-size the label dtype from the GLOBAL max across frames —
+                # deciding from frame 0 alone would silently WRAP labels if a later
+                # frame has more objects (e.g. 300 cells in frame 40 vs 200 in
+                # frame 0). One streaming pass over max() is cheap next to the I/O.
+                _gmax = 0
+                for t in range(_n):
+                    try:
+                        _gmax = max(_gmax, int(np.asarray(data[t]).max()))
+                    except Exception:
+                        _gmax = 65535
+                        break
+                _dt = (np.uint8 if _gmax <= 255
+                       else np.uint16 if _gmax <= 65535 else np.uint32)
 
                 def _mask_frames():
                     for t in range(_n):
-                        yield np.asarray(data[t]).astype(np.uint16)
+                        yield np.asarray(data[t]).astype(_dt)
 
                 tifffile.imwrite(
                     out_path, _mask_frames(),
-                    shape=(_n, _h, _w), dtype=np.uint16,
+                    shape=(_n, _h, _w), dtype=_dt,
                     compression='zlib',
                     metadata={'axes': _axes},
                     description=_pycat_tag('mask'),
                     bigtiff=True)
                 print(f"[PyCAT] Saved 3D label stack → {out_path} "
-                      f"(compressed, axes={_axes})")
+                      f"(compressed, axes={_axes}, {np.dtype(_dt).name}, "
+                      f"max label {_gmax})")
             else:
-                arr = np.asarray(data).astype(np.uint16)
+                # 2D label mask → PNG (already compressed), right-sized: a binary
+                # mask or a <256-object label image is uint8, not uint16.
+                arr = _to_label_array(data)
                 out_path = f"{save_name}_{safe_name}.png"
                 sk.io.imsave(out_path, arr)
 
@@ -3815,20 +3964,26 @@ class FileIOClass:
                 # Stream the frames: imwrite accepts a generator with shape=/dtype=,
                 # so we get compression + a declared axis WITHOUT materialising the
                 # whole movie in RAM (the original per-frame writer streamed too).
+                # The dtype is decided from the FIRST frame (right-sized, never
+                # upcast) and used for the whole stack.
                 _h, _w = int(shape[1]), int(shape[2])
+                _probe = _to_uint16(_frame(0))
+                _dt = _probe.dtype
 
                 def _frames():
-                    for t in range(n_t):
-                        yield _to_uint16(_frame(t))
+                    yield _probe
+                    for t in range(1, n_t):
+                        yield _to_uint16(_frame(t)).astype(_dt, copy=False)
 
                 tifffile.imwrite(
                     out_path, _frames(),
-                    shape=(n_t, _h, _w), dtype=np.uint16,
+                    shape=(n_t, _h, _w), dtype=_dt,
                     compression='zlib',
                     metadata={'axes': _axes},
                     description=_pycat_tag('image'),
                     bigtiff=True)
-                print(f"[PyCAT] Saved stack → {out_path} (compressed, axes={_axes})")
+                print(f"[PyCAT] Saved stack → {out_path} "
+                      f"(compressed, axes={_axes}, {_dt})")
             else:
                 # 2D image or RGB
                 arr = np.asarray(data)
