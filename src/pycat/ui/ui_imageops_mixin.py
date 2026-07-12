@@ -63,6 +63,87 @@ class _ImageOpsWidgetsMixin:
         """Add a widget for upscaling images, optionally in a separate dock."""
         upscaling_layout = QVBoxLayout()
         self.add_text_label(upscaling_layout, 'Upscale Images', bold=True) # Add widget title label
+
+        # ── Scale advisor ────────────────────────────────────────────────────
+        # Upscaling adds NO information. Its only legitimate purpose is to fix a
+        # scale mismatch between the objects and the ALGORITHM — so whether it is
+        # needed depends entirely on which segmentation method comes next.
+        # Cellpose has a learned ~30px scale prior and genuinely benefits; Otsu
+        # thresholds a histogram and has no spatial scale at all, so upscaling
+        # cannot help it and measurably HURTS (interpolation blurs the bimodality
+        # Otsu depends on). Rather than let the user guess, measure the objects and
+        # say so.
+        from PyQt5.QtWidgets import QComboBox as _QComboBox, QLabel as _QLabel
+        _adv_row = QHBoxLayout()
+        _adv_row.addWidget(_QLabel("Next segmentation method:"))
+        self._upscale_method_dd = _QComboBox()
+        self._upscale_method_dd.addItems([
+            'cellpose', 'stardist', 'otsu', 'local_threshold',
+            'blob_log', 'random_forest', 'watershed'])
+        self._upscale_method_dd.setToolTip(
+            "Which method will you segment with? Upscaling only helps methods that "
+            "have a fixed internal scale (Cellpose, StarDist). Threshold and "
+            "blob-detection methods are scale-free or scale-adaptive — upscaling "
+            "does not help them and can make them worse.")
+        _adv_row.addWidget(self._upscale_method_dd)
+        upscaling_layout.addLayout(_adv_row)
+
+        _advise_btn = QPushButton("Do I need to upscale?")
+        _advice = _QLabel("")
+        _advice.setWordWrap(True)
+        _advice.setStyleSheet("font-size:9pt; padding:4px;")
+
+        def _on_advise():
+            from pycat.toolbox.segmentation_scale_advisor import (
+                advise_upscaling, measure_object_diameter_px)
+            import napari as _np_
+            method = self._upscale_method_dd.currentText()
+
+            # Prefer a size the user already established; otherwise measure it.
+            d = 0.0
+            try:
+                dr = self.central_manager.active_data_class.data_repository
+                d = float(dr.get('cell_diameter', 0) or dr.get('object_size', 0) or 0)
+            except Exception:
+                d = 0.0
+            if not d:
+                try:
+                    sel = [l for l in self.viewer.layers.selection
+                           if isinstance(l, _np_.layers.Image)]
+                    if sel:
+                        from pycat.file_io.file_io import (layer_is_stack,
+                                                           extract_2d_plane)
+                        lay = sel[0]
+                        fi = 0
+                        if layer_is_stack(lay.data):
+                            try:
+                                fi = int(self.viewer.dims.current_step[0])
+                            except Exception:
+                                fi = 0
+                        plane = extract_2d_plane(lay.data, frame_index=fi, dtype=None)
+                        d = measure_object_diameter_px(plane)
+                except Exception:
+                    d = 0.0
+
+            r = advise_upscaling(d, method)
+            colour = {'ok': '#5cb85c', 'suggest': '#f0a500',
+                      'warn': '#d9534f'}.get(r['level'], '#aaa')
+            txt = r['reason'].replace('**', '')
+            _advice.setText(
+                f"<span style='color:{colour};'>{txt}</span>")
+            try:
+                self._record('upscale_advice', {
+                    'method': method,
+                    'object_diameter_px': (float(d) if d else None),
+                    'recommended_factor': int(r['factor']),
+                    'needed': bool(r['needed'])})
+            except Exception:
+                pass
+
+        _advise_btn.clicked.connect(_on_advise)
+        upscaling_layout.addWidget(_advise_btn)
+        upscaling_layout.addWidget(_advice)
+
         upscaling_checkbox = QCheckBox("Update Data Class") # Add a checkbox for updating the data class
         upscaling_checkbox.setChecked(True) # Set the checkbox to checked by default
         upscaling_layout.addWidget(upscaling_checkbox) # Add the checkbox to the layout

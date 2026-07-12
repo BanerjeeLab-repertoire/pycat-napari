@@ -4,6 +4,58 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.377] - 2026-07-10
+### Added — upscaling is now *advised* and *resolved*, not guessed
+Two changes that together close the upscaling problem properly, rather than warning
+about it after the fact.
+
+**1. Segmentation scale advisor — "do I need to upscale, and by how much?"**
+
+Upscaling adds no information; its **only** legitimate purpose is to fix a scale
+mismatch between your objects and the **algorithm**. So the answer depends entirely
+on which segmentation method comes next — and for most methods the answer is *don't*:
+
+.. list-table::
+
+   * - **Cellpose / StarDist**
+     - Have a *learned* scale prior (Cellpose's features were trained on ~30 px
+       objects). A small object is not merely small — it is outside the range the
+       network's features can read. Upscaling genuinely helps.
+   * - **Otsu and other thresholds**
+     - Threshold the intensity **histogram** and have no spatial scale at all.
+       Upscaling cannot help and measurably **hurts**: interpolation inserts
+       intermediate-intensity pixels at every boundary, blurring the bimodality Otsu
+       depends on. Measured on synthetic discs with known ground truth, Dice fell
+       from **0.876 → 0.759** (2 px objects) and **0.994 → 0.930** (4 px) going from
+       1× to 4×.
+   * - **Blob / LoG detection**
+     - Scale-adaptive by parameter. If objects are small, set a **smaller sigma** —
+       do not inflate the image.
+   * - **Random forest / watershed**
+     - Depend on fixed filter or gradient scales; upscaling shifts objects relative
+       to them and usually degrades the result.
+
+The Upscale Images widget now has a method picker and a **"Do I need to upscale?"**
+button. It measures your object size (or uses the diameter you already set), and
+answers: *not needed*, *upscale N×*, or — when objects are too small for any factor
+to rescue — **use a different method**, rather than forcing a CNN to see something it
+cannot. It refuses to guess when the object size is unknown.
+
+**2. The measurement source is now resolved from layer lineage, not layer names.**
+
+PyCAT's tag system already records the chain
+``mask --belongs_to--> segmentation image --derived_from(via='upscale')--> original``.
+The Partial-Volume Measurement tool now **follows it**: selecting a mask
+automatically resolves which image its intensities should be measured on and what the
+upscale factor was, and says so in plain language. If the mask was segmented on a 4×
+upscale, it points the measurement at the **original** image and sets the factor to 4
+— with no name-matching heuristics, and no reliance on the user knowing to do it.
+
+When a mask carries no lineage, the tool **says so** rather than guessing.
+
+This is what makes the measurement correct *by construction* instead of correct
+*if the user reads a warning*.
+
 ## [1.5.376] - 2026-07-10
 ### Documentation — the new tools and file-handling behaviour are now explained
 Recent releases added tools and changed behaviour that were listed in the reference

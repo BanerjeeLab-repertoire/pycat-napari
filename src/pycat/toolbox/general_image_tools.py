@@ -784,6 +784,40 @@ def _add_partial_volume_measure(ui_instance, layout=None, separate_widget=False)
         "native scale (the weights are then just 0/1).")
     form.addRow("Upscale factor:", factor)
 
+    resolved = QLabel("")
+    resolved.setWordWrap(True)
+    resolved.setStyleSheet("font-size:9pt;")
+    form.addRow(resolved)
+
+    def _auto_resolve():
+        """Follow the MASK's recorded lineage to decide which image to measure on
+        and what the upscale factor was — rather than making the user work it out,
+        or guessing from layer names. The tag system already records
+        mask --belongs_to--> segmentation image --derived_from(upscale)--> original.
+        """
+        try:
+            lmask = viewer.layers[mask_dd.currentText()]
+        except Exception:
+            resolved.setText(""); return
+        from pycat.toolbox.partial_volume_tools import resolve_measurement_source
+        r = resolve_measurement_source(lmask, viewer)
+        if not r.get('confident'):
+            resolved.setText(
+                f"<span style='color:#e8a33d;'>{r.get('reason','')}</span>")
+            return
+        # Point the image dropdown at the resolved source and set the factor.
+        tgt = r.get('measure_on')
+        if tgt is not None:
+            i = img_dd.findText(tgt.name)
+            if i >= 0:
+                img_dd.setCurrentIndex(i)
+        factor.setValue(int(r.get('factor', 1)))
+        colour = '#8f8' if not r.get('upscaled') else '#8cf'
+        resolved.setText(f"<span style='color:{colour};'>{r.get('reason','')}</span>")
+
+    mask_dd.currentTextChanged.connect(lambda *_: _auto_resolve())
+    _auto_resolve()
+
     bg = QDoubleSpinBox()
     bg.setDecimals(2); bg.setRange(-1e6, 1e6); bg.setValue(0.0)
     bg.setToolTip("Background level subtracted for the integrated-intensity column.")

@@ -499,6 +499,234 @@ def size_confound_warning(radii_group_a, radii_group_b, psf_sigma_px,
     )
 
 
+def resolve_measurement_source(mask_layer, viewer):
+    """Given a MASK, work out what image its intensities should be measured on —
+    by following the layer's lineage, not by guessing from layer names.
+
+    This is the piece that makes the measurement correct *by construction* rather
+    than by warning the user after the fact. PyCAT's tag system already records the
+    lineage we need:
+
+        mask --belongs_to-->  Upscaled Image  --derived_from(via='upscale')-->  Original
+
+    So the questions a measurement must answer are all derivable:
+
+      1. Which image was this mask segmented from?      (``belongs_to`` edge)
+      2. Was that image an upscale?                     (``derived_from``/``supersedes``
+                                                         edge with ``via='upscale'``)
+      3. If so, what is the native original?            (walk to the source)
+      4. What is the upscale factor?                    (shape ratio — measured, not
+                                                         assumed)
+
+    Returns a dict:
+        image_layer      the layer intensities SHOULD be measured on (the native
+                         original when the mask came from an upscale; otherwise the
+                         image the mask was segmented from)
+        segmented_on     the layer the mask was actually segmented from
+        factor           integer upscale factor (1 when no upscaling happened)
+        upscaled         True when the segmentation was done on an upscaled image
+        resolved         True when the lineage answered the question; False when it
+                         could not (caller should then ask the user rather than guess)
+        reason           human-readable explanation of what was found
+
+    A ``resolved=False`` result is not a failure to be papered over — it means the
+    lineage is incomplete (e.g. a layer loaded from disk, or produced before tagging
+    existed), and the honest response is to ask rather than assume.
+    """
+    out = dict(image_layer=None, segmented_on=None, factor=1, upscaled=False,
+               resolved=False, reason='')
+    try:
+        from pycat.utils.layer_tags import get_edges, get_tag
+    except Exception:
+        out['reason'] = 'tag system unavailable'
+        return out
+
+    def _find(name):
+        try:
+            return viewer.layers[name]
+        except Exception:
+            return None
+
+    def _edges(layer):
+        try:
+            return get_edges(layer) or []
+        except Exception:
+            return []
+
+    # 1. What was this mask segmented from?
+    src_layer = None
+    for e in _edges(mask_layer):
+        if e.get('relation') == 'belongs_to':
+            src_layer = _find(e.get('target'))
+            if src_layer is not None:
+                break
+    if src_layer is None:
+        out['reason'] = ('no lineage recorded for this mask — cannot tell which '
+                         'image it was segmented from')
+        return out
+    out['segmented_on'] = src_layer
+
+    # 2. Was that image itself produced by an upscale? Walk back through
+    #    image->image derivations until we find one (or run out).
+    native = src_layer
+    seen = {getattr(src_layer, 'name', None)}
+    upscaled = False
+    hops = 0
+    cur = src_layer
+    while cur is not None and hops < 10:
+        hops += 1
+        nxt = None
+        for e in _edges(cur):
+            if e.get('relation') in ('derived_from', 'supersedes'):
+                if str(e.get('via', '')).lower() == 'upscale':
+                    cand = _find(e.get('target'))
+                    if cand is not None and getattr(cand, 'name', None) not in seen:
+                        upscaled = True
+                        nxt = cand
+                        break
+        if nxt is None:
+            break
+        seen.add(getattr(nxt, 'name', None))
+        native = nxt
+        cur = nxt
+
+    out['upscaled'] = upscaled
+    out['image_layer'] = native
+
+    # 3. Determine the factor by MEASURING the shape ratio, not trusting a label.
+    try:
+        ms = np.asarray(getattr(mask_layer, 'data')).shape
+        ns = getattr(getattr(native, 'data', None), 'shape', None)
+        if ns is not None and len(ms) >= 2 and len(ns) >= 2:
+            fy = ms[-2] / max(ns[-2], 1)
+            fx = ms[-1] / max(ns[-1], 1)
+            f = int(round((fy + fx) / 2.0))
+            # Sanity: the two axes must agree, and the factor must be a whole number.
+            if f >= 1 and abs(fy - fx) < 0.1 and abs(f - fy) < 0.1:
+                out['factor'] = f
+            else:
+                out['reason'] = (f'mask {ms[-2:]} is not a whole-number upscale of '
+                                 f'image {ns[-2:]} — cannot resolve the factor')
+                return out
+    except Exception as e:
+        out['reason'] = f'could not compare shapes: {e}'
+        return out
+
+    out['resolved'] = True
+    if upscaled and out['factor'] > 1:
+        out['reason'] = (
+            f"mask was segmented on '{getattr(src_layer, 'name', '?')}' "
+            f"(a {out['factor']}x upscale) — intensities will be measured on "
+            f"'{getattr(native, 'name', '?')}' (the original) using partial-volume "
+            f"weights")
+    elif upscaled:
+        out['reason'] = ("lineage says the segmentation image was upscaled, but the "
+                         "mask is the same size as the original — treating as native")
+    else:
+        out['reason'] = (f"mask was segmented on '{getattr(native, 'name', '?')}' at "
+                         f"native scale — measuring directly on it")
+    return out
+
+
+def resolve_measurement_source(mask_layer, viewer):
+    """Given a MASK, find the image its intensities should be measured on — by
+    following the layer's recorded lineage, not by guessing from names.
+
+    This is what makes the measurement correct *by construction* rather than by
+    warning. PyCAT's tag system already records the chain:
+
+        mask --belongs_to--> the image it was segmented from
+        image --derived_from(via='upscale')--> the original, native-scale image
+
+    So if a mask was produced by segmenting an upscaled image, the lineage says so,
+    and it also says which image the upscale came from and (by shape) what the factor
+    was. There is no need to pattern-match layer names.
+
+    Returns a dict:
+      segmented_on : the layer the mask was segmented from (or None if unknown)
+      measure_on   : the layer intensities SHOULD be measured on — the native-scale
+                     ancestor if the segmentation image was an upscale, otherwise the
+                     segmentation image itself
+      factor       : the upscale factor between measure_on and the mask (1 if none)
+      upscaled     : True if the segmentation was done on an upscaled image
+      confident    : True if this was resolved from recorded lineage; False if it had
+                     to fall back to a heuristic (in which case: tell the user)
+      reason       : human-readable explanation
+    """
+    try:
+        from pycat.utils import layer_tags as LT
+    except Exception:
+        return dict(segmented_on=None, measure_on=None, factor=1, upscaled=False,
+                    confident=False, reason="Tag system unavailable.")
+
+    def _by_id(tag_id):
+        for l in viewer.layers:
+            try:
+                if LT.layer_tag_id(l) == tag_id:
+                    return l
+            except Exception:
+                continue
+        return None
+
+    def _edges(layer):
+        try:
+            return LT.get_edges(layer) or []
+        except Exception:
+            return []
+
+    # 1. Which image was this mask segmented from?  (belongs_to)
+    seg_img = None
+    for e in _edges(mask_layer):
+        if e.get('relation') == 'belongs_to':
+            seg_img = _by_id(e.get('target'))
+            if seg_img is not None:
+                break
+
+    if seg_img is None:
+        return dict(segmented_on=None, measure_on=None, factor=1, upscaled=False,
+                    confident=False,
+                    reason="This mask has no recorded lineage, so I cannot tell "
+                           "which image it was segmented from. Select the image "
+                           "yourself — and if the segmentation was done on an "
+                           "upscaled image, measure on the ORIGINAL.")
+
+    # 2. Was that image itself produced by upscaling something?
+    native = None
+    for e in _edges(seg_img):
+        if e.get('via') == 'upscale' and e.get('relation') in ('derived_from',
+                                                               'supersedes'):
+            native = _by_id(e.get('target'))
+            if native is not None:
+                break
+
+    if native is None:
+        return dict(segmented_on=seg_img, measure_on=seg_img, factor=1,
+                    upscaled=False, confident=True,
+                    reason=f"'{seg_img.name}' is native scale (no upscale in its "
+                           f"lineage), so intensities are measured on it directly.")
+
+    # 3. Recover the factor from the shapes (the lineage records the relationship;
+    #    the shapes give the number).
+    factor = 1
+    try:
+        sh_up = np.asarray(getattr(seg_img.data, 'shape', ()))[-2:]
+        sh_nat = np.asarray(getattr(native.data, 'shape', ()))[-2:]
+        if len(sh_up) == 2 and len(sh_nat) == 2 and sh_nat[0] > 0:
+            f = float(sh_up[0]) / float(sh_nat[0])
+            factor = int(round(f)) if abs(f - round(f)) < 0.05 else 1
+    except Exception:
+        factor = 1
+
+    return dict(segmented_on=seg_img, measure_on=native, factor=max(1, factor),
+                upscaled=True, confident=True,
+                reason=f"'{mask_layer.name}' was segmented on '{seg_img.name}', "
+                       f"which is a {factor}x upscale of '{native.name}'. "
+                       f"Intensities will be measured on '{native.name}' (the "
+                       f"original pixels) using partial-volume weights — measuring "
+                       f"on the upscale would pseudoreplicate the statistics and "
+                       f"bias small objects.")
+
+
 def looks_upscaled(layer_or_name, native_shape=None, data=None):
     """Heuristic: is this layer an upscaled image (and therefore unsafe to measure
     intensities on)? Used to WARN when a measurement is about to read interpolated
