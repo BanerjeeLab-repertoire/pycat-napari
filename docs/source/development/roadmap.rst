@@ -461,6 +461,82 @@ Standing acceptance criteria for the whole backlog:
 * A number that can be wrong in a *named* way should say so — see
   ``pycat.utils.measurement``.
 
+.. rubric:: Keyframe adequacy — trigger a new keyframe on morphology change, not on a fixed interval
+
+**What the code does now, and why it is defensible:** ``ts_cellpose_tools`` runs Cellpose
+every N frames and **copies the nearest keyframe's mask** to the frames between (no morphing,
+no label interpolation). The rationale in that module is sound — cells move slowly relative to
+condensate dynamics, Cellpose on 600 frames takes ~10 h, and true spatial interpolation of
+integer label masks bleeds labels across boundaries and needs cell correspondence solved.
+
+**The audit's warning about interpolating PUNCTA masks does not apply here, and that is worth
+recording so nobody "fixes" it:** condensates *are* segmented per frame
+(``_ts_analyze_frame_worker`` does per-cell condensate segmentation on every frame). Only the
+**cell** mask is keyframed. Condensates form, dissolve, merge and split, so interpolating
+*their* masks would invent objects — and PyCAT does not.
+
+**What IS owed:** the keyframe interval is **fixed**, so it cannot know when it has become
+inadequate. A cell that divides, dies, moves, or changes shape between keyframes silently gets
+the wrong boundary — and the puncta inside it are then attributed to the wrong cell.
+
+**Where:** ``ts_cellpose_tools.py`` (the keyframe loop), and ``timeseries_condensate_tools.py``
+line ~1859, where a **2-D cell mask can be propagated to every frame** — the degenerate case of
+the same problem.
+
+**The fix:** an adequacy score computed between keyframes — image-registration residual, mask
+edge displacement, intensity change, cell shape change, appearance/disappearance of cells,
+division/death — and **trigger a new keyframe when it exceeds a threshold**, rather than on a
+fixed spacing. Fail loudly when morphology has changed substantially rather than propagating a
+stale mask.
+
+**Acceptance:** on a synthetic stack where a cell divides at frame 30, a fixed 20-frame
+keyframe schedule mis-assigns the daughter cells; the adequacy-triggered schedule inserts a
+keyframe at the division and does not. And a static 2-D mask propagated across a stack with
+genuine cell motion must **warn**, not silently mis-attribute puncta.
+
+.. rubric:: Layer intent — the root cause of the whole upscaling problem
+
+Every generated layer should record what it is **for**:
+
+* **visualization** — contrast-stretched, denoised, upscaled: fine to look at, never to measure.
+* **segmentation** — the input a segmenter should see (this is what upscaling is legitimately
+  for).
+* **measurement** — the original detector pixels. The only thing intensities may be read from.
+
+**This is not a nicety; it is the root cause of the bug that consumed most of this session.**
+The Cell Analyzer *defaulted* to measuring intensities on the **upscaled** image (1.5.372),
+which pseudoreplicates the statistics and biases small objects — and it did so because nothing
+in the data model said "this layer is for segmentation, not for measurement". The provenance
+resolver (1.5.377) fixes the *symptom* by walking the tag lineage; **intent** would have made
+it impossible in the first place.
+
+**Where:** ``pycat/utils/layer_tags.py`` already has the tag store and the ``role`` /
+``provenance`` keys — this is a new tag (``intent``), set at creation, plus a check in the
+measurement path. The machinery exists; the concept does not.
+
+**Acceptance:** a layer tagged ``intent=visualization`` or ``intent=segmentation`` cannot be
+selected as the intensity source for a measurement without an explicit override, and the
+override is recorded in the result's ``Measurement`` assumptions.
+
+.. rubric:: Focus selection must not pick the sharpest DEBRIS
+
+``analyse_frame_quality`` / ``bf_analyse_frame_quality`` score focus over the **whole frame**.
+Sharp debris, dust on the coverslip, or a bright out-of-plane object will score *higher* than a
+correctly-focused condensate — so the "best frame" can be the one where the junk is sharpest.
+
+**Where:** the focus metrics in ``condensate_physics_tools`` (``analyse_frame_quality``) and
+``brightfield_tools`` (``bf_analyse_frame_quality``), plus the Frame Quality / Focus QC tool in
+``general_image_tools``.
+
+**The fix:** compute focus **inside a biologically relevant mask** (the cell mask, or a
+segmentation of the objects of interest), and use more than one metric — a single Brenner
+gradient is exactly what debris maximises. Report the focus score *per compartment*, not just
+per frame.
+
+**Acceptance:** on a synthetic stack with an in-focus condensate and a sharper piece of
+out-of-plane debris, whole-frame focus scoring picks the debris frame; mask-restricted scoring
+picks the condensate frame.
+
 .. rubric:: BUG (not architecture) — puncta SNR is the same un-subtracted ratio fixed in 1.5.379
 
 **Where:** ``segmentation_tools.py:1342-1344`` in ``puncta_refinement_filtering_func``::
@@ -866,9 +942,24 @@ tagged layer load without anyone noticing.
 ``stack_access.py`` (1.5.389) is the first slice of this and is already done — it is the
 pure-numpy ``array_sources`` layer, and it proves the pattern works.
 
-**Do it slice by slice, with a compile check and a save/load round-trip after each.** A
-naive extraction of this file has already been attempted and broke it twice (see the
-``stack_access`` consolidation rubric). Do not attempt it in one pass.
+**Where:** ``src/pycat/file_io/file_io.py`` (~7 000 lines, 98 functions, 22 top-level
+definitions). Suggested slice order, easiest and most isolated first:
+
+1. ``array_sources.py`` — **DONE**, shipped as ``stack_access.py`` (1.5.389). Pure numpy.
+2. ``io_dialogs.py`` — the Qt dialogs (pixel-size prompt, axis prompt, copy-to-local). They
+   have no analysis logic and are the cleanest cut.
+3. ``metadata_readers.py`` — metadata parsing (much already lives in ``metadata_extract.py``).
+4. ``layer_saver.py`` — the save path (compression, dtype right-sizing, axis declaration).
+5. ``format_detection.py`` / ``layer_loader.py`` / ``session_io.py`` — the hardest, and the
+   most entangled with the ``central_manager``. Leave for last.
+
+**Do it slice by slice, with a compile check and a save/load round-trip after each.** A naive
+extraction has already been attempted and **broke this file twice** (see the ``stack_access``
+consolidation rubric). Do not attempt it in one pass.
+
+**Acceptance:** after each slice, ``file_io.py`` still compiles, a save→reload round-trip of an
+image *and* a label stack reproduces the data byte-for-byte with the axis correctly declared
+(no T/Z prompt on reload), and ``tests/test_no_duplicate_definitions`` stays green.
 
 .. rubric:: Cellpose model lifetime (audit point 10)
 
@@ -886,6 +977,9 @@ supports it.
 process in a full keyframe run.
 
 .. rubric:: Zarr completion markers and write ownership (audit)
+
+**Where:** ``timeseries_condensate_tools.py`` (the zarr writers in ``_StackProcessWorker`` and
+``run_timeseries_condensate_analysis``) and ``ts_cache_manager.py`` (cache identity and reuse).
 
 Two distinct hazards:
 
@@ -1041,9 +1135,19 @@ are usually harmless, but several of these sit in **stateful loading and time-se
 where they may be the residue of logic that was partially removed while downstream behaviour
 still assumes it exists. That makes them a *symptom* worth reading, not a lint to clear.
 
-**Where:** run ``ruff --select F841`` (unused local) and review each hit against the
-surrounding logic. The question for each is not "is it used?" but "**was something meant to
-use it, and does the code silently behave as if it did?**"
+**Where:** ``ruff check src --select F841`` — currently **34 findings**, already wired into CI
+as an *advisory* (non-breaking) step (1.5.391). The concentrations are
+``timeseries_condensate_tools.py`` (6), ``file_io.py`` (3: ``from_meta``, ``is_lazy``,
+``ndim``), ``ui_modules.py`` (3: ``strategy_dd``, ``otsu_classes_spin``) and
+``ui_diagnostics_mixin.py`` (3).
+
+Review each hit against the surrounding logic. The question is not "is it used?" but "**was
+something meant to use it, and does the code silently behave as if it did?**"
+
+**Acceptance:** every one of the 34 is either *removed* (dead) or *wired up* (the logic it was
+meant to feed is restored), with a one-line note in the commit saying which — and then F841 is
+promoted from advisory to **build-breaking** in ``.github/workflows/core.yml``. That promotion
+is the real acceptance test: it is what stops the residue accumulating again.
 
 .. rubric:: Packaging
 
