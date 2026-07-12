@@ -49,17 +49,40 @@ def synthetic_frap_curve(mobile_fraction=0.7, half_time_s=5.0, i0=0.2,
                          n=60, t_max=40.0, noise_sigma=0.0, seed=0):
     """A normalized FRAP recovery curve with KNOWN mobile fraction and half-time.
 
-    Built directly from the recovery model I(t) = (a + b·x)/(1 + x), x = t/τ½,
-    with a = i0 (immediate post-bleach) and b = i0 + mobile_fraction (plateau),
-    so mobile_fraction = b − a exactly. Use to check that fit_frap_recovery
-    recovers these inputs.
+    Built from the recovery model I(t) = (a + b·x)/(1 + x), x = t/τ½, with a = i0
+    (immediate post-bleach) and b the plateau.
+
+    The mobile fraction, correctly
+    ------------------------------
+    **This fixture used to set ``b = i0 + mobile_fraction``**, i.e. it assumed
+    ``mobile_fraction = b − a``. That is the fraction of the **pre-bleach signal** that
+    recovers — **not the mobile fraction**, and the two are different whenever the bleach is
+    incomplete, which it always is.
+
+    The mobile fraction is *"of the molecules that were bleached, what fraction was replaced
+    by unbleached ones from outside?"*::
+
+        the bleach REMOVED     1 − a
+        the recovery RESTORED  b − a
+        mobile fraction     = (b − a) / (1 − a)
+
+    With a = 0.2 and b = 0.9: the bleach removed 80 % of the molecules and 70 % of the
+    pre-bleach signal came back, so **0.7 / 0.8 = 0.875** of the bleached pool was mobile.
+    The old fixture called that 0.7, and the test duly asserted 0.7 against
+    ``fit_frap_recovery``'s correct 0.875 — **the test was wrong, not the code.**
+
+    (They coincide only when the bleach is complete, a = 0. It never is.)
+
+    So: invert the definition. Given the requested mobile fraction, place the plateau at::
+
+        b = a + mobile_fraction · (1 − a)
 
     Returns (time, intensity).
     """
     rng = np.random.default_rng(seed)
     t = np.linspace(0, t_max, n)
     a = i0
-    b = i0 + mobile_fraction
+    b = a + mobile_fraction * (1.0 - a)
     x = t / half_time_s
     y = (a + b * x) / (1.0 + x)
     if noise_sigma > 0:

@@ -1,2 +1,6 @@
 -r requirements-devbio-napari.txt
-pytorch==2.1.2=cpu_generic_py39hef92293_4
+# Was `pytorch==2.1.2=cpu_generic_py39hef92293_4` — conda syntax (name=version=build) with
+# an extra `=`, which is invalid for pip AND for conda. pip rejects it outright, so this file
+# could never be installed; Dependabot aborted its whole scan on it. On pip the package is
+# `torch`, and the macOS arm64 wheels are CPU-only already.
+torch>=2.1.2

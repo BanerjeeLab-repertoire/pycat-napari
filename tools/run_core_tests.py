@@ -31,6 +31,8 @@ Usage::
 """
 
 import ast
+import builtins
+import contextlib
 import importlib
 import inspect
 import pathlib
@@ -71,10 +73,52 @@ def _setup_environment(repo_root):
     # more — the 1.5.409 bug was hidden by a dev check that did this without noticing that CI
     # would not.
     sys.path.insert(0, str(repo_root / 'src'))
+    # The science tests import `tests.fixtures_synthetic`, so the repo root must be on the
+    # path too — pytest does this via rootdir, and forgetting it made every science module
+    # "fail to load" with ModuleNotFoundError.
+    sys.path.insert(0, str(repo_root))
 
+    # The stub must be FAITHFUL. A first version lacked `raises` and `approx`, and duly
+    # reported four failures that were entirely its own — a runner that invents failures is
+    # worse than no runner, because it trains you to ignore it.
     stub = types.ModuleType('pytest')
+
+    @contextlib.contextmanager
+    def _raises(expected, **kwargs):
+        try:
+            yield
+        except expected:
+            return
+        raise AssertionError(f"DID NOT RAISE {expected}")
+
+    class _Approx:
+        def __init__(self, value, rel=None, abs=None):
+            self.value, self.rel, self.abs = value, rel, abs
+
+        def __eq__(self, other):
+            if self.abs is not None:
+                return builtins.abs(other - self.value) <= self.abs
+            rel = self.rel if self.rel is not None else 1e-6
+            return builtins.abs(other - self.value) <= rel * max(builtins.abs(self.value), 1e-12)
+
+        def __repr__(self):
+            return f"approx({self.value})"
+
+    class _SkipTest(Exception):
+        pass
+
+    class _MarkStub:
+        def __getattr__(self, _name):
+            return lambda *a, **k: (lambda fn: fn)
+
+    stub.raises = _raises
+    stub.approx = lambda value, **kwargs: _Approx(value, **kwargs)
     stub.fail = lambda msg, **k: (_ for _ in ()).throw(AssertionError(msg))
+    stub.skip = lambda *a, **k: (_ for _ in ()).throw(_SkipTest())
     stub.importorskip = lambda name, **k: importlib.import_module(name)
+    stub.mark = _MarkStub()
+    stub.fixture = lambda *a, **k: (lambda fn: fn)
+    stub.SkipTest = _SkipTest
     sys.modules['pytest'] = stub
     return stub
 
@@ -105,11 +149,14 @@ def main():
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     pytest_stub = _setup_environment(repo_root)
 
-    core = [
-        repo_root / 'tests' / 'test_no_undefined_names.py',
-        repo_root / 'tests' / 'test_headless_science.py',
-        repo_root / 'tests' / 'test_spatial_nulls.py',
-    ]
+    # Every file carrying @pytest.mark.core. The science tests were added in 1.5.434 —
+    # they had never been marked, so `pytest -m core` never ran them, and two golden-master
+    # reference values had been sitting unfilled (= permanently skipped) since they were
+    # written.
+    core = sorted(
+        p for p in (repo_root / 'tests').glob('test_*.py')
+        if 'pytest.mark.core' in p.read_text(encoding='utf-8', errors='ignore')
+    )
 
     total = failed = 0
     for path in core:
@@ -135,6 +182,9 @@ def main():
                 try:
                     fn()
                     print(f"    {name:36} PASS")
+                except pytest_stub.SkipTest:
+                    total -= 1
+                    print(f"    {name:36} skip")
                 except Exception as exc:               # noqa: BLE001
                     failed += 1
                     print(f"    {name:36} FAIL: {type(exc).__name__}: {str(exc)[:60]}")

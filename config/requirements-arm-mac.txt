@@ -1,2 +1,18 @@
 -r requirements-base.txt
-pytorch==2.1.2=cpu_generic_py39hef92293_4
+
+# PyTorch on Apple Silicon.
+#
+# This line used to read:
+#
+#     pytorch==2.1.2=cpu_generic_py39hef92293_4
+#
+# which is CONDA syntax (name=version=build) with an extra `=`, copied from
+# config/pycat-napari-env-arm-mac.yaml. It is **invalid for pip AND invalid for conda** —
+# pip's parser rejects it outright (`InvalidRequirement`), so this file could never have
+# been installed by anything. Dependabot was simply the first tool to try to read it, and
+# it aborted the whole dependency scan on line 2.
+#
+# On pip the package is `torch`, not `pytorch`, and there is no CPU build to select: the
+# macOS arm64 wheels are CPU-only already. The conda YAML still pins the conda build, which
+# is correct THERE.
+torch>=2.1.2

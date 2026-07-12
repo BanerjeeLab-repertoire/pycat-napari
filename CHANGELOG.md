@@ -4,6 +4,95 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.435] - 2026-07-10
+### FIXED — two requirements files were invalid for pip AND for conda, so Dependabot could not scan the repo at all
+``config/requirements-arm-mac.txt`` line 2 read::
+
+    pytorch==2.1.2=cpu_generic_py39hef92293_4
+
+That is **conda** syntax (``name=version=build``) with an extra ``=``, copied from
+``config/pycat-napari-env-arm-mac.yaml`` — where ``pytorch=2.1.2=cpu_generic_py39hef92293_4``
+is correct. With the doubled ``=`` it is **valid for neither tool**: pip's parser rejects it
+outright with ``InvalidRequirement``.
+
+**So the file could never have been installed by anything.** It has been broken since it was
+written, and nothing noticed — it is referenced by **no workflow, no ``pyproject.toml``, and no
+documentation.** Dependabot was simply the first tool to try to read it, and it **aborted the
+entire dependency scan on line 2**, which means **no security updates were being checked at
+all.**
+
+The same line appears in ``config/requirements-devbio-napari-arm-mac.txt``. Both fixed: on pip
+the package is ``torch``, not ``pytorch``, and there is **no CPU build to select** — the macOS
+arm64 wheels are CPU-only already. The conda YAMLs still pin the conda build string, which is
+correct *there*.
+
+All four ``config/requirements*.txt`` files now parse as valid pip.
+
+### Added — ``tests/test_requirements_parse.py``
+**A file that no build step reads is a file whose breakage is invisible** until an external tool
+trips over it. This test reads them, so it is not invisible. Verified: reintroducing the conda
+pin makes it fail; the suite is otherwise **60/60**.
+
+### Note — this was not caused by anything in this session
+Worth stating plainly. The failing job is **Dependabot**, not the ``core`` workflow, and the
+broken line predates every change made here. It surfaced now because Dependabot runs on a
+schedule, not on push.
+
+## [1.5.434] - 2026-07-10
+### FIXED — the FRAP test was asserting the wrong definition of mobile fraction
+With a faithful runner in place (1.5.433), I ran the **30 science tests that CI collects but
+never marks ``core``** — so ``pytest -m core`` had never run them. One failed on ground truth.
+
+``synthetic_frap_curve`` built the plateau as ``b = i0 + mobile_fraction``, i.e. it assumed
+**``mobile_fraction = b − a``**. That is the fraction of the **pre-bleach signal** that
+recovers — **not the mobile fraction.**
+
+The mobile fraction is *"of the molecules that were bleached, what fraction was replaced by
+unbleached ones from outside?"*::
+
+    the bleach REMOVED     1 − a
+    the recovery RESTORED  b − a
+    mobile fraction     = (b − a) / (1 − a)
+
+With ``a = 0.2``, ``b = 0.9``: the bleach removed **80 %** of the molecules and **70 %** of the
+pre-bleach signal came back — so **0.7 / 0.8 = 0.875** of the bleached pool was mobile.
+
+The fixture called that **0.7**, and the test asserted 0.7 against ``fit_frap_recovery``'s
+correct **0.875**. **The test was wrong, not the code** — and the fit was perfect throughout
+(R² = 1.000000, half-time exact). The two definitions coincide only when the bleach is complete
+(``a = 0``), which it never is.
+
+Fixed: the fixture now places the plateau at ``b = a + mobile_fraction·(1 − a)``. The fit
+recovers the requested value **exactly** at 0.30, 0.50, 0.70 and 0.90.
+
+### Filled — two golden-master reference values that had never run
+Both were left as ``None`` with a note to fill them, so both tests **skipped permanently**.
+Measured rather than guessed:
+
+**``EMPIRICAL_PARTIAL_OVERLAP_PEARSON = 0.8321``.** The scene is ``ch2 = 0.6·ch1 + 0.4·independent``,
+for which the Pearson correlation is **analytic**: ``r = 0.6/√(0.6² + 0.4²) = 0.8321``. Measured
+over 40 seeds: **mean 0.8319**, sd 0.0020. **Agreement to four decimal places** — so this is not
+a characterisation of current behaviour but a check against a value derived *independently of
+the implementation*. If the Pearson code is rewritten correctly, it still passes.
+
+**``NOISY_FIT_MOBILE_TOL = 0.03``** at ``NOISY_FIT_NOISE_SIGMA = 0.02``. Measured over 50 seeds,
+the error in the recovered mobile fraction: mean 0.0072, 95th pct 0.0146, **max 0.0184**. A
+tolerance of 0.03 sits above the observed maximum without being so loose that a genuine
+regression slips through — a 2× degradation fails it.
+
+### Changed — the science tests are now ``core``-marked, and CI runs them
+**24 science tests** (colocalization, FRAP, partition, VPT viscosity, feature analysis, image
+processing) were collected by CI and **never executed**, because none carried the marker. They
+now do. Verified in the CI environment: **59/59 passing** — up from 35 (the guards alone).
+
+### Note — the runner invented four failures, and that is a bug in the runner
+``run_core_tests.py`` first reported 41/45. Its pytest stub lacked ``raises`` and ``approx``,
+and the repo root was not on the path (so ``tests.fixtures_synthetic`` would not import). All
+four "failures" were its own.
+
+**A runner that invents failures is worse than no runner** — it trains you to ignore it. The
+stub is now faithful, and the suite is genuinely green.
+
 ## [1.5.433] - 2026-07-10
 ### Added — ``tools/run_core_tests.py``: run the CI suite the way CI runs it
 Two guard bugs shipped in a row (1.5.428, 1.5.432) for the same reason: **the development check
