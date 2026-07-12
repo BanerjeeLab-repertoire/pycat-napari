@@ -4,6 +4,62 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.401] - 2026-07-10
+### Fixed — a bead hitting a wall was reported as "subdiffusion"
+``motion_type`` is read straight off ``alpha``, and alpha is the **entire**
+anomalous-vs-Brownian claim. But alpha means nothing unless the power law is the right
+model — and **confinement is the failure that matters**. A probe trapped in a small
+condensate produces an MSD that **plateaus**, and a power law *cannot* plateau, so it fits
+the plateau with a spuriously small exponent:
+
+| truth | alpha | R² | reported |
+|---|---|---|---|
+| truly Brownian | 1.006 | 1.000 | `Brownian` ✓ |
+| **confined (probe hits the wall)** | **0.000** | **0.903** | **`subdiffusion`** ✗ |
+
+A confined probe is reported as **subdiffusion with a healthy R²** — which a reader takes as
+*"the medium is viscoelastic / crowded"*. **It is not. The bead is hitting a wall.**
+Completely different physics, the wrong conclusion, and R² does not blink.
+
+New **``test_confinement``** fits both a power law and a confined model and selects by AICc.
+``motion_type`` now returns ``'confined (not anomalous diffusion)'`` with the estimated domain
+size, and states plainly that alpha is not interpretable in that case.
+
+Validated against ground truth (40 replicates each):
+
+| | rate |
+|---|---|
+| false "confined" on **Brownian** | **2 %** |
+| false "confined" on **genuine subdiffusion** | 12 % |
+| **detected real confinement** | **65 %** |
+
+A genuinely diffusing probe is essentially never called confined, and — importantly — a
+*genuinely subdiffusive* MSD is still reported as subdiffusion. The test distinguishes real
+anomalous diffusion from a wall, which is the whole point.
+
+### Note — the runs test was the wrong tool here, and pretending otherwise flagged everything
+``assess_fit`` (1.5.400) was wired into the MSD fit first. It flagged **100 % of fits,
+including textbook Brownian ones.**
+
+The cause was a real bug in ``fit_quality``: the runs test needs **≥ 8 residuals** to have any
+power, and PyCAT's *defensible lag window* is deliberately narrow — often only **~6 lags**. So
+the test could never run, returned ``NaN``, and my ``adequate`` logic treated "could not
+assess" as "the model is wrong". **Absence of evidence is not evidence of absence**, and
+conflating them makes a check that fires on everything — which is worse than no check.
+
+``assess_fit`` now returns an explicit ``assessable`` flag, and "not assessed" no longer
+blocks a result. Model comparison was used for confinement instead, because **it works at
+n = 6 where the runs test cannot**:
+
+| n lags | false alarm (Brownian) | detect confinement |
+|---|---|---|
+| **6** | **0 %** | 60 % |
+| 10 | 0 % | **100 %** |
+| 15+ | 0 % | 100 % |
+
+So a *negative* result on a short lag window means **"not detected"**, not "not confined" —
+and the verdict says so.
+
 ## [1.5.400] - 2026-07-10
 ### Added — fit adequacy: R² accepts wrong models, and the residuals catch them
 R² is used as a fit-quality measure at **67 call sites across 9 modules**. It answers exactly

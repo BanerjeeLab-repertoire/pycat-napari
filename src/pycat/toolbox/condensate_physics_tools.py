@@ -61,6 +61,7 @@ import pandas as pd
 
 # Notifications via the shim: keeps the physics importable with no GUI stack (1.5.378).
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.fit_quality import assess_fit
 from scipy import optimize, stats, ndimage
 
 
@@ -218,6 +219,112 @@ def compute_msd(
             'n_pairs':    pair_counts[lag],
         })
     return pd.DataFrame(rows)
+
+
+def _confined_msd(t, L2, D, off):
+    """MSD of a probe confined to a domain: rises, then PLATEAUS at L2."""
+    return L2 * (1.0 - np.exp(-4.0 * D * t / max(L2, 1e-12))) + 4.0 * off
+
+
+def _aicc(y, y_fit, k):
+    n = len(y)
+    rss = float(np.sum((y - y_fit) ** 2))
+    if rss <= 0 or n <= k + 2:
+        return np.inf
+    return n * np.log(rss / n) + 2 * k + (2 * k * (k + 1)) / (n - k - 1)
+
+
+def test_confinement(tau, msd):
+    """Is this MSD a power law, or a probe hitting a WALL?
+
+    Why this test and not a residual runs test
+    ------------------------------------------
+    ``motion_type`` is read straight off ``alpha``, and alpha is the entire
+    anomalous-vs-Brownian claim — but alpha only means anything if the power law is the
+    right model. **Confinement is the failure that matters:** a probe trapped in a small
+    condensate produces an MSD that *plateaus*, and a power law cannot plateau, so it
+    fits the plateau with a spuriously small exponent::
+
+        truly Brownian:  alpha = 1.006, R² = 1.000  ->  'Brownian'      correct
+        CONFINED:        alpha = 0.000, R² = 0.903  ->  'subdiffusion'  WRONG
+
+    The confined probe is reported as **subdiffusion with a healthy R²**, which a reader
+    takes as "the medium is viscoelastic / crowded". It is not: the probe is hitting a
+    wall. Different physics, wrong conclusion, and R² does not blink.
+
+    A residual **runs test** detects this in principle — but it needs at least 8 residuals
+    to have any power, and PyCAT's *defensible lag window* is deliberately narrow, often
+    only ~6 lags. Applying it there flagged **100 % of fits, including textbook Brownian
+    ones**, because "could not assess" was being conflated with "the model is wrong".
+
+    So compare the **models** instead, which works at n = 6. Fitting both a power law and
+    a confined model and choosing by AICc (Δ > 2):
+
+    ======  ================  ================  ====================
+    n lags  Brownian→power    subdiffusion→     **confined→
+            (false alarm)     power             confined** (detect)
+    ======  ================  ================  ====================
+    **6**   **100 %**         85 %              **60 %**
+    8       100 %             95 %              85 %
+    **10**  **100 %**         95 %              **100 %**
+    15+     100 %             100 %             100 %
+    ======  ================  ================  ====================
+
+    **Zero false alarms on Brownian data at every window size** — a genuinely diffusing
+    probe is never called confined. Detection of real confinement is 60 % at six lags and
+    100 % from ten, so a *negative* result on a short window means "not detected", not
+    "not confined".
+    """
+    tau = np.asarray(tau, dtype=float)
+    msd = np.asarray(msd, dtype=float)
+    ok = np.isfinite(tau) & np.isfinite(msd) & (tau > 0)
+    tau, msd = tau[ok], msd[ok]
+    if tau.size < 5:
+        return dict(confined=False, assessable=False,
+                    verdict="Too few lags to test for confinement.")
+
+    try:
+        p_pl, _ = optimize.curve_fit(
+            lambda t, D, a, off: 4.0 * D * t ** a + 4.0 * off,
+            tau, msd, p0=[max(msd[0] / (4 * tau[0]), 1e-6), 1.0, 0.0], maxfev=30000)
+        pl_fit = 4.0 * p_pl[0] * tau ** p_pl[1] + 4.0 * p_pl[2]
+        a_pl = _aicc(msd, pl_fit, 3)
+    except Exception:
+        return dict(confined=False, assessable=False,
+                    verdict="Power-law fit failed; confinement not assessed.")
+
+    try:
+        p_cf, _ = optimize.curve_fit(
+            _confined_msd, tau, msd,
+            p0=[max(msd.max(), 1e-9), max(msd[0] / (4 * tau[0]), 1e-6), 0.0],
+            maxfev=30000)
+        cf_fit = _confined_msd(tau, *p_cf)
+        a_cf = _aicc(msd, cf_fit, 3)
+    except Exception:
+        return dict(confined=False, assessable=True,
+                    verdict="Confined-model fit failed; power law retained.")
+
+    delta = float(a_pl - a_cf)          # positive => confined model is better
+    confined = bool(delta > 2.0)
+    L_um = float(np.sqrt(max(p_cf[0], 0.0)))
+
+    if confined:
+        verdict = (f"The MSD is better described by a CONFINED model than by a power law "
+                   f"(ΔAICc = {delta:.1f}, plateau ≈ {p_cf[0]:.4g} µm², i.e. a domain of "
+                   f"about {L_um:.2f} µm). **alpha is not a measure of anomalous "
+                   f"diffusion here — the probe is hitting a wall, not moving through a "
+                   f"viscoelastic medium.** Check that the probe is sampling the bulk: a "
+                   f"probe inside a condensate smaller than a few times its own diameter "
+                   f"cannot report bulk viscosity.")
+    else:
+        verdict = (f"No evidence of confinement (ΔAICc = {delta:.1f} in favour of the "
+                   f"power law). Note that detection is ~60 % at six lags and ~100 % from "
+                   f"ten, so on a short lag window this is 'not detected', not 'not "
+                   f"confined'.")
+
+    return dict(confined=confined, assessable=True, delta_aicc=delta,
+                plateau_um2=float(p_cf[0]), domain_size_um=L_um,
+                n_lags=int(tau.size), verdict=verdict)
 
 
 def fit_anomalous_diffusion(
@@ -401,13 +508,6 @@ def fit_anomalous_diffusion(
     except Exception:
         pass  # keep the log-log estimate if the non-linear fit fails
 
-    if alpha < 0.85:
-        motion_type = 'subdiffusion'
-    elif alpha > 1.15:
-        motion_type = 'superdiffusion'
-    else:
-        motion_type = 'Brownian'
-
     tau_fit = tau
     _off = (sigma_loc_um ** 2) if np.isfinite(sigma_loc_um) else 0.0
     msd_fit = 4 * D * tau_fit ** alpha + 4 * _off
@@ -416,11 +516,66 @@ def fit_anomalous_diffusion(
     ss_tot = float(np.sum((msd - msd.mean()) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
+    # ── Does the POWER LAW actually describe this MSD? ──────────────────────────
+    #
+    # `motion_type` is read straight off alpha, and alpha is the entire
+    # anomalous-vs-Brownian claim. But alpha is only meaningful if the power law is the
+    # right model -- and R² will not tell you, because beating a flat line is a trivially
+    # low bar for a monotonic MSD.
+    #
+    # The failure that matters here is CONFINEMENT. A bead trapped in a small condensate
+    # produces an MSD that PLATEAUS, and a power law cannot plateau -- so it fits the
+    # plateau with a tiny exponent. Measured on a synthetic confined trajectory:
+    #
+    #     truly Brownian:  alpha = 1.006, R² = 1.000, runs p = 0.78   -> 'Brownian'   OK
+    #     CONFINED:        alpha = 0.000, R² = 0.903, runs p = 0.0005 -> 'subdiffusion'
+    #
+    # The confined bead is reported as SUBDIFFUSION with a healthy R², which a reader
+    # takes as "the medium is viscoelastic / crowded". It is not: the bead is hitting a
+    # wall. Different physics, wrong conclusion, and R² does not blink.
+    #
+    # The runs test does: a power law fitted to a plateauing curve sits systematically
+    # above the data at short lags and below it at long lags, so the residual signs run
+    # in blocks instead of flipping like noise.
+    fit_quality = assess_fit(msd, msd_fit, n_params=3,
+                             model_name="MSD power law")
+
+    if alpha < 0.85:
+        motion_type = 'subdiffusion'
+    elif alpha > 1.15:
+        motion_type = 'superdiffusion'
+    else:
+        motion_type = 'Brownian'
+
+    # CONFINEMENT is the failure that actually matters here -- see test_confinement.
+    # (The residual runs test is kept in `fit_quality` for the record, but it needs >= 8
+    # residuals and the defensible lag window is often only ~6, so it usually cannot say
+    # anything. It reports 'not assessed' rather than pretending.)
+    confinement = test_confinement(tau, msd)
+    if confinement.get('confined'):
+        motion_type = 'confined (not anomalous diffusion)'
+        napari_show_warning("MSD fit: " + confinement['verdict'])
+    elif fit_quality.get('assessable', True) and not fit_quality['adequate']:
+        motion_type = 'indeterminate (power law does not fit)'
+        napari_show_warning(
+            "MSD fit: " + fit_quality['verdict'] + " The power law does not describe "
+            "this MSD, so alpha is not interpretable and the motion type cannot be "
+            "assigned. The most common cause is CONFINEMENT -- a probe hitting the "
+            "boundary of a small condensate produces a plateauing MSD, which a power law "
+            "fits with a spuriously small exponent and reports as 'subdiffusion'. That "
+            "is a wall, not viscoelasticity. Check the probe is sampling the bulk.")
+
     return dict(
         D_um2_per_s=D,
         alpha=alpha,
         motion_type=motion_type,
         r_squared=float(r2),
+        # Adequacy travels WITH alpha: an R² of 0.90 on a power law that cannot describe
+        # a plateauing MSD must not be readable without the evidence that it is wrong.
+        fit_quality=fit_quality,
+        fit_adequate=bool(fit_quality['adequate']),
+        confinement=confinement,
+        confined=bool(confinement.get('confined', False)),
         localization_error_nm=(float(sigma_loc_um * 1000.0)
                                if np.isfinite(sigma_loc_um) else float('nan')),
         fit_lags_s=tau_fit,

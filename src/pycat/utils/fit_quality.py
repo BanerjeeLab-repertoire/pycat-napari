@@ -114,8 +114,17 @@ def assess_fit(y, y_fit, n_params=None, model_name=""):
     ok = np.isfinite(y) & np.isfinite(y_fit)
     y, y_fit = y[ok], y_fit[ok]
     if y.size < 8:
-        return dict(r_squared=float('nan'), adequate=False,
-                    verdict="Too few points to assess fit quality.")
+        # NOT the same as "the fit is bad". The runs test needs a reasonable number of
+        # residuals to have any power; below that it cannot say anything either way.
+        # Conflating "could not assess" with "inadequate" produced a 100% false-alarm
+        # rate on the MSD fit, whose defensible lag window is deliberately narrow (often
+        # ~6 points). Say "unknown", and do not block the result.
+        return dict(r_squared=r_squared(y, y_fit), adequate=True, assessable=False,
+                    runs_p=float('nan'),
+                    verdict=(f"Fit adequacy NOT ASSESSED: only {y.size} points, and the "
+                             f"residual runs test needs at least 8 to have any power. "
+                             f"This is not evidence the model fits — it is the absence "
+                             f"of evidence either way."))
 
     res = y - y_fit
     r2 = r_squared(y, y_fit)
@@ -128,10 +137,11 @@ def assess_fit(y, y_fit, n_params=None, model_name=""):
     adequate = bool(np.isfinite(p) and p >= 0.05)
     name = f"{model_name}: " if model_name else ""
 
-    if not np.isfinite(p):
-        verdict = (f"{name}R² = {r2:.4f}. Too few residuals for a runs test — fit "
-                   f"adequacy could not be assessed.")
-        adequate = bool(r2 > 0.9)
+    assessable = bool(np.isfinite(p))
+    if not assessable:
+        verdict = (f"{name}R² = {r2:.4f}. Fit adequacy NOT ASSESSED — too few residuals "
+                   f"for a runs test. This is not evidence the model fits.")
+        adequate = True          # unknown, not bad: do not block the result
     elif adequate:
         verdict = (f"{name}R² = {r2:.4f}, residuals random (runs test p = {p:.3f}, "
                    f"{n_runs} runs vs {n_exp:.0f} expected). No evidence the model is "
@@ -150,5 +160,6 @@ def assess_fit(y, y_fit, n_params=None, model_name=""):
         relative_rms=rel_rms,
         n_params=n_params,
         adequate=adequate,
+        assessable=assessable,   # False => "unknown", NOT "bad"
         verdict=verdict,
     )
