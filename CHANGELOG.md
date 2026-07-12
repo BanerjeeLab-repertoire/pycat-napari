@@ -4,6 +4,64 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.400] - 2026-07-10
+### Added — fit adequacy: R² accepts wrong models, and the residuals catch them
+R² is used as a fit-quality measure at **67 call sites across 9 modules**. It answers exactly
+one question: **"does this model beat a horizontal line?"** For any monotonic curve — a FRAP
+recovery, an MSD, a coarsening law — that is a trivially low bar, and clearing it is not
+evidence the model is *right*.
+
+Measured against PyCAT's **actual** FRAP model (the single-pool hyperbolic
+``I = (a + b·x)/(1 + x)``) on data whose truth is a **two-component** recovery — a fast and a
+slow pool, which the single-pool model cannot represent:
+
+| | R² | mobile fraction |
+|---|---|---|
+| single-pool fit to 2-component truth | **0.957** | 0.822 |
+| *truth* | — | *0.875* |
+
+**The wrong model scores R² = 0.957.** Any "R² > 0.95 means a good fit" heuristic accepts it
+without hesitation.
+
+**The residuals catch it.** A correct model leaves residuals whose signs flip like a coin. A
+model *missing structure* leaves them in **blocks** — the fit sits above the data over one
+stretch and below it over another. The Wald–Wolfowitz **runs test** measures exactly that:
+
+| scenario | flagged |
+|---|---|
+| correct model (data from the model) | **2 / 40 (5 %)** |
+| wrong model (2-component truth) | **30 / 40 (75 %)** |
+
+Calibrated — a 5 % false-alarm rate is what a 0.05 threshold *should* give — and it catches
+three quarters of the wrong-model fits R² waves through.
+
+New **``pycat/utils/fit_quality.py``**: ``assess_fit`` returns R², the runs test, an
+``adequate`` flag and a verdict. Wired into ``frap_tools``, where the adequacy now travels
+**with** the parameters — an R² of 0.957 on a wrong model cannot be read without the evidence
+that the model is wrong.
+
+This is the **same failure** as the colocalization p-value (1.5.396), Ripley's CSR line
+(1.5.397) and Moran's I (1.5.398–399): *a number that looks like a validity check but is
+tested against a null nobody chose.* R²'s implicit null is "a flat line", and beating a flat
+line is not evidence of correctness.
+
+### Note — my validation was wrong first, and the check itself exposed it
+The first run flagged the **correct** model 30/30 times — a fatal false-positive rate. The
+cause: I generated exponential recovery data and fed it to PyCAT's **hyperbolic** fitter. The
+runs test was right; **my test was wrong.** It correctly detected that the model did not
+match the data I had given it. Redone against the real model equation, it calibrates at 5 %.
+
+A check that catches your own mistake in constructing its validation is a good sign — but it
+is also exactly why the *"assert the correct model is accepted"* half of the test matters as
+much as the *"assert the wrong model is caught"* half.
+
+### Recorded — the other 8 modules
+``vpt_tools`` (the MSD power-law fit — a non-random residual pattern means **α** is being read
+off a curve the model does not describe, and α is the whole anomalous-vs-Brownian claim),
+``condensate_physics_tools`` (the coarsening exponent, same argument), ``invitro_tools``,
+``gaussian_localization_tools``, ``molecular_counting_tools``, ``fusion_tools``,
+``spida_tools``, ``correlation_func_analysis_tools``. In the roadmap with an acceptance test.
+
 ## [1.5.399] - 2026-07-10
 ### Changed — Moran's I demoted, with a measured saturation guard
 Moran's I is no longer the primary structure indicator. It is **saturated on condensate

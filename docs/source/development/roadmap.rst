@@ -998,6 +998,35 @@ different parameters, which is a **correctness** hazard, not a performance one.
 **Acceptance:** killing a run mid-write leaves a cache that is *rejected* on the next load
 rather than silently reused; and a parameter change invalidates the cache.
 
+.. rubric:: Extend the fit-adequacy check to the other 8 modules using R²
+
+``pycat.utils.fit_quality.assess_fit`` (1.5.400) pairs R² with a **residual runs test**,
+which catches the wrong-model fits that R² waves through. It is wired into ``frap_tools``.
+
+**Why it matters:** R² answers only *"does this model beat a horizontal line?"* — a trivially
+low bar for any monotonic curve. A single-pool fit to genuinely two-component FRAP data
+scores **R² = 0.957** and is accepted by any "R² > 0.95" heuristic. The runs test flags it,
+because the residuals run in blocks rather than flipping sign like noise. Calibrated: 5 %
+false alarms on correct fits, 75 % detection of wrong-model fits.
+
+**Where** — R² is used as a fit-quality measure at 67 call sites across:
+``condensate_physics_tools`` (14), ``vpt_tools`` (14), ``gaussian_localization_tools`` (14),
+``molecular_counting_tools`` (8), ``fusion_tools`` (7), ``invitro_tools`` (5),
+``spida_tools`` (4), ``correlation_func_analysis_tools`` (1).
+
+The **highest-value** targets are the ones whose parameters are physically interpreted:
+
+* ``vpt_tools`` — the MSD power-law fit. A non-random residual pattern means the α exponent
+  is being read off a curve the model does not describe, and α is the whole anomalous-vs-
+  Brownian claim.
+* ``condensate_physics_tools`` — the coarsening exponent, same argument.
+* ``invitro_tools`` — the phase-boundary / lever-rule fits.
+
+**Acceptance:** for each, generate data from a *known-wrong* model (e.g. two-component decay
+fitted with one component; a confined trajectory fitted with a free power law) and assert
+that ``assess_fit`` marks it inadequate while accepting data generated from the correct
+model, with a false-alarm rate near 5 %.
+
 .. rubric:: The object-feature table as a first-class artifact (audit points 7 & 8)
 
 Several workflows independently call ``skimage.measure.regionprops_table`` on the same

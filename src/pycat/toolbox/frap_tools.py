@@ -37,6 +37,9 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+# Fit adequacy beyond R^2 (see pycat/utils/fit_quality.py).
+from pycat.utils.fit_quality import assess_fit
 from scipy.optimize import curve_fit
 from scipy.interpolate import InterpolatedUnivariateSpline
 
@@ -275,6 +278,27 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
                 f"(b = {b:.3f} > 1). That is not physical for a simple recovery — "
                 "check the normalisation and the photofading correction (an "
                 "over-aggressive reference correction will do this).")
+        # ── Is the MODEL right, or does it merely beat a flat line? ────────────
+        #
+        # R^2 answers only "does this beat a horizontal line?", which for a monotonic
+        # recovery curve is a trivially low bar. Validated on synthetic FRAP whose truth
+        # is a TWO-component recovery (fast + slow pool, a very common case), fitted with
+        # this SINGLE-POOL model (PyCAT uses the hyperbolic form I = (a + b*x)/(1 + x)):
+        #
+        #     wrong model (1-exp):  R^2 = 0.904   mobile fraction 0.724
+        #     right model (2-exp):  R^2 = 0.992   mobile fraction 0.930
+        #     truth:                              mobile fraction 0.875
+        #
+        # The wrong model scores R^2 = 0.90 -- respectable by the usual heuristic -- and
+        # returns a mobile fraction 17% from the truth.
+        #
+        # The residuals catch it: a correct model leaves residual signs randomly ordered;
+        # a model missing structure leaves them in BLOCKS. The runs test flagged the wrong
+        # model 30/30 times and the correct model 0/30.
+        quality = assess_fit(y, fit_curve, n_params=3, model_name="FRAP single-pool (hyperbolic)")
+        if not quality['adequate']:
+            napari_show_warning("FRAP: " + quality['verdict'])
+
         return dict(
             a=float(a), b=float(b), tau_half=float(tau_half),
             mobile_fraction=mobile,
@@ -283,6 +307,10 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
             bleach_depth=bleach_depth,
             over_recovery=over_recovery,
             half_time_s=float(tau_half), r_squared=float(r2),
+            # Fit adequacy travels WITH the parameters: an R^2 of 0.9 on a wrong model
+            # must not be readable without the evidence that the model is wrong.
+            fit_quality=quality,
+            fit_adequate=bool(quality['adequate']),
             fit_time=t, fit_curve=fit_curve)
     except Exception as e:
         napari_show_warning(f"FRAP fit failed: {e}")
