@@ -302,9 +302,6 @@ def stream_stats(stack_like, percentiles=(1, 99)):
     count = 0
     mean = 0.0
     m2 = 0.0
-    sat = 0
-    hist = None
-    edges = None
 
     for t in range(n_frames):
         f = read_frame(stack_like, t).astype(np.float64, copy=False)

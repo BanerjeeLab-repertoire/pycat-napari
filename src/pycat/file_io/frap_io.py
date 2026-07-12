@@ -72,9 +72,9 @@ def load_lumicks_frap(
     """
     try:
         import lumicks.pylake as pylake
-    except ImportError:
+    except ImportError as _e:
         raise ImportError(
-            "lumicks.pylake not installed. Run: pip install lumicks.pylake")
+            "lumicks.pylake not installed. Run: pip install lumicks.pylake") from _e
 
     f = pylake.File(h5_path)
     scan_names = list(f.scans)
@@ -236,9 +236,9 @@ def load_lumicks_fusion(h5_path: str) -> dict:
     """
     try:
         import lumicks.pylake as pylake
-    except ImportError:
+    except ImportError as _e:
         raise ImportError(
-            "lumicks.pylake not installed. Run: pip install lumicks.pylake")
+            "lumicks.pylake not installed. Run: pip install lumicks.pylake") from _e
 
     f = pylake.File(h5_path)
     forces = {}
@@ -362,9 +362,9 @@ def load_lumicks_fd(h5_path: str,
     """
     try:
         import lumicks.pylake as pylake
-    except ImportError:
+    except ImportError as _e:
         raise ImportError(
-            "lumicks.pylake not installed. Run: pip install lumicks.pylake")
+            "lumicks.pylake not installed. Run: pip install lumicks.pylake") from _e
 
     f = pylake.File(h5_path)
 

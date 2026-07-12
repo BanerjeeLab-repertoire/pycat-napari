@@ -2581,11 +2581,11 @@ class FileIOClass:
             try:
                 from aicsimageio import AICSImage as _AICSImage
                 AICSImage = _AICSImage
-            except ImportError:
+            except ImportError as _e:
                 raise RuntimeError(
                     "aicsimageio is required to open TIFF/CZI stacks. "
                     "Install with: pip install aicsimageio"
-                )
+                ) from _e
             image = AICSImage(file_path)
             use_aicsimage = True
 

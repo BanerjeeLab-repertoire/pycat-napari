@@ -4,6 +4,75 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.391] - 2026-07-10
+### Added — CI that enforces every guard from this audit
+The audit's final "immediate blocker" was *"add Ruff correctness checks to CI"*. The other
+six were fixed in 1.5.386–1.5.388; this one is the most valuable, because **it is what stops
+the other six from coming back**.
+
+**The Ruff config was silently doing nothing.** ``select``/``ignore`` sat at the top level of
+``[tool.ruff]``, where modern Ruff **ignores them** — they belong under ``[tool.ruff.lint]``.
+So the linter appeared to declare rules it was not enforcing. Fixed.
+
+**New ``.github/workflows/core.yml``** (there was no CI at all). It installs **only** the
+scientific dependencies — deliberately **not** napari, PyQt5 or cellpose. If a scientific
+module needs a GUI stack to import, that is the failure this job exists to catch, and the fix
+is to move the import, not to add it to CI.
+
+Build-breaking gates, every one of which corresponds to a bug that actually shipped:
+
+- ``F821`` undefined name → ``progress_emit``, ``mask_name``
+- ``F823`` local used before assignment → the ``QSizePolicy`` ``UnboundLocalError``
+- ``F811`` redefinition → duplicate ``run_expand_labels`` / ``resolve_measurement_source``
+- ``F601`` repeated dict key → the duplicate batch-registry step
+- ``B006`` mutable default argument
+- ``B023`` loop variable captured in a closure (the classic Qt-callback bug)
+- ``B904`` raise-without-``from`` inside ``except`` (destroys the original traceback)
+- the AST guards (undefined names, use-before-import, duplicate definitions)
+- the headless-import guard (13 scientific modules must import with no GUI)
+- the core scientific suite
+
+**Verified the CI will be GREEN on first push, not red** — every build-breaking gate was
+dry-run against the current code and passes. A guard that fails on day one is a guard that
+gets disabled.
+
+### Fixed — exception chaining (B904): 8 sites were destroying the original traceback
+``raise ImportError("install lumicks.pylake")`` inside an ``except ImportError:`` **discards
+the real cause**. If the import failed because of a *version conflict* rather than absence,
+the user is told to install a package they already have, and the actual error is gone. All 8
+now use ``raise ... from _e``.
+
+(Two further sites were checked and are **false positives** — a ``raise`` inside a class
+*defined* in an ``except`` block, but *called* long afterwards. Verified empirically that
+``__context__`` is ``None`` there, so there is nothing to chain; real Ruff scopes B904 to the
+enclosing function and does not flag them.)
+
+### Changed — F841 (unused locals) is ADVISORY, not build-breaking
+34 findings, and the audit is right that they must be **reviewed individually rather than
+deleted**. Several sit in stateful loading and time-series code — ``from_meta``, ``is_lazy``,
+``ndim``, ``strategy_dd``, ``otsu_classes_spin`` — where an unused local may be the **residue
+of logic that was partially removed while downstream code still behaves as if it existed**.
+The question for each is not *"is it used?"* but *"was something meant to use it?"* Reported
+in CI, never auto-fixed, does not fail the build until triaged. (Three of the 34 were mine,
+introduced while writing ``stream_stats``; those are removed.)
+
+**The full ~2,390 Ruff findings are NOT auto-fixed.** A global ``--fix`` across a 7 000-line
+``file_io.py`` is exactly how a working codebase gets broken.
+
+### Verified — the core scientific suite runs with no napari, no Qt, no GPU
+FRAP mobile fraction (1.000 on a known curve), viscosity from diffusion, colocalization
+Pearson (r = 0.969), partial-volume weighted statistics, and unbinned distribution fitting all
+execute headlessly. That is precisely the ``tests/core/`` tier the audit asked for, and it now
+exists and works.
+
+### Recorded — the remaining architectural items
+``file_io.py``'s split (7 000 lines, ~11 responsibilities — and ``stack_access.py`` is already
+its first proven slice), the Cellpose model lifetime (one persistent model per device, never
+per frame), and zarr completion markers plus write-ownership discipline (a cancelled run
+currently leaves a partial cache that looks valid; and cache identity must include the code
+version and every scientifically relevant parameter, which is a **correctness** hazard, not a
+performance one). All in the roadmap with acceptance tests.
+
 ## [1.5.390] - 2026-07-10
 ### Fixed — trace extraction was 70× slower than it needed to be, and rejected lazy stacks
 ``molecular_counting_tools.extract_spot_traces`` did::

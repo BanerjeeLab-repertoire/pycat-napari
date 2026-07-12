@@ -121,7 +121,7 @@ def _get_gateway(fiji_endpoint: str = 'sc.fiji:fiji', heap_gb: int = 4):
             "pip does not install Java itself; use your OS package manager, "
             "conda (conda install openjdk=11), or Adoptium/Oracle directly.\n"
             f"Original error: {e}"
-        )
+        ) from e
 
     try:
         sj.config.add_options(f'-Xmx{heap_gb}g')
@@ -131,7 +131,7 @@ def _get_gateway(fiji_endpoint: str = 'sc.fiji:fiji', heap_gb: int = 4):
             f"Failed to initialise ImageJ2/Fiji gateway (endpoint="
             f"'{fiji_endpoint}'). First-run downloads require network "
             f"access and can take several minutes. Original error: {e}"
-        )
+        ) from e
 
     # Resolve TrackMate classes via the scripting API (never the plugin
     # dispatcher — see module docstring for why this matters headless).
@@ -166,7 +166,7 @@ def _get_gateway(fiji_endpoint: str = 'sc.fiji:fiji', heap_gb: int = 4):
             f"Fiji gateway started but TrackMate classes could not be "
             f"resolved — is TrackMate included in this Fiji installation? "
             f"Original error: {e}"
-        )
+        ) from e
 
     _ij_gateway = ij
     _trackmate_classes = classes

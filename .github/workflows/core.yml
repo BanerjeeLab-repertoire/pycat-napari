@@ -1,0 +1,89 @@
+name: core
+
+# The point of this workflow is to make the scientific code verifiable WITHOUT a GUI,
+# and to stop a specific set of bugs from silently returning. Every check below exists
+# because the corresponding bug actually shipped:
+#
+#   * a `NameError` on a name that only existed as a nested function's parameter, which
+#     meant the Dynamic Spatial Analysis button could never have run;
+#   * an `UnboundLocalError` from a late `QSizePolicy` import, which made three widgets
+#     impossible to construct;
+#   * a `mask_name` read from a *sibling* nested function's locals, swallowed by an
+#     `except Exception`, so ticking "Ripley's L / PCF" silently produced no results;
+#   * two functions defined twice, the later silently replacing the earlier;
+#   * a duplicate key in the batch replay registry;
+#   * scientific modules importing napari/PyQt at module scope, so 4 of 6 science test
+#     modules could not even be COLLECTED.
+#
+# None of these are style issues, and none of them would be caught by "does it compile".
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  core:
+    name: core (no napari, no Qt, no GPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the SCIENTIFIC deps only
+        # Deliberately NOT installing napari, PyQt5 or cellpose. If a scientific module
+        # needs them to import, that is the failure this job exists to catch — the fix is
+        # to move the GUI import, not to add it here.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy scikit-image pandas tifffile zarr
+          pip install pytest pytest-cov ruff
+
+      - name: Ruff — correctness rules (BUILD-BREAKING)
+        # NOT the full ~2,390 findings. This is the subset where every rule has caught a
+        # real, shipped bug in this repository, and where the codebase is verified clean:
+        #
+        #   F821 undefined name           -> `progress_emit`, `mask_name`
+        #   F823 local used before assign -> the `QSizePolicy` UnboundLocalError
+        #   F811 redefinition             -> duplicate run_expand_labels / resolver
+        #   F601 repeated dict key        -> duplicate batch-registry step
+        #   B006 mutable default argument
+        #   B023 loop variable captured in a closure (a classic Qt-callback bug)
+        #   B904 raise-without-from in except (destroys the original traceback)
+        run: |
+          ruff check src \
+            --select F821,F823,F601,F811,B006,B023,B904 \
+            --output-format=github
+
+      - name: Ruff — unused locals (ADVISORY — do not auto-fix)
+        # F841 currently reports ~34 findings, and the audit is right that they must be
+        # reviewed individually rather than deleted. Several sit in stateful loading and
+        # time-series code (`from_meta`, `is_lazy`, `ndim`, `strategy_dd`,
+        # `otsu_classes_spin`), where an unused local may be the RESIDUE of logic that was
+        # partially removed while downstream code still behaves as if it existed. The
+        # question for each is not "is it used?" but "was something meant to use it?".
+        # Reported, never auto-fixed, and does not fail the build until triaged.
+        run: ruff check src --select F841 --output-format=github || true
+
+      - name: Ruff — style (advisory, never fails the build)
+        run: ruff check src || true
+
+      - name: Guards — undefined names, use-before-import, duplicate definitions
+        # These run without importing anything: they are pure AST checks, so they work
+        # even for modules whose heavy dependencies are absent.
+        run: |
+          pytest tests/test_no_undefined_names.py -v
+
+      - name: Guards — scientific modules must import with no GUI
+        run: |
+          pytest tests/test_headless_science.py -v
+
+      - name: Core scientific tests
+        # The numerical kernels — FRAP fitting, VPT/viscosity, colocalization
+        # coefficients, partition, image transforms — must all be verifiable here.
+        run: |
+          pytest -m core -v --cov=pycat --cov-report=term-missing || \
+          pytest tests/ -v -k "not ui and not viewer and not napari"

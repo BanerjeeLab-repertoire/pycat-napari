@@ -219,9 +219,9 @@ def run_keyframe_stardist(
     try:
         from stardist.models import StarDist2D
         from csbdeep.utils import normalize as csbdeep_normalize
-    except ImportError:
+    except ImportError as _e:
         raise ImportError(
-            "StarDist not installed. Run: pip install stardist csbdeep")
+            "StarDist not installed. Run: pip install stardist csbdeep") from _e
 
     import skimage.transform as _sktr
     import skimage as _sk

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.390"
+version = "1.5.391"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -204,7 +204,27 @@ target-version = ["py312"]
 include = '\.pyi?$'
 
 [tool.ruff]
-select = ["E", "F", "B", "I"]
-ignore = ["E501"]
+# `select`/`ignore` at top level are DEPRECATED in modern Ruff -- they belong under
+# [tool.ruff.lint]. Left at the top level they are silently ignored, so the linter was
+# not actually enforcing the rules it appeared to declare.
 line-length = 88
 target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+ignore = ["E501"]
+
+# The CORRECTNESS subset. These are not style opinions -- every one of them has found a
+# real, shipped bug in this codebase:
+#   F821 undefined name            -> `progress_emit`, `mask_name` (1.5.386)
+#   F823 local used before assign  -> `QSizePolicy` UnboundLocalError (1.5.387)
+#   F811 redefinition              -> duplicate run_expand_labels / resolve_measurement_source (1.5.388)
+#   F601 repeated dict key         -> duplicate batch registry step (1.5.386)
+#   F841 unused local              -> the residue of half-removed logic
+#   B006 mutable default arg
+#   B023 loop variable captured in a closure (a classic Qt-callback bug)
+#   B904 raise-without-from inside except (destroys the original traceback)
+#
+# Run this subset in CI and treat it as a build failure. The rest of the ~2,390 Ruff
+# findings are style/maintainability and should NOT be auto-fixed en masse -- a global
+# `--fix` over a 7,000-line file_io.py is exactly how a working codebase gets broken.

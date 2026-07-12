@@ -852,6 +852,58 @@ sensitivity must be *reported*, not hidden).
   is a **correctness** hazard, not a performance one: it will silently serve a result
   computed with different parameters. This belongs in the correctness bucket.
 
+.. rubric:: Split file_io.py (7 000 lines, ~11 responsibilities)
+
+``file_io.py`` does format detection, image opening, lazy wrappers, metadata parsing,
+session restoration, mask/image classification, Qt dialogs, napari layer creation, zarr
+handling, tag restoration and save logic. **This is not a cosmetic complaint:** it is why
+the body of a ``_has_structured_metadata`` method could be accidentally merged into
+``_apply_saved_tags_to_layer`` (1.5.386) and sit there raising ``NameError`` on every
+tagged layer load without anyone noticing.
+
+**Suggested split:** ``format_detection.py``, ``metadata_readers.py``, ``array_sources.py``,
+``layer_loader.py``, ``layer_saver.py``, ``session_io.py``, ``io_dialogs.py``.
+``stack_access.py`` (1.5.389) is the first slice of this and is already done — it is the
+pure-numpy ``array_sources`` layer, and it proves the pattern works.
+
+**Do it slice by slice, with a compile check and a save/load round-trip after each.** A
+naive extraction of this file has already been attempted and broke it twice (see the
+``stack_access`` consolidation rubric). Do not attempt it in one pass.
+
+.. rubric:: Cellpose model lifetime (audit point 10)
+
+Cellpose model construction is expensive and each worker process that builds one duplicates
+it in (GPU) memory. **Where:** ``ts_cellpose_tools.py`` and ``segmentation_tools.py``.
+
+**The pattern:** one persistent model per execution device — a single GPU inference worker
+that batches frames, or a worker-local model built **once per process** in the
+``ProcessPoolExecutor`` initializer (``_init_worker_threads`` in
+``timeseries_condensate_tools`` is now exactly the right hook to hang this on). Never build
+the model per frame or per task. Keyframe inference should batch frames where the API
+supports it.
+
+**Acceptance:** a counter asserts the Cellpose model is constructed at most once per worker
+process in a full keyframe run.
+
+.. rubric:: Zarr completion markers and write ownership (audit)
+
+Two distinct hazards:
+
+* **No completion marker.** A cancelled or crashed run leaves a partially-written zarr that
+  looks valid. Write ``root.attrs["pycat_complete"] = True`` **only** after a successful
+  finish, and reject any cache lacking it. Clean up partial outputs on cancellation.
+* **Chunk ownership.** Frame-parallel workers writing into the same zarr are only safe if no
+  two workers can touch the same chunk. With a temporal chunk size > 1, *non-overlapping
+  frames still share a chunk*. Use ``(1, H, W)`` chunks for frame-parallel writes, or a
+  single writer, or explicitly allocated non-overlapping chunk groups.
+
+**And cache identity must include the code version and every scientifically relevant
+parameter** — a cache keyed on incomplete identity silently serves a result computed with
+different parameters, which is a **correctness** hazard, not a performance one.
+
+**Acceptance:** killing a run mid-write leaves a cache that is *rejected* on the next load
+rather than silently reused; and a parameter change invalidates the cache.
+
 .. rubric:: The object-feature table as a first-class artifact (audit points 7 & 8)
 
 Several workflows independently call ``skimage.measure.regionprops_table`` on the same
