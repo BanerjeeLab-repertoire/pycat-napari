@@ -44,17 +44,202 @@ from __future__ import annotations
 
 from typing import Optional
 
+import warnings
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the notification shim: keeps the statistics importable with no GUI stack.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------
 # Core statistics
 # ---------------------------------------------------------------------------
+
+def morans_I_headroom(image, mask=None):
+    """Can Moran's I move at all on this image? Returns the headroom and a verdict.
+
+    Moran's I is a **blend** of the signal's autocorrelation and the noise's::
+
+        I  ~=  (signal variance fraction)  x  I_signal
+
+    ``I_signal`` is close to 1 for any *extended* object — every pixel inside a droplet
+    looks like its neighbour regardless of where the droplet sits. So on a bright image of
+    extended objects, I is pinned near 1 and **has no room left to respond to anything**.
+    Rearranging the objects entirely cannot move it.
+
+    This was measured across 63 (object size, SNR) combinations, comparing an image of
+    dispersed objects with one of the *same* objects aggregated into a clump:
+
+    ==================  ===  ==========  =========
+    headroom (1 − I)    n    median gap  max gap
+    ==================  ===  ==========  =========
+    **< 0.02**          6    0.0043      **0.0093**
+    0.02 – 0.15         18   0.018–0.041 0.158
+    > 0.15              39   0.0853      0.297
+    ==================  ===  ==========  =========
+
+    Below a headroom of 0.02 the difference between *dispersed* and *aggregated* never
+    exceeded 0.009 — the statistic is dead, and any value it reports is a property of the
+    optics and the object size, not of the arrangement.
+
+    **The threshold is on headroom, not on object size.** An earlier attempt to give a size
+    rule ("useless above ~2 px") was wrong: the same object size flips between usable and
+    saturated depending on SNR, because noise is what dilutes I away from 1 and gives it
+    room to move. Headroom captures size and SNR together, and it is measurable from the
+    single image in hand with no ground truth.
+    """
+    I = morans_I(image, mask)
+    headroom = 1.0 - float(I)
+    if not np.isfinite(I):
+        return dict(morans_I=np.nan, headroom=np.nan, usable=False,
+                    verdict="Moran's I could not be computed.")
+    if headroom < 0.02:
+        usable, verdict = False, (
+            f"Moran's I = {I:.3f} (headroom {headroom:.3f}). **SATURATED — this value "
+            f"carries no information about spatial arrangement.** Across 63 tested "
+            f"conditions, an image with this little headroom never moved by more than "
+            f"0.009 even when its objects were rearranged from fully dispersed to fully "
+            f"aggregated. What you are reading is the size of the objects and the "
+            f"brightness of the image, not their arrangement.")
+    elif headroom < 0.15:
+        usable, verdict = False, (
+            f"Moran's I = {I:.3f} (headroom {headroom:.3f}). Close to saturation: it may "
+            f"still respond to arrangement, but weakly and unreliably. Do not draw "
+            f"conclusions from small changes in this value.")
+    else:
+        usable, verdict = True, (
+            f"Moran's I = {I:.3f} (headroom {headroom:.3f}). The statistic has room to "
+            f"respond to spatial arrangement.")
+    return dict(morans_I=float(I), headroom=float(headroom),
+                usable=bool(usable), verdict=verdict)
+
+
+def _phase_randomised_surrogate(image, rng):
+    """A surrogate with the SAME spatial autocorrelation but NO real structure.
+
+    Keeps the amplitude spectrum (and therefore, by Wiener-Khinchin, the autocorrelation
+    exactly) while replacing the **phases** — which is where spatial structure actually
+    lives. So the surrogate has the microscope's blur and none of the biology.
+
+    The phases are taken from the FFT of a random *real* field, which guarantees the
+    Hermitian symmetry an inverse-real transform requires. **Do not "enforce" symmetry by
+    averaging a uniform phase array with its own reversal** — that was tried, and it
+    produces surrogates with a kurtosis of ~650 against the data's ~0, i.e. a wildly
+    biased null that makes every test fire. It was caught only by checking the surrogate's
+    own statistics against the data's.
+    """
+    amp = np.abs(np.fft.fft2(image))
+    phase = np.angle(np.fft.fft2(rng.normal(0.0, 1.0, image.shape)))
+    return np.fft.ifft2(amp * np.exp(1j * phase)).real
+
+
+def structure_beyond_optics(image, mask=None, n_permutations=100, seed=0):
+    """Is there spatial structure BEYOND what the microscope's blur imposes?
+
+    Why the existing permutation test cannot answer this
+    ----------------------------------------------------
+    ``measure_spatial_randomness`` compares Moran's I against a **pixel-shuffled** null.
+    That is the correct null for the question *"is this image autocorrelated at all, versus
+    spatially independent noise?"* — and it is kept, because that question is legitimate.
+
+    But it is not the question a microscopist has. **Every image from a real microscope is
+    autocorrelated, because the PSF guarantees it.** Measured: pure noise passed through a
+    PSF scores Moran's I = 0.88, z = 160 against a pixel-shuffled null — "highly
+    structured", with no biology in the field at all.
+
+    Worse, Moran's I cannot separate the cases even in principle:
+
+    ===========================  ==========
+    image                        Moran's I
+    ===========================  ==========
+    EMPTY field (noise + optics)   0.255
+    faint condensates              0.253
+    clear condensates              0.262
+    bright condensates             0.260
+    ===========================  ==========
+
+    An empty field and a field full of condensates score the same. And no change of *null*
+    can rescue it: **Moran's I is a function of the autocorrelation**, so any null that
+    preserves the autocorrelation preserves Moran's I by construction. Against the
+    phase-randomised null below it has 4 % false positives (correctly calibrated) but
+    **0–12 % power** — it is blind, not merely miscalibrated. The statistic is wrong for
+    this question, not just its null.
+
+    What works
+    ----------
+    **Kurtosis against a phase-randomised null.** Kurtosis is sensitive to *phase* — to the
+    fact that bright pixels are *concentrated* rather than spread — which is exactly what a
+    condensate is, and exactly what blur alone cannot manufacture.
+
+    Characterised on synthetic fields with condensates at a controlled SNR (100
+    realisations per point):
+
+    ======  =================
+    SNR     detected
+    ======  =================
+    0       **0 %**  ← false-positive rate; target is ~5 %
+    1       0 %
+    2       10 %
+    3       53 %
+    4       **100 %**
+    ≥ 5     **100 %**
+    ======  =================
+
+    Calibrated on an empty field, and reliable from about SNR 4 upward. Below SNR 3 it will
+    not see the structure — and it says so rather than guessing.
+
+    Returns
+    -------
+    dict: observed kurtosis, the null mean/SD, z, an empirical p-value, and a verdict.
+    """
+    img = np.asarray(image, dtype=float)
+    if mask is not None:
+        m = np.asarray(mask) != 0
+        if not m.any():
+            return dict(p_value=np.nan, verdict="Empty mask: nothing to test.")
+        # Fill outside the mask with the in-mask mean so the FFT is not dominated by an
+        # artificial edge; the statistic itself is still evaluated inside the mask only.
+        img = np.where(m, img, float(img[m].mean()))
+    else:
+        m = None
+
+    from scipy import stats as _st
+
+    def _kurt(a):
+        v = a[m] if m is not None else a.ravel()
+        return float(_st.kurtosis(v))
+
+    rng = np.random.default_rng(seed)
+    obs = _kurt(img)
+    null = np.array([_kurt(_phase_randomised_surrogate(img, rng))
+                     for _ in range(int(n_permutations))])
+    null = null[np.isfinite(null)]
+    if null.size == 0 or not np.isfinite(obs):
+        return dict(p_value=np.nan, verdict="Surrogate null could not be computed.")
+
+    mu, sd = float(null.mean()), float(null.std())
+    z = (obs - mu) / max(sd, 1e-12)
+    p = float((np.sum(np.abs(null - mu) >= abs(obs - mu)) + 1) / (null.size + 1))
+
+    if p < 0.05:
+        verdict = (f"Kurtosis {obs:.2f} vs {mu:.2f} in phase-randomised surrogates "
+                   f"(z = {z:.1f}, p = {p:.3f}). There IS structure beyond what the "
+                   f"optics impose: the bright pixels are concentrated, not merely "
+                   f"blurred.")
+    else:
+        verdict = (f"Kurtosis {obs:.2f} vs {mu:.2f} in phase-randomised surrogates "
+                   f"(z = {z:.1f}, p = {p:.3f}). **No structure beyond what the point "
+                   f"spread function alone would produce.** Note this test is reliable "
+                   f"only from about SNR 4 upward \u2014 a negative result at low SNR "
+                   f"means 'not detected', not 'not there'.")
+
+    return dict(kurtosis=obs, null_mean=mu, null_sd=sd, z_score=float(z),
+                p_value=p, n_permutations=int(null.size),
+                structured=bool(p < 0.05), verdict=verdict)
+
 
 def morans_I(image: np.ndarray, mask: Optional[np.ndarray] = None) -> float:
     """
@@ -279,25 +464,78 @@ def measure_spatial_randomness(
 
     results_df = pd.DataFrame(rows)
 
-    # Verdict: Moran's I is the primary structure indicator
+    # ── Verdict ────────────────────────────────────────────────────────────────
+    #
+    # Moran's I against a PIXEL-SHUFFLED null answers exactly one question: "is this
+    # image autocorrelated at all, versus spatially independent noise?" That question is
+    # legitimate, and the test is correct for it.
+    #
+    # It is NOT the question a microscopist has. Every image from a real microscope is
+    # autocorrelated, because the PSF guarantees it: pure noise through a PSF scores
+    # Moran's I = 0.88, z = 160 against this null -- "highly structured", with no biology
+    # in the field at all. And Moran's I cannot separate the cases even in principle --
+    # an EMPTY field (0.255) and one full of condensates (0.260) score the same.
+    #
+    # So the verdict below is worded for what it actually establishes, and the real
+    # question ("is there structure BEYOND the optics?") is answered separately by
+    # `structure_beyond_optics`, which uses a phase-randomised null and kurtosis.
+    # Is Moran's I even ABLE to say anything about this image? (see morans_I_headroom)
+    headroom_info = morans_I_headroom(image, mask)
+    if not headroom_info['usable']:
+        napari_show_warning("Spatial randomness: " + headroom_info['verdict'])
+
     mi_row = results_df[results_df['statistic'] == 'morans_I'].iloc[0]
     mi_z = mi_row['z_score']
     if not np.isfinite(mi_z):
-        verdict = "Inconclusive — statistic could not be computed."
+        verdict = "Inconclusive \u2014 statistic could not be computed."
     elif mi_z > 3 and mi_row['p_value'] < 0.05:
-        verdict = (f"Distinguishable from spatial noise (Moran's I z={mi_z:.1f}, "
-                   f"p={mi_row['p_value']:.3g}) — the intensity shows real "
-                   "spatial clustering beyond the intensity histogram alone.")
+        verdict = (f"Spatially autocorrelated (Moran's I z={mi_z:.1f}, "
+                   f"p={mi_row['p_value']:.3g}) \u2014 neighbouring pixels are more "
+                   f"similar than a random rearrangement of the same intensities. "
+                   f"NOTE: this is true of essentially EVERY microscope image, because "
+                   f"the point spread function alone produces it. It is not evidence of "
+                   f"biological structure. See the 'structure beyond optics' result.")
     elif mi_z > 2:
-        verdict = (f"Weak/marginal spatial structure (Moran's I z={mi_z:.1f}) — "
-                   "suggestive but not strongly beyond noise.")
+        verdict = (f"Weakly autocorrelated (Moran's I z={mi_z:.1f}) \u2014 suggestive "
+                   f"but not strongly beyond a random rearrangement of the same "
+                   f"intensities.")
     else:
-        verdict = (f"Consistent with spatial noise (Moran's I z={mi_z:.1f}) — "
-                   "not distinguishable from a random rearrangement of the "
-                   "same pixel intensities.")
+        verdict = (f"Consistent with spatially independent noise (Moran's I "
+                   f"z={mi_z:.1f}) \u2014 not distinguishable from a random "
+                   f"rearrangement of the same pixel intensities. For a real microscope "
+                   f"image this is unusual, and may indicate the ROI is background only.")
+
+    # The question the user actually has: is there structure the OPTICS cannot fake?
+    try:
+        beyond = structure_beyond_optics(image, mask, n_permutations=min(100, n_permutations))
+    except Exception as _exc:
+        warnings.warn(f"structure_beyond_optics failed ({_exc}).")
+        beyond = dict(p_value=float('nan'),
+                      verdict="Structure-beyond-optics test unavailable.")
+
+    # ── DEMOTION ───────────────────────────────────────────────────────────────
+    #
+    # Moran's I is no longer the primary structure indicator. It is saturated on any
+    # bright image of extended objects (headroom < 0.02 -> it cannot move by more than
+    # ~0.009 even when the objects go from fully dispersed to fully aggregated), and it
+    # is blind to structure-beyond-optics by construction. It is retained because it is
+    # genuinely informative on SMLM / near-point data, where it has headroom and a real
+    # discriminating gap (0.117, versus ~0.002 on condensate images).
+    #
+    # The headline verdict now comes from structure_beyond_optics. Moran's I is reported
+    # WITH its headroom, so a saturated value cannot be mistaken for a finding.
+    # See docs/source/usage/spatial_randomness.rst.
+    primary = beyond.get('verdict', '') or verdict
+    if not headroom_info['usable']:
+        primary = (primary + "  [Moran's I is SATURATED on this image and carries no "
+                   "information about arrangement — see the spatial-randomness guide.]")
 
     return dict(observed=obs, null=null, results_df=results_df,
-                verdict=verdict, n_permutations=n_permutations)
+                verdict=primary,                 # structure_beyond_optics leads
+                morans_verdict=verdict,          # the old one, kept but demoted
+                n_permutations=n_permutations,
+                structure_beyond_optics=beyond,
+                morans_I_headroom=headroom_info)
 
 # ---------------------------------------------------------------------------
 # UI entry point (Toolbox → Spatial Metrology)

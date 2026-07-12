@@ -47,6 +47,7 @@ move between frames *without tracking anything*.
 
    measurement_guidance
    assumptions_and_limitations
+   spatial_randomness
    general_tools_guide
    loading_and_saving
 

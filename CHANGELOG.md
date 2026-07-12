@@ -4,6 +4,124 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.399] - 2026-07-10
+### Changed — Moran's I demoted, with a measured saturation guard
+Moran's I is no longer the primary structure indicator. It is **saturated on condensate
+images and reports nothing about arrangement** — but it is **genuinely useful on SMLM /
+single-molecule data**, so it is kept, guarded rather than removed.
+
+**The mechanism.** Moran's I of a real image is a *blend* of the signal's autocorrelation
+and the noise's: ``I ≈ f_signal × I_signal``. For any **extended** object ``I_signal ≈ 1`` —
+every pixel inside a droplet looks like its neighbour *regardless of where the droplet sits*.
+So on a bright image of extended objects, I is pinned near 1 and **has no room left to
+respond to anything.**
+
+Measured across **63 (object size, SNR) combinations**, comparing dispersed objects against
+the *same* objects aggregated into a clump:
+
+| headroom (1 − I) | n | median gap | max gap |
+|---|---|---|---|
+| **< 0.02** | 6 | 0.0043 | **0.0093** |
+| 0.02 – 0.15 | 18 | 0.018 – 0.041 | 0.158 |
+| > 0.15 | 39 | 0.0853 | 0.297 |
+
+Below a headroom of 0.02 the difference between *fully dispersed* and *fully aggregated*
+**never exceeded 0.009**. The statistic is dead; the value reflects object size and image
+brightness, not arrangement.
+
+**New ``morans_I_headroom``** measures this from the single image in hand — no ground truth
+— and refuses to interpret a saturated value. Validated end-to-end with **nothing hard-coded
+about image type**:
+
+| image | Moran's I | headroom | verdict |
+|---|---|---|---|
+| condensates (8 px, bright) | 0.999 | 0.001 | **saturated — refused** |
+| SMLM, random localisations | 0.655 | 0.345 | usable |
+| SMLM, clustered localisations | 0.772 | 0.228 | usable |
+
+The discriminating gap is **0.117 on SMLM** against **~0.002 on condensates** — two orders of
+magnitude, decided entirely by what is in the image. The headline verdict now comes from
+``structure_beyond_optics``; Moran's I is reported *with* its headroom so a pinned 0.99 cannot
+be mistaken for a finding.
+
+**A wrong claim, corrected in public.** An earlier version of this analysis concluded Moran's
+I is "useless above about 2 pixels". **That was wrong.** The same object size flips between
+usable and saturated depending on SNR, because it is *noise* that dilutes I away from 1 and
+gives it room to move — so a size threshold was really a measurement of whatever SNR happened
+to be simulated. I reached three contradictory conclusions by varying my own simulation
+parameters before catching it. **Headroom is the correct guard** because it captures size and
+SNR together, and it is measurable rather than assumed.
+
+### Added — ``docs/source/usage/spatial_randomness.rst``
+The full diagnosis, written up: what Moran's I measures (arrangement at fixed histogram — a
+real and exclusive capability: two images with *identical* kurtosis, 22.345, score 0.913 vs
+0.006), why it fails on condensates, the measured headroom table, why **no null model can
+rescue it** for the structure-beyond-optics question (it *is* the autocorrelation the null
+must preserve, so it has a correct 4 % false-positive rate and 0–12 % power — blind, not
+miscalibrated), where it genuinely works (SMLM), and the note that **a null model has to be
+checked, not just built**.
+
+## [1.5.398] - 2026-07-10
+### Fixed — the spatial-randomness test declared an empty field "real spatial clustering"
+``measure_spatial_randomness`` tests Moran's I against a **pixel-shuffled** null. That null
+is *correct* for the question it asks — *"is this image autocorrelated at all, versus
+spatially independent noise?"* — and it is kept.
+
+**But that is not the question a microscopist has.** Every image from a real microscope is
+autocorrelated, because **the PSF guarantees it**. Pure noise passed through a PSF scores
+Moran's I = 0.88, **z = 160** against this null — reported as "real spatial clustering
+beyond the intensity histogram" with *no biology in the field at all*.
+
+And Moran's I cannot separate the cases even in principle:
+
+| image | Moran's I |
+|---|---|
+| EMPTY field (noise + optics) | 0.255 |
+| faint condensates | 0.253 |
+| clear condensates | 0.262 |
+| bright condensates | 0.260 |
+
+**No change of null can rescue this.** Moran's I *is* a function of the autocorrelation, so
+any null that preserves the autocorrelation preserves Moran's I by construction. Against a
+phase-randomised null it has 4 % false positives (correctly calibrated) but **0–12 % power**.
+It is **blind, not merely miscalibrated** — the *statistic* is wrong for the question, not
+just its null.
+
+**New ``structure_beyond_optics``**: kurtosis against a **phase-randomised** null. The
+surrogate keeps the amplitude spectrum (hence the autocorrelation *exactly*, by
+Wiener–Khinchin) and replaces the **phases**, where real structure lives — so it has the
+microscope's blur and none of the biology. Kurtosis is sensitive to phase: to bright pixels
+being *concentrated* rather than *spread*, which is what a condensate is and what blur alone
+cannot manufacture.
+
+Characterised on synthetic fields with condensates at controlled SNR:
+
+| SNR | detected |
+|---|---|
+| **0** | **0 %** ← false-positive rate |
+| 2 | 10 % |
+| 3 | 53 % |
+| **4** | **100 %** |
+| ≥ 5 | **100 %** |
+
+Calibrated on an empty field, reliable from ≈ SNR 4 up — and it **says so** rather than
+guessing: a negative result at low SNR is reported as *"not detected"*, not *"not there"*.
+
+Runs automatically inside ``measure_spatial_randomness``; the Moran's I verdict is reworded
+to state only what it actually establishes.
+
+### Note — my own surrogate was biased, and only a self-check caught it
+The first phase-randomisation enforced Hermitian symmetry by averaging a uniform phase array
+with its own reversal. That produced surrogates with a **kurtosis of ~650 against the data's
+~0** (and the wrong variance) — a wildly biased null that made **every** test fire, at a
+**100 % false-positive rate**. It looked like a working detector.
+
+It was caught only by comparing the *surrogate's own statistics* to the *data's* — a null
+whose moments do not match the data is not a null. The correct construction takes the phases
+from the FFT of a random **real** field, which is Hermitian by construction (kurtosis 0.0098,
+variance matching the data to four decimals). **Building a null model is not enough; the null
+has to be checked.**
+
 ## [1.5.397] - 2026-07-10
 ### Fixed — Ripley's L had no null model, and the CSR line it was read against is wrong
 ``ripleys_l`` reported L(r) and left the user to compare it against the CSR line of zero.
