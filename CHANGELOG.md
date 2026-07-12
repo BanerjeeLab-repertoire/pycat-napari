@@ -4,6 +4,42 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.449] - 2026-07-10
+### Added — the fusion relaxation reports τ with its interval, and η/γ inherits it
+``fit_aspect_ratio_relaxation`` discarded its covariance like the others. τ now carries a 95 %
+CI, and **η/γ — the viscosity-to-surface-tension ratio — inherits it exactly**, being τ divided
+by a constant. *A ratio without an interval is not a measurement.*
+
+The interval widens honestly with the noise (true τ = 10 s):
+
+| noise on AR | τ | R² | 95 % CI on τ |
+|---|---|---|---|
+| 0.03 | 9.81 | 0.998 | [9.54, 10.09] |
+| 0.10 | 9.41 | 0.980 | [8.54, 10.28] |
+| 0.30 | 8.48 | 0.860 | [6.16, 10.81] |
+| 0.60 | 7.56 | 0.647 | **[3.47, 11.65]** |
+
+### Note — I expected the FRAP failure here, measured for it, and it is NOT there
+This is worth recording, because the negative result is the finding.
+
+**This fit is robust to a short observation window.** I assumed the same failure as FRAP
+(1.5.446) and the MSD fit (1.5.447) — a parameter unconstrained by too little data, with R²
+staying high — and measured it. With a true τ of 10 s, **even half a relaxation time of data
+recovers 10.10 ± 0.46.** The relaxation is a clean single exponential with a large amplitude
+(the aspect ratio falls from ~3 to 1), so a short window still pins τ.
+
+**What degrades it is noise — and here R² tracks the problem honestly** (0.998 → 0.647 as the
+scatter in τ grows). That is the *opposite* of the FRAP and MSD cases, where R² stayed high or
+even *rose* while the parameter became unconstrained.
+
+So the covariance is captured to give τ an interval, but **no hidden failure mode is being
+caught here.** R² is a reasonable guide for this fit, and saying so plainly matters: **the point
+of these checks is to find where a statistic misleads, not to attach one everywhere.**
+
+I had drafted the opposite claim before running the numbers. It would have been wrong.
+
+**102/102 core tests passing.**
+
 ## [1.5.448] - 2026-07-10
 ### Wired — the interval on D now reaches the viscosity
 1.5.447 made ``fit_anomalous_diffusion`` report a 95 % CI on D. And ``viscosity_measurement``
