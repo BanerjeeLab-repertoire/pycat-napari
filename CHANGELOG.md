@@ -4,6 +4,51 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.383] - 2026-07-10
+### Fixed — the scientific tests could not run at all
+The audit reported that the test suite fails during **collection** because scientific
+modules import napari or PyQt at module scope. Reproduced directly, and it is worse than
+a nuisance:
+
+| test module | imports | status before |
+|---|---|---|
+| ``test_coloc_metrics`` | ``pixel_wise_corr_analysis_tools`` | **BLOCKED** (PyQt5) |
+| ``test_partition`` | ``partition_enrichment_tools`` | **BLOCKED** (napari) |
+| ``test_feature_analysis`` | ``feature_analysis_tools`` | **BLOCKED** (napari) |
+| ``test_image_processing`` | ``image_processing_tools`` | **BLOCKED** (napari) |
+
+**Four of six scientific test modules could not even be COLLECTED** — they failed at
+import time, before a single assertion ran. These are tests of *pure numerical
+functions*: colocalization coefficients, partition coefficients, feature measurements,
+image filters. None of them need a window.
+
+The coupling is **transitive**, which is why it spreads: ``feature_analysis_tools`` was
+un-importable **not because of its own imports** but because of ``image_processing_tools``
+three levels down the graph. One convenient line at the base blocks everything above it.
+
+- ``image_processing_tools``, ``partition_enrichment_tools`` and
+  ``pixel_wise_corr_analysis_tools`` are now decoupled (notifications through the
+  ``pycat.utils.notify`` shim; ``napari.layers`` isinstance checks and Qt/``pycat.ui``
+  helpers imported at call time, inside the viewer-facing functions that only run when a
+  viewer exists; the Qt dialog degrades to a clear error rather than blocking the module
+  import).
+- **All six scientific test modules now import with no napari and no Qt**, and the
+  functions were re-verified headlessly: Pearson r = 0.969 on a correlated pair,
+  upscaling 32² → 64², the FRAP mobile fraction (1.5.381) returning 1.000 for a fully
+  mobile species, and the viscosity chain producing a physical value.
+- **Two test tiers** are declared in ``pyproject.toml``: ``pytest -m core`` (pure
+  scientific kernels — no napari, no Qt, no GPU; run on every commit) and
+  ``pytest -m integration`` (viewer behaviour, file IO, Qt).
+- **New guard test** ``tests/test_headless_science.py`` fails if a GUI import is
+  re-introduced at module scope in any of 13 guarded scientific modules. Without it this
+  decoupling silently rots — it takes one convenient import line to undo. The failure
+  message says what to do instead, so the fix is not "add napari to the test
+  environment".
+
+**13 of 13 guarded modules pass. 20 ``*_tools`` modules remain coupled** — a bounded,
+mechanical job, now enforced as each is converted rather than being swept in at the tail
+of a release.
+
 ## [1.5.382] - 2026-07-10
 ### Fixed — the C_sat fit threw away the most informative samples, and could return a negative concentration
 ``estimate_csat_lever_rule`` does ``above = phi > 0`` and then regresses **only those

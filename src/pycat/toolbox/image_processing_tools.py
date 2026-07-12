@@ -23,9 +23,27 @@ import warnings
 # Third party imports
 import numpy as np
 import skimage as sk
-import napari
-from napari.utils.notifications import show_warning as napari_show_warning
-from napari.utils.notifications import show_info as napari_show_info
+# GUI is imported LAZILY. This module's pure array operations (filters, background
+# removal, upscaling, intensity rescaling) are imported by other SCIENTIFIC modules --
+# feature_analysis_tools among them -- and a top-level `import napari` made every one
+# of them, and their tests, un-importable without a display. The coupling is
+# TRANSITIVE: one GUI import at the base of the graph blocks everything above it.
+# Verified: 4 of 6 science test modules could not even be COLLECTED without napari/Qt.
+from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.notify import show_info as napari_show_info
+
+
+def _add_image(image, viewer, **kw):
+    """Lazy wrapper for the viewer helper (importing it at module scope would pull
+    in Qt and block headless import of this module's array functions)."""
+    # ui_utils pulls in Qt -> imported at CALL time inside _add_image().
+    return _add_image(image, viewer, **kw)
+
+
+def _napari():
+    """Lazy napari import, for the viewer-facing helpers in this module."""
+    import napari
+    return napari
 import scipy.ndimage as ndi
 from scipy.interpolate import RectBivariateSpline
 from pywt import wavedecn, waverecn 
@@ -33,7 +51,7 @@ import SimpleITK as sitk
 
 # Local application imports
 from pycat.utils.general_utils import dtype_conversion_func, get_default_intensity_range 
-from pycat.ui.ui_utils import add_image_with_default_colormap
+# ui_utils pulls in Qt -> imported at CALL time inside _add_image().
 
 
 def _safe_equalize_adapthist(img, **kwargs):
@@ -297,7 +315,7 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
 
     active_layer = viewer.layers.selection.active
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         napari_show_warning("No active image layer selected.")
@@ -312,7 +330,7 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     rescaled_image = apply_rescale_intensity(image, out_min, out_max)
 
     # Add the rescaled image to the viewer
-    add_image_with_default_colormap(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}")
+    _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}")
 
 
 def invert_image(image):
@@ -370,7 +388,7 @@ def run_invert_image(viewer):
     active_layer = viewer.layers.selection.active
     
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         raise ValueError("No active image layer selected.")
@@ -379,7 +397,7 @@ def run_invert_image(viewer):
     inverted_image = invert_image(image)
 
     # Add the inverted image to the viewer
-    add_image_with_default_colormap(inverted_image, viewer, name=f"Inverted {active_layer.name}")
+    _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}")
 
 
 def upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor=2, pad=False):
@@ -606,10 +624,10 @@ def run_upscaling_func(data_checkbox, data_instance, viewer):
 
         # Single add, exactly once per source layer.
         if _new_scale is not None:
-            add_image_with_default_colormap(upscaled_img, viewer,
+            _add_image(upscaled_img, viewer,
                                             name=_out_name, scale=_new_scale)
         else:
-            add_image_with_default_colormap(upscaled_img, viewer, name=_out_name)
+            _add_image(upscaled_img, viewer, name=_out_name)
 
         # Lineage: the upscaled layer is derived_from + supersedes the source, and
         # inherits its role/modality/channel. This is what makes autopopulation
@@ -797,7 +815,7 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   active_layer = viewer.layers.selection.active
 
   # Validate that an active layer is selected
-  if active_layer is None or not isinstance(active_layer, napari.layers.Image):
+  if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
       # Raise an error if no layer is currently active
       raise ValueError("No active image layer selected")
 
@@ -808,7 +826,7 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   enhanced_image = peak_and_edge_enhancement_func(image, ball_radius)
 
   # Add the enhanced image as a new layer to the viewer with a descriptive name
-  add_image_with_default_colormap(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}")
+  _add_image(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}")
 
 
 def apply_laplace_of_gauss_filter(image, sigma=3):
@@ -907,7 +925,7 @@ def run_apply_laplace_of_gauss_filter(sigma_input, viewer):
     active_layer = viewer.layers.selection.active
 
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         raise ValueError("No active image layer selected.")
@@ -918,7 +936,7 @@ def run_apply_laplace_of_gauss_filter(sigma_input, viewer):
     LoG_image = apply_laplace_of_gauss_filter(image, sigma)
 
     # Add the LoG filtered image to the viewer
-    add_image_with_default_colormap(LoG_image, viewer, name=f"LoG of {active_layer.name}")
+    _add_image(LoG_image, viewer, name=f"LoG of {active_layer.name}")
 
 
 def run_morphological_gaussian_filter(filter_size_input, viewer):
@@ -950,7 +968,7 @@ def run_morphological_gaussian_filter(filter_size_input, viewer):
     active_layer = viewer.layers.selection.active
     
     # Validate that an active layer is selected
-    if active_layer is None or not isinstance(active_layer, napari.layers.Image):
+    if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
         # Raise an error if no layer is currently active
         raise ValueError("No active image layer selected")
     
@@ -979,7 +997,7 @@ def run_morphological_gaussian_filter(filter_size_input, viewer):
     image = dtype_conversion_func(img, output_bit_depth=input_dtype)
 
     # Add the processed image as a new layer to the viewer with a descriptive name
-    add_image_with_default_colormap(image, viewer, name=f"Filtered {active_layer.name}")
+    _add_image(image, viewer, name=f"Filtered {active_layer.name}")
 
 
 def run_clahe(clip_input, k_size_input, viewer):
@@ -1013,7 +1031,7 @@ def run_clahe(clip_input, k_size_input, viewer):
     active_layer = viewer.layers.selection.active
     
     # Validate that an active layer is selected
-    if active_layer is None or not isinstance(active_layer, napari.layers.Image):
+    if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
         # Raise an error if no layer is currently active
         raise ValueError("No active image layer selected")
     
@@ -1037,7 +1055,7 @@ def run_clahe(clip_input, k_size_input, viewer):
     CLAHE_img = dtype_conversion_func(CLAHE_img, output_bit_depth=input_dtype)
 
     # Add the CLAHE-enhanced image as a new layer to the Napari viewer
-    add_image_with_default_colormap(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}")
+    _add_image(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}")
 
 
 def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
@@ -1187,7 +1205,7 @@ def run_dpr(psf_input, gain_input, data_instance, viewer):
     DPR_img, _ = deblur_by_pixel_reassignment(active_layer.data, psf_0, gain_0, window_size)
 
     # Display the processed image in the viewer
-    add_image_with_default_colormap(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}")
+    _add_image(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}")
 
 
 # Background and Noise Correction # 
@@ -1434,7 +1452,7 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
     equalize_intensity_input = eq_int_input.isChecked() # Check if equalize intensity is enabled
 
     # Check if there is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         napari_show_warning("No active image layer selected.")
@@ -1443,7 +1461,7 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
     bg_removed_image = rb_gaussian_background_removal(image, ball_radius, equalize_intensity=equalize_intensity_input)
 
     # Add the processed image as a new layer in the viewer
-    add_image_with_default_colormap(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}')
+    _add_image(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}')
     try:
         from pycat.utils import layer_tags as _LT
         if len(viewer.layers):
@@ -1785,7 +1803,7 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
     ball_radius = math.ceil(data_instance.data_repository['ball_radius'])
 
     # Validate the active layer
-    if active_layer is None or not isinstance(active_layer, napari.layers.Image):
+    if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
         raise ValueError("No active image layer selected or the selected layer is not an image layer.")
 
     # Process the active image layer
@@ -1823,7 +1841,7 @@ def run_enhanced_rb_gaussian_bg_removal(data_instance, viewer):
         enhanced_image = rb_gaussian_bg_removal_with_edge_enhancement(image, ball_radius)
 
     # Add the processed image as a new layer with an indicative name
-    add_image_with_default_colormap(enhanced_image, viewer, name=f'Enhanced Background Removed {active_layer.name}')
+    _add_image(enhanced_image, viewer, name=f'Enhanced Background Removed {active_layer.name}')
     try:
         from pycat.utils import layer_tags as _LT
         if len(viewer.layers):
@@ -2017,7 +2035,7 @@ def run_wbns(psf_input, noise_level_input, viewer):
 
     active_layer = viewer.layers.selection.active
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         raise ValueError("No active image layer selected.")
@@ -2029,7 +2047,7 @@ def run_wbns(psf_input, noise_level_input, viewer):
     WBNS_img, _ = wbns_func(image, psf_fwhm, noise_lvl)
 
     # Display the processed image
-    add_image_with_default_colormap(WBNS_img, viewer, name=f"BG and Noise Corrected {active_layer.name}")
+    _add_image(WBNS_img, viewer, name=f"BG and Noise Corrected {active_layer.name}")
 
 
 def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
@@ -2055,7 +2073,7 @@ def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
     
     active_layer = viewer.layers.selection.active
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         napari_show_warning("No active image layer selected.")
@@ -2068,7 +2086,7 @@ def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
     _, wavelet_noise_corrected = wbns_func(image, psf_fwhm, noise_lvl)
 
     # Display the processed image
-    add_image_with_default_colormap(wavelet_noise_corrected, viewer, name=f"Wavelet Noise Corrected {active_layer.name}")
+    _add_image(wavelet_noise_corrected, viewer, name=f"Wavelet Noise Corrected {active_layer.name}")
 
 def apply_bilateral_filter(image, radius):
     """
@@ -2138,7 +2156,7 @@ def run_apply_bilateral_filter(radius_input, viewer):
 
     active_layer = viewer.layers.selection.active
     # Check if their is an active layer, and that it is a Napari image layer
-    if active_layer is not None and isinstance(active_layer, napari.layers.Image):
+    if active_layer is not None and isinstance(active_layer, _napari().layers.Image):
         image = active_layer.data
     else:
         napari_show_warning("No active image layer selected.")
@@ -2151,7 +2169,7 @@ def run_apply_bilateral_filter(radius_input, viewer):
     filtered_image = apply_bilateral_filter(image, radius)
 
     # Add the filtered image as a new layer to the viewer
-    add_image_with_default_colormap(filtered_image, viewer, name=f"Bilateral Filtered {active_layer.name}")
+    _add_image(filtered_image, viewer, name=f"Bilateral Filtered {active_layer.name}")
 
 
 def pre_process_image(image, ball_radius, window_size,
@@ -2326,7 +2344,7 @@ def run_pre_process_image(data_instance, viewer):
 
     # Check for an active image layer in the viewer
     active_layer = viewer.layers.selection.active
-    if active_layer is None or not isinstance(active_layer, napari.layers.Image):
+    if active_layer is None or not isinstance(active_layer, _napari().layers.Image):
         raise ValueError("No active image layer selected")
     
     # Retrieve the image and parameters for pre-processing from the data instance
@@ -2359,7 +2377,7 @@ def run_pre_process_image(data_instance, viewer):
         suppression_params=suppression_params)
 
     # Add the pre-processed image to the viewer with a default colormap
-    add_image_with_default_colormap(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}")
+    _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}")
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.382"
+version = "1.5.383"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -185,6 +185,18 @@ allow-direct-references = true
 addopts = "-v --cov=pycat --cov-report=term-missing"
 testpaths = ["tests"]
 qt_api = "pyqt5"
+# Two test tiers. The scientific kernels must be verifiable WITHOUT a GUI stack --
+# a viscosity calculation, an MSD fit or a colocalization coefficient should be
+# checkable in a plain pytest run with no display, no Qt and no napari. Coupling them
+# to a GUI import made that impossible, which is backwards: the numerical code is the
+# part that most needs automated regression testing.
+#
+#   pytest -m core          -> no napari, no Qt, no GPU. Run on every commit.
+#   pytest -m integration   -> viewer behaviour, file loading, Qt widgets.
+markers = [
+    "core: pure scientific kernels - no napari, no Qt, no GPU. Must pass headlessly.",
+    "integration: requires napari/Qt/file-IO/GPU.",
+]
 
 [tool.black]
 line-length = 88

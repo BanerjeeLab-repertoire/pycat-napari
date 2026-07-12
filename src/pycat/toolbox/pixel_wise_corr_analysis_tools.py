@@ -21,11 +21,23 @@ import scipy
 import skimage as sk
 import matplotlib.pyplot as plt
 import pandas as pd
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QCheckBox, QPushButton, QLabel
-from napari.utils.notifications import show_error as napari_show_error
+# Qt is imported lazily inside the dialog helper below: the colocalization
+# COEFFICIENTS in this module are pure numpy/scipy and must be testable headlessly.
+try:
+    from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QCheckBox,
+                                 QPushButton, QLabel)
+    _QT_AVAILABLE = True
+except Exception:  # pragma: no cover - headless
+    _QT_AVAILABLE = False
+    class _NoQt:
+        def __init__(self, *a, **k):
+            raise RuntimeError('This dialog requires PyQt5, which is not available. '
+                               'The colocalization coefficients work headlessly.')
+    QDialog = QVBoxLayout = QHBoxLayout = QCheckBox = QPushButton = QLabel = _NoQt
+from pycat.utils.notify import show_warning as napari_show_error
 
 # Local application imports
-from pycat.ui.ui_utils import show_dataframes_dialog
+# ui_utils pulls in Qt -> imported at CALL time in the functions that display tables.
 
 
 
@@ -1576,7 +1588,7 @@ def run_pwcca(image_layer1, image_layer2, roi_mask_layer, data_instance, viewer)
 
     # Display the analysis results to the user.
     window_title = "Pixel-Wise Correlation Coefficient Analysis"
-    show_dataframes_dialog(window_title, tables_info)
+    __import__("pycat.ui.ui_utils", fromlist=["show_dataframes_dialog"]).show_dataframes_dialog(window_title, tables_info)
 
     # Store the analysis results in the data instance for future access.
     data_instance.data_repository["PWCCA_coefficient_df"] = concatenated_table1_data

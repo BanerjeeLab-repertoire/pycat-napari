@@ -1,0 +1,96 @@
+"""
+Guard: the scientific kernels must stay importable WITHOUT a GUI stack.
+
+This test exists because the coupling it guards against is easy to re-introduce with a
+single convenient line — ``from napari.utils.notifications import show_warning`` at the
+top of a module — and the consequences are invisible until someone tries to run the
+tests.
+
+The coupling is **transitive**. One GUI import at the base of the import graph blocks
+every module above it: ``feature_analysis_tools`` was un-importable not because of its
+own imports but because of ``image_processing_tools``, three levels down. Before this
+was fixed, **four of six scientific test modules could not even be COLLECTED** without
+napari and PyQt installed — they failed at import time, before a single assertion ran.
+
+That is backwards. The numerical code — a viscosity calculation, an MSD fit, a
+colocalization coefficient, a FRAP mobile fraction — is the part that most needs
+automated regression testing, and it should be verifiable in a plain ``pytest`` run with
+no display, no Qt, and no napari.
+
+If this test fails, the fix is NOT to add napari to the test environment. It is to move
+the GUI import out of the scientific module:
+
+* notifications  -> ``from pycat.utils.notify import show_info, show_warning``
+  (forwards to napari when a UI is present, prints otherwise)
+* ``napari.layers.X`` isinstance checks -> import napari inside the function that needs
+  it, which by definition only runs when a viewer exists
+* Qt widgets / ``pycat.ui.*`` helpers -> import at call time inside the viewer-facing
+  function
+"""
+
+import ast
+import pathlib
+
+import pytest
+
+# Scientific modules whose numerical content must be importable with no GUI.
+# (UI modules — *_ui.py — are exempt: presenting a widget IS their job.)
+SCIENTIFIC_MODULES = [
+    "condensate_physics_tools",
+    "feature_analysis_tools",
+    "frap_tools",
+    "image_processing_tools",
+    "invitro_tools",
+    "label_and_mask_tools",
+    "nb_tools",
+    "partial_volume_tools",
+    "partition_enrichment_tools",
+    "pixel_wise_corr_analysis_tools",
+    "segmentation_scale_advisor",
+    "spida_tools",
+    "vpt_tools",
+]
+
+_FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
+
+_TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+
+def _module_level_gui_imports(path: pathlib.Path):
+    """Return the GUI imports made at MODULE scope (i.e. at import time).
+
+    Imports inside a function body are fine — those run only when a viewer already
+    exists. It is the top-level ones that break headless import.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    bad = []
+    for node in tree.body:                       # module scope only, deliberately
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.split(".")[0] in _FORBIDDEN_ROOTS:
+                    bad.append(a.name)
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root in _FORBIDDEN_ROOTS:
+                bad.append(node.module)
+        # `try: import PyQt5 ... except ImportError:` is an ACCEPTED pattern: the
+        # module still imports without Qt, it just disables the dialog. Skip Try
+        # bodies rather than flagging them.
+    return bad
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("mod", SCIENTIFIC_MODULES)
+def test_no_module_level_gui_import(mod):
+    """A scientific module must not import napari or Qt at module scope."""
+    path = _TOOLBOX / f"{mod}.py"
+    if not path.exists():
+        pytest.skip(f"{mod} not present")
+    bad = _module_level_gui_imports(path)
+    assert not bad, (
+        f"{mod}.py imports a GUI stack at module scope: {bad}.\n"
+        f"This makes the module — and every module that imports it — un-importable "
+        f"without a display, so its science cannot be tested headlessly.\n"
+        f"Use pycat.utils.notify for notifications, and import napari/Qt inside the "
+        f"viewer-facing functions that actually need them."
+    )

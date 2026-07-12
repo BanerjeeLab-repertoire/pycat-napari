@@ -38,8 +38,10 @@ import numpy as np
 import pandas as pd
 import scipy.ndimage as ndi
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the notification shim: keeps the partition/enrichment measurements
+# importable and testable with no GUI stack.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------
