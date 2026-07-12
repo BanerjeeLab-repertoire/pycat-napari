@@ -37,26 +37,56 @@ jobs:
         # Deliberately NOT installing napari, PyQt5 or cellpose. If a scientific module
         # needs them to import, that is the failure this job exists to catch — the fix is
         # to move the GUI import, not to add it here.
+        #
+        # But the COMPUTE dependencies must be here, or the job fails for the wrong
+        # reason. The first version of this workflow installed only numpy/scipy/skimage/
+        # pandas, and 4 of the 13 guarded science modules could not import at all:
+        # image_processing_tools needs pywavelets and SimpleITK, label_and_mask_tools and
+        # feature_analysis_tools need cv2, pixel_wise_corr_analysis_tools needs matplotlib.
+        # A red build caused by a missing dependency teaches nothing and trains people to
+        # ignore CI. `tests/test_headless_science.py` now asserts this list stays complete.
+        #
+        # This list is EXACTLY the module-scope, non-optional imports of the 13 guarded
+        # modules, computed from the AST rather than guessed:
+        #
+        #     numpy scipy scikit-image pandas matplotlib
+        #     opencv-python-headless (cv2)  pywavelets (pywt)  simpleitk (SimpleITK)
+        #
+        # Nothing else. `torch`, `cellpose`, `numba`, `sklearn`, `aicsimageio` and the rest
+        # appear in the transitive graph only through LAZY imports inside functions, so they
+        # are never executed at import time and must not be installed here — numba in
+        # particular carries strict numpy pins and is a needless resolution risk for a job
+        # that never touches it.
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy scikit-image pandas tifffile zarr
+          pip install numpy scipy scikit-image pandas matplotlib
+          pip install opencv-python-headless pywavelets simpleitk
           pip install pytest pytest-cov ruff
 
-      - name: Ruff — correctness rules (BUILD-BREAKING)
-        # NOT the full ~2,390 findings. This is the subset where every rule has caught a
-        # real, shipped bug in this repository, and where the codebase is verified clean:
+      - name: Ruff — correctness rules (ADVISORY until first seen green)
+        # This subset is where every rule has caught a real, shipped bug here:
         #
         #   F821 undefined name           -> `progress_emit`, `mask_name`
         #   F823 local used before assign -> the `QSizePolicy` UnboundLocalError
         #   F811 redefinition             -> duplicate run_expand_labels / resolver
         #   F601 repeated dict key        -> duplicate batch-registry step
         #   B006 mutable default argument
-        #   B023 loop variable captured in a closure (a classic Qt-callback bug)
+        #   B023 loop variable in a closure (the classic Qt-callback bug)
         #   B904 raise-without-from in except (destroys the original traceback)
+        #
+        # It is ADVISORY (`|| true`) for now, deliberately. Ruff could not be installed in
+        # the environment where this workflow was written, so F811/F601/B006/B904 were
+        # verified against a hand-written AST re-implementation and F821/F823/B023 against
+        # the guard tests below — but real Ruff has edge cases those approximations do not.
+        #
+        # Staking the build on a step that has never actually been RUN is how you get a red
+        # pipeline that teaches nothing. Once this step is observed green in a real run,
+        # delete the `|| true` and it becomes blocking. The AST guards below already cover
+        # the same bug classes and ARE blocking, so nothing is unguarded in the meantime.
         run: |
           ruff check src \
             --select F821,F823,F601,F811,B006,B023,B904 \
-            --output-format=github
+            --output-format=github || true
 
       - name: Ruff — unused locals (ADVISORY — do not auto-fix)
         # F841 currently reports ~34 findings, and the audit is right that they must be
@@ -84,6 +114,14 @@ jobs:
       - name: Core scientific tests
         # The numerical kernels — FRAP fitting, VPT/viscosity, colocalization
         # coefficients, partition, image transforms — must all be verifiable here.
+        #
+        # NO `|| pytest tests/` FALLBACK. The first version had one, as a hedge in case
+        # the `core` marker was not wired up. It was: `pytest -m core` collected almost
+        # nothing, the `||` fired, and the fallback then collected the napari-dependent
+        # tests (test_central_manager.py) in an environment with no napari — so the build
+        # went red for a reason that had nothing to do with the code.
+        #
+        # A "just in case" fallback turns a clean signal into a confusing one. If the
+        # marker selects nothing, that is a fact worth surfacing, not papering over.
         run: |
-          pytest -m core -v --cov=pycat --cov-report=term-missing || \
-          pytest tests/ -v -k "not ui and not viewer and not napari"
+          pytest -m core -v --cov=pycat --cov-report=term-missing

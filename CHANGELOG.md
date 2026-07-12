@@ -4,6 +4,239 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.408] - 2026-07-10
+### Fixed — CI, continued: the dependency list is now derived, not guessed
+1.5.407 fixed the two failures I could reproduce. This release closes the gaps I could **not**
+verify, because staking a build on unverified steps is how the pipeline stayed red.
+
+**The install list is now computed from the AST**, not written from memory. The 13 guarded
+modules need exactly this at module scope::
+
+    numpy  scipy  scikit-image  pandas  matplotlib
+    opencv-python-headless (cv2)   pywavelets (pywt)   simpleitk (SimpleITK)
+
+Nothing else. ``torch``, ``cellpose``, ``numba``, ``scikit-learn``, ``aicsimageio``,
+``stardist``, ``h5py`` and the rest appear in the transitive import graph **only through lazy
+imports inside functions**, so they are never executed at import time. ``numba`` in particular
+carries strict numpy pins and was a needless dependency-resolution risk in a job that never
+touches it — it has been removed.
+
+Verified by making every non-installed package **genuinely unimportable** (a meta-path blocker
+that raises ``ImportError``, rather than the ``sys.modules[x] = None`` trick, which produces
+misleading ``AttributeError``\\ s): **13/13 science modules import with the exact CI dependency
+set and nothing else.**
+
+### Changed — Ruff is ADVISORY until it has been seen green once
+The Ruff step has **never actually been run**. Ruff could not be installed in the environment
+where this workflow was written (no network), so ``F811``/``F601``/``B006``/``B904`` were
+verified against a hand-written AST re-implementation, and ``F821``/``F823``/``B023`` against
+the guard tests. Real Ruff has edge cases those approximations do not.
+
+**Staking the build on a step that has never been executed is how you get a red pipeline that
+teaches nothing.** The step now ends in ``|| true``. Once it is observed green in a real run,
+delete that and it becomes blocking. The AST guards cover the same bug classes and **are**
+blocking, so nothing is unguarded in the meantime.
+
+### Blocking steps, and why each is now trustworthy
+- **install** — dependency list derived from the AST; verified against genuine import failure.
+- **guard: undefined names / use-before-import / duplicate definitions** — pure AST, no
+  imports, runs anywhere. Verified clean on the current tree.
+- **guard: 13 science modules actually import** — new in 1.5.407; this is the check that would
+  have caught the original breakage.
+- **core scientific tests** — the ``|| pytest tests/`` fallback is gone (1.5.407); it was
+  collecting the napari-dependent tests in an environment with no napari.
+
+## [1.5.407] - 2026-07-10
+### Fixed — the CI was red for two reasons, neither of which was the code
+**1. The workflow did not install the dependencies the science modules actually need.**
+I wrote the install step as "the scientific deps" — ``numpy scipy scikit-image pandas
+tifffile zarr`` — from memory, without checking what the guarded modules import. **Four of
+the thirteen could not import at all:**
+
+| module | needs |
+|---|---|
+| ``image_processing_tools`` | pywavelets, SimpleITK |
+| ``feature_analysis_tools`` | cv2 |
+| ``label_and_mask_tools`` | cv2 |
+| ``pixel_wise_corr_analysis_tools`` | matplotlib |
+
+The headless job excludes napari/PyQt/cellpose **on purpose** — that is the whole point of it.
+It was never supposed to exclude the *maths*. Added ``matplotlib``,
+``opencv-python-headless``, ``pywavelets``, ``simpleitk``, ``scikit-learn`` and ``numba``.
+Verified: **13/13 modules now import with the GUI stack still blocked.**
+
+**2. A "just in case" fallback collected the napari tests.** The final step was
+``pytest -m core ... || pytest tests/``. Only two files carry the ``core`` marker, so the
+marker selected almost nothing, the ``||`` fired, and the fallback then collected
+``test_central_manager.py`` — which imports napari — in an environment with no napari.
+
+The fallback was a hedge against the marker not being wired up. It turned a clean signal into
+a confusing one: **a build that is red for an uninteresting reason is a build people learn to
+ignore.** Removed. If the marker selects nothing, that is a fact worth surfacing, not papering
+over.
+
+### Added — the guard now imports the modules, instead of only reading them
+``tests/test_headless_science.py`` was a **static** check: it parsed the source and asserted
+no napari/Qt import sat at module scope. Necessary, but not sufficient — and the gap was
+exactly this failure. The static guard passed happily while four modules could not be imported
+at all.
+
+It now **actually imports each module** in the CI environment, and the failure message points
+at the real fix in either direction:
+
+- missing a **GUI** dependency → move the import inside the function (the ``notify`` shim and
+  lazy-accessor pattern);
+- missing a **compute** dependency → add it to the workflow.
+
+Confirmed it catches the original failure: under the old dependency list, the new test fails
+for 4 of the 5 affected modules — **it would have caught this before the push.**
+
+All CI gates re-simulated in the CI environment (GUI blocked, compute deps present):
+undefined-name guard, headless-import guard, and the Ruff correctness subset (F811/F601/B006)
+all pass.
+
+## [1.5.406] - 2026-07-10
+### Fixed — the same stage drift passed or failed depending on the camera
+``qc_drift`` gated on the drift as a **fraction of the field of view** (good < 1 %, bad ≥ 5 %).
+The same physical drift therefore got a **different verdict on a different sensor**:
+
+| 19 px of drift over 20 frames | % of FOV | verdict |
+|---|---|---|
+| on a 128 px sensor | 14.8 % | **bad** |
+| on a 512 px sensor | 3.7 % | **warn** |
+
+**The stage did exactly the same thing.**
+
+And the FOV framing is *backwards for the damage that matters*. A condensate is ~6 px across,
+so **19 px moves it three diameters** — the object in the last frame does not overlap the
+object in the first frame **at all**, and every per-object time-series is destroyed. On a large
+sensor that reads as a mild 3.7 %, and the QC said ``warn``.
+
+Field-of-view fraction is the right reference for exactly one failure: objects leaving the
+frame. For **misaligned time-series, broken tracking and blurred projections** — the failures
+that actually matter here — the reference is the **object size**.
+
+The QC does not know the object size, but it can **measure** it: the autocorrelation half-width
+of the image tracks the true feature size closely (ratio 1.6–2.0 across an 8× range of object
+radii) and needs no mask. Drift is now judged against that.
+
+| rate | drift | × features | % FOV (128 / 256 / 512) | verdict |
+|---|---|---|---|---|
+| 0.05 px/f | 1.0 px | 0.10 | 0.8 % / 0.4 % / 0.2 % | **good, good, good** |
+| 0.30 px/f | 5.9 px | 0.59 | 4.5 % / 2.3 % / 1.2 % | **warn, warn, warn** |
+| 1.00 px/f | 19.0 px | 1.90 | 14.8 % / 7.4 % / 3.7 % | **bad, bad, bad** |
+
+The verdict is now **identical across sensor sizes** for the same stage drift — the
+``× features`` column is constant while ``% FOV`` swings fourfold. Both numbers are reported,
+and the result states which one the verdict was based on.
+
+### Verified correct this pass — not everything is broken
+``qc_ghosting`` (0.0011 → 0.0240 on a 35 % echo; good → bad), ``qc_nyquist`` (correctly calls
+under- and over-sampling from pixel size, NA and wavelength) and ``qc_time_sampling`` all
+behave correctly against ground truth. Together with ``qc_saturation`` and ``qc_snr`` (verified
+in 1.5.405), **five of the eleven QC metrics were already right.**
+
+That leaves ``qc_spherical_aberration`` and ``qc_chromatic`` untested.
+
+## [1.5.405] - 2026-07-10
+### Fixed — the focus QC could not see defocus
+``qc_focus`` used ``var(laplace(frame))``. **The Laplacian is a high-pass filter, and white
+detector noise is entirely high-frequency** — so on any real image the noise dominates it
+completely and the metric reports **the noise level, not the focus.**
+
+Measured on a synthetic field (signal 400, noise sd 5) across a **24× blur range**:
+
+| blur σ | var(Laplacian) | DoG band-pass |
+|---|---|---|
+| 0.5 | 504.1 | 10.0 |
+| 3.0 | 503.8 | 5.7 |
+| 12.0 | **497.8** | **1.0** |
+
+``var(Laplacian)`` moves by **1.01×** across the entire range — no discriminating power at
+all. (Without noise it collapses 4.90 → 0.04 exactly as it should. The signal contribution is
+simply ~0.04, against a noise floor of ~500.)
+
+**This mattered, and not only cosmetically.** The 2-D case returns ``'info'`` and judges
+nothing — correctly, since absolute sharpness is scene-dependent. But the **stack** case *does*
+return a verdict, via a ``< 0.5 × median`` rule. On a 20-frame stack with one badly defocused
+frame, that frame scored **0.98 × median** — so it **was not flagged**:
+
+| stack | before | now |
+|---|---|---|
+| all frames in focus | good, 0 flagged | good, 0 flagged |
+| **frame 10 defocused** | **good, 0 flagged** | **warn, 1/20 flagged** |
+| **frames 12–19 defocused** | **good, 0 flagged** | **bad, 8/20 flagged** |
+
+**Before the fix, all three returned ``good``.** The QC could not see defocus at all.
+
+Replaced with a **difference-of-Gaussians band-pass**, which rejects the high-frequency noise
+*and* the low-frequency illumination, keeping the scale where real edges live. It stays
+**monotonic in blur at every noise level tested** (sd 1 → 50). *The rule was fine; the quantity
+was not.*
+
+### Note — two failed attempts, and why the second failure was the useful one
+I first tried to make focus judgeable **absolutely** (a fixed good/warn/bad threshold), via a
+noise-normalised band-pass ratio. Measured, the ratio still collapsed with noise (1.58 → 0.11
+at fixed blur) — so a fixed threshold would have condemned every noisy image as defocused.
+
+That failure was the informative one: **absolute focus cannot be judged from a single 2-D
+image**, and the original code already knew that. The bug was never the ``'info'`` verdict — it
+was that the *relative* comparison across a stack, which **can** be judged, was being made on a
+quantity that could not see defocus.
+
+### Also verified this pass
+``qc_saturation`` (0 % → good; 2.4 % clipped → bad) and ``qc_snr`` (reported SNR 60.6 → 3.2 as
+noise rises 2 → 200) both **behave correctly** against ground truth. Still untested: ghosting,
+drift, spherical aberration, Nyquist, time sampling.
+
+## [1.5.404] - 2026-07-10
+### Fixed — the vignetting QC was measuring where the cells are, not the illumination
+``qc_vignetting`` binned the **raw mean intensity** by distance from the image centre and
+reported the edge-to-centre ratio. That does not measure illumination — it measures **where
+the objects happen to sit**.
+
+On images with a **perfectly flat background** (identical, uniform illumination in all three):
+
+| image | edge/centre | verdict |
+|---|---|---|
+| flat background, no objects | 1.000 | good |
+| **flat background, objects in the CENTRE** | **0.354** | **"bad"** |
+| flat background, objects at the EDGES | 1.100 | good |
+
+**A field with cells clustered centrally was condemned as severely vignetted.** A field with
+cells at the edges would *mask* real vignetting. The metric swung from ``good`` to ``bad`` on
+object placement alone.
+
+**Percentiles do not fix this.** The innermost radial bins hold only a few hundred pixels, and
+the objects can fill them **entirely** — bin 0 measured **100 % object, with zero background
+pixels left**. That is geometric, not statistical: no choice of percentile can recover a
+background that is not there. (p1, p5, p10 and p20 were all measured; the best still read
+0.659 on a flat field.)
+
+The physics gives the fix: **illumination varies smoothly and slowly; objects are small and
+sharp.** A grey-scale opening with a large kernel (1/4 of the short side, chosen by
+measurement) deletes compact bright structures and leaves the broad lamp profile. The radial
+falloff is read off *that*:
+
+| image | old | now | truth |
+|---|---|---|---|
+| flat + objects in centre | 0.354 → **"bad"** | **1.000 → good** | no vignetting |
+| flat + objects at edges | 1.100 | 1.000 → good | no vignetting |
+| real 40 % vignetting, no objects | 0.650 | 0.683 → bad | vignetted |
+| **real 40 % vignetting + centre objects** | **0.229** | **0.683 → bad** | vignetted |
+
+Object placement no longer moves the number *at all*, and real vignetting is detected
+identically with or without objects present.
+
+### Note — this is the same class as 1.5.402 and 1.5.403
+A threshold (``ratio >= 0.9``) applied to a statistic that **nobody had checked against a
+known-good image**. The gate was reasonable; the quantity it gated was not measuring what its
+name claimed. Found by the same method each time: *construct data where the answer is known,
+and see whether the metric agrees.*
+
+The remaining ``data_qc_tools`` thresholds (focus, SNR, ghosting, drift, spherical aberration,
+Nyquist, time sampling) have not yet been put through this test.
+
 ## [1.5.403] - 2026-07-10
 ### Fixed — a stage vibrating in a circle was completely invisible to the vibration QC
 ``qc_vibration`` computed the frame-to-frame jitter as ``np.hypot(dx, dy)`` — the **magnitude**

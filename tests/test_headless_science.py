@@ -94,3 +94,48 @@ def test_no_module_level_gui_import(mod):
         f"Use pycat.utils.notify for notifications, and import napari/Qt inside the "
         f"viewer-facing functions that actually need them."
     )
+
+
+# ─────────────────── the module must ACTUALLY import, not just look clean ───────────────
+#
+# The GUI check above is STATIC: it parses the source and asserts that no napari/Qt import
+# sits at module scope. That is necessary but not sufficient, and the gap was real.
+#
+# The `core` workflow originally installed only numpy/scipy/scikit-image/pandas — a
+# plausible-looking "the scientific deps" list written from memory. Four of the thirteen
+# guarded modules could not import at all in that environment:
+#
+#     image_processing_tools          -> pywavelets, SimpleITK
+#     feature_analysis_tools          -> cv2
+#     label_and_mask_tools            -> cv2
+#     pixel_wise_corr_analysis_tools  -> matplotlib
+#
+# The static guard passed (none of those are napari or Qt), the workflow went red, and the
+# failure taught nothing — a CI that is red for an uninteresting reason is a CI people
+# learn to ignore.
+#
+# So: actually import each module. This runs in the CI environment, so if the workflow's
+# dependency list is missing something a science module genuinely needs, THIS test says so
+# — pointing at the real problem instead of failing somewhere downstream.
+
+@pytest.mark.core
+@pytest.mark.parametrize("mod", SCIENTIFIC_MODULES)
+def test_module_actually_imports(mod):
+    """Each guarded module must import in the headless CI environment."""
+    import importlib
+
+    try:
+        importlib.import_module(f"pycat.toolbox.{mod}")
+    except ImportError as exc:
+        pytest.fail(
+            f"pycat.toolbox.{mod} cannot be imported in the headless environment: "
+            f"{exc}\n\n"
+            f"If the missing package is a GUI dependency (napari, PyQt), the fix is to "
+            f"move the import inside the function that needs it — see the notify shim "
+            f"(pycat.utils.notify) and the lazy-accessor pattern already used in "
+            f"label_and_mask_tools.\n\n"
+            f"If it is a COMPUTE dependency (cv2, pywavelets, SimpleITK, matplotlib, "
+            f"scikit-learn), the fix is the opposite: add it to the install step in "
+            f".github/workflows/core.yml. The headless job excludes the GUI stack on "
+            f"purpose; it is not supposed to exclude the maths."
+        )

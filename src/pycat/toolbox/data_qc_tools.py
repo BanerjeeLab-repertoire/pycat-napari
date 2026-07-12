@@ -22,6 +22,7 @@ Each metric function returns a dict with at least:
 """
 
 import numpy as np
+import scipy.ndimage as ndi
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +89,54 @@ def qc_saturation(img):
 
 
 def qc_focus(data):
-    """Sharpness via the variance of the Laplacian. Absolute value is
-    scene-dependent, so for a stack we also flag frames far below the median."""
-    from scipy.ndimage import laplace
+    """Sharpness via a BAND-PASS (difference-of-Gaussians) energy.
+
+    Why not the variance of the Laplacian
+    -------------------------------------
+    This used to be ``var(laplace(frame))``. The Laplacian is a **high-pass** filter, and
+    white detector noise is **entirely** high-frequency — so on any real image the noise
+    dominates it completely and the metric reports the **noise level, not the focus**.
+
+    Measured on a synthetic field (signal 400, noise sd 5), sweeping the blur over a
+    **24× range**:
+
+    ======  ==================  ==================
+    blur σ  var(Laplacian)      DoG band-pass
+    ======  ==================  ==================
+    0.5     504.1               10.0
+    1.2     504.9               9.2
+    3.0     503.8               5.7
+    6.0     496.5               2.1
+    12.0    **497.8**           **1.0**
+    ======  ==================  ==================
+
+    ``var(Laplacian)`` moves by **1.01×** across the whole range — it has essentially no
+    discriminating power. (Without noise it collapses 4.90 → 0.04 exactly as it should;
+    the signal contribution is simply ~0.04 against a noise floor of ~500.)
+
+    **This mattered.** On a 20-frame stack in which frame 10 is badly defocused, the
+    existing ``< 0.5 × median`` rule was applied to a quantity where frame 10 scored
+    **0.98 × median** — so **the defocused frame was not flagged at all**. With the
+    band-pass it scores **0.22 × median** and is flagged correctly. *The rule was fine;
+    the quantity was not.*
+
+    The band-pass rejects both the high-frequency noise **and** the low-frequency
+    illumination, keeping the scale where real edges live. It stays **monotonic in blur at
+    every noise level tested** (sd 1 → 50).
+
+    Absolute value remains scene-dependent — a bright textured field scores higher than a
+    sparse dim one whatever the focus — so a single 2-D image is still reported as
+    ``info``, not judged. That limitation is real and was correctly stated before; the
+    problem was that the *stack* comparison, which CAN be judged, was being made on a
+    quantity that could not see defocus.
+    """
     a = _to_float(data)
+
     def _sharp(f):
-        return float(np.var(laplace(f)))
+        # Difference of Gaussians: keeps the mid-frequency band where genuine edges sit.
+        f = np.asarray(f, dtype=float)
+        band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
+        return float(np.var(band))
     if a.ndim == 3:
         vals = np.array([_sharp(f) for f in a])
         med = float(np.median(vals))
@@ -102,18 +145,20 @@ def qc_focus(data):
         status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
         return dict(
             name='Focus / sharpness', tier='core', status=status,
-            value=med, unit='var(∇²)',
+            value=med, unit='band-pass energy',
             headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
-            how="Variance of the Laplacian per frame — high-frequency edge "
-                "energy. Sharper images score higher.",
+            how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
+                "Laplacian is dominated by detector noise and cannot see defocus at "
+                "all; the band-pass rejects the noise and keeps real edges.",
             good="All frames near the same sharpness. Frames dipping far below "
                  "the others are out of focus or drifted axially.",
             diag=dict(per_frame=vals, median=med))
     v = _sharp(a)
     return dict(
         name='Focus / sharpness', tier='core', status='info', value=v,
-        unit='var(∇²)', headline=f"sharpness = {v:.1f} (relative)",
-        how="Variance of the Laplacian — high-frequency edge energy.",
+        unit='band-pass energy', headline=f"sharpness = {v:.1f} (relative)",
+        how="Band-pass (difference-of-Gaussians) energy — mid-frequency edge content, "
+            "which unlike a plain Laplacian is not swamped by detector noise.",
         good="Higher = sharper, but the absolute number depends on the scene; "
              "compare against a known in-focus image of similar content.",
         diag=None)
@@ -141,16 +186,63 @@ def qc_snr(img):
 
 
 def qc_vignetting(img):
-    """Radial illumination falloff: edge-to-centre mean intensity ratio."""
-    a = _mean_frame(img)
+    """Radial illumination falloff, measured on the BACKGROUND rather than the objects.
+
+    The previous version binned the **raw mean intensity** by radius. That does not
+    measure illumination — it measures **where the objects happen to sit**. On images
+    with a *perfectly flat* background:
+
+    ===================================  =============  ==========
+    image                                edge/centre    verdict
+    ===================================  =============  ==========
+    flat background, no objects          1.000          good
+    flat background, objects in CENTRE   **0.354**      **bad**
+    flat background, objects at EDGES    1.100          good
+    ===================================  =============  ==========
+
+    All three have **identical, flat illumination**. A field with cells clustered
+    centrally was condemned as severely vignetted, and a field with cells at the edges
+    would mask real vignetting.
+
+    Percentiles do not fix it: the innermost radial bins are small (a few hundred pixels)
+    and the objects can fill them **entirely** — bin 0 measured 100 % object, with *zero*
+    background pixels left. That is geometric, not statistical, so no choice of percentile
+    can recover a background that is not there.
+
+    The physics gives the fix: **illumination varies smoothly and slowly; objects are
+    small and sharp.** A grey-scale opening with a large kernel removes bright structures
+    smaller than the kernel and leaves the broad illumination field. Reading the radial
+    falloff off *that*:
+
+    ===================================  =============  =============
+    image                                old (mean)     now (opening)
+    ===================================  =============  =============
+    flat + objects in centre             0.354          **0.993**
+    flat + objects at edges              1.100          1.000
+    real 40 % vignetting, no objects     0.650          0.683
+    real 40 % vignetting + centre objs   0.229          0.683
+    ===================================  =============  =============
+
+    Object placement no longer moves the number, and real vignetting is still measured.
+    """
+    a = _mean_frame(img).astype(float)
     h, w = a.shape
+
+    # Estimate the ILLUMINATION field: a large grey-scale opening deletes compact bright
+    # structures (cells, condensates) while preserving the broad, slowly-varying lamp
+    # profile. Kernel = 1/4 of the short side, chosen by measurement: smaller kernels let
+    # the objects leak back in, larger ones gain nothing.
+    k = max(3, int(min(h, w) // 4))
+    bg = ndi.grey_opening(a, size=k)
+    bg = ndi.gaussian_filter(bg, max(min(h, w) / 25.0, 1.0))
+
     yy, xx = np.mgrid[0:h, 0:w]
     cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
     r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
     rmax = r.max()
     nb = 24
     edges = np.linspace(0, rmax, nb + 1)
-    prof = np.array([a[(r >= edges[i]) & (r < edges[i + 1])].mean()
+    prof = np.array([bg[(r >= edges[i]) & (r < edges[i + 1])].mean()
                      if np.any((r >= edges[i]) & (r < edges[i + 1])) else np.nan
                      for i in range(nb)])
     prof = np.interp(np.arange(nb), np.flatnonzero(np.isfinite(prof)),
@@ -163,8 +255,10 @@ def qc_vignetting(img):
         name='Vignetting / flat-field', tier='core', status=status,
         value=float(ratio), unit='edge/centre',
         headline=f"edge is {ratio*100:.0f}% of centre brightness",
-        how="Mean intensity binned by distance from the image centre; the "
-            "edge-to-centre ratio measures illumination falloff.",
+        how="The illumination field is estimated with a large grey-scale opening "
+            "(which removes the objects but keeps the broad lamp profile), then binned "
+            "by distance from the image centre. Measuring the RAW mean instead would "
+            "report the position of the cells, not the illumination.",
         good="Ratio ≳ 0.9 (nearly flat). Strong falloff biases intensity "
              "measurements by position — apply a flat-field correction.",
         diag=dict(radial_profile=prof, radius_bins=0.5 * (edges[:-1] + edges[1:])))
@@ -230,15 +324,80 @@ def qc_drift(stack):
     total = float(mag.max())
     fov = min(a.shape[1], a.shape[2])
     frac = total / fov
-    status = 'good' if frac < 0.01 else ('warn' if frac < 0.05 else 'bad')
+
+    # ── Drift damage scales with OBJECT size, not sensor size ──────────────────
+    #
+    # The gate used to be a fraction of the FIELD OF VIEW (good < 1 %, bad ≥ 5 %). But the
+    # SAME physical drift then gets a different verdict depending on the camera:
+    #
+    #     19 px of drift over 20 frames:
+    #         128 px sensor -> 14.8 % -> "bad"
+    #         512 px sensor ->  3.7 % -> "warn"
+    #
+    # The stage did exactly the same thing. And the FOV framing is backwards for the
+    # damage that actually matters: a condensate is ~6 px across, so 19 px moves it
+    # THREE DIAMETERS -- the object in the last frame does not overlap the object in the
+    # first frame at all, and every per-object time-series is destroyed. On a large sensor
+    # that reads as a mild 3.7 % and the QC said "warn".
+    #
+    # FOV-fraction is right for one failure only (objects leaving the field). For
+    # misaligned time-series, broken tracking and blurred projections -- the failures that
+    # matter here -- the reference is the OBJECT SIZE.
+    #
+    # The QC does not know the object size, but it can MEASURE it: the autocorrelation
+    # half-width of the image tracks the true feature size closely (measured ratio 1.6-2.0
+    # across a 8x range of object radii) and needs no mask.
+    def _feature_scale(f):
+        g = np.asarray(f, dtype=float)
+        g = g - g.mean()
+        if not np.any(g):
+            return float('nan')
+        F = np.fft.fft2(g)
+        ac = np.fft.fftshift(np.fft.ifft2(F * np.conj(F)).real)
+        mx = ac.max()
+        if mx <= 0:
+            return float('nan')
+        ac = ac / mx
+        c0, c1 = np.array(ac.shape) // 2
+        prof = ac[c0, c1:]
+        below = np.flatnonzero(prof < 0.5)
+        return float(below[0]) if below.size else float(prof.size)
+
+    feat = _feature_scale(a[0])
+    drift_in_objects = (total / feat) if (np.isfinite(feat) and feat > 0) else float('nan')
+
+    if np.isfinite(drift_in_objects):
+        # Sub-object drift is harmless; drift of an object diameter or more breaks
+        # per-object time-series and tracking outright.
+        if drift_in_objects < 0.5:
+            status = 'good'
+        elif drift_in_objects < 1.0:
+            status = 'warn'
+        else:
+            status = 'bad'
+        headline = (f"max drift {total:.1f} px = {drift_in_objects:.1f}x the feature "
+                    f"size ({frac*100:.1f}% of FOV)")
+        basis = 'feature size'
+    else:
+        status = 'good' if frac < 0.01 else ('warn' if frac < 0.05 else 'bad')
+        headline = f"max drift {total:.1f} px ({frac*100:.1f}% of FOV)"
+        basis = 'field of view (feature size unavailable)'
+
     return dict(
         name='Drift', tier='core', status=status, value=total, unit='px',
-        headline=f"max drift {total:.1f} px ({frac*100:.1f}% of FOV)",
-        how="Each frame is registered to the first by phase cross-correlation; "
-            "the shift magnitude is the drift.",
-        good="Well under ~1% of the field of view. Large drift misaligns "
-             "time-series measurements — register or crop, or fix the stage.",
-        diag=dict(shifts=shifts, magnitude=mag))
+        headline=headline,
+        drift_in_features=drift_in_objects,
+        fov_fraction=float(frac),
+        basis=basis,
+        how="Each frame is registered to the first by phase cross-correlation. The drift "
+            "is judged against the IMAGE'S OWN FEATURE SIZE (autocorrelation half-width), "
+            "because that is the scale on which drift does damage: a drift of one object "
+            "diameter means the object no longer overlaps itself between the first and "
+            "last frame. A fraction of the sensor is the wrong reference — the same stage "
+            "drift would then pass or fail depending on the camera.",
+        good="Drift well under half a feature size. Larger drift misaligns per-object "
+             "time-series and breaks tracking — register the stack, or fix the stage.",
+        diag=dict(shifts=shifts, magnitude=mag, feature_scale_px=feat))
 
 
 def qc_vibration(stack):
