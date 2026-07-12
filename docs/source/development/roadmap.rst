@@ -537,6 +537,45 @@ per frame.
 out-of-plane debris, whole-frame focus scoring picks the debris frame; mask-restricted scoring
 picks the condensate frame.
 
+.. rubric:: Audit the 115 filtering defaults (two already shown to invert the result)
+
+A default parameter that **filters data before the analysis** is the most dangerous kind of
+threshold: it looks conservative, it runs silently, and it can remove exactly the measurements
+the method exists to make. Two have now been demonstrated to do so:
+
+* ``molecular_counting_tools``, ``r2_min = 0.999`` (1.5.414) — discarded **every** low-expressing
+  cell and reported a population mean of **77 against a true 44**. The R² of a bleaching fit
+  rises with N, so the gate selected for **brightness**, not correctness.
+* ``ts_cellpose_tools.filter_cells_by_transfection``, ``snr_threshold = 2.0`` on a *ratio*
+  (1.5.415) — on a camera with a 500-count pedestal, **every** transfected cell was called
+  untransfected.
+
+**Where:** an AST sweep found **115 filtering defaults** across ``src/pycat/toolbox/*_tools.py``
+(parameters matching ``min_``/``max_``/``thresh``/``cutoff``/``reject``/``drop``/``filter``).
+The concentrations, and the ones most likely to bite:
+
+* ``segmentation_tools`` — ``local_snr_threshold=1.0`` and ``global_snr_threshold=1.0`` appear
+  **20 times** across the puncta pipeline, and that SNR is the **un-subtracted ratio** already
+  fixed elsewhere (see the BUG rubric below). It decides which puncta survive.
+* ``vpt_tools`` — ~20 detection/linking defaults (``threshold=0.02``, ``max_linking_distance_um``,
+  ``min_track_length=5``, ``classify_beads(defocus_r2_max=0.85)``). These gate which beads and
+  which tracks reach the viscosity calculation.
+* ``condensate_physics_tools`` — ``min_track_length=5``, ``reject_outlier_tracks=True``,
+  ``min_independent_pairs=10``, ``bleach_r2_min=0.7``.
+* ``brightfield_tools`` — ``min_diameter_px=3``, ``max_diameter_px=50``, ``min_circularity=0.5``:
+  a size/shape gate that will silently exclude a whole population of condensates if the pixel
+  size differs from whatever it was tuned on.
+
+**The test, and it is cheap:** construct data where the answer is known, then **vary the thing
+the threshold is not supposed to depend on** — the camera pedestal, the sensor size, the frame
+count, the expression level — and check whether the verdict moves. Both bugs above were found
+in minutes that way.
+
+**Acceptance:** for each default, either (a) a demonstration that the gated quantity is
+invariant to the irrelevant variable and the threshold is calibrated against measured data, or
+(b) the default is changed and the measurement is written into the docstring so nobody restores
+the old value thinking it is the safe choice.
+
 .. rubric:: BUG (not architecture) — puncta SNR is the same un-subtracted ratio fixed in 1.5.379
 
 **Where:** ``segmentation_tools.py:1342-1344`` in ``puncta_refinement_filtering_func``::

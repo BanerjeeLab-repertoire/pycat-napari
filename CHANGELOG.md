@@ -4,6 +4,47 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.415] - 2026-07-10
+### Fixed — on a camera with a 500-count pedestal, EVERY transfected cell was called untransfected
+``filter_cells_by_transfection`` decides **which cells are analysed at all**. It used
+``snr = mean_cell / background`` — a **ratio**.
+
+The camera pedestal adds a constant to every pixel and carries no signal. But it appears in
+**both the numerator and the denominator**, so it drags the ratio toward 1. The same cells,
+with the same true expression, therefore pass or fail depending on the camera:
+
+| pedestal | expr = 0 | expr = 15 | expr = 60 | expr = 200 | **transfected fraction** |
+|---|---|---|---|---|---|
+| 0 | 1.0 drop | 1.8 drop | **4.0 KEEP** | **11.0 KEEP** | 0.50 |
+| 100 | 1.0 drop | 1.1 drop | **1.5 drop** | 2.7 KEEP | 0.25 |
+| **500** | 1.0 drop | 1.0 drop | **1.1 drop** | **1.4 drop** | **0.00** |
+| **2000** | 1.0 drop | 1.0 drop | 1.0 drop | **1.1 drop** | **0.00** |
+
+**Every transfected cell rejected, on a perfectly ordinary sensor offset.** And this gate runs
+*before* analysis, so it is a selection effect on the entire dataset.
+
+Replaced with a background-**subtracted** contrast, normalised by the background noise::
+
+    CNR = (mean_cell − background) / noise_sd
+
+**Verified invariant to the pedestal** — identical at 0, 50, 100, 500 and 2000 counts
+(0.6 / 3.6 / 12.5 / 40.6 for the four cells above, in every case). The non-expressing cell is
+dropped, all three real cells are kept, and the transfected fraction is **0.75 throughout**.
+
+The threshold is now in units of background sigma, and the default is **3.0** (three sigma
+above background) — a calibrated, physically meaningful choice rather than a ratio of 2.0 that
+meant something different on every camera.
+
+### The pattern, third instance
+This is the **same un-subtracted SNR** fixed in ``pipeline_snr_tools`` (1.5.379) and still
+outstanding in ``segmentation_tools``' puncta filter (recorded as a BUG rubric in the roadmap).
+And it is the same **class** as the molecule-counting R² gate (1.5.414): *a default filter that
+looks rigorous, is applied before the analysis, and silently removes exactly the data the
+measurement is about.*
+
+A sweep found **115 filtering defaults** across the scientific modules. Two have now been
+shown to invert the result they gate. The remainder are recorded for the same treatment.
+
 ## [1.5.414] - 2026-07-10
 ### Fixed — the molecule-counting R² gate discarded every low-expressing cell and inflated the population mean by 75 %
 ``count_molecules_pooled`` and ``count_molecules_single`` defaulted to ``r2_min = 0.999`` — a

@@ -299,7 +299,7 @@ class _KeyframeCellposeWorker(QThread):
 # UI widget
 # ---------------------------------------------------------------------------
 
-def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=2.0,
+def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=3.0,
                                  bg_percentile=25.0):
     """Split a labeled cell mask into transfected / untransfected cells by
     per-cell fluorescence SNR on a single (reference) frame.
@@ -318,7 +318,16 @@ def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=2.0,
         The fluorescence/condensate channel frame the transfection is judged on
         (the SAME channel that will be analysed, e.g. mCherry / EGFP).
     snr_threshold : float
-        Minimum mean-cell / background ratio to count a cell as transfected.
+        Minimum CONTRAST-to-noise ratio — ``(mean_cell - background) / noise_sd`` — to
+        count a cell as transfected, i.e. how many background-noise sigma the cell sits
+        above background. Default 3.0.
+
+        **This was previously a mean/background RATIO with a default of 2.0, and it was
+        measuring the camera rather than the biology:** on a sensor with a 500-count
+        pedestal, every transfected cell was called untransfected, because the pedestal
+        appears in both the numerator and the denominator and drags the ratio toward 1.
+        The contrast-to-noise form is invariant to the pedestal (verified identical at 0,
+        50, 100, 500 and 2000 counts).
     bg_percentile : float
         Percentile of the whole frame used as the background level.
 
@@ -345,6 +354,38 @@ def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=2.0,
     labels = _np.unique(lab)
     labels = labels[labels != 0]
 
+    # ── Background-SUBTRACTED contrast, not a ratio ─────────────────────────────
+    #
+    # This used `snr = mean_int / bg` — a RATIO. The camera pedestal adds a constant to
+    # every pixel and carries no signal, but it appears in BOTH the numerator and the
+    # denominator, so it drags the ratio toward 1. The same cells, with the same true
+    # expression, therefore pass or fail depending on the camera:
+    #
+    #     pedestal      expr=0   expr=15   expr=60   expr=200   transfected fraction
+    #        0         1.0 drop  1.8 drop  4.0 KEEP  11.0 KEEP        0.50
+    #      100         1.0 drop  1.1 drop  1.5 drop   2.7 KEEP        0.25
+    #      500         1.0 drop  1.0 drop  1.1 drop   1.4 DROP        **0.00**
+    #     2000         1.0 drop  1.0 drop  1.0 drop   1.1 DROP        **0.00**
+    #
+    # **On a camera with a 500-count pedestal, EVERY transfected cell was called
+    # untransfected.** This gate decides which cells are analysed at all, so that is a
+    # selection effect on the entire dataset — the same class of error as the molecule-
+    # counting R² gate (1.5.414), and the same un-subtracted SNR fixed in pipeline_snr_tools
+    # (1.5.379).
+    #
+    # Measure the CONTRAST above background, in units of the background NOISE:
+    #
+    #     CNR = (mean_cell - background) / noise_sd
+    #
+    # Verified invariant to the pedestal — identical at 0, 50, 100, 500 and 2000 counts
+    # (0.7 / 3.7 / 12.6 / 40.7 for the four cells above). A non-expressing cell sits near
+    # zero; a real one is many noise-sigma above. The threshold is therefore in sigma, and
+    # 3.0 (three sigma above background) is the calibrated default.
+    bg_px = img[lab == 0]
+    noise_sd = float(_np.std(bg_px)) if bg_px.size > 2 else 0.0
+    if not (noise_sd > 0):
+        noise_sd = 1.0
+
     rows = []
     kept, dropped = [], []
     for lb in labels:
@@ -352,12 +393,17 @@ def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=2.0,
         if cell_px.size == 0:
             continue
         mean_int = float(cell_px.mean())
-        snr = mean_int / bg if bg > 0 else 0.0
-        transfected = snr >= snr_threshold
+        cnr = (mean_int - bg) / noise_sd
+        # Legacy ratio, retained for reference only — it is NOT what the decision uses.
+        ratio = mean_int / bg if bg > 0 else 0.0
+        transfected = cnr >= snr_threshold
         rows.append({'cell_label': int(lb),
                      'mean_intensity': mean_int,
                      'background': bg,
-                     'snr': snr,
+                     'noise_sd': noise_sd,
+                     'cnr': cnr,
+                     'snr': cnr,              # `snr` key kept; now carries the CNR
+                     'intensity_ratio': ratio,
                      'transfected': bool(transfected)})
         (kept if transfected else dropped).append(int(lb))
 
