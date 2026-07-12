@@ -126,6 +126,30 @@ def client_enrichment(
     dense_c = dense_raw - bg
     dilute_c = dilute_raw - bg
     enrichment = (dense_c / dilute_c) if (np.isfinite(dilute_c) and dilute_c > 0) else np.nan
+    # ── background = 0.0 silently asserts "there is no camera offset" ──────────
+    #
+    # K = (dense - bg) / (dilute - bg) is correct, and it recovers the true value exactly
+    # at ANY pedestal — PROVIDED the background is supplied. The default of 0.0 asserts
+    # that there is none, which is almost never true of a real detector, and the result
+    # then collapses toward 1 with no warning. Measured, with a TRUE K of 30:
+    #
+    #     pedestal    bg NOT given    bg given
+    #        0           30.00          30.00
+    #      100           15.50          30.00
+    #      500            5.83          30.00
+    #     2000            2.38          30.00
+    #
+    # A 12x error, and the number looks perfectly plausible. So say so.
+    if (background_mask is None and float(background) == 0.0
+            and np.isfinite(dilute_c) and dilute_c > 0):
+        napari_show_warning(
+            "Client enrichment: no background was supplied, so K = dense/dilute with NO "
+            "camera offset removed. The pedestal appears in BOTH terms and drags K toward "
+            "1 — with a true K of 30 and a 500-count pedestal, this returns 5.83. Pass "
+            "`background=` (the camera floor, e.g. from a dark frame) or `background_mask=` "
+            "(a signal-free region). If the image genuinely has no offset — because it was "
+            "already background-subtracted — this warning can be ignored.")
+
     return dict(dense_mean=dense_c, dilute_mean=dilute_c,
                 dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
                 background=bg, enrichment=enrichment,

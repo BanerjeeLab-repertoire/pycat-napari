@@ -35,6 +35,11 @@ import pandas as pd
 # Notifications via the shim: keeps this module importable with no GUI stack (1.5.378).
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.notify import show_info as napari_show_info
+
+# These report an INTENSITY RATIO, so they need the detector's zero point. Measured with a
+# TRUE Kp of 30: on min-max normalised data the reported value swung from 323 to 22 with the
+# noise level alone; on a top-hat + LoG image it came out NEGATIVE (-11.96).
+from pycat.utils.intensity_semantics import IntensitySemantics, require_intensity
 from pycat.utils.general_utils import debug_log
 import skimage as sk
 from scipy import ndimage, optimize, stats
@@ -45,6 +50,7 @@ from typing import Optional
 # 1. Per-field summary (replaces per-cell summary for in vitro)
 # ---------------------------------------------------------------------------
 
+@require_intensity(IntensitySemantics.ABSOLUTE, 'field summary')
 def field_summary(
     labeled_droplets: np.ndarray,
     image: np.ndarray,
@@ -1487,6 +1493,7 @@ def estimate_phase_boundary(concentrations, fractions, n_boot=400,
 # 5. Partition coefficient without cell mask
 # ---------------------------------------------------------------------------
 
+@require_intensity(IntensitySemantics.ABSOLUTE, 'the partition coefficient')
 def partition_coefficient_field(
     image: np.ndarray,
     labeled_droplets: np.ndarray,

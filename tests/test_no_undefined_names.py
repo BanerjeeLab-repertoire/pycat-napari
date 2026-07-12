@@ -56,6 +56,21 @@ import pytest
 _BUILTINS = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "_"}
 _SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 
+# The guards scan the TESTS as well as the source, and that is not pedantry.
+#
+# `test_no_infinite_self_recursion` shipped referencing a bare `SRC` — which does not exist;
+# the module defines `_SRC`. So **the undefined-name guard shipped with an undefined name**,
+# and CI went red on it. It was not caught locally because the sandbox check exec'd the
+# function bodies directly and injected its own paths, so `SRC` was never resolved.
+#
+# A guard that cannot see its own file is not a guard. These now scan both trees.
+_TESTS = pathlib.Path(__file__).resolve().parent
+
+
+def _scanned_files():
+    """Every file the guards check: the source tree AND the tests themselves."""
+    return sorted(_SRC.rglob("*.py")) + sorted(_TESTS.glob("*.py"))
+
 
 class _Scope:
     __slots__ = ("parent", "bound")
@@ -220,8 +235,10 @@ def _undefined_names(path: pathlib.Path):
 def test_no_undefined_names():
     """No module may reference a name that Python cannot resolve at run time."""
     findings = []
-    for f in sorted(_SRC.rglob("*.py")):
-        rel = f.relative_to(_SRC)
+    for f in _scanned_files():
+        # The scan spans two roots (src/ and tests/), so relative_to(_SRC) would raise on a
+        # test file. The bare name is what the message needs anyway.
+        rel = f.name
         for _, lineno, name in _undefined_names(f):
             findings.append(f"{rel}:{lineno}  ->  '{name}'  (bound nowhere: NameError)")
         try:
@@ -290,9 +307,9 @@ def _duplicate_definitions(path: pathlib.Path):
 def test_no_duplicate_definitions():
     """No function or class may be defined twice in the same scope."""
     findings = []
-    for f in sorted(_SRC.rglob("*.py")):
+    for f in _scanned_files():
         for name, lines in _duplicate_definitions(f):
-            findings.append(f"{f.relative_to(_SRC)}: '{name}' defined at lines {lines}")
+            findings.append(f"{f.name}: '{name}' defined at lines {lines}")
 
     assert not findings, (
         "These are defined more than once in the same scope. Python keeps only the LAST "
@@ -366,9 +383,9 @@ def _infinite_self_recursion(path):
 def test_no_infinite_self_recursion():
     """A function that unconditionally calls itself will blow the stack on first use."""
     offenders = []
-    for path in sorted(SRC.rglob("*.py")):
+    for path in _scanned_files():
         for lineno, name in _infinite_self_recursion(path):
-            offenders.append(f"{path.relative_to(SRC)}:{lineno}: {name}() calls itself "
+            offenders.append(f"{path.name}:{lineno}: {name}() calls itself "
                              f"unconditionally")
 
     assert not offenders, (

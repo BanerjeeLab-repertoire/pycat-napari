@@ -574,6 +574,9 @@ def compute_optical_density(
     return np.clip(od, 0, 3).astype(np.float32)
 
 
+# Computes optical density, so it needs the detector's zero point — same requirement as
+# compute_optical_density above.
+@require_intensity(IntensitySemantics.ABSOLUTE, 'brightfield condensate metrics')
 def bf_condensate_metrics(
     image: np.ndarray,
     labeled_condensates: np.ndarray,

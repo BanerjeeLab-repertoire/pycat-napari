@@ -4,6 +4,86 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.432] - 2026-07-10
+### FIXED — the undefined-name guard shipped with an undefined name
+``test_no_infinite_self_recursion`` (added in 1.5.428) referenced a bare ``SRC``. The module
+defines ``_SRC``. **So the guard whose entire job is to catch ``NameError`` failed with a
+``NameError``**, and CI went red on it.
+
+**Why it was not caught locally, and this is the part worth fixing.** My sandbox check ran the
+guard by ``exec``-ing the function *bodies* with paths injected into the namespace — so ``SRC``
+was resolved by my harness and never looked up. **The check was more forgiving than the runner
+it was standing in for.**
+
+Running the module the way CI actually runs it — executing the file, calling the test functions,
+injecting nothing — immediately found **a second instance of the same bug**:
+``test_no_undefined_names`` called ``relative_to(_SRC)`` on files that are not under that root,
+raising ``ValueError``. It would have gone red on the next push.
+
+### Fixed — the guards now scan the tests as well as the source
+The root cause is that the guards only scanned ``src/pycat``, **so they could not see their own
+file.** They now scan both trees: **112 source files + 24 test files**, and both are clean.
+
+*A guard that cannot see its own file is not a guard.*
+
+### Note — the same lesson as 1.5.409, and I did not apply it
+1.5.409 was caused by ``sys.path.insert(0, 'src')`` in my development checks — a convenience
+that does not exist in CI, hiding a whole class of failure. I wrote at the time:
+
+> *A test environment that differs from the real one in a convenient way will hide exactly the
+> bugs that matter.*
+
+Then I did it again, in the same file, with a different convenience. The fix is not resolve —
+it is to **run the thing the way it will actually be run**, which is now what the sandbox check
+does: execute the module, call the tests, inject nothing.
+
+## [1.5.431] - 2026-07-10
+### Gated — the three reachable intensity measurements, and a trap in the enrichment default
+``field_summary``, ``partition_coefficient_field`` and ``bf_condensate_metrics`` are now gated
+on ``ABSOLUTE`` semantics. All three report an intensity ratio or an optical density, so they
+need the detector's zero point. Verified: each **runs normally on valid input** and **refuses a
+CLAHE'd layer** — no existing caller breaks.
+
+**Prioritised by reachability, not by count.** ``fit_bimodal_intensity`` and
+``extract_spot_traces`` are **not reachable from any UI or batch path** (0 call sites in either),
+so gating them would be theoretical. The three above have **6 reachable call sites** between
+them.
+
+### Found — ``client_enrichment`` is CORRECT, and its default is the trap
+The maths is right: ``K = (dense − bg) / (dilute − bg)`` is a ratio of **differences**, and it
+recovers the true value **exactly at any pedestal** — *provided the background is supplied*.
+
+**The default is ``background = 0.0``, which silently asserts "there is no camera offset".**
+Measured, with a **true K of 30**:
+
+| pedestal | background not given | background given |
+|---|---|---|
+| 0 | **30.00** | 30.00 |
+| 100 | 15.50 | **30.00** |
+| 500 | **5.83** | **30.00** |
+| 2000 | **2.38** | **30.00** |
+
+**A 12× error, and the number looks perfectly plausible.** It now warns when the default is
+used, naming what the assumption costs and how to supply the background (a dark frame, or a
+signal-free region via ``background_mask``). If the image genuinely has no offset — because it
+was already background-subtracted — the warning can be ignored, and it says so.
+
+### The classification, complete
+Every intensity measurement PyCAT exposes, with its requirement **measured against ground
+truth**:
+
+| measurement | requires | why |
+|---|---|---|
+| optical density, ``bf_condensate_metrics`` | **ABSOLUTE** | a log of a ratio to the true incident intensity |
+| partition coefficient, ``field_summary`` | **ABSOLUTE** | a bare intensity ratio |
+| N&B, molecule counting | **LINEAR** | variance vs mean — a constant adds to one and not the other |
+| ``client_enrichment`` | **LINEAR** | a ratio of differences — but the offset must be *known* |
+| Taylor-normalised FRAP | **MONOTONIC** | the offset cancels in a ratio of differences |
+
+**Three different answers, none of them obvious.** Each was measured rather than assumed,
+because getting one backwards blocks correct inputs while letting wrong ones through — strictly
+worse than no gate at all.
+
 ## [1.5.430] - 2026-07-10
 ### Gated — molecule counting, and a correction to my own classification of FRAP
 Extending the intensity-semantics gate meant **verifying each requirement rather than asserting
