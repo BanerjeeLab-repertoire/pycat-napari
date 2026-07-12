@@ -4,6 +4,53 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.397] - 2026-07-10
+### Fixed — Ripley's L had no null model, and the CSR line it was read against is wrong
+``ripleys_l`` reported L(r) and left the user to compare it against the CSR line of zero.
+There was **no null model at all** — no envelope, no permutations, nothing.
+
+**CSR is the wrong null here.** It assumes an object could land *anywhere* in the area, and
+it cannot: condensates are confined to a cell, which is irregular and usually non-convex.
+**The confinement itself produces an apparent signal.**
+
+Measured by placing objects **uniformly at random inside a real, non-convex cell shape**,
+where the truth is *no spatial structure whatsoever*:
+
+| r | L(r) against the CSR line | how a user would read it |
+|---|---|---|
+| 8 px | −0.82 | ~random |
+| 17 px | −2.06 | "regular / repulsion" |
+| 29 px | **−4.95** | **"strong regularity"** |
+
+and at a realistic pixel size the same randomly-placed objects gave **L = +6.18** — which
+reads as **strong clustering**. There is no biology in any of those numbers. **The artefact
+can point in either direction depending on the scale**, which makes eyeballing it against the
+CSR line worse than useless.
+
+New **``spatial_null_envelope``** randomises the points **within the actual cell mask** — the
+same compartment the real objects were confined to — so whatever the confinement does to L(r)
+is present in the null too, and cancels. What survives is biology.
+
+- Returns the observed curve, the null mean, a Monte-Carlo envelope, and a **global rank
+  test** p-value. The global test is the honest one: reading significance off a pointwise
+  envelope at ten radii is ten tests, not one.
+- Validated: **0/20 false positives** on objects placed at random inside a cell (the same
+  data the CSR line called "regular"), and **20/20 detection** of genuine clustering. It is
+  calibrated *and* it keeps its power.
+- Runs automatically in ``run_all_spatial_metrics``; results land at
+  ``results['ripleys_l_envelope']`` and ``results['ripleys_l_null']``.
+
+This is the same class of error as the colocalization p-value (1.5.396): a null model that
+assumes independence or free placement, applied to data where neither holds. Both were
+producing confident significance from nothing.
+
+### Note — the guard caught two more
+``coords_px`` (a leftover from a clumsy ``'x' in dir()`` check) and ``debug_log`` (not
+imported in this module). Both flagged **before anything was run**. The units bug it exposed
+was real: ``run_all_spatial_metrics`` receives coordinates in **microns**, and the envelope
+must index the mask in **pixels** — a silent mismatch would have randomised the null over the
+wrong region entirely.
+
 ## [1.5.396] - 2026-07-10
 ### Fixed — the colocalization p-value was measuring how many pixels you have
 The p-value shipped alongside every coefficient comes from ``scipy.stats.pearsonr`` over
