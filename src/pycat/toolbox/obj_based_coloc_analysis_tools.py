@@ -19,10 +19,17 @@ Date
 import numpy as np
 import pandas as pd
 import skimage as sk
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QHBoxLayout, QPushButton
+# ── Qt is imported LAZILY, inside the dialog that needs it ────────────────────
+#
+# This module holds 12 pure analysis functions — Manders' coefficients, object overlap,
+# per-object colocalisation — and a single Qt dialog. Importing Qt at module scope blocked
+# the headless import of ALL of them, so none could be tested in CI.
+#
+# The dialog imports Qt inside `obcaDialog.__init__`; the analysis functions do not touch
+# it. `PyQt5` is a module-scope name for the class BODY (obcaDialog subclasses QDialog), so
+# the base class is resolved lazily too — see the class definition below.
 
 # Local application imports
-from pycat.ui.ui_utils import show_dataframes_dialog
 
 
 def manders_coloc(image1, mask2, roi_mask):
@@ -139,6 +146,8 @@ def run_manders_coloc(image_layer1, mask_layer2, roi_mask_layer, data_instance):
     # Preparing the data for display in a table
     tables_info = [("Manders Colocalization Coefficient", mcc_df)]
     window_title = "Manders Colocalization Coefficient"
+    # ui_utils imports napari; import it here so the analysis functions stay headless.
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
     # Storing the results in the data instance for later access
@@ -583,144 +592,172 @@ def object_based_distance_analysis(mask1, mask2, roi_mask):
     return final_mean_distance, percentage_non_coincident
 
 
-class obcaDialog(QDialog):
+def _make_obca_dialog_class():
+    """Build the Qt dialog class ON FIRST USE, so Qt is not needed to import this module.
+
+    ``class obcaDialog(QDialog)`` resolves ``QDialog`` **at class-definition time**, which
+    runs at import. So a module-scope Qt import could not simply be moved inside
+    ``__init__`` — the base class itself needs it.
+
+    This module holds **12 pure analysis functions** (Manders' M1/M2, object overlap,
+    per-object colocalisation) and this one dialog. The Qt import blocked the headless
+    import of all twelve, so none of them could be tested in CI. Building the class inside
+    a factory defers Qt to the moment the dialog is actually opened.
+
+    The class is cached after the first call, so repeated dialogs cost nothing.
     """
-    A dialog class for selecting correlation and distance analysis methods in an object-based colocalization
-    analysis (OBCA) context. It provides a user-friendly interface where users can choose from a predefined list
-    of methods, organized into sections for different types of analyses.
+    global _OBCA_DIALOG_CLS
+    if _OBCA_DIALOG_CLS is not None:
+        return _OBCA_DIALOG_CLS
 
-    Attributes
-    ----------
-    checkboxes : list of QCheckBox
-        A list containing all the QCheckBox widgets in the dialog, representing available analysis methods.
+    from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel, QCheckBox, QHBoxLayout,
+                                 QPushButton)
 
-    Parameters
-    ----------
-    parent : QWidget, optional
-        The parent widget of this dialog, typically the main window of the application. Defaults to None.
-    """
-
-    def __init__(self, parent=None):
+    class obcaDialog(QDialog):
         """
-        Initializes the obcaDialog with sections for selecting various correlation and distance analysis methods,
-        and includes buttons for selecting or deselecting all options.
+        A dialog class for selecting correlation and distance analysis methods in an object-based colocalization
+        analysis (OBCA) context. It provides a user-friendly interface where users can choose from a predefined list
+        of methods, organized into sections for different types of analyses.
+
+        Attributes
+        ----------
+        checkboxes : list of QCheckBox
+            A list containing all the QCheckBox widgets in the dialog, representing available analysis methods.
 
         Parameters
         ----------
         parent : QWidget, optional
-            The parent widget of the dialog. Defaults to None.
+            The parent widget of this dialog, typically the main window of the application. Defaults to None.
         """
-        super().__init__(parent)
-        self.setWindowTitle('Select Correlation Analysis Methods')
-        self.checkboxes = []
 
-        # Main layout of the dialog
-        self.layout = QVBoxLayout(self)
+        def __init__(self, parent=None):
+            """
+            Initializes the obcaDialog with sections for selecting various correlation and distance analysis methods,
+            and includes buttons for selecting or deselecting all options.
 
-        # Section for Object-Based Colocalization Analysis (OBCA) methods
-        obca_methods = ["Mander's M1 value", "Mander's M2 value", "Jaccard Index", "Sorensen-Dice Coefficient"]
-        self.layout.addLayout(self._create_section_layout("Object Based Colocalization Analysis", obca_methods))
+            Parameters
+            ----------
+            parent : QWidget, optional
+                The parent widget of the dialog. Defaults to None.
+            """
+            super().__init__(parent)
+            self.setWindowTitle('Select Correlation Analysis Methods')
+            self.checkboxes = []
 
-        # Section for Distance Analysis methods
-        self.layout.addLayout(self._create_section_layout("Distance Analysis", ["Calculate Distance Between Objects"]))
+            # Main layout of the dialog
+            self.layout = QVBoxLayout(self)
 
-        # Layout for Select All and Deselect All buttons
-        self.layout.addLayout(self._create_selection_buttons())
+            # Section for Object-Based Colocalization Analysis (OBCA) methods
+            obca_methods = ["Mander's M1 value", "Mander's M2 value", "Jaccard Index", "Sorensen-Dice Coefficient"]
+            self.layout.addLayout(self._create_section_layout("Object Based Colocalization Analysis", obca_methods))
 
-        # Layout for OK and Cancel action buttons
-        self.layout.addLayout(self._create_action_buttons())
+            # Section for Distance Analysis methods
+            self.layout.addLayout(self._create_section_layout("Distance Analysis", ["Calculate Distance Between Objects"]))
 
-    def _create_section_layout(self, title, options):
-        """
-        Creates a QVBoxLayout containing checkboxes for a given section, each labeled according to the options
-        provided.
+            # Layout for Select All and Deselect All buttons
+            self.layout.addLayout(self._create_selection_buttons())
 
-        Parameters
-        ----------
-        title : str
-            The title of the section.
-        options : list of str
-            A list of strings that describe each checkbox option within the section.
+            # Layout for OK and Cancel action buttons
+            self.layout.addLayout(self._create_action_buttons())
 
-        Returns
-        -------
-        QVBoxLayout
-            A layout containing a label for the section and one checkbox per option.
-        """
-        section_layout = QVBoxLayout()
-        section_label = QLabel(title)
-        section_label.setWordWrap(True)
-        section_layout.addWidget(section_label)
+        def _create_section_layout(self, title, options):
+            """
+            Creates a QVBoxLayout containing checkboxes for a given section, each labeled according to the options
+            provided.
 
-        for option in options:
-            checkbox = QCheckBox(option)
-            self.checkboxes.append(checkbox)
-            section_layout.addWidget(checkbox)
+            Parameters
+            ----------
+            title : str
+                The title of the section.
+            options : list of str
+                A list of strings that describe each checkbox option within the section.
 
-        return section_layout
+            Returns
+            -------
+            QVBoxLayout
+                A layout containing a label for the section and one checkbox per option.
+            """
+            section_layout = QVBoxLayout()
+            section_label = QLabel(title)
+            section_label.setWordWrap(True)
+            section_layout.addWidget(section_label)
 
-    def _create_selection_buttons(self):
-        """
-        Creates a QHBoxLayout with 'Select All' and 'Deselect All' buttons to facilitate bulk selection of
-        analysis methods.
+            for option in options:
+                checkbox = QCheckBox(option)
+                self.checkboxes.append(checkbox)
+                section_layout.addWidget(checkbox)
 
-        Returns
-        -------
-        QHBoxLayout
-            A layout containing the 'Select All' and 'Deselect All' buttons.
-        """
-        selection_layout = QHBoxLayout()
-        select_all_button = QPushButton('Select All')
-        select_all_button.clicked.connect(self.select_all)
-        deselect_all_button = QPushButton('Deselect All')
-        deselect_all_button.clicked.connect(self.deselect_all)
+            return section_layout
 
-        selection_layout.addWidget(select_all_button)
-        selection_layout.addWidget(deselect_all_button)
+        def _create_selection_buttons(self):
+            """
+            Creates a QHBoxLayout with 'Select All' and 'Deselect All' buttons to facilitate bulk selection of
+            analysis methods.
 
-        return selection_layout
+            Returns
+            -------
+            QHBoxLayout
+                A layout containing the 'Select All' and 'Deselect All' buttons.
+            """
+            selection_layout = QHBoxLayout()
+            select_all_button = QPushButton('Select All')
+            select_all_button.clicked.connect(self.select_all)
+            deselect_all_button = QPushButton('Deselect All')
+            deselect_all_button.clicked.connect(self.deselect_all)
 
-    def _create_action_buttons(self):
-        """
-        Creates a QHBoxLayout with 'OK' and 'Cancel' buttons. The 'OK' button saves the selection and closes
-        the dialog, whereas the 'Cancel' button discards any changes and closes the dialog.
+            selection_layout.addWidget(select_all_button)
+            selection_layout.addWidget(deselect_all_button)
 
-        Returns
-        -------
-        QHBoxLayout
-            A layout containing the 'OK' and 'Cancel' buttons.
-        """
-        action_layout = QHBoxLayout()
-        ok_button = QPushButton('OK')
-        ok_button.clicked.connect(self.accept)
-        cancel_button = QPushButton('Cancel')
-        cancel_button.clicked.connect(self.reject)
+            return selection_layout
 
-        action_layout.addWidget(ok_button)
-        action_layout.addWidget(cancel_button)
+        def _create_action_buttons(self):
+            """
+            Creates a QHBoxLayout with 'OK' and 'Cancel' buttons. The 'OK' button saves the selection and closes
+            the dialog, whereas the 'Cancel' button discards any changes and closes the dialog.
 
-        return action_layout
+            Returns
+            -------
+            QHBoxLayout
+                A layout containing the 'OK' and 'Cancel' buttons.
+            """
+            action_layout = QHBoxLayout()
+            ok_button = QPushButton('OK')
+            ok_button.clicked.connect(self.accept)
+            cancel_button = QPushButton('Cancel')
+            cancel_button.clicked.connect(self.reject)
 
-    def select_all(self):
-        """Selects all checkboxes within the dialogue."""
-        for checkbox in self.checkboxes:
-            checkbox.setChecked(True)
+            action_layout.addWidget(ok_button)
+            action_layout.addWidget(cancel_button)
 
-    def deselect_all(self):
-        """Deselects all checkboxes within the dialogue."""
-        for checkbox in self.checkboxes:
-            checkbox.setChecked(False)
+            return action_layout
 
-    def get_selected_methods(self):
-        """
-        Retrieves a list of the analysis methods selected by the user.
+        def select_all(self):
+            """Selects all checkboxes within the dialogue."""
+            for checkbox in self.checkboxes:
+                checkbox.setChecked(True)
 
-        Returns
-        -------
-        list of str
-            A list of the names of the selected analysis methods.
-        """
-        return [checkbox.text() for checkbox in self.checkboxes if checkbox.isChecked()]
+        def deselect_all(self):
+            """Deselects all checkboxes within the dialogue."""
+            for checkbox in self.checkboxes:
+                checkbox.setChecked(False)
+
+        def get_selected_methods(self):
+            """
+            Retrieves a list of the analysis methods selected by the user.
+
+            Returns
+            -------
+            list of str
+                A list of the names of the selected analysis methods.
+            """
+            return [checkbox.text() for checkbox in self.checkboxes if checkbox.isChecked()]
+
+    _OBCA_DIALOG_CLS = obcaDialog
+    return obcaDialog
+
+
+_OBCA_DIALOG_CLS = None
+
 
 
 def object_based_colocalization_analysis(object_mask1, object_mask2, roi_mask, method_selections, data_instance):
@@ -913,7 +950,10 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
         raise ValueError("ROI mask must have the same shape as the input masks.")
 
     # Display dialog for user to select methods for analysis.
-    dialog = obcaDialog()
+    # Qt is imported here, not at module scope — see _make_obca_dialog_class. QDialog is
+    # needed for the Accepted/Rejected constants below, not just for the class.
+    from PyQt5.QtWidgets import QDialog
+    dialog = _make_obca_dialog_class()()
     result = dialog.exec_()
 
     if result == QDialog.Accepted:
@@ -979,6 +1019,8 @@ def run_obca(mask_layer1, mask_layer2, roi_mask_layer, data_instance):
 
     # Displaying the results in a dialog
     window_title = "Object-Based Colocalization Analysis"
+    # ui_utils imports napari; import it here so the analysis functions stay headless.
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
     # Storing the analysis results in the data instance

@@ -49,8 +49,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the notification shim: keeps the array functions importable with no GUI stack.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # ---------------------------------------------------------------------------

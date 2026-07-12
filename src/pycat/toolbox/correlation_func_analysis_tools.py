@@ -29,10 +29,12 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import pandas as pd
 import skimage as sk
-from napari.utils.notifications import show_warning as napari_show_warning
+from pycat.utils.notify import show_warning as napari_show_warning
 
 # Local application imports
-from pycat.ui.ui_utils import show_dataframes_dialog
+# `pycat.ui.ui_utils` imports napari, so importing it at module scope blocks the
+# headless import of this module's array functions. `show_dataframes_dialog` is imported lazily,
+# inside the function that uses it.
 from pycat.utils.general_utils import crop_bounding_box
 
 
@@ -830,6 +832,7 @@ def run_ccf_analysis(image_layer1, image_layer2, roi_mask_layer, data_instance):
     ]
     
     window_title = "Cross-Correlation Function Analysis"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
     # Add the results to the data instance
@@ -1388,6 +1391,7 @@ def run_autocorrelation_analysis(image_layer, roi_mask_layer, lower_lim_input, u
     tables_info = [("2D ACF Fitted Gaussian Parameters", concatenated_fitted_params_df_2d),
                    ("1D ACF Fitted Gaussian Parameters", concatenated_fitted_params_df_1d)]
     window_title = "Auto-Correlation Function Analysis"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
     # Add the results to the data instance for storage and retrieval

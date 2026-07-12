@@ -49,6 +49,23 @@ SCIENTIFIC_MODULES = [
     "segmentation_scale_advisor",
     "spida_tools",
     "vpt_tools",
+    # Newly decoupled (1.5.438). `obj_based_coloc_analysis_tools` holds 12 pure analysis
+    # functions — Manders' M1/M2, object overlap, per-object colocalisation — that were
+    # locked behind a module-scope Qt import for a single dialog, so CI could never see
+    # them. `correlation_func_analysis_tools` and `layer_tools` pulled in `pycat.ui.ui_utils`
+    # (which imports napari) for one function each.
+    "obj_based_coloc_analysis_tools",
+    # 1.5.439: 16 pure analysis functions — the puncta refinement filter, local thresholding,
+    # the SNR/contrast gates, watershed splitting — were locked behind a module-scope napari
+    # import for a handful of viewer functions. The puncta filter had NEVER been tested (see
+    # tests/test_puncta_refinement.py); its SNR gate was found completely dead in 1.5.416.
+    "segmentation_tools",
+    "correlation_func_analysis_tools",
+    "layer_tools",
+    "clean_spot_detection_tools",
+    "fd_curve_tools",
+    "fft_bandpass_tools",
+    "intensity_profile_tools",
 ]
 
 _FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}

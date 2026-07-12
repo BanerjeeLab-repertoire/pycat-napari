@@ -27,15 +27,24 @@ import cv2
 import scipy.ndimage as ndi
 import scipy.stats as stats
 import pandas as pd
-from cellpose import models
+# cellpose pulls in torch; imported lazily inside the cellpose functions that need it.
 from sklearn.ensemble import RandomForestClassifier
-import napari
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# ── napari and Qt are imported LAZILY, inside the viewer-facing functions ─────
+#
+# This module holds 16 PURE analysis functions — the puncta refinement filter, local
+# thresholding, the SNR/contrast gates, watershed splitting — and a handful of `run_*`
+# functions that take a viewer. Importing napari at module scope blocked the headless
+# import of ALL of them, so none could be tested in CI. The puncta filter in particular
+# (whose SNR gate was found dead in 1.5.416) had never been exercised by a test.
+#
+# `napari` is used only for `isinstance(layer, napari.layers.Image)` inside the `run_*`
+# functions; it is imported there.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 # Local application imports
 from pycat.toolbox.label_and_mask_tools import binary_morph_operation, opencv_contour_func, extend_mask_to_edges
-from pycat.ui.ui_utils import refresh_viewer_with_new_data, add_image_with_default_colormap
+# `pycat.ui.ui_utils` imports napari — imported lazily inside the `run_*` functions.
 from pycat.utils.general_utils import dtype_conversion_func, check_contrast_func
 from pycat.utils.math_utils import remove_outliers_iqr
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity, rb_gaussian_bg_removal_with_edge_enhancement
@@ -181,6 +190,7 @@ def _build_cellpose_model(model_name):
                     "cellpose<4 (pip install 'cellpose<4').")
             except Exception:
                 pass
+        from cellpose import models
         model = models.CellposeModel(gpu=gpu, pretrained_model=name)
     else:
         # Cellpose <4: builtin CNNs are selected via model_type.
@@ -306,6 +316,7 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
     current_active_layer_name = active_layer.name  # Store name for later use
 
     # Verify active layer is a Napari image layer
+    import napari
     if active_layer is not None and isinstance(active_layer, napari.layers.Image):
         image = active_layer.data  # Extract image data for processing
     else:
@@ -321,6 +332,7 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
     existing_layer = next((layer for layer in viewer.layers if layer.name == layer_name), None)
     if existing_layer:
         # Update existing layer with the thresholded mask
+        from pycat.ui.ui_utils import refresh_viewer_with_new_data
         refresh_viewer_with_new_data(viewer, existing_layer, thresh_mask)  # Refresh the viewer to display changes
     else:
         viewer.add_labels(thresh_mask, name=layer_name)  # Add new layer
@@ -670,6 +682,7 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
 
     # Check for an active image layer in the viewer
     active_layer = viewer.layers.selection.active
+    import napari
     if active_layer is None or not isinstance(active_layer, napari.layers.Image):
         raise ValueError("No active image layer selected")
 
@@ -684,6 +697,7 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
     segmented_img = felzenszwalb_segmentation_and_merging(image, scale=scale, sigma=sigma, min_size=min_size)
 
     # Display the segmented image in the viewer
+    from pycat.ui.ui_utils import add_image_with_default_colormap
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
@@ -995,6 +1009,7 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
 
     Parameters
     ----------
+    import napari
     image_layer : napari.layers.Image
         The image layer to be segmented.
     data_instance : object
@@ -1156,6 +1171,7 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
 
     Parameters
     ----------
+    import napari
     image_layer : napari.layers.Image
         The layer containing the image data to be segmented.
     label_layer : napari.layers.Labels
@@ -1255,6 +1271,10 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     cell_area = np.sum(cell_mask)
     
     # Analyze each object individually
+    # Accumulated for the summary below: what was rejected, and why.
+    _dropped = []
+    _reason_counts = {}
+
     for label in np.unique(labeled_puncta_mask)[1:]:
         # Create a binary mask for each object
         puncta_mask_holder = labeled_puncta_mask == label
@@ -1414,17 +1434,64 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         if _reasons:
             # remove the puncta from the mask
             refined_puncta_mask[labeled_puncta_mask == label] = 0
-            # Diagnostic: log why each object was dropped. Enabled by setting the
-            # module-level _PYCAT_REFINE_DEBUG flag (or env PYCAT_REFINE_DEBUG=1).
-            # Reports object area and the condition(s) that fired, so a dropped
-            # bright condensate can be traced to the exact failing check rather
-            # than guessed at.
+
+            # ── ALWAYS record WHY, not only when a debug flag is set ────────────
+            #
+            # These eight conditions decide which detections survive into every downstream
+            # count. The reasons were computed for each dropped object and then DISCARDED
+            # unless `PYCAT_REFINE_DEBUG=1` was set — and even then they were `print`ed to a
+            # console a napari user never sees.
+            #
+            # So a user whose puncta silently vanish had no way to find out why. That is the
+            # same class of problem as the dead SNR gate itself (1.5.416): the pipeline was
+            # making a consequential decision and not telling anyone.
+            #
+            # The per-object detail is kept for the debug flag; the SUMMARY is always
+            # accumulated and always surfaced.
+            _dropped.append({
+                'label': int(label),
+                'area_px': int(df['area'].values[0]),
+                'object_mean': float(img_object_mean),
+                'reasons': list(_reasons),
+            })
+            for _r in _reasons:
+                _reason_counts[_r] = _reason_counts.get(_r, 0) + 1
+
             if _refine_debug_enabled():
                 _a = int(df['area'].values[0])
                 print(f"[PyCAT refine] dropped label {int(label)} "
                       f"(area={_a}px, obj_mean={img_object_mean:.0f}): "
                       f"{', '.join(_reasons)}")
 
+    # ── Tell the user what the filter did ──────────────────────────────────────
+    #
+    # A filter that removes objects and says nothing is indistinguishable from a
+    # segmentation that never found them. The counts are named so a suspicious rejection
+    # (e.g. everything dropped on `area`, meaning min_spot_radius is wrong for this pixel
+    # size) is visible immediately rather than after a day of confusion.
+    _n_in = int(len(np.unique(labeled_puncta_mask)) - 1)
+    _n_dropped = len(_dropped)
+    if _n_dropped:
+        _detail = ", ".join(f"{k} ({v})" for k, v in
+                            sorted(_reason_counts.items(), key=lambda kv: -kv[1]))
+        _msg = (f"Puncta refinement: {_n_dropped} of {_n_in} detections rejected. "
+                f"Reasons: {_detail}. "
+                f"(A detection can fail several conditions, so these sum to more than the "
+                f"number dropped.)")
+        if _n_in and _n_dropped == _n_in:
+            _msg += (" **EVERY detection was rejected.** That usually means a threshold is "
+                     "wrong for this data rather than that the puncta are all spurious — "
+                     "check min_spot_radius against the pixel size, and the SNR thresholds "
+                     "against the image contrast.")
+            napari_show_warning(_msg)
+        elif _n_in and _n_dropped >= 0.8 * _n_in:
+            # >= not >: 4 of 5 is exactly 80%, and a user who loses four fifths of their
+            # detections should hear about it.
+            _msg += (" At least 80% were rejected — worth checking the thresholds before "
+                     "trusting the count.")
+            napari_show_warning(_msg)
+        else:
+            napari_show_info(_msg)
 
     return refined_puncta_mask
 
@@ -1889,6 +1956,7 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
 
     Parameters
     ----------
+    import napari
     pre_processed_image_layer : napari.layers.Image
         The pre-processed image layer, ready for segmentation.
     original_image_layer : napari.layers.Image

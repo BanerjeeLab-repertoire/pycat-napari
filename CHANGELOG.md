@@ -4,6 +4,216 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.440] - 2026-07-10
+### Fixed — the puncta filter threw objects away and told nobody why
+Eight conditions decide which detections survive into **every downstream count**. The reason a
+detection failed was computed for each dropped object and then **discarded** — unless
+``PYCAT_REFINE_DEBUG=1`` was set, and even then it was ``print``ed to a console a napari user
+never sees.
+
+**So a user whose puncta silently vanished had no way to find out why.** That is the same class
+of failure as the dead SNR gate itself (1.5.416): the pipeline was making a consequential
+decision and not telling anyone.
+
+The summary is now **always** produced::
+
+    Puncta refinement: 2 of 5 detections rejected.
+    Reasons: local_intensity (2), local_snr (2).
+
+And the dangerous case **escalates to a warning**:
+
+| dropped | level |
+|---|---|
+| 2 of 5 | info |
+| **4 of 5 (80 %)** | **warning** |
+| **5 of 5** | **warning** — *"EVERY detection was rejected. That usually means a threshold is wrong for this data rather than that the puncta are all spurious — check min_spot_radius against the pixel size, and the SNR thresholds against the image contrast."* |
+
+**Without that message a user simply concludes "there are no puncta in my cells."** The
+threshold is ``>= 0.8``, not ``> 0.8``: four of five *is* eighty percent, and someone losing
+four fifths of their detections should hear about it.
+
+### Added — ``test_puncta_filter_reports_what_it_rejected``
+Asserts the summary is produced **and names the conditions that fired**, so a wrong threshold
+can be traced to the exact check rather than guessed at. **78/78 core tests passing.**
+
+### Note — my first version of the test patched the wrong name
+It replaced ``show_warning`` on ``pycat.utils.notify``, and saw nothing. But
+``segmentation_tools`` does ``from pycat.utils.notify import show_warning as
+napari_show_warning`` — which **copies the reference at import time**, so patching the source
+module has no effect on the already-bound name.
+
+A real limitation of the test, not the code. It now patches the name *as bound in the module
+under test*.
+
+## [1.5.439] - 2026-07-10
+### Decoupled — ``segmentation_tools``, and the puncta filter is tested for the first time
+**24 GUI-coupled science modules at the start of this work → 15 → 8 → 7.**
+
+``segmentation_tools`` holds **16 pure analysis functions** — the puncta refinement filter,
+local thresholding, the SNR/contrast gates, watershed splitting — and a handful of viewer
+functions. A module-scope ``import napari`` (used only for ``isinstance(layer,
+napari.layers.Image)`` inside the ``run_*`` functions) blocked the headless import of **all
+sixteen**, so CI could never see any of them. ``cellpose`` and ``pycat.ui.ui_utils`` were the
+same story. All are now imported lazily, inside the functions that use them.
+
+### Added — ``tests/test_puncta_refinement.py``
+**The puncta refinement filter had never been tested.** It decides which detections survive into
+every downstream count, and its SNR gate was found **completely dead** in 1.5.416 —
+``object_mean / bg_std <= 1.0`` never fires on any camera with a positive background, so **two of
+its five quality conditions had never rejected anything, on any image, for the life of the
+pipeline.**
+
+That fix was measured against synthetic data, but nothing in the codebase exercised it. Now
+something does. Five detections in one cell on a 500-count pedestal — three real puncta
+(amplitudes 80, 80, 40) and two labelled regions with **no signal added at all**:
+
+| | result |
+|---|---|
+| real puncta kept | **3 / 3** |
+| spurious kept | **0 / 2** |
+
+**The 1.5.416 fix works, and is now protected by a regression test.** **77/77 core tests
+passing**, up from 60 this evening.
+
+### Note — I misread the return value and briefly thought the filter was broken
+My first run reported *"2 of 3 real puncta rejected"*. The function returns a **tuple**, and I
+indexed ``out[0]`` as though it were the mask.
+
+The ``PYCAT_REFINE_DEBUG=1`` flag settled it in one line: **only labels 4 and 5 were dropped** —
+the two spurious ones — and it named the conditions that fired (``local_intensity``,
+``local_snr``). The filter was correct all along; **my test was wrong.**
+
+Worth noting the flag exists and works. It also exposes a real gap: the eight rejection reasons
+are collected internally but **never surfaced** unless that environment variable is set, so a
+user whose puncta silently vanish has no way to find out why. Recorded for follow-up.
+
+## [1.5.438] - 2026-07-10
+### Decoupled — 7 more science modules now import headlessly, unlocking Manders' coefficients
+GUI-coupled science modules: **24 at the start of this work → 15 today → 8 now.**
+
+**``obj_based_coloc_analysis_tools`` is the significant one.** It holds **12 pure analysis
+functions** — Manders' M1/M2, object overlap, per-object colocalisation — and **one Qt dialog.**
+The module-scope Qt import blocked the headless import of **all twelve**, so CI could never see
+any of them.
+
+The obstacle was that ``class obcaDialog(QDialog)`` resolves ``QDialog`` **at class-definition
+time**, which runs at import — so the import could not simply be moved inside ``__init__``; the
+*base class* needs it. The class is now built inside a factory on first use, and cached.
+
+Manders is correct, and now verifiable in CI. On two ch1 objects with ch2 overlapping exactly
+one of them:
+
+| | value | expected |
+|---|---|---|
+| M1 (fraction of ch1 overlapping ch2) | **0.500** | 0.500 |
+| M2 (fraction of ch2 overlapping ch1) | **1.000** | 1.000 |
+
+Also decoupled: ``correlation_func_analysis_tools`` and ``layer_tools`` (each pulled in
+``pycat.ui.ui_utils``, which imports napari, for a **single** function — now imported lazily
+inside the function that uses it), plus ``clean_spot_detection_tools``, ``fd_curve_tools``,
+``fft_bandpass_tools`` and ``intensity_profile_tools`` (the notification shim).
+
+All seven are added to ``test_headless_science.py``, which now asserts they import with the GUI
+stack genuinely absent. **74/74 core tests passing**, up from 60.
+
+### Remaining
+Eight modules still import napari or Qt at module scope. Three are genuinely UI
+(``data_viz_tools``, ``video_export_tools``, ``general_image_tools`` — 0 pure functions between
+them). The five with locked science are ``segmentation_tools`` (16 pure functions),
+``spatial_acf_tools`` (5), ``ts_cellpose_tools`` (2), ``timeseries_condensate_tools`` (2) and
+``two_channel_coloc_tools`` (1).
+
+## [1.5.437] - 2026-07-10
+### Fixed — a swallowed exception left a third of a small object's signal uncorrected, silently
+``estimate_psf_sigma`` ended in::
+
+    except Exception:
+        return 1.0
+
+The caller cannot then distinguish *"the PSF is 1.0 px"* from *"the estimation crashed"* — and
+**1.0 is a perfectly plausible PSF width**, so nothing looks wrong.
+
+**It is not a harmless default.** The PSF sigma is the **kernel of the partial-volume
+correction**. With a true PSF of 2.5 px and a silent fallback of 1.0:
+
+| object radius (px) | true bias | with fallback 1.0 | gap |
+|---|---|---|---|
+| 1.0 | −0.954 | −0.635 | 0.319 |
+| **2.0** | −0.734 | −0.358 | **0.376** |
+| 4.0 | −0.437 | −0.185 | 0.252 |
+
+**Roughly a third of a small object's signal, left uncorrected — silently.**
+
+The fallback is kept (the caller needs *something*), but the failure is now **visible**: it
+warns, names the exception, and states what the fallback costs. Validated: a flat image (no
+gradient to estimate from) warns and returns 1.0; a real image with a true PSF of 2.5 returns
+**2.44**, silently. *The estimator was fine — only its failure mode was invisible.*
+
+### Added — ``tests/test_silent_fallbacks.py``
+**Most of the ~330 bare ``except Exception: pass`` handlers are harmless** — optional imports,
+best-effort cleanup, GPU probes falling back to CPU. Swallowing there costs a *feature*, and
+the user notices.
+
+**The dangerous ones return a plausible value.** This guard forbids exactly that, and only in
+the 14 modules whose job is to produce a number a scientist will report. Verified **4/4** on the
+cases that matter:
+
+| case | verdict |
+|---|---|
+| the actual bug (``return 1.0``) | **flagged** |
+| the fix (warns, then returns) | allowed |
+| honest failure (``return np.nan``) | allowed |
+| honest failure (``dict(fit_success=False)``) | allowed |
+
+It does **not** forbid fallbacks — it forbids **invisible** ones. Either warn, or return an
+explicit failure (``NaN``, ``None``, or a dict with ``success=False``) so the caller can tell.
+
+### Note — a survey, not a mass edit
+An AST sweep classified every handler in the non-UI code:
+
+| | count |
+|---|---|
+| bare ``pass`` on ``Exception`` | 328 |
+| broad catch, no log | 270 |
+| **logs or warns (fine)** | **151** |
+| re-raises (fine) | 14 |
+
+Of the 104 silent broad handlers *inside science modules*, most return ``NaN`` or
+``fit_success=False`` — which is **correct behaviour**, and rewriting them would be churn.
+**One returned a plausible number.** That is the one that was fixed, and the guard now prevents
+another.
+
+## [1.5.436] - 2026-07-10
+### Changed — the dark reference is now an explicit choice, not an empty dropdown
+Gable's observation, and it is the right one: **an empty dropdown reads as "you forgot
+something", not "this is optional and here is what it costs."** The user tries to fill it, and
+when they cannot, the bypass happens **silently** — they get a number without ever choosing to
+accept a compromised one.
+
+A checkbox now **owns the decision**, defaults to the correct behaviour, and states the
+consequence **at the point where it is turned off**. Three paths, and the middle one is the
+important one:
+
+| user action | result | ``is_true_kp`` |
+|---|---|---|
+| **[x] use dark reference + layer chosen** | **Kp = 29.6** *(true 30)* | **True** |
+| **[x] ticked, but NO layer chosen** | **blocked, with a warning** | — |
+| **[ ] unticked** (deliberate bypass) | intensity ratio 5.77 | **False** |
+
+**Ticked-but-empty is a mistake, not a choice**, so the widget refuses rather than silently
+falling back to the uncorrected number — which is exactly the trap the checkbox exists to
+close. Unticked *is* a choice, so it proceeds, returns the ratio so work is not blocked, and
+labels it for what it is.
+
+Unticking swaps the help text for an amber warning stating the cost in full: the result is an
+**intensity ratio, not a partition coefficient**, biased toward 1 by an amount that **cannot be
+recovered from the image** (in vitro every pixel contains the dilute phase, so there is no
+fluorophore-free region to reference). **A true Kp of 30 reads as 5.8 on a 500-count pedestal.**
+Use it for *relative* comparison between images acquired identically; do not report it as Kp.
+
+The **contrast** (I_dense − I_dilute) is exact in every case — the pedestal cancels in the
+difference — and is reported regardless.
+
 ## [1.5.435] - 2026-07-10
 ### FIXED — two requirements files were invalid for pip AND for conda, so Dependabot could not scan the repo at all
 ``config/requirements-arm-mac.txt`` line 2 read::

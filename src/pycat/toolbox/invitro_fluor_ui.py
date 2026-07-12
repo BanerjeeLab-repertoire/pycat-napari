@@ -631,19 +631,47 @@ def _ivf_field_summary(ui, layout):
     # "camera floor" — Kp = 5.77 against a true 30, reported confidently. See 1.5.423.)
     #
     # One extra frame fixes it: buffer, no fluorophore, same camera settings.
+    # ── The decision is EXPLICIT, not an empty dropdown ────────────────────────
+    #
+    # A dropdown left blank reads as "you forgot something", so the user tries to fill it —
+    # and the bypass then happens SILENTLY: they get a number without ever choosing to
+    # accept a compromised one. The checkbox OWNS the decision, defaults to the correct
+    # behaviour, and states the consequence at the point where it is turned off.
+    dark_cb = QCheckBox("Use a dark reference (recommended)")
+    dark_cb.setChecked(True)
+    form.addRow(dark_cb)
+
     dark_dd = ui.create_layer_dropdown(napari.layers.Image)
-    dark_dd.insertItem(0, "\u2014 none (no dark reference) \u2014")
-    dark_dd.setCurrentIndex(0)
     form.addRow("Dark reference (buffer, no dye):", dark_dd)
-    form.addRow(QLabel(
-        "<span style='color:#888;font-size:10px'>"
-        "<b>Required for a true partition coefficient.</b> In vitro the camera floor "
-        "cannot be measured from the image — every pixel contains the dilute phase, so "
-        "there is no fluorophore-free region to reference. Without it, the reported ratio "
-        "is biased toward 1 by an unknowable amount (a true K<sub>p</sub> of 30 reads as "
-        "5.8 on a 500-count pedestal). Acquire one frame of buffer with no dye, at the "
-        "same camera settings. The <b>contrast</b> (I<sub>dense</sub> − I<sub>dilute</sub>) "
-        "is exact either way.</span>"))
+
+    _dark_note = QLabel("")
+    _dark_note.setWordWrap(True)
+    form.addRow(_dark_note)
+
+    def _toggle_dark(checked):
+        dark_dd.setEnabled(bool(checked))
+        if checked:
+            _dark_note.setText(
+                "<span style='color:#888;font-size:10px'>"
+                "One frame of buffer with <b>no dye</b>, at the same camera settings. The "
+                "camera floor is measured directly and removed from both phases, so "
+                "K<sub>p</sub> is pedestal-independent (validated: 29.6 recovered against a "
+                "true 30.0 at pedestals of 0, 100, 500 and 2000 counts).</span>")
+        else:
+            _dark_note.setText(
+                "<span style='color:#b58900;font-size:10px'>"
+                "<b>Proceeding without a dark reference.</b> The result is an "
+                "<b>intensity ratio, NOT a partition coefficient</b> — biased toward 1 by "
+                "the camera pedestal, by an amount that <b>cannot be recovered from the "
+                "image</b> (in vitro every pixel contains the dilute phase, so there is no "
+                "fluorophore-free region to reference). A true K<sub>p</sub> of 30 reads as "
+                "<b>5.8</b> on a 500-count pedestal. Use it for <b>relative</b> comparison "
+                "between images acquired identically; do not report it as K<sub>p</sub>. "
+                "The <b>contrast</b> (I<sub>dense</sub> − I<sub>dilute</sub>) is exact "
+                "regardless.</span>")
+
+    dark_cb.toggled.connect(_toggle_dark)
+    _toggle_dark(True)
 
     run = QPushButton("▶  Compute Field Summary")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -678,20 +706,35 @@ def _ivf_field_summary(ui, layout):
         # `sample_type='in_vitro'` is not a guess: this is the IN VITRO fluorescence widget,
         # so the tool knows it must not try to auto-detect the floor.
         from pycat.toolbox.invitro_tools import partition_coefficient_local
+        _use_dark = dark_cb.isChecked()
         _dark = None
-        _dark_name = dark_dd.currentText() if dark_dd is not None else ""
-        if _dark_name and _dark_name not in ("", "None", "—"):
-            try:
-                _dark = np.asarray(ui.viewer.layers[_dark_name].data)
-            except KeyError:
-                _dark = None
+        if _use_dark:
+            _dark_name = dark_dd.currentText() if dark_dd is not None else ""
+            if _dark_name:
+                try:
+                    _dark = np.asarray(ui.viewer.layers[_dark_name].data)
+                except KeyError:
+                    _dark = None
+            if _dark is None:
+                # The user ASKED for a dark reference and did not supply one. That is a
+                # mistake, not a choice — say so rather than silently falling back to the
+                # uncorrected ratio, which is exactly the trap the checkbox exists to close.
+                napari_show_warning(
+                    "Partition coefficient: 'Use a dark reference' is ticked but no dark "
+                    "layer was selected. Load a frame of buffer with no dye (same camera "
+                    "settings) and choose it, or untick the box to proceed with an "
+                    "uncorrected intensity ratio \u2014 which is NOT Kp, and is biased "
+                    "toward 1 by the camera pedestal.")
+                return
+
         part = partition_coefficient_local(
             img, mask.astype(np.int32), sample_type='in_vitro',
             dark_reference=_dark,
-            # Without a dark frame, still return the raw ratio so the analysis proceeds —
-            # flagged `is_true_kp=False` so it cannot be mistaken for a partition
-            # coefficient. The contrast is exact regardless.
-            allow_no_reference=(_dark is None))
+            # The bypass is now a DELIBERATE choice (the box is unticked), not a silent
+            # fallback. The raw ratio is returned so work can proceed, flagged
+            # `is_true_kp=False` so it cannot be mistaken for a partition coefficient. The
+            # contrast is exact regardless.
+            allow_no_reference=(not _use_dark))
         ui._dr()['ivf_field_summary']   = summ
         ui._dr()['ivf_partition_coeff'] = part
         ui._record('ivf_field_summary', {

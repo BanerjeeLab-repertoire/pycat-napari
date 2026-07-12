@@ -66,6 +66,10 @@ from __future__ import annotations
 import numpy as np
 
 
+
+# A silent failure in a MEASUREMENT path becomes a wrong number, not a missing feature.
+from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.general_utils import debug_log
 # ───────────────────────── weight construction ──────────────────────────────
 
 def partial_volume_weights(hi_res_mask, factor, label=None):
@@ -373,11 +377,43 @@ def estimate_psf_sigma(image, mask=None, max_objects=30):
         # The PSF is where extra smoothing stops reducing the peak gradient much:
         # find where the curve has dropped to 1/e of its initial value.
         if prof[0] <= 0:
+            # No gradient anywhere: there is nothing to estimate a PSF from. Say so.
+            napari_show_warning(
+                "PSF estimation: the image has no measurable intensity gradient, so the PSF "
+                "width cannot be estimated. Falling back to sigma = 1.0 px, which is a "
+                "GUESS — supply `psf_sigma_px` explicitly if the partial-volume correction "
+                "matters. With a true PSF of 2.5 px, a fallback of 1.0 leaves roughly a "
+                "THIRD of a small object's signal uncorrected (at a 1 px radius the true "
+                "bias is -0.954 and the fallback assumes -0.635).")
             return 1.0
         target = prof[0] / np.e
         idx = np.argmin(np.abs(prof - target))
         return float(np.clip(sigs[idx], 0.3, 4.0))
-    except Exception:
+    except Exception as _exc:
+        # ── A silent fallback here becomes a WRONG CORRECTION, not a missing feature ──
+        #
+        # This used to be a bare `except Exception: return 1.0`. The caller cannot then
+        # distinguish "the PSF is 1.0 px" from "the estimation crashed" — and 1.0 is a
+        # perfectly plausible PSF width, so nothing looks wrong.
+        #
+        # It is not a harmless default. The PSF sigma is the kernel of the partial-volume
+        # correction, and getting it wrong under-corrects small objects badly. With a TRUE
+        # PSF of 2.5 px:
+        #
+        #     radius (px)   true bias   with fallback 1.0   gap
+        #        1.0          -0.954        -0.635          0.319
+        #        2.0          -0.734        -0.358          0.376
+        #        4.0          -0.437        -0.185          0.252
+        #
+        # **A third of a small object's signal, left uncorrected, silently.**
+        napari_show_warning(
+            f"PSF estimation FAILED ({type(_exc).__name__}: {_exc}). Falling back to "
+            f"sigma = 1.0 px, which is a GUESS, not a measurement. The PSF width is the "
+            f"kernel of the partial-volume correction: with a true PSF of 2.5 px, a "
+            f"fallback of 1.0 leaves roughly a THIRD of a small object's signal "
+            f"uncorrected. Supply `psf_sigma_px` explicitly, or do not rely on the "
+            f"partial-volume correction for this data.")
+        debug_log("estimate_psf_sigma failed", _exc)
         return 1.0
 
 

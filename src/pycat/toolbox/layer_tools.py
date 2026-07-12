@@ -18,10 +18,12 @@ Date
 
 # Third party imports
 import numpy as np
-from napari.utils.notifications import show_warning as napari_show_warning
+from pycat.utils.notify import show_warning as napari_show_warning
 
 # Local application imports
-from pycat.ui.ui_utils import add_image_with_default_colormap
+# `pycat.ui.ui_utils` imports napari, so importing it at module scope blocks the
+# headless import of this module's array functions. `add_image_with_default_colormap` is imported lazily,
+# inside the function that uses it.
 from pycat.utils.general_utils import dtype_conversion_func
 
 
@@ -97,6 +99,7 @@ def run_simple_multi_merge(mode, viewer):
     normalized_data = dtype_conversion_func(clipped / _max, output_bit_depth=input_dtype)
 
     # Add the merged image to the viewer with a default colormap
+    from pycat.ui.ui_utils import add_image_with_default_colormap
     add_image_with_default_colormap(normalized_data, viewer, name=f"{mode} Merged Image")
 
 
@@ -164,4 +167,5 @@ def run_advanced_two_layer_merge(input_layer1, input_layer2, mode, slider, viewe
     normalized_data = dtype_conversion_func(normalized_data, output_bit_depth=input_dtype)
 
     # Add the merged image to the viewer
+    from pycat.ui.ui_utils import add_image_with_default_colormap
     add_image_with_default_colormap(normalized_data, viewer, name=f"{mode} Merged Image")
