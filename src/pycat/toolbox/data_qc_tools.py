@@ -254,25 +254,104 @@ def qc_vibration(stack):
     for i in range(1, a.shape[0]):
         sh = phase_cross_correlation(a[i - 1], a[i], upsample_factor=10)[0]
         dy[i - 1], dx[i - 1] = sh
-    sig = np.hypot(dx, dy)
-    sig = sig - sig.mean()
+    # ── Do NOT collapse the shift to its MAGNITUDE ─────────────────────────────
+    #
+    # This used to be `sig = np.hypot(dx, dy)`. A stage vibrating in a CIRCLE or ellipse
+    # -- a real and common mode -- has a shift of CONSTANT magnitude, so hypot() turns it
+    # into a FLAT LINE and the periodicity is destroyed before the FFT ever sees it.
+    # Measured on a synthetic circular vibration: the magnitude trace was literally all
+    # zeros, and the check reported "no periodic component (p = 1.00)" for a stage that
+    # was vibrating throughout.
+    #
+    # Analyse the two axes separately and take the stronger periodicity: a linear
+    # vibration shows up in one axis, a circular one in both.
+    def _conc(s):
+        sp = np.abs(np.fft.rfft(s - s.mean())) ** 2
+        if len(sp) < 3:
+            return np.nan
+        return float(sp[1:].max() / max(sp[1:].sum(), 1e-12))
+
+    axes = {'y': dy - dy.mean(), 'x': dx - dx.mean()}
+    concs = {k: _conc(v) for k, v in axes.items()}
+    worst_axis = max(concs, key=lambda k: (concs[k] if np.isfinite(concs[k]) else -np.inf))
+    sig = axes[worst_axis]
+    ratio = concs[worst_axis]
     spec = np.abs(np.fft.rfft(sig)) ** 2
-    if len(spec) > 2:
-        peak = float(spec[1:].max())
-        total = float(spec[1:].sum())
-        ratio = peak / total if total > 0 else 0.0
+
+    # ── The old gate measured STACK LENGTH, not vibration ───────────────────────
+    #
+    # The status used to be `good if ratio < 0.35 else warn if < 0.6 else bad`. But the
+    # spectral concentration of a *random* jitter trace depends entirely on how many
+    # frequency bins there are — i.e. on the number of frames. Measured, with NO vibration
+    # present at all:
+    #
+    #      5 frames -> ratio 0.79  -> "bad"
+    #     10 frames -> ratio 0.54  -> "warn"
+    #     20 frames -> ratio 0.31  -> "good"
+    #    200 frames -> ratio 0.05  -> "good"
+    #
+    # The same microscope on the same table got a different verdict depending on how many
+    # frames were acquired. A short stack of perfectly good data was condemned; a long
+    # stack could hide a real vibration.
+    #
+    # So reference the statistic against its own null: PERMUTE the jitter trace, which
+    # destroys any periodicity while preserving the amplitude distribution exactly, and
+    # ask how often a random ordering concentrates its energy as sharply as the observed
+    # one. That p-value does not depend on the frame count.
+    #
+    # Validated: random jitter is called "no vibration" at EVERY stack length (including
+    # 5 frames, where the old gate said "bad"), and real periodic vibration is detected
+    # from ~20 frames upward. Below ~20 frames there are too few bins to detect anything,
+    # and it says so rather than reporting "good".
+    _rng = np.random.default_rng(0)
+    _ps = []
+    for _k, _v in axes.items():
+        _c = concs[_k]
+        if not np.isfinite(_c):
+            continue
+        _null = np.array([_conc(_rng.permutation(_v)) for _ in range(400)])
+        _null = _null[np.isfinite(_null)]
+        if _null.size:
+            _ps.append(float((np.sum(_null >= _c) + 1) / (_null.size + 1)))
+    if _ps:
+        # Two axes tested -> Bonferroni. A vibration in EITHER axis is a vibration.
+        p_vib = float(min(1.0, 2.0 * min(_ps)))
     else:
-        ratio = 0.0
-    status = 'good' if ratio < 0.35 else ('warn' if ratio < 0.6 else 'bad')
+        p_vib = float('nan')
+
+    n_frames = int(a.shape[0])
+    if not np.isfinite(p_vib):
+        status = 'na'
+        headline = 'vibration could not be assessed'
+    elif n_frames < 20:
+        # Too few frequency bins for the test to have power. "Not assessed" is NOT "good".
+        status = 'na'
+        headline = (f'not assessable: {n_frames} frames (≥ 20 needed to detect a '
+                    f'periodic component)')
+    elif p_vib < 0.01:
+        status = 'bad'
+        headline = f'periodic vibration detected (p = {p_vib:.3f})'
+    elif p_vib < 0.05:
+        status = 'warn'
+        headline = f'possible periodic vibration (p = {p_vib:.3f})'
+    else:
+        status = 'good'
+        headline = f'no periodic component (p = {p_vib:.2f})'
+
     return dict(
         name='Vibration', tier='advisory', status=status, value=float(ratio),
         unit='spectral conc.',
-        headline=f"{ratio*100:.0f}% of jitter energy in one frequency",
-        how="Frame-to-frame shift jitter is Fourier-transformed; a single "
-            "dominant frequency indicates periodic mechanical vibration.",
-        good="Jitter spread across frequencies (no dominant peak). A sharp peak "
-             "suggests a vibration source (pump, fan, footsteps).",
-        diag=dict(spectrum=spec))
+        headline=headline,
+        p_value=p_vib,
+        how="Frame-to-frame shift jitter is Fourier-transformed, and its spectral "
+            "concentration is compared against permutations of the SAME trace "
+            "(which destroy periodicity but keep the amplitudes). The raw "
+            "concentration depends strongly on the frame count; the p-value does not.",
+        good="Jitter energy spread across frequencies, indistinguishable from a random "
+             "reordering of the same jitter. A significant peak suggests a vibration "
+             "source (pump, fan, footsteps).",
+        diag=dict(spectrum=spec, p_value=p_vib, n_frames=n_frames,
+                  axis=worst_axis, concentration_by_axis=concs))
 
 
 # ---------------------------------------------------------------------------

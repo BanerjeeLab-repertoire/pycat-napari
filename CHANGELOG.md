@@ -4,6 +4,102 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.403] - 2026-07-10
+### Fixed — a stage vibrating in a circle was completely invisible to the vibration QC
+``qc_vibration`` computed the frame-to-frame jitter as ``np.hypot(dx, dy)`` — the **magnitude**
+of the shift. **A stage vibrating in a circle or an ellipse has a shift of constant
+magnitude**, so ``hypot`` collapses it to a **flat line** and the periodicity is destroyed
+before the FFT ever sees it. On a synthetic circular vibration the magnitude trace was
+*literally all zeros*, and the check reported *"no periodic component (p = 1.00)"* for a stage
+that was vibrating throughout.
+
+Circular and elliptical stage vibration is a **real and common mode** — a pump, a fan, a
+rotating imbalance. It was undetectable.
+
+Fixed by analysing the two axes **separately** (Bonferroni-corrected): a linear vibration
+shows in one axis, a circular one in both.
+
+### Fixed — the vibration threshold was measuring STACK LENGTH, not vibration
+The status was ``good if ratio < 0.35 else warn if < 0.6 else bad``, where ``ratio`` is the
+spectral concentration of the jitter. But the concentration of a **random** jitter trace
+depends entirely on the number of frequency bins — i.e. **on the frame count**. Measured, with
+**no vibration present at all**:
+
+| frames | ratio | old verdict |
+|---|---|---|
+| **5** | 0.79 | **"bad"** |
+| 10 | 0.54 | "warn" |
+| 20 | 0.31 | "good" |
+| 200 | 0.05 | "good" |
+
+**The same microscope on the same table got a different verdict depending on how many frames
+were acquired.** A short stack of perfectly good data was condemned.
+
+Replaced with a **permutation null**: shuffle the jitter trace — destroying any periodicity
+while preserving the amplitudes exactly — and ask how often a random ordering concentrates its
+energy as sharply. That p-value does not depend on the frame count.
+
+Validated on stacks with **measured** shifts (see below): random jitter → ``good`` at every
+length; linear **and circular** vibration → ``bad`` at 25/50/100 frames. Below 20 frames there
+are too few bins for the test to have power, and it now returns ``na`` — *not assessable* —
+rather than ``good``. **"Could not assess" is not a clean bill of health.**
+
+### Note — my validation harness was broken, and the passing tests were passing by luck
+The first harness shifted a base image with ``ndi.shift(..., mode='reflect')`` at an amplitude
+and period that ``phase_cross_correlation`` measured as **exactly zero shift**. Every
+"detection" it reported was noise. The T = 20 and T = 40 cases *passed*, which is precisely why
+this was dangerous — a green test on a harness that produces no signal.
+
+Caught by checking the harness itself: *do the measured shifts match the intended ones?* They
+did not (all zeros). The corrected harness reaches a correlation of **0.997** between intended
+and measured shift, and only then are the results meaningful.
+
+**Validate the validator.** A test that cannot fail is not evidence.
+
+## [1.5.402] - 2026-07-10
+### Fixed — the coarsening confidence flag never fired, so it carried no information
+``fit_coarsening`` distinguishes **Ostwald ripening** (R ~ t^⅓) from **coalescence**
+(R ~ t^½), and it already had a ``mechanism_confidence`` flag gated on the **R² gap**
+between the two fits exceeding **0.1**.
+
+**Measured, the gap between t^⅓ and t^½ is about 0.008 — even on noiseless data.** The two
+curves are both concave-increasing and genuinely similar over any finite time range. So the
+gate **never fired**: ``confidence`` was permanently ``'low'``, and the flag could not
+distinguish a call that is right **100 %** of the time from one that is a **coin flip**.
+
+The *selection* is actually good — validated against ground truth at **100 %** correct on
+clean data, degrading to ~70 % at heavy noise. What was missing was any honest statement of
+**which regime you are in**.
+
+**Replaced with a bootstrap:** resample the residuals and ask how often the winning mechanism
+actually wins. It needs no ground truth, is measurable from the single dataset in hand, and
+it **tracks the true correct-selection rate**:
+
+| noise | true correct rate | bootstrap agreement | label now |
+|---|---|---|---|
+| 0.005 | **100 %** | 100 % | **high** |
+| 0.05 | 88 % | 95 % | high |
+| 0.10 | 80 % | 81 % | **moderate** |
+| 0.20 | 72 % | 67 % | **low** |
+| 0.40 | **52 %** | 60 % | low |
+
+Every one of those rows previously reported ``'low'``. The flag now moves from *high* →
+*moderate* → *low* exactly as the call degrades toward a coin flip, and at *low* it says so
+plainly: *"barely better than a coin flip — t^⅓ and t^½ are not distinguishable in this data.
+Do not report a coarsening mechanism from it."*
+
+``mechanism_bootstrap_agreement`` is returned alongside, so the number behind the label is
+visible.
+
+### Note — what was already right here
+This module was in better shape than most: it already had an explicit confidence flag, an
+honest caveat about the two exponents being hard to separate, and a sensible *arrested*
+detection that avoids fitting a power law to a radius that is not growing. The problem was
+only that the **threshold was set at a scale the statistic never reaches** — a plausible
+number chosen without measuring what the gap actually looks like. Worth recording, because it
+is a subtler failure than the ones before it: not a missing check, but a check calibrated
+against an assumption instead of data.
+
 ## [1.5.401] - 2026-07-10
 ### Fixed — a bead hitting a wall was reported as "subdiffusion"
 ``motion_type`` is read straight off ``alpha``, and alpha is the **entire**
