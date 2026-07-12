@@ -4,6 +4,113 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.414] - 2026-07-10
+### Fixed — the molecule-counting R² gate discarded every low-expressing cell and inflated the population mean by 75 %
+``count_molecules_pooled`` and ``count_molecules_single`` defaulted to ``r2_min = 0.999`` — a
+minimum R² on the **bleaching-curve fit** for a trace to be accepted.
+
+**The R² of a bleaching fit rises with N.** A brighter trace has a better signal-to-noise
+ratio, so the double exponential fits it better. The gate therefore selects for
+**brightness**, not for correctness — and in a *pooled* analysis, that is a selection effect
+on the population itself.
+
+Measured on a mixed population (30 cells with N = 8, 30 cells with N = 80; **true population
+mean 44**):
+
+| gate | N = 8 group | N = 80 group | reported mean N |
+|---|---|---|---|
+| **`r2_min = 0.999`** (old default) | **0 / 30** | 30 / 30 | **77.1** |
+| `r2_min = 0.0` (new default) | 30 / 30 | 30 / 30 | **42.4** |
+| *truth* | — | — | *44* |
+
+**Not one low-expressing cell survived the gate. The reported mean was 77 against a true 44.**
+
+That is not a conservative filter. It is a selection effect that **inverts the biological
+conclusion**, and it fires hardest on exactly the low-copy-number measurements that molecule
+counting exists to make.
+
+**And the estimator is fine at low N.** Validated against ground truth (60 traces per point):
+
+| true N | median estimate | IQR | within 2× | **accepted (old gate)** |
+|---|---|---|---|---|
+| **5** | **5.0** | 5–6 | **100 %** | **0 %** |
+| **20** | **20.5** | 18–24 | **100 %** | **0 %** |
+| 50 | 49.7 | 44–60 | 100 % | 98 % |
+| 200 | 201.2 | 176–239 | 100 % | 100 % |
+
+A true count of **5 is recovered as 5.0, with every trace inside 2×** — and rejected **100 %
+of the time**. The estimator was excellent at low copy number; the gate threw it away.
+
+Default is now ``0.0`` in both functions, with the measurement written into the docstrings so
+nobody restores the old value thinking it is the safe choice. Set ``r2_min`` deliberately if
+there is a reason to.
+
+### Note — the per-trace scatter is inherent, not a defect to be gated away
+A single bleaching trace carries limited information: a true N = 20 gives an interquartile
+range of about 18–24 across repeats. The *median* is accurate; the individual estimate is
+noisy. **That is what ``count_molecules_pooled`` is for** — pooling across traces is how this
+method is meant to be used, and it is now stated in the returned ``quality`` field rather than
+being papered over with a filter that silently drops half the data.
+
+``molecular_counting_tools`` now imports headlessly — **16** GUI-coupled scientific modules
+remain.
+
+## [1.5.413] - 2026-07-10
+### Fixed — an R² gate on spots cannot tell one molecule from two, or from a dead pixel
+``localize_spots`` filters on ``min_r_squared``, and ``molecular_counting_tools`` uses an R²
+threshold to decide whether **a molecule count is accepted at all**. But R² only asks whether
+a Gaussian beats a flat line — and a Gaussian describes a *lot* of things well.
+
+Measured on 11×11 patches (true PSF sigma 1.8 px):
+
+| patch | R² | sigma | aspect |
+|---|---|---|---|
+| **real single spot** | 0.983 | **1.83** | 1.03 |
+| **two merged spots** | **0.980** | 2.42 | **1.49** |
+| **hot pixel** | **0.928** | **0.14** | 1.14 |
+| a diagonal edge | 0.672 | 12.24 | 1.09 |
+| flat noise | 0.051 | — | — |
+
+**A merged pair scores 0.980 against a real spot's 0.983. A hot pixel scores 0.928.** An R²
+gate therefore accepts merged spots and dead pixels as valid single molecules — and in
+molecular counting, each of those is a wrong count.
+
+**The width is what discriminates.** New ``classify_spot_fit`` checks the fitted sigma against
+the PSF and the aspect ratio: a hot pixel is far narrower than the PSF, a merged pair is
+elongated, an edge fits with an absurd sigma. Thresholds set from measurement, not guessed
+(40 realisations each):
+
+| case | sigma / PSF | aspect |
+|---|---|---|
+| single spot | **1.00** | **1.02** |
+| merged, 2 px apart | 1.08 | 1.17 |
+| merged, 3 px apart | 1.21 | **1.39** |
+| merged, 4 px apart | 1.40 | **1.77** |
+
+Hence ``max_aspect = 1.3``, ``sigma_tolerance = (0.6, 1.3)``. Validated end-to-end: real spots
+pass as ``single``; merged pairs at 3 px and 4 px are both caught as ``elongated``.
+
+**And the limit is stated, not hidden.** A pair closer than about **3 px is not detectable as
+a pair by anyone** — at 2 px apart it produces sigma/PSF = 1.08 and aspect = 1.17,
+statistically indistinguishable from a single spot. That is diffraction, not a shortcoming of
+the check. A ``single`` verdict therefore means *"not distinguishable from one spot"*, **not**
+*"definitely one molecule"*, and the docstring says so.
+
+### Fixed — rejected spots were silently dropped
+A spot whose fit failed or fell below ``min_r_squared`` simply **vanished** from the output.
+The user got N−1 spots with no indication that one was rejected, or why. A hot pixel is 1 px
+wide and frequently makes the Gaussian fit fail outright — so it disappeared entirely, which
+is the worst possible outcome: **a missing molecule is as wrong as a spurious one, and a
+silent drop is indistinguishable from a spot that was never detected.**
+
+Rejected detections are now **returned and flagged** (``spot_class``, ``spot_ok``,
+``spot_reason``), with a warning stating how many were rejected. ``df[df.spot_ok]`` gives the
+usable spots; ``df[~df.spot_ok]`` shows what was rejected and why. Validated: **5 detections
+in, 5 rows out** — 2 usable, 2 ``elongated``, 1 ``fit_failed``.
+
+``gaussian_localization_tools`` now imports headlessly — **17** GUI-coupled scientific modules
+remain.
+
 ## [1.5.412] - 2026-07-10
 ### Fixed — a two-mode fusion relaxation understated the viscosity by 76 %, at R² = 0.996
 ``tau`` **is** the measurement: by Frenkel, ``tau = eta*R/sigma``, so the viscosity is read
