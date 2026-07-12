@@ -27,7 +27,7 @@ from napari.utils.notifications import (
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
     QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QProgressBar,
-    QScrollArea, QSizePolicy, QRadioButton, QComboBox,
+    QScrollArea, QSizePolicy, QRadioButton, QComboBox, QLineEdit,
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
@@ -1576,8 +1576,41 @@ class VideoParticleTrackingUI:
         self._bead_radius = QDoubleSpinBox()
         self._bead_radius.setRange(0.001, 5.0); self._bead_radius.setValue(0.1)
         self._bead_radius.setDecimals(3); self._bead_radius.setSingleStep(0.01)
-        self._bead_radius.setToolTip("Probe bead radius (µm). 20nm–2µm typical → 0.01–1.0 µm radius.")
+        self._bead_radius.setToolTip(
+            "Probe bead radius (µm). 20nm–2µm typical → 0.01–1.0 µm radius.\n\n"
+            "Viscosity is INVERSELY proportional to this: η = kT/(6πRD). A radius "
+            "that is 30% wrong makes the viscosity 30% wrong.")
         form.addRow("Bead radius (µm):", self._bead_radius)
+
+        # Provenance of the radius. Recorded because η ∝ 1/R, so the radius is not a
+        # nuisance parameter — it propagates linearly into the answer. A dropdown, not
+        # a free-text field: it is structured (so it can be batched, queried and
+        # exported) and it is one click rather than something to retype every run.
+        self._radius_source = QComboBox()
+        self._radius_source.addItems(["manufacturer", "calibrated", "metadata",
+                                      "assumed"])
+        self._radius_source.setToolTip(
+            "Where this radius came from. Recorded with the result.\n\n"
+            "• manufacturer — the bead specification / datasheet (the usual case).\n"
+            "• calibrated — measured against a standard on this instrument.\n"
+            "• metadata — read from the acquisition file.\n"
+            "• assumed — a default or a guess; the result inherits that uncertainty.\n\n"
+            "Note: do NOT derive the radius from the imaged blob. The blob is the bead "
+            "CONVOLVED WITH THE PSF — for a 200 nm bead at ~1.2 NA the PSF is comparable "
+            "to the bead itself, so the apparent size is dominated by the optics. You "
+            "would be measuring the microscope, and the viscosity would come out too "
+            "LOW. Comparing the apparent size to the spec as a SANITY CHECK is good "
+            "practice (it catches a wrong vial or aggregates); using it as the input "
+            "is not.\n\n"
+            "Example of a fully-specified radius: 0.100 µm, manufacturer spec, ±5%.")
+        form.addRow("Radius source:", self._radius_source)
+
+        self._radius_note = QLineEdit()
+        self._radius_note.setPlaceholderText("optional — e.g. cat# / lot, or ±5%")
+        self._radius_note.setToolTip(
+            "Optional free text stored with the result: a catalogue number, a lot, a "
+            "tolerance. Leave blank if the source dropdown says enough.")
+        form.addRow("Radius note:", self._radius_note)
 
         self._temp_C = QDoubleSpinBox()
         self._temp_C.setRange(-20, 100); self._temp_C.setValue(24.0)
@@ -1800,6 +1833,45 @@ class VideoParticleTrackingUI:
         self._dr()['vpt_fit'] = fit
         self._dr()['vpt_eta_Pa_s'] = eta
 
+        # Build the viscosity as a MEASUREMENT that carries its provenance and its
+        # assumptions, not just a float. eta is proportional to 1/R, so where the bead
+        # radius came from is part of the result, not metadata about it.
+        try:
+            from pycat.toolbox.vpt_tools import viscosity_measurement
+            _src = (self._radius_source.currentText()
+                    if hasattr(self, '_radius_source') else 'manufacturer')
+            _note = (self._radius_note.text().strip()
+                     if hasattr(self, '_radius_note') else '')
+            _vm = viscosity_measurement(
+                D_um2_per_s=fit.get('D_um2_per_s', float('nan')),
+                bead_radius_um=self._bead_radius.value(),
+                temperature_C=self._temp_C.value(),
+                radius_source=_src,
+                # ── The interval on D, propagated to the viscosity ──────────────
+                #
+                # `fit_anomalous_diffusion` computes a 95% CI on D from the fit covariance
+                # (1.5.447), and `viscosity_measurement` already knows how to propagate it —
+                # but NOTHING WAS PASSING IT. The interval was computed, the consumer could
+                # take it, and the two were never connected.
+                #
+                # Stokes-Einstein is eta = kT/(6*pi*R*D), so the interval propagates exactly
+                # and INVERTS: a low D gives a HIGH viscosity. On the measured MSD intervals
+                # the viscosity spans a factor of 1.7-1.9 between the ends — on the number
+                # that goes into the paper.
+                D_ci=(fit.get('identifiability', {})
+                         .get('D_um2_per_s', {})
+                         .get('ci', None)),
+                alpha=fit.get('alpha', None),
+                n_tracks=(int(tracks['track_id'].nunique())
+                          if tracks is not None and len(tracks) else None),
+            )
+            if _note:
+                _vm.notes.append(f'Bead radius: {_note}')
+            self._dr()['vpt_viscosity_measurement'] = _vm
+            print('[PyCAT VPT] ' + _vm.summary().replace(chr(10), chr(10) + '[PyCAT VPT] '))
+        except Exception as _e:
+            print(f'[PyCAT VPT] measurement record failed: {_e}')
+
         D = fit.get('D_um2_per_s', float('nan'))
         alpha = fit.get('alpha', float('nan'))
         r2 = fit.get('r_squared', float('nan'))
@@ -1808,6 +1880,10 @@ class VideoParticleTrackingUI:
         self._record('vpt_microrheology', {
             'frame_interval_s': self._frame_dt.value(),
             'bead_radius_um': self._bead_radius.value(),
+            'bead_radius_source': (self._radius_source.currentText()
+                                   if hasattr(self, '_radius_source') else 'manufacturer'),
+            'bead_radius_note': (self._radius_note.text().strip()
+                                 if hasattr(self, '_radius_note') else ''),
             'temperature_C': self._temp_C.value(),
             'min_track_length': self._min_track.value(),
             'drift_mode': (self._drift_mode.currentData()

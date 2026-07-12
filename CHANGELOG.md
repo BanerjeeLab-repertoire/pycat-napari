@@ -4,6 +4,40 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.448] - 2026-07-10
+### Wired — the interval on D now reaches the viscosity
+1.5.447 made ``fit_anomalous_diffusion`` report a 95 % CI on D. And ``viscosity_measurement``
+**already knew how to propagate it** — it has taken a ``D_ci`` argument all along.
+
+**Nothing was passing it.** The interval was computed, the consumer could take it, and the two
+were never connected. Exactly the trap from 1.5.421: *a fix that is not wired in is not a fix.*
+
+Stokes-Einstein is ``η = kT / (6πRD)``, so the interval propagates **exactly**, and it
+**inverts** — a LOW D gives a HIGH viscosity, so the viscosity interval is *not symmetric* about
+the point estimate. The full chain, measured (bead radius 0.1 µm, 24 °C, true D = 0.05 µm²/s):
+
+| lag window | D (95 % CI) | viscosity (95 % CI) |
+|---|---|---|
+| 30 lags | 0.0473 [0.0353, 0.0594] | 0.046 Pa·s [0.037, 0.062] — **1.7×** |
+| 12 lags | 0.0489 [0.0380, 0.0598] | 0.045 Pa·s [0.036, 0.057] — 1.6× |
+| 6 lags | 0.0504 [0.0440, 0.0568] | 0.043 Pa·s [0.038, 0.049] — 1.3× |
+| **4 lags** | 0.0510 [0.0349, 0.0671] | 0.043 Pa·s [0.032, 0.062] — **1.9×** |
+
+**A factor of 1.9 between the ends of the interval — on the number that goes into the paper.**
+
+### Added — ``viscosity_interval_from_diffusion``, and the unbounded case
+A CI on D that **includes zero** means the viscosity is **unbounded above**: η diverges as
+D → 0. That is a real finding, not an error — *the data does not exclude an arbitrarily thick
+medium* — and it now says so rather than reporting a confident point estimate.
+
+The caveat from 1.5.447 travels with the number: the CI on D is honest at long lag windows and
+**over-confident at short ones** (claims 95 % coverage, delivers 78 % at four lags), so the
+viscosity interval is a **lower bound** on the true uncertainty, not an upper one.
+
+Guarded by ``test_viscosity_carries_the_interval_the_msd_fit_supports``, which also asserts the
+**inversion** — that the upper end of the viscosity interval comes from the *lower* end of D's.
+**102/102 core tests passing.**
+
 ## [1.5.447] - 2026-07-10
 ### Fixed — the MSD fit discarded its covariance, so D was reported without an interval
 The FRAP covariance bug (1.5.446) was not isolated. **Nine ``curve_fit`` calls in

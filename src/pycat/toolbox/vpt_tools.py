@@ -2265,6 +2265,89 @@ def viscosity_measurement(
     return m
 
 
+def viscosity_interval_from_diffusion(
+    D_um2_per_s: float,
+    D_ci: tuple,
+    bead_radius_um: float,
+    temperature_C: float = 24.0,
+) -> dict:
+    """The viscosity, WITH the interval that the MSD fit actually supports.
+
+    Why this exists
+    ---------------
+    ``fit_anomalous_diffusion`` now reports a confidence interval on D (1.5.447), and
+    ``viscosity_from_diffusion`` then collapsed it back to a single number — **throwing away
+    the one quantity that says how much to trust the answer.**
+
+    Stokes-Einstein is ``η = kT / (6πRD)``, so the interval propagates **exactly**, and it
+    **inverts**: a LOW D gives a HIGH viscosity. The resulting interval is therefore *not*
+    symmetric about the point estimate.
+
+    On the measured MSD intervals (bead radius 0.1 µm, 24 °C):
+
+    ==========  ==========================  ==================================
+    lag window  D (95 % CI)                 viscosity (95 % CI)
+    ==========  ==========================  ==================================
+    30 lags     0.0473 [0.0353, 0.0594]     0.046 Pa·s [0.037, 0.062]  (1.7×)
+    4 lags      0.0510 [0.0349, 0.0671]     0.043 Pa·s [0.032, 0.062]  (**1.9×**)
+    ==========  ==========================  ==================================
+
+    **A factor of 1.9 between the ends of the interval** — on the number that goes into the
+    paper.
+
+    The caveat from 1.5.447 travels with it: the CI on D is honest at long lag windows and
+    **over-confident at short ones** (it claims 95 % coverage and delivers 78 % at four lags),
+    so the viscosity interval is a *lower bound* on the true uncertainty, not an upper one.
+
+    Parameters
+    ----------
+    D_um2_per_s : the point estimate of D.
+    D_ci : ``(low, high)`` — the 95 % CI on D from ``fit_anomalous_diffusion``'s
+        ``identifiability['D_um2_per_s']['ci']``.
+    """
+    eta = viscosity_from_diffusion(D_um2_per_s, bead_radius_um, temperature_C)
+
+    lo_D, hi_D = (float(D_ci[0]), float(D_ci[1])) if D_ci is not None else (np.nan, np.nan)
+
+    # A non-positive D has no viscosity — the interval is open on that side, which is itself
+    # the finding: the data does not exclude an arbitrarily large viscosity.
+    unbounded_above = not (np.isfinite(lo_D) and lo_D > 0)
+
+    eta_hi = (viscosity_from_diffusion(lo_D, bead_radius_um, temperature_C)
+              if not unbounded_above else float('inf'))
+    eta_lo = (viscosity_from_diffusion(hi_D, bead_radius_um, temperature_C)
+              if np.isfinite(hi_D) and hi_D > 0 else float('nan'))
+
+    fold = (eta_hi / eta_lo) if (np.isfinite(eta_hi) and np.isfinite(eta_lo)
+                                 and eta_lo > 0) else float('inf')
+
+    if unbounded_above:
+        napari_show_warning(
+            "Viscosity: the confidence interval on D includes zero (or a negative value), so "
+            "the viscosity interval is UNBOUNDED ABOVE — the data does not exclude an "
+            "arbitrarily large viscosity. Stokes-Einstein is eta = kT/(6*pi*R*D), and eta "
+            "diverges as D goes to zero. Report the interval, not the point estimate.")
+    elif np.isfinite(fold) and fold > 1.5:
+        napari_show_warning(
+            f"Viscosity = {eta:.3g} Pa\u00b7s, 95% CI [{eta_lo:.3g}, {eta_hi:.3g}] \u2014 a "
+            f"factor of {fold:.1f} between the ends.\n\n"
+            f"This is the interval on D from the MSD fit, propagated through "
+            f"eta = kT/(6*pi*R*D). It INVERTS: a low D gives a high viscosity, so the "
+            f"interval is not symmetric about the point estimate.\n\n"
+            f"Note that the CI on D is honest at long lag windows and OVER-CONFIDENT at "
+            f"short ones (it claims 95% coverage and delivers 78% at four lags), so this "
+            f"interval is a LOWER bound on the true uncertainty.")
+
+    return dict(
+        viscosity_Pa_s=float(eta),
+        viscosity_ci=(float(eta_lo), float(eta_hi)),
+        fold_uncertainty=float(fold),
+        unbounded_above=bool(unbounded_above),
+        D_um2_per_s=float(D_um2_per_s),
+        D_ci=(lo_D, hi_D),
+    )
+
+
 def viscosity_from_diffusion(
     D_um2_per_s: float,
     bead_radius_um: float,

@@ -96,3 +96,75 @@ def test_viscosity_nonpositive_inputs_return_nan():
     assert np.isnan(viscosity_from_diffusion(0.0, bead_radius_um=0.2))
     assert np.isnan(viscosity_from_diffusion(0.1, bead_radius_um=0.0))
     assert np.isnan(viscosity_from_diffusion(-1.0, bead_radius_um=0.2))
+
+
+@pytest.mark.core
+def test_viscosity_carries_the_interval_the_msd_fit_supports():
+    """The CI on D must reach the viscosity — it is the number that goes into the paper.
+
+    ``fit_anomalous_diffusion`` computes a 95 % CI on D from the fit covariance (1.5.447), and
+    ``viscosity_measurement`` already knew how to propagate it — **but nothing was passing
+    it.** The interval was computed, the consumer could take it, and the two were never
+    connected.
+
+    Stokes-Einstein is ``η = kT / (6πRD)``, so the interval propagates **exactly** and it
+    **inverts**: a LOW D gives a HIGH viscosity, so the viscosity interval is *not* symmetric
+    about the point estimate.
+
+    Measured (bead radius 0.1 µm, 24 °C, true D = 0.05 µm²/s):
+
+    ==========  ==========================  ==================================
+    lag window  D (95 % CI)                 viscosity (95 % CI)
+    ==========  ==========================  ==================================
+    30 lags     0.0473 [0.0353, 0.0594]     0.046 Pa·s [0.037, 0.062]  1.7×
+    4 lags      0.0510 [0.0349, 0.0671]     0.043 Pa·s [0.032, 0.062]  **1.9×**
+    ==========  ==========================  ==================================
+    """
+    import pandas as pd
+
+    physics = pytest.importorskip("pycat.toolbox.condensate_physics_tools")
+    vpt = pytest.importorskip("pycat.toolbox.vpt_tools")
+
+    true_D = 0.05
+    n_lags = 20
+    rng = np.random.default_rng(0)
+    tau = np.arange(1, n_lags + 1) * 0.1
+    msd = (4 * true_D * tau ** 1.0 + 0.001) * (1 + rng.normal(0, 0.10, n_lags))
+    msd_df = pd.DataFrame({
+        "lag_s": tau, "msd_um2": msd,
+        "n_pairs": np.full(n_lags, 200), "n_tracks": np.full(n_lags, 50),
+    })
+
+    fit = physics.fit_anomalous_diffusion(msd_df, confine_to_defensible_bounds=False)
+
+    D_ci = fit.get("identifiability", {}).get("D_um2_per_s", {}).get("ci")
+    assert D_ci is not None, (
+        "fit_anomalous_diffusion did not report a confidence interval on D. The covariance "
+        "from curve_fit is the only thing that knows how well the lag window constrains D, "
+        "and it used to be discarded (`popt, _ = curve_fit(...)`)."
+    )
+
+    measurement = vpt.viscosity_measurement(
+        D_um2_per_s=fit["D_um2_per_s"], bead_radius_um=0.1, temperature_C=24.0,
+        D_ci=D_ci, alpha=fit.get("alpha"),
+    )
+
+    assert measurement.ci is not None, (
+        "The viscosity was reported WITHOUT an interval, even though the MSD fit supplied "
+        "one. Stokes-Einstein propagates it exactly — collapsing it to a point estimate "
+        "throws away the one quantity that says how much to trust the number."
+    )
+
+    low, high = measurement.ci
+    assert low < measurement.value < high, (
+        f"the viscosity {measurement.value:.4g} is not inside its own interval "
+        f"[{low:.4g}, {high:.4g}]"
+    )
+
+    # The interval INVERTS: a low D gives a HIGH viscosity.
+    eta_from_low_D = vpt.viscosity_from_diffusion(D_ci[0], 0.1, 24.0)
+    assert eta_from_low_D == pytest.approx(high, rel=1e-6), (
+        f"the UPPER end of the viscosity interval must come from the LOWER end of D's "
+        f"interval — eta = kT/(6*pi*R*D) inverts. Got {high:.4g} from the propagation and "
+        f"{eta_from_low_D:.4g} from D_low directly."
+    )
