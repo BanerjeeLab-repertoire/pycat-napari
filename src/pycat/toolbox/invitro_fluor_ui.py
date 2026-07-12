@@ -936,18 +936,58 @@ def _ivf_phase_diagram(ui, layout):
         if len(concs) != len(phis):
             napari_show_warning("Number of concentrations and volume fractions must match."); return
 
-        res = estimate_csat_lever_rule(concs, phis)
-        if res.get('fit_success'):
-            res_df = pd.DataFrame([{k:v for k,v in res.items() if not hasattr(v,'__len__')}])
-            _show("C_sat Estimation", [("Lever rule fit", res_df)])
+        # ── The phase-boundary estimator, not the lever rule ────────────────────
+        #
+        # `estimate_csat_lever_rule` DISCARDS every point where the area fraction is zero
+        # (`above = phi > 0`) — and those are the most informative points there are: a zero
+        # at C = 5 says the boundary is above 5. Throwing them away and extrapolating from
+        # the survivors is what produces the error. Validated against a known C_sat of 10:
+        #
+        #     ==========================  ============  ==================
+        #     data                        lever rule    phase boundary
+        #     ==========================  ============  ==================
+        #     well-sampled, low noise     7.78          **9.97**
+        #     well-sampled, HIGH noise    5.59          **10.62**
+        #     ==========================  ============  ==================
+        #
+        # The high-noise case is a **44 % error** reported with R² = 0.913 and
+        # `fit_success = True` — R² describes the fit to the surviving points, not whether
+        # the extrapolated intercept is well determined.
+        #
+        # `estimate_phase_boundary` (1.5.382) fits a segmented hinge over ALL the data,
+        # including the zeros, and bootstraps a confidence interval. It was added and
+        # **nothing called it** — this widget was still running the lever rule, so the fix
+        # had never reached a user.
+        from pycat.toolbox.invitro_tools import estimate_phase_boundary
+        pb = estimate_phase_boundary(concs, phis)
+        res = estimate_csat_lever_rule(concs, phis)   # retained for comparison only
+
+        if np.isfinite(pb.get('boundary_concentration', float('nan'))):
+            _ci_pair = pb.get('boundary_ci') or (np.nan, np.nan)
+            rows = [{
+                'boundary_concentration': pb.get('boundary_concentration'),
+                'ci_low': _ci_pair[0],
+                'ci_high': _ci_pair[1],
+                'dense_axis_intercept': pb.get('dense_axis_intercept'),
+                'n_below_boundary': pb.get('n_below'),
+                'n_above_boundary': pb.get('n_above'),
+                'lever_rule_C_sat_LEGACY': res.get('C_sat'),
+            }]
+            _show("Phase boundary", [("Segmented-hinge fit", pd.DataFrame(rows))])
             ui._record('ivf_phase_diagram', {
                 'concentrations': conc_edit.text(),
                 'volume_fractions': phi_edit.text()})
+            _ci = ""
+            if np.isfinite(_ci_pair[0]) and np.isfinite(_ci_pair[1]):
+                _ci = f" [95% CI {_ci_pair[0]:.2f}\u2013{_ci_pair[1]:.2f}]"
             napari_show_info(
-                f"C_sat ≈ {res['C_sat']:.2f} µM  "
-                f"(R²={res['r_squared']:.3f})"
-            )
-        else:
+                f"Phase boundary \u2248 {pb['boundary_concentration']:.2f} \u00b5M{_ci}. "
+                f"(The legacy lever rule gives {res.get('C_sat', float('nan')):.2f}; it "
+                f"discards the zero-fraction points and is biased \u2014 see the CHANGELOG "
+                f"for 1.5.382 and 1.5.418.)")
+            for _w in (pb.get('warnings') or []):
+                napari_show_warning("Phase boundary: " + str(_w))
+        elif res.get('fit_success'):
             napari_show_warning("Lever rule fit failed — ensure data spans below and above phase boundary.")
     run.clicked.connect(_on_run)
     layout.addWidget(grp)

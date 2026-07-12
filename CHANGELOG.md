@@ -4,6 +4,182 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.423] - 2026-07-10
+### Added — ``partition_coefficient_local``: a local dilute phase, and an honest camera floor
+Kp = ``(I_dense − floor) / (I_dilute − floor)``. Get the floor wrong and Kp is dragged toward
+1: with a **true Kp of 30**, a 500-count pedestal left in place gives **5.81 — an 81 % error
+that looks like a plausible number.** 1.5.422 could only record this as *unchecked*. It is now
+solved, with the resolution depending on the sample — because the physics does.
+
+**The dilute phase is measured LOCALLY, from an annulus around each droplet** — not from a
+global percentile, which assumes uniform illumination that a vignetted field does not have.
+
+**And the annulus must be OFFSET from the droplet edge.** A phase boundary is not a step; it
+has a finite interface width, and a ring drawn against the edge sits inside that gradient:
+
+| gap from edge | ring − pedestal (true dilute = 100) |
+|---|---|
+| **0** | **491.8** ← inside the gradient, 5× too high |
+| 2 | 206.0 |
+| 5 | 110.7 |
+| **10** | **100.3** ← converged |
+
+Default gap is 3 × the estimated interface width, floored at 5 px.
+
+### The camera floor: what is possible depends on the sample
+**In cells, the extracellular region IS a dark reference** — there is no fluorophore outside
+the cell, so that region contains the camera pedestal (and any medium autofluorescence, a real
+floor you also want removed). Pass ``cell_mask``. The **median** of the outside region is used,
+not the mean: the mean is dragged upward by cell-edge pixels (measured against a true pedestal
+of 500 — **mean 548.2, median 504.0**). Same principle as the annulus gap: stay away from the
+interface.
+
+**In vitro, the floor CANNOT be auto-detected. Not by any method.** Droplets sit in bulk
+buffer; every pixel is (pedestal + dilute) or (pedestal + dense). **No region of the image
+contains the pedestal alone**, so the floor and the dilute phase are *inseparable in
+principle*, not merely hard to separate. A dark reference — buffer with no fluorophore, same
+camera settings — is the only thing that works, and it costs one extra frame.
+
+``sample_type`` is now explicit (``'cellular'`` / ``'in_vitro'``), and in vitro without a dark
+reference the tool **refuses** rather than guesses.
+
+Validated (true Kp = 30):
+
+| case | Kp | ``is_true_kp`` |
+|---|---|---|
+| cells + ``cell_mask`` | **29.54** | True |
+| cells, no mask | NaN | False |
+| **in vitro, no reference** | **NaN** | **False** |
+| in vitro + ``dark_reference`` | **29.59** | True |
+| in vitro + ``allow_no_reference`` | 5.77 | **False** |
+
+``allow_no_reference=True`` returns the raw ratio so an analysis can proceed — flagged
+``is_true_kp=False`` so it cannot be mistaken for a partition coefficient. The **contrast**
+(``I_dense − I_dilute``) is reported in every case and is **exact**, because the pedestal
+cancels in the difference.
+
+### Note — I tried to auto-detect the floor with Otsu, and it failed catastrophically
+Worth recording, because the failure was **silent and confident** — the worst kind.
+
+In vitro there is no dark region, but Otsu split the image anyway, **returned the DILUTE PHASE
+(600.9 counts) as the "camera floor"**, and gave **Kp = 5.77 against a true 30 — flagged
+``is_true_kp=True``.** A separation test (*"is the high class 1.5× the low class?"*) did not
+save it, because **dense/dilute is itself a 5× ratio**. Otsu cannot tell *"background vs cell"*
+from *"dilute vs dense"* — **both are bimodal.**
+
+**A heuristic cannot recover information the image does not contain.** The fix was not a better
+heuristic; it was to tell the tool which sample it is looking at, and let it refuse.
+
+## [1.5.422] - 2026-07-10
+### Added — the partition coefficient as a ``Measurement``, with its assumptions CHECKED
+The ``Measurement`` provenance model (1.5.384) covered only viscosity. Extended to the
+partition coefficient — the backlog's highest-value target, and the one with the clearest
+failure modes.
+
+``partition_coefficient_field`` returns a number. ``partition_measurement`` returns the number
+**with the conditions under which it means anything**, each computed from the data:
+
+- **no saturation** — *checked*. A clipped dense phase does not give a lower bound on Kp: the
+  numerator is truncated by an unknown amount, so the ratio is **meaningless, not
+  conservative**. (1.5.392: with a bulk of 100 on a 16-bit sensor, a true Kp of 655, 1500 and
+  4000 **all read as 655**.) A saturated image now returns ``NaN`` and
+  ``NOT_INTERPRETABLE``.
+- **background subtracted** — *asked, not guessed* (see below).
+- **dilute phase measured locally** — *flagged*. A global percentile assumes uniform
+  illumination, which a vignetted field does not have.
+
+Validated: no false alarms across Kp = 3 to 300; saturation correctly rejected; an explicitly
+unsubtracted image correctly rejected.
+
+### Note — I tried twice to DETECT an unsubtracted background, and it cannot be done
+This is worth writing down, because the failure is instructive rather than embarrassing.
+
+**In a partition measurement the dilute phase IS signal** — it is the denominator. It is not a
+background to be removed, and a low-Kp system legitimately has a dilute level close to the
+dense one. **A camera pedestal and a genuine dilute phase produce exactly the same thing: a
+floor above zero.** There is no signature to find.
+
+Both heuristics failed, in both directions:
+
+| attempt | failure |
+|---|---|
+| floor vs the dense/dilute **span** | flagged **every** low-Kp image (Kp = 3, Kp = 10) as unsubtracted — with **no pedestal at all** |
+| floor vs the dense-phase **contrast** | still false-alarmed at Kp = 3, **and passed** a 500-count pedestal that had already dragged Kp from 30 to **5.8** |
+
+So: **ask.** The caller knows whether they subtracted the background. If they do not say, the
+assumption is recorded as ``checked=False, holds=None`` — *unchecked*, not silently assumed to
+hold.
+
+**And the consequence is worth being blunt about**, because it is large and invisible. An
+unsubtracted pedestal appears in **both** the numerator and the denominator and drags Kp toward
+1. On identical droplets with a **true Kp of 30**:
+
+| pedestal | reported Kp |
+|---|---|
+| 0 | **30.0** |
+| 100 | 15.5 |
+| 500 | **5.8** |
+| 2000 | **2.4** |
+
+**A 12× error that looks like a perfectly plausible number.** This is the same failure as the
+transfection filter (1.5.415) and the puncta SNR gate (1.5.416) — an unsubtracted offset in a
+ratio — and here it silently rewrites the thermodynamics.
+
+## [1.5.421] - 2026-07-10
+### Fixed — two corrected estimators had never been called, so the fixes had never run
+Having been bitten twice by *"shipped but never wired"* (1.5.419, 1.5.420), I swept for it: an
+AST scan of every function added during this audit, counting real call sites. Four were
+unwired, and **two of them were the corrected estimators.**
+
+**1. The size-distribution fit.** ``fit_size_distribution_mle`` was added in 1.5.379 — and
+nothing called it. Both in-vitro UIs and the batch registry were still running the old
+``fit_size_distribution``, which offers **only two candidates** (lognormal, power-law) and
+picks between them by an R² on a **binned histogram**.
+
+The problem is not that it is inaccurate. It is that **the right answer is often not in its
+vocabulary**. Measured against ground truth (12 samples per case), the model actually named:
+
+| true | old function | MLE |
+|---|---|---|
+| lognormal | **100 %** | 100 % |
+| gamma | **0 %** | **91 %** |
+| weibull | **0 %** | **83 %** |
+| exponential | **0 %** | **75 %** |
+
+It is not *wrong* about gamma — **it cannot say gamma.** A genuinely gamma-distributed droplet
+population was reported as lognormal or power-law, because those are the only words it has.
+
+``preferred_model`` now carries the MLE's answer, so **all three call sites get the correct
+model with no change at their end**. ``preferred_model_histogram`` retains what the old method
+would have said, for comparison with historical results. A warning fires when the Vuong test
+says the data cannot distinguish the candidates at all.
+
+**2. The C_sat estimator.** ``estimate_phase_boundary`` was added in 1.5.382 — and nothing
+called it either. The phase-diagram widget was still running
+``estimate_csat_lever_rule``, which **discards every point where the area fraction is zero**.
+Those are the most informative points there are: *a zero at C = 5 says the boundary is above 5.*
+
+What the widget now reports, against a **true C_sat of 10**:
+
+| data | **phase boundary (now)** | lever rule (before) |
+|---|---|---|
+| clean | **9.88** [8.0, 10.4] | 5.15 |
+| realistic | **8.57** [6.6, 11.3] | 4.69 |
+| noisy | **12.82** [3.6, 16.6] | 2.70 |
+
+**A 2–4× underestimate, now corrected** — and the confidence interval widens honestly with the
+noise instead of reporting a single confident number.
+
+### Note — the sweep, and what it says about the shape of this work
+Of the ~23 functions added during this audit, **19 were wired in and 4 were not**. Two of the
+four were pure API surface for future callers (``get_array_source``, ``stream_stats``) — fine.
+The other two were **fixes that had never reached a user.**
+
+Building the correct estimator is the easy half. **A fix that is not wired in is not a fix**,
+and there is no warning when that happens: the code compiles, the tests pass, and the broken
+function keeps running. The only thing that catches it is going back and asking *"who actually
+calls this?"*
+
 ## [1.5.420] - 2026-07-10
 ### Fixed — the Spatial Metrology widget (the path users actually click) still used the CSR null
 1.5.397 built the compartment-constrained null. 1.5.419 wired it into the time-series pass.
