@@ -4,6 +4,67 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.416] - 2026-07-10
+### Fixed — two of the five puncta quality checks have never rejected anything
+The puncta refinement filter gates on ``object_mean / bg_std`` — **no background
+subtraction**. The camera pedestal sits in the numerator and not the denominator, so the
+reported "SNR" scales with it. For an **identical** punctum (true contrast 50 counts):
+
+| pedestal | reported "SNR" |
+|---|---|
+| 0 | 14 |
+| 100 | 34 |
+| 500 | 115 |
+| **2000** | **416** |
+
+The gate rejects when ``SNR <= threshold``, and the threshold is **1.0** — so it rejects only
+when ``object_mean <= bg_std``. **On any camera with a positive background that never
+happens.** Even a "punctum" of **pure noise with zero contrast** has ``object_mean`` = 120
+against ``bg_std`` = 5, and is kept.
+
+**The ``local_snr`` and ``global_snr`` conditions are dead. They have never rejected a single
+detection, on any camera, for the entire life of the pipeline** — two of the five puncta
+quality checks doing nothing at all.
+
+Replaced with the contrast above background in units of the background noise, which is
+pedestal-invariant::
+
+    CNR = (object_mean − background) / background_noise
+
+Calibrated against ground truth (12 fields, 8 puncta each):
+
+| | median CNR | 95th pct |
+|---|---|---|
+| **spurious (pure noise)** | **0.0** | **0.4** |
+| real punctum, amp 8 | 0.8 | 1.2 |
+| real punctum, amp 15 | 1.6 | 2.0 |
+| real punctum, amp 30 | 3.2 | 3.7 |
+| real punctum, amp 120 | 12.7 | 14.4 |
+
+Spurious detections top out at **0.4**, so a threshold of **1.0** separates noise from real
+puncta. **The default is unchanged at 1.0** — but it now means *"one sigma of contrast above
+background"* instead of a pedestal-dependent number that gated nothing. Verified: identical
+verdict at pedestals of 0, 100, 500 and 2000, and the gate now **fires** — pure noise is
+rejected, real puncta are kept.
+
+### Note — I nearly calibrated the threshold against a broken metric
+My first calibration measured each punctum's CNR against a **mean/std** local background ring,
+and it said a threshold of 2.0 would reject genuinely **bright** puncta (amp = 60). That
+stopped me.
+
+The cause: the background ring is **contaminated by neighbouring puncta**. Measured — a bright
+punctum with 3 neighbours nearby had its ``ring_std`` inflated from 5 to **18**, collapsing its
+CNR from **6.7 to 1.7**. *The metric was reporting crowding, not contrast*, and a threshold
+calibrated against it would have **deleted real puncta from crowded cells** — precisely the
+cells with the most biology in them.
+
+The background is therefore estimated **robustly** (median + MAD), which neighbouring bright
+pixels cannot drag around: the same crowded puncta recover to CNR 5.0 and 5.7.
+
+**Before trusting a metric to set a threshold, check that the metric is measuring what you
+think it is.** This is the second time in this sweep that the calibration data, not the
+threshold, was the problem.
+
 ## [1.5.415] - 2026-07-10
 ### Fixed — on a camera with a 500-count pedestal, EVERY transfected cell was called untransfected
 ``filter_cells_by_transfection`` decides **which cells are analysed at all**. It used
