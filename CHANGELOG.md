@@ -4,6 +4,69 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.417] - 2026-07-10
+### Fixed — the bead classifier was sorting by BRIGHTNESS, not focus
+``classify_beads`` flagged a bead as ``out_of_plane`` when it was ``oversized and (dim_peak or
+r2 < defocus_r2_max)``, with the comment *"poor R² reinforces it"*. **It does not.**
+
+R² measures how well the model explains the **variance** — and at low SNR the noise dominates
+the variance, so R² collapses **even when the shape is perfect**. Measured on a bead that is
+**perfectly in focus** (true sigma 1.0) at every brightness, with only the SNR changing:
+
+| amplitude | SNR | mean R² | flagged "defocused" (R² < 0.85)? |
+|---|---|---|---|
+| 10 | 3 | 0.236 | **YES** |
+| 20 | 7 | 0.532 | **YES** |
+| **40** | **13** | **0.817** | **YES** |
+| 80 | 27 | 0.947 | no |
+| 160 | 53 | 0.986 | no |
+
+**A dim IN-FOCUS bead was called out-of-plane. The same bead, brighter, was not.**
+
+This is the inverted-classifier behaviour recorded against the real bead data, and a direct
+contributor to the **~15 % dropout of stable, in-focus beads** — which fragments the tracks,
+starves the linker, and corrupts the viscosity.
+
+**Sigma is the SNR-independent measure of focus**, because it is a property of the **shape**
+rather than of how well the model explains the variance. Verified: a fitted sigma of **1.00 at
+every SNR from 3 to 53** for an in-focus bead, and **2.49–2.50** for a genuinely defocused one.
+
+The ``oversized`` test was already sigma-based and correct; the R² clause only **added false
+positives**, so it is removed. ``defocus_r2_max`` is retained in the signature for backward
+compatibility, marked deprecated and unused, with a note that **it is not a focus measure and
+must not be reintroduced.**
+
+Validated against ground truth:
+
+| bead population | class |
+|---|---|
+| bright, in focus | ``singlet`` |
+| **dim, in focus (R² 0.82)** | **``singlet``** ← was ``out_of_plane`` |
+| **very dim, in focus (R² 0.53)** | **``singlet``** ← was ``out_of_plane`` |
+| genuinely defocused (sigma 2.5) | ``out_of_plane`` |
+| aggregate (bright + compact) | ``aggregate`` |
+
+### Note — this is the fourth instance of the same failure
+A fit statistic (R², SNR-as-a-ratio) used as a **quality gate**, where it is actually reading
+brightness or the noise floor:
+
+* ``qc_focus`` — ``var(Laplacian)`` reading the noise, blind to defocus (1.5.405)
+* ``molecular_counting`` — R² selecting for brightness, discarding every low-expressing cell
+  (1.5.414)
+* ``filter_cells_by_transfection`` — an un-subtracted SNR ratio, pedestal-dependent (1.5.415)
+* ``segmentation_tools`` puncta — the same un-subtracted ratio, gating nothing at all (1.5.416)
+* **``classify_beads`` — R² reading SNR, dropping dim in-focus beads (this release)**
+
+**A goodness-of-fit statistic is not a quality measure.** It answers "does this model explain
+the variance", and when the noise *is* the variance it answers that question about the noise.
+The quantity that discriminates is almost always a **shape** or a **contrast**, not a fit
+score.
+
+### Practical note — this should improve the VPT viscosity directly
+Recovering the dim in-focus beads that were being discarded should reduce the track
+fragmentation that the linker has been unable to bridge. Worth re-running the 8.325 baseline
+comparison after this change.
+
 ## [1.5.416] - 2026-07-10
 ### Fixed — two of the five puncta quality checks have never rejected anything
 The puncta refinement filter gates on ``object_mean / bg_std`` — **no background
