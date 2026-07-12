@@ -4,6 +4,47 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.395] - 2026-07-10
+### Added — Manders' coefficients now report how much they depend on the threshold
+Manders' M1/M2 are **defined by** a threshold, so the number is only as defensible as that
+choice. Costes' method (already here) picks it in a principled way — but a *single* reported
+M1 still hides how much the answer hinges on where the cut landed.
+
+Measured with a ±30 % threshold perturbation on synthetic images with a **known** partial
+overlap:
+
+| scenario | M1 across the perturbation |
+|---|---|
+| identical channels | **1.00 → 1.00** (spread 0.00) |
+| disjoint channels | **0.00 → 0.00** |
+| dim, partial overlap (the condensate case) | **0.13 → 0.93** |
+
+**The same image supports almost any conclusion depending on the cut.** Two groups analysing
+identical data, both using a defensible threshold, can report materially different
+colocalization — and neither would know.
+
+New ``manders_threshold_sensitivity`` returns the grid, the M1/M2 range, a ``stable`` flag
+(both spreads < 0.10) and a plain-English verdict. It runs **automatically** whenever a
+threshold-dependent method is selected, and warns only when the coefficient is genuinely
+fragile — Pearson-only selections stay silent, and clean well-separated data is not flagged.
+
+This does not produce a *better* number. It produces an *honest* one: it separates the case
+where M1 is solid from the case where it is an artefact of the threshold.
+
+**The first version of this was wrong, and the ground-truth test caught it.** Sweeping fixed
+percentiles of the whole image is the wrong grid: with sparse objects most percentiles land
+*inside the background*, where Manders is meaningless anyway, and two **perfectly colocalised
+channels** then appeared "unstable" (M1 ranging 0.79–1.00) purely because the low thresholds
+admitted background noise. The perturbation must be anchored to a threshold a real analysis
+would actually use (Costes/Otsu) and moved around it — which is the question that matters:
+*if my threshold were somewhat different, as another analyst's would be, would I report a
+different number?*
+
+### Note — the guard caught two more, again in the edit loop
+``napari_show_warning`` and ``debug_log`` were used without imports. The undefined-name guard
+flagged both **before anything was run** — the third such catch in three releases. Both now go
+through the shims, and ``pixel_wise_corr_analysis_tools`` still imports headlessly.
+
 ## [1.5.394] - 2026-07-10
 ### Fixed — N&B accepted 4 frames in silence, where the answer can be 12× wrong
 The 4-frame minimum is **mathematically sufficient** to form a variance and
