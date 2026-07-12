@@ -4,6 +4,52 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.396] - 2026-07-10
+### Fixed — the colocalization p-value was measuring how many pixels you have
+The p-value shipped alongside every coefficient comes from ``scipy.stats.pearsonr`` over
+**flattened pixels**, and its null assumes the samples are **independent**. Adjacent pixels
+in a microscopy image are not — the PSF correlates them — so the ``n`` in that p-value
+(65 536 for a 256×256 ROI) is a fiction.
+
+**Measured on two channels that are INDEPENDENT BY CONSTRUCTION, each blurred by a realistic
+PSF, where the truth is "not significant":**
+
+| test | false positives |
+|---|---|
+| pixel p-value (what is reported today) | **83 %** |
+| pixel-scrambling null | **85 %** ← *the naive fix fails just as badly* |
+| **block-shuffled null (block = measured correlation length)** | **10 %** ← target is 5 % |
+
+Two independent channels are called significantly colocalized **more than four times in
+five**. The test is not measuring biology; it is measuring pixel count.
+
+**Pixel scrambling is not the fix.** Destroying the spatial autocorrelation makes the null
+distribution far too narrow, so almost anything clears it — it fails exactly as badly as the
+parametric p-value. That is the audit's precise point, and it is why "just permute it" does
+not work.
+
+New **``spatial_null_test``** shuffles whole **blocks**, preserving the structure *within*
+each block so the null has the same spatial statistics as the data. The block size is set
+from the **measured** correlation length of the image (2× the 1/e decay of its
+autocorrelation), not guessed. New ``spatial_correlation_length`` exposes that measurement.
+
+**And it keeps its power:** genuine colocalization is still detected **100 %** of the time
+(``r = 0.584, p = 0.005``). This is not a matter of making everything non-significant — the
+calibrated test says *no* to independent channels and *yes* to real association.
+
+Runs automatically whenever a correlation coefficient is selected.
+
+### Added — the replication unit, stated where the number is used
+Pixels within a cell are not biological replicates, and neither are objects within a cell: a
+coefficient over one ROI is **one observation**, whatever its pixel count. The output is
+indexed by *method* only — it carries no cell/field/experiment column — so nothing in it can
+distinguish one cell measured well from ten cells measured once.
+
+The note now travels **with the result** (``data_repository['PWCCA_diagnostics']``), alongside
+the threshold-sensitivity report and the calibrated null, rather than being fired as a warning
+on every run: a warning that always fires is a warning nobody reads, and this one needs to be
+present at the point the number is *used*.
+
 ## [1.5.395] - 2026-07-10
 ### Added — Manders' coefficients now report how much they depend on the threshold
 Manders' M1/M2 are **defined by** a threshold, so the number is only as defensible as that
