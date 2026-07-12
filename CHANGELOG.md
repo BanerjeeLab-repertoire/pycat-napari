@@ -4,6 +4,86 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.444] - 2026-07-10
+### FIXED — CI could not import three modules: ``scikit-learn`` was missing from the install
+``segmentation_tools`` imports ``RandomForestClassifier`` at module scope, and
+``two_channel_coloc_tools`` and ``timeseries_condensate_tools`` import ``segmentation_tools`` —
+so **all three** inherit it. None could be imported in the headless job.
+
+**The dependency had always been there.** It was invisible because ``segmentation_tools``
+imported napari at module scope and **could not be imported at all**, so its own dependencies
+never surfaced. **Decoupling the science (1.5.439) exposed a dependency that had been hiding
+behind a GUI import for the life of the project.** The same thing happened one release earlier
+with ``largestinteriorrectangle`` (1.5.442).
+
+### Added — ``tests/test_ci_dependencies.py``: the install list is now DERIVED, not maintained
+The CI install list was hand-maintained, and it **drifted twice in two releases**. Both times the
+sandbox had *stubbed* the missing package, so it looked fine locally and went red in CI.
+
+This test walks the module-scope imports of every module the headless test guards — following
+``pycat.toolbox`` imports **transitively**, which is how the two time-series modules inherit
+sklearn from segmentation_tools — and fails if any is absent from the workflow's install step.
+
+*A hand-maintained list of a derivable fact will drift.* This derives it.
+
+### Note — my first version of the guard was checking a COMMENT
+It searched the raw workflow text for the pip name, and **passed even with the ``pip install
+scikit-learn`` line deleted** — because the comment I had written *above* that line still
+contained the words "scikit-learn".
+
+Caught by testing the guard against the bug it was written for: delete the line, and it must go
+red. It didn't. It now reads only the actual ``pip install`` commands, with trailing comments
+stripped. Verified: **installed → passes; line removed → fails; restored → passes.**
+
+*A guard that cannot fail is not a guard — and a guard that reads its own documentation as
+evidence is worse, because it looks like it works.*
+
+**99/99 core tests passing.**
+
+## [1.5.443] - 2026-07-10
+### FIXED — the pixel size silently defaulted to 1 µm/px, in ten places
+With every science module now headless (1.5.442), the guards can finally see all of the code.
+Running the silent-fallback check (1.5.437) across the newly-visible modules found the same bug
+it was written for — **duplicated ten times.**
+
+``_mpx()`` is defined **ten times** across the codebase, in two forms, and **both silently
+default to 1.0 µm/px**: eight UI copies via ``.get('microns_per_pixel_sq', 1.0)``, and two in
+``_tools`` modules via ``except Exception: return 1.0``.
+
+The caller cannot distinguish *"the pixel size is 1.0 µm"* from *"the lookup failed"* — and 1.0
+is a perfectly plausible pixel size, so **nothing looks wrong.** It is not a harmless default.
+**Every length and every area in the output is scaled by it:**
+
+| true µm/px | true area (µm²) | with fallback 1.0 | error |
+|---|---|---|---|
+| **0.0264** (Zeiss 63× oil) | 0.348 | 500.0 | **1435×** |
+| 0.1 (typical 100×) | 5.000 | 500.0 | 100× |
+| 0.67 (the bead videos) | 224.45 | 500.0 | 2× |
+
+**A 1435× overestimate of every area on the Zeiss 63× data — reported as an entirely
+normal-looking number.**
+
+New ``pycat/utils/pixel_size.py``, one canonical accessor:
+
+- ``pixel_size_um`` returns **NaN** when the pixel size is unknown, and warns. A NaN
+  propagates: an area computed from it is visibly NaN, rather than wrong by three orders of
+  magnitude and looking fine.
+- ``pixel_size_um_or_default`` is available where a number is genuinely required — but it
+  **warns that the output is in PIXEL units, not microns**, so the assumption is on the record
+  instead of silent.
+
+Wired into the two ``_tools`` copies the guard flagged. Guarded by ``tests/test_pixel_size.py``,
+which asserts NaN on all six failure modes (missing, ``None``, zero, negative, unparseable, no
+repository), the exact value on a valid one, and that the explicit default still warns.
+
+**98/98 core tests passing.**
+
+### The eight UI copies
+They use ``self._dr().get('microns_per_pixel_sq', 1.0)`` — the same silent default, reached by
+a different route. They are next; the canonical accessor exists now, and the pixel-size gate
+(``add_pixel_size_gate``, confirmed working on 2026-07-09) is the intended front line. This
+release closes the two that had no gate in front of them at all.
+
 ## [1.5.442] - 2026-07-10
 ### Decoupled — the last three science modules. Every analysis function now imports headlessly.
 **24 GUI-coupled science modules → 15 → 8 → 7 → 6 → 3** — and the remaining three

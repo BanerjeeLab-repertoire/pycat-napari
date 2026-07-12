@@ -370,11 +370,22 @@ def _add_morphological_complexity(ui_instance, layout=None, separate_widget=Fals
     form.addRow(prog); form.addRow(btn)
 
     def _mpx():
+        # ── Was: `except Exception: return 1.0` — a SILENT 1 µm/px ──────────────
+        #
+        # The caller could not tell "the pixel size is 1.0 µm" from "the lookup failed",
+        # and 1.0 is a plausible pixel size, so nothing looked wrong. It is not a harmless
+        # default: every length and area in the output is scaled by it. On a Zeiss 63x
+        # (0.0264 µm/px) a fallback of 1.0 is a **1435x overestimate of every area**,
+        # reported as an entirely normal-looking number.
+        #
+        # `pixel_size_um_or_default` still returns a number so the widget can proceed — but
+        # it WARNS, so a result in pixel units is not mistaken for one in microns.
+        from pycat.utils.pixel_size import pixel_size_um_or_default
         try:
-            v = ui_instance.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-            return float(v) ** 0.5 if v else 1.0
+            _repo = ui_instance.central_manager.active_data_class.data_repository
         except Exception:
-            return 1.0
+            _repo = None
+        return pixel_size_um_or_default(_repo, context='morphological_complexity_tools')
 
     def _on_run():
         from napari.utils.notifications import show_info as _info, show_warning as _warn

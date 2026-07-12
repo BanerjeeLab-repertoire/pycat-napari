@@ -61,6 +61,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy scipy scikit-image pandas matplotlib
           pip install opencv-python-headless pywavelets simpleitk
+          # scikit-learn: `segmentation_tools` imports RandomForestClassifier at module
+          # scope, and `two_channel_coloc_tools` / `timeseries_condensate_tools` import
+          # segmentation_tools, so all three inherit it. It was invisible until 1.5.439
+          # decoupled segmentation_tools from napari — the module could not be imported at
+          # all, so its dependency never surfaced. DECOUPLING THE SCIENCE EXPOSED A
+          # DEPENDENCY THAT HAD ALWAYS BEEN THERE.
+          #
+          # This list is DERIVED, not maintained by hand: tests/test_ci_dependencies.py
+          # walks the module-scope imports of every module the headless test guards
+          # (following pycat.toolbox imports transitively) and fails if any is missing here.
+          # Hand-maintaining it is exactly how sklearn got left out.
+          pip install scikit-learn
           pip install pytest pytest-cov ruff
           # PyCAT uses a SRC-LAYOUT (src/pycat/), so `import pycat` does NOT work from a
           # checkout — the package must be installed. Without this, every test that
