@@ -21,12 +21,55 @@ import pandas as pd
 import scipy.ndimage as ndi
 import skimage as sk
 import cv2
-import napari
-from napari.utils.notifications import show_warning as napari_show_warning
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QCheckBox, QLineEdit, QPushButton, QScrollArea, QWidget, QSizePolicy
+
+# GUI stack is imported LAZILY (inside the functions that need it) rather than at
+# module scope. This module contains pure array operations — binary_morph_operation,
+# opencv_contour_func — that other scientific modules import, and a top-level
+# `import napari` / `from PyQt5 ...` made those functions, and everything that
+# depends on them, un-importable without a display. That prevented the measurement
+# chain from being tested headlessly, which is backwards: the numerical code is the
+# part that most needs automated regression testing.
+#
+# The viewer-facing functions below still use napari.layers for isinstance checks;
+# they simply import it at call time, when a viewer demonstrably exists.
+from pycat.utils.notify import show_warning as napari_show_warning
+
+
+def _napari():
+    """Lazy napari import, for the viewer-facing helpers in this module."""
+    import napari
+    return napari
+
+
+# PyQt is needed only by MeasurementDialog (a GUI dialog). Import it defensively so
+# that a headless run — a test, a notebook, a batch job — can still import this
+# module for its array operations. If Qt is genuinely absent, the dialog class
+# becomes a stub that raises only if someone actually tries to open it.
+try:
+    from PyQt5.QtWidgets import (
+        QDialog, QVBoxLayout, QFormLayout, QCheckBox, QLineEdit, QPushButton,
+        QScrollArea, QWidget, QSizePolicy)
+    _QT_AVAILABLE = True
+except Exception:                                    # pragma: no cover - headless
+    _QT_AVAILABLE = False
+
+    class _NoQt:
+        """Placeholder base: importing this module without Qt is fine; *using* the
+        GUI dialog without Qt is not, and says so clearly."""
+        def __init__(self, *a, **k):
+            raise RuntimeError(
+                "MeasurementDialog requires PyQt5, which is not available in this "
+                "environment. The array operations in this module work headlessly; "
+                "the GUI dialog does not.")
+
+    QDialog = QWidget = _NoQt                        # type: ignore
+    QVBoxLayout = QFormLayout = QCheckBox = _NoQt    # type: ignore
+    QLineEdit = QPushButton = QScrollArea = _NoQt    # type: ignore
+    QSizePolicy = _NoQt                              # type: ignore
 
 # Local application imports
-from pycat.ui.ui_utils import show_dataframes_dialog, refresh_viewer_with_new_data
+# pycat.ui.ui_utils pulls in the Qt stack, so it is imported at CALL time inside the
+# viewer-facing functions below — keeping this module's array operations headless.
 
 
 
@@ -257,7 +300,7 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
     # Get the currently selected layer in the viewer.
     active_layer = viewer.layers.selection.active  
     if active_layer is not None:
-        if isinstance(active_layer, napari.layers.Labels):
+        if isinstance(active_layer, _napari().layers.Labels):
             binary_mask = active_layer.data.copy()
         else:
             raise ValueError('The active layer must be a labels layer.')
@@ -293,6 +336,7 @@ def run_binary_morph_operation(roi_mask_layer, iter_input, elem_size_input, elem
     processed_mask = processed_mask.astype(input_dtype)
 
     # Refresh the viewer
+    from pycat.ui.ui_utils import refresh_viewer_with_new_data
     refresh_viewer_with_new_data(viewer, active_layer, new_data=processed_mask.copy())
 
 
@@ -327,7 +371,7 @@ def run_update_labels(new_label_input, increment_mode, viewer):
     active_layer = viewer.layers.selection.active
 
     # Ensure there is an active labels layer
-    if active_layer is None or not isinstance(active_layer, napari.layers.Labels):
+    if active_layer is None or not isinstance(active_layer, _napari().layers.Labels):
         napari_show_warning("No active labels layer selected.")
         return
     # Ensure the input is valid and convert to an integer
@@ -350,6 +394,7 @@ def run_update_labels(new_label_input, increment_mode, viewer):
         active_layer.data[active_layer.data == picked_label] = new_label_value
         
     # Manually refresh the viewer to update the changes
+    from pycat.ui.ui_utils import refresh_viewer_with_new_data
     refresh_viewer_with_new_data(viewer, active_layer)
 
 
@@ -492,6 +537,7 @@ def run_measure_binary_mask(mask_layer, image_layer, data_instance):
 
     tables_info = [("Mask Statistics", data_instance.data_repository['binary_mask_stats_df'])]
     window_title = "Analysis Results"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
 
@@ -732,6 +778,7 @@ def run_measure_region_props(mask_layer, image_layer, data_instance):
     # Show the measurement results in a popup table
     tables_info = [("Region Properties", data_instance.data_repository['generic_df'])]
     window_title = "Analysis Results"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
 

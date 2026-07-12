@@ -41,8 +41,10 @@ import pandas as pd
 import skimage as sk
 import scipy.ndimage as ndi
 
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Notifications go through the shim so this module's PHYSICS (detection, MSD,
+# diffusion fitting, viscosity) stays importable and testable without a GUI stack.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 # Boltzmann constant (J/K)

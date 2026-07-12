@@ -59,17 +59,56 @@ def field_summary(
     Returns
     -------
     dict with keys:
-        n_droplets              : number of detected droplets
-        volume_fraction         : Φ = total droplet area / field area
-        mean_radius_um          : mean droplet radius (from area)
+        n_droplets                : number of detected droplets
+        projected_area_fraction   : total droplet AREA / field AREA. This is a 2-D
+                                    projected area fraction, **not a volume
+                                    fraction** — see the note below.
+        volume_fraction           : DEPRECATED alias of projected_area_fraction,
+                                    kept so existing scripts and saved tables do not
+                                    break. Do not use in new code; it is misnamed.
+        mean_radius_um            : mean droplet radius (from area)
         median_radius_um
         std_radius_um
-        number_density_per_um2  : droplets per µm²
-        mean_droplet_intensity  : mean image value inside droplets
-        bulk_intensity          : mean image value outside droplets (= C_sat proxy)
-        partition_coefficient   : mean_droplet_intensity / bulk_intensity
+        number_density_per_um2    : droplets per µm²
+        mean_droplet_intensity    : mean image value inside droplets
+        dilute_phase_intensity    : mean image value OUTSIDE droplets. This is a
+                                    fluorescence intensity, **not a concentration**
+                                    — see the note below.
+        bulk_intensity            : DEPRECATED alias of dilute_phase_intensity.
+        partition_coefficient     : mean_droplet_intensity / dilute_phase_intensity.
+                                    An apparent, intensity-based partition
+                                    coefficient (dimensionless ratio of signals), not
+                                    a thermodynamic one.
         total_droplet_area_um2
         field_area_um2
+
+    Notes on what these quantities are, and are not
+    -----------------------------------------------
+    **The area fraction is not a volume fraction.** ``total_area / field_area`` is the
+    fraction of a 2-D *projection* that is occupied by droplets. It equals the bulk
+    volume fraction only under restrictive assumptions (an isotropic random section
+    through a statistically homogeneous 3-D material, or a genuinely quasi-2-D
+    chamber whose depth is small compared with the droplets). In a typical flow cell
+    neither holds: droplets settle, so a plane near the coverslip over-represents
+    them and a plane in the bulk under-represents them; and large droplets are more
+    likely to intersect any given plane than small ones, biasing the in-plane size
+    distribution toward large objects. Reporting this number as "volume fraction"
+    invites it to be read as a physical volumetric quantity that it is not. Use the
+    **Z-Stack (3-D) Object Analysis** workflow when a true volume fraction is needed.
+
+    **The dilute-phase intensity is not C_sat.** It is a mean fluorescence (or optical
+    density) value. Converting it to a saturation concentration requires a calibration
+    curve relating intensity to concentration for *that* fluorophore, on *that*
+    instrument, with *that* illumination — plus the assumption that the probe reports
+    linearly over the range in question. Without that calibration it is a *proxy*: it
+    is monotonic with concentration and therefore useful for comparison, but it has no
+    units and should not be reported as a concentration.
+
+    The same distinction applies to ``partition_coefficient``: it is a ratio of
+    measured intensities. It equals the thermodynamic partition coefficient only if
+    the intensity-to-concentration relationship is linear and identical in both
+    phases — which is not guaranteed (quenching, inner-filter effects, and
+    environment-sensitive quantum yield all break it).
     """
     H, W = labeled_droplets.shape
     if field_area_um2 is None:
@@ -81,10 +120,16 @@ def field_summary(
     cond_mask  = labeled_droplets > 0
 
     if n == 0:
-        return dict(n_droplets=0, volume_fraction=0.0, mean_radius_um=0.0,
+        _empty_bulk = float(image.mean())
+        return dict(n_droplets=0,
+                    projected_area_fraction=0.0,
+                    volume_fraction=0.0,          # deprecated alias
+                    mean_radius_um=0.0,
                     median_radius_um=0.0, std_radius_um=0.0,
                     number_density_per_um2=0.0,
-                    mean_droplet_intensity=np.nan, bulk_intensity=float(image.mean()),
+                    mean_droplet_intensity=np.nan,
+                    dilute_phase_intensity=_empty_bulk,
+                    bulk_intensity=_empty_bulk,   # deprecated alias
                     partition_coefficient=np.nan,
                     total_droplet_area_um2=0.0, field_area_um2=field_area_um2)
 
@@ -96,16 +141,22 @@ def field_summary(
     cond_int  = float(image[cond_mask].mean()) if cond_mask.sum() > 0 else np.nan
     part      = (cond_int / max(bulk_int, 1e-9)) if (bulk_int and bulk_int > 0) else np.nan
 
+    _area_frac = total_area / field_area_um2
+
     return dict(
         n_droplets=n,
-        volume_fraction=total_area / field_area_um2,
+        # Honest name first; the old key is kept as a deprecated alias so existing
+        # scripts, saved CSVs and downstream code keep working.
+        projected_area_fraction=_area_frac,
+        volume_fraction=_area_frac,               # DEPRECATED: misnamed, see docstring
         mean_radius_um=float(radii_um.mean()),
         median_radius_um=float(np.median(radii_um)),
         std_radius_um=float(radii_um.std()),
         number_density_per_um2=n / field_area_um2,
         mean_droplet_intensity=cond_int,
-        bulk_intensity=bulk_int,
-        partition_coefficient=part,
+        dilute_phase_intensity=bulk_int,
+        bulk_intensity=bulk_int,                  # DEPRECATED alias
+        partition_coefficient=part,               # apparent, intensity-based
         total_droplet_area_um2=total_area,
         field_area_um2=field_area_um2,
     )
@@ -238,7 +289,15 @@ def coarsening_statistics(
             'n_droplets':        len(props),
             'mean_radius_um':    float(radii.mean()) if len(radii) > 0 else 0.0,
             'median_radius_um':  float(np.median(radii)) if len(radii) > 0 else 0.0,
-            'volume_fraction':   total_area / field_area,
+            # This is a 2-D PROJECTED AREA fraction, not a volume fraction. It equals
+            # a volume fraction only for an isotropic random section through a
+            # statistically homogeneous 3-D material, or a genuinely quasi-2-D
+            # chamber. In a flow cell droplets settle and large droplets are more
+            # likely to intersect any given plane, so neither holds. The old
+            # 'volume_fraction' key is retained as a deprecated alias so existing
+            # scripts and saved tables keep working.
+            'projected_area_fraction': total_area / field_area,
+            'volume_fraction':   total_area / field_area,   # DEPRECATED: misnamed
             'number_density':    len(props) / field_area,
             'polydispersity':    float(radii.std() / max(radii.mean(), 1e-9)) if len(radii) > 1 else 0.0,
             'total_area_um2':    total_area,
@@ -269,13 +328,45 @@ def estimate_csat_lever_rule(
     Parameters
     ----------
     concentrations   : 1D array of total protein concentrations (µM or a.u.)
-    volume_fractions : 1D array of measured condensate volume fractions (Φ)
+    volume_fractions : 1D array of measured condensate fractions (Φ). **See the
+                       warning below: if these came from a 2-D image, they are
+                       projected AREA fractions, not volume fractions.**
 
     Returns
     -------
     dict with keys:
         C_sat, C_dense, slope, r_squared,
         fit_success, C_sat_units (unknown if not provided)
+
+    .. warning::
+
+       **The lever rule is a volumetric identity.** Φ in the equation above is a
+       genuine volume fraction. PyCAT's 2-D workflows report a *projected area
+       fraction* (see ``field_summary`` / ``coarsening_statistics``), which is not the
+       same quantity: droplets settle, so the plane you imaged over- or
+       under-represents them depending on its depth, and larger droplets are more
+       likely to intersect any given plane.
+
+       Feeding an area fraction into this fit therefore yields a **biased**
+       ``C_sat``. The bias is systematic rather than random, so it does **not**
+       average out across a dilution series.
+
+       This is still useful as a **relative** measure — the ordering and the trend of
+       C_sat across conditions imaged identically are informative, and a shifted
+       phase boundary is still a shifted phase boundary. It should **not** be reported
+       as an absolute saturation concentration on the strength of 2-D data alone.
+
+       For a defensible absolute C_sat, obtain Φ from the **Z-Stack (3-D) Object
+       Analysis** workflow (a real volume fraction), or from a quasi-2-D chamber whose
+       depth is genuinely small compared with the droplets — and state which.
+
+    .. note::
+
+       ``C_sat`` and ``C_dense`` inherit the units of ``concentrations``. If those were
+       *fluorescence intensities* rather than calibrated concentrations, then the
+       outputs are intensity-scale proxies, not concentrations — monotonic with
+       concentration and useful for comparison, but without units. Converting them
+       requires a calibration curve for that fluorophore on that instrument.
     """
     c = np.asarray(concentrations, dtype=float)
     phi = np.asarray(volume_fractions, dtype=float)

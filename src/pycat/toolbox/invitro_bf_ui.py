@@ -318,7 +318,8 @@ def _ivbf_od_field(ui, layout):
             ("Per-droplet OD metrics", per_drop),
         ])
         napari_show_info(
-            f"Φ={summ['volume_fraction']:.3f}, n={summ['n_droplets']}, "
+            f"area fraction={summ['projected_area_fraction']:.3f} (2D projection, "
+            f"not a volume fraction), n={summ['n_droplets']}, "
             f"mean R={summ['mean_radius_um']:.2f}µm, "
             f"mean OD={per_drop['mean_od'].mean():.3f}"
         )

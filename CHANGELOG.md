@@ -4,6 +4,65 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.378] - 2026-07-10
+### Fixed — audit response: a projected area fraction was being reported as a volume fraction
+An external code audit flagged that 2-D analyses report ``total_area / field_area``
+under the name **volume_fraction**. Verified: ``field_summary`` and
+``coarsening_statistics`` in ``invitro_tools`` both did exactly this — and the
+function's own docstring said *"Φ = total droplet area / field area"* while naming the
+output a volume. The in-vitro UIs then displayed it as **"Φ"**, the standard symbol for
+volume fraction in the phase-separation literature. A reader had no reason to suspect it
+was not one.
+
+- **The honest name is now ``projected_area_fraction``** in both functions.
+  ``volume_fraction`` is retained as a **deprecated alias** so existing scripts and
+  saved tables continue to work, and the values are unchanged. The UIs now display
+  *"area fraction (2D projection, not a volume fraction)"* rather than "Φ".
+- **The area fraction is not a volume fraction.** It coincides with one only for an
+  isotropic random section through a statistically homogeneous 3-D material, or a
+  genuinely quasi-2-D chamber. In a flow cell neither holds: droplets settle (so the
+  value depends on focal depth) and larger droplets are more likely to intersect any
+  given plane (biasing the in-plane size distribution). Use the Z-Stack (3-D) workflow
+  for a real volume fraction.
+- **The error propagated into the physics.** ``estimate_csat_lever_rule`` applies the
+  lever rule — a *volumetric* thermodynamic identity — to this quantity. Feeding it an
+  area fraction yields a **systematically biased** C_sat that does not average out
+  across a dilution series. This is now documented at the point of use: the fit remains
+  useful as a **relative** measure (the ordering and trend across identically-imaged
+  conditions are informative) but must not be reported as an absolute saturation
+  concentration on 2-D data alone.
+- **A fluorescence intensity was labelled a concentration.** ``bulk_intensity`` was
+  documented as *"(= C_sat proxy)"*. It is now ``dilute_phase_intensity`` (with the old
+  key aliased), and the docstring states plainly that converting an intensity to a
+  concentration requires a calibration curve for that fluorophore on that instrument;
+  without it the value is a unitless proxy — monotonic with concentration and useful for
+  comparison, but not a concentration. The same caveat is recorded for
+  ``partition_coefficient``, which is a ratio of *intensities* and equals the
+  thermodynamic partition coefficient only if the intensity-concentration relationship
+  is linear and identical in both phases (quenching and environment-sensitive quantum
+  yield break this).
+
+### Fixed — the scientific code can now be tested without a GUI
+The audit also noted that scientific functions are coupled to napari/PyQt, preventing
+headless testing. Verified and partially fixed. Of 48 ``*_tools`` modules, **24 import a
+GUI stack at module scope** — and because the coupling is *transitive*, one such import
+at the base of the import graph makes everything above it un-importable without a
+display. That is backwards: the numerical code is the part that most needs automated
+regression testing.
+
+- **New ``pycat.utils.notify`` shim.** Forwards to napari when a UI is present and
+  degrades to printing when it is not (a warning a scientist should see must not vanish
+  because the code is running in a script). Most of the coupling was two lines importing
+  ``show_info``/``show_warning``.
+- **``vpt_tools``, ``label_and_mask_tools`` and ``invitro_tools`` now import cleanly with
+  no napari and no Qt**, so the viscosity chain, the mask operations, and the in-vitro
+  statistics are headlessly testable. GUI imports in ``label_and_mask_tools`` are now
+  lazy (resolved at call time, when a viewer demonstrably exists), and its Qt dialog
+  degrades to a clear error if opened without Qt rather than blocking the module import.
+- The remaining coupled modules are a bounded, mechanical job and are **deliberately left
+  for a dedicated pass** rather than swept in at the tail of a release — a broad
+  multi-file refactor is precisely what has broken this build before.
+
 ## [1.5.377] - 2026-07-10
 ### Added — upscaling is now *advised* and *resolved*, not guessed
 Two changes that together close the upscaling problem properly, rather than warning

@@ -647,7 +647,8 @@ def _ivf_field_summary(ui, layout):
             ("Per-droplet partition", part_df),
         ])
         napari_show_info(
-            f"Φ={summ['volume_fraction']:.3f}, "
+            f"area fraction={summ['projected_area_fraction']:.3f} "
+            f"(2D projection, not a volume fraction), "
             f"n={summ['n_droplets']}, "
             f"mean R={summ['mean_radius_um']:.2f}µm, "
             f"partition={summ['partition_coefficient']:.1f}×"

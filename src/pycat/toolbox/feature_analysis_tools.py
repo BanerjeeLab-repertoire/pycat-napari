@@ -27,13 +27,16 @@ import numpy as np
 import pandas as pd
 import skimage as sk
 import scipy.stats as stats
-from napari.utils.notifications import show_warning as napari_show_warning
+# Via the shim: keeps the measurement functions importable without napari.
+from pycat.utils.notify import show_warning as napari_show_warning
 
 # Local application imports
 from pycat.toolbox.label_and_mask_tools import binary_morph_operation, opencv_contour_func
 from pycat.utils.general_utils import dtype_conversion_func, crop_bounding_box, create_overlay_image
 from pycat.utils.math_utils import remove_outliers_iqr
-from pycat.ui.ui_utils import show_dataframes_dialog
+# ui_utils pulls in the Qt/napari stack; imported at CALL time so the measurement
+# functions in this module (cell_analysis_func, puncta_analysis_func) stay testable
+# headlessly.
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 
 
@@ -562,6 +565,7 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     # Display the cell statistics in a popup window
     tables_info = [("Cell Statistics", cell_df)]
     window_title = "Cell Analysis"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
 
 
@@ -842,4 +846,5 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     # Display the puncta and cell statistics in a popup window
     tables_info = [("Cell Statistics", cell_df), ("Condensate Statistics", puncta_df)]
     window_title = "Analysis Results"
+    from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
