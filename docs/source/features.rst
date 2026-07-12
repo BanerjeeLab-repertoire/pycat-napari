@@ -45,13 +45,21 @@ Analysis Pipelines
 ------------------
 PyCAT also provides several pre-configured analysis pipelines for common use cases.
 
-**Condensate Analysis** : Tailored analysis for in-cellulo condensates
+**Cellular Object Analysis (Fluorescence / Brightfield)** : Tailored analysis for in-cellulo condensates
 
-**Colocalization Analysis** : Object-based and pixel-wise correlation pipelines
+**In Vitro Object Analysis (Fluorescence / Brightfield)** : Field-level droplet statistics, size distributions, C\ :sub:`sat`, contact angle
 
-**General ROI Analysis** : Exploratory pipeline with region property measurements
+**Time Series Object Analysis** : Full T·H·W pipeline with drift correction and per-frame metrics
 
-**Fibril Analysis** : Analyze beta-amyloid fibers and fibril structures
+**Z-Stack (3D) Object Analysis** : True 3D segmentation and volumetric metrics — use this when you need a *real* volume fraction (see :doc:`usage/assumptions_and_limitations`)
+
+**Colocalization Analysis** : Object-based and pixel-wise correlation pipelines, plus **Colocalization Over Time** for tracking how colocalization evolves frame-by-frame
+
+**Exploratory Analysis** : A workbench exposing the entire toolbox in collapsible sections, for freely mixing individual tools (formerly "General ROI Analysis")
+
+**Cellular Fibril Analysis** / **In Vitro Fibril Analysis** : Analyze beta-amyloid fibers and fibril structures. The cellular variant adds cell segmentation so fibrils gain per-cell context; the in-vitro variant analyses the whole field.
+
+**Biophysics pipelines** : Video Particle Tracking (microrheology), FRAP, Droplet Fusion, Force-Distance curves, and Temperature-dependent condensate analysis
 
 
 

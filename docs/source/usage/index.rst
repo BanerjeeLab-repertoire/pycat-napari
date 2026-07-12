@@ -26,8 +26,8 @@ Available Tutorials
 .. note::
    More tutorials are being developed and will be added soon. Check back for updates or contribute your own tutorials through our GitHub repository.
 
-Interpreting Your Results
--------------------------
+Guides and Reference
+--------------------
 
 Before you draw conclusions from PyCAT's measurements, read the measurement
 guidance. It documents effects — chiefly the **size-dependent intensity bias** and
@@ -37,12 +37,18 @@ and that can otherwise produce confident but false conclusions.
 The assumptions page lists what PyCAT **cannot** tell you: where each method's
 premises break, and which numbers stop meaning what you think they mean.
 
+The general tools guide explains **when and why** to reach for the toolbox tools whose
+value is not obvious from the name — for example, how to measure how far your objects
+move between frames *without tracking anything*.
+
 .. toctree::
    :maxdepth: 2
    :caption: Guidance:
 
    measurement_guidance
    assumptions_and_limitations
+   general_tools_guide
+   loading_and_saving
 
 Getting Help
 ------------

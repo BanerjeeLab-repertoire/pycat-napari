@@ -4,6 +4,45 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.376] - 2026-07-10
+### Documentation — the new tools and file-handling behaviour are now explained
+Recent releases added tools and changed behaviour that were listed in the reference
+table but never *explained*. A tool nobody understands is a tool nobody uses.
+
+**New page: Usage ▸ General Tools: When and Why.** The *when and why*, not the *what*:
+
+- **Motion Scale Estimator** — the one most likely to be overlooked, because its
+  premise is non-obvious: you can measure how far your objects move between frames
+  **without tracking anything**. Explains the problem it solves (every linker demands
+  a maximum-displacement parameter that is almost always guessed, and a wrong guess
+  produces plausible-looking mislinked trajectories that silently corrupt the physics),
+  how the projection trick works, and — most usefully — the **trackability verdict**,
+  which can tell you a dataset is untrackable in seconds rather than after a
+  three-hour analysis returns a nonsensical viscosity.
+- **Partial-Volume Measurement**, **Frame Quality / Focus QC**, **Photobleach
+  Correction**, **Detrend Stack**, **Image Registration**, **Colocalization Over
+  Time**, and the **Stack / Time-Series Tools**.
+- Includes distinctions that are easy to get wrong — e.g. **detrending is not bleach
+  correction**: bleach correction rescales intensities so they compare across frames;
+  detrending removes a trend so it does not pollute a *variance* measurement. Use the
+  former when you care about intensity, the latter when you care about fluctuations.
+
+**New page: Usage ▸ Loading and Saving Data.** Explains the dialogs PyCAT may show and
+why:
+
+- **"Is this a time series or a z-stack?"** — a plain multi-page TIFF genuinely does
+  not record whether its pages are timepoints or z-slices. The two load identically but
+  mean entirely different things to an analysis, so PyCAT asks instead of guessing.
+- **"Copy this file to local storage first?"** — what the storage probe does and why.
+- **What PyCAT writes when you save** — compression, right-sized bit depth, declared
+  stack axes, and why upscaled *images* are flagged as reconstructable while masks
+  segmented at high resolution are not.
+
+**Also corrected:** the pipelines list was stale. "General ROI Analysis" is now
+**Exploratory Analysis**, "Fibril Analysis" is split into **Cellular** and **In Vitro**
+variants, and the Time-Series, Z-Stack, Colocalization-Over-Time, and biophysics
+pipelines (VPT, FRAP, Fusion, Force-Distance, Temperature) were missing entirely.
+
 ## [1.5.375] - 2026-07-10
 ### Documentation — scientific assumptions and developer pitfalls, previously undocumented
 A scan of past development sessions surfaced several findings that were encoded in
