@@ -34,11 +34,15 @@ guidance. It documents effects — chiefly the **size-dependent intensity bias**
 the consequences of **upscaling** — that change how results should be interpreted,
 and that can otherwise produce confident but false conclusions.
 
+The assumptions page lists what PyCAT **cannot** tell you: where each method's
+premises break, and which numbers stop meaning what you think they mean.
+
 .. toctree::
    :maxdepth: 2
    :caption: Guidance:
 
    measurement_guidance
+   assumptions_and_limitations
 
 Getting Help
 ------------

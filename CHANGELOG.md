@@ -4,6 +4,57 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.375] - 2026-07-10
+### Documentation — scientific assumptions and developer pitfalls, previously undocumented
+A scan of past development sessions surfaced several findings that were encoded in
+code comments, changelogs, or a roadmap — i.e. nowhere a user or a new contributor
+would ever look. Each was re-verified against the current code before writing.
+
+**New page: Usage ▸ Assumptions and Limitations.** Deliberately a page about what
+PyCAT *cannot* tell you:
+
+- **2D "volume fraction" is a projection proxy, not a volume.** It is the area
+  fraction of a focal plane. Droplets settle, so the value depends on focal depth,
+  and larger droplets are more likely to intersect any given plane (a stereological
+  bias toward large objects). The caveat existed in the in-vitro workflow's UI and in
+  the developer roadmap, but not in the user documentation.
+- **Automatic object-size estimation is only valid for 2D fluorescence** — and the
+  code already enforced this (``AUTO_OBJECT_SIZE_VALID_WORKFLOWS``) without ever
+  telling the user why. It is invalid for brightfield (edge/phase contrast has no
+  intensity hierarchy to threshold), for time series (object size drifts as objects
+  grow and coarsen, so a single median is wrong by construction), and for z-stacks (a
+  projected diameter is not a 3-D size).
+- **Intensity-hierarchy thresholding is a fluorescence assumption**, not a universal
+  one: in brightfield an object can be darker than background at its centre and
+  brighter at its halo.
+- **Tracking assumes objects move less than they are far apart** — a property of the
+  *acquisition*, not the software. The Motion Scale Estimator answers this **before**
+  a tracking run rather than after.
+- **Derived quantities inherit every upstream assumption**: a wrong pixel size or
+  frame interval produces a wrong viscosity even when every subsequent step is
+  perfect, and a mis-linked ensemble yields tight error bars around a wrong number.
+
+**New section: Contributing ▸ Codebase Pitfalls.** Traps that have caused real,
+silent bugs and raise no exception:
+
+- **Never call ``np.asarray()`` on a stack layer's data.** The lazy wrappers'
+  ``__array__`` is *deliberately* truncated to frame 0 (so napari's incidental array
+  requests don't materialise a multi-gigabyte movie), so ``np.asarray(layer.data)``
+  silently yields a single 2-D frame. Nothing errors; the analysis simply reports
+  frame 0 as if it were the whole movie. This has shipped as a bug **three times**
+  (temperature, VPT, colocalization). Use ``materialize_stack`` / ``iter_frames`` /
+  ``extract_2d_plane`` — the last taking *the frame the user is viewing*, not frame 0.
+- Lazy versus materialised is chosen by **access pattern** (single-pass → stream;
+  repeated/random → materialise once).
+- Do not measure intensities on upscaled images; metadata capture belongs at the
+  load event; never silently pool distinct populations; build incrementally and
+  compile after each step.
+
+**Also corrected:** the Toolbox Reference described *Upscale Image* as "increases
+image resolution while preserving structural features" — which implies it adds
+resolution. It does not, and that framing is arguably the origin of the
+measure-on-the-upscale problem.
+
 ## [1.5.374] - 2026-07-10
 ### Documentation — the measurement findings are now documented, not buried
 - **New user-facing page: Usage ▸ Measurement Guidance** (``docs/source/usage/
