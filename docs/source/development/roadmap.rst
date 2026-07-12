@@ -852,6 +852,78 @@ sensitivity must be *reported*, not hidden).
   is a **correctness** hazard, not a performance one: it will silently serve a result
   computed with different parameters. This belongs in the correctness bucket.
 
+.. rubric:: Silent exception swallowing (measured — 400 dangerous sites)
+
+**Where:** an AST classification of every broad handler in the codebase:
+
+.. list-table::
+   :header-rows: 1
+
+   * -
+     - logged
+     - re-raised
+     - **silent (pass)**
+     - **silent (other)**
+   * - core (non-UI)
+     - 76
+     - 5
+     - **199**
+     - **201**
+   * - UI
+     - 82
+     - 0
+     - 208
+     - 105
+
+**876 broad ``except Exception`` handlers, of which 400 are SILENT in non-UI code.**
+``file_io.py`` alone holds **101** of them. This is not a style complaint: it is *why* the
+orphaned ``file_path`` block (1.5.386) raised ``NameError`` on **every tagged layer load**
+for an unknown length of time without anyone noticing — its own ``except Exception:
+return False`` ate the evidence.
+
+**The infrastructure already exists.** ``pycat.utils.general_utils.debug_log(context, exc)``
+prints the context and traceback when ``PYCAT_DEBUG=1`` and is otherwise completely silent.
+It is simply not applied to the 400 sites.
+
+**Recipe:** replace ``except Exception: pass`` with
+``except Exception as e: debug_log('<module>: <what was attempted>', e)``. Behaviour is
+unchanged in normal use; the failure becomes diagnosable on demand. Start with
+``file_io.py`` (101), ``metadata_extract.py`` (19), ``run_pycat.py`` (21).
+
+**Do NOT sweep this mechanically.** Attempted, and it broke ``file_io.py`` twice: an
+``except Exception:`` whose body is on the *same line* is not amenable to naive line
+insertion, and the two-pass edit shifted line numbers under itself. This needs a proper
+CST-preserving rewrite (``libcst``) or careful hand editing, file by file, with a compile
+check after each — not a regex or a line-index loop. It is a **bounded, mechanical, but
+genuinely fiddly** job and deserves its own session.
+
+**Longer term** (the audit's rule, and the right one)::
+
+    core scientific / file operation
+      -> catch EXPECTED exceptions only
+      -> raise a typed error
+
+    UI boundary
+      -> catch the typed error
+      -> log the traceback
+      -> show a concise notification
+
+**Acceptance:** ``PYCAT_DEBUG=1`` on a deliberately corrupted file must print a traceback
+for every failure that is silently absorbed today; and no bare ``except Exception: pass``
+remains in ``file_io.py``.
+
+.. rubric:: Stale / unused variables (review individually — do NOT bulk-delete)
+
+The audit lists ``proc_source``, ``proc_zarr_ref``, ``from_meta``, ``is_lazy``, ``ndim``,
+``thresholds``, ``cell_diameter``, ``strategy_dd``, ``otsu_classes_spin``. Unused variables
+are usually harmless, but several of these sit in **stateful loading and time-series** code,
+where they may be the residue of logic that was partially removed while downstream behaviour
+still assumes it exists. That makes them a *symptom* worth reading, not a lint to clear.
+
+**Where:** run ``ruff --select F841`` (unused local) and review each hit against the
+surrounding logic. The question for each is not "is it used?" but "**was something meant to
+use it, and does the code silently behave as if it did?**"
+
 .. rubric:: Packaging
 
 ``requires-python = ">=3.12,<3.13"`` blocked the auditor's 3.13 environment. Decide whether

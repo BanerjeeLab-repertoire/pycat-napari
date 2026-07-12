@@ -243,3 +243,63 @@ def test_no_undefined_names():
           "list used as a mutable cell, the idiom already used in "
           "timeseries_condensate_tools.py."
     )
+
+
+# ─────────────────────────── duplicate definitions ───────────────────────────
+#
+# A `def` (or `class`) written twice in the same scope is not an error in Python: the
+# later one silently replaces the earlier, and the first becomes dead code. That is a
+# merge/copy-paste artefact waiting to become a real bug — someone edits the first
+# definition, tests it, and cannot understand why nothing changed.
+#
+# Found in the wild:
+#   * `label_and_mask_tools.run_expand_labels` and `.run_mask_logic_merge` — each defined
+#     twice; the second was a compressed copy of the first. Verified functionally
+#     identical (same signature, same computational calls) before removing.
+#   * `partial_volume_tools.resolve_measurement_source` — defined twice, and the two were
+#     NOT equivalent (different helpers, different return shape). The *second* was the live
+#     and validated one, so "keep the first" would have BROKEN it. This is why the fix must
+#     be to check which one actually runs, not to apply a blanket rule.
+
+def _duplicate_definitions(path: pathlib.Path):
+    import collections
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return []
+    out = []
+    scoped = collections.defaultdict(list)
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scoped[node.name].append(node.lineno)
+    for name, lines in scoped.items():
+        if len(lines) > 1:
+            out.append((name, lines))
+    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        methods = collections.defaultdict(list)
+        for node in cls.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                methods[node.name].append(node.lineno)
+        for name, lines in methods.items():
+            if len(lines) > 1:
+                out.append((f"{cls.name}.{name}", lines))
+    return out
+
+
+@pytest.mark.core
+def test_no_duplicate_definitions():
+    """No function or class may be defined twice in the same scope."""
+    findings = []
+    for f in sorted(_SRC.rglob("*.py")):
+        for name, lines in _duplicate_definitions(f):
+            findings.append(f"{f.relative_to(_SRC)}: '{name}' defined at lines {lines}")
+
+    assert not findings, (
+        "These are defined more than once in the same scope. Python keeps only the LAST "
+        "one; the earlier definitions are dead code:\n  "
+        + "\n  ".join(findings)
+        + "\n\nBefore deleting: check which definition is actually LIVE (the last) and "
+          "whether the copies are functionally identical. They are not always — one of "
+          "these had two non-equivalent versions, and keeping the 'clearer first' one "
+          "would have broken it."
+    )

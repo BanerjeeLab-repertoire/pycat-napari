@@ -4,6 +4,59 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.388] - 2026-07-10
+### Fixed — duplicate function definitions (one of them mine, and NOT harmless)
+``label_and_mask_tools.py`` defined ``run_expand_labels`` and ``run_mask_logic_merge``
+**twice** each. Python keeps the later one; the earlier becomes dead code. Verified
+mechanically that the copies were **functionally identical** (same signature, same
+computational calls) before removing them — the second was simply a compressed,
+less-documented copy. The clearer first versions are retained, and their stale inline
+``from napari.utils.notifications import ...`` now goes through the shim (1.5.378).
+Re-tested: expand-labels grows regions, and AND/OR/XOR return exactly 4/28/24 px on a
+known overlap.
+
+**A codebase-wide sweep then found a third — in code I wrote.**
+``partial_volume_tools.resolve_measurement_source`` was defined twice, and this pair was
+**not equivalent** (different helper functions, different return shape). The **second** was
+the live, validated one. So the audit's blanket advice — *"retain the first, clearer
+implementation"* — would have **broken the lineage resolver**. The rule has to be *check
+which one actually runs*, not *keep the first*. The dead first definition was removed and
+the resolver re-validated end-to-end (mask → 4× upscale → original, factor 4).
+
+**The codebase now has zero duplicate definitions**, and
+``tests/test_no_undefined_names.py`` guards against new ones — with the above written into
+its failure message, so the next person does not apply the blanket rule and break something.
+
+### Measured — 400 silent exception handlers, and why the ``file_path`` bug hid so long
+Classified every broad handler by AST:
+
+| | logged | re-raised | **silent (pass)** | **silent (other)** |
+|---|---|---|---|---|
+| core (non-UI) | 76 | 5 | **199** | **201** |
+| UI | 82 | 0 | 208 | 105 |
+
+**876 broad ``except Exception`` handlers; 400 are silent in non-UI code.** ``file_io.py``
+alone holds **101**. This is precisely why the orphaned ``file_path`` block (1.5.386) could
+raise ``NameError`` on **every tagged layer load** without anyone noticing — its own
+``except Exception: return False`` ate the evidence.
+
+The infrastructure to fix it already exists: ``debug_log(context, exc)`` prints a traceback
+when ``PYCAT_DEBUG=1`` and is otherwise silent. It is simply not applied at those 400 sites.
+
+**Not swept in this release, deliberately.** It was attempted and it **broke ``file_io.py``
+twice** — an ``except Exception:`` whose body sits on the same line defeats naive line
+insertion, and a two-pass edit shifts line numbers under itself. Forcing a large mechanical
+rewrite of the most critical file in the codebase at the tail of a release is exactly the
+move that has broken this build before. The measurement, the recipe, the file-by-file
+priority order, and an explicit warning not to sweep it with a regex are recorded in the
+roadmap under *Silent exception swallowing*, together with the audit's longer-term rule
+(typed errors in core, broad catch only at the UI boundary).
+
+The **stale/unused variables** item is recorded alongside it, with the point that matters:
+several sit in stateful loading and time-series code, so the question for each is not "is it
+used?" but "**was something meant to use it, and does the code silently behave as if it
+did?**" — a symptom to read, not a lint to clear.
+
 ## [1.5.387] - 2026-07-10
 ### Fixed — three widgets could never be constructed (UnboundLocalError, not NameError)
 ``intensity_profile_tools``, ``molecular_counting_tools`` and
