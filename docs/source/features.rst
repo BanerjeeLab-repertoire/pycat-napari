@@ -74,7 +74,10 @@ This reference table lists all of the individual functions available in the PyCA
    * - Invert Intensity
      - Inverts pixel intensity values (e.g., dark to bright).
    * - Upscale Image
-     - Increases image resolution while preserving structural features.
+     - Interpolates an image to a larger pixel grid so that a segmentation model
+       sees objects at the scale it expects. **Adds no information** — it cannot
+       resolve anything the optics did not capture, and intensities must **not** be
+       measured on the result. See :doc:`usage/measurement_guidance`.
    * - RB Gauss BG removal
      - Rolling ball and Gaussian background removal.
    * - BG removal with edge enhancement
@@ -167,12 +170,62 @@ This reference table lists all of the individual functions available in the PyCA
      - Tools for visualizing analysis results.
    * - Plotting Widget
      - Interactive widget for plotting and visualizing analysis outputs.
+   * - Frame Quality / Focus QC
+     - Scores every frame of a stack for sharpness (Brenner gradient) and
+       information content (entropy), flags out-of-focus frames, and identifies the
+       sharpest frame.
+   * - Motion Scale Estimator
+     - Measures how far objects move between frames from a short max-projection —
+       **without linking any tracks** — and reports a data-derived maximum linking
+       distance plus a trackability verdict (if per-frame motion approaches the
+       object size, frame-to-frame linking is unreliable).
+   * - Export Time-Series Video
+     - Renders a time-series stack to a video file.
+
+   * - **General Image Tools**
+     - Techniques that apply to almost any data, not just one workflow.
+   * - Image Registration (subpixel)
+     - Aligns one image to another by phase cross-correlation (channel alignment,
+       drift correction, before/after comparison).
+   * - Photobleach Correction
+     - Fits an exponential decay to a stack's mean intensity and divides it out;
+       declines to "correct" when the fit does not converge.
+   * - Detrend Stack
+     - Removes slow drift/bleaching that would otherwise inflate the temporal
+       variance of a fluctuation measurement.
+   * - Partial-Volume Measurement
+     - Measures objects that were segmented on an **upscaled** image using the
+       **original** pixels, via fractional-coverage weights, with an effective
+       sample size so error bars are not pseudoreplicated. Reports the predicted
+       **size-dependent optical bias** for every object and warns when a size
+       difference could fabricate an intensity difference. **Read**
+       :doc:`usage/measurement_guidance` **before interpreting intensities.**
 
 
 
 Cell Analysis Features
 ----------------------
 This table lists the features measured in the cell_df data structure when using the condensate analysis pipeline and the cell analyzer and condensate analyzer functions.
+
+.. warning::
+
+   **Before interpreting any intensity feature below, read**
+   :doc:`usage/measurement_guidance`.
+
+   Intensity measurements carry a **size-dependent optical bias**: a boundary pixel
+   physically integrates a mixture of object and background photons, so **small
+   objects measure dimmer than they truly are**, and the bias shrinks as objects
+   grow (approximately −52 % at a 3-pixel radius versus −11 % at 15 pixels, for a
+   typical PSF).
+
+   This is not a software defect and it is present in any image-analysis tool. It
+   matters because it is a **gradient**, not a constant: a uniform bias cancels when
+   you compare two conditions, but a size-dependent one does not. **A treatment that
+   changes only object size will fabricate an apparent change in intensity** — in
+   simulation, with *p* ≈ 10\ :sup:`−83` when the true difference was zero.
+
+   Always report size distributions alongside intensities, and compare size-matched
+   subsets when the conditions differ in size.
 
 .. list-table:: Features Measured in cell_df
    :widths: 20 80

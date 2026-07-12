@@ -26,6 +26,20 @@ Available Tutorials
 .. note::
    More tutorials are being developed and will be added soon. Check back for updates or contribute your own tutorials through our GitHub repository.
 
+Interpreting Your Results
+-------------------------
+
+Before you draw conclusions from PyCAT's measurements, read the measurement
+guidance. It documents effects — chiefly the **size-dependent intensity bias** and
+the consequences of **upscaling** — that change how results should be interpreted,
+and that can otherwise produce confident but false conclusions.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Guidance:
+
+   measurement_guidance
+
 Getting Help
 ------------
 

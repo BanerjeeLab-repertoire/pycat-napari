@@ -4,6 +4,40 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.374] - 2026-07-10
+### Documentation — the measurement findings are now documented, not buried
+- **New user-facing page: Usage ▸ Measurement Guidance** (``docs/source/usage/
+  measurement_guidance.rst``). The findings of the last few releases are
+  methodological, not cosmetic — they change how results should be *interpreted* —
+  so they belong in the documentation rather than only in a changelog. It covers:
+  - **Upscaling**: what it does (satisfies a segmentation model's scale prior) and
+    what it does *not* do (add information, resolve anything the optics missed), and
+    why intensities must never be measured on it.
+  - **The size–intensity bias**: the effect that survives every software
+    improvement, with the worked example — three objects of *identical* true
+    intensity measuring 72.9 / 91.4 / 94.9 purely because they differ in size — and
+    the practical rules (report size distributions, compare size-matched subsets,
+    distrust sub-resolution objects).
+  - **Saved data**: compression, right-sized bit depth, and which layers are
+    reconstructable.
+- **The Cell Analysis feature table now carries a warning** at the point of use:
+  anyone reading the description of ``intensity_mean`` is told, right there, that
+  the value carries a size-dependent optical bias and that a size difference between
+  conditions can fabricate an intensity difference.
+- **Corrected a misleading entry in the toolbox reference.** "Upscale Image" was
+  described as *"increases image resolution while preserving structural features"* —
+  which implies it adds resolution. It does not, and that framing is precisely the
+  misunderstanding that led to intensities being measured on interpolated pixels.
+- The six new general tools and Partial-Volume Measurement are listed in the
+  **Toolbox Reference** table.
+- **The full investigations are now in the repository** under ``docs/audits/``
+  (``upscaling_and_measurement_audit_2026-07-10.md``,
+  ``mask_storage_findings_2026-07-10.md``), including the approaches that were
+  measured and **rejected** — run-length encoding (worse than plain compression),
+  keyframe deltas (~8 % gain), and the initial framing of partial-volume weighting
+  as a complete fix (it is not: it does not rescue a comparison between groups of
+  differing object size).
+
 ## [1.5.373] - 2026-07-10
 ### Added — size-dependent intensity bias is now QUANTIFIED and WARNED, not chased
 - **The important correction to 1.5.372:** the residual size-dependent intensity
