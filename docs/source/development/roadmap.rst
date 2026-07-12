@@ -852,6 +852,42 @@ sensitivity must be *reported*, not hidden).
   is a **correctness** hazard, not a performance one: it will silently serve a result
   computed with different parameters. This belongs in the correctness bucket.
 
+.. rubric:: Consolidate the stack helpers into stack_access (a follow-up I failed twice)
+
+``pycat/file_io/stack_access.py`` (1.5.389) now holds the pure-numpy lazy/streaming layer —
+``materialize_stack``, ``iter_frames``, ``layer_is_stack``, ``extract_2d_plane``, plus the
+new ``read_frame``, ``get_array_source`` and ``stream_stats``. **It imports with nothing but
+numpy** (verified with napari, PyQt5, aicsimageio and skimage all forcibly blocked).
+
+**But ``file_io.py`` still defines its own copies**, so the five helpers are currently
+duplicated. New code should import from ``stack_access``; the 15 existing importers still go
+through ``file_io``, which is why they still drag AICSImage + PyQt + napari into memory just
+to iterate frames.
+
+**Where:** delete the five function definitions from ``file_io.py`` and replace them with
+``from pycat.file_io.stack_access import ...`` (a re-export, so the 15 existing imports keep
+working unchanged).
+
+**This was attempted twice and broke ``file_io.py`` both times.** Once by deleting on line
+indices (cut into an adjacent docstring), once by an ``ast.get_source_segment`` removal
+followed by a blank-line-collapsing regex (corrupted an indented docstring). A third attempt
+was not made. It needs ``libcst`` or a careful hand edit with a compile check after **each**
+function removed — not a scripted sweep. The file is 7 000 lines and holds the compression,
+dtype-right-sizing and orphaned-block fixes from this session; do not do this casually.
+
+.. warning::
+
+   The sandbox git is pinned at v1.5.329, **59 releases behind**. ``git checkout`` on a file
+   there does not restore it — it *destroys* the session's work. During this attempt a
+   ``git checkout src/pycat/file_io/file_io.py`` wiped the compression, dtype and
+   orphaned-block fixes; they were recovered only because the shipped
+   ``pycat_1.5.386_changed.zip`` still contained the correct file. **The shipped artifacts
+   are the backup, not git.**
+
+**Acceptance:** ``file_io.py`` defines none of the five helpers, imports them from
+``stack_access``, still compiles, and the file-save round-trip test still passes; and
+``tests/test_no_duplicate_definitions`` stays green.
+
 .. rubric:: Silent exception swallowing (measured — 400 dangerous sites)
 
 **Where:** an AST classification of every broad handler in the codebase:

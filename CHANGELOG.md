@@ -4,6 +4,68 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.389] - 2026-07-10
+### Added — ``stack_access``: the pure-numpy core of the lazy/streaming layer
+The audit's ``*_core.py`` split, done surgically where it actually pays.
+
+``materialize_stack``, ``iter_frames``, ``layer_is_stack`` and ``extract_2d_plane`` are the
+functions every analysis module needs in order to read a possibly-lazy stack safely. They
+are **pure numpy** — verified by AST that none of them touches AICSImage, Qt, napari or
+skimage. Yet they live in ``file_io.py``, which imports **AICSImage + PyQt5 + napari +
+ui_utils** at module scope, and **15 toolbox modules import from ``file_io`` purely to reach
+them**. So every one of them drags the entire GUI and file-format stack into memory just to
+iterate frames over an array it already holds. That is why the scientific tests could not be
+collected in a minimal environment (the audit's point 10 — the other three examples it gave
+were already fixed in 1.5.378/383; ``file_io`` was the one that remained).
+
+**New ``pycat/file_io/stack_access.py`` imports with nothing but numpy** — verified with
+``napari``, ``PyQt5``, ``aicsimageio`` and ``skimage`` *all forcibly blocked*.
+
+It adds the audit's explicit access-pattern contract:
+
+- ``get_array_source(layer, access_pattern=...)`` — ``framewise`` (default) returns a source
+  to stream; ``full`` **raises unless ``allow_materialize=True``**. Pulling a multi-gigabyte
+  movie into RAM should be a deliberate act visible at the call site, not the silent default
+  it is today.
+- ``read_frame(source, t)`` — the framewise primitive, safe on lazy wrappers, zarr, dask and
+  plain arrays.
+- ``stream_stats(source)`` — global min / max / mean / std / percentiles in **one streaming
+  pass**, never materialising.
+
+Validated against the trap it exists to prevent: ``np.asarray`` on a lazy wrapper returns
+**frame 0 only** (shape ``(16,16)`` from a ``(12,16,16)`` stack, silently);
+``materialize_stack`` recovers all 12; ``get_array_source(..., 'full')`` correctly refuses
+without ``allow_materialize``; and ``stream_stats`` reproduces min/max/mean/std exactly.
+
+### Fixed — global normalisation allocated the entire movie to obtain one scalar
+``timeseries_condensate_tools.py:652``::
+
+    _global_norm_max = float(np.asarray(_src_for_max[:]).max())
+
+``store[:]`` on a **zarr** array pulls the whole stack into RAM. For a 1.5 GB movie that is
+1.5 GB allocated for a **single scalar** — which defeats the entire point of the zarr
+backing.
+
+**And the failure mode was worse than the cost.** When that allocation failed, the
+surrounding ``except Exception`` silently substituted ``norm_max = 1.0`` — i.e. a **wrong
+normalisation**, not a missing one. Running out of memory produced a quietly mis-scaled
+movie rather than an error.
+
+Replaced with a streaming reduction (one frame at a time, running max). Verified to give the
+**identical** answer without ever holding the movie, and the fallback now prints why it fired
+instead of silently changing the normalisation.
+
+### Note — the remaining consolidation is recorded, and it defeated me twice
+``file_io.py`` still defines its own copies of the five helpers, so they are duplicated. The
+clean finish is to delete them there and re-export from ``stack_access``. **Attempted twice,
+broke ``file_io.py`` both times** (line-index deletion cut into an adjacent docstring; an
+``ast.get_source_segment`` removal plus a blank-line-collapsing regex corrupted an indented
+docstring). No third attempt. Recorded in the roadmap with the method that will work
+(``libcst``, or hand-editing with a compile check after each removal) — along with a warning
+that the sandbox git is **59 releases behind**, so ``git checkout`` on a file there destroys
+the session's work rather than restoring it. That happened during this attempt; the file was
+recovered from the shipped ``1.5.386`` artifact.
+
 ## [1.5.388] - 2026-07-10
 ### Fixed — duplicate function definitions (one of them mine, and NOT harmless)
 ``label_and_mask_tools.py`` defined ``run_expand_labels`` and ``run_mask_logic_merge``

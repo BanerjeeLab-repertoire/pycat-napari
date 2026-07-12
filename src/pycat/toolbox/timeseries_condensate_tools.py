@@ -647,10 +647,35 @@ class _StackProcessWorker(QThread):
             else:
                 # Pre-materialised zarr: frames already [0,1]; norm_max stays the
                 # stack global max for pre_process_image's internal scaling.
+                # Streaming reduction: read one frame at a time and keep a running
+                # max. The previous line was:
+                #
+                #     float(np.asarray(_src_for_max[:]).max())
+                #
+                # `store[:]` on a zarr array pulls the ENTIRE stack into RAM -- for a
+                # 1.5 GB movie that is 1.5 GB allocated to obtain ONE SCALAR, which
+                # defeats the whole point of the zarr backing. Worse, when that
+                # allocation failed the `except` silently substituted norm_max = 1.0,
+                # i.e. a WRONG normalisation rather than a slow one -- so the failure
+                # mode of running out of memory was a quietly mis-scaled movie.
+                _global_norm_max = 1.0
                 try:
                     _src_for_max = _zarr.open(src_desc['path'], mode='r')
-                    _global_norm_max = float(np.asarray(_src_for_max[:]).max())
-                except Exception:
+                    _gm = -np.inf
+                    _nt = int(_src_for_max.shape[0])
+                    for _t in range(_nt):
+                        _fr = np.asarray(_src_for_max[_t])
+                        if _fr.size:
+                            _fm = float(np.nanmax(_fr))
+                            if _fm > _gm:
+                                _gm = _fm
+                    if np.isfinite(_gm):
+                        _global_norm_max = float(_gm)
+                except Exception as _e:
+                    # Do not swallow this silently: a fallback of 1.0 is a DIFFERENT
+                    # normalisation, not a missing one.
+                    print(f'[PyCAT TS] global-max scan failed ({_e}); falling back to '
+                          f'norm_max=1.0 -- normalisation may be wrong.')
                     _global_norm_max = 1.0
                 _kwargs_with_norm['norm_max'] = _global_norm_max if _global_norm_max > 0 else 1.0
 
