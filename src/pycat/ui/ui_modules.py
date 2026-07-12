@@ -1058,12 +1058,13 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         from pycat.toolbox.general_image_tools import (
             _add_image_registration, _add_frame_quality_qc,
             _add_bleach_correction, _add_detrend_stack,
-            _add_motion_scale_estimator)
+            _add_motion_scale_estimator, _add_partial_volume_measure)
         self._add_image_registration = lambda **kw: _add_image_registration(self, **kw)
         self._add_frame_quality_qc = lambda **kw: _add_frame_quality_qc(self, **kw)
         self._add_bleach_correction = lambda **kw: _add_bleach_correction(self, **kw)
         self._add_detrend_stack = lambda **kw: _add_detrend_stack(self, **kw)
         self._add_motion_scale_estimator = lambda **kw: _add_motion_scale_estimator(self, **kw)
+        self._add_partial_volume_measure = lambda **kw: _add_partial_volume_measure(self, **kw)
         # New pipeline UI entry points exposed as standalone toolbox tools.
         # These use the same (ui_instance, layout=None, separate_widget=False)
         # calling convention as _add_spatial_metrology so they slot directly
@@ -3068,6 +3069,7 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_run_cell_analysis_func, s)
         add(tf._add_run_segment_subcellular_objects, s)
         add(tf._add_run_puncta_analysis_func, s)
+        add(tf._add_partial_volume_measure, s)
 
         # ── Colocalization / Correlation (collapsed) ────────────────────────
         s = section("Colocalization / Correlation")
@@ -5270,6 +5272,11 @@ class MenuManager:
             'Cell Analyzer': (self.central_manager.toolbox_functions_ui._add_run_cell_analysis_func, {'separate_widget': True}),
             'Condensate Segmentation': (self.central_manager.toolbox_functions_ui._add_run_segment_subcellular_objects, {'separate_widget': True}),
             'Condensate Analyzer': (self.central_manager.toolbox_functions_ui._add_run_puncta_analysis_func, {'separate_widget': True}),
+            # Measure objects segmented on an UPSCALED image using the ORIGINAL
+            # pixels (partial-volume weighting). Reading intensities off
+            # interpolated pixels pseudoreplicates the statistics and biases small
+            # objects; this is the defensible path.
+            'Partial-Volume Measurement (measure on original pixels)': (self.central_manager.toolbox_functions_ui._add_partial_volume_measure, {'separate_widget': True}),
         }
         self._add_actions_to_menu(condensate_analysis_actions, condensate_analysis_submenu)
 

@@ -4,6 +4,92 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.373] - 2026-07-10
+### Added — size-dependent intensity bias is now QUANTIFIED and WARNED, not chased
+- **The important correction to 1.5.372:** the residual size-dependent intensity
+  bias is **optical, not computational** — an edge pixel physically integrates a mix
+  of object and background photons, so small objects read dim *no matter how the
+  mask is handled*. Partial-volume weighting barely dents it. Verified: two groups
+  with **identical true intensity** but different sizes (r=3 vs r=8 px) produce an
+  apparent **+12% intensity difference with p ≈ 1e-83** — and PV weighting still
+  produced +11.7%. Chasing a better measurement does not fix this.
+- **A shared bias level cancels in a comparison. The bias GRADIENT does not.** That
+  is the failure mode that survives every measurement improvement, and it is
+  precisely the one that matters for comparative biology: a treatment that changes
+  only condensate *size* fabricates an apparent *intensity* change.
+- **So the bias is now measured, predicted, and reported rather than chased:**
+  - ``intensity_bias_for_size(radius, psf)`` predicts the dilution for an object of
+    a given size under the user's own optics (bias ≈ −tanh(0.75·σ_PSF/R), fitted to
+    numerically imaged discs; max error ~5% of contrast over r=2–20 px,
+    σ_PSF=0.5–2 px, and saturating rather than extrapolating in the sub-resolution
+    corner).
+  - ``estimate_psf_sigma(image)`` measures the PSF width from the data itself, so
+    the prediction is specific to the user's imaging conditions.
+  - ``size_confound_warning(radii_a, radii_b, psf)`` answers the question that
+    protects the science: *can a size difference between these groups fabricate an
+    intensity difference?* It correctly flags r=3 vs r=8 as **SEVERE** and stays
+    quiet for r=6.0 vs r=6.5.
+  - ``is_sub_resolution(radius, psf)`` flags objects at or below the resolution
+    limit, whose absolute intensity is not trustworthy by **any** method.
+- **Every Partial-Volume Measurement now reports the bias per object**
+  (``radius_eq_px``, ``predicted_bias_pct``, ``sub_resolution``) and shows a
+  field-level advisory: the bias at the smallest / median / largest object, a
+  sub-resolution count, and an explicit **size-confound warning** when the spread of
+  object sizes is large enough that an intensity-vs-size trend cannot be
+  distinguished from the artefact.
+
+### Why this matters more than a better estimator
+Three objects with **identical true intensity (100)** measure as **72.9 / 91.4 /
+94.9** purely because they differ in size. A user plotting intensity against size
+sees a convincing correlation that does not exist. The ``predicted_bias_pct`` column
+(−52% / −19% / −11%) is what tells them so. No refinement of the measurement removes
+that trend — only knowing its size does.
+
+## [1.5.372] - 2026-07-10
+### Added — Partial-volume measurement: measure on the ORIGINAL pixels, not the upscale
+- **PyCAT's standard workflow measured intensities on upscaled images. That is not
+  scientifically defensible, and the UI defaulted to it** (the "Select Image for
+  Cell Analysis" dropdown pre-selected *Upscaled Fluorescence*). Verified
+  numerically:
+  - **Upscaling adds no information.** In tests it *never* split two objects that
+    native-resolution segmentation merged, at any separation — the PSF, not the
+    pixel grid, sets the resolution limit. Its only legitimate use is to satisfy a
+    segmentation model's learned object-scale prior (a property of the *algorithm*,
+    not of the data).
+  - **Reading intensities off interpolated pixels pseudoreplicates.** 16× the
+    "samples", zero new photons: the reported SEM came out ~1.5× smaller than the
+    true standard error across noise realisations. Every error bar and p-value was
+    falsely confident.
+  - **It biases small objects low, size-dependently** (−14% for a 9-px object, −2%
+    for a 517-px one), which can manufacture a spurious intensity-vs-size trend.
+- **New ``partial_volume_tools`` module** implements the defensible path: the
+  high-resolution mask is converted to **fractional-coverage weights on the native
+  grid**, and all statistics are computed on the **original detector pixels**, with
+  a Kish **effective sample size** so the error bars stay honest. Validated against
+  ground truth: the reported SEM is now calibrated (ratio 1.12–1.19 to the true
+  standard error across object sizes and noise levels, i.e. slightly conservative)
+  where the old path was 1.5× overconfident.
+- **Why not simply downscale the mask:** measured, that is *worse* than the status
+  quo for small objects (bias −16.4 vs −14.1 at R=2.5 px). A native edge pixel at
+  intensity 60 between background 20 and object 100 genuinely encodes "≈50%
+  covered"; **binarising destroys that**. Partial-volume weighting keeps it — it
+  recovered true sub-pixel coverage better than a binary native mask in 31 of 36
+  conditions spanning object size, PSF width, noise, and threshold offset.
+- **New tool:** Toolbox ▸ Cell and Object Analyses ▸ *Partial-Volume Measurement*.
+  Takes the high-res mask + the ORIGINAL image + the upscale factor, and reports
+  per-object weighted mean/integrated intensity, fractional area, and an SEM built
+  from an estimated noise σ (not from the intensity spread, which also contains the
+  object's real internal structure — conflating them inflated the SEM ~2.8×).
+- **The Cell Analyzer now warns** when the selected intensity image is an upscaled
+  layer, explaining why that biases the result and pointing at the correct tool.
+
+### Honest limits
+- Small objects are biased low **regardless of method** — even a native mask on
+  native data reads low, because the *detector* integrates a mix of object and
+  background photons across an edge pixel. Partial-volume weighting minimises the
+  *software-added* bias; it cannot undo the optics. Unbiased absolute intensities on
+  ~2-px objects is a deconvolution/PSF-modelling problem, not a masking problem.
+
 ## [1.5.371] - 2026-07-10
 ### Fixed — PyCAT was saving masks and stacks completely UNCOMPRESSED (~100× larger)
 - **Masks, label stacks, and image stacks are now written compressed.** Every save

@@ -725,3 +725,231 @@ def _add_motion_scale_estimator(ui_instance, layout=None, separate_widget=False)
     ui_instance._add_widget_to_layout_or_dock(
         w_, layout, separate_widget, "Motion Scale Estimator")
 
+
+# ────────── 6. Partial-Volume Measurement (measure on native pixels) ────────
+
+def _add_partial_volume_measure(ui_instance, layout=None, separate_widget=False):
+    """Measure objects segmented on an UPSCALED image, on the ORIGINAL pixels.
+
+    Upscaling adds no information — it is a deterministic interpolation of the
+    pixels you already had, and it cannot resolve anything the optics didn't
+    (verified: upscaling never split objects that native-resolution segmentation
+    merged). Its only legitimate use is to satisfy a segmentation model's learned
+    object-scale prior. Reading INTENSITIES off interpolated pixels, however:
+
+      * pseudoreplicates (16x the "samples", zero new photons → reported SEM comes
+        out ~1.5x too confident), and
+      * biases small objects low in a size-dependent way (which can manufacture a
+        spurious intensity-vs-size trend).
+
+    This tool does it correctly: it converts the high-resolution mask into
+    FRACTIONAL COVERAGE weights on the native grid, then computes weighted
+    statistics on the ORIGINAL image, with an effective sample size so the error
+    bars stay honest.
+    """
+    viewer = ui_instance.viewer
+    grp = QGroupBox("Partial-Volume Measurement (measure on original pixels)")
+    form = QFormLayout(grp)
+
+    form.addRow(QLabel(
+        "<span style='color:#aaa;font-size:9pt;'>For objects segmented on an "
+        "<b>upscaled</b> image. Converts the high-res mask into fractional-coverage "
+        "weights on the native grid and measures intensities on the "
+        "<b>original</b> image — never on interpolated pixels. Reports an effective "
+        "sample size so the SEM isn't pseudoreplicated.</span>"))
+
+    mask_dd = QComboBox()
+    img_dd = QComboBox()
+
+    def _refresh():
+        import napari
+        cur_m, cur_i = mask_dd.currentText(), img_dd.currentText()
+        mask_dd.clear(); img_dd.clear()
+        mask_dd.addItems([l.name for l in viewer.layers
+                          if isinstance(l, napari.layers.Labels)])
+        img_dd.addItems(_image_layer_names(viewer))
+        for dd, cur in ((mask_dd, cur_m), (img_dd, cur_i)):
+            i = dd.findText(cur)
+            if i >= 0:
+                dd.setCurrentIndex(i)
+
+    _refresh()
+    form.addRow("High-res mask (from upscaled seg.):", mask_dd)
+    form.addRow("ORIGINAL image (native scale):", img_dd)
+
+    factor = QSpinBox(); factor.setRange(1, 16); factor.setValue(2)
+    factor.setToolTip(
+        "The upscale factor used for segmentation. The mask should be this many "
+        "times larger than the original image. Use 1 if the mask is already at "
+        "native scale (the weights are then just 0/1).")
+    form.addRow("Upscale factor:", factor)
+
+    bg = QDoubleSpinBox()
+    bg.setDecimals(2); bg.setRange(-1e6, 1e6); bg.setValue(0.0)
+    bg.setToolTip("Background level subtracted for the integrated-intensity column.")
+    form.addRow("Background:", bg)
+
+    status = QLabel(""); status.setWordWrap(True)
+    btn = QPushButton("\u25b6  Measure (partial-volume)")
+    btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+    def _run():
+        _refresh()
+        try:
+            lmask = viewer.layers[mask_dd.currentText()]
+            limg = viewer.layers[img_dd.currentText()]
+        except KeyError as e:
+            napari_show_warning(f"PV measure: layer not found — {e}"); return
+
+        from pycat.file_io.file_io import layer_is_stack, extract_2d_plane
+        fi = 0
+        if layer_is_stack(limg.data):
+            try:
+                fi = int(viewer.dims.current_step[0])
+            except Exception:
+                fi = 0
+        img = extract_2d_plane(limg.data, frame_index=fi, dtype=None)
+        mask = np.asarray(lmask.data)
+        if mask.ndim == 3:
+            mask = mask[min(fi, mask.shape[0] - 1)]
+
+        f = int(factor.value())
+        exp = (img.shape[0] * f, img.shape[1] * f)
+        if f > 1 and (abs(mask.shape[0] - exp[0]) > f or abs(mask.shape[1] - exp[1]) > f):
+            napari_show_warning(
+                f"The mask {mask.shape} is not a {f}x upscale of the image "
+                f"{img.shape} (expected about {exp}). Check the factor, or pick "
+                f"the ORIGINAL (not upscaled) image.")
+            return
+        # Guard the classic mistake: measuring on the upscaled image.
+        from pycat.toolbox.partial_volume_tools import looks_upscaled
+        if looks_upscaled(limg):
+            napari_show_warning(
+                "The selected image looks like an UPSCALED layer. Select the "
+                "ORIGINAL image — measuring on interpolated pixels is exactly what "
+                "this tool exists to avoid.")
+            return
+
+        from pycat.toolbox.partial_volume_tools import measure_objects_pv
+        try:
+            mpp = float(ui_instance._mpx())
+        except Exception:
+            mpp = 1.0
+        try:
+            df = measure_objects_pv(mask, img, factor=f,
+                                    microns_per_pixel=mpp,
+                                    background=float(bg.value()))
+        except Exception as e:
+            napari_show_warning(f"PV measurement failed: {e}"); return
+        if df is None or df.empty:
+            napari_show_info("PV measure: no objects found."); return
+
+        try:
+            ui_instance.central_manager.active_data_class.data_repository[
+                'partial_volume_df'] = df
+        except Exception:
+            pass
+        try:
+            from pycat.ui.ui_utils import show_dataframes_dialog
+            show_dataframes_dialog("Partial-Volume Measurements",
+                                   [("Per object (measured on native pixels)",
+                                     df.round(4))])
+        except Exception:
+            pass
+
+        _npx = float(df['n_pixels_touched'].sum())
+        _neff = float(df['n_eff'].sum())
+
+        # ── The advisory that actually protects the science ──────────────────
+        # The residual size-dependent bias is OPTICAL, not computational: an edge
+        # pixel physically integrates a mix of object and background photons, so
+        # small objects read dim no matter how the mask is handled. A shared bias
+        # LEVEL cancels in a comparison, but the GRADIENT does not — two groups
+        # with identical true intensity but different SIZE produce an apparent
+        # intensity difference (verified: R=3 vs R=8 fabricates ~+12% with
+        # p~1e-83). So we quantify it for the user's own optics and say so.
+        advisory = ""
+        try:
+            from pycat.toolbox.partial_volume_tools import (
+                estimate_psf_sigma, intensity_bias_for_size, is_sub_resolution,
+                size_confound_warning)
+            psf = estimate_psf_sigma(img)
+            radii = np.sqrt(df['area_px'].values / np.pi)   # equivalent radius
+            r_min, r_med, r_max = (float(np.min(radii)), float(np.median(radii)),
+                                   float(np.max(radii)))
+            b_min = intensity_bias_for_size(r_min, psf)
+            b_med = intensity_bias_for_size(r_med, psf)
+            b_max = intensity_bias_for_size(r_max, psf)
+            n_sub = int(sum(is_sub_resolution(r, psf) for r in radii))
+
+            # Does the spread of sizes WITHIN this field already threaten a
+            # size-intensity correlation?
+            conf = size_confound_warning(radii[radii <= r_med],
+                                         radii[radii > r_med], psf)
+
+            lines = [
+                f"<b>Size-dependent intensity bias</b> (optical — present with any "
+                f"masking method; PSF σ ≈ {psf:.1f} px):",
+                f"&nbsp;&nbsp;smallest object r≈{r_min:.1f}px → <b>{b_min:+.0%}</b> · "
+                f"median r≈{r_med:.1f}px → <b>{b_med:+.0%}</b> · "
+                f"largest r≈{r_max:.1f}px → <b>{b_max:+.0%}</b>",
+            ]
+            if n_sub:
+                lines.append(
+                    f"<span style='color:#f88;'>⚠ {n_sub} object(s) are at or below "
+                    f"the resolution limit — their absolute intensity is dominated "
+                    f"by background mixing and is not trustworthy by any method.</span>")
+            if conf['level'] == 'severe':
+                lines.append(
+                    f"<span style='color:#f88;'>⚠ <b>Size confound within this "
+                    f"field:</b> small vs large objects differ enough that the bias "
+                    f"gradient alone can produce a "
+                    f"{conf['apparent_intensity_difference']:+.0%} apparent intensity "
+                    f"difference. <b>Do not interpret an intensity-vs-size trend "
+                    f"without size-matching.</b></span>")
+            elif conf['level'] == 'mild':
+                lines.append(
+                    f"<span style='color:#e8a33d;'>Size range is mild "
+                    f"({conf['apparent_intensity_difference']:+.0%} from size alone) "
+                    f"— report size distributions alongside intensities.</span>")
+            advisory = ("<div style='margin-top:6px;font-size:9pt;color:#bbb;'>"
+                        + "<br>".join(lines) + "</div>")
+            # Keep the numbers for the record.
+            dr = ui_instance.central_manager.active_data_class.data_repository
+            dr['intensity_bias_advisory'] = dict(
+                psf_sigma_px=psf, r_min=r_min, r_med=r_med, r_max=r_max,
+                bias_min=b_min, bias_med=b_med, bias_max=b_max,
+                n_sub_resolution=n_sub, **{k: v for k, v in conf.items()
+                                           if k != 'verdict'})
+        except Exception as e:
+            print(f"[PyCAT PV] bias advisory failed: {e}")
+
+        status.setText(
+            f"<span style='color:#8f8;'>{len(df)} objects measured on the "
+            f"<b>original</b> image.<br>Effective N = {_neff:.0f} vs "
+            f"{_npx:.0f} pixels touched — the SEM uses the effective N, so it is "
+            f"not inflated by partially-covered edge pixels.</span>" + advisory)
+        napari_show_info(
+            f"Partial-volume measurement: {len(df)} objects (measured on native "
+            f"pixels, effective N={_neff:.0f}).")
+        try:
+            ui_instance._record('partial_volume_measure', {
+                'mask': lmask.name, 'image': limg.name, 'factor': f,
+                'n_objects': int(len(df)), 'background': float(bg.value())})
+        except Exception:
+            pass
+
+    btn.clicked.connect(_run)
+    try:
+        from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
+    except Exception:
+        form.addRow(btn)
+    form.addRow(status)
+
+    container = QVBoxLayout(); container.addWidget(grp)
+    w_ = QWidget(); w_.setLayout(container)
+    ui_instance._add_widget_to_layout_or_dock(
+        w_, layout, separate_widget, "Partial-Volume Measurement")
+
+

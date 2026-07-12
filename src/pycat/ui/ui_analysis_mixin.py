@@ -38,6 +38,33 @@ class _AnalysisWidgetsMixin:
         cell_segmentation_dropdown_omit = self._layer_row(cell_segmentation_layout, 'Select Mask Layer to Omit:', napari.layers.Labels, optional=True)
         cell_segmentation_dropdown_omit.insertItem(0, "None")
         cell_segmentation_dropdown_images = self._layer_row(cell_segmentation_layout, 'Select Image for Cell Analysis:', napari.layers.Image, name_hint='Upscaled Fluorescence')
+        # Measuring intensities on an UPSCALED image is not defensible: the
+        # interpolated pixels carry no new photons, so the statistics are
+        # pseudoreplicated (reported SEM ~1.5x too confident) and small objects are
+        # biased low in a size-dependent way. Warn when that is about to happen and
+        # point at the tool that does it properly.
+        _cell_img_warn = QLabel("")
+        _cell_img_warn.setWordWrap(True)
+        cell_segmentation_layout.addWidget(_cell_img_warn)
+
+        def _check_upscaled_cell(*_a):
+            try:
+                nm = cell_segmentation_dropdown_images.currentText()
+                if nm and 'upscal' in nm.lower():
+                    _cell_img_warn.setText(
+                        "<span style='color:#e8a33d;font-size:9pt;'>\u26a0 This is an "
+                        "<b>upscaled</b> image. Intensities measured on interpolated "
+                        "pixels are pseudoreplicated (error bars come out too small) "
+                        "and bias small objects low. Prefer the original image, or "
+                        "use <i>Partial-Volume Measurement</i> to measure the "
+                        "upscaled segmentation on the original pixels.</span>")
+                else:
+                    _cell_img_warn.setText("")
+            except Exception:
+                pass
+
+        cell_segmentation_dropdown_images.currentTextChanged.connect(_check_upscaled_cell)
+        _check_upscaled_cell()
         cell_analysis_button = QPushButton("Run Cell Analyzer") # Create a button widget
         cell_analysis_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         def _on_cell_analysis():
