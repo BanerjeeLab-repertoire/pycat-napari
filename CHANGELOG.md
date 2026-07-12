@@ -4,6 +4,40 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.445] - 2026-07-10
+### FIXED — ``networkx`` was imported at module scope and never declared
+Chasing the CI dependency drift (1.5.442, 1.5.444) to its root: I compared **every** third-party
+import in the codebase against what ``pyproject.toml`` declares.
+
+**Thirteen packages are imported but not declared. Twelve of them are fine** — they are LAZY
+imports, inside the function that uses them (``cupy``, ``stardist``, ``imagej``, ``lumicks``,
+``h5py``, ``shapely``, ``tifffile``, …). A package imported inside a function is an *optional
+feature* that degrades gracefully when absent. That is a design choice, not a bug.
+
+**One is a real bug.** ``fibril_tools`` imports ``networkx`` at **module scope** — the
+skeleton-graph analysis is built on it — and it was **never declared**. It has worked everywhere
+only because ``scikit-image`` depends on networkx, so it arrives **transitively**. If skimage
+ever drops that dependency, **fibril analysis breaks for every user, on a clean install, with no
+warning.**
+
+*A transitive dependency you rely on is a dependency you have not declared.* Now declared.
+
+### Added — ``test_no_undeclared_module_scope_imports``
+A module-scope import is a **hard** requirement: it fails at import time, on a clean install,
+before any user code runs. Lazy imports are exempt, deliberately.
+
+Verified against the bug it was written for: remove the ``networkx`` declaration and it goes red
+(exit 1); restore it and the suite is green. **100/100 core tests passing.**
+
+### Note — the guard produced 23 files' worth of false positives, from a bug inside itself
+My first version mapped ``skimage`` → ``"scikit-image"`` while the declared set had already been
+normalised to ``scikit_image`` (hyphens to underscores). So ``skimage``, ``cv2`` and ``sklearn``
+— all three **correctly declared** — appeared as undeclared, in 23 files.
+
+**A normalisation mismatch inside the guard itself.** Caught because the number was
+*implausible*: three of the most obviously-declared packages in the project cannot all be
+missing. When a check fires on something that cannot be true, **the check is what is broken.**
+
 ## [1.5.444] - 2026-07-10
 ### FIXED — CI could not import three modules: ``scikit-learn`` was missing from the install
 ``segmentation_tools`` imports ``RandomForestClassifier`` at module scope, and

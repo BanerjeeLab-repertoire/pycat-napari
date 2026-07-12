@@ -158,3 +158,90 @@ def test_ci_installs_every_module_scope_dependency():
           "(largestinteriorrectangle in 1.5.442, scikit-learn in 1.5.444), both times "
           "because it was maintained by hand while the code moved underneath it."
     )
+
+
+# ── Undeclared module-scope imports: the bug that only appears on a clean install ────────
+
+# import name -> the pip name, NORMALISED the same way `_declared_packages` normalises
+# (lowercase, hyphens to underscores). A first version mapped `skimage` -> "scikit-image"
+# while the declared set held "scikit_image", so every one of them looked undeclared —
+# 23 files' worth of false positives from a normalisation mismatch inside the guard itself.
+_ALIAS = {
+    "skimage": "scikit_image",
+    "cv2": "opencv_python_headless",
+    "pywt": "pywavelets",
+    "SimpleITK": "simpleitk",
+    "sklearn": "scikit_learn",
+    "PIL": "pillow",
+    "yaml": "pyyaml",
+    "qtpy": "pyqt5",
+    "PyQt5": "pyqt5",
+}
+
+
+def _declared_packages():
+    import tomllib
+
+    data = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return {
+        re.split(r"[<>=!\[ ]", dep.strip())[0].lower().replace("-", "_")
+        for dep in data["project"]["dependencies"]
+    }
+
+
+@pytest.mark.core
+def test_no_undeclared_module_scope_imports():
+    """A package imported at module scope must be declared in pyproject.toml.
+
+    ``fibril_tools`` imported ``networkx`` at module scope and **never declared it**. It
+    worked everywhere only because ``scikit-image`` depends on networkx, so it arrived
+    **transitively** — and if skimage ever dropped that dependency, fibril analysis would
+    break for every user, on a clean install, with no warning.
+
+    **A transitive dependency you rely on is a dependency you have not declared.**
+
+    LAZY imports are exempt and deliberately so: a package imported *inside a function* is an
+    optional feature that degrades gracefully when it is absent (cupy, stardist, imagej,
+    lumicks). Twelve packages are used that way, and that is a design choice, not a bug. Only
+    a MODULE-SCOPE import is a hard requirement — it fails at import time, before any code the
+    user wrote has run.
+    """
+    import sys
+
+    declared = _declared_packages()
+    stdlib = set(sys.stdlib_module_names)
+
+    offenders = {}
+    for path in sorted((_ROOT / "src" / "pycat").rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+
+        for node in tree.body:                   # MODULE SCOPE only
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+
+            for name in names:
+                top = name.split(".")[0]
+                if top in stdlib or top == "pycat":
+                    continue
+                key = _ALIAS.get(top, top.lower().replace("-", "_"))
+                if key not in declared:
+                    offenders.setdefault(top, set()).add(path.name)
+
+    assert not offenders, (
+        "These packages are imported at MODULE SCOPE but are NOT declared in "
+        "pyproject.toml:\n  "
+        + "\n  ".join(f"{pkg}  ({', '.join(sorted(files))})"
+                      for pkg, files in sorted(offenders.items()))
+        + "\n\nA module-scope import is a HARD requirement — it fails at import time, on a "
+          "clean install, before any user code runs. `networkx` was undeclared for the life "
+          "of the project and worked only because scikit-image happens to depend on it. A "
+          "transitive dependency you rely on is a dependency you have not declared.\n\n"
+          "If the package is an OPTIONAL feature, move the import inside the function that "
+          "uses it — that is what the other twelve undeclared packages do, correctly."
+    )
