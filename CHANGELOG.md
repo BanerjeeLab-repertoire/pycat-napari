@@ -4,6 +4,52 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.410] - 2026-07-10
+### Fixed — ``pytest -m core`` still *collected* the GUI tests, and collection means importing
+Progress: 1.5.409's ``pip install --no-deps -e .`` worked, and **28 tests were selected**. But
+the run still aborted, because of a fact about pytest that is easy to get wrong:
+
+**Markers are applied AFTER collection, and collection means importing.** ``-m core`` does not
+stop pytest from importing every module under ``testpaths`` — it only *deselects* them
+afterwards. So a test module whose **module-scope** imports need napari or aicsimageio raises
+``ImportError`` during collection and aborts the entire run, no matter what the marker
+selects. 28 tests were selected and **none of them ever ran**.
+
+Five modules do this::
+
+    test_central_manager    -> napari
+    test_data_management    -> pycat.data.data_modules  -> napari
+    test_file_io            -> pycat.file_io.file_io    -> aicsimageio
+    test_materialize_stack  -> pycat.file_io.file_io    -> aicsimageio
+    test_run_pycat          -> pycat.run_pycat          -> napari
+
+New **``tests/conftest.py``** skips a test module that cannot be imported *because the GUI/IO
+stack is deliberately absent*, rather than treating it as an error. It **grows by itself** — a
+new GUI test does not need anyone to remember to add it to an ``--ignore`` list — and it is
+deliberately conservative: a module is skipped only when the package is *genuinely not
+installed* **and** that module imports it. A real import bug is still a hard failure.
+
+Verified in a simulated headless environment: **exactly the 5 that errored are skipped, the
+guard tests are kept**, and there are **zero collection errors** — 13 modules run, 2 skip
+cleanly through their own ``pytest.importorskip`` (``test_ui_smoke``, ``test_segmentation_refine``,
+which were already written correctly).
+
+**And the real science now runs headlessly:** ``test_coloc_metrics``, ``test_frap_fitting``,
+``test_partition``, ``test_vpt_viscosity_chain``, ``test_feature_analysis``,
+``test_image_processing``, ``test_vpt_parallel_equivalence``.
+
+### Note — I broke my own simulation twice while fixing this
+First, ``pytest`` is not installed in the sandbox, so *every* test module "failed" to import.
+Then I stubbed it — and stubbed ``importorskip`` as a plain import, which made
+``test_ui_smoke`` and ``test_segmentation_refine`` look broken when in fact **they were the
+two modules that already handled this correctly.** I nearly widened the conftest hook to
+"fix" two files that had nothing wrong with them.
+
+Same lesson as the ``sys.path.insert(0, 'src')`` habit that hid the 1.5.409 bug: **a
+simulation that differs from the real environment will invent failures as readily as it hides
+them.** The fix, both times, was to make the simulation faithful — block the module at the
+meta-path so it raises a genuine ``ImportError``; make ``importorskip`` genuinely skip.
+
 ## [1.5.409] - 2026-07-10
 ### Fixed — the CI never installed PyCAT
 The real cause, and it is embarrassingly basic: **PyCAT uses a src-layout**
