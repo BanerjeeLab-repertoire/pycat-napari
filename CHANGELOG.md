@@ -4,6 +4,128 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.380] - 2026-07-10
+### Fixed — the moduli plots manufactured an elastic modulus that was not measured
+The Evans conversion itself is correct and does **not** clip: ``g_prime_pa`` carries
+negative values through faithfully. **The plots did the damage.** Three separate ways,
+all of which turn an honest null result into an apparent measurement — and all of which
+bite hardest in exactly the regime PyCAT is used for.
+
+Biological condensates are **viscous-dominated** at accessible lag times (roughly water
+to well past honey). In that window there is little elasticity to measure, so the true
+G′ is ≈ 0 and **noise pushes it negative routinely**. On a synthetic η = 7 Pa·s medium —
+the regime of the validated ~8.3 Pa·s bead data — **11 of 20 G′ points come out negative,
+and 19 of 20 bootstrap confidence bands straddle zero.** That is correct physics: the
+data are consistent with *no measurable elasticity*.
+
+What the plots did with that:
+
+1. **Clipped the lines.** ``np.clip(g_prime, 1e-12, None)`` on a **log axis** mapped
+   every negative G′ to the floor and drew it as a positive point — rendering "the Evans
+   conversion is not locally valid here" as a tidy, everywhere-positive G′ curve.
+2. **Clipped the confidence bands** — the worse one. A bootstrap band whose lower bound
+   is negative *straddles zero*, i.e. the data cannot distinguish the modulus from zero.
+   Clipping that lower bound to 1e-12 makes the band appear to **exclude** zero,
+   converting "not significantly different from zero" into "significantly positive
+   elasticity".
+3. **Annotated a crossover from ``sign(G′ − G″)``.** Where G′ is noise about zero, that
+   sign flip is noise — so the figure could label a physically meaningless crossover
+   frequency.
+
+Fixed in both the consolidated panel and the standalone moduli window:
+
+- Negative moduli are **never clipped**. Only positive points are drawn (they are the
+  only ones representable on a log axis); the rest are marked with ``×`` at the axis
+  floor and counted in the legend (e.g. *"G′ (storage) [11/20 ≤ 0]"*).
+- **Confidence bands are drawn only where the whole band is positive.** Bands that
+  straddle zero are not drawn and are reported instead — because a band straddling zero
+  is a *result*, not a rendering problem.
+- **The crossover is annotated only where both moduli are positive**, so noise in G′
+  cannot be reported as a material crossover.
+- The figure carries a note stating that this is expected for a viscous-dominated medium,
+  and that **passive VPT cannot resolve a G′/G″ crossover in this regime — active
+  microrheology (optical tweezers) is the correct technique.**
+
+### Note — the VPT track-rejection concern was checked and is NOT supported
+The audit warned that ``compute_msd``'s IQR fence on first/last-lag MSD "risks selecting
+tracks based directly on the outcome variable" (MSD → D → viscosity). Tested against
+ground truth rather than assumed. On a synthetic mixed population the fence rejects:
+
+| population | rejection rate |
+|---|---|
+| honest **long** tracks | **2 %** |
+| honest **short** tracks | 22 % |
+| **mis-linked** tracks | **70 %** |
+
+It is not meaningfully selecting on the outcome: honest long tracks are rejected at the
+noise-tail rate of any IQR fence, and on clean Brownian data with no mis-links the filter
+biases D by only **+1.1 %** (viscosity −1.1 %). What it actually removes is mis-links —
+which is its stated purpose — and short tracks, which cannot constrain a viscoelastic
+response anyway. **No change made.** (The one regime where the short-track loss would
+matter — a G′/G″ crossover at short lag — is outside passive VPT's reach for these media
+regardless, and is properly addressed by active microrheology.)
+
+## [1.5.379] - 2026-07-10
+### Fixed — the SNR diagnostic told users that background subtraction destroys their data
+The audit flagged that SNR is computed as ``<signal> / sigma_bg`` without subtracting the
+background mean. Verified in ``pipeline_snr_tools`` — and the consequence is worse than a
+mislabelling.
+
+Because the background is not subtracted, the metric is **inflated by the camera
+pedestal**, which is an instrument constant with no physical content. Measured on a
+synthetic image with a real contrast of 50 over a noise σ of 5: adding an offset of
+0 / 100 / 500 / 2000 counts reported an "SNR" of **28 / 78 / 282 / 1049** — the identical
+image. It is therefore not comparable across cameras or across sessions.
+
+**The damage is not academic.** This module computes ``delta_snr`` *across preprocessing
+steps* to tell the user whether a step helped, and colours the table green or orange
+accordingly. Background subtraction **removes the pedestal** — so the tool reported
+**Δ = −257** for one of the most valuable steps in the pipeline, painting it as
+destructive, when the true contrast change was **+1.5**. A user following the tool's own
+advice would have turned background subtraction off.
+
+- The table now reports **CNR** = ``(<signal> − <background>) / sigma_bg`` — the
+  contrast-to-noise ratio, which is invariant to the camera offset (it reported ~27 in
+  all four cases above). Columns, colour-coding, and the "best step" summary are all
+  driven by CNR. Verified after the fix: background subtraction reads **+1.5**
+  (correctly neutral) and denoising reads **+40** (correctly a large win).
+- The old un-subtracted ratio is retained as ``snr_raw`` and labelled an
+  *intensity-to-noise ratio*, since it is a legitimate relative number *within* a single
+  image. The legacy ``snr`` key now carries the honest metric, so existing consumers are
+  corrected automatically.
+- (``data_qc_tools.qc_snr`` was also checked and is **not** affected — it uses a
+  percentile range, which is implicitly a contrast measure.)
+
+### Fixed — distribution model selection by R² on a histogram
+``fit_size_distribution`` chose between lognormal and power law with
+``preferred = 'lognormal' if r2_ln >= r2_pl else 'power_law'`` — R² computed on **binned
+counts**. Verified to be unreliable in exactly the way the audit describes: on data drawn
+from a **true power law**, it returns ``power_law`` at 8 bins and **``lognormal`` at 15,
+30 and 50 bins**. An arbitrary bin choice flips the scientific conclusion, and it flips
+it *toward* lognormal — so a genuine power law is the result most likely to be missed.
+Across 12 ground-truth cases it identified the correct distribution **25 %** of the time.
+
+- **New ``fit_size_distribution_mle``**: unbinned maximum-likelihood fitting of
+  lognormal, **gamma**, **Weibull**, exponential and power law, ranked by AIC and
+  compared with a **Vuong likelihood-ratio test**. Gamma and Weibull are included
+  deliberately — for coarsening droplets they are often better descriptions than a forced
+  lognormal-vs-power-law choice. **Whole-sample identification accuracy: 100 %** on the
+  same ground-truth cases.
+- **It reports when it cannot tell.** With few objects the honest answer is usually "these
+  data cannot distinguish these models"; ``distinguishable=False`` says so and the verdict
+  explicitly instructs the user not to report a preferred model as established.
+- **The power law is fitted by MLE above an estimated ``x_min``** (Clauset
+  KS-minimisation), and is reported **separately from the whole-sample ranking**, scoped
+  to its tail. This is deliberate and was learned the hard way: a version that let the
+  tail-only power law compete for "best model" reported **"power law" for data drawn from
+  lognormal, gamma AND exponential distributions**, because the upper tail of almost any
+  distribution is locally power-law-like. Adding a KS goodness-of-fit gate did **not** fix
+  it (those tails genuinely pass, p ≈ 0.6–0.8). Conflating "is the tail power-law-like
+  above a cut-off I chose?" with "what distribution are my sizes drawn from?" is how
+  spurious power laws get published; the two questions are now answered separately.
+- The old ``fit_size_distribution`` is retained (nothing breaks) but should be treated as
+  a **descriptive histogram fit**, not model selection.
+
 ## [1.5.378] - 2026-07-10
 ### Fixed — audit response: a projected area fraction was being reported as a volume fraction
 An external code audit flagged that 2-D analyses report ``total_area / field_area``

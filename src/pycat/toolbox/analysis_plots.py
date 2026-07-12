@@ -286,16 +286,71 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
 
 
 def _draw_moduli_into(ax, moduli_df):
-    """Draw G′/G″ (Evans) onto a supplied Axes (consolidated-panel version)."""
+    """Draw G′/G″ (Evans) onto a supplied Axes (consolidated-panel version).
+
+    Negative moduli are NOT clipped. The previous version did
+    ``np.clip(g_prime, 1e-12, None)`` on a log axis, which silently mapped every
+    negative G′ onto the bottom of the plot as a positive-looking point — turning
+    "the Evans conversion is not locally valid here" into a tidy curve that appears
+    to be a measured elastic modulus.
+
+    This matters most in exactly the regime PyCAT is used for. Biological condensates
+    are viscous-dominated at accessible lag times (roughly water-to-honey and beyond),
+    so the true G′ is small and any G′/G″ crossover lies outside the measurable
+    window. Noise therefore pushes G′ negative *routinely*, and that is the honest
+    signal: there is no measurable elasticity at that frequency. Drawing it as a
+    positive floor value manufactures the appearance of one.
+
+    So: valid (positive) points are drawn as a line; invalid (≤0) points are marked
+    at the axis floor with an open marker and counted in the legend.
+    """
     if moduli_df is None or not len(moduli_df):
         ax.text(0.5, 0.5, "No moduli", ha='center', va='center'); return
     d = moduli_df.sort_values('omega_rad_s')
     w = d['omega_rad_s'].values
-    ax.plot(w, np.clip(d['g_prime_pa'].values, 1e-12, None), '-o', ms=3,
-            color='#c44e52', label="G′ (storage)")
-    ax.plot(w, np.clip(d['g_double_prime_pa'].values, 1e-12, None), '-s', ms=3,
-            color='#4c72b0', label="G″ (loss)")
+
+    def _plot_modulus(vals, colour, marker, label):
+        vals = np.asarray(vals, dtype=float)
+        good = np.isfinite(vals) & (vals > 0)
+        bad = np.isfinite(vals) & (vals <= 0)
+        n_bad = int(bad.sum())
+        lab = label if not n_bad else f"{label}  [{n_bad}/{len(vals)} invalid]"
+        if good.any():
+            ax.plot(w[good], vals[good], '-' + marker, ms=3, color=colour, label=lab)
+        else:
+            # Nothing valid at all — still register the label so the reader knows.
+            ax.plot([], [], '-' + marker, ms=3, color=colour, label=lab)
+        return good, bad, n_bad
+
+    g1 = d['g_prime_pa'].values
+    g2 = d['g_double_prime_pa'].values
+    good1, bad1, nbad1 = _plot_modulus(g1, '#c44e52', 'o', "G′ (storage)")
+    good2, bad2, nbad2 = _plot_modulus(g2, '#4c72b0', 's', "G″ (loss)")
+
     ax.set_xscale('log'); ax.set_yscale('log')
+
+    # Mark the invalid points explicitly at the bottom of the axes, rather than
+    # pretending they are small positive numbers.
+    if bad1.any() or bad2.any():
+        try:
+            ymin = ax.get_ylim()[0]
+            if bad1.any():
+                ax.plot(w[bad1], np.full(bad1.sum(), ymin), 'x', ms=6,
+                        color='#c44e52', alpha=0.8, clip_on=False)
+            if bad2.any():
+                ax.plot(w[bad2], np.full(bad2.sum(), ymin), 'x', ms=6,
+                        color='#4c72b0', alpha=0.8, clip_on=False)
+            ax.text(0.02, 0.02,
+                    "×  modulus ≤ 0 — Evans conversion not locally valid\n"
+                    "    (expected where the material is viscous-dominated:\n"
+                    "     there is no measurable elasticity at that frequency).\n"
+                    "    Passive VPT cannot resolve a G′/G″ crossover here —\n"
+                    "    use active microrheology (optical tweezers) for that.",
+                    transform=ax.transAxes, ha='left', va='bottom', fontsize=6.5,
+                    color='#999')
+        except Exception:
+            pass
+
     ax.set_xlabel("angular frequency ω (rad/s)"); ax.set_ylabel("modulus (Pa)")
     ax.set_title("Complex moduli G′/G″ — Evans method", fontweight='bold')
     ax.grid(True, which='both', alpha=0.15); ax.legend(fontsize=8)
@@ -422,36 +477,84 @@ def plot_moduli(moduli_df, title="Complex moduli G′/G″ — Evans method (mic
     gp = d['g_prime_pa'].values
     gpp = d['g_double_prime_pa'].values
 
-    # Optional bootstrap confidence bands (drawn only if the columns are present,
-    # produced by compute_moduli_evans_bootstrap). Shaded region behind the lines.
-    if {'g_prime_lo', 'g_prime_hi'}.issubset(d.columns):
-        ax.fill_between(w, np.clip(d['g_prime_lo'].values, 1e-12, None),
-                        np.clip(d['g_prime_hi'].values, 1e-12, None),
-                        color='#c44e52', alpha=0.18, linewidth=0)
-    if {'g_double_prime_lo', 'g_double_prime_hi'}.issubset(d.columns):
-        ax.fill_between(w, np.clip(d['g_double_prime_lo'].values, 1e-12, None),
-                        np.clip(d['g_double_prime_hi'].values, 1e-12, None),
-                        color='#4c72b0', alpha=0.18, linewidth=0)
+    # NOTHING here is clipped onto the log axis. Three separate ways the previous
+    # version turned a null result into an apparent measurement:
+    #
+    #  1. The CI BANDS were clipped: np.clip(g_prime_lo, 1e-12, None). A bootstrap
+    #     band whose lower bound is NEGATIVE straddles zero -- the data are consistent
+    #     with NO elasticity. Clipping the lower bound to 1e-12 makes the band appear
+    #     to EXCLUDE zero, converting "not significantly different from zero" into
+    #     "significantly positive".
+    #  2. The LINES were clipped, drawing negative G' as points on the floor.
+    #  3. The CROSSOVER was annotated from sign(G' - G''). Where G' is noise about
+    #     zero, that sign flip is noise, and the figure would label a physically
+    #     meaningless crossover frequency.
+    #
+    # This matters because PyCAT's media are viscous-dominated (biological condensates
+    # run from about water to well past honey): G' is genuinely ~0 in the accessible
+    # window and negative values are EXPECTED. Passive VPT cannot resolve a G'/G''
+    # crossover in that regime; active microrheology (optical tweezers) is the correct
+    # technique, and a future module will cover it.
+    gp_arr = np.asarray(gp, dtype=float)
+    gpp_arr = np.asarray(gpp, dtype=float)
+    gp_ok = gp_arr > 0
+    gpp_ok = gpp_arr > 0
 
-    # only positive values are meaningful on log axes
-    ax.plot(w, np.clip(gp, 1e-12, None), '-o', ms=4, color='#c44e52',
-            label="G′ (storage / elastic)")
-    ax.plot(w, np.clip(gpp, 1e-12, None), '-s', ms=4, color='#4c72b0',
-            label="G″ (loss / viscous)")
+    def _band(lo_c, hi_c, colour):
+        if not {lo_c, hi_c}.issubset(d.columns):
+            return 0
+        lo = d[lo_c].values.astype(float)
+        hi = d[hi_c].values.astype(float)
+        drawable = (lo > 0) & (hi > 0)
+        if drawable.any():
+            ax.fill_between(w[drawable], lo[drawable], hi[drawable],
+                            color=colour, alpha=0.18, linewidth=0)
+        return int(((lo <= 0) & (hi > 0)).sum())
 
-    # crossover annotation
+    n_straddle = _band('g_prime_lo', 'g_prime_hi', '#c44e52')
+    _band('g_double_prime_lo', 'g_double_prime_hi', '#4c72b0')
+
+    if gp_ok.any():
+        _lab = "G\u2032 (storage / elastic)"
+        if (~gp_ok).any():
+            _lab += f"  [{int((~gp_ok).sum())}/{len(gp_arr)} \u2264 0]"
+        ax.plot(w[gp_ok], gp_arr[gp_ok], '-o', ms=4, color='#c44e52', label=_lab)
+    else:
+        ax.plot([], [], '-o', ms=4, color='#c44e52',
+                label=f"G\u2032 \u2014 all {len(gp_arr)} points \u2264 0 (no measurable elasticity)")
+    if gpp_ok.any():
+        ax.plot(w[gpp_ok], gpp_arr[gpp_ok], '-s', ms=4, color='#4c72b0',
+                label="G\u2033 (loss / viscous)")
+
+    # Crossover: only where BOTH moduli are positive, so a sign flip of noise in G'
+    # cannot be reported as a material crossover.
     try:
-        diff = gp - gpp
-        sign = np.sign(diff)
-        idx = np.where(np.diff(sign) != 0)[0]
-        if idx.size:
-            k = idx[0]
-            wc = w[k]
-            ax.axvline(wc, color='0.5', ls=':', lw=1)
-            ax.text(wc, ax.get_ylim()[0], f"  crossover ≈ {wc:.2g} rad/s",
-                    fontsize=8, color='0.4', rotation=90, va='bottom')
+        both = gp_ok & gpp_ok
+        if both.sum() >= 2:
+            ww = w[both]
+            diff = gp_arr[both] - gpp_arr[both]
+            idx = np.where(np.diff(np.sign(diff)) != 0)[0]
+            if idx.size:
+                wc = ww[idx[0]]
+                ax.axvline(wc, color='0.5', ls=':', lw=1)
+                ax.text(wc, ax.get_ylim()[0], f"  crossover \u2248 {wc:.2g} rad/s",
+                        fontsize=8, color='0.4', rotation=90, va='bottom')
     except Exception:
         pass
+
+    if (~gp_ok).any() or n_straddle:
+        _msg = []
+        if (~gp_ok).any():
+            _msg.append(f"{int((~gp_ok).sum())}/{len(gp_arr)} G\u2032 points \u2264 0 \u2014 not "
+                        f"plottable; Evans conversion not locally valid there.")
+        if n_straddle:
+            _msg.append(f"{n_straddle} G\u2032 CI band(s) straddle zero \u2014 consistent "
+                        f"with NO elasticity.")
+        _msg.append("Expected for a viscous-dominated medium. Passive VPT cannot "
+                    "resolve a G\u2032/G\u2033 crossover \u2014 use active microrheology.")
+        ax.text(0.02, 0.02, "\n".join(_msg), transform=ax.transAxes,
+                ha='left', va='bottom', fontsize=6.5, color='#c44e52',
+                bbox=dict(boxstyle='round', fc='#fff5f5', ec='#c44e52', alpha=0.85))
 
     ax.set_xscale('log'); ax.set_yscale('log')
     ax.set_xlabel("angular frequency ω (rad/s)")
