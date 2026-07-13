@@ -4,6 +4,46 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.523] - 2026-07-13
+### CRITICAL — Cellpose segmentation was completely dead on Cellpose < 4
+```python
+if _cellpose_major_version() >= 4:
+    from cellpose import models              # <-- imported HERE
+    model = models.CellposeModel(...)
+else:
+    model = models.CellposeModel(...)        # <-- used HERE. Never imported.
+```
+
+**Every Cellpose 3.x install** — which is most of them — took the ``else`` branch and died:
+
+```
+UnboundLocalError: cannot access local variable 'models'
+```
+
+**Cell segmentation did not work at all.** Reported by Meet; reproduced exactly by stubbing
+cellpose 3.1.0.
+
+**Fixed** — the import moved **above** the branch, where both paths can see it. Verified on both:
+
+| version | API used | result |
+|---|---|---|
+| **Cellpose 3.x** | ``model_type='cyto2'`` | **works** *(was crashing)* |
+| **Cellpose 4.x** | ``pretrained_model='cpsam'`` | **works** |
+
+### And `test_no_undefined_names` CANNOT catch this — which is the real lesson
+``models`` **IS** bound — just in a branch that may not run. **A scope-chain checker sees a binding
+and stops.**
+
+***It is not a scoping bug. It is a control-flow bug, and it needed its own guard.***
+
+``test_conditional_imports`` now walks every function's AST and asks: **is any name imported inside
+one arm of a branch and used inside another?** That is an ``UnboundLocalError`` for exactly the
+users who take the other path — *and it looks perfectly fine to every other check we have.*
+
+**Verified by re-introducing the bug and watching the guard fire.**
+
+**329/329 core tests passing.**
+
 ## [1.5.522] - 2026-07-13
 ### `extend_mask_to_edges` wrote into the CALLER's array — and returned the same object
 ```python

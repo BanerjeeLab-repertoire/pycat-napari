@@ -180,6 +180,21 @@ def _build_cellpose_model(model_name):
     except Exception:
         pass
 
+    # ── ``models`` was imported INSIDE the Cellpose-4 branch only ────────────────
+    #
+    # ``from cellpose import models`` sat inside ``if _cellpose_major_version() >= 4:``, and the
+    # ``else`` branch — **every Cellpose 3.x install** — then called ``models.CellposeModel(...)``
+    # with nothing having imported it.
+    #
+    #     UnboundLocalError: cannot access local variable 'models'
+    #
+    # **Cell segmentation was completely dead on Cellpose < 4**, which is what most users have.
+    # The import belongs **above** the branch, where both paths can see it.
+    #
+    # *(Reported by Meet, 2026-07-13. Reproduced by stubbing cellpose 3.1.0 — the traceback is
+    # identical.)*
+    from cellpose import models
+
     if _cellpose_major_version() >= 4:
         # Cellpose 4+: legacy names don't exist; fall back to cpsam explicitly.
         name = model_name if model_name in available_cellpose_models() else 'cpsam'
@@ -194,7 +209,6 @@ def _build_cellpose_model(model_name):
                     "cellpose<4 (pip install 'cellpose<4').")
             except Exception:
                 pass
-        from cellpose import models
         model = models.CellposeModel(gpu=gpu, pretrained_model=name)
     else:
         # Cellpose <4: builtin CNNs are selected via model_type.
