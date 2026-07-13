@@ -196,9 +196,25 @@ def _wrap(viewer, original, layer_type):
             if op and get_operation(op):
                 tag_layer(layer, 'op', op, source='derived')     # definitional, not a guess
             else:
-                guessed = _op_from_name(name)
-                if guessed and get_operation(guessed):
-                    tag_layer(layer, 'op', guessed, source='inferred')
+                op = _op_from_name(name)
+                if op and get_operation(op):
+                    tag_layer(layer, 'op', op, source='inferred')
+                else:
+                    op = None
+
+            # ── The TARGET comes with the operation, and was being dropped ───────
+            #
+            # The registry already knows that `cellpose` produces CELLS and `bead_detect`
+            # produces BEADS — it is declared on the decorator. The hook was tagging the `op` and
+            # **throwing the target away**, so a step asking for "the cell labels"
+            # (role=labels, target=cell) found NOTHING, even with a Cellpose layer sitting right
+            # there.
+            #
+            # The information existed. It just was not being carried the last inch.
+            if op:
+                entry = get_operation(op)
+                if entry and entry.get('target'):
+                    tag_layer(layer, 'target', entry['target'], source='derived')
 
         except Exception as exc:
             # A tagging failure must NEVER stop a layer being added. The user's data comes first.

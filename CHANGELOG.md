@@ -4,6 +4,72 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.498] - 2026-07-10
+### Autopopulation — the payoff the tag vocabulary was built for
+Every workflow step in PyCAT has a layer dropdown, and **the user fills every one of them by hand,
+in every step, on every run.** ``field_status`` tracks *whether* a dropdown is filled; **nothing
+fills it.**
+
+Now a step **declares what it needs**, in tags, and the resolver finds it:
+
+| what the step wants | the query |
+|---|---|
+| the raw image | ``role=image, provenance=raw`` |
+| the cell labels | ``role=labels, target=cell`` |
+| the CLAHE result | ``op=clahe`` |
+| the most recent mask | ``role=mask, prefer=newest`` |
+
+### The thing that must not happen
+**A wrong auto-selection the user does not notice is worse than an empty dropdown.** They run the
+analysis on the wrong layer, get a number, and **never know.**
+
+So the resolver returns a **confidence** and a **reason**:
+
+| confidence | meaning | what the UI does |
+|---|---|---|
+| **certain** | exactly one layer matches | auto-select it |
+| **likely** | several match, one is clearly best | pre-select, **and say so** |
+| **ambiguous** | several match, no clear winner | **do not choose** — name them |
+| **none** | nothing matches | say what was looked for |
+
+*This is the same principle as the brushing refusal and the same principle as "an absent tag is
+honest; a guessed one is a lie". **It keeps coming up because it is the same mistake wearing
+different clothes.***
+
+### The binding table is DATA, not code
+``layer_bindings.json`` — **14 bindings**, and **3 are deliberately ambiguous.** The
+colocalization channels are the clearest case: with two channel masks present, choosing one is a
+**coin flip**, and *a colocalization run on the wrong pairing gives a number that looks fine.*
+**Leaving ``prefer`` out is how that is said.**
+
+### FOUND — the registry knew the target, and the hook was throwing it away
+The registry declares that ``cellpose`` produces **cells** and ``bead_detect`` produces **beads**.
+The hook tagged the ``op`` and **dropped the target** — so a step asking for *"the cell labels"*
+(``role=labels, target=cell``) found **nothing**, with a Cellpose layer sitting right there.
+
+**The information existed. It was not being carried the last inch.**
+
+### FOUND — an empty lineage graph is not evidence of anything
+``prefer='head_of_lineage'`` looked for layers with no lineage **edge**, and returned the most
+recently added **derived** layer as "the source" — because **no edges exist at all.** The hook
+cannot record a parent: by the time a UI calls ``add_image(result)``, the transform that made
+``result`` has already returned.
+
+**But the hook knows something better** — whether a layer was the first image into an empty viewer
+(``provenance='raw'``). That answers the question **with certainty** rather than inferring it from
+an absence.
+
+*An empty graph is not evidence that a layer is a source. It is evidence that nobody recorded the
+lineage.*
+
+### And the binding table would NOT have shipped
+It was not in ``package-data``. The resolver falls back to an empty table when the JSON cannot be
+loaded — so **every dropdown would have silently stopped autopopulating in the installed package,
+while working perfectly in the repo.** *That is the worst kind of bug: it cannot be reproduced by
+the person who wrote it.* Fixed and guarded.
+
+**285/285 core tests passing.**
+
 ## [1.5.497] - 2026-07-10
 ### Three plotting backends, addressable the same way — and the difference is **not cosmetic**
 Brushing needs three things from a plot: an **artist** whose elements map 1:1 to the rows, a

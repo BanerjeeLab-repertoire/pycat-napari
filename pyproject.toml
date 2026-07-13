@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.497"
+version = "1.5.498"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -195,6 +195,10 @@ exclude = [
 
 [tool.hatch.build.targets.wheel.package-data]
 pycat = [
+    # The layer-binding table. **It is DATA, and it must ship** — without it the resolver falls
+    # back to an empty table and every dropdown stops autopopulating, silently, in the installed
+    # package while working perfectly in the repo.
+    "src/pycat/utils/*.json",
     "src/pycat/icons/*.png",
     "LICENSE",
     "README.md", 

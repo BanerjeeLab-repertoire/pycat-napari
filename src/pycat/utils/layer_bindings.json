@@ -1,0 +1,100 @@
+{
+  "_comment": [
+    "WHICH LAYER SHOULD EACH STEP'S DROPDOWN AUTO-SELECT?",
+    "",
+    "A step declares WHAT IT NEEDS, in tags, and the resolver finds it. This file is the",
+    "declaration -- it is data, not code, so a step's binding can be corrected without touching",
+    "the UI that reads it.",
+    "",
+    "Each entry is a TAG QUERY. 'prefer' decides what happens when several layers match:",
+    "  newest           the one you just made -- the sane default for a mask or a filtered image",
+    "  oldest           the first",
+    "  head_of_lineage  the SOURCE (provenance=raw), i.e. the original acquisition",
+    "  (absent)         AMBIGUOUS -- several match, and NOTHING is chosen",
+    "",
+    "That last one is the important one. **A wrong auto-selection the user does not notice is",
+    "worse than an empty dropdown** -- they run the analysis on the wrong layer and never know.",
+    "So a binding without a 'prefer' will refuse to guess, and say why.",
+    "",
+    "The keys are '<ui_module>.<field>'. A field with no entry here is simply not autopopulated,",
+    "which is the correct behaviour for anything genuinely ambiguous."
+  ],
+
+  "common.raw_image": {
+    "role": "image",
+    "provenance": "raw",
+    "prefer": "head_of_lineage",
+    "why": "The original acquisition, before anything was done to it."
+  },
+  "common.preprocessed_image": {
+    "role": "image",
+    "prefer": "newest",
+    "why": "The most recent image -- usually the one you just filtered."
+  },
+  "common.mask": {
+    "role": "mask",
+    "prefer": "newest",
+    "why": "The most recent binary mask."
+  },
+  "common.labels": {
+    "role": "labels",
+    "prefer": "newest",
+    "why": "The most recent labelled objects."
+  },
+
+  "cell_segmentation.input_image": {
+    "role": "image",
+    "prefer": "newest",
+    "why": "Cellpose runs on the preprocessed image if there is one, otherwise the raw."
+  },
+  "cell_segmentation.cell_labels": {
+    "role": "labels",
+    "target": "cell",
+    "prefer": "newest",
+    "why": "The cell labels -- tagged target=cell by cellpose or multi_otsu."
+  },
+
+  "puncta_analysis.input_image": {
+    "role": "image",
+    "prefer": "newest",
+    "why": "Puncta detection wants the enhanced image (LoG / DoG), not the raw."
+  },
+  "puncta_analysis.cell_labels": {
+    "role": "labels",
+    "target": "cell",
+    "prefer": "newest",
+    "why": "Puncta are assigned to their parent cell, so the cell labels are needed."
+  },
+  "puncta_analysis.puncta_mask": {
+    "role": "mask",
+    "target": "punctum",
+    "prefer": "newest",
+    "why": "The puncta mask."
+  },
+
+  "vpt.bead_stack": {
+    "role": "bead_stack",
+    "why": "The bead movie. There is normally exactly one, so no preference is needed -- and if there are two, the user should choose."
+  },
+  "vpt.host_mask": {
+    "role": "host_mask",
+    "prefer": "newest",
+    "why": "The condensate the beads are inside."
+  },
+
+  "brightfield.input_image": {
+    "role": "image",
+    "modality": "brightfield",
+    "prefer": "newest",
+    "why": "A brightfield image -- DARK objects on a bright field. The tag matters: running the brightfield path on a fluorescence image gives plausible-looking nonsense."
+  },
+
+  "colocalization.channel_a": {
+    "role": "mask",
+    "why": "The first channel's mask. NO preference: with two channels present, choosing one would be a coin flip -- and a colocalization run on the wrong pairing gives a number that looks fine."
+  },
+  "colocalization.channel_b": {
+    "role": "mask",
+    "why": "The second channel's mask. Deliberately ambiguous for the same reason."
+  }
+}
