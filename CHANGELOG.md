@@ -4,6 +4,54 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.506] - 2026-07-13
+### THREE panels reported LENGTHS with no pixel-size gate
+**A pixel size of 1 is a CLAIM about the microscope, not an absence of one.**
+
+``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and **1 µm/px is a
+plausible value, not an obviously-wrong one.** So a length silently comes out in **pixels, labelled
+as microns**, and nothing says so.
+
+``utils/pixel_size.py`` puts it exactly:
+
+> *"A NaN area is visibly wrong; a 1435× overestimate is not."*
+
+**That module exists to guard this, and it has 2 call sites — while 48 sites read the pixel size
+raw.** The gate in ``field_status`` is the UI-level backstop, and **three panels that report
+lengths did not have it:**
+
+- **``spatial_metrology_ui``** — nearest-neighbour distances, Ripley's L, the pair-correlation
+  function. ***Every single output is a length.***
+- **``advanced_analysis_ui``** — the main cellular puncta/condensate workflow, reporting areas.
+- **``condensate_physics_ui``** — emits ``eta_over_gamma_s_per_um``, **the inverse capillary
+  velocity** — *the leg of the chain that gives you γ* — and ``mean_condensate_area_um2``. **Both
+  scale with the pixel size.**
+
+All three now carry it.
+
+### And the STRUCTURE that let it happen: **eight names for one quantity**
+| name | uses |
+|---|---|
+| ``microns_per_pixel`` | 45 |
+| ``px_size_um`` | 4 |
+| **``microns_per_pixel_sq``** | **4** |
+| ``microns_per_px`` | 2 |
+| ``mpp`` | 2 |
+| ``micron_resolution``, ``pixel_size_um``, ``pixel_size_z_um`` | 1 each |
+
+**One of them is SQUARED.** ``microns_per_pixel`` and ``microns_per_pixel_sq`` differ by a square,
+and passing the wrong one puts every area out by a factor of the pixel size.
+
+*(Audited: both call sites that convert between them do ``sqrt`` correctly. **No live unit bug** —
+but eight names for one physical quantity is how the next one gets in.)*
+
+### GUARDED
+A test now fails any ``*_ui.py`` that emits a ``_um`` / ``_um2`` column and lacks the gate, unless
+it is on an explicit allow-list of panels that genuinely report no lengths. **If the list grows,
+the guard is being eroded by exception.**
+
+**302/302 core tests passing.**
+
 ## [1.5.505] - 2026-07-13
 ### HEALTH AUDIT — three real bugs, and the structure that produced them
 

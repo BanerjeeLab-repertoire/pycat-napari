@@ -9,6 +9,8 @@ Tabbed widget for:
 """
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -51,6 +53,24 @@ def _fit_tab_height(tabs):
 
 def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     outer = QVBoxLayout()
+    # ── The pixel-size gate: eta/gamma and the condensate AREA both scale with it ──
+    #
+    # This panel emits ``eta_over_gamma_s_per_um`` — the **inverse capillary velocity**, which
+    # is the leg of the chain that gives you gamma — and ``mean_condensate_area_um2``.
+    # **Both scale with the pixel size**, and it defaults to 1 um/px when the metadata does
+    # not carry it.
+    #
+    # **1 um/px is a plausible value, not an obviously-wrong one**, so the number comes out
+    # in pixels labelled as microns and nothing says so.
+    try:
+        from pycat.ui.field_status import add_pixel_size_gate
+        add_pixel_size_gate(
+            outer,
+            lambda: ui_instance.central_manager.active_data_class.data_repository,
+            central_manager=ui_instance.central_manager)
+    except Exception as _exc:
+        debug_log('condensate_physics_ui: the pixel-size gate could not be added', _exc)
+
     outer.setSpacing(6)
     outer.setContentsMargins(2, 2, 2, 2)
     # Top-level section header sized to match the enumerated step titles (14px).

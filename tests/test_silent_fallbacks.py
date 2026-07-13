@@ -242,3 +242,70 @@ def test_the_stack_helpers_have_ONE_implementation():
         f"implementations of the function that fixes the lazy-stack bug** is how that bug "
         f"survives a fix: patch one copy, miss the other."
     )
+
+
+# ── The pixel size: a default of 1 is a CLAIM, not an absence ─────────────────────────────
+
+_NO_PIXEL_GATE_NEEDED = {
+    # UIs that report NO physical length or area. Each is a deliberate exclusion, and the list is
+    # short on purpose: **if it grows, the guard is being eroded by exception.**
+    'contrast_cascade_ui.py',      # preprocessing only — emits images, not measurements
+    'data_qc_ui.py',               # QC verdicts, no lengths
+    'fd_curve_ui.py',              # force/extension come from the instrument, not the pixel size
+    'fusion_ui.py',                # aspect ratios — dimensionless
+    'coloc_ui.py',                 # overlap coefficients — dimensionless
+    'nb_ui.py',                    # brightness/number — no lengths
+    'spida_ui.py',                 # brightness — no lengths
+    'molecular_counting_ui.py',    # counts — no lengths
+    'topology_ui.py',              # normalised envelope metrics
+    'fibril_ui.py',                # takes px_size_um explicitly as a parameter
+}
+
+
+@pytest.mark.core
+def test_every_UI_that_reports_a_LENGTH_has_the_pixel_size_gate():
+    """**A pixel size of 1 is a CLAIM about the microscope, not an absence of one.**
+
+    ``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and **1 µm/px
+    is a plausible value**, not an obviously-wrong one. So a length silently comes out in
+    **pixels, labelled as microns**, and nothing says so.
+
+    ``utils/pixel_size.py`` puts it exactly:
+
+        *"A NaN area is visibly wrong; a 1435× overestimate is not."*
+
+    That module exists to guard this, and it has **2 call sites** — while **48 sites read the
+    pixel size raw**, defaulting to 1. The gate in ``field_status`` is the UI-level backstop, and
+    **two panels that report nothing BUT lengths did not have it**:
+
+    * ``spatial_metrology_ui`` — nearest-neighbour distances, Ripley's L, the pair-correlation
+      function. **Every single output is a length.**
+    * ``advanced_analysis_ui`` — the main cellular puncta/condensate workflow, reporting areas.
+
+    Both now carry it.
+    """
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    missing = []
+    for path in sorted(toolbox.glob("*_ui.py")):
+        if path.name in _NO_PIXEL_GATE_NEEDED:
+            continue
+
+        source = path.read_text(encoding='utf-8', errors='ignore')
+
+        # Does this panel report a physical length or area?
+        import re
+        reports_length = bool(re.search(r"['\"][a-z_0-9]+_um2?3?['\"]", source))
+        if not reports_length:
+            continue
+
+        if 'add_pixel_size_gate' not in source:
+            missing.append(path.name)
+
+    assert not missing, (
+        f"these UIs report a physical length or area and have NO pixel-size gate: {missing}\n\n"
+        f"The pixel size defaults to 1 um/px when the metadata does not carry it — a PLAUSIBLE "
+        f"value, not an obviously-wrong one — so every length silently comes out in pixels "
+        f"labelled as microns. Add `add_pixel_size_gate`, or add the file to "
+        f"_NO_PIXEL_GATE_NEEDED **with a reason** if it genuinely reports no lengths."
+    )

@@ -9,6 +9,8 @@ condensate analysis (dynamic).
 """
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -52,6 +54,23 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     """
     outer = QVBoxLayout()
     ui_instance.add_text_label(outer, 'Advanced Condensate Analysis', bold=True)
+
+    # ── The pixel-size gate: this panel reports AREAS and DISTANCES in microns ──
+    #
+    # ``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and
+    # **1 um/px is a plausible value, not an obviously-wrong one.** So an area silently comes out
+    # in PIXELS-squared, labelled as microns-squared, and nothing says so.
+    #
+    # ``utils/pixel_size.py`` puts it exactly: *"A NaN area is visibly wrong; a 1435x
+    # overestimate is not."* Eight UIs already carry this gate; this one did not.
+    try:
+        from pycat.ui.field_status import add_pixel_size_gate
+        add_pixel_size_gate(
+            outer,
+            lambda: ui_instance.central_manager.active_data_class.data_repository,
+            central_manager=ui_instance.central_manager)
+    except Exception as _exc:
+        debug_log('advanced_analysis_ui: the pixel-size gate could not be added', _exc)
 
     # Fully-optional block: hidden by default behind an off-by-default checkbox.
     from PyQt5.QtWidgets import QCheckBox as _QCheckBox

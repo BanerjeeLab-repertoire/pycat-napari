@@ -11,6 +11,8 @@ Sits in the Condensate Analysis pipeline after Condensate Analysis has run
 from __future__ import annotations
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -438,6 +440,26 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
     outer  = QVBoxLayout(widget)
     outer.setSpacing(6)
     outer.setContentsMargins(2, 2, 2, 2)
+
+    # ── The pixel-size gate: EVERY output of this panel is a LENGTH ─────────────
+    #
+    # ``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and
+    # **1 µm/px is a plausible value, not an obviously-wrong one.** So a length silently comes out
+    # in PIXELS, labelled as MICRONS, and nothing says so.
+    #
+    # ``utils/pixel_size.py`` puts it exactly: *"A NaN area is visibly wrong; a 1435x overestimate
+    # is not."*
+    #
+    # Eight UIs already carry this gate. This one did not — and it is the one where it matters
+    # most, because there is no output here that is NOT a length.
+    try:
+        from pycat.ui.field_status import add_pixel_size_gate
+        add_pixel_size_gate(
+            outer,
+            lambda: ui_instance.central_manager.active_data_class.data_repository,
+            central_manager=ui_instance.central_manager)
+    except Exception as _exc:
+        debug_log('spatial_metrology_ui: the pixel-size gate could not be added', _exc)
     if _step_hdr is not None:
         outer.addWidget(_step_hdr)
     # Optional block: reveal checkbox (off by default) shows/hides the analysis box.
