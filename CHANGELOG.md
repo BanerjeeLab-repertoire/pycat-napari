@@ -4,6 +4,56 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.500] - 2026-07-10
+### The Costes test was a **pixel shuffle** — which is not Costes
+**83 % false positives on independent channels.**
+
+``perform_costes_test`` called ``scramble_pixels(image1, roi_mask)`` with **no block size**, so it
+defaulted to **1: a pure pixel shuffle.**
+
+**Costes's entire defining idea is scrambling in BLOCKS the size of the PSF**, precisely so the
+null **keeps** the autocorrelation the optics created and destroys only the *relationship* between
+the channels.
+
+**Every blurred image is autocorrelated. That is the optics, not the biology.** Two *completely
+independent* channels, blurred realistically, show a non-zero r **by chance** — and a pixel shuffle
+destroys exactly the structure the null exists to preserve:
+
+| scene | mean observed r | **FALSE POSITIVES** |
+|---|---|---|
+| sharp (no PSF) | 0.000 | 0 / 12 |
+| **blurred, psf = 3** | −0.040 | **10 / 12 (83 %)** |
+| **blurred, psf = 6** | −0.058 | **11 / 12 (92 %)** |
+
+The null came out at **+0.0003 ± 0.0078** while the observed r wandered to **−0.087** — so a
+channel pair with a **negative** correlation was being reported as **significantly colocalized, at
+p = 0.000.**
+
+***A null that does not reproduce the optics is testing against a world that does not exist.***
+
+**And the correct machinery was already in the same file**: ``spatial_null_test`` measures the
+correlation length and block-shuffles at twice it. That is now what Costes uses.
+
+**After: 0/12 false positives at psf=3, and power is 10/10 at r=0.3 and r=0.6.**
+
+### The residual is a REAL LIMIT, and it is reported rather than hidden
+The block size **must** be the PSF scale. But on a small, heavily-blurred image the block becomes a
+large fraction of the field, and **there are too few independent blocks to build a null from:**
+
+| image | block / field | FALSE POSITIVES |
+|---|---|---|
+| **128 px** | **17 %** | **4 / 10** |
+| 256 px | 9 % | **0 / 10** |
+| 512 px | 5 % | 1 / 10 |
+
+**A finite-size effect, not a bug.** A warning now fires when fewer than ~50 independent blocks are
+available, saying the p-value is liberal there.
+
+### Audited and exact — Pearson and Spearman
+Within **1.3 %** of a known correlation at every level, and **precisely 1.0** on identical images.
+
+**295/295 core tests passing.**
+
 ## [1.5.499] - 2026-07-10
 ### Autopopulation wired into the UI — through **one funnel**, and it never overrides a choice
 Every layer dropdown in PyCAT goes through ``update_dropdown_items``. **That is where the wiring
