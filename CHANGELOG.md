@@ -4,6 +4,65 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.497] - 2026-07-10
+### Three plotting backends, addressable the same way — and the difference is **not cosmetic**
+Brushing needs three things from a plot: an **artist** whose elements map 1:1 to the rows, a
+**pick event** that reports *which* element was clicked, and somewhere to hang the **ObjectRefs**.
+
+| backend | how a click reports a row | what it costs |
+|---|---|---|
+| **matplotlib** | ``mpl_connect('pick_event')`` → ``ind`` | nothing |
+| **seaborn** | **it IS matplotlib** — same canvas, same event | nothing; the artist must be found inside the Axes |
+| **plotly** | a **JavaScript** callback in a browser | **a Python↔JS bridge** |
+
+### The one thing every backend must get right
+**Do the artist's points still correspond, IN ORDER, to the DataFrame's rows?**
+
+If a library reorders, groups or drops rows while drawing, then *"point 3"* is not *"row 3"* — and
+a click resolves to **the wrong object, lands, and says nothing.**
+
+**That is not hypothetical.** PyCAT's own ``plot_focus_diagnostic`` groups by interpretation and
+draws each group as a separate artist; a naive index map there **would** have pointed at the wrong
+condensate.
+
+So the order is **verified at wire time, not assumed** — and when it cannot be trusted, **brushing
+is refused.** Tested with a deliberately shuffled artist: **caught.**
+
+### Seaborn was nearly free — and its safety was VERIFIED, not assumed
+Seaborn is a matplotlib front end: the same canvas, the same pick event. The real question was
+whether ``hue`` **splits the data into one artist per level** — in which case an index into one
+artist is an index into a **subset**, not into the table.
+
+**Tested: modern seaborn keeps one collection, in DataFrame order.** And the test is what keeps
+that true — *if a future seaborn changes, it fails there rather than silently pointing every click
+at the wrong object.*
+
+### Plotly is integrated HONESTLY
+A click inside a plotly figure lives in **JavaScript**. Reaching napari needs a
+``QWebEngineView`` + ``QWebChannel`` — **a heavy dependency (~100 MB) and a real Qt risk in an app
+that already has a user hitting OpenGL/Qt rendering failures.**
+
+So the identity goes where it works **with no bridge at all: the hover.** The user moves the mouse
+over a point and sees **which object it is** — its label, its frame, the file it came from.
+**That is most of the value of brushing, and it costs nothing.**
+
+And when the click genuinely is not available, **the widget says so** — rather than doing nothing.
+*Silence is the failure mode that makes people think a feature is broken.*
+
+``plotly`` and ``plotly-interactive`` are **optional** extras; the backend selector only offers
+backends that are **actually importable.** *An option that silently fails is worse than one that
+is not there.*
+
+### And the plotly path is FLAGGED AS UNVERIFIED, because it is
+**The sandbox has no network, so plotly could not be installed and the figure could never actually
+be built and inspected.** The matplotlib and seaborn paths **were** verified end-to-end.
+
+*"It should work" is not "it was run."* The docstring says so, and
+``test_the_plotly_hover_carries_the_object_identity`` **skips until plotly is installed and
+exercises it the moment it is.** **The first thing to do with that path is run it.**
+
+**278/278 core tests passing** (plotly's test skipping, honestly).
+
 ## [1.5.496] - 2026-07-10
 ### The `PlottingWidget` is the natural wiring point — and **"wire the 13 plots" was the wrong goal**
 Gable: *"the plotting widget should also wire things naturally."* It does, and it is the **better**

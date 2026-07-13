@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.496"
+version = "1.5.497"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -73,6 +73,26 @@ dependencies = [
 [project.optional-dependencies]
 gpu = [
     "cupy-cuda11x",
+]
+# Plotly is OPTIONAL, and deliberately so.
+#
+# It is one of three plotting backends (matplotlib, seaborn, plotly -- see
+# pycat.utils.plot_backends). matplotlib and seaborn are required, because PyCAT's figures are
+# built with them. Plotly adds INTERACTIVE EXPLORATION -- zoom, pan, legend filtering, and a hover
+# that carries the object's identity.
+#
+# What it does NOT add without more machinery is click-to-napari: a click inside a plotly figure
+# lives in JavaScript, and reaching Python needs QtWebEngine -- a heavy dependency and a real risk
+# in an app that already has a user hitting Qt/OpenGL rendering failures. So the click is an
+# opt-in upgrade, and the hover carries the identity in the meantime.
+plotly = [
+    "plotly",
+]
+# The click->napari bridge for plotly. Heavy (~100 MB) and a common source of Qt install trouble;
+# install it only if the plotly click is actually wanted.
+plotly-interactive = [
+    "plotly",
+    "PyQtWebEngine",
 ]
 spatial = [
     "shapely",

@@ -73,6 +73,35 @@ class PlottingWidget(QWidget):
         self.df_combo.currentIndexChanged.connect(self.on_dataframe_changed)
         layout.addWidget(self.df_combo)
 
+        # ── The plotting backend ────────────────────────────────────────────────
+        #
+        # The same data, rendered by a different library. What changes is not the picture but
+        # **what you can do with it**:
+        #
+        #   matplotlib  the default. Click a point -> see the object.
+        #   seaborn     matplotlib underneath, with statistical defaults. **Same click.**
+        #   plotly      zoom, pan, legend filtering, and a hover that says which object each
+        #               point is. **The click does not reach napari** without QtWebEngine — and
+        #               the widget SAYS so rather than doing nothing.
+        #
+        # Only the backends that are actually importable are offered. An option that silently
+        # fails is worse than one that is not there.
+        self.backend_combo = QComboBox()
+        self.backend_combo.setToolTip(
+            "Which library draws the plot.\n\n"
+            "matplotlib — click a point to see the object it measures.\n"
+            "seaborn — the same, with statistical styling.\n"
+            "plotly — zoom/pan/filter, and hover to see which object a point is "
+            "(the click needs QtWebEngine).")
+        try:
+            from pycat.utils.plot_backends import available_backends
+            self.backend_combo.addItems(
+                [name for name, (ok, _) in available_backends().items() if ok])
+        except Exception as _exc:
+            debug_log('PlottingWidget: could not list the plotting backends', _exc)
+            self.backend_combo.addItems(['matplotlib'])
+        layout.addWidget(self.backend_combo)
+
         # Radio buttons for plot type
         self.line_radio = QRadioButton("Scatter/Line Plot")
         self.line_radio.setToolTip("Plot one column against another as points and/or a line.")
@@ -397,6 +426,49 @@ class PlottingWidget(QWidget):
 
         return group
 
+    def _backend(self):
+        """Which plotting backend the user selected. Defaults to matplotlib."""
+        combo = getattr(self, 'backend_combo', None)
+        return combo.currentText().lower() if combo is not None else 'matplotlib'
+
+    def _show_plotly(self, df, x_col, y_col):
+        """**Plotly: full interactivity, and the identity in the hover.**
+
+        A click inside a plotly figure lives in JavaScript. Reaching napari from there needs a
+        ``QWebEngineView`` and a ``QWebChannel`` — **a heavy dependency and a real Qt risk** in an
+        app that already has a user hitting OpenGL/Qt rendering failures.
+
+        So the identity goes where it works **with no bridge at all**: the hover. The user sees
+        *which object* each point is — its label, its frame, the file it came from — without any
+        of that machinery.
+
+        **And when the click genuinely is not available, it says so**, rather than doing nothing.
+        *Silence is the failure mode that makes people think a feature is broken.*
+        """
+        try:
+            from pycat.utils.plot_backends import plotly_scatter, available_backends
+            from pycat.utils.object_ref import refs_from_dataframe
+        except Exception as exc:
+            debug_log('PlottingWidget: the plotly backend is unavailable', exc)
+            napari_show_warning("Plotly is not installed. Install it with: pip install plotly")
+            return
+
+        ok, message = available_backends().get('plotly', (False, 'plotly is not installed'))
+        if not ok:
+            napari_show_warning(f"Plotly is not available. {message}")
+            return
+        if message:
+            napari_show_warning(message)      # e.g. "the click will not reach napari"
+
+        try:
+            refs = refs_from_dataframe(df)
+            figure = plotly_scatter(df, x_col, y_col, refs=refs,
+                                    title=f"{y_col} vs {x_col}")
+            figure.show()
+        except Exception as exc:
+            debug_log('PlottingWidget: the plotly figure failed', exc)
+            napari_show_warning(f"The plotly figure could not be built: {exc}")
+
     def _wire_brushing(self, figure, artist, df):
         """**Make the points clickable, if the rows are objects.**
 
@@ -487,6 +559,22 @@ class PlottingWidget(QWidget):
             # think brushing is broken.
             _line, = plt.plot(df[x_col], df[y_col], linestyle=ls, marker=ms, picker=5)
             self._wire_brushing(plt.gcf(), _line, df)
+
+            # ── The same plot, in any backend, addressed the same way ──────────
+            #
+            # matplotlib / seaborn / plotly all render this. What differs is **how a click gets
+            # back to Python**, and that difference is not cosmetic:
+            #
+            #   matplotlib  a pick event on the canvas          -> works today
+            #   seaborn     **IS matplotlib** — the same canvas, the same event
+            #   plotly      a JavaScript callback in a browser  -> needs a Qt↔JS bridge
+            #
+            # So plotly gets the identity into the **hover** instead, which needs no bridge at
+            # all: the user moves the mouse over a point and sees which object it is. That is most
+            # of the value, and it costs nothing.
+            if self._backend() == 'plotly':
+                self._show_plotly(df, x_col, y_col)
+                return
 
             plt.xscale(x_scale)
             plt.yscale(y_scale)
