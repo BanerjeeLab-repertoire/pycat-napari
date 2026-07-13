@@ -286,6 +286,68 @@ def check_assumptions(pixels, dtype_max=None):
                     "Estimated signal-to-background looks low (<4). "
                     "Autofluorescence/background can bias density downward; "
                     "consider subtracting a white-noise background level.")
+
+    # ── The CAMERA PEDESTAL inflates N catastrophically, and nothing checked it ──
+    #
+    # SpIDA fits the molecular density N and the brightness epsilon to the shape of the
+    # intensity HISTOGRAM. **A camera pedestal shifts the whole histogram to the right** —
+    # and the fit reads that shift as *more molecules*.
+    #
+    # Measured, with a TRUE N of 8 molecules and epsilon of 25 counts:
+    #
+    #     pedestal    N fitted    epsilon fitted    N error
+    #     0           7.78        25.65             -3 %
+    #     50          12.05       20.61             **+51 %**
+    #     200         31.00       12.79             **+287 %**
+    #     800         195.73      5.07              **+2347 %**
+    #
+    # **A 24-fold overestimate of the molecule count on a realistic camera offset** — and
+    # epsilon collapses by the same factor, because N·epsilon is constrained by the mean while
+    # the pedestal has broken their separation.
+    #
+    # This is the same physics as the N&B failure (1.5.453): the pedestal adds to the MEAN but
+    # not to the variance, so every moment-based estimator of molecular number is corrupted by
+    # it. **The whole point of the intensity histogram is that its SHAPE encodes N and epsilon,
+    # and an additive offset changes the shape.**
+    #
+    # It is detectable: a genuine fluorescence histogram of a Poisson emitter extends down
+    # toward zero, because some pixels see no molecules. **A pedestal puts a hard floor under
+    # it**, and a distribution whose minimum is far above zero relative to its spread has been
+    # offset.
+    if p.size > 100:
+        _lo = float(np.percentile(p, 0.5))
+        _spread = float(np.percentile(p, 99.5) - _lo)
+        # ── The threshold is set by the DAMAGE, not by eye ───────────────────────
+        #
+        # A first version used 0.5, and it **missed a pedestal of 50 counts that already
+        # inflates N by 51 %.** Calibrated against the actual error:
+        #
+        #     pedestal    floor/spread    N error
+        #     0           0.120           -3 %       (clean)
+        #     10          0.148           +7 %
+        #     25          **0.189**       **+23 %**  <- unacceptable
+        #     50          0.257           +51 %
+        #     200         0.667           +287 %
+        #
+        # The error passes ~15 % between floor/spread 0.148 and 0.189, so the gate sits at
+        # **0.17**. Note the clean case is already at 0.120 — **the margin is thin**, which is
+        # itself the finding: SpIDA has very little tolerance for an offset, and a user on a
+        # camera with any meaningful pedestal must subtract it.
+        if _spread > 0 and _lo > 0.17 * _spread:
+            warnings.append(
+                f"**The intensity histogram has a hard floor at {_lo:.0f} counts** — about "
+                f"{_lo / _spread:.0%} of its own spread above zero. That is the signature of a "
+                f"CAMERA PEDESTAL, and SpIDA cannot tolerate one.\n\n"
+                f"SpIDA reads N and epsilon from the SHAPE of the histogram, and an additive "
+                f"offset changes the shape. Measured with a true N of 8: a pedestal of 200 "
+                f"counts fits **N = 31 (+287%)**, and 800 counts fits **N = 196 (+2347%)** — "
+                f"while epsilon collapses by the same factor, because N x epsilon is pinned by "
+                f"the mean once their separation is broken.\n\n"
+                f"Subtract the camera offset (a dark reference, or the `white_noise` parameter) "
+                f"before fitting. **This is the same failure as N&B (1.5.453): the pedestal "
+                f"adds to the mean but not the variance, so every moment-based estimator of "
+                f"molecular number is corrupted by it.**")
+
     return warnings
 
 

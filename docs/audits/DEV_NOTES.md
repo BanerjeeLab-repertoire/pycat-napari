@@ -600,3 +600,54 @@ that cries wolf will be disabled by whoever trips over it next.** It was therefo
 
 **Do not re-enable the box-intersection version as-is.** It is wrong under the current layout,
 and passing it would require re-introducing the geometry it was written against.
+
+
+---
+
+## OPEN: molecular counting — the two corrections do not COMPOSE (2026-07-12, 1.5.480)
+
+**Status: each correction works alone. Together they under-perform, and I do not yet know why.**
+
+``count_molecules_single`` fits ``nu`` as the slope of the binomial bleaching variance against
+the mean, and ``N = y[fast] / nu``. Two independent contaminations, in **opposite directions**,
+which **partly cancelled** — the worst case, because the combined error looked acceptable while
+each half was badly wrong.
+
+Against the correct (binomial-thinning) simulation, TRUE nu = 100, N = 10:
+
+===========================  ==========  ==========  =============
+trace                        BEFORE      AFTER       verdict
+===========================  ==========  ==========  =============
+clean                        −0 %        **−0 %**    sound
+read noise (sd 15)           −23 %       **−11 %**   improved
+pedestal (500)               **+79 %**   **−17 %**   improved
+read 15 + pedestal 500       +30 %       −24 %       **not better**
+read 40 + pedestal 800       −14 %       −34 %       **worse**
+===========================  ==========  ==========  =============
+
+### What was fixed and is solid
+1. **The pedestal must come off BEFORE ``_variance_pairs``.** Both axes carry I(t). Subtracting
+   it from ``y[fast]`` afterwards fixes the numerator and leaves **nu at 49.0 against a true
+   100**. Recovered from the post-bleach plateau (497.7 against a true 500) — no dark reference.
+2. **The read-noise floor is ``s²·(1 + p²)``, not ``s²``.** The y-axis is
+   ``(I(t+1) − p·I(t))²``, which carries noise from BOTH frames. At p = 0.97 that is
+   **1.94 × s²** — a first version subtracted half the bias.
+
+### What is NOT resolved
+The two corrections **do not compose**. Both improve their own case and the combination is worse
+than either. Hypotheses, untested:
+
+* The plateau variance measures ``s²`` **plus** any residual molecular signal, so at high read
+  noise the estimate of s² is itself contaminated — and the ``(1 + p²)`` scaling then amplifies
+  the error.
+* ``p`` is fitted from the bleaching curve, and read noise **biases that fit too**. A wrong p
+  scales the noise floor wrongly, and p appears in both axes.
+* The through-origin constraint may be the wrong model once an offset has been subtracted — an
+  intercept term might be more honest than forcing the line through zero.
+
+### To pick up
+Fit ``nu`` with a **free intercept** and compare: the intercept IS the noise floor, and letting
+the fit find it avoids estimating s² and p separately. If that works, both corrections collapse
+into one and the composition problem disappears. **Test against the binomial-thinning simulation
+in ``tests/test_group_a_moments.py``, which is the correct one** — the first attempt used
+deterministic bleaching and had no binomial fluctuation for the estimator to fit at all.

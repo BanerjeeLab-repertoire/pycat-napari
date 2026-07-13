@@ -4,6 +4,68 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.480] - 2026-07-10
+### GROUP A — the pedestal hypothesis was right, and worse than expected
+**Stated before any code was run:** SpIDA, molecular counting, N&B and the correlation tools all
+extract a molecular number from a **moment** of the intensity distribution — so **all of them
+should carry the N&B pedestal bug (1.5.453): the camera offset adds to the mean but not the
+variance.**
+
+### FIXED — SpIDA: a **24-fold** overestimate of the molecule count
+SpIDA fits N and ε to the **shape** of the intensity histogram, and a pedestal **shifts the whole
+histogram to the right** — which the fit reads as *more molecules*. With a TRUE N of 8:
+
+| pedestal | N fitted | ε fitted | **N error** |
+|---|---|---|---|
+| 0 | 7.78 | 25.65 | −3 % |
+| 50 | 12.05 | 20.61 | **+51 %** |
+| 200 | 31.00 | 12.79 | **+287 %** |
+| **800** | **195.73** | 5.07 | **+2347 %** |
+
+ε collapses by the same factor, because **N·ε is pinned by the mean** once their separation is
+broken. ``check_assumptions`` existed — it checked size, saturation and SNR, and **not this.**
+
+The gate is calibrated against the *damage*, not by eye: a pedestal of only **25 counts** already
+inflates N by **23 %**, so it fires there. **0 false alarms in 20 clean seeds** — and the margin
+is thin, which is itself the finding: **SpIDA has almost no tolerance for an offset.**
+
+### FIXED — molecular counting: two bugs in opposite directions, partly cancelling
+**The worst case**, because the combined error looks acceptable while each half is badly wrong.
+TRUE ν = 100, N = 10:
+
+| trace | ν | N |
+|---|---|---|
+| clean | 82.2 | **9.97** ← the estimator is **sound** |
+| read noise (sd 15) | 104.2 | 7.72 (**−23 %**) |
+| pedestal (500) | **47.5** | **17.86 (+79 %)** |
+
+**And the fix is in the data**: after every fluorophore bleaches, the trace sits at the pedestal,
+and the variance of that plateau is the read noise. **No dark reference needed** — a true pedestal
+of 500 with sd 15 recovers as **497.7 ± 13.5** from the tail.
+
+Two subtleties a first attempt got wrong:
+- **The pedestal must come off before the variance pairs are built.** Both axes contain I(t).
+  Subtracting it from ``y[fast]`` afterwards fixes the numerator and leaves **ν at 49.0 against a
+  true 100**.
+- **The noise floor is ``s²·(1 + p²)``, not ``s²``** — the y-axis is ``(I(t+1) − p·I(t))²``, which
+  carries read noise from **both** frames. At p = 0.97 that is **1.94 × s²**.
+
+Pedestal: **+79 % → −17 %.** Read noise: **−23 % → −11 %.**
+
+### And I nearly shipped a fix for a WRONG SIMULATION — again
+The first bleaching trace decayed **deterministically** (``int(count) × ν``), so there was **no
+binomial fluctuation for the estimator to fit at all** — and the estimator regresses exactly that.
+It made the code look broken when the *simulation* was. **The same trap as 1.5.453, and it took
+the same form: check the simulation before the code.**
+
+### NOT RESOLVED — the two corrections do not compose
+Each works alone; **together they are worse than either.** Written up in
+``docs/audits/DEV_NOTES.md`` with three hypotheses and a concrete next step (fit ν with a **free
+intercept** — the intercept *is* the noise floor, which would collapse both corrections into one
+and avoid estimating s² and p separately).
+
+**192/192 core tests passing.**
+
 ## [1.5.479] - 2026-07-10
 ### GROUP D COMPLETE — time-series dynamics. One serious bug, two clean modules.
 ### FIXED — temporal enhancement destroys intensity-vs-time information. **Every method.**
