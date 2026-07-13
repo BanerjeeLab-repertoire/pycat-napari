@@ -429,3 +429,110 @@ def test_require_stack_RAISES_instead_of_returning_frame_zero():
     # And REFUSES a genuinely 2-D layer, instead of proceeding.
     with pytest.raises(stack_access.NotAStack):
         stack_access.require_stack(np.random.rand(32, 32), context='a test')
+
+
+# ── The frame interval: the pixel-size problem, one axis over ─────────────────────────────
+
+@pytest.mark.core
+def test_the_frame_interval_is_NaN_when_the_file_does_not_carry_one():
+    """**``frame_interval_s = 1.0`` is a claim that the microscope ran at 1 fps.**
+
+    It is not an absence of information. **51 functions default it**, and it is silently wrong on
+    almost every real acquisition.
+
+    This has already cost real time: **VPT's viscosity read ~0.094 Pa·s against an expected ~7**,
+    and one of the two root causes was exactly this — *the frame interval defaulted while the real
+    MicroManager metadata said 0.5 s/frame.* **A 5× error in the time axis is a 5× error in every
+    diffusion coefficient**, and nothing about the output looks wrong.
+
+    *A NaN diffusion coefficient is visibly wrong; a 5× overestimate is not.*
+    """
+    frame_interval = pytest.importorskip("pycat.utils.frame_interval")
+
+    real = frame_interval.frame_interval_s(
+        {'file_metadata': {'common': {'frame_interval_s': 0.5}}})
+    assert real == pytest.approx(0.5), f"a real interval must pass through; got {real}"
+
+    for repository in ({}, {'file_metadata': {'common': {}}},
+                       {'file_metadata': {'common': {'frame_interval_s': 'x'}}}):
+        value = frame_interval.frame_interval_s(repository)
+        assert not np.isfinite(value), (
+            f"a missing or unreadable frame interval must be NaN, not a plausible 1.0 — "
+            f"got {value} from {repository}"
+        )
+
+
+@pytest.mark.core
+def test_the_metadata_sync_NEVER_overrides_the_users_own_value():
+    """**A sync that stomps a deliberate choice is worse than no sync at all.**
+
+    The user changed it *because they knew something the file did not.* VPT's implementation gets
+    this right, and it is the rule this helper preserves.
+    """
+    frame_interval = pytest.importorskip("pycat.utils.frame_interval")
+
+    class _Spin:
+        def __init__(self, value=1.0):
+            self.value = value
+
+        def blockSignals(self, _):
+            pass
+
+        def setValue(self, v):
+            self.value = v
+
+    class _Owner:
+        touched = False
+
+    repository = {'file_metadata': {'common': {'frame_interval_s': 0.5}}}
+
+    # Untouched: the file wins.
+    owner, spin = _Owner(), _Spin()
+    assert frame_interval.sync_spinbox_from_metadata(
+        spin, repository, touched_flag='touched', owner=owner)
+    assert spin.value == pytest.approx(0.5)
+
+    # The user chose 0.25: THEIR value wins.
+    owner.touched = True
+    spin = _Spin(0.25)
+    assert not frame_interval.sync_spinbox_from_metadata(
+        spin, repository, touched_flag='touched', owner=owner)
+    assert spin.value == pytest.approx(0.25), (
+        "the metadata sync overrode a value the user deliberately set. They changed it BECAUSE "
+        "they knew something the file did not."
+    )
+
+
+@pytest.mark.core
+def test_every_UI_with_a_frame_interval_SYNCS_it_from_the_file():
+    """**Three UIs read the file. Seven took a spinbox default and reported it as physics.**
+
+    ``metadata_extract`` captures the true interval at load. VPT reads it. The rest did not.
+    """
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    import re
+
+    missing = []
+    for path in sorted(toolbox.glob("*_ui.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+
+        # Does this panel HAVE a frame-interval spinbox?
+        has_interval = bool(re.search(r'\b\w*(?:dt|interval)\w*\s*=\s*QDoubleSpinBox\(\)',
+                                      source, re.I))
+        if not has_interval:
+            continue
+
+        syncs = ('sync_spinbox_from_metadata' in source
+                 or '_sync_frame_interval_from_metadata' in source
+                 or 'frame_interval_s' in source)
+
+        if not syncs:
+            missing.append(path.name)
+
+    assert not missing, (
+        f"these UIs have a frame-interval field and never read it from the file: {missing}\n\n"
+        f"A 1.0 s default is a CLAIM that the microscope ran at 1 fps. Every time-dependent "
+        f"result — a diffusion coefficient, an MSD exponent, a recovery half-time — scales with "
+        f"it directly."
+    )

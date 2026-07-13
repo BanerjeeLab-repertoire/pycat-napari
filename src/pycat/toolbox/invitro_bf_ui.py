@@ -22,6 +22,8 @@ Compared to In Vitro Fluorescence:
 from __future__ import annotations
 import numpy as np
 
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
@@ -478,6 +480,16 @@ def _ivbf_dynamics(ui, layout):
     stack_dd = ui.create_layer_dropdown(napari.layers.Labels)
     form.addRow(label_with_circle("Droplet mask stack (T,H,W):", dropdown=stack_dd), stack_dd)
     dt_sp   = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_sp, ui.central_manager.active_data_class.data_repository,
+            context='invitro_bf_ui')
+    except Exception as _exc:
+        debug_log('invitro_bf_ui: could not sync the frame interval', _exc)
     disp_sp = QDoubleSpinBox(); disp_sp.setRange(0.1,100); disp_sp.setValue(10.0)
     form.addRow("Frame interval (s):", dt_sp)
     form.addRow("Max displacement (µm):", disp_sp)

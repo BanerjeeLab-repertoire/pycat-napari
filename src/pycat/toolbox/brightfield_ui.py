@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import numpy as np
 
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
@@ -692,6 +694,16 @@ def _add_bf_dynamics(ui, layout):
     form.addRow(label_with_circle("Condensate mask stack (T,H,W):", dropdown=stack_dd), stack_dd)
 
     dt_spin   = QDoubleSpinBox(); dt_spin.setRange(0.01, 3600); dt_spin.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_spin, ui.central_manager.active_data_class.data_repository,
+            context='brightfield_ui')
+    except Exception as _exc:
+        debug_log('brightfield_ui: could not sync the frame interval', _exc)
     disp_spin = QDoubleSpinBox(); disp_spin.setRange(0.1, 20);  disp_spin.setValue(2.0)
     form.addRow("Frame interval (s):", dt_spin)
     form.addRow("Max displacement (µm):", disp_spin)

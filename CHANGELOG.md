@@ -4,6 +4,53 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.511] - 2026-07-13
+### SEVEN panels guessed the FRAME INTERVAL — the pixel-size bug, one axis over
+**``frame_interval_s = 1.0`` is not an absence of information. It is a claim that the microscope
+ran at one frame per second** — and **51 functions default it.**
+
+**This has already cost real time.** VPT's viscosity read **~0.094 Pa·s against an expected ~7**,
+and one of the two root causes was exactly this: *the frame interval defaulted while the real
+MicroManager metadata said **0.5 s/frame**.*
+
+> **A 5× error in the time axis is a 5× error in every diffusion coefficient** — and nothing about
+> the output looks wrong.
+
+``metadata_extract`` **already captures the true interval at load**, and **VPT already reads it.**
+Three UIs do. **Seven did not** — they took a spinbox default and reported the answer as physics:
+
+``advanced_analysis`` · ``brightfield`` · ``condensate_physics`` · ``fusion`` · ``invitro_bf`` ·
+``invitro_fluor`` · ``data_qc``
+
+All now read the file. **8 spinboxes wired.**
+
+### And the rule VPT gets right, which is preserved
+> **A sync that stomps a deliberate choice is worse than no sync at all.**
+
+The user changed it **because they knew something the file did not.** ``sync_spinbox_from_metadata``
+never overrides a value the user set — *verified: the file says 0.5, the user chose 0.25, and 0.25
+wins.*
+
+### And it returns NaN, not 1.0
+*A NaN diffusion coefficient is visibly wrong; a 5× overestimate is not.*
+
+### The complexity ratchet caught MY OWN work
+``_add_advanced_analysis`` grew from **659 to 669 lines** when the sync was added — and
+``test_nothing_exceeds_the_ABSOLUTE_longest_function`` **failed.**
+
+**That is the ratchet working.** The honest response is to **record that the function is now
+bigger**, not to pretend it is not — so the ceiling moved to 672, *with the reason*. It remains
+indefensible, and it is exactly why the pixel-size gate's silent failure went unnoticed inside one
+of these.
+
+### Audited and CLEAN — the mask/labels confusion is NOT systemic
+The touching-condensates bug (a bool mask returned where labels belonged) looked like it might be
+a pattern. **It is not.** All three name/return mismatches turned out to be false positives —
+``segment_subcellular_objects`` honestly returns masks and says so; ``run_label_binary_mask``
+labels a mask, which is what its name says. **A one-off, not a disease.**
+
+**309/309 core tests passing.**
+
 ## [1.5.510] - 2026-07-13
 ### THE REFACTOR — derived from the bugs, not from the line count
 Fifteen bugs this session. **Thirteen would have been prevented by a structural change, not by

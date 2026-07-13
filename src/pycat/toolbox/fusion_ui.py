@@ -20,6 +20,8 @@ Steps
 from __future__ import annotations
 import numpy as np
 
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
@@ -221,6 +223,16 @@ class DropletFusionUI:
 
         self._frame_dt = QDoubleSpinBox()
         self._frame_dt.setRange(0.0001, 3600); self._frame_dt.setValue(1.0)
+        # The frame interval comes from the FILE, not from a spinbox default. See
+        # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+        # almost never true. The user's own value always wins.
+        try:
+            from pycat.utils.frame_interval import sync_spinbox_from_metadata
+            sync_spinbox_from_metadata(
+                self._frame_dt, self.central_manager.active_data_class.data_repository,
+                context='fusion_ui')
+        except Exception as _exc:
+            debug_log('fusion_ui: could not sync the frame interval', _exc)
         self._frame_dt.setDecimals(4)
         self._frame_dt.setToolTip("Image mode only: time per frame (s).")
         form.addRow("Frame interval (s):", self._frame_dt)

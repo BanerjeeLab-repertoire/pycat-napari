@@ -119,6 +119,16 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     mf.addRow("Condensate mask stack (T,H,W):", stack_dd_msd)
 
     dt_spin  = QDoubleSpinBox(); dt_spin.setRange(0.01, 3600); dt_spin.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_spin, ui_instance.central_manager.active_data_class.data_repository,
+            context='condensate_physics_ui')
+    except Exception as _exc:
+        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
     lag_spin = QSpinBox();       lag_spin.setRange(2, 500);    lag_spin.setValue(0)
     lag_spin.setToolTip("Max lag frames (0 = auto: n_frames/4)")
     min_len  = QSpinBox();       min_len.setRange(3, 50);      min_len.setValue(5)
@@ -272,6 +282,16 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     _wl = QLabel("Coarsening kinetics — uses timeseries_condensate_df from TS Analysis."); _wl.setWordWrap(True)
     kf.addRow(_wl)
     dt_kin = QDoubleSpinBox(); dt_kin.setRange(0.01, 3600); dt_kin.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_kin, ui_instance.central_manager.active_data_class.data_repository,
+            context='condensate_physics_ui')
+    except Exception as _exc:
+        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
     kf.addRow("Frame interval (s):", dt_kin)
     run_coarse = QPushButton("▶  Fit Coarsening Kinetics")
     run_coarse.setToolTip("Fit mean radius vs time to t^⅓ (Ostwald) and t^½ (coalescence); reports the preferred mechanism and confidence.")
@@ -377,6 +397,16 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     qf.addRow("Image stack (T,H,W):", stack_dd_qc)
 
     dt_qc  = QDoubleSpinBox(); dt_qc.setRange(0.01, 3600); dt_qc.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_qc, ui_instance.central_manager.active_data_class.data_repository,
+            context='condensate_physics_ui')
+    except Exception as _exc:
+        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
     thr_qc = QDoubleSpinBox(); thr_qc.setRange(0.01, 0.9);  thr_qc.setValue(0.3)
     thr_qc.setToolTip(
         "Frames with Laplacian variance AND entropy below this fraction\n"

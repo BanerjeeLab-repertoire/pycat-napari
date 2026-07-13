@@ -277,6 +277,16 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
         "Bayesian only."
     )
     frame_dt = QDoubleSpinBox(); frame_dt.setRange(0.01, 3600); frame_dt.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            frame_dt, ui_instance.central_manager.active_data_class.data_repository,
+            context='advanced_analysis_ui')
+    except Exception as _exc:
+        debug_log('advanced_analysis_ui: could not sync the frame interval', _exc)
     frame_dt.setToolTip("Time between frames (seconds) — sets the physical time axis for dynamics.")
     prox_um  = QDoubleSpinBox(); prox_um.setRange(0.1, 10);  prox_um.setValue(1.0)
     prox_um.setToolTip("Centroid proximity (µm) for calling two objects a merge or fission event.")

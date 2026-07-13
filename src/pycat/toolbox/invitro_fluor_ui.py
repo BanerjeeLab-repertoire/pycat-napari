@@ -33,6 +33,8 @@ except Exception:
     label_with_circle = lambda t, **k: t
 import numpy as np
 
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
@@ -877,6 +879,16 @@ def _ivf_dynamics(ui, layout):
     form.addRow("Fluorescence stack (optional):", img_dd)
 
     dt_sp   = QDoubleSpinBox(); dt_sp.setRange(0.01,3600); dt_sp.setValue(1.0)
+    # The frame interval comes from the FILE, not from a spinbox default. See
+    # pycat.utils.frame_interval — a 1.0 s default is a physical CLAIM, and it is
+    # almost never true. The user's own value always wins.
+    try:
+        from pycat.utils.frame_interval import sync_spinbox_from_metadata
+        sync_spinbox_from_metadata(
+            dt_sp, ui.central_manager.active_data_class.data_repository,
+            context='invitro_fluor_ui')
+    except Exception as _exc:
+        debug_log('invitro_fluor_ui: could not sync the frame interval', _exc)
     disp_sp = QDoubleSpinBox(); disp_sp.setRange(0.1,50);  disp_sp.setValue(5.0)
     disp_sp.setToolTip("Max displacement between frames (µm).\n"
                        "In vitro droplets can move more than cellular condensates.")
