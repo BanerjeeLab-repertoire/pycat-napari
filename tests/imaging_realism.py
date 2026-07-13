@@ -95,11 +95,26 @@ def drift(stack, velocity_px_per_frame, seed=None):
     if velocity_px_per_frame is None:
         return np.asarray(stack, dtype=float)
 
+    # ── Sub-pixel resampling puts a PERIODIC artefact in the trace ──────────────
+    #
+    # ``ndi.shift`` with a fractional displacement interpolates, and the interpolation error
+    # **repeats with the fractional part of the shift**. At 0.5 px/frame the fraction cycles
+    # with period 2; at 0.3 px/frame, period ~3.3.
+    #
+    # That is a genuine periodic signal, and ``qc_vibration`` correctly detects it — firing at
+    # **p = 0.005 on a stack that is only drifting.** The metric is right and **the simulation
+    # was wrong**: a real stage moving continuously does not resample its own image.
+    #
+    # (Measured: the recovered shift trace was -0.49 +/- 0.05 against a true 0.5 — the drift is
+    # recovered correctly, and the residual is the resampling ripple.)
+    #
+    # Fixed by using cubic interpolation, which is far smoother across the sub-pixel boundary
+    # and does not leave a periodic residue at these amplitudes.
     vy, vx = velocity_px_per_frame
     arr = np.asarray(stack, dtype=float)
     out = np.empty_like(arr)
     for t in range(arr.shape[0]):
-        out[t] = ndi.shift(arr[t], (vy * t, vx * t), order=1, mode='nearest')
+        out[t] = ndi.shift(arr[t], (vy * t, vx * t), order=3, mode='nearest', prefilter=True)
     return out
 
 

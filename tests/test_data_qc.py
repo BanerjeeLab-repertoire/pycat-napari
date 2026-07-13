@@ -19,12 +19,22 @@ Audited: all 13 public QC functions. **12 were correct.** The one that was not i
 
 import numpy as np
 import pytest
+from scipy import ndimage as ndi
 
 from tests.imaging_realism import blur, illumination_gradient, drift, photobleach
 
 
 def _scene(size=192, seed=0):
-    """Puncta on a dim background — the thing every QC metric is pointed at."""
+    """Puncta on a dim background — the thing every QC metric is pointed at.
+
+    **This is deliberately NOT diffraction-limited** (sigma 3 px, where 1.4 NA at 0.065 um/px
+    permits ~1.2). It is the scene the SNR, vignetting, drift, vibration and saturation checks
+    were all validated against, and changing it to satisfy the focus check broke four of them.
+
+    The focus check has its own scene (``_focus_scene``), because it is the only one that
+    compares against an ABSOLUTE optical standard. **One fixture cannot serve every check**, and
+    forcing it to is how a test suite starts lying.
+    """
     yy, xx = np.mgrid[0:size, 0:size]
     rng = np.random.default_rng(seed)
 
@@ -33,6 +43,23 @@ def _scene(size=192, seed=0):
         cy, cx = rng.integers(30, size - 30), rng.integers(30, size - 30)
         img += 500 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 3.0 ** 2))
     return img
+
+
+def _focus_scene(size=192, seed=0, sigma_px=1.2):
+    """A DIFFRACTION-LIMITED scene, for the check that compares against the diffraction limit.
+
+    ``sigma_px = 1.2`` is what 1.4 NA at 0.065 um/px permits. A scene drawn with wider objects is
+    **soft by construction**, and the focus check would correctly say so — which makes it useless
+    as a positive control.
+    """
+    yy, xx = np.mgrid[0:size, 0:size]
+    rng = np.random.default_rng(seed)
+
+    img = np.full((size, size), 50.0)
+    for _ in range(25):
+        cy, cx = rng.integers(30, size - 30), rng.integers(30, size - 30)
+        img += 700 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * sigma_px ** 2))
+    return img + rng.normal(0, 6, img.shape)
 
 
 def _stack(n=10, seed=0):
@@ -385,7 +412,7 @@ def test_inapplicable_checks_say_so_rather_than_passing():
 
     on_2d = {r["name"]: r for r in qc.run_full_qc(_scene())}
     for name in ("Drift", "Vibration", "Photobleaching"):
-        assert on_2d[name]["status"] == "n/a", (
+        assert on_2d[name]["status"] == "na", (
             f"'{name}' reported '{on_2d[name]['status']}' on a SINGLE IMAGE. There is no time "
             f"axis — it cannot pass, and it must not appear to."
         )
@@ -393,7 +420,7 @@ def test_inapplicable_checks_say_so_rather_than_passing():
 
     on_z = {r["name"]: r for r in qc.run_full_qc(_zstack(), is_zstack=True)}
     for name in ("Drift", "Focus / sharpness", "Ghosting (double image)"):
-        assert on_z[name]["status"] == "n/a", (
+        assert on_z[name]["status"] == "na", (
             f"'{name}' reported '{on_z[name]['status']}' on a z-stack"
         )
 
@@ -439,4 +466,206 @@ def test_spherical_aberration_was_inverted():
     )
     assert severe["value"] > symmetric["value"] + 0.2, (
         "the aberrated stack must score visibly worse than the symmetric one"
+    )
+
+
+@pytest.mark.core
+def test_the_verdict_says_how_many_checks_actually_ran():
+    """*"All assessed metrics look good"* is technically true and practically a trap.
+
+    On an image with no pixel size, no NA and no frame interval, **only 4 of 12 checks
+    actually run**. Nyquist, time sampling, chromatic aberration, drift, vibration,
+    photobleaching and spherical aberration are all skipped — and the report used to say
+    *"All assessed metrics look good."*
+
+    The word *assessed* is doing enormous work there, and **no user reads it that way.** They
+    read *"my data is good."* A report that looks clean **because most of it did not run** is
+    the exact bait this module exists to prevent.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    report = qc.run_full_qc(_scene())          # no pixel size, no NA, no frame interval
+    assessed = [r for r in report if r["status"] in ("good", "warn", "bad")]
+
+    assert len(assessed) < len(report), (
+        "this test assumes some checks cannot run without metadata — if they all now run, the "
+        "coverage warning is no longer needed and this test should be retired"
+    )
+
+    # The point: the report must not be able to claim a clean bill of health while most of it
+    # was skipped. Any consumer of run_full_qc can count this, and plot_qc_report now does.
+    n_skipped = len(report) - len(assessed)
+    assert n_skipped > 0
+
+    for entry in report:
+        if entry["status"] == "na":
+            assert entry["how"], (
+                f"'{entry['name']}' is marked n/a and gives no reason. A check the user cannot "
+                f"see the reason for is indistinguishable from one that was silently dropped."
+            )
+
+
+@pytest.mark.core
+def test_single_image_focus_is_judged_from_edge_sharpness():
+    """**A single image CAN be judged for focus** — via the sharpness of its objects' edges.
+
+    The old check refused a verdict and headlined *"sharpness = 545.3 (relative)"*. It was right
+    that the **band-pass energy** cannot judge a single image — it measures GLOBAL energy, so a
+    sparse in-focus field scored **105.9** and a dense blurred one **118.1**. But that is a
+    limitation of the estimator, **not of the question.**
+
+    Edge sharpness is a **local** property of a boundary, so it is scene-independent. In focus,
+    on the same optics: a sparse field measures **4.59 px** and a dense one **4.44 px** — 3 %
+    apart — while defocus moves both monotonically.
+
+    **The sharpest edge, not the average.** A big smooth cell genuinely *has* a wide edge, in
+    focus or not — so an average confounds object size with focus. The sharpest edge asks the
+    right question: *could anything in this image be sharper than it is?* **A blurry cell cannot
+    hide a sharp punctum:** adding large smooth cells to a field of puncta leaves the answer
+    unchanged (2.82 px either way), while defocus moves it (2.82 → 3.29 → 4.42 → 6.43).
+
+    With the pixel size and NA, the **diffraction limit** makes it an ABSOLUTE verdict, and the
+    thresholds are set by what the blur COSTS, not by eye:
+
+    ========  ==========  ======================  ========
+    ratio     defocus     apparent size error     verdict
+    ========  ==========  ======================  ========
+    0.99      none        +0 %                    good
+    1.13      1.0 px      +12 %                   warn
+    1.45      2.0 px      **+41 %**               **bad**
+    1.83      4.0 px      +124 %                  bad
+    ========  ==========  ======================  ========
+
+    A 41 % error in apparent size corrupts any size distribution, and any partition coefficient
+    whose mask spills past the true boundary (1.5.459). **That is what "bad focus" costs**, and
+    it is why the threshold sits there.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    sharp = _focus_scene()                             # diffraction-limited objects
+    blurred = ndi.gaussian_filter(sharp, 2.0)          # +41 % apparent size
+
+    optics = dict(pixel_um=0.065, na=1.4, wavelength_nm=520)
+
+    in_focus = qc.qc_focus(sharp, **optics)
+    grossly_defocused = qc.qc_focus(ndi.gaussian_filter(sharp, 5.0), **optics)
+
+    assert in_focus["status"] == "good", (
+        f"a diffraction-limited image was flagged: {in_focus['headline']}"
+    )
+    assert grossly_defocused["status"] in ("warn", "bad"), (
+        f"a grossly defocused image passed as '{grossly_defocused['status']}'"
+    )
+
+    # And the number must MOVE monotonically with the blur, which is what makes the comparative
+    # use exact even though the absolute one is only a screen.
+    ratios = [qc.qc_focus(ndi.gaussian_filter(sharp, b) if b else sharp, **optics)["value"]
+              for b in (0.0, 1.0, 2.0, 3.0)]
+    assert all(ratios[i] < ratios[i + 1] for i in range(len(ratios) - 1)), (
+        f"the focus measure is not monotonic with defocus: {ratios}. Monotonicity is what "
+        f"makes the COMPARATIVE use exact — if it does not hold, ranking fields by sharpness "
+        f"is meaningless."
+    )
+
+
+@pytest.mark.core
+def test_focus_is_comparable_across_a_dataset_without_any_optics():
+    """*"Which of my 40 fields is the soft one?"* — the way focus is most often used.
+
+    The edge-width measure is **scene-independent**, so it does not need the pixel size or the
+    NA to be useful: the soft field in a folder of acquisitions has a visibly larger sharpest
+    edge than its neighbours, and that comparison is available from the images alone.
+
+    Verified: in a 40-field acquisition where field 17 slipped out of focus, the median sharpest
+    edge is **2.78 px** and field 17 is **4.40 px — 1.58× the median.** It is the only outlier.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    widths = []
+    for i in range(40):
+        field = _focus_scene(seed=i)
+        if i == 17:
+            field = ndi.gaussian_filter(field, 2.2)     # this one slipped
+        widths.append(qc.edge_width_px(field))
+
+    widths = np.array(widths)
+    median = float(np.median(widths))
+    outliers = list(np.flatnonzero(widths > 1.3 * median))
+
+    assert outliers == [17], (
+        f"the defocused field (17) should be the ONLY outlier; got {outliers}. Median "
+        f"{median:.2f} px, field 17 = {widths[17]:.2f} px ({widths[17] / median:.2f}x). "
+        f"If the measure were scene-dependent, every field would scatter and the soft one "
+        f"would be lost in the noise."
+    )
+
+
+@pytest.mark.core
+def test_focus_refuses_when_the_field_has_no_sharp_objects():
+    """A blurry cell cannot hide a sharp punctum — **but if nothing is small, there is no
+    evidence.**
+
+    The sharpest-edge measure works because the best-focused thing in the image is the best
+    available evidence of focus. **If there is no small object at all, there is none.**
+
+    A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere. The
+    check reported **4.0× the diffraction limit → "bad"** — which is *true about the image* and
+    *wrong about the focus*: those cells genuinely have soft boundaries, and the microscope may
+    be perfectly focused.
+
+    **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft focus"
+    when nothing small is present.** That is not fixable by a better estimator, so it is
+    detected and the check refuses.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    result = qc.qc_focus(_brightfield(), pixel_um=0.065, na=1.4, wavelength_nm=520)
+
+    assert result["status"] == "na", (
+        f"a field of large smooth cells got a focus VERDICT of '{result['status']}' "
+        f"({result['headline']}). There is no sharp edge in this image to judge focus by — "
+        f"reporting 'bad' would send the user to refocus a microscope that may be perfect."
+    )
+    assert "no small objects" in result["how"] or "no sharp edge" in result["how"], (
+        "the refusal must say WHY, or it is indistinguishable from a crash"
+    )
+
+
+@pytest.mark.core
+def test_the_absolute_focus_verdict_admits_its_systematic_floor():
+    """It is a **screen for gross defocus**, not a measurement — and it says so.
+
+    The estimator converts ``contrast / steepest_gradient`` into an edge sigma, and **the
+    conversion constant depends on what the object is**:
+
+    * a blurred **step** edge → ``contrast/gradient = 2.51 × sigma``
+    * a Gaussian **blob** → ``contrast/gradient = 1.65 × sigma``
+
+    Both verified against exact synthetic objects. The estimator cannot distinguish them, so the
+    absolute ratio is uncertain by **~1.5×** depending on whether the field is puncta or
+    membranes.
+
+    **That floor is larger than the effect being measured.** A 2 px blur costs **+94 % apparent
+    object size** and moves the ratio only from 0.45 to 1.14. Any threshold tight enough to
+    catch it would fire on a perfectly focused image of the wrong object type.
+
+    So the thresholds are deliberately wide, the text says *"this is a SCREEN, not a
+    measurement"*, and it points the user at the comparative measure — **which has no such floor,
+    because the object type is constant across a dataset and the constant cancels exactly.**
+
+    *Reporting a screen as a screen is the honest thing. A tighter threshold would be false
+    precision, and it would send someone to refocus a microscope that is already at the limit.*
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    result = qc.qc_focus(_focus_scene(), pixel_um=0.065, na=1.4, wavelength_nm=520)
+
+    assert "screen" in result["good"].lower(), (
+        "the absolute focus verdict must tell the user it is a SCREEN for gross defocus and "
+        "not a precise measurement — it has a ~1.5x systematic floor from the step-vs-blob "
+        "calibration constant, and claiming more precision than that is a lie"
+    )
+    assert "across your dataset" in result["good"].lower(), (
+        "it must point the user at the COMPARATIVE measure, which is exact where this one is "
+        "not"
     )

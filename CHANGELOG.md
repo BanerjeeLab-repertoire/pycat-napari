@@ -4,6 +4,114 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.470] - 2026-07-10
+### Gable was right — a single image CAN be judged for focus, via the sharpness of object edges
+The old check refused a verdict and headlined *"sharpness = 545.3 (relative)"*. It was right that
+the **band-pass energy** cannot judge a single image — it measures **global** energy, so a sparse
+in-focus field scored **105.9** and a dense blurred one **118.1**. But that is a limitation of
+the estimator, **not of the question.**
+
+Edge sharpness is a **local** property of a boundary, so it is scene-independent. In focus, on
+the same optics: a sparse field measures **4.59 px** and a dense one **4.44 px** — 3 % apart —
+while defocus moves both monotonically.
+
+**The sharpest edge, not the average.** A big smooth cell genuinely *has* a wide edge, in focus
+or not — so an average confounds object size with focus all over again. The sharpest edge asks
+the right question: *could anything in this image be sharper than it is?* **A blurry cell cannot
+hide a sharp punctum** — adding large smooth cells to a field of puncta leaves the answer
+unchanged (2.82 px either way), while defocus moves it (2.82 → 3.29 → 4.42 → 6.43).
+
+The estimator is calibrated against exact synthetic edges: ``contrast / steepest_gradient``
+converges to **σ·√(2π)**, the analytic result for a Gaussian-blurred step.
+
+### Added — the comparative path, which is how focus is actually used
+> *"Which of my 40 fields is the soft one?"*
+
+This needs **no optical metadata at all.** In a 40-field acquisition where field 17 slipped out
+of focus, the median sharpest edge is **2.78 px** and field 17 is **4.40 px — 1.58× the
+median**, the only outlier.
+
+**This is the exact path**, because across one dataset the object type is constant and the
+calibration constant **cancels**.
+
+### Note — the ABSOLUTE path is a screen, and it says so
+I tried to set the thresholds by the measurement error the blur causes, **and it cannot be done
+honestly.** The conversion constant depends on what the object *is* — **2.51× σ for a step edge,
+1.65× σ for a Gaussian blob** — and the estimator cannot distinguish them. That is a **~1.5×
+systematic floor**, and it is *larger than the effect being measured*: a 2 px blur costs **+94 %
+apparent object size** and moves the ratio only 0.45 → 1.14.
+
+Any threshold tight enough to catch that would fire on a perfectly focused image of the wrong
+object type. **So the absolute verdict is deliberately wide, calls itself a screen, and points
+the user at the comparative measure.** *A tighter threshold would be false precision, and would
+send someone to refocus a microscope that is already at the diffraction limit.*
+
+### And it refuses when the field has no sharp objects at all
+A brightfield field of large smooth cells has **no sharp edge anywhere**. The check reported
+**4.0× the limit → "bad"** — *true about the image, wrong about the focus.* It **cannot
+distinguish "soft objects, sharp focus" from "sharp objects, soft focus"** when nothing small is
+present. Detected, and refused with the reason.
+
+### FIXED — a smooth drift was firing the vibration alarm
+Once the test scene was made diffraction-limited, a stack drifting at 0.5 px/frame fired
+``qc_vibration`` at **p = 0.005, "bad"** — sending the user to hunt for a pump.
+
+**The metric was right and my simulation was wrong.** ``ndi.shift`` with a fractional
+displacement leaves an interpolation ripple that **repeats with the fractional part of the
+shift** — period 2 at 0.5 px/frame. That is a genuine periodic signal, correctly detected. Fixed
+in the harness (cubic interpolation), not the metric. **The bug was always there, hidden behind a
+blurry test image.**
+
+**158/158 core tests passing.**
+
+## [1.5.469] - 2026-07-10
+### The rest of the QC audit — the *report*, not the metrics
+1.5.465 audited whether each metric works. 1.5.468 audited whether it runs on the right data
+type. **Neither audited the two things a user actually reads: the teaching text, and the overall
+verdict.** This does.
+
+### FIXED — the report could say "all good" while most of it never ran
+The verdict counted only `bad` and `warn`. On an image with **no pixel size, no NA and no frame
+interval — only 4 of 12 checks actually run.** Nyquist, time sampling, chromatic aberration,
+drift, vibration, photobleaching and spherical aberration are all skipped, and the report said:
+
+> *"All assessed metrics look good."*
+
+**The word "assessed" is doing enormous work there, and no user reads it that way.** They read
+*"my data is good."* **A report that looks clean because most of it did not run is the exact bait
+this module exists to prevent.**
+
+It now says: *"All 4 checks that ran look good — but 8 could NOT run (missing metadata, or the
+wrong kind of data). **This is not a clean bill of health.**"*
+
+### FIXED — `"sharpness = 545.3 (relative)"` is not a result
+No scale, no target, no action. And it is **baiting**: a user scanning a colour-coded scorecard
+sees a row with a number and no red flag, and concludes the focus was checked and passed. **It
+was not checked.**
+
+A single image genuinely *cannot* be judged for focus without a reference — the band-pass energy
+of a **sparse** field is legitimately lower than that of a **dense** one, and neither is out of
+focus. The headline now says so, and says what would let the check give a verdict (a z-stack, a
+time series, or a known in-focus image of the same specimen). The number is kept in `value` for
+the one case where it *is* meaningful: comparing two images of the same specimen.
+
+### FIXED — two spellings of "not applicable"
+`'n/a'` (my own, from 1.5.468) and `'na'` (the existing 10 uses). **`'n/a'` is not a key in
+`_STATUS_COLOR`**, so the three checks I marked in the last release would have rendered with a
+fallback colour in the scorecard. Unified to `'na'`, and the test now asserts every `na` entry
+carries a **reason** — *a check the user cannot see the reason for is indistinguishable from one
+that was silently dropped.*
+
+### Checked and correct — no change needed
+- **`qc_snr` reporting `bad` on featureless noise.** That is right: pure Gaussian noise *does*
+  have SNR ≈ 3.3. Not every alarm on a degenerate input is a false alarm.
+- **The `how` / `good` text on the working checks.** Each explains the method *and* gives a
+  target with an action (*"SNR ≳ 10 is comfortable; below ~4 the structure is buried — increase
+  exposure/illumination"*). That is the Image → Assessment → Interpretation → Recommendation
+  shape, and it holds.
+
+**155/155 core tests passing.**
+
 ## [1.5.468] - 2026-07-10
 ### Audited the QC *report*, not the metrics: 4 false alarms on clean data → 0
 The previous audit (1.5.465) asked *"does each metric work?"*. This one asks the question that
