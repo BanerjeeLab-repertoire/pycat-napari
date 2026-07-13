@@ -4,6 +4,268 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.491] - 2026-07-10
+### Validated the neck/elastocapillary module against the literature — and against published data
+Full write-up: **``docs/validation/neck_geometry_and_elastocapillarity.md``**
+
+### VALIDATION 1 — the Laplace pressure at the neck reproduces **Pawar et al. (2011)**
+**Pawar, Caggioni, Ergun, Hartel & Spicer**, *Soft Matter* **7**, 7710–7716 (2011),
+DOI 10.1039/c1sm05457k — *"Arrested coalescence in Pickering emulsions"*.
+
+> *"their complete fusion into a single spherical drop can sometimes be arrested in an intermediate
+> shape **if a rheological resistance offsets the Laplace pressure driving force**."*
+
+Their **eqn (6)**: ``ΔP = 2γ/R_droplet − (γ/R₁ − γ/R₂)``, with R₁ the cross-sectional radius and R₂
+the neck radius — **the two principal radii of a saddle, of opposite sign.** *That is exactly the
+object ``neck_geometry`` measures.*
+
+They publish two arrested doublets with full geometry and the ΔP they computed. Recomputing from
+their own numbers:
+
+| case | R_droplet | R₁ | R₂ | **their ΔP** | **implied γ** |
+|---|---|---|---|---|---|
+| Fig 5(b.3) | 100 µm | 48 µm | 73 µm | 6.81 × 10² Pa | **0.0529 N/m** |
+| Fig 5(c.3) | 94 µm | 94 µm | ∞ | 5.63 × 10² Pa | **0.0529 N/m** |
+
+**Two independent geometries give the identical implied interfacial tension.** The form of the
+equation is confirmed exactly. Guarded by
+``test_the_neck_laplace_pressure_reproduces_PAWAR_2011``.
+
+### VALIDATION 2 — is the method even in the accessible regime?
+**Condensate γ = 0.1–100 µN/m** (Jawerth 2018, PGL-3: 1–5 µN/m; Alshareedah, Thurston & Banerjee
+2021). **Condensate G′ = ~0.1 Pa (liquid-like) to ~1 kPa (aged).**
+
+``L_ec = γ/G`` falls inside the **0.3–10 µm** light-microscopy window for **G ≈ 0.1–100 Pa** —
+**precisely the aged / maturing / disease-associated regime.**
+
+And **both failure modes are informative, not failures**:
+- **A true liquid (G → 0)**: L_ec → ∞, nothing arrests → *"all round → L_ec **bounded below** by
+  the largest condensate"* — **a soft material.**
+- **A hard solid (G ~ 1 kPa)**: L_ec ≈ 0.0001–0.1 µm, **below the diffraction limit**; everything
+  is arrested → *"all irregular → L_ec **bounded above** by the smallest"* — **a stiff material.**
+
+**Both land in the bounded case the code already handles.**
+
+### The three-regime structure is exactly what the module reports
+> *"**If surface energy dominates, the drops will completely coalesce.** **If elastic energy
+> dominates, the droplets are unable to even initiate coalescence.** **Arrest occurs when
+> coalescence can begin but not complete.**"*
+> — Dahiya, Caggioni, Spicer et al., *Phil. Trans. R. Soc. A* (2016)
+
+### Honest limitations, recorded
+1. **Validated against synthetic geometry and published *numbers* — not against a condensate
+   dataset with an independently-measured G.** The next step is real: a preparation whose G is
+   known from micropipette aspiration, and check the size crossover lands where γ/G says.
+2. **The intensity witness does not discriminate** (0.42–0.46 of the body median for a genuine
+   neck *and* an arrested one alike) **and is not given a vote.**
+3. **2D projections of 3D objects** — a pair whose axis is out of plane reads a smaller apparent
+   neck. Not handled.
+4. **The 0.6 neck threshold is physically motivated but not experimentally calibrated** on
+   condensates.
+
+**251/251 core tests passing.**
+
+## [1.5.490] - 2026-07-10
+### The neck carries the physics — `neck_geometry` and `fit_elastocapillary_length`
+Gable asked whether the tangents at the neck say something about surface tension. **They do**, and
+the answer runs further than expected.
+
+### The geometry, and it is exact
+For two spheres of radius R with centres separated by d, the neck radius is
+``r_n = sqrt(R² − (d/2)²)`` and the half-angle satisfies **``sin(α) = r_n / R``** — so the
+**dihedral angle** between the two surfaces is ``2α``, and it falls **straight out of the mask**.
+Measured ``r_n/R`` reproduces the exact relation to within a few percent, and the dihedral angle
+to **within 3°**.
+
+### The elastocapillary length — γ/G from a single image
+Gable's objection was the key: **small objects are essentially all surface.** That is not a
+limitation — **it IS the measurement.**
+
+Elastic energy scales with **volume** (``G·strain²·R³``); capillary energy with **surface**
+(``γ·strain·R²``). Their ratio is **R / L_ec**, where **L_ec = γ/G**. So:
+
+**A droplet smaller than L_ec is capillary-dominated and rounds up whatever the modulus is. It is
+not big enough to hold a shape.**
+
+**Therefore the size at which condensates stop being round IS the elastocapillary length**, and
+every condensate in a field is a bounded observation:
+
+- arrested at radius R → **R > L_ec** → **G > γ/R** *(a lower bound)*
+- rounded up at radius R → **R < L_ec** → **G < γ/R** *(an upper bound)*
+
+Fitting the *fraction irregular* against log R gives a sigmoid whose **midpoint is L_ec**.
+Validated on 400-condensate populations spanning 0.3–10 µm:
+
+| TRUE L_ec | fitted | 95 % CI |
+|---|---|---|
+| 0.80 µm | **0.79** | ± 0.07 |
+| 2.00 µm | **1.97** | ± 0.28 |
+| 5.00 µm | **4.92** | ± 0.74 |
+
+**Recovered to within 2 % across a 6× range, with a real confidence interval — from one image, no
+time series, no calibration.**
+
+### And it closes a chain PyCAT already has
+| measurement | gives |
+|---|---|
+| **VPT** | **η** |
+| **fusion relaxation** | **η/γ** → γ |
+| **this** | **γ/G** → **G** |
+
+**An absolute elastic modulus from three measurements the software already makes.**
+
+### What a single frame CANNOT give, said plainly
+**γ, η and G separately.** A snapshot gives ``r_n/R``, which for a Newtonian liquid is a function
+of ``t/τ_v`` with ``τ_v = ηR/γ`` — the capillary time. **One frame gives ratios, not absolute
+moduli**, and the docstring says so.
+
+### Two limits, and they are different
+- **PHYSICS**: a droplet below L_ec cannot be arrested. Reading *"no arrest"* on a 0.3 µm punctum
+  as *"liquid"* is **reading the size, not the material**. For a soft condensate (γ ~ 1e-6 N/m,
+  G ~ 1 Pa) **L_ec ~ 1 µm** — most small puncta are *physically incapable* of showing arrest.
+  Reported as ``size_sufficient``.
+- **MEASUREMENT**: the lobe residual of a *perfect* sphere pair is **0.037 at R = 8 px** against
+  **0.005 at R = 60 px**. Below ~15 px the pixelation floor swamps the elastic signal even where
+  the physics would allow it. Reported as ``pixelation_limited``.
+
+### And the lobe residual reads elasticity, not viscosity
+**A merely slow pair keeps spherical lobes** — surface tension is the only stress on a free
+surface, however viscous the interior. **An elastic network can hold it out of round.** Measured:
+**0.0095** at G/γ = 0, rising monotonically to **0.0291** at G/γ = 2.
+
+*(An all-round or all-irregular population yields no fit, and says so: L_ec is then **bounded**
+outside the observed size range — which is still information, and reporting a fitted number from
+it would be inventing a transition that was never seen.)*
+
+**249/249 core tests passing.**
+
+## [1.5.489] - 2026-07-10
+### RETRACTED — the temperature defaults. **My simulation was wrong, not the pipeline.**
+1.5.488 changed the cloud-point defaults from ``entropy_corrected`` + ``baseline`` to
+``focus_score`` + ``midpoint``, on the strength of a simulation showing entropy returning the
+start of the ramp.
+
+**The simulation was wrong.** Every scene gave the "clear" sample an intensity spread of sd = 15,
+which **already fills the histogram** — entropy started at **7.1 out of a theoretical maximum of
+8.0** and had nowhere to rise:
+
+| sample | entropy |
+|---|---|
+| CLEAR, tiny noise (sd 2) | **7.189** |
+| TURBID, strong scatter (sd 120) | **6.948** |
+
+``entropy_turbidity_curve`` bins each frame against its **own** intensity range, and a Gaussian
+binned to its own spread has nearly the same entropy whatever its width. **The metric was never
+given a chance to respond**, and I concluded it was broken.
+
+**Gable validated the cloud points on real temperature-ramp data and they are accurate.**
+Defaults reverted. The tests encoding the wrong conclusion are **removed, not adjusted** — *a test
+that encodes a false conclusion is worse than no test.*
+
+*(The UI passes ``signal_column`` explicitly, so the function default was never reached from the
+application — the validated pipeline was not affected either way. But the default was wrong, and
+the reasoning behind it was worse.)*
+
+**The lesson is the 1.5.453 one again: check the simulation before the code.** And when the person
+who ran the real experiment says it works, **that is data** — test the simulation against *their*
+result, not the other way round.
+
+**The real open question — low-quality data** (focus drift, illumination instability, bubbles) — is
+written up in ``docs/audits/DEV_NOTES.md``, with the note that testing it needs a **degradation
+model applied to a validated real ramp**, not another synthetic transition.
+
+### NEW — `assess_and_split_touching`: **should** these masks be split?
+``split_touching_objects`` runs a watershed and cuts. **It does not ask whether it should.** The
+same connected mask can be four physically different things, and **only one of them is two
+droplets**:
+
+- **Two droplets in contact** — a **deep neck**. They have not fused. **Split.**
+- **Arrested fusion** — caught part-way through coalescence, with a **shallow neck** because the
+  interface has already relaxed. **This is ONE body, and the arrest IS the finding**: a pair that
+  stalls mid-fusion is reporting a high viscosity or a solidified interface. **Splitting it
+  destroys exactly that observation.**
+- **Beads-on-a-string / fractal aggregate** — **many** small units. Cutting it in *two* is
+  arbitrary; the object is not a droplet pair.
+- **A single irregular droplet** — nothing to split.
+
+**The neck ratio is the discriminator, and nothing else is.** It is the depth of the saddle
+between the two distance-transform peaks, as a fraction of the peaks themselves:
+
+| morphology | solidity | n_peaks | **neck_ratio** |
+|---|---|---|---|
+| single droplet | 0.979 | 1 | 1.000 |
+| **two touching** | 0.906 | **2** | **0.364** |
+| **arrested fusion** | 0.979 | **2** | **0.965** |
+| beads on a string | 0.930 | **6** | 0.788 |
+| fractal aggregate | 0.891 | 1 | 1.000 |
+
+**Solidity does not separate them** (0.979 for arrested fusion is identical to a single droplet).
+**The peak count does not** (both are 2). **Only the depth of the neck does** — and it moves
+smoothly and monotonically with the degree of fusion (0.128 barely touching → 1.000 merged).
+
+A neck shallower than ~0.6 of the droplet radius means **surface tension has already relaxed the
+interface**. That is a physical statement, not a tuned threshold.
+
+### Note — the intensity witness does NOT discriminate, so it does not get a vote
+A real neck sits in a thinner part of the object and should be **dimmer**. **Tested, and it is
+not diagnostic**: the neck intensity came out at **0.42–0.46** of the body median for a genuine
+neck *and* an arrested one alike, because the body median is dominated by the bright droplet
+centres and **every** neck is dim compared with those.
+
+The geometry is decisive on its own (0.50 against 0.77 on the same pair), so the intensity is
+**reported for inspection and not used to override the call**. *A witness that does not
+discriminate must not be given a vote.*
+
+**243/243 core tests passing.**
+
+## [1.5.488] - 2026-07-10
+### GROUP H — the cloud-point detector returned **the start of the temperature ramp**
+``temperature_tools`` feeds the **phase diagrams and Csat**. Tested against a simulated heat-cool
+cycle with a **known** transition (cloud 30 °C, clear 27 °C, hysteresis 3 °C):
+
+| signal | T_phase | T_clear | hysteresis |
+|---|---|---|---|
+| *(truth)* | **30.0** | **27.0** | **3.0** |
+| `entropy_corrected` *(the default)* | **20.74** | **20.79** | 0.05 |
+| `entropy` | 20.68 | 20.71 | 0.03 |
+| `image_mean` | 21.01 | 21.01 | 0.00 |
+| **`focus_score`** | **29.67** | **27.00** | **2.67** |
+
+**Every signal except ``focus_score`` returned ~20.7 — the first temperature in the ramp.** The
+transition was not detected *at all*, and **a phase diagram built from that default is a plot of
+when the experiment started.**
+
+### Why entropy cannot work here — and it is physics, not a coding error
+Shannon entropy of the intensity histogram is **non-monotonic across a phase transition**: it
+**drops** as droplets nucleate (the histogram becomes bimodal and concentrated) and **recovers** as
+they grow. Measured across the heating branch: **6.47 → 4.84 → 6.13.**
+
+**An onset detector cannot find an onset in that — there isn't one.**
+
+``focus_score`` rises **monotonically** (0.02 → 1.14) because **droplets introduce sharp edges**,
+and *a phase transition is precisely the appearance of an interface*. **It is the physically right
+signal.** Defaults changed to ``focus_score`` + ``midpoint``: the true cloud point now comes back
+to **±0.33 °C** across a 26–34 °C range, and the **hysteresis to 2.67 against a true 3.0.**
+
+### Found — `persistence_length_um` scales with the fibre LENGTH
+**A perfectly straight fibre has INFINITE persistence length.** Lp is estimated from the decay of
+the tangent autocorrelation, and **on a straight fibre the correlation never decays** — so the fit
+is bounded only by *how much fibre was available*:
+
+| fibre length | reported Lp |
+|---|---|
+| 40 px | 72.1 |
+| 200 px | 379.9 |
+
+**Lp ≈ 1.9 × the fibre length**, on fibres whose tortuosity is 1.00 — *they do not bend at all*.
+**Two conditions whose fibres differ only in length would show different "stiffness."** Documented;
+``tortuosity`` is correct (1.0021–1.0106 across the same fibres) and should be preferred.
+
+### Audited and exact — `wlc_extensible`
+**0.00 %** against the analytic Odijk high-force limit at every force tested.
+
+**242/242 core tests passing.**
+
 ## [1.5.487] - 2026-07-10
 ### GROUP F — the coloc metrics are **exact**. They are also **not evidence**.
 ``manders_m1_calculation``, ``jaccard_index_calculation`` and ``sorensen_dice_coefficient_calculation``

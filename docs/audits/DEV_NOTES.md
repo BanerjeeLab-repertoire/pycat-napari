@@ -694,3 +694,48 @@ piece of work rather than a parameter tweak.
 structure. It responds correctly to exactly what ``n_basins`` cannot see. The module already
 carries a good statistic beside the broken one, and ``topo_n_basins_is_unreliable`` is now set on
 every result so a consumer can see which is which.
+
+
+---
+
+## OPEN: cloud-point detection on LOW-QUALITY data (1.5.489)
+
+**The pipeline is VALIDATED on good data.** Gable confirmed accurate cloud points on real
+temperature-ramp acquisitions with ``entropy_corrected`` + ``baseline``. **Those defaults stand.**
+
+### The retraction that produced this note
+1.5.488 changed the defaults on the strength of a simulation showing entropy returning the start
+of the ramp. **The simulation was wrong.** Every scene gave the "clear" sample an intensity spread
+of sd = 15, which already fills the histogram — entropy started at **7.1 out of a theoretical
+maximum of 8.0** and had nowhere to rise:
+
+    CLEAR sample, tiny noise (sd 2):        entropy **7.189**
+    TURBID sample, strong scatter (sd 120): entropy **6.948**
+
+``entropy_turbidity_curve`` bins each frame against its **own** intensity range, and a Gaussian
+binned to its own spread has nearly the same entropy whatever its width. **The metric was never
+given a chance to respond.** Reverted in 1.5.489.
+
+**The lesson is the 1.5.453 one again: check the simulation before the code.** And when the
+person who ran the real experiment says it works, that is data — test the simulation against
+*their* result, not the other way round.
+
+### What is actually open
+How the turbidity signals behave when the acquisition is **degraded**:
+
+* **Focus drift across the ramp.** ``focus_score`` is in the table and would move with defocus
+  as well as with droplets — and defocus also blurs the histogram, which moves entropy. A ramp
+  that drifts out of focus could produce a spurious transition, or mask a real one.
+* **Illumination instability.** A lamp that warms with the stage changes ``image_mean`` and the
+  histogram width independently of the sample.
+* **Bubbles / debris entering the field.** A step change in the histogram that is not a phase
+  transition.
+* **Which signal survives which degradation.** ``entropy_corrected`` is the validated one; whether
+  it is the most *robust* one is a different question and is not known.
+
+### What a test of this needs
+A **degradation model on real turbidity data**, not a synthetic phase transition — the synthetic
+route is exactly what produced the wrong conclusion above. The ``tests/imaging_realism.py`` harness
+(1.5.464) has the pieces (``blur``, ``illumination_gradient``, ``photobleach``), and the right shape
+is: take a ramp Gable has already validated, degrade it by a known amount, and ask **at what
+degradation the cloud point moves by more than the experimental uncertainty.**

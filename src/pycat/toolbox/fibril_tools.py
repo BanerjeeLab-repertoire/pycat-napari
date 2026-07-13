@@ -287,6 +287,35 @@ def fibril_morphometry(binary_mask, px_size_um=1.0):
     segment_df : list of dict (one per edge/segment)
         length_um, length_px, tortuosity, mean_curvature, mean_half_width_px,
         max_half_width_px, persistence_length_um (from tangent autocorrelation).
+
+        .. warning::
+
+           **``persistence_length_um`` SCALES WITH THE FIBRE LENGTH, and comparing it between
+           conditions whose fibres differ in length will manufacture a stiffness difference.**
+
+           Persistence length is estimated from the decay of the tangent autocorrelation. On a
+           **perfectly straight fibre the correlation never decays**, so the fit is bounded only
+           by **how much fibre was available** — not by the material.
+
+           Measured on straight fibres (tortuosity ~ 1.00, i.e. no bending at all):
+
+               fibre length   reported Lp
+               40 px          72.1
+               80 px          149.1
+               120 px         226.0
+               200 px         379.9
+
+           **Lp ~ 1.9 x the fibre length.** A straight fibre has *infinite* persistence length; the
+           number reported is a property of the measurement window.
+
+           **Two conditions whose fibres differ only in LENGTH will show different "stiffness"**,
+           and it would look like a real result. Compare Lp only between fibres of comparable
+           length — and treat any Lp that is a fixed multiple of the segment length as
+           unmeasured, not as stiff.
+
+           (``tortuosity`` does NOT have this problem: it is 1.0021-1.0106 across the same
+           fibres, correctly reporting that all of them are straight. **Prefer it** when the
+           question is "how bendy are these fibres".)
     node_df : list of dict (one per junction/endpoint node)
         pos, degree, kind.
     summary : dict

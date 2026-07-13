@@ -729,6 +729,35 @@ def detect_transitions(turbidity_df: pd.DataFrame,
     Split the turbidity curve into heating and cooling branches at the
     maximum-temperature frame and estimate the transition temperatures.
 
+    .. note::
+
+       **The defaults are ``entropy_corrected`` + ``baseline``, and they are VALIDATED on real
+       data.** Gable confirmed accurate cloud points on real temperature-ramp acquisitions.
+
+       **A previous release (1.5.488) changed them to ``focus_score`` + ``midpoint`` on the basis
+       of a simulation, and that simulation was WRONG.** The scenes gave the "clear" sample an
+       intensity spread of sd = 15, which already fills the histogram — entropy started at 7.1
+       out of a theoretical maximum of 8.0 and **had nowhere to rise**:
+
+           CLEAR sample, tiny noise (sd 2):     entropy 7.189
+           TURBID sample, strong scatter (sd 120): entropy 6.948
+
+       Entropy is flat-to-falling across *every* scene I built, because
+       ``entropy_turbidity_curve`` bins each frame against its **own** intensity range — and a
+       Gaussian binned to its own spread has nearly the same entropy whatever its width. **The
+       metric was never given a chance to respond**, and I concluded it was broken.
+
+       **It is not broken. My simulation never tested it.**
+
+       (``focus_score`` remains available and does track resolved-droplet nucleation well — it
+       rises monotonically because droplets introduce edges. It may be the better signal when
+       droplets are optically resolved rather than producing bulk scattering. But it is an
+       option, not the default, and the default is the one with real-data validation behind it.)
+
+       **The open question is low-quality data** — how these signals behave when the acquisition
+       has focus drift, illumination instability or bubbles. That is written up in
+       ``docs/audits/DEV_NOTES.md`` and is not addressed here.
+
     Returns
     -------
     dict with:
