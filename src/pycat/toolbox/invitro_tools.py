@@ -2035,9 +2035,37 @@ def detect_sedimentation(
     r_s,   r_r2   = _slope_r2(t, r)
 
     # Sedimentation: phi increasing AND n increasing
-    sed = phi_s > 0 and phi_r2 > 0.3 and n_s > 0
-    # Coarsening: radius increasing AND n decreasing
-    coarse = r_s > 0 and r_r2 > 0.3 and n_s < 0
+    # ── The droplet COUNT cannot gate both processes — it is their SUM ──────────
+    #
+    # The old rule was::
+    #
+    #     sed    = phi_s > 0 and phi_r2 > 0.3 and **n_s > 0**
+    #     coarse = r_s   > 0 and r_r2   > 0.3 and **n_s < 0**
+    #
+    # **``n_s`` cannot be both positive and negative**, so ``sed`` and ``coarse`` were **mutually
+    # exclusive by construction** — and the ``'both'`` branch below was **unreachable.**
+    #
+    # That is not a style point. **When both processes run at once, the count is the SUM of a
+    # sedimentation gain and a coalescence loss, and it can take either sign.** Measured on a
+    # simulated sample with genuine sedimentation AND genuine coarsening, the old rule called it
+    # **"sedimentation" 98 % of the time** — and its recommendation said *"no sedimentation
+    # artefact"* about the coarsening, **which is the opposite of the truth.**
+    #
+    # The physics:
+    #
+    #     sedimentation  droplets settle INTO the focal plane   -> **phi UP**, n up, r unchanged
+    #     coarsening     droplets merge / Ostwald-ripen         -> **r UP**, n down, phi ~flat
+    #     BOTH           settling WHILE the residents coarsen   -> **phi UP and r UP**, n either
+    #
+    # **So phi and r are the discriminators, and n is CORROBORATION** — it strengthens a call, it
+    # does not gate one.
+    sed = phi_s > 0 and phi_r2 > 0.3
+    coarse = r_s > 0 and r_r2 > 0.3
+
+    # The count corroborates: rising with a rising phi is the settling signature; falling with a
+    # rising radius is the coalescence signature. Reported so the user can see WHY.
+    sed_corroborated = bool(sed and n_s > 0)
+    coarse_corroborated = bool(coarse and n_s < 0)
 
     if sed and coarse:
         dominant = 'both'
@@ -2059,6 +2087,11 @@ def detect_sedimentation(
     return dict(
         sedimentation_detected=sed,
         coarsening_detected=coarse,
+        # Does the DROPLET COUNT agree? A rising count alongside a rising volume fraction is the
+        # settling signature; a falling count alongside a rising radius is the coalescence
+        # signature. **Not a gate** (see above) — the user sees WHY the call was made.
+        sedimentation_corroborated_by_count=sed_corroborated,
+        coarsening_corroborated_by_count=coarse_corroborated,
         phi_slope=phi_s, phi_r2=phi_r2,
         n_slope=n_s,     n_r2=n_r2,
         radius_slope=r_s, radius_r2=r_r2,

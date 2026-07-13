@@ -95,9 +95,55 @@ import numpy as np
 # the parallel backend was justified by a diagnostic **that did not test it**, and may be an
 # unnecessary loss of speed.
 #
-# It is left OFF because a segfault at launch is worse than a slower filter, and because a wrong
-# default that is *safe* costs less than a wrong default that *crashes*. **But it is a caution,
-# not a finding**, and ``numba_arm64_diag.py`` v2 — which writes real files — will settle it.
+# ── **IT IS TORCH, NOT Qt.** The race I spent three diagnostics assuming never existed. ──
+#
+# ``reproduce_arm64_crash.py`` on Meet's M2 (2026-07-13). Each case in its own subprocess, each
+# recreating the ORIGINAL concurrency — numba compiling on a **worker thread**:
+#
+#     A  numba on a worker, nothing else            **OK**
+#     B  numba on a worker + **Qt** on the main     **OK**        <- **Qt IS INNOCENT**
+#     C  numba on a worker + **torch** first        **SEGFAULT**  <- the cause
+#     D  numba on a worker + Qt + torch             **SEGFAULT**
+#     E  numba on the MAIN thread, after Qt         **OK**
+#
+# **torch ships its own libomp.** Two OpenMP runtimes in one arm64 process is a classic way to
+# die — and the ``OMP: Info #276`` banner in the original crash was **torch's.** Numba was the
+# bystander that happened to be running when it blew up.
+#
+# **The Qt race was a hypothesis I formed from a coincidence, and I ran with it for three
+# diagnostics. It was wrong.**
+#
+# ── AND THIS CHANGES WHY 1.5.503 WORKS ───────────────────────────────────────────────────
+#
+# ``run_pycat`` calls ``_prewarm_cellpose_model()`` at line ~294 — **which imports torch** — and
+# starts the Numba warm-up thread at line ~495. **That is case C, exactly.**
+#
+# 1.5.503 does two things on Darwin: it **defers the warm-up** and it **disables parallel Numba**.
+# I claimed the first was the fix. **The matrix says it is the second.**
+#
+# Deferring the warm-up moves the compile from launch to **first use** — and if torch+numba
+# segfaults on the main thread too, that is *worse*, not better: the crash would land
+# **mid-analysis** instead of at startup.
+#
+# **The one thing that genuinely protects Meet is `parallel=False`**, because the crash is inside
+# a parallel kernel.
+#
+# ── THE MISSING CELL, and it decides the real fix ────────────────────────────────────────
+#
+# E vs C changed **two** variables (torch present/absent AND worker/main thread), so E surviving
+# does not prove the main thread is safe. **``reproduce_arm64_crash.py`` (2nd run) isolates it:**
+#
+#     F  **torch + numba on the MAIN thread**
+#
+#     F segfaults -> the thread is irrelevant. It is libomp vs libomp, and the fix must stop two
+#                    OpenMP runtimes loading — ``KMP_DUPLICATE_LIB_OK=TRUE`` (case G) or
+#                    ``NUMBA_THREADING_LAYER=workqueue`` (case H, the cleaner one: numba avoids
+#                    OpenMP entirely and KEEPS its parallelism).
+#     F survives  -> the worker thread IS the trigger in torch's presence, and parallel Numba can
+#                    be re-enabled provided the warm-up stays on the main thread.
+#
+# **Until F is run, parallel stays OFF on Darwin** — and now for a reason that is measured rather
+# than assumed.
 #
 # So the parallel backend is **off by default on Darwin**. The kernels still JIT (single-threaded
 # Numba is fine), and every one of them has a NumPy fallback besides. On a 64x64 warm-up image
@@ -110,7 +156,47 @@ import numpy as np
 import os as _os
 import sys as _sys
 
-_PARALLEL_DEFAULT = _sys.platform != 'darwin'
+# ── THE FIX: numba must not load an OpenMP runtime on macOS ─────────────────────────────────
+#
+# **Established on Meet's M2 (2026-07-13), each case in its own subprocess:**
+#
+#     C  torch + numba on a **worker**                    **SEGFAULT**
+#     F  torch + numba on the **MAIN thread**             **SEGFAULT**  <- the thread is irrelevant
+#     G  torch + numba + **KMP_DUPLICATE_LIB_OK=TRUE**    **SEGFAULT**  <- the flag does NOTHING
+#     H  torch + numba + **NUMBA_THREADING_LAYER=workqueue**   **OK**   <- **the fix**
+#
+# **It is torch's libomp against numba's libomp. Full stop.** Qt is innocent; the thread is
+# irrelevant; and ``KMP_DUPLICATE_LIB_OK`` — **which ``run_pycat`` already sets** — does not help,
+# exactly as Intel's own documentation warns (*"may cause crashes or silently produce incorrect
+# results"*).
+#
+# **``workqueue`` is numba's own pure-Python thread pool. It loads NO libomp at all**, so the
+# collision cannot happen — and it **keeps the parallelism.** It is slower than OpenMP and has no
+# nested parallelism, but PyCAT's kernels are flat per-pixel loops, so neither costs anything.
+#
+# ``NUMBA_THREADING_LAYER`` is read at **numba's import time**, so this must run before
+# ``import numba`` below. This is the only place early enough.
+#
+# **This is what made the deferred warm-up look like a fix**: it was never the concurrency. The
+# only thing that protected macOS users was ``parallel=False``, and with workqueue we no longer
+# need even that.
+if _sys.platform == 'darwin':
+    _os.environ.setdefault('NUMBA_THREADING_LAYER', 'workqueue')
+
+# **And if someone forces OpenMP back on, the crash comes back.** Say so rather than letting them
+# discover it as a segfault — a user who sets this deserves to know what they are choosing.
+_FORCED_OMP = (_sys.platform == 'darwin'
+               and _os.environ.get('NUMBA_THREADING_LAYER', '').lower() in ('omp', 'tbb'))
+if _FORCED_OMP:
+    print("[PyCAT Numba] WARNING: NUMBA_THREADING_LAYER is set to "
+          f"'{_os.environ['NUMBA_THREADING_LAYER']}' on macOS. **PyTorch already loads its own "
+          "OpenMP runtime, and a second one segfaults this process** (verified on Apple Silicon). "
+          "Unset it, or use 'workqueue', unless you know what you are doing.")
+
+# With numba no longer loading libomp, the collision is gone — so parallel can be ON everywhere.
+# **It was disabled on Darwin for a cause that has now been correctly identified and removed.**
+_PARALLEL_DEFAULT = True
+
 NUMBA_PARALLEL: bool = _os.environ.get(
     'PYCAT_NUMBA_PARALLEL', '1' if _PARALLEL_DEFAULT else '0') in ('1', 'true', 'True')
 

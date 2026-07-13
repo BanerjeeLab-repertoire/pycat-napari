@@ -4,6 +4,273 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.517] - 2026-07-13
+### SOLVED — and **parallel Numba is back on for macOS**
+The complete matrix, each case in its own subprocess on an M2:
+
+| | | result |
+|---|---|---|
+| **C** | torch + numba on a **worker** | **SEGFAULT** |
+| **F** | torch + numba on the **MAIN thread** | **SEGFAULT** — *the thread is irrelevant* |
+| **G** | + **``KMP_DUPLICATE_LIB_OK=TRUE``** | **SEGFAULT** — ***the flag PyCAT already sets does NOTHING*** |
+| **H** | + **``NUMBA_THREADING_LAYER=workqueue``** | **OK** |
+
+*(and previously: **numba + Qt — OK.** Qt was innocent all along.)*
+
+### Three things this settles
+1. **The thread does not matter.** F segfaults too — so **the deferred warm-up (1.5.503) was never
+   the fix.** It only moved the crash to **first use, mid-analysis**, which is worse. *The only
+   thing protecting macOS users was ``parallel=False``.*
+2. **``KMP_DUPLICATE_LIB_OK`` does not work — and PyCAT already sets it.** Exactly as Intel's own
+   documentation warns: it makes the duplicate **tolerated, not safe.**
+3. **``workqueue`` works.** Numba's own pure-Python thread pool loads **no libomp at all**, so
+   there is no second OpenMP runtime to collide with torch's — **and it keeps the parallelism.**
+
+### The fix
+- **``NUMBA_THREADING_LAYER=workqueue`` on Darwin**, set in ``run_pycat`` **before the first native
+  import** — numba can be pulled in indirectly by cellpose or a napari plugin, so setting it in
+  ``numba_utils`` would be **too late**.
+- **Parallel Numba is RE-ENABLED on macOS.** *The speed is back.*
+- Forcing ``omp`` back on **warns**, rather than letting the user find out via a segfault.
+- ``KMP_DUPLICATE_LIB_OK`` is **kept** — useless for numba/torch, but the only mitigation for the
+  **other** pair: **MKL's libiomp5 against torch's libomp — the documented Intel-Mac "PyTorch
+  segfaults Cellpose" bug.** *Same mechanism, different colliders.*
+
+**313/313 core tests passing.**
+
+## [1.5.516] - 2026-07-13
+### The Intel-Mac bug and the Apple-Silicon bug are **THE SAME BUG**
+| | collision | victim |
+|---|---|---|
+| **Intel Mac** | MKL's ``libiomp5`` + torch's ``libomp`` | **cellpose** |
+| **Apple Silicon** | torch's ``libomp`` + numba's ``libomp`` | **numba** |
+
+**Two OpenMP runtimes in one macOS process.** They share a symbol table and stomp each other's
+thread state, and **whichever library happens to be running when that happens is the one that
+dies.**
+
+> ***The victim is incidental. The loader is the bug.***
+
+### The evidence was already in the codebase
+- ``run_pycat`` **already sets ``KMP_DUPLICATE_LIB_OK=TRUE``** — a variable that **exists for
+  exactly this**, and which **predates Apple Silicon by years. It was created for Intel Macs.**
+- It already warns that a cellpose crash *"usually means the installed PyTorch is not compatible
+  with this CPU/architecture"* and recommends ``nomkl`` — and **``nomkl``'s entire function is to
+  remove a competing OpenMP runtime.** *The README's advice was right, for a reason it did not
+  state.*
+
+**And on Intel it can be WORSE** — MKL is present there and absent on arm64, so there can be
+**three** runtimes.
+
+### `KMP_DUPLICATE_LIB_OK` does NOT fix it — and may make it worse
+Intel's own docs: *"...allow the program to continue to execute, **but that may cause crashes or
+silently produce incorrect results**."*
+
+**It does not make two runtimes safe. It makes them TOLERATED.** Without it: a clean, diagnosable
+``OMP: Error #15`` abort. With it: the process **continues and segfaults deeper in.**
+
+> ***It converts a diagnosable failure into a mysterious one — and PyCAT sets it, and Meet's
+> machine crashed anyway.***
+
+### And the comment in the code said "arm64"
+``run_pycat``'s OpenMP block was headed *"On Apple Silicon (arm64)"*. **It is a macOS problem, not
+an architecture problem.** *That one word framed three diagnostics around a Qt race that never
+existed.*
+
+### `openmp_audit.py`
+Counts the OpenMP runtimes **actually loaded** and says **which package brings which** — by walking
+the process's dyld images, **and** by finding the dylibs on disk (a ground truth needing no macOS
+API). **Two distinct libomp files in one environment is the condition, whatever the CPU.**
+
+**312/312 core tests passing.**
+
+## [1.5.515] - 2026-07-13
+### The Apple Silicon crash is **TORCH**, not Qt — and the race I chased never existed
+``reproduce_arm64_crash.py`` on Meet's M2, each case in its own subprocess, each recreating the
+**original concurrency** (numba compiling on a **worker thread**):
+
+| case | | result |
+|---|---|---|
+| A | numba on a worker, nothing else | **OK** |
+| B | numba on a worker + **Qt** | **OK** — ***Qt is INNOCENT*** |
+| **C** | numba on a worker + **torch** | **SEGFAULT** |
+| D | + Qt + torch | **SEGFAULT** |
+| E | numba on MAIN, after Qt | **OK** |
+
+**torch ships its own libomp**, and two OpenMP runtimes in one arm64 process is a classic way to
+die. **The ``OMP: Info #276`` banner in the original crash was torch's** — Numba was the bystander
+that happened to be running when it blew up.
+
+> ***The Qt race was a hypothesis I formed from a coincidence, and I ran with it for three
+> diagnostics. It was wrong.***
+
+### And it changes WHY 1.5.503 works
+``run_pycat`` imports **torch (via cellpose) at line ~294** and starts the warm-up thread at
+**~495**. ***That is case C, exactly.***
+
+1.5.503 does two things on Darwin: **defers the warm-up** and **disables parallel Numba**. I
+claimed the first was the fix. **The matrix says it is the second** — the crash is inside a
+*parallel* kernel.
+
+**Deferring the warm-up alone would only move the compile to first use** — and if torch+numba also
+dies on the main thread, that is **worse**: the crash lands **mid-analysis** rather than at startup.
+
+### The likely real fix, documented but NOT enabled
+``NUMBA_THREADING_LAYER=workqueue`` — numba's **own pure-Python thread pool**, which **does not
+load an external libomp** and therefore **cannot collide with torch's.**
+
+Already known to work on that M2 standalone and with the real kernel. **The torch case is what the
+next run tests.** If it passes, it is **strictly better than ``parallel=False``**: the same safety,
+and the kernels **actually run in parallel**.
+
+Available today:
+
+```
+NUMBA_THREADING_LAYER=workqueue PYCAT_NUMBA_PARALLEL=1 run-pycat
+```
+
+***It is not the default yet. I have shipped a fix on an untested hypothesis four times in this
+investigation. Not a fifth.***
+
+**312/312 core tests passing.**
+
+## [1.5.514] - 2026-07-13
+### `detect_sedimentation` could NEVER see both processes — the branch was unreachable
+**Sedimentation mimics coarsening.** Droplets settling into the focal plane make the volume
+fraction rise; so does droplet growth. **If you call one the other, a coarsening rate is an
+artefact of gravity** — and this function exists to catch exactly that.
+
+The rule was:
+
+```python
+sed    = phi_s > 0 and phi_r2 > 0.3 and n_s > 0     # more droplets appear
+coarse = r_s   > 0 and r_r2   > 0.3 and n_s < 0     # fewer droplets (they merge)
+```
+
+**``n_s`` cannot be both positive and negative.** So ``sed`` and ``coarse`` were **mutually
+exclusive by construction**, and the ``'both'`` branch below them was **unreachable.**
+
+**That is not a style point.** When both processes run at once, the droplet count is the **SUM** of
+a settling gain and a coalescence loss — **and it can take either sign.**
+
+Measured on a sample with genuine sedimentation **and** genuine coarsening, the old rule called it
+**"sedimentation" 98 % of the time**, and its recommendation said *"no sedimentation artefact"*
+about the coarsening. ***The opposite of the truth.***
+
+### The physics
+| process | what happens | signature |
+|---|---|---|
+| sedimentation | droplets settle **into** the focal plane | **φ up**, n up, r flat |
+| coarsening | droplets merge / Ostwald-ripen | **r up**, n down, φ flat |
+| **both** | settling **while** the residents coarsen | **φ up AND r up**, n **either** |
+
+**So φ and r are the discriminators, and n is CORROBORATION** — it strengthens a call, it does not
+gate one. The corroboration is now **reported**, so the user can see *why* the call was made.
+
+### Measured
+| scene | BEFORE | AFTER |
+|---|---|---|
+| **both processes** | **`sedimentation` 98 %** | **`both` 85 %** |
+| sedimentation alone | 98 % | 98 % |
+| coarsening alone | 85 % | 83 % |
+| stable | 100 % | 98 % (2 % FP) |
+
+**No loss of specificity.**
+
+### Audited and sound
+The ``R² > 0.3`` gate does real work: on a 20-frame series the false-positive rate on a **stable**
+sample is **2 %**. *(On a 5-frame series it is 8 % — a slope fitted to five noisy points finds a
+trend by chance. That is a property of the data, not of the code, and it is documented.)*
+
+**11 of PyCAT's 13 statistical tests use a permutation null.** The mask/labels and null-construction
+classes are **not** systemic — the Costes bug was a one-off.
+
+**312/312 core tests passing.**
+
+## [1.5.513] - 2026-07-13
+### The launch now SAYS what it actually did
+Three diagnostics in a row drew confident, wrong conclusions from the arm64 crash. ``run_pycat``
+now prints, on every launch:
+
+- the warm-up's **thread and timestamp** — *the entire hypothesis is that it runs concurrently with
+  Qt, and the only way to know is to make the app say so*
+- **which threading layer Numba actually loaded**
+
+**That last one is the crux, not a nicety.** If Numba's default on Apple Silicon is already
+``workqueue`` rather than ``omp``, then the ``OMP: Info #276`` banner in the crash came from
+**somewhere else** — torch? BLAS? — and *"disable parallel Numba"* fixed a **symptom, not a
+cause.** **One line of output decides it.**
+
+### And the probe had a FOURTH bug — corrected
+``probe_real_kernel.py`` printed its f-strings **literally**, because the child script was written
+with **doubled braces** — the escaping you use when a string goes through ``.format()``. **It never
+does.** ***I escaped for a `.format()` that never happens.***
+
+**But Meet's run still proves what it claimed**, and the exit code is why: the child's
+``if not NUMBA_PARALLEL: sys.exit(2)`` guard **has no braces**, so it was written correctly and
+ran — and the child **exited 0**. **Parallel WAS on.**
+
+The real kernel was tested in parallel on **all seven array shapes** (uint16 camera data,
+non-contiguous views, constant images, single row/column), plus **20 repeat calls**, under **both**
+threading layers — and **none of it segfaulted.**
+
+*The critique's worst case — "the probe silently tested serial" — is ruled out by the exit code,
+not by the broken print.*
+
+**The fixed probe is verified by actually executing the child** — the step skipped in all three
+previous versions.
+
+**310/310 core tests passing.**
+
+## [1.5.512] - 2026-07-13
+### My diagnostic overclaimed a THIRD time — corrected
+``numba_arm64_diag.py`` v3 ran correctly on Meet's M2 and established something real:
+
+| test | result |
+|---|---|
+| plain ``@njit`` | PASS |
+| ``@njit(cache=True)`` | PASS |
+| ``@njit(parallel=True)`` | PASS |
+| **``@njit(parallel=True, cache=True)``** | **PASS** — *exactly what PyCAT's decorator says* |
+| ``workqueue`` layer | PASS |
+
+**So the parallel backend is NOT categorically broken on Apple Silicon.**
+
+**And then it announced "so the launch crash was the Qt race."** *That was an overclaim — the third
+in a diagnostic whose entire header is about not overclaiming.*
+
+What it tested was a **64×64 float32 toy**. The real crash was in ``rescale_intensity_fast``, with
+real microscopy data, inside a running Qt app with **napari, torch, OpenCV and BLAS all loaded**. A
+segfault in a parallel kernel is consistent with **either** an initialisation-order race **or** a
+kernel/data/backend-specific native failure the toy did not reproduce.
+
+> **Standalone-parallel-works does not distinguish them.**
+
+**The defensible statement:** parallel Numba works in isolation, so the failure needs the PyCAT
+launch context or the real kernel — which makes an initialisation-order interaction the **leading
+hypothesis, not a proven diagnosis.**
+
+### `probe_real_kernel.py` — the REAL kernel, in a SUBPROCESS
+It runs the **actual** ``rescale_intensity_fast`` on the shapes real data has — **uint16 camera
+arrays, non-contiguous views, constant images, 2048×2048, single row/column** — and **20 repeat
+calls**, because a crash on call 1 (compilation) and a crash on call 20 (steady state) mean
+different things.
+
+**Each case runs in a subprocess**, because **a SIGSEGV kills the process and cannot be caught
+in-process.** ``try/except`` will not save you from signal 11 — only a separate process will tell
+you it happened.
+
+### And that is a real constraint on the DESIGN, not just the test
+**PyCAT cannot auto-detect a working parallel backend by trying it and catching the failure** — the
+process would simply die. If parallel is ever enabled *conditionally* on Darwin, the check must be
+a **subprocess probe at first launch**. *Anything else is a guard that cannot fire.*
+
+**The safe policy stands, and is now written down:** keep the deferred warm-up permanently;
+``PYCAT_NUMBA_PARALLEL=1`` re-enables parallel; ``NUMBA_THREADING_LAYER=workqueue`` is the fallback
+if OpenMP specifically is the problem — **and the v3 run shows workqueue works on that machine.**
+
+**309/309 core tests passing.**
+
 ## [1.5.511] - 2026-07-13
 ### SEVEN panels guessed the FRAME INTERVAL — the pixel-size bug, one axis over
 **``frame_interval_s = 1.0`` is not an absence of information. It is a claim that the microscope

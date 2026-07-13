@@ -59,22 +59,81 @@ import os
 import warnings
 
 # ── OpenMP runtime safety (must run BEFORE numpy/torch/numba/napari import) ──
-# On Apple Silicon (arm64) several bundled libraries (PyTorch, Numba, MKL,
-# Cellpose) can each pull in their OWN copy of the OpenMP runtime. When two
-# copies load into the same process the program can abort at the C level with a
-# segmentation fault at launch — which multiple native-arm64 macOS users hit.
-# The "OMP: Info #276 ... omp_set_nested ... deprecated" banner is a tell-tale
-# sign of a duplicate OpenMP load. Setting KMP_DUPLICATE_LIB_OK=TRUE tells the
-# Intel/LLVM OpenMP runtime to tolerate the duplicate instead of aborting, and
-# capping the thread counts avoids oversubscription races during init. These are
-# no-ops on machines that don't have the conflict, so they are safe everywhere.
-# They MUST be set before the first native import, hence right after `import os`.
+#
+# **This is a macOS problem, NOT an Apple Silicon problem** — and this comment used to say
+# arm64, which sent the investigation down the wrong path for three diagnostics.
+#
+# Several bundled libraries (PyTorch, Numba, MKL, Cellpose) each ship their **own copy of the
+# OpenMP runtime**. Two copies in one macOS process share a symbol table and stomp each other's
+# thread state, and **whichever library happens to be running when that happens is the one that
+# dies.**
+#
+# **That is why the SAME BUG has appeared twice, wearing different clothes:**
+#
+#     Intel Mac   MKL's libiomp5  +  torch's libomp   ->  segfault **in cellpose**
+#     Apple Si    torch's libomp  +  numba's libomp   ->  segfault **in numba**
+#
+# ***The victim is incidental. The loader is the bug.*** (Established 2026-07-13 by
+# ``reproduce_arm64_crash.py``: numba + Qt is FINE; numba + **torch** segfaults.)
+#
+# **And on Intel it can be WORSE**, because MKL is present there and absent on arm64 — so there
+# can be **three** OpenMP runtimes, not two.
+#
+# ── KMP_DUPLICATE_LIB_OK DOES NOT FIX THIS ──────────────────────────────────────────────
+#
+# Intel's own documentation is blunt: *"you can set KMP_DUPLICATE_LIB_OK=TRUE to allow the
+# program to continue to execute, **but that may cause crashes or silently produce incorrect
+# results**."*
+#
+# **It does not make two runtimes safe. It makes them TOLERATED.** Without it you get a clean,
+# diagnosable ``OMP: Error #15`` abort. **With it, the process continues and segfaults deeper
+# in** — *it converts a diagnosable failure into a mysterious one.*
+#
+# **PyCAT sets this flag, and Meet's machine crashed anyway.** It is kept because a *tolerated*
+# duplicate is still better than an unconditional abort for the many users whose libraries happen
+# not to collide — but **it is a mitigation, not a fix**, and it should not be mistaken for one.
+#
+# **The real fix is to have only ONE OpenMP runtime.** In order of preference:
+#   1. ``NUMBA_THREADING_LAYER=workqueue`` — numba loads **no libomp at all**, and keeps its
+#      parallelism. Cleanest.
+#   2. ``conda install -c conda-forge nomkl`` — removes MKL's libiomp5. **This is what the README
+#      already recommends for Intel Macs, and it is the same fix for the same bug.**
+#   3. ``PYCAT_NUMBA_PARALLEL=0`` — numba does not use OpenMP. Safe; loses parallelism. *(This is
+#      what PyCAT currently does on macOS.)*
+#
+# ``openmp_audit.py`` counts the runtimes actually present, and says which package brings which.
+#
+# These MUST be set before the first native import, hence right after `import os`.
 for _var, _val in (
     ('KMP_DUPLICATE_LIB_OK', 'TRUE'),
     ('OMP_NUM_THREADS', os.environ.get('OMP_NUM_THREADS', '4')),
     ('KMP_INIT_AT_FORK', 'FALSE'),
 ):
     os.environ.setdefault(_var, _val)
+
+# ── THE ACTUAL FIX: numba must not load an OpenMP runtime on macOS ───────────────────────
+#
+# ``NUMBA_THREADING_LAYER`` is read at **numba's import time**, and **numba can be pulled in
+# indirectly** — by cellpose, or by a napari plugin — long before ``pycat.toolbox.numba_utils``
+# ever loads. Setting it there would be **too late**. It has to be here, before the first native
+# import, alongside the other OpenMP variables.
+#
+# **Established on an M2 (2026-07-13), each case in its own subprocess:**
+#
+#     torch + numba on a **worker**                     **SEGFAULT**
+#     torch + numba on the **MAIN thread**              **SEGFAULT**   <- the thread is irrelevant
+#     torch + numba + **KMP_DUPLICATE_LIB_OK=TRUE**     **SEGFAULT**   <- the line ABOVE does
+#                                                                          NOTHING for this
+#     torch + numba + **NUMBA_THREADING_LAYER=workqueue**    **OK**
+#
+# ``workqueue`` is numba's **own pure-Python thread pool**. It loads **no libomp at all**, so
+# there is no second OpenMP runtime to collide with torch's — and **it keeps the parallelism.**
+#
+# *(``KMP_DUPLICATE_LIB_OK`` above stays: it is useless for the numba/torch pair, but it is the
+# only mitigation available for the OTHER pair — MKL's libiomp5 against torch's libomp, which is
+# the documented Intel-Mac "PyTorch segfaults Cellpose" bug. Same mechanism, different colliders.)*
+if sys.platform == 'darwin':
+    os.environ.setdefault('NUMBA_THREADING_LAYER', 'workqueue')
 
 # Set dask scheduler to synchronous BEFORE dask is imported anywhere.
 # Prevents dask from importing 'distributed' which crashes on Windows
@@ -440,13 +499,39 @@ def run_pycat_func():
             if sys.platform == 'darwin':
                 print("[PyCAT Numba] Warm-up deferred on macOS — the kernels will compile on "
                       "first use. (Numba's OpenMP backend and Qt initialising concurrently "
-                      "segfaults on Apple Silicon.)")
+                      "is the leading suspect for the arm64 launch segfault.)", flush=True)
             else:
+                # ── Say WHICH THREAD, and WHEN ──────────────────────────────────────
+                #
+                # The whole arm64 hypothesis is that this runs **concurrently with Qt**. If that
+                # is right, the fix is that it no longer does — and **the only way to know is to
+                # print the thread and the timestamp**, and compare them against Qt's.
+                #
+                # Three diagnostics in a row drew confident, wrong conclusions from this crash.
+                # *The cheapest possible insurance against a fourth is to make the app say what it
+                # actually did.*
+                import threading as _threading
+                import time as _time
+                print(f"[PyCAT Numba] warm-up START  thread={_threading.current_thread().name}  "
+                      f"t={_time.time():.3f}", flush=True)
                 try:
                     from pycat.toolbox.numba_utils import warmup_numba
                     warmup_numba()
+                    print(f"[PyCAT Numba] warm-up END    "
+                          f"thread={_threading.current_thread().name}  t={_time.time():.3f}",
+                          flush=True)
+                    # WHICH threading layer actually loaded. Only valid after a parallel kernel
+                    # has run — and it is the number that decides whether OpenMP is even the right
+                    # suspect. If numba's default here is already `workqueue`, then the OMP banner
+                    # in the crash came from somewhere else (torch? BLAS?), and disabling parallel
+                    # Numba fixed a symptom rather than a cause.
+                    try:
+                        from numba import threading_layer as _tl
+                        print(f"[PyCAT Numba] threading layer = {_tl()}", flush=True)
+                    except Exception:
+                        pass
                 except Exception as e:
-                    print(f"[PyCAT Numba] Warmup skipped: {e}")
+                    print(f"[PyCAT Numba] Warmup skipped: {e}", flush=True)
             # PyTorch/CUDA status check — background so the GUI stays responsive.
             # SKIPPED on macOS: (a) there is no CUDA on Apple Silicon, so the
             # check has no useful result there, and (b) importing torch on this

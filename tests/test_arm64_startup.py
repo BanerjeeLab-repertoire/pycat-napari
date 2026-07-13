@@ -48,69 +48,73 @@ _SOURCE = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 
 
 @pytest.mark.core
-def test_the_numba_warmup_is_deferred_on_macOS():
-    """**The warm-up is a nice-to-have. It is not worth a crash at launch.**
+def test_numba_uses_WORKQUEUE_on_macOS_so_it_loads_no_libomp():
+    """**The fix, and it is the only thing that works.**
 
-    It exists purely to hide a first-use compile delay. The kernels still compile on first real
-    use — on the main thread, with nothing else initialising alongside them.
+    Established on an M2, each case in its own subprocess::
+
+        torch + numba on a **worker**                      **SEGFAULT**
+        torch + numba on the **MAIN thread**               **SEGFAULT**   <- thread irrelevant
+        torch + numba + **KMP_DUPLICATE_LIB_OK=TRUE**      **SEGFAULT**   <- the flag does nothing
+        torch + numba + **NUMBA_THREADING_LAYER=workqueue**     **OK**
+
+    **It is torch's libomp against numba's libomp.** Qt was innocent. The thread was irrelevant.
+    And ``KMP_DUPLICATE_LIB_OK`` — *which PyCAT already sets* — **does not help**, exactly as
+    Intel's own documentation warns.
+
+    ``workqueue`` is numba's **own pure-Python thread pool**: it loads **no libomp at all**, so
+    there is no second OpenMP runtime to collide with torch's — **and it keeps the parallelism.**
     """
     source = (_SOURCE / "run_pycat.py").read_text(encoding='utf-8', errors='ignore')
 
-    warmup_start = source.find("def _warmup():")
-    assert warmup_start > 0, "the warm-up function is gone"
-
-    warmup_end = source.find("threading.Thread(target=_warmup", warmup_start)
-    body = source[warmup_start:warmup_end]
-
-    assert "darwin" in body, (
-        "the Numba warm-up must be deferred on macOS. It initialises OpenMP on a worker thread "
-        "while Qt comes up on the main thread — the SAME race this file already documents (and "
-        "already avoids) for torch, which sits fifteen lines below it."
+    assert 'NUMBA_THREADING_LAYER' in source, (
+        "run_pycat must set NUMBA_THREADING_LAYER=workqueue on macOS. Without it, numba loads its "
+        "own libomp alongside torch's, and the process SEGFAULTS."
     )
-
-    # And the guard must come BEFORE the warmup call, not after it.
-    darwin_at = body.find("darwin")
-    warmup_at = body.find("warmup_numba()")
-    assert darwin_at < warmup_at, (
-        "the platform check must guard the warm-up call, not follow it"
-    )
+    assert 'workqueue' in source
 
 
 @pytest.mark.core
-def test_the_parallel_backend_is_OFF_by_default_on_macOS():
-    """**Deferring the warm-up alone would be a guess.**
+def test_the_threading_layer_is_set_BEFORE_the_first_native_import():
+    """**``NUMBA_THREADING_LAYER`` is read at numba's IMPORT time. Setting it later does nothing.**
 
-    If the parallel backend itself is what is broken on arm64, the crash simply moves from launch
-    to **first use** — mid-analysis, which is worse than at startup.
+    And **numba can be pulled in indirectly** — by cellpose, or by a napari plugin — long before
+    ``pycat.toolbox.numba_utils`` ever loads. So setting it *there* would be **too late**, and the
+    segfault would come back with nothing to show why.
 
-    Every kernel has a NumPy fallback, and single-threaded Numba is fine. **Parallelism is a
-    speed-up, not a capability — and it is not worth a segfault.**
+    It must sit in the env block at the top of ``run_pycat``, **before the first native import**,
+    beside the other OpenMP variables.
+    """
+    source = (_SOURCE / "run_pycat.py").read_text(encoding='utf-8', errors='ignore')
+
+    threading_layer_at = source.find('NUMBA_THREADING_LAYER')
+    assert threading_layer_at > 0
+
+    # It must come before napari, torch, numpy — anything that could drag numba in with it.
+    for native in ('import napari', 'import numpy', 'import torch'):
+        native_at = source.find(native)
+        if native_at < 0:
+            continue
+        assert threading_layer_at < native_at, (
+            f"NUMBA_THREADING_LAYER is set AFTER `{native}`. It is read at numba's import time, "
+            f"and numba can be pulled in indirectly by cellpose or a napari plugin — so setting "
+            f"it late does nothing, and the segfault returns."
+        )
+
+
+@pytest.mark.core
+def test_forcing_OpenMP_back_on_macOS_WARNS():
+    """**A user who sets ``NUMBA_THREADING_LAYER=omp`` gets the crash back.**
+
+    They deserve to be told, rather than discovering it as a segfault.
     """
     source = (_SOURCE / "toolbox" / "numba_utils.py").read_text(encoding='utf-8', errors='ignore')
 
-    assert "NUMBA_PARALLEL" in source, "the parallel backend must be switchable"
-    assert "darwin" in source, (
-        "the parallel backend must default OFF on Darwin — that is where it segfaults"
+    assert '_FORCED_OMP' in source or 'omp' in source.lower()
+    assert 'WARNING' in source, (
+        "forcing OpenMP back on macOS must WARN — PyTorch already loads its own OpenMP runtime, "
+        "and a second one segfaults the process"
     )
-    assert "PYCAT_NUMBA_PARALLEL" in source, (
-        "there must be an environment override, so testing a newer numba/llvmlite does not "
-        "require editing the source. **That is the experiment worth running.**"
-    )
-
-    # No kernel may hardcode parallel=True any more.
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if getattr(node.func, 'id', '') != 'njit':
-            continue
-        for keyword in node.keywords:
-            if keyword.arg == 'parallel':
-                assert not (isinstance(keyword.value, ast.Constant)
-                            and keyword.value.value is True), (
-                    "a kernel hardcodes parallel=True. It must use NUMBA_PARALLEL, which is "
-                    "False on macOS — otherwise it segfaults on Apple Silicon."
-                )
 
 
 @pytest.mark.core
