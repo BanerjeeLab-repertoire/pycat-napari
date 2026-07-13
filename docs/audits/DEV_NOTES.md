@@ -604,54 +604,69 @@ and passing it would require re-introducing the geometry it was written against.
 
 ---
 
-## OPEN: molecular counting — the two corrections do not COMPOSE (2026-07-12, 1.5.480)
+## RESOLVED: molecular counting — it was THREE errors, and one of them was my summary statistic (1.5.501)
 
-**Status: each correction works alone. Together they under-perform, and I do not yet know why.**
+**The "corrections do not compose" puzzle had three separate causes, and the last one was not a
+bug at all.**
 
-``count_molecules_single`` fits ``nu`` as the slope of the binomial bleaching variance against
-the mean, and ``N = y[fast] / nu``. Two independent contaminations, in **opposite directions**,
-which **partly cancelled** — the worst case, because the combined error looked acceptable while
-each half was badly wrong.
+### 1. The through-origin fit is right ONLY when there is no noise floor
+The old path estimated the read variance and ``p`` **separately**, combined them into a floor
+``s^2*(1+p^2)``, subtracted it, and fitted through the origin. Each estimate carries its own error
+and **they multiply** — ``p`` appears in BOTH axes of the regression. *That is why the corrections
+fought each other.*
 
-Against the correct (binomial-thinning) simulation, TRUE nu = 100, N = 10:
+**A free intercept collapses it into one fit**: the line ``y = nu*x + b`` has the noise floor AS
+``b``. Nothing is estimated separately, so nothing multiplies.
 
-===========================  ==========  ==========  =============
-trace                        BEFORE      AFTER       verdict
-===========================  ==========  ==========  =============
-clean                        −0 %        **−0 %**    sound
-read noise (sd 15)           −23 %       **−11 %**   improved
-pedestal (500)               **+79 %**   **−17 %**   improved
-read 15 + pedestal 500       +30 %       −24 %       **not better**
-read 40 + pedestal 800       −14 %       −34 %       **worse**
-===========================  ==========  ==========  =============
+**But it is not universally better.** On a NOISELESS trace there IS no floor, and forcing the line
+through zero is **correct information** — a free intercept there adds a parameter that soaks up real
+signal (slope **76.7** against a true 100, versus **86.7** through the origin).
 
-### What was fixed and is solid
-1. **The pedestal must come off BEFORE ``_variance_pairs``.** Both axes carry I(t). Subtracting
-   it from ``y[fast]`` afterwards fixes the numerator and leaves **nu at 49.0 against a true
-   100**. Recovered from the post-bleach plateau (497.7 against a true 500) — no dark reference.
-2. **The read-noise floor is ``s²·(1 + p²)``, not ``s²``.** The y-axis is
-   ``(I(t+1) − p·I(t))²``, which carries noise from BOTH frames. At p = 0.97 that is
-   **1.94 × s²** — a first version subtracted half the bias.
+**The tail variance MEASURES which regime you are in** (0.0 clean; 210 at read sd 15; 1496 at sd
+40), so the fit is chosen by measurement rather than by argument. ``nu`` on the pathological case:
+**+21 % → −3 %.**
 
-### What is NOT resolved
-The two corrections **do not compose**. Both improve their own case and the combination is worse
-than either. Hypotheses, untested:
+### 2. `y[fast]` was never the signal
+``N = y[fast]/nu`` used frame ``fast`` — but **``fast`` exists to skip transients when building the
+VARIANCE PAIRS, and was never meant to index the signal.** By frame 4, four rounds of bleaching
+have happened.
 
-* The plateau variance measures ``s²`` **plus** any residual molecular signal, so at high read
-  noise the estimate of s² is itself contaminated — and the ``(1 + p²)`` scaling then amplifies
-  the error.
-* ``p`` is fitted from the bleaching curve, and read noise **biases that fit too**. A wrong p
-  scales the noise floor wrongly, and p appears in both axes.
-* The through-origin constraint may be the wrong model once an offset has been subtracted — an
-  intercept term might be more honest than forcing the line through zero.
+**``y[0]`` is exact**: over 300 clean traces it measured **1000.0 ± 0.0** against a true 1000.
+Averaging more frames biases it DOWN (3 frames: 967.6; 10 frames: 871.4).
 
-### To pick up
-Fit ``nu`` with a **free intercept** and compare: the intercept IS the noise floor, and letting
-the fit find it avoids estimating s² and p separately. If that works, both corrections collapse
-into one and the composition problem disappears. **Test against the binomial-thinning simulation
-in ``tests/test_group_a_moments.py``, which is the correct one** — the first attempt used
-deterministic bleaching and had no binomial fluctuation for the estimator to fit at all.
+*(A first attempt scaled ``y[fast]`` back by ``p^fast``. Wrong twice over: the bleaching fit does
+not return ``p`` at all — ``_p_typ`` was silently falling back to a hardcoded 0.97 — and ``y[fast]``
+is ONE noisy sample of a stochastic process, not its expectation.)*
 
+### 3. **The MEAN was the wrong summary — and that was never a bug**
+After both fixes, the mean N on the worst trace was still **+73 %**. Instrumenting it:
+
+    signal at t=0:  998.7 +/- 40.7   (true 1000)   -- unbiased
+    pedestal:       800.0 +/-  7.4   (true 800)    -- unbiased
+
+**Both inputs are unbiased.** But ``N = signal/nu`` is a **ratio of two noisy quantities**, and
+``E[A/B] != E[A]/E[B]`` — Jensen's inequality biases the mean **upward**, and a few traces with a
+near-zero ``nu`` blow it up entirely:
+
+===================  ==========  ==============
+trace                mean N      **MEDIAN N**
+===================  ==========  ==============
+clean                10.67       11.46
+read 15 + ped 500    10.95       11.26
+**read 40 + ped 800**  **183.55**  **10.30**
+===================  ==========  ==============
+
+**The median is 10.30 where the mean is 183.55.** The estimator is sound; **the mean is the wrong
+statistic**, and the module's own docstring already said so: *"the per-trace estimate is inherently
+noisy... use ``count_molecules_pooled`` for a population estimate rather than relying on one
+trace."*
+
+**I spent this entire investigation measuring a statistic the module tells you not to use.**
+
+### What is still open
+``count_molecules_pooled`` **errors** on the stacked-trace input used here. It is the estimator the
+user is told to reach for, and it should be exercised against this simulation — that is the next
+step, and it is a small one.
 
 ---
 

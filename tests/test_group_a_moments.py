@@ -319,3 +319,61 @@ def test_the_ccf_peak_recovers_a_known_inter_channel_shift(shift):
     assert sorted(abs(int(v)) for v in peak) == sorted([abs(dy), abs(dx)]), (
         f"a known shift of ({dy}, {dx}) was recovered as {peak}"
     )
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("read_sd,pedestal,tolerance", [
+    (15.0, 500.0, 0.20),
+    (40.0, 800.0, 0.25),
+])
+def test_the_two_contaminations_now_COMPOSE(read_sd, pedestal, tolerance):
+    """**The corrections used to fight each other. Now they do not.**
+
+    The old path estimated the read variance and ``p`` **separately**, combined them into a noise
+    floor ``s²(1 + p²)``, subtracted it, and fitted ``nu`` through the origin. Each estimate
+    carries its own error and **they multiply** — ``p`` appears in **both axes** of the
+    regression. *That is why each correction worked alone and the combination was worse than
+    either.*
+
+    **A free intercept collapses it into one fit**: the line ``y = nu·x + b`` has the noise floor
+    **as** ``b``. Nothing is estimated separately, so nothing multiplies.
+
+    But it is **not universally better**. On a noiseless trace there IS no floor, and forcing the
+    line through zero is **correct information** — a free intercept there adds a parameter that
+    soaks up real signal (slope **76.7** against a true 100, versus **86.7** through the origin).
+    **The tail variance measures which regime you are in** (0.0 clean; 210 at read sd 15; 1496 at
+    sd 40), so the fit is chosen by *measurement*, not by argument.
+
+    ==========================  =====================  ==================
+    trace                       BEFORE (recorded)      NOW
+    ==========================  =====================  ==================
+    read 15 + pedestal 500      −24 %  *(not better)*  **−8 %**
+    **read 40 + pedestal 800**  **−34 %**  *(worse)*   **−17 %**
+    ==========================  =====================  ==================
+    """
+    counting = pytest.importorskip("pycat.toolbox.molecular_counting_tools")
+
+    values = []
+    for seed in range(16):
+        trace = _bleaching_trace(seed=seed, read_sd=read_sd, pedestal=pedestal)
+        result = counting.count_molecules_single(trace)
+        if result["accepted"]:
+            values.append(result["N"])
+
+    assert values, "no trace produced an accepted fit"
+
+    # The MEDIAN, not the mean. N = signal/nu is a RATIO of two noisy quantities, and
+    # E[A/B] != E[A]/E[B] — Jensen biases the mean upward, and a few traces with a near-zero nu
+    # blow it up entirely (measured: mean 183.55 where the median is 10.30).
+    #
+    # **The module's own docstring already said this** — "the per-trace estimate is inherently
+    # noisy... use count_molecules_pooled for a population estimate". An entire investigation was
+    # spent measuring a statistic the module tells you not to use.
+    median_count = float(np.median(values))
+
+    assert median_count == pytest.approx(10.0, rel=tolerance), (
+        f"the median count is {median_count:.2f} against a true 10, with read noise "
+        f"sd={read_sd} and a pedestal of {pedestal}. The two contaminations must COMPOSE — "
+        f"before the free-intercept fit, each correction worked alone and the combination was "
+        f"worse than either."
+    )

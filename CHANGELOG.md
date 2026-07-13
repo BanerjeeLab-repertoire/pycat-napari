@@ -4,6 +4,70 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.501] - 2026-07-10
+### RESOLVED — molecular counting: the corrections now compose
+| trace | **BEFORE** (recorded in DEV_NOTES) | **NOW** |
+|---|---|---|
+| read 15 + pedestal 500 | −24 % *(not better)* | **−8 %** |
+| **read 40 + pedestal 800** | **−34 %** *(worse)* | **−17 %** |
+
+### Why they fought each other
+The old path estimated the read variance and ``p`` **separately**, combined them into a floor
+``s²(1 + p²)``, subtracted it, and fitted ``nu`` through the origin. Each estimate carries its own
+error and **they multiply** — ``p`` appears in **both axes** of the regression.
+
+**A free intercept collapses it into one fit**: the line ``y = nu·x + b`` has the noise floor **as**
+``b``. Nothing is estimated separately, so nothing multiplies. ``nu`` on the pathological case:
+**+21 % → −3 %.**
+
+### But it is NOT universally better — and the tail variance decides
+On a **noiseless** trace there IS no floor, and forcing the line through zero is **correct
+information**. A free intercept there adds a parameter that soaks up real signal: slope **76.7**
+against a true 100, versus **86.7** through the origin.
+
+**The tail variance measures which regime you are in** (0.0 clean; 210 at read sd 15; 1496 at sd 40),
+so the fit is chosen **by measurement, not by argument.** *A camera with zero read noise does not
+exist — but the rule should not rest on that.*
+
+### I found a "third bug" that was not one, and the test caught me
+I changed the numerator from ``y[fast]`` to ``y[0]``, reasoning that ``fast`` rounds of bleaching
+have already happened by frame ``fast``. **The reasoning was fine and the change was wrong**:
+``_variance_pairs`` builds its pairs starting at frame ``fast``, so the ``nu`` it fits is measured
+over that window — and ``y[fast]`` is the signal at the **start of the same window.** *They match.*
+
+| | median N (true 10) |
+|---|---|
+| **through-origin + `y[fast]`** | **9.97** *(the original, and correct)* |
+| through-origin + `y[0]` | 12.17 |
+
+``test_molecule_counting_is_exact_on_a_clean_trace`` **failed immediately** — which is the entire
+value of having written it during the audit. *I would otherwise have shipped a regression while
+believing I had fixed a bug.*
+
+### And the real lesson: the MEAN was the wrong statistic all along
+After the fixes the **mean** N on the worst trace was still **+73 %**. Instrumenting it: the signal
+recovers at **998.7 ± 40.7** (true 1000) and the pedestal at **800.0 ± 7.4** (true 800). **Both
+inputs are unbiased.**
+
+But ``N = signal / nu`` is a **ratio of two noisy quantities**, and ``E[A/B] ≠ E[A]/E[B]`` —
+Jensen's inequality biases the mean **upward**, and a few traces with a near-zero ``nu`` blow it up:
+
+| trace | mean N | **MEDIAN N** |
+|---|---|---|
+| **read 40 + ped 800** | **183.55** | **10.30** |
+
+**The estimator was sound. The mean was the wrong summary** — and the module's own docstring
+already said so: *"the per-trace estimate is inherently noisy... use ``count_molecules_pooled`` for
+a population estimate rather than relying on one trace."*
+
+**An entire investigation was spent measuring a statistic the module tells you not to use.**
+
+### Still open
+``count_molecules_pooled`` **errors** on stacked-trace input. It is the estimator the user is told
+to reach for, and it should be exercised against this simulation. Recorded in DEV_NOTES.
+
+**295/295 core tests passing.**
+
 ## [1.5.500] - 2026-07-10
 ### The Costes test was a **pixel shuffle** — which is not Costes
 **83 % false positives on independent channels.**
