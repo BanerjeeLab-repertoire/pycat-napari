@@ -18,6 +18,8 @@ try:
 except Exception:
     label_with_circle = lambda t,**k: t
 import numpy as np
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -327,7 +329,7 @@ class VideoParticleTrackingUI:
         self._bead_picker_layer = layer
 
     def _mpx(self):
-        return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
+        return pixel_size_um_or_default(self._dr(), context='vpt_ui')
 
     def _record(self, step, params):
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)

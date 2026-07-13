@@ -21,6 +21,8 @@ Compared to In Vitro Fluorescence:
 """
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -55,7 +57,7 @@ class InVitroBFUI:
         self.viewer = viewer; self.central_manager = central_manager
 
     def _dr(self):  return self.central_manager.active_data_class.data_repository
-    def _mpx(self): return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
+    def _mpx(self): return pixel_size_um_or_default(self._dr(), context='invitro_bf_ui')
     def _record(self, step, params):
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp: bp.record(step, params)

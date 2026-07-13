@@ -35,6 +35,7 @@ or return an explicit failure flag, so the caller can tell.
 
 import ast
 import pathlib
+import numpy as np
 
 import pytest
 
@@ -308,4 +309,74 @@ def test_every_UI_that_reports_a_LENGTH_has_the_pixel_size_gate():
         f"value, not an obviously-wrong one — so every length silently comes out in pixels "
         f"labelled as microns. Add `add_pixel_size_gate`, or add the file to "
         f"_NO_PIXEL_GATE_NEEDED **with a reason** if it genuinely reports no lengths."
+    )
+
+
+@pytest.mark.core
+def test_a_pixel_size_of_exactly_1_is_a_SENTINEL_not_a_measurement():
+    """**``file_io`` writes ``microns_per_pixel_sq = 1`` when it does not know.**
+
+    It even says so — *"Resolution data incomplete, using default value of 1 (um/px)^2"*.
+
+    So **a value of exactly 1 is the loader saying "I have no idea", not the microscope saying
+    "one micron".** ``pixel_size_um`` was returning it as a legitimate measurement, **with no
+    warning** — which is precisely the failure that module exists to prevent:
+
+        *1 µm/px is a plausible value, not an obviously-wrong one.*
+
+    ``field_status``'s gate already knew this — ``abs(val - 1.0) > 1e-9`` is its test for a REAL
+    scale. **The accessor did not.**
+
+    A microscope whose pixel really IS 1.000 µm is possible, and such a user confirms it through
+    the gate, which sets ``pixel_size_confirmed``. **That flag is the one thing that distinguishes
+    "the user told us it is 1" from "nobody told us anything".**
+    """
+    pixel_size = pytest.importorskip("pycat.utils.pixel_size")
+
+    real = pixel_size.pixel_size_um({'microns_per_pixel_sq': 0.0625})
+    assert real == pytest.approx(0.25), f"a real pixel size must pass through; got {real}"
+
+    sentinel = pixel_size.pixel_size_um({'microns_per_pixel_sq': 1})
+    assert not np.isfinite(sentinel), (
+        "a pixel size of EXACTLY 1 is the loader's fallback for 'no resolution in the metadata'. "
+        "Returning it as a measurement means every length silently comes out in PIXELS, labelled "
+        "as microns."
+    )
+
+    confirmed = pixel_size.pixel_size_um(
+        {'microns_per_pixel_sq': 1, 'pixel_size_confirmed': True})
+    assert confirmed == pytest.approx(1.0), (
+        "a user who CONFIRMS a 1 um pixel must be believed — otherwise a legitimate microscope "
+        "becomes unusable"
+    )
+
+
+@pytest.mark.core
+def test_the_UIs_read_the_pixel_size_through_the_ACCESSOR():
+    """**``float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5`` was copy-pasted into 15 places.**
+
+    It is a verbatim reimplementation of ``pixel_size_um_or_default`` — **minus the warning.** The
+    accessor exists, it does exactly this, and it says so when it is defaulting. It had **2 call
+    sites** while the copy-paste had 15.
+
+    *That is how a guard stops guarding: not by being removed, but by being bypassed.*
+    """
+    import re
+
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    idiom = re.compile(
+        r"float\([^)]*\.get\('microns_per_pixel_sq',\s*1(?:\.0)?\)\)\s*\*\*\s*0\.5")
+
+    offenders = []
+    for path in sorted(toolbox.glob("*_ui.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+        if idiom.search(source):
+            offenders.append(path.name)
+
+    assert not offenders, (
+        f"these UIs reimplement the pixel-size accessor by hand: {offenders}\n\n"
+        f"`float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5` is exactly what "
+        f"`pixel_size_um_or_default` does — **minus the warning that says the result is in PIXEL "
+        f"units, not microns.** Call the accessor."
     )

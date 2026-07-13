@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import numpy as np
 
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
@@ -343,7 +345,7 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
 
         # Get coordinates from data repository or compute from mask
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='spatial_metrology_ui')
 
         from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids
         coords_df = get_puncta_centroids(pmask, cmask, mpx)

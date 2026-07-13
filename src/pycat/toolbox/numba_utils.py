@@ -66,6 +66,39 @@ import numpy as np
 # **Fixing only (1) would be a guess**, and if (2) is the real cause the crash simply moves from
 # launch to first use — which is *worse*, because it would then happen mid-analysis.
 #
+# **WHAT THE DIAGNOSTIC ACTUALLY SHOWED (2026-07-13) — and it is NOT what it claimed** ─────────
+#
+# The first version of ``numba_arm64_diag.py`` ran each test with ``python -c "<code>"``. But
+# ``@njit(cache=True)`` **cannot cache code that came from a string** — there is no file to write
+# the cache beside — so numba raised::
+#
+#     RuntimeError: cannot cache function 'f': no locator available for file '<string>'
+#
+# **Both** the cached test and the parallel test hit that, because both used ``cache=True``.
+# Neither ever reached the parallel backend. The script saw "parallel crashed" and announced that
+# the backend was broken — **it had proved nothing of the sort.**
+#
+# And the failures were **clean Python exceptions, not segfaults**. The launch crash was
+# ``Fatal Python error: Segmentation fault``. *Those are not the same failure.*
+#
+# **What Meet's run DOES establish:**
+#   * plain ``@njit`` works on the M2 (test 1 passed)
+#   * **the OpenMP threading layer loads fine on its own** — test 4 launched it, printed ``omp``,
+#     and did not crash
+#   * numpy 1.26.4 / numba 0.65.1 / llvmlite 0.47.0, macOS 26.5 arm64
+#
+# **That last point is weak evidence for the RACE, not the backend**: OpenMP comes up cleanly when
+# it comes up *alone*. The crash needed Qt initialising beside it.
+#
+# **So the honest position is:** deferring the warm-up (1) is almost certainly the real fix — it
+# removes a concurrency this very file's neighbour already identifies as fatal on arm64. Disabling
+# the parallel backend was justified by a diagnostic **that did not test it**, and may be an
+# unnecessary loss of speed.
+#
+# It is left OFF because a segfault at launch is worse than a slower filter, and because a wrong
+# default that is *safe* costs less than a wrong default that *crashes*. **But it is a caution,
+# not a finding**, and ``numba_arm64_diag.py`` v2 — which writes real files — will settle it.
+#
 # So the parallel backend is **off by default on Darwin**. The kernels still JIT (single-threaded
 # Numba is fine), and every one of them has a NumPy fallback besides. On a 64x64 warm-up image
 # the parallelism buys nothing anyway; on a real image it is a speed-up, not a capability — **and

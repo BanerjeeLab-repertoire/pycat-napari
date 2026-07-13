@@ -26,6 +26,8 @@ Key design principle:
 from __future__ import annotations
 
 import numpy as np
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -138,7 +140,7 @@ class BrightfieldCondensateUI:
         return self.central_manager.active_data_class.data_repository
 
     def _mpx(self):
-        return float(self._dr().get('microns_per_pixel_sq', 1.0)) ** 0.5
+        return pixel_size_um_or_default(self._dr(), context='brightfield_ui')
 
     # ── dock construction ────────────────────────────────────────────────
 

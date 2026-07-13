@@ -10,6 +10,8 @@ Tabbed widget for:
 from __future__ import annotations
 import numpy as np
 
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
@@ -151,7 +153,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         if stack.ndim != 3:
             napari_show_warning("MSD needs a 3D (T,H,W) label stack."); return
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
         prog_msd.setVisible(True); prog_msd.setRange(0,0); run_msd.setEnabled(False)
 
         def _task():
@@ -239,7 +241,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
         prog_hist.setVisible(True); prog_hist.setRange(0,0); run_hist.setEnabled(False)
 
         def _task():
@@ -328,7 +330,7 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         stack = materialize_stack(ui_instance.viewer.layers[name].data, dtype=None)
         if stack.ndim != 3:
             napari_show_warning("Fusion needs a 3D (T,H,W) mask stack."); return
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5
+        mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
         events = extract_fusion_relaxation(
             stack, microns_per_pixel=mpx, frame_interval_s=dt_kin.value())
         if not events:

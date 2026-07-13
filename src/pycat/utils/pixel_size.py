@@ -109,6 +109,34 @@ def pixel_size_um(data_repository, context=''):
             f"positive number. Lengths and areas are returned as NaN.")
         return float('nan')
 
+    # ── EXACTLY 1 is the value the loader writes when it does NOT KNOW ──────────
+    #
+    # ``file_io`` falls back to ``microns_per_pixel_sq = 1`` when the metadata carries no
+    # resolution — and it prints *"Resolution data incomplete, using default value of 1
+    # (um/px)^2"* when it does so.
+    #
+    # **So a value of exactly 1 is a SENTINEL, not a measurement.** This function was returning it
+    # as a legitimate pixel size, with **no warning** — which is the whole failure it exists to
+    # prevent: *1 µm/px is a plausible value, not an obviously-wrong one.*
+    #
+    # ``field_status``'s pixel-size gate already knows this — ``abs(val - 1.0) > 1e-9`` is its
+    # test for a REAL scale. **The accessor did not.**
+    #
+    # A microscope whose pixel really IS 1.000 µm is possible, and such a user confirms it through
+    # the gate, which sets ``pixel_size_confirmed``. **That flag is the one thing that
+    # distinguishes "the user told us it is 1" from "nobody told us anything".**
+    if (abs(value - 1.0) < 1e-9
+            and isinstance(data_repository, dict)
+            and not data_repository.get('pixel_size_confirmed')):
+        _warn_once(
+            f'sentinel{where}',
+            f"Pixel size unknown{where}: `microns_per_pixel_sq` is exactly 1, which is the "
+            f"**fallback the loader writes when the metadata carries no resolution** — not a "
+            f"measurement. Lengths and areas are returned as NaN.\n\n"
+            f"If your pixel really is 1.000 um, confirm it in the pixel-size panel and it will "
+            f"be accepted.")
+        return float('nan')
+
     return float(value ** 0.5)
 
 

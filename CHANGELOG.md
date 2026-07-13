@@ -4,6 +4,98 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.508] - 2026-07-13
+### A pixel size of EXACTLY 1 is a SENTINEL, not a measurement
+``file_io`` writes ``microns_per_pixel_sq = 1`` when the metadata carries no resolution — and it
+**says so**: *"Resolution data incomplete, using default value of 1 (um/px)^2"*.
+
+**So a value of exactly 1 is the loader saying "I have no idea", not the microscope saying "one
+micron".**
+
+``pixel_size_um`` was returning it as a **legitimate measurement, with no warning** — which is
+precisely the failure that module exists to prevent:
+
+> *1 µm/px is a plausible value, not an obviously-wrong one.*
+
+``field_status``'s gate already knew this — ``abs(val - 1.0) > 1e-9`` is its test for a REAL scale.
+**The accessor did not.**
+
+A microscope whose pixel really IS 1.000 µm is possible, and such a user confirms it through the
+gate, which sets ``pixel_size_confirmed``. **That flag is the one thing that distinguishes "the
+user told us it is 1" from "nobody told us anything"** — and it is now honoured.
+
+### The accessor had 2 call sites. The copy-paste had 15.
+```python
+float(dr.get('microns_per_pixel_sq', 1.0)) ** 0.5
+```
+
+That idiom is a **verbatim reimplementation of ``pixel_size_um_or_default`` — minus the warning**
+that says the result is in **pixel** units, not microns. It was copy-pasted into **15 places**
+across eleven UIs.
+
+***That is how a guard stops guarding: not by being removed, but by being bypassed.***
+
+All 15 now call the accessor, so every UI pixel-size read goes through the one place that warns.
+
+### GUARDED
+- a pixel size of exactly 1 must return **NaN** unless confirmed — and a confirmed 1 must be
+  believed, or a legitimate microscope becomes unusable
+- no ``*_ui.py`` may reimplement the accessor by hand
+
+**304/304 core tests passing.**
+
+## [1.5.507] - 2026-07-13
+### My arm64 diagnostic was BROKEN, and it drew a wrong conclusion
+``numba_arm64_diag.py`` v1 ran each test with ``python -c "<code>"``. But **``@njit(cache=True)``
+cannot cache code that came from a string** — there is no file to write the cache beside — so numba
+raised:
+
+```
+RuntimeError: cannot cache function 'f': no locator available for file '<string>'
+```
+
+**Both** the cached test and the parallel test hit that, **because both used ``cache=True``.**
+Neither ever reached the parallel backend.
+
+**The script saw "parallel crashed" and announced that the backend was broken. It had proved
+nothing of the sort — it had proved that you cannot cache a string.**
+
+And the failures were **clean Python exceptions, not segfaults.** The launch crash was
+``Fatal Python error: Segmentation fault``. ***Those are not the same failure.***
+
+### What Meet's run DOES establish
+- **plain ``@njit`` works** on the M2
+- **the OpenMP threading layer loads fine on its own** — test 4 launched it, printed ``omp``, and
+  **did not crash**
+- numpy 1.26.4 / numba 0.65.1 / llvmlite 0.47.0, macOS 26.5 arm64
+
+**That third point is weak evidence for the RACE, not the backend.** OpenMP comes up cleanly when
+it comes up **alone**. *The crash needed Qt initialising beside it.*
+
+### The honest position on 1.5.503
+It did two things:
+
+1. **Deferring the warm-up on macOS** — almost certainly the real fix. It removes a concurrency
+   that ``run_pycat``'s own comment already identifies as fatal on arm64, fifteen lines from the
+   crash site.
+2. **Disabling the parallel backend on macOS** — justified by a diagnostic **that did not test
+   it**, and possibly an unnecessary loss of speed.
+
+**It stays off**, because a segfault at launch is worse than a slower filter, and a wrong default
+that is *safe* costs less than one that *crashes*. **But it is a caution, not a finding**, and the
+code now says so.
+
+### `numba_arm64_diag.py` v2 — writes real files, and separates a segfault from an exception
+It also tests ``parallel=True`` **with and without** ``cache``, and tries the **TBB** and
+**workqueue** threading layers — so if OpenMP is the specific problem, a different layer may
+restore the speed:
+
+```
+NUMBA_THREADING_LAYER=tbb run-pycat
+```
+
+**302/302 core tests passing.**
+
 ## [1.5.506] - 2026-07-13
 ### THREE panels reported LENGTHS with no pixel-size gate
 **A pixel size of 1 is a CLAIM about the microscope, not an absence of one.**

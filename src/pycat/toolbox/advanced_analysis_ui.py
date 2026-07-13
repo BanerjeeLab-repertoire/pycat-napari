@@ -10,6 +10,8 @@ condensate analysis (dynamic).
 from __future__ import annotations
 import numpy as np
 
+
+from pycat.utils.pixel_size import pixel_size_um_or_default
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 import napari
@@ -157,7 +159,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_warning(f"Layer not found: {e}"); return
 
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
         results = {}
         n_cells = len(np.unique(cmask)) - 1
         prog_m.setMaximum(max(n_cells, 1)); prog_m.setValue(0); prog_m.setVisible(True)
@@ -380,7 +382,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_warning("Dynamic analysis needs a 3D (T,H,W) mask stack."); return
 
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
         # NOTE: this used to call `progress_emit(0, 5)` here. `progress_emit` is a
         # PARAMETER of the nested `_task` below, not a variable of this scope, so the
         # name did not exist yet and this line raised NameError — killing the handler
@@ -570,7 +572,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             napari_show_warning(f"Layer not found: {e}"); return
 
         dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = float(dr.get('microns_per_pixel_sq', 1.0))**0.5
+        mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
         coords_df = get_puncta_centroids(pmask, cmask, mpx)
         cells = [c for c in coords_df['cell_label'].unique() if c != 0]
         n = len(cells)
