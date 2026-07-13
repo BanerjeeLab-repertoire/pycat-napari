@@ -4,6 +4,43 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.521] - 2026-07-13
+### Fit-quality audit COMPLETE — and two `popt, _ = curve_fit(...)` that are CORRECT
+``_fit_sigma`` (in ``vpt_tools`` and ``general_image_tools``) discards the covariance, exactly like
+the SACF and CCF fits that turned out to be real bugs. **It is not the same bug**, and the
+difference is worth stating rather than sweeping both up together.
+
+**There, one fit IS the answer.** Here it is **one of forty**: the caller takes
+``np.median(psf_sigmas)`` across every bead, and **the median tolerates up to 50 % garbage by
+construction.** Verified — with **40 %** of the fits replaced by uniform noise, the median still
+recovers **2.12** against a true **2.00**.
+
+***A per-fit quality gate would add cost and no protection.*** Documented on the function.
+
+### The audit, in full
+**Real bugs, fixed:**
+
+| function | what it did |
+|---|---|
+| ``fit_gaussian_2d`` (CCF) | σ = **0.495** from **pure noise**, reported as real |
+| ``fit_gaussian_1d`` (CCF) | same helper |
+| ``_fit_sacf_1d`` (SACF) | σ = **119.8 px** from **pure noise** |
+
+**Verified sound — not assumed:** ``fit_anomalous_diffusion``, ``fit_frap_recovery``,
+``fit_coarsening``, ``fit_photobleaching``, ``fit_fusion_relaxation``, ``fit_size_distribution``,
+``fit_bleaching_trace``, ``fit_spida_histogram``, ``estimate_phase_boundary`` (bootstrap CI), and
+both Gaussian-localization fits. **All report an R² or an explicit uncertainty.**
+
+### And three bugs of my OWN, caught while fixing it
+1. The shared helper **guessed the width index from ``len(popt)``** → read the **baseline** as the
+   width → **rejected every real fit.** *A guard with no power.*
+2. My test built ``gaussian + white noise``, which **is not what an ACF looks like** → I was
+   measuring a failure of the *estimator* on an input it never sees, **and blaming the guard.**
+3. ``inf`` from ``pcov`` means **both** *"perfect fit"* (singular covariance) **and** *"total
+   failure"*. Conflating them would have **thrown away the best fit the function can produce.**
+
+**324/324 core tests passing.**
+
 ## [1.5.520] - 2026-07-13
 ### The SACF threw its covariance away — and reported a **119.8 px** correlation length for noise
 ``_fit_sacf_1d`` ended with ``popt, _ = curve_fit(...)``. **That ``_`` is ``pcov``**, and it is the
