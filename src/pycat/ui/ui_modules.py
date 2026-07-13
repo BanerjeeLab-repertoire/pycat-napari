@@ -27,6 +27,8 @@ import math
 
 # Third party imports
 import napari 
+
+from pycat.utils.general_utils import debug_log
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
@@ -385,7 +387,7 @@ class BaseUIClass:
                 return False
         return True
 
-    def create_layer_dropdown(self, layer_type, name_hint: str = ''):
+    def create_layer_dropdown(self, layer_type, name_hint: str = '', binding: str = ''):
         """
         Creates a dropdown (QComboBox) widget that lists layers of a specific type.
 
@@ -404,6 +406,24 @@ class BaseUIClass:
             name_hint='Labeled Cell Mask' for a cell-mask dropdown, etc.
             If name_hint is empty (the default), no auto-selection occurs on
             insert — the dropdown stays on whatever the user last chose.
+        binding : str, optional
+            **The TAG-based way to say the same thing, and it is the stronger one.**
+
+            ``name_hint`` matches a substring of a LAYER NAME. That works until someone renames a
+            layer, or a new operation produces a name that happens to contain the same substring —
+            and then it silently selects the wrong one. **It is matching a label, not a fact.**
+
+            A ``binding`` names an entry in ``layer_bindings.json`` (e.g.
+            ``'cell_segmentation.cell_labels'``), and the resolver finds the layer whose **TAGS**
+            match: ``role=labels, target=cell``. That is a statement about what the layer IS, and
+            it survives renaming, reordering, and a user who calls their mask "asdf".
+
+            It also knows when it does not know. When several layers match and none is clearly
+            right, **it selects nothing and says which ones matched** — because *a wrong
+            auto-selection the user does not notice is worse than an empty dropdown: they run the
+            analysis on the wrong layer, get a number, and never know.*
+
+            ``name_hint`` still works, and is used when no binding is given.
 
         Returns
         -------
@@ -425,6 +445,10 @@ class BaseUIClass:
         # the user scrolls through the dock panel (event-filter based; the
         # older instance-attribute wheelEvent patch never fired under PyQt5).
         guard_wheel(dropdown)
+
+        # The binding is what the dropdown WANTS, in tags. update_dropdown_items reads it.
+        if binding:
+            self.bind_dropdown(dropdown, binding)
 
         self.update_dropdown_items(dropdown, layer_type)
 
@@ -533,6 +557,52 @@ class BaseUIClass:
         restored_index = dropdown.findText(previous_selection)
         if restored_index != -1:
             dropdown.setCurrentIndex(restored_index)
+            return
+
+        # ── AUTOPOPULATE — and NEVER over a choice the user already made ────────
+        #
+        # We only reach here when the previous selection is GONE (or there never was one). That
+        # matters: the bug this function's docstring records — dropdowns silently resetting to the
+        # first layer, so a batch config captured "Segmentation Image" instead of the user's
+        # "Upscaled Segmentation Image" — is **exactly the bug autopopulation could reintroduce.**
+        #
+        # So the rule is absolute: **a restored selection wins, always.** Autopopulation fills a
+        # dropdown that is EMPTY; it never overrides a decision.
+        #
+        # And it only fills on CERTAINTY. When several layers match, the resolver refuses to
+        # choose and says which — because *a wrong auto-selection the user does not notice is
+        # worse than an empty dropdown: they run the analysis on the wrong layer, get a number,
+        # and never know.*
+        binding_key = getattr(dropdown, '_pycat_binding', None)
+        if not binding_key:
+            return
+
+        try:
+            from pycat.utils.tag_resolver import autopopulate
+            autopopulate(self.viewer, dropdown, binding_key)
+        except Exception as exc:
+            debug_log('update_dropdown_items: autopopulation failed', exc)
+
+    def bind_dropdown(self, dropdown, binding_key):
+        """**Declare what this dropdown wants**, and it will fill itself.
+
+        ``binding_key`` names an entry in ``layer_bindings.json`` — e.g.
+        ``'cell_segmentation.cell_labels'``. The resolver looks for a layer whose TAGS match, and
+        fills the dropdown **only when exactly one does.**
+
+        The binding is data, not code: which layer a step should want is a *scientific* judgement
+        (does this want the raw image, or the filtered one?) and it will be revised as the
+        workflows are curated. Changing it does not mean touching this UI.
+
+        **A dropdown with no binding is simply not autopopulated**, which is the correct behaviour
+        for any field whose right layer cannot be decided from tags alone. *Leaving it unbound is
+        how that is said.*
+        """
+        try:
+            dropdown._pycat_binding = str(binding_key)
+        except Exception as exc:
+            debug_log('bind_dropdown: could not attach the binding', exc)
+        return dropdown
 
     def _consume_step_label(self):
         """Return the staged 'Step N — ' prefix (and clear it), or '' if none.

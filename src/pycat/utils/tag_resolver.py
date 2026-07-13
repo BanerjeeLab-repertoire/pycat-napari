@@ -296,7 +296,7 @@ def resolve_binding(viewer, binding_key, *, exclude=None):
     return layer, confidence, reason
 
 
-def autopopulate(viewer, dropdown, binding_key, *, auto_select_likely=False):
+def autopopulate(viewer, dropdown, binding_key, *, auto_select_likely=True):
     """**Fill a dropdown from the tags — or leave it, and say why.**
 
     This is the function a UI calls. It returns ``(confidence, reason)`` so the caller can show
@@ -314,6 +314,21 @@ def autopopulate(viewer, dropdown, binding_key, *, auto_select_likely=False):
     if layer is None:
         return confidence, reason
 
+    # ── A `likely` result that selects NOTHING is the worst outcome ─────────────
+    #
+    # A first version only selected on CERTAIN. So a binding with ``prefer='newest'`` — which is
+    # most of them — resolved to LIKELY, **selected nothing, and said nothing.** The dropdown sat
+    # empty while the resolver knew perfectly well which layer was wanted.
+    #
+    # That is worse than either alternative: it is the feature **silently not working.**
+    #
+    # So a LIKELY match IS selected — and the tooltip **says it was inferred and asks the user to
+    # check.** The user still sees a filled dropdown, and still has the information to catch it if
+    # it is wrong.
+    #
+    # AMBIGUOUS still selects nothing, and that remains correct: there, the resolver genuinely
+    # does not know, and *a wrong auto-selection the user does not notice is worse than an empty
+    # dropdown.*
     if confidence == CERTAIN or (confidence == LIKELY and auto_select_likely):
         try:
             index = dropdown.findText(layer.name)

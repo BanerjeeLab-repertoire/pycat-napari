@@ -266,3 +266,133 @@ def test_the_binding_table_SHIPS_in_the_package():
         f"would fall back to an EMPTY binding table in the installed package — silently — while "
         f"working perfectly in the repo."
     )
+
+
+# ── The UI wiring: two properties that must hold ──────────────────────────────────────────
+
+class _FakeCombo:
+    def __init__(self):
+        self.items = []
+        self.idx = -1
+        self.tip = ''
+
+    def addItem(self, text):
+        self.items.append(text)
+
+    def findText(self, text):
+        return self.items.index(text) if text in self.items else -1
+
+    def setCurrentIndex(self, i):
+        self.idx = i
+
+    def currentText(self):
+        return self.items[self.idx] if 0 <= self.idx < len(self.items) else ''
+
+    def setToolTip(self, text):
+        self.tip = text
+
+
+@pytest.mark.core
+def test_a_LIKELY_match_is_SELECTED_and_flagged_rather_than_silently_ignored():
+    """**A `likely` result that selects NOTHING is the worst outcome.**
+
+    A first version only selected on ``certain``. So a binding with ``prefer='newest'`` — which is
+    **most of them** — resolved to ``likely``, **selected nothing, and said nothing.** The dropdown
+    sat empty while the resolver knew perfectly well which layer was wanted.
+
+    That is worse than either alternative: **it is the feature silently not working.**
+
+    So a ``likely`` match IS selected, and the tooltip **says it was inferred and asks the user to
+    check.** They see a filled dropdown *and* the information to catch it if it is wrong.
+    """
+    resolver = pytest.importorskip("pycat.utils.tag_resolver")
+
+    viewer = _viewer_with(
+        ('image', 'movie.tif', np.random.rand(32, 32)),
+        ('labels', 'First labels', np.random.randint(0, 7, (32, 32))),
+        ('labels', 'Second labels', np.random.randint(0, 5, (32, 32))),
+    )
+
+    combo = _FakeCombo()
+    for layer in viewer.layers:
+        combo.addItem(layer.name)
+
+    with contextlib.redirect_stderr(io.StringIO()):
+        confidence, reason = resolver.autopopulate(viewer, combo, 'common.labels')
+
+    assert confidence == resolver.LIKELY
+    assert combo.currentText() == 'Second labels', (
+        f"a LIKELY match selected {combo.currentText()!r}. If it selects NOTHING, the resolver "
+        f"knows the answer and the dropdown sits empty — the feature silently not working."
+    )
+    assert 'Check this is the one you meant' in reason, (
+        "an inferred selection must SAY it was inferred, or the user cannot catch it when wrong"
+    )
+
+
+@pytest.mark.core
+def test_AMBIGUOUS_still_selects_NOTHING():
+    """The line between "infer it and flag it" and "refuse" is where the resolver **cannot know**.
+
+    ``colocalization.channel_a`` declares no preference **on purpose**: with two channel masks
+    present, choosing one is a **coin flip**, and *a colocalization run on the wrong pairing gives
+    a number that looks fine.*
+    """
+    resolver = pytest.importorskip("pycat.utils.tag_resolver")
+
+    viewer = _viewer_with(
+        ('labels', 'Mask A', (np.random.rand(32, 32) > 0.5).astype(np.uint8)),
+        ('labels', 'Mask B', (np.random.rand(32, 32) > 0.5).astype(np.uint8)),
+    )
+
+    combo = _FakeCombo()
+    for layer in viewer.layers:
+        combo.addItem(layer.name)
+
+    with contextlib.redirect_stderr(io.StringIO()):
+        confidence, reason = resolver.autopopulate(viewer, combo, 'colocalization.channel_a')
+
+    assert confidence == resolver.AMBIGUOUS
+    assert combo.currentText() == '', (
+        f"an AMBIGUOUS binding selected {combo.currentText()!r}. It must select NOTHING — "
+        f"choosing between two channel masks is a coin flip, and the analysis would run on the "
+        f"wrong pairing and give a number that looks fine."
+    )
+    assert 'Mask A' in reason and 'Mask B' in reason, (
+        "the user must be told which layers matched, so they can pick"
+    )
+
+
+@pytest.mark.core
+def test_the_dropdown_builder_accepts_a_binding():
+    """``name_hint`` matches a **layer NAME**. A binding matches what the layer **IS**.
+
+    ``name_hint='Labeled Cell Mask'`` works until someone renames a layer, or a new operation
+    produces a name containing the same substring — **and then it silently selects the wrong one.
+    It is matching a label, not a fact.**
+
+    A binding survives renaming, reordering, and a user who calls their mask *"asdf"*.
+    """
+    # Read the SOURCE, not the module: ui_modules imports napari, which is not importable in a
+    # headless test environment. The signature is a fact about the code, and the code is right
+    # there.
+    import ast
+    import pathlib as _pathlib
+
+    source = (_pathlib.Path(__file__).resolve().parents[1]
+              / "src" / "pycat" / "ui" / "ui_modules.py").read_text(encoding='utf-8')
+    tree = ast.parse(source)
+
+    builder = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == 'create_layer_dropdown':
+            builder = node
+            break
+
+    assert builder is not None, "create_layer_dropdown is gone"
+
+    parameters = [a.arg for a in builder.args.args]
+    assert 'binding' in parameters, (
+        f"create_layer_dropdown takes {parameters}. It must accept a tag `binding` — the strong "
+        f"version of `name_hint`, which matches a layer NAME and breaks the moment one is renamed"
+    )

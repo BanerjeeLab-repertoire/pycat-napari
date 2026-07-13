@@ -4,6 +4,46 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.499] - 2026-07-10
+### Autopopulation wired into the UI — through **one funnel**, and it never overrides a choice
+Every layer dropdown in PyCAT goes through ``update_dropdown_items``. **That is where the wiring
+belongs** — not at twenty call sites, which is the fragile pattern that has already produced two
+sweeps this session.
+
+``create_layer_dropdown(layer_type, name_hint='', **binding=''**)``.
+
+### The rule is absolute: **a restored selection wins, always**
+This function's own docstring records the bug: dropdowns silently resetting to the first layer, so
+a batch config captured *"Segmentation Image"* instead of the user's *"Upscaled Segmentation
+Image"*.
+
+**That is exactly the bug autopopulation could reintroduce.** So it only ever fills a dropdown that
+is **empty** — it never touches a decision the user already made.
+
+### `binding` is the strong version of `name_hint`
+``name_hint='Labeled Cell Mask'`` matches a **substring of a layer NAME**. It works until someone
+renames a layer, or a new operation produces a name containing the same substring — **and then it
+silently selects the wrong one. It is matching a label, not a fact.**
+
+A binding matches what the layer **IS** (``role=labels, target=cell``), and **survives renaming,
+reordering, and a user who calls their mask "asdf".**
+
+### FOUND — a `likely` match that selects NOTHING is the worst outcome
+A first version only auto-selected on ``certain``. So a binding with ``prefer='newest'`` — **which
+is most of them** — resolved to ``likely``, **selected nothing, and said nothing.** The dropdown
+sat empty **while the resolver knew perfectly well which layer was wanted.**
+
+*That is worse than either alternative: it is the feature **silently not working.***
+
+A ``likely`` match is now selected, **and the tooltip says it was inferred and asks the user to
+check.** They get a filled dropdown *and* the information to catch it when it is wrong.
+
+**``ambiguous`` still selects nothing**, and that remains correct — there the resolver genuinely
+does not know, and *a wrong auto-selection the user does not notice is worse than an empty
+dropdown.*
+
+**288/288 core tests passing.**
+
 ## [1.5.498] - 2026-07-10
 ### Autopopulation — the payoff the tag vocabulary was built for
 Every workflow step in PyCAT has a layer dropdown, and **the user fills every one of them by hand,
