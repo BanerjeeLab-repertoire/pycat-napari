@@ -4,6 +4,61 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.479] - 2026-07-10
+### GROUP D COMPLETE — time-series dynamics. One serious bug, two clean modules.
+### FIXED — temporal enhancement destroys intensity-vs-time information. **Every method.**
+This is not a bug in one of them — **it is what a contrast enhancement does**: it normalises each
+frame against its own statistics, and a real change in brightness over time is normalised away
+with it.
+
+Measured, on objects that genuinely grow **+44 %** across 20 frames:
+
+| method | trend still present | Spearman |
+|---|---|---|
+| *(raw)* | **+44 %** | — |
+| per_frame | **+1 %** | 0.23 |
+| pooled_stats | **+1 %** | 0.23 |
+| windowed_mean | **+3 %** | −0.03 |
+| triplanar | **+2 %** | 0.17 |
+
+**A 44 % growth becomes 1 %.** So an enhanced stack must **not** be used for condensate growth or
+coarsening rates, FRAP recovery, photobleaching correction, or partition/enrichment over time.
+**The numbers will still come out, and they will be wrong.**
+
+It is safe — and useful — for **segmentation and detection**, where only the *shape* matters and
+the absolute intensity is discarded anyway. **That is what it is for**, and it now says so.
+
+**``score_trend_preservation`` measures exactly this damage, and ``enhance_stack`` never called
+it.** It does now, and warns — on a fade (photobleaching) as well as on growth, because *the fade
+is the signal a bleach correction fits*.
+
+*(And it does not cry wolf: a static stack has no trend to destroy, so the warning is gated on a
+real change in the raw signal. A first version fired on every stack, and a warning that cries
+wolf gets turned off.)*
+
+### Audited and correct — `timeseries_invitro_tools`
+Growth rate against an analytic truth (area = π·r², so the rate is exact):
+
+| radius growth / frame | TRUE (µm²/s) | measured | error |
+|---|---|---|---|
+| **0 %** *(static)* | 0.0000 | **−0.0000** | **0.0 %** |
+| 5 % | 2.0852 | 2.1030 | +0.9 % |
+| 10 % | 5.5135 | 5.5188 | +0.1 % |
+
+**Within 1 % at every rate, and exactly zero on a static stack** — the case a growth estimator is
+most likely to get wrong, because *noise alone can manufacture a trend*. Fusion detection
+recovers the event at the **correct frame** with the **correct parents**.
+
+### Audited and correct — `estimate_temporal_correlation`
+An AR(1) process has ρ(1) = exp(−1/τ) analytically, and the estimator matches it to **three
+decimal places** at every τ (0.368 vs 0.368; 0.883 vs 0.882). Its recommendation is honest about
+the cost.
+
+**Recording a pass is as much the point as recording a bug. An audit is only worth something if a
+clean result means something.**
+
+**188/188 core tests passing.**
+
 ## [1.5.478] - 2026-07-10
 ### Group D continues — `fusion_tools`: τ is the physics, and it was 21.6 % wrong at R² = 1.000
 Two droplets coalesce and the aspect ratio relaxes exponentially. The **inverse capillary
