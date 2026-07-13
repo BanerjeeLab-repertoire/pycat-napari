@@ -75,6 +75,47 @@ def pearsons_correlation(image1, image2, roi_mask):
     Pearson's correlation measures the linear correlation between two datasets. Results are only valid if both
     images are of the same size and the mask, if applied, matches their dimensions.
     """
+    # ── A WHOLE-FRAME ROI makes Pearson measure the CELL SHAPE, not colocalisation ──
+    #
+    # Pearson over the whole frame asks "are both channels bright in the same places" — and
+    # the biggest structure both channels share is **the cell itself**, bright inside and dark
+    # outside. That alone saturates the metric.
+    #
+    # Measured on channels that are COMPLETELY INDEPENDENT (zero real colocalisation), with
+    # both carrying the same cell shape:
+    #
+    #     scene                          whole frame    cell ROI
+    #     independent (r should be 0)    **0.987**      **0.011**
+    #     50 % co-localised              0.997          0.712
+    #     fully co-localised             1.000          1.000
+    #
+    # **On the whole frame all three read ~0.99 — the metric cannot distinguish them at all.**
+    # Inside the cell ROI the shared shape is gone (every pixel is in the cell) and Pearson
+    # measures the real correlation.
+    #
+    # (The camera pedestal, by contrast, does NOT matter here: Pearson is invariant to an
+    # additive offset. Verified — a pedestal of 500 leaves r unchanged at 0.010.)
+    try:
+        _mask = np.asarray(roi_mask)
+        if _mask.dtype != bool:
+            _mask = _mask > 0
+        _frac = float(_mask.mean()) if _mask.size else 0.0
+        if _frac > 0.95:
+            napari_show_warning(
+                f"Pearson: the ROI covers {_frac:.0%} of the frame — that is effectively the "
+                f"WHOLE IMAGE, and Pearson then measures the CELL SHAPE, not colocalisation."
+                f"\n\nBoth channels are bright inside the cell and dark outside, and that "
+                f"shared structure alone saturates the metric. Measured on channels that are "
+                f"COMPLETELY INDEPENDENT (zero real colocalisation) but share a cell shape: "
+                f"**r = 0.987 over the whole frame, and r = 0.011 inside the cell ROI.** A "
+                f"50 %-colocalised scene reads 0.997 over the frame and 0.712 in the ROI — so "
+                f"over the whole frame, no colocalisation and half colocalisation are "
+                f"indistinguishable.\n\nRestrict the ROI to the cell (or the compartment you "
+                f"mean to test). The number you get from a whole-frame ROI is not a "
+                f"colocalisation coefficient.")
+    except Exception as _exc:
+        debug_log('Pearson: could not assess the ROI coverage', _exc)
+
     if image1.ndim == 2:
         # If the image is 2D, use a specific function (e.g., from skimage) to calculate the Pearson's Correlation Coefficient.
         pcc, p_val = sk.measure.pearson_corr_coeff(image1, image2, roi_mask)

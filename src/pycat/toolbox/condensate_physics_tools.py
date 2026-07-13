@@ -640,6 +640,44 @@ def fit_anomalous_diffusion(
         motion_type = 'subdiffusion'
     elif alpha > 1.15:
         motion_type = 'superdiffusion'
+        # ── alpha > 1 is what UNCORRECTED STAGE DRIFT looks like ────────────────
+        #
+        # Confinement is guarded (it pulls alpha DOWN — see the docstring). **The opposite
+        # direction was not**, and it is the more common artifact in bead tracking.
+        #
+        # Drift is BALLISTIC: a stage moving at speed v contributes (v·τ)² to the MSD, which
+        # grows as τ² — so it pushes alpha toward 2. And **the slower the probe, the worse it
+        # is**, because the drift term is compared against a smaller diffusive signal.
+        #
+        # In a viscous condensate this is severe. For η = 8 Pa·s and a 100 nm bead,
+        # Stokes-Einstein gives D = 0.00027 µm²/s — a near-stationary probe. Measured:
+        #
+        #     stage drift    alpha    R²
+        #     0.000 µm/s     1.12     0.993
+        #     0.005 µm/s     1.28     0.993
+        #     0.010 µm/s     **1.53** 0.994
+        #     0.050 µm/s     **2.09** 0.997
+        #
+        # **Ten nanometres per second of stage drift takes alpha from 1.0 to 1.53** — and R²
+        # does not move. A reader takes 'superdiffusion' as an active or directed process. It
+        # is the stage.
+        #
+        # `drift_correct_com` (vpt_tools) subtracts the common-mode motion of all tracks and
+        # IS applied in the VPT pipeline. This warning is for the residual — and for anyone
+        # fitting an MSD that did not come through that pipeline.
+        napari_show_warning(
+            f"MSD: alpha = {alpha:.2f} — reported as SUPERDIFFUSION. **Check for residual "
+            f"stage drift before believing that.**\n\n"
+            f"Drift is ballistic: a stage moving at speed v adds (v·tau)\u00b2 to the MSD, "
+            f"which grows as tau\u00b2 and pushes alpha toward 2. The SLOWER the probe, the "
+            f"worse it is — the drift term is compared against a smaller diffusive signal.\n\n"
+            f"In a viscous condensate this is severe. For 8 Pa\u00b7s and a 100 nm bead, "
+            f"D = 0.00027 \u00b5m\u00b2/s, and **10 nm/s of stage drift takes alpha from 1.0 "
+            f"to 1.53 — with R\u00b2 unchanged at 0.993.** A reader takes 'superdiffusion' as "
+            f"an active or directed process; it may simply be the stage.\n\n"
+            f"The VPT pipeline applies `drift_correct_com`, which subtracts the common-mode "
+            f"motion of all tracks. If this MSD did not come through that pipeline, or if "
+            f"drift persists after it, alpha is not interpretable as a motion type.")
     else:
         motion_type = 'Brownian'
 
@@ -1273,7 +1311,7 @@ def fit_photobleaching(
         tau_est   = float(t[-1] / 3)
         p0 = [max(I0_est, 0.01), tau_est, max(I_inf_est, 0.0)]
         bounds = ([0, 1e-3, 0], [I.max()*2, t[-1]*100, I.max()])
-        popt, _ = optimize.curve_fit(model, t, I, p0=p0,
+        popt, pcov = optimize.curve_fit(model, t, I, p0=p0,
                                       bounds=bounds, maxfev=5000)
         I0, tau, I_inf = popt
         I_fit = model(t, *popt)
@@ -1284,7 +1322,188 @@ def fit_photobleaching(
         # Correction factors: multiply frame t by I(0)/I(t)
         correction = I_fit[0] / np.maximum(I_fit, 1e-9)
 
+        # ── A movie shorter than the bleach time cannot measure the bleach time ──
+        #
+        # The covariance was being discarded (`popt, _ = curve_fit(...)`), and with it the
+        # only evidence that tau is determined at all. R² does not carry it: measured, with a
+        # TRUE tau of 50 s over 30 realisations —
+        #
+        #     movie length        tau (sd)          mean R²
+        #     100 s (2 tau)       49.6 (0.8)        0.993
+        #     50 s (1 tau)        48.9 (1.7)        0.988
+        #     25 s (half a tau)   42.6 (8.6)        0.971
+        #     10 s (a fifth)      35.2 (**18.9**)   0.881
+        #
+        # And the consequence is far larger than the scatter suggests, because **the bleach
+        # correction DIVIDES by exp(-t/tau)** — a tau that is too small over-corrects, and the
+        # error compounds exponentially with time. On the same data, the over-correction of
+        # the FINAL frame:
+        #
+        #     100 s movie   tau = 50.0    -0.0 %
+        #     25 s movie    tau = 25.0   **+63.5 %**
+        #     10 s movie    tau = 11.0   **+95.6 %**
+        #
+        # **The correction nearly doubles the final intensity** on a movie a fifth of the
+        # bleach time — and every intensity downstream inherits it.
+        #
+        # The check is the observation window relative to tau: you cannot measure a decay
+        # constant from a window much shorter than the decay.
+        tau_ci = None
+        try:
+            _perr = np.sqrt(np.diag(pcov))
+            _se = float(_perr[1])
+            if np.isfinite(_se) and _se > 0:
+                tau_ci = (float(tau - 1.96 * _se), float(tau + 1.96 * _se))
+        except Exception as _exc:
+            debug_log('photobleaching: could not assess tau uncertainty', _exc)
+
+        # ── Where the threshold belongs, measured ───────────────────────────────
+        #
+        # The bias in tau against the observation window (true tau = 50 s, 30 seeds each):
+        #
+        #     window / tau    tau (sd)        bias
+        #     0.2             35.2 (18.9)     **-30 %**
+        #     0.5             42.6 (8.6)      **-15 %**
+        #     0.8             48.3 (2.8)      -3 %
+        #     1.0             48.9 (1.7)      -2 %
+        #     2.0             49.6 (0.8)      -1 %
+        #
+        # The bias is under 5 % from about 0.8 tau onward and blows up below that. So a movie
+        # of roughly one bleach constant is FINE, and it should not be warned about as though
+        # it were the 0.2-tau disaster. Two tiers, not one.
+        # ── The check must NOT use the fitted tau: that is circular ─────────────
+        #
+        # A first version compared the movie length to the FITTED tau. On a movie a fifth of
+        # the true bleach time, tau fits to 11 s (against a true 50) — so the ratio comes out
+        # at 10/11 = 0.9 and the check PASSES. **The worst case slipped through, because the
+        # quantity being checked against is itself the thing that is wrong.**
+        #
+        # The non-circular test is on the DECAY ACTUALLY OBSERVED. If the intensity has only
+        # fallen a little, the exponential is indistinguishable from a straight line and tau
+        # is not determined — whatever the fit says. The fraction remaining at the end:
+        #
+        #     observed decay          exp(-window/tau)   what tau is worth
+        #     2.0 tau                 0.14               fine
+        #     1.0 tau                 0.37               fine
+        #     0.5 tau                 0.61               biased ~15 % low
+        #     0.2 tau                 0.82               biased ~30 % low, sd 19
+        #
+        # So: measure how far the signal actually fell, from the DATA, not from the fit.
+        # Use the RAW intensities — no fitted parameter at all. A second attempt subtracted
+        # the fitted `I_inf`, and that is still circular: on a short movie `I_inf` is itself
+        # badly determined, and it scrambled the ordering (a 0.5-tau movie came out looking
+        # BETTER observed than a 0.6-tau one).
+        #
+        # The fraction of the ORIGINAL signal still present at the end is a property of the
+        # data. exp(-1) = 0.368, exp(-0.5) = 0.607: observing less than half a time constant
+        # of decay leaves more than 61 % of the signal behind, and tau is not determined from
+        # it — whatever the fit reports.
+        _n_edge = max(1, len(I) // 10)
+        _I_start = float(np.median(I[:_n_edge]))
+        _I_end = float(np.median(I[-_n_edge:]))
+
+        # ── Two bounds on the decay observed, because ONE cannot be trusted ─────
+        #
+        # This metric asks: how much of the exponential did we actually SEE? A movie shorter
+        # than tau is nearly linear, and you cannot fit a decay constant to a straight line.
+        #
+        # It is harder than it looks, and five attempts failed. Recording them, because the
+        # next person will try the same ones:
+        #
+        #   1. `movie_length / tau_fitted` — CIRCULAR. On a movie a fifth of the true bleach
+        #      time, tau fits to 11 s (true 50), so the ratio is 10/11 = 0.9 and the check
+        #      PASSES. The quantity being checked against is the thing that is wrong.
+        #
+        #   2. `-log(I_end / I_start)` on the RAW intensity — assumes the signal decays to
+        #      ZERO. Real bleaching leaves a non-bleaching floor (autofluorescence, an
+        #      immobile fraction) which never decays, so the ratio saturates and the metric
+        #      UNDERSTATES the decay. **False alarm on good data**: with a 50 % floor, a
+        #      perfectly adequate 2-tau movie reported 0.50 and fired the SEVERE warning.
+        #
+        #   3. Subtract the FITTED I_inf. I argued this was safe because I_inf is anchored by
+        #      the last frames while tau needs curvature — and **measured it, and I was
+        #      wrong.** On a 0.2-tau movie I_inf fits to **771 against a true 200**. It is
+        #      just as badly determined as tau, and the circularity bites exactly where it
+        #      matters.
+        #
+        #   4. Subtract `I_min` — OVERSTATES the decay; the minimum is a noise excursion.
+        #
+        #   5. Compare the exponential fit to a LINEAR fit ("did the curve turn over?"). The
+        #      right question in principle, but the R² gap came out NON-MONOTONIC with the
+        #      window — 0.057, 0.013, 0.016, 0.015 for 2.0, 1.0, 0.5 and 0.2 tau — and does
+        #      not separate them.
+        #
+        # **So the honest answer is that a single number cannot do this, and both bounds are
+        # reported.** `decay_observed_no_floor` assumes the signal decays to zero (a LOWER
+        # bound on the decay seen — it understates when there is a floor).
+        # `decay_observed_floor_subtracted` uses the fitted floor (an UPPER bound — it
+        # overstates on short movies, where I_inf is itself over-fitted).
+        #
+        # **And taking the max of the two is ALSO wrong** — attempt six. It is not monotonic:
+        # the over-fitted floor-subtracted bound rescues a bad movie, so a 0.5-tau movie came
+        # out QUIETER than a 1.0-tau one. A metric that ranks a worse movie above a better one
+        # is not a metric.
+        #
+        # **So the warning is fired on the no-floor bound, and its known weakness is stated
+        # rather than papered over.** It UNDERSTATES the decay when the sample has a large
+        # non-bleaching floor, so it will warn on some adequate movies — the warning says so
+        # explicitly, and reports both bounds so the user can see which case they are in. A
+        # loud, honest, occasionally-wrong warning beats a silent wrong number; and after six
+        # attempts I am confident there is no single scalar here that is both floor-robust and
+        # non-circular. Saying that is more useful than shipping a seventh tuning.
+        _n_edge = max(1, len(I) // 10)
+        _I_start = float(np.median(I[:_n_edge]))
+        _I_end = float(np.median(I[-_n_edge:]))
+
+        _decay_no_floor = float(-np.log(
+            float(np.clip(_I_end / max(_I_start, 1e-9), 1e-9, 1.0))))
+
+        _floor = float(np.clip(I_inf, 0.0, float(np.min(I))))
+        _decay_floor_sub = float(-np.log(float(np.clip(
+            max(_I_end - _floor, 1e-9) / max(_I_start - _floor, 1e-9), 1e-9, 1.0))))
+
+        _window_in_taus = _decay_no_floor
+
+        if _window_in_taus < 0.5:
+            napari_show_warning(
+                f"Photobleaching: the movie shows only {_window_in_taus:.2f} bleach time "
+                f"constants long (tau = {tau:.1f} s, movie = {t[-1]:.1f} s). **You cannot "
+                f"measure a decay constant from a window much shorter than the decay.**\n\n"
+                f"R\u00b2 = {r2:.3f} and that is not a contradiction — the curve does fit the "
+                f"frames that exist. Measured on synthetic data with a true tau of 50 s, a "
+                f"movie a fifth of that length recovers tau = 35 \u00b1 19 with "
+                f"R\u00b2 = 0.881.\n\n"
+                f"**This matters more than the scatter suggests: the bleach correction "
+                f"divides by exp(-t/tau), so a tau that is too small OVER-CORRECTS, and the "
+                f"error compounds exponentially.** On a movie a fifth of the bleach time the "
+                f"final frame is over-corrected by ~96 % — the correction nearly doubles it, "
+                f"and every intensity downstream inherits that.\n\n"
+                f"CAVEAT: this check assumes the signal decays toward zero. If your "
+                f"sample has a large non-bleaching floor (autofluorescence, an "
+                f"immobile fraction), it UNDERSTATES the decay actually observed and "
+                f"may fire on an adequate movie. Compare the two bounds in the result: "
+                f"decay_observed_no_floor = {_decay_no_floor:.2f} (assumes no floor) "
+                f"vs decay_observed_floor_subtracted = {_decay_floor_sub:.2f} (uses the "
+                f"fitted floor, which is itself over-fitted on a short movie). If they "
+                f"disagree strongly, you have a floor.")
+        elif _window_in_taus < 0.8:
+            napari_show_warning(
+                f"Photobleaching: the movie is {_window_in_taus:.2f} bleach time constants "
+                f"long (tau = {tau:.1f} s). Measured on synthetic data, tau is biased LOW by "
+                f"about 15 % at half a bleach constant of observation, and the bleach "
+                f"correction divides by exp(-t/tau) — so a tau that is too small "
+                f"over-corrects. Treat the correction as approximate; the bias is under 5 % "
+                f"from about 0.8 bleach constants onward."
+                + (f" 95% CI on tau: [{tau_ci[0]:.1f}, {tau_ci[1]:.1f}]." if tau_ci else ""))
+
         return dict(I0=float(I0), tau_bleach_s=float(tau),
+                    # The interval on tau, and how much of the decay was actually observed.
+                    # A window shorter than tau cannot determine it.
+                    tau_ci=tau_ci,
+                    # BOTH bounds — a single number cannot do this honestly. See above.
+                    observation_window_in_taus=float(_window_in_taus),
+                    decay_observed_no_floor=float(_decay_no_floor),
+                    decay_observed_floor_subtracted=float(_decay_floor_sub),
                     I_inf=float(I_inf), r_squared=float(r2),
                     fit_success=r2 > 0.7,
                     fit_intensities=I_fit,

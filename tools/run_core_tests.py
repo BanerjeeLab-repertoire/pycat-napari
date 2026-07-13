@@ -57,17 +57,92 @@ class _Blocker:
         raise ImportError(f"No module named '{fullname}' (not installed in the headless CI)")
 
 
+def _ci_installed_packages(repo_root):
+    """(import_name, pip_name) for every package the CI workflow installs.
+
+    Read from the workflow, not hard-coded — a hand-maintained copy of a derivable fact
+    drifts, which is the lesson of 1.5.444/445.
+    """
+    workflow = (repo_root / '.github' / 'workflows' / 'core.yml')
+    if not workflow.exists():
+        return []
+
+    commands = " ".join(
+        line.split('#', 1)[0]
+        for line in workflow.read_text(encoding='utf-8', errors='ignore').splitlines()
+        if 'pip install' in line.split('#', 1)[0]
+    )
+
+    # pip name -> the name you actually import
+    known = {
+        'numpy': 'numpy', 'scipy': 'scipy', 'pandas': 'pandas',
+        'matplotlib': 'matplotlib', 'scikit-image': 'skimage',
+        'opencv-python-headless': 'cv2', 'pywavelets': 'pywt',
+        'simpleitk': 'SimpleITK', 'scikit-learn': 'sklearn',
+        'networkx': 'networkx', 'largestinteriorrectangle': 'largestinteriorrectangle',
+    }
+    return [(imp, pip) for pip, imp in known.items() if pip in commands]
+
+
 def _setup_environment(repo_root):
     sys.meta_path.insert(0, _Blocker([
         'napari', 'PyQt5', 'PyQt6', 'qtpy', 'aicsimageio', 'cellpose', 'torch',
     ]))
-    for name in ('pywt', 'SimpleITK', 'cv2', 'matplotlib'):
+    # ── NEVER STUB A COMPUTE DEPENDENCY ────────────────────────────────────────
+    #
+    # This block used to fabricate `pywt`, `SimpleITK`, `cv2` and `matplotlib` when they were
+    # missing locally. **That is the exact mechanism that hid `sklearn` (1.5.444) and
+    # `largestinteriorrectangle` (1.5.442)**: the module imported fine here against a fake
+    # package, and went red in CI where the real one was absent.
+    #
+    # The docstring of this very file says "no conveniences", and it was doing this. A
+    # missing compute dependency is a FINDING — either the package belongs in the CI install
+    # list, or the import belongs inside a function. It is never something to paper over.
+    #
+    # The GUI stack is different: it is blocked at the meta-path ON PURPOSE, because the
+    # whole point of the headless job is to prove the science imports without it.
+    _required = _ci_installed_packages(repo_root)
+    _missing = []
+    for _import_name, _pip_name in _required:
         try:
-            importlib.import_module(name)
+            importlib.import_module(_import_name)
         except ImportError:
-            stub = types.ModuleType(name)
-            stub.wavedecn = stub.waverecn = lambda *a, **k: None
-            sys.modules[name] = stub
+            _missing.append(f"{_import_name}  (pip install {_pip_name})")
+
+    if _missing:
+        # ── If we MUST stub, say so loudly. Do not report a clean run. ─────────
+        #
+        # Some sandboxes have no network and cannot install these. Stubbing is then the only
+        # way to run at all — but a stubbed run is NOT a faithful CI run, and reporting
+        # "115/115 passed" from one is how `sklearn` and `largestinteriorrectangle` reached
+        # a red build.
+        #
+        # So: stub if we have to, and print a banner that the result is degraded, listing
+        # exactly which packages are fake. The exit code is still meaningful for the tests
+        # that DID run; what is not meaningful is the claim that the import surface is clean.
+        print("=" * 78)
+        print("  WARNING: THIS IS NOT A FAITHFUL CI RUN")
+        print("=" * 78)
+        print("  These packages are installed by CI but are ABSENT here, and are being")
+        print("  STUBBED. Any import error they would have caused is invisible in this run:")
+        for _m in _missing:
+            print(f"    {_m}")
+        print()
+        print("  Stubbing is exactly what hid the sklearn (1.5.444) and")
+        print("  largestinteriorrectangle (1.5.442) failures: the module imported fine")
+        print("  locally against a fake package, and went red in CI.")
+        print()
+        print("  Install them if you can. If you cannot (no network), then a GREEN result")
+        print("  here does NOT mean the import surface is clean — only `pytest -m core` in")
+        print("  CI can tell you that.")
+        print("=" * 78)
+        print()
+
+        for _import_name, _pip_name in _required:
+            if any(_import_name in _m for _m in _missing):
+                _stub = types.ModuleType(_import_name)
+                _stub.wavedecn = _stub.waverecn = lambda *a, **k: None
+                sys.modules[_import_name] = _stub
 
     # `pip install --no-deps -e .` puts src/ on the path. Emulate exactly that, and nothing
     # more — the 1.5.409 bug was hidden by a dev check that did this without noticing that CI

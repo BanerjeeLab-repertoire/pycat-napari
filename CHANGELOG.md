@@ -4,6 +4,904 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.468] - 2026-07-10
+### Audited the QC *report*, not the metrics: 4 false alarms on clean data → 0
+The previous audit (1.5.465) asked *"does each metric work?"*. This one asks the question that
+actually matters to a user: **is the report as a whole honest — does it teach, and does it avoid
+baiting people into false conclusions?**
+
+Run on **clean, good data** of four types, where **any warn or bad is a false alarm by
+definition**:
+
+| check | 2D fluor | brightfield | **Z-STACK** | time series |
+|---|---|---|---|---|
+| Drift | — | — | **bad** | good |
+| Focus / sharpness | info | info | **warn** | good |
+| Ghosting | good | good | **warn** | good |
+| Spherical aberration | info | info | **warn** | info |
+
+**All four were on the z-stack.** Brightfield passed cleanly, and correctly — ``qc_snr`` tracks
+contrast, not the lamp (33 → 6.4 → 3.5 as the absorption depth falls).
+
+### Fixed — checks that cannot apply now say so, with the reason
+**Drift on a z-stack was the worst.** With **zero** lateral drift it reported **89.2 px, "bad"**
+— and adding a full pixel per plane of *real* drift moved it only to 100.1. **It is blind to the
+thing it names**: the phase correlation is failing on the sharp-vs-blurred mismatch between focal
+planes, not measuring displacement.
+
+*(Z-planes ARE acquired sequentially, so drift between them is physically real — this is not an
+inapplicable question, it is a broken measurement. The honest response is to say the check does
+not work here, not to report a number that does not mean what it says.)*
+
+**Focus** flagged 2/21 planes as below half-median sharpness — **which is what a z-stack is.**
+The outer planes are *supposed* to be blurred. Flagging correct data teaches the user to ignore
+the focus check, which is the one that matters most on a 2D image.
+
+These now report **`n/a` with an explanation**, not a verdict. **A check that cannot apply must
+not report "good" either** — that is a quiet lie: the user reads a clean report and concludes
+their data passed a test that was never run.
+
+### FIXED — `qc_spherical_aberration` was inverted. Two bugs, stacked.
+**It fired on clean stacks and passed the aberration it exists to detect.**
+
+**1. The axial profile did not peak at best focus.** ``_axial_sharp`` is a difference-of-Gaussians
+band-pass at σ 1–2, and when the in-focus objects are *sharper* than that band, **the response
+dips at best focus** — the sharpest plane is a local *minimum*:
+
+```
+plane  9: 1.000   <- argmax lands HERE
+plane 10: 0.849   <- the TRUE focal plane, and a LOCAL MINIMUM
+plane 11: 0.999
+```
+
+``argmax`` landed one plane off, the moments were taken about the wrong origin, and a **perfectly
+symmetric stack** (left energy = right energy = 544, *exactly*) reported skew **+0.577 → warn**.
+
+**2. The normalised third moment is the wrong statistic.** Fixing the origin exposed a **false
+negative**: a stack with **half the energy on one side of focus** (right/left = 0.499) reported
+|skew| = 0.080 against a threshold of 0.4 — and **passed as good**. The ``m2^1.5`` denominator
+grows with the axial spread, and **spherical aberration *is* a one-sided spread**, so the
+normalisation *cancels the very asymmetry it should expose*.
+
+Replaced with the **energy ratio about focus** — *does the response fall off at the same rate
+above and below?* — which is what a bead z-stack is inspected for by eye. Symmetric now reads
+**0.000 → good**; severely aberrated reads **0.461 → bad**. The signed skew is kept in the
+diagnostic, because **its sign tells the user which way to turn the correction collar.**
+
+**Zero false alarms on clean data, across all four data types. 153/153 core tests passing.**
+
+## [1.5.467] - 2026-07-10
+### Added — every QC exemplar now carries a Wikipedia link and a primary citation
+**A defect the user cannot look up is a defect they cannot learn from.** The gallery makes a
+claim about someone's data — *"this is saturated, and your partition coefficient is
+meaningless"* — and a scientist is entitled to check that against something other than our own
+docstring.
+
+Two links, doing different jobs:
+
+- **Wikipedia** — the accessible entry point. Someone who has never heard of vignetting needs
+  somewhere to start that is not a paywalled review.
+- **A primary reference** — from the quantitative-microscopy literature a reviewer expects:
+  **Waters 2009** (*J Cell Biol* 185:1135), **North 2006** (*J Cell Biol* 172:9),
+  **Jost & Waters 2019** (*J Cell Biol* 218:1452), **Jonkman et al. 2020** (*Nat Protoc*
+  15:1585). Every citation resolves through a DOI, and the test asserts it.
+
+Clickable in the widget, rendered in the docs.
+
+### The saturation exemplar quotes Waters (2009) verbatim, because it justifies our refusal
+> *"Detectors have a limited capacity to hold electrons; if this capacity is reached, the
+> corresponding pixel will be saturated… The linearity of the detector is therefore lost, and
+> saturated images cannot be used for quantitation of fluorescence intensity values. **Choosing
+> to crop out saturated areas is not acceptable… because it will select for the weaker intensity
+> parts of the specimen.**"*
+
+That is the canonical reference stating exactly what 1.5.392 measured: **a clipped value is not a
+lower bound**, and the sensible-looking rescue — analyse the unsaturated regions — is worse than
+the disease, because it biases the population toward the dim.
+
+**PyCAT refuses to report a Kp from a clipped image.** A user who finds that inconvenient can
+now read, in one click, why the field agrees.
+
+**147/147 core tests passing.**
+
+## [1.5.466] - 2026-07-10
+### Added — the QC exemplar gallery: what each defect LOOKS like, and what it COSTS
+A QC report that says *"Focus: 0.42"* teaches nobody anything. The module's purpose is the shape
+**Image → Assessment → Interpretation → Recommendation**, and **the Image half was missing.** A
+scientist looking at a "bad" verdict on their own data had no reference for what "bad" looks
+like, or how bad theirs is by comparison.
+
+Seven exemplars — saturation, defocus, low SNR, vignetting, photobleaching, drift, vibration —
+each a **clean** frame beside a **degraded** one, with the verdict PyCAT gives each.
+
+**Two renderers, one generator:**
+- **In-app** (``qc_gallery_ui.py``) — a dockable panel to open beside a QC report.
+- **Documentation** (``tools/build_qc_gallery.py`` → ``docs/qc_gallery/``) — PNGs and a markdown
+  page, which is also what a supplement wants.
+
+**The verdicts are computed, not written down.** The gallery calls the real metric on the real
+image. **A teaching example that no longer matches the software is worse than none** — it would
+tell a user their data is fine when PyCAT would say otherwise — so
+``tests/test_qc_gallery.py`` asserts that every clean panel comes back *good* and every degraded
+panel comes back *warn* or *bad*. If a metric stops firing on its own exemplar, the build fails.
+
+### On simulated exemplars
+**These are simulated, and every panel says so.** Real bad-data exemplars accumulate slowly, and
+waiting for a curated set means shipping nothing. A simulated exemplar is honest about what it
+is: it carries the **exact parameter** that produced it (*clipped at 600 counts*, *sigma = 3.0
+px*), so a user can reason about the *degree* of the defect rather than eyeballing a vibe. The
+interface does not change when a real example replaces a simulated one — ``source`` is a field.
+
+**What must not happen** is a gallery that quietly implies *"your data should look like this"*.
+A synthetic image is not an acquisition standard. Every panel is labelled `SIMULATED`, in the
+widget and in the docs.
+
+### Added — `qc_photobleaching`: the metric that did not exist
+Building the gallery surfaced this immediately: **the QC module could not see photobleaching at
+all.** It had ``qc_drift`` and ``qc_vibration`` for temporal *motion*, and nothing for temporal
+*intensity*.
+
+It cannot be folded into ``qc_snr``: **a global intensity scale changes the signal and the noise
+together**, so the SNR is (correctly) invariant to it. *A stack that fades to a tenth of its
+brightness has the same SNR at the end as at the start — and is useless.*
+
+And it is one of the most destructive defects there is: a bleach correction **divides** by
+exp(-t/τ), so an error in τ compounds exponentially (**96 % over-correction** of the final frame,
+1.5.451), and in FRAP an uncorrected fade makes the recovery read **2.5× too fast** with a mobile
+fraction 31 % too low — at R² = 0.94 (1.5.455).
+
+### Note — the gallery taught us something about our own metric
+The vignetting exemplar cannot use the four-cell reference scene, because **four cells arranged
+in a ring genuinely are a radial intensity pattern** — ``qc_vignetting`` reads the *clean* scene
+as **bad (0.535)**: *"edge is 54 % of centre brightness"*.
+
+**The metric is not wrong. The scene is.** But that is a real caveat for a user with a sparse
+field: if your cells happen to sit toward the centre, the vignetting score is reporting **where
+your cells are**, not how your lamp is behaving. The gallery says so out loud, which is exactly
+what an anti-black-box tool should do.
+
+**146/146 core tests passing.**
+
+## [1.5.465] - 2026-07-10
+### Audited — all 13 QC metrics, against the defect each names *and* the defects it must ignore
+``data_qc_tools`` is the manuscript's enabling layer — the claim that PyCAT tells a scientist
+*"can I trust this data, and if not, how do I improve it?"*. **Four bugs were fixed in it
+(1.5.403–406) and it had zero tests.**
+
+The test that matters for a QC metric is not *"does it return a number"*. It is: **does it move
+when its own defect is present, and stay put when a different defect is present?** That second
+half is what catches the failures that actually occurred — a focus score that rises with noise
+is measuring noise (1.5.405); a vignetting score that reads cells-in-the-centre as bad
+illumination is measuring object placement (1.5.404). **Both returned confident numbers.**
+
+**Audited all 13. Eleven were correct** — including several I expected to be broken:
+
+- ``qc_focus`` — catches a defocused frame, **ignores a noisy-but-sharp one.** The 1.5.405 DoG
+  fix works exactly as designed, and the single-image ``'info'`` status is deliberate, not a
+  failure (the absolute number is scene-dependent; it only judges *across* a stack).
+- ``qc_snr``, ``qc_vignetting`` — both invariant to an 800-count pedestal and to clipping, both
+  responsive to their own defect.
+- ``qc_drift`` — fires on drift, ignores bleaching and noise.
+- ``qc_nyquist`` — correct Abbe physics (d = λ/2NA), and it correctly flags Gable's 0.0264 µm/px
+  as *oversampled*.
+
+### FIXED — `qc_saturation` was blind to any clipping below the dtype maximum
+``_dtype_max`` returned ``np.iinfo(uint16).max`` = **65535**. **A 12-bit camera writing into a
+uint16 array clips at 4095.** A camera at reduced gain clips lower still. So the check found
+**nothing**:
+
+| image | truly flat-topped | reported |
+|---|---|---|
+| clipped at 65535 (the dtype max) | 0.0 % | 0.00 % good |
+| clipped at 4095 (a 12-bit sensor) | **1.2 %** | **0.00 % good** |
+| clipped at 1000 (gain-limited) | **9.1 %** | **0.00 % good** |
+
+**Nine percent of the pixels destroyed, reported as "good"** — and saturation is the one defect
+that *cannot* be recovered downstream. A clipped intensity is **gone**, and every measurement
+built on it inherits a number that is not a lower bound on anything (1.5.392).
+
+The ceiling is now detected **from the data**: a pile-up of pixels at *exactly* the image
+maximum is the signature of a flat top, wherever the ceiling sits. Reported now matches truth to
+two decimals (1.18 % and 9.14 %), and it does **not** fire on an unclipped image that merely has
+a brightest pixel.
+
+### FIXED — `qc_vibration` reported a pump that did not exist, on a bleaching stack
+``phase_cross_correlation`` is *supposed* to be intensity-robust. **It is not robust enough when
+the frame is globally scaled** — the sub-pixel peak fit is biased by the moving DC term and
+noise floor.
+
+A photobleaching stack **does not move at all**, and it drove ``qc_vibration`` to **p = 0.010,
+status "bad"** — a confident report of a *periodic vibration source*. The shift trace was
+tracking the exponential intensity decay, which is smooth and monotonic and therefore
+concentrated in the low-frequency bins: **exactly the signature the permutation test looks for.**
+
+**The user is sent to check their pumps and fans, and the stage is fine.**
+
+Fixed by z-scoring each frame before correlating (``_shift_normalise``), applied at all three
+phase-correlation sites. Bleaching now reads *good*, and **no sensitivity is lost**: a periodic
+oscillation still fires (p = 0.005), random jitter still does not (p = 0.519), and drift still
+fires on ``qc_drift`` (bad) while correctly *not* firing on ``qc_vibration``.
+
+**That discrimination is the point.** A metric that fired on any motion would send the user
+hunting for a vibration source when the real problem is a drifting stage — a different cause,
+and a different fix.
+
+**143/143 core tests passing.**
+
+## [1.5.464] - 2026-07-10
+### Added — `tests/imaging_realism.py`: the audit's validation layer 2
+The external audit specified a three-layer validation framework and asked every quantitative
+method to declare which layer it had reached:
+
+> **Implemented → Analytically validated → Simulation validated → Experimentally validated**
+
+**"Analytically validated" is a low bar, and PyCAT was mostly at it.** A method tested only on a
+clean synthetic scene has been tested against a microscope that does not exist.
+
+The audit named eleven degradations that separate a clean scene from a real acquisition —
+*Poisson noise, sCMOS read noise and offset maps, blur and axial defocus, illumination
+gradients, photobleaching, drift, finite exposure motion blur, pixelation, saturation, object
+overlap, segmentation errors.*
+
+**Eight of those eleven have already broken a real PyCAT measurement, each found the hard way,
+one bug at a time:**
+
+| degradation | what it broke, measured | release |
+|---|---|---|
+| sCMOS pedestal | Kp 30 → **5.8**; N&B number inflated **120×** | 1.5.422/453 |
+| saturation | Kp of 655, 1500 and 4000 **all read 655** | 1.5.392 |
+| PSF blur (the halo) | client enrichment 30 → **14.9** | 1.5.460 |
+| photobleaching | FRAP t½ **2.5× too fast**, R² = 0.94 | 1.5.455 |
+| drift | MSD α → **1.91**, reported as *superdiffusion* | 1.5.456 |
+| illumination gradient | vignetting QC measured object placement | 1.5.404 |
+| segmentation error | over-inclusive mask: Kp 30 → **4.4** | 1.5.459 |
+| Poisson noise | N&B shot-noise floor is B = 1, not 0 | 1.5.453 |
+
+**I have been rediscovering the auditor's list one bug at a time instead of building it.** This
+module is that list, assembled.
+
+Each degradation is a function of a **physically meaningful parameter** — ``pedestal`` in counts,
+``drift`` in px/frame, ``bleach_tau`` in frames — and ``acquire()`` composes them **in the order
+a microscope applies them**: the sample bleaches, the stage drifts, the object smears during the
+exposure, the optics blur, the photons arrive (Poisson), the sensor adds gain/offset/read-noise,
+the ADC clips, the sensor bins.
+
+*Applying the pedestal before the Poisson draw would make the pedestal itself noisy — which is
+not what a camera does, and would understate the damage. A noisy pedestal at least carries
+variance; the real one does not, and that is exactly why it destroys N&B.*
+
+### Added — `tests/test_imaging_realism.py`: 9 tests, methods measured through a real acquisition
+**The bar: recover the truth, or refuse. Never return a confident wrong number.**
+
+- **Kp = 29.44 at pedestals of 0, 100, 500 and 2000** — through Poisson noise, gain, pedestal
+  *and* read noise. The pedestal-independence claim is now **earned**, not asserted.
+- **Saturation is refused**, not reported: three scenes with true Kp of 30, 70 and 200 — a
+  **seven-fold range** — are indistinguishable once the dense phase clips. All three return NaN,
+  with 4/4 droplets flagged.
+- **The PSF degrades Kp visibly and boundedly**: 29.44 → 28.00 → **24.81** as blur rises to
+  2.5 px. The annulus gap (1.5.423) holds the loss to 17 % where the *ungapped* enrichment lost
+  50 %.
+- **The transfection gate is camera-independent**: the same 3-of-4 cells, and the same 0.75
+  fraction, at every pedestal. This is the 1.5.415 failure — where a mean/background *ratio*
+  called **every transfected cell untransfected** on a 500-count sensor.
+
+### Fixed — a validation claim was being printed next to a NaN
+Building the harness surfaced this immediately: on a saturated image the partition verdict read
+
+> *"Kp = **nan**. … Kp is pedestal-independent. **Validated: 29.65 recovered against a true
+> 30.0**"*
+
+The 1.5.462 scoping guard did not catch it, because the claim **is** correctly scoped. The
+problem is different, and worse: **the number it describes does not exist.** A validation claim
+attached to a NaN tells the user the machinery is sound at the exact moment it has refused to
+answer — and invites them to go looking for the number somewhere else.
+
+**135/135 core tests passing.**
+
+## [1.5.463] - 2026-07-10
+### Validated — the VPT chain reproduces the 8.325 reference on real data. No regression.
+The scientific-audit work of releases 398–462 touches the VPT path in several places (the
+lag-window gate, the localisation-offset term, identifiability, drift correction). **It has now
+been checked against the real bead file, and it did not regress anything.**
+
+With the settled acquisition parameters and the correct measurement configuration:
+
+| linker | gap | tracks | D (µm²/s) | α | **η (Pa·s)** |
+|---|---|---|---|---|---|
+| GREEDY | 1 | 118 | 0.000273 | **0.930** | **7.969** |
+| BAYES | 1 | 118 | 0.000273 | **0.930** | **7.969** |
+
+**η = 7.97 against the 8.325 reference — a 4 % difference — from a fully automated chain**, with
+α = 0.930 (Brownian). The reference required TrackMate with manual trajectory pruning; **this
+does not.** That is the standing goal, and it is met.
+
+Recorded in ``docs/audits/DEV_NOTES.md`` with the exact reproducing settings, so it is not lost
+again.
+
+### Documented — this file's metadata is untrustworthy at every depth short of per-frame timestamps
+``3_30_hr_1_MMStack_Pos0_ome2.tif`` is a MicroManager acquisition re-saved through ImageJ, which
+**stripped the per-image metadata**. What survives contains **two different, both-wrong answers
+and no right one**:
+
+- ``"Interval_ms": 0.0`` — the field that is *supposed* to hold the cadence. **Zero.**
+- ``"Acquisition comments: 500ms interval"`` — a **free-text human note**. It reads as
+  authoritative, it is the only number in the file that looks like an interval, and **it is
+  wrong**: the true cadence is 100 ms.
+- ``"CustomIntervals_ms": []`` — empty.
+
+**Reading 500 ms where the truth is 100 ms inflates the reported viscosity five-fold.**
+``_extract_frame_interval_s`` already returns ``(None, None)`` rather than guessing, and already
+rejects ``Interval_ms: 0``. That behaviour is now documented with this worked example so it is
+never relaxed. **A plausible-looking interval from a summary field or a comment is not
+evidence.**
+
+### Note — the false alarm was mine, and it was a failure to search, not a failure to reason
+I first measured **12–17 Pa·s** and reported it as a possible regression from the audit work. It
+was not. Two mistakes, both mine:
+
+1. **I linked ALL detections instead of the singlets.** The measurement requires
+   ``select_bead_population(det, 'singlet')`` — folding in ``out_of_plane`` (17 % of detections)
+   and ``aggregate`` beads puts motion in the MSD that does not belong there. **That is the
+   whole of the 12–17 vs 8.0 gap.**
+2. **I did not search my own records.** The pixel size (0.067 µm/px — an earlier 0.67 was a 10×
+   error, i.e. **100× in the MSD**), the frame interval, the linking distance, the gap setting
+   and the singlet filter were **all** in the transcripts and notes. I scraped a metadata comment
+   instead, grepped one file, found a *retracted* number, and asserted a conclusion from it —
+   including telling Gable his recollection was wrong. **It was right.**
+
+*Search the record before running anything or asserting anything. It is the ground truth, and
+speculation dressed as analysis costs real time.*
+
+### Found — `gap=1` still matters, and that is a real result
+An off-by-one in the gap check (``t - last_frame <= max_gap_frames``) was fixed to
+``<= max_gap_frames + 1``, so ``gap=0`` now means *"link consecutive frames"*. It would be
+reasonable to assume ``gap=1`` is therefore redundant.
+
+**It is not.** ``gap=0`` → 243 tracks, α = 1.05, **η = 10.1**. ``gap=1`` → 118 tracks, α = 0.930,
+**η = 7.97**. Bridging a *single* missing frame nearly halves the track count and moves the
+viscosity by 21 %.
+
+**The detection still drops beads (~15 %, per the 2026-07-09 analysis), and gap-closing recovers
+the tracks.** The apparent superdiffusion at ``gap=0`` (α = 1.05) is **fragmentation, not
+drift** — it disappears when the fragments are bridged.
+
+## [1.5.462] - 2026-07-10
+### Added — a guard against unscoped reassurances, and the one the last fix missed
+Having found the same failure twice — in someone else's message (1.5.459) and then in my own
+(1.5.461) — I went looking for the rest rather than waiting to trip over a third.
+
+**And found that the 1.5.459 correction had not reached the second copy of the same claim.**
+``partition_coefficient_local`` was fixed to suppress its confident verdict when the mask looks
+bad. ``partition_measurement`` carried the identical unscoped text — *"Kp is pedestal-independent.
+Validated: 29.65 recovered against a true 30.0"* — untouched, for two more releases.
+
+*A true-but-unscoped claim gets fixed where you are looking and lives on where you are not.*
+
+The scope is now **in the sentence**, not beside it:
+
+> Kp is pedestal-independent — validated **against the PEDESTAL specifically**. **That is the
+> only thing it is validated against.** It says nothing about the segmentation: an
+> over-inclusive droplet mask collapses Kp by up to 7×, with the pedestal correction still
+> perfectly sound.
+
+### `tests/test_claim_scoping.py`
+A user-facing message that says a number is **validated**, **exact**, or **independent** of
+something must, *in the same message*, say **what it is not validated against**.
+
+Verified **4/4** against the cases that matter:
+
+| case | verdict |
+|---|---|
+| the actual bug (*"Validated: 29.65 recovered…"*) | **flagged** |
+| the fix (scope stated) | allowed |
+| a plain warning (no claim) | allowed |
+| a scoped *"exact"* claim | allowed |
+
+**This is not a style check.** A reassurance whose scope is unstated **is read as a
+guarantee** — and it is more dangerous than no message at all, because it *actively suppresses
+the user's own doubt.* Both bugs this week were found by a scientist noticing a number looked
+wrong. A confident message is precisely the thing that stops them looking.
+
+**126/126 core tests passing.**
+
+## [1.5.461] - 2026-07-10
+### Corrected — I called the contrast "exact". It is exact against the *pedestal*, not the *halo*.
+1.5.426 introduced ``dense_dilute_contrast`` and described it, in three places, as **"exact — the
+pedestal cancels in the difference."** I have repeated that reassurance in every release since.
+
+**The first half is right and the second is a blanket claim that does not hold.**
+
+The pedestal *does* cancel. But the contrast is **not immune to the PSF halo**, which corrupts
+*both* terms — the dense mean is pulled **down** by soft edge pixels inside the mask, and the
+dilute mean is pulled **up** by halo pixels outside it. Measured, **true contrast = 2900**:
+
+| droplet edge | contrast | error |
+|---|---|---|
+| sharp | 2898 | **−0 %** |
+| 1 px | 2773 | −4 % |
+| 2.5 px *(realistic)* | 2560 | **−12 %** |
+| 5 px | 2269 | **−22 %** |
+
+Corrected in all three places, and pinned by a test that asserts **both halves** — that a sharp
+edge recovers the contrast exactly on a 500-count pedestal (so the pedestal really does cancel),
+**and** that a 5 px edge visibly degrades it. *The claim cannot drift back to the reassuring
+version.*
+
+### Note — this is the failure mode of 1.5.459, and I committed it myself
+1.5.459 was about a message that was **true and incomplete**: *"Kp is pedestal-independent,
+validated"* printed unchanged while an over-inclusive mask collapsed Kp by 7×. The statement was
+correct — about the pedestal — and said nothing about the mask, and the user reads the
+reassurance.
+
+**I then did exactly that.** *"The contrast is exact"* is true about the pedestal, silent about
+the halo, and I have been repeating it as a blanket guarantee for thirty-five releases. It took
+measuring the halo's effect on the contrast — which I only did because ``field_summary`` returned
+a number I could not explain — to notice.
+
+*A caveat you attach to someone else's claim is easy. Noticing that your own reassurance has a
+scope you never stated is the hard part.*
+
+**125/125 core tests passing.**
+
+## [1.5.460] - 2026-07-10
+### FIXED — the enrichment's "dilute" reference was the PSF halo, and the option meant to help made it worse
+**A droplet edge is not sharp.** The PSF gives it a halo, and the pixels *immediately outside*
+the dense mask are **halo, not dilute phase**. Including them inflates the dilute reference and
+collapses the enrichment.
+
+Measured, **true enrichment = 30**:
+
+| droplet edge width | dilute_mean | enrichment |
+|---|---|---|
+| sharp | 100.0 | **30.00** |
+| 1 px | 113.0 | 25.54 |
+| 2.5 px *(realistic)* | 130.0 | 20.66 |
+| **5 px** | 163.1 | **14.86** |
+
+**A realistic PSF halves the enrichment — and every real droplet has one.**
+
+### And `dilute_dilation_px` — the parameter that exists to fix this — made it worse
+It built the dilute shell **immediately adjacent** to the dense mask (``dilated & ~dense``) —
+**which is the halo itself**, the worst possible choice. With a 2.5 px edge it took the answer
+from 20.66 down to **2.86**:
+
+| dilute region | dilute_mean | enrichment |
+|---|---|---|
+| **adjacent shell** *(the old behaviour)* | 1440.5 | **2.86** |
+| gap 5 px, shell 6 px | 621.5 | 22.10 |
+| **gap 10 px, shell 6 px** | 600.9 | **26.63** |
+
+New ``dilute_gap_px`` steps **away** from the mask before sampling — the same annulus gap already
+used by ``partition_coefficient_local`` (1.5.423). Using ``dilute_dilation_px`` without a gap now
+warns and says exactly what it costs.
+
+### Note — my scene exposed this, and I nearly dismissed it as my own error
+The over-inclusive-mask sweep (1.5.459) showed ``client_enrichment`` returning **14.22 against a
+true 30 even with a perfect mask.** My first reaction was that my synthetic droplets had an
+unrealistically soft edge — *my scene's fault, not the code's.*
+
+**That was the wrong instinct.** Real droplets have soft edges: that is what a PSF *is*. The
+scene was right and the code was wrong. Testing across edge widths made it unambiguous — sharp
+edges recover 30.00 exactly, and the error scales monotonically with the blur.
+
+*A simulation that looks "too hard" is often just realistic. The N&B lesson (1.5.453) cuts both
+ways: question the simulation — and then question the instinct to blame it.*
+
+**124/124 core tests passing.**
+
+## [1.5.459] - 2026-07-10
+### FIXED — an over-inclusive droplet mask collapses Kp by 7×, and the code called it "validated"
+The Manders finding (1.5.458) — *a mask covering too much of the frame breaks the measurement* —
+generalises. The partition coefficient is worse.
+
+Kp = I_dense / I_dilute. **If the mask spills past the droplet, it pulls dilute-phase pixels
+into the "dense" average**, so I_dense falls and Kp falls with it. Measured, true Kp = 30, true
+droplet radius 13 px:
+
+| mask radius | Kp reported | CV inside the mask |
+|---|---|---|
+| **13 px** *(true)* | **29.61** | 0.016 |
+| 20 px | 19.93 | 0.421 |
+| 30 px | 9.46 | 0.807 |
+| **50 px** | **4.41** | 0.902 |
+
+**A 7× collapse — and the function printed *"Kp is pedestal-independent. Validated: 29.65
+recovered against a true 30.0"* the whole way down.**
+
+That message is not false. Kp **is** pedestal-independent, and that **was** validated — against
+the *pedestal*. It says nothing about the mask. **The reassurance was true and the number was
+wrong**, which is the worst combination there is.
+
+### Detectable from the data alone, with no ground truth
+A clean dense mask has a **low coefficient of variation** — every pixel in it is dense phase. An
+over-inclusive mask mixes in dilute pixels and the CV rises: **0.016 → 0.807**, a 50-fold
+separation, monotonic in the error. That is now checked and warned on.
+
+**And the confident verdict is suppressed when the mask is suspect.** A reassurance printed
+alongside a warning is worse than no reassurance: *the user reads the one that agrees with
+them.*
+
+The test asserts the guard is silent on a correct mask, too — *a warning that cries wolf will be
+ignored when it matters.*
+
+**122/122 core tests passing.**
+
+## [1.5.458] - 2026-07-10
+### Fixed — a Manders threshold below the background reports M = 1.0 on pure noise
+Manders' coefficients are computed from **binary masks**, and the masks come from a
+**threshold**. If that threshold sits *below the background*, the mask covers the whole frame —
+and then **every pixel is "positive" in both channels**, so M1 = M2 = 1.0: *perfect
+colocalisation, of noise.*
+
+Measured on a scene where channel 2 overlaps exactly **half** of channel 1's puncta (true
+M1 = 0.5), background = 20:
+
+| threshold | M1 | M2 | mask coverage |
+|---|---|---|---|
+| **10** *(below background)* | **1.000** | **1.000** | **100 %** |
+| 15 *(below background)* | 0.957 | 0.960 | 96 % |
+| 20 *(~ the background)* | 0.543 | 0.569 | 55 % |
+| **40** *(correct)* | **0.474** | 0.930 | 4 % |
+
+**You would be reporting perfect colocalisation of noise, with no indication anything is
+wrong.** A mask covering more than half the frame now warns.
+
+### Note — Manders is more robust than its reputation, and saying so matters
+I expected the textbook result: *"Manders is notoriously threshold-sensitive"*. **Above the
+background it is not.** From threshold 30 to 70 — more than a factor of two — M1 moves only from
+0.459 to 0.485, converging on the true 0.5. The coefficients are stable across any sensible
+choice.
+
+**The failure is entirely at the low end**, and it is a *different* failure from the one the
+reputation describes. Had I written the guard from the reputation rather than from measurement,
+I would have built a threshold-sensitivity sweep — useful, but not the thing that actually goes
+wrong — and missed the case that silently reports 1.0.
+
+The guard does not cry wolf on a correct threshold; the test asserts that too, *because a warning
+that fires on good data will be ignored when it matters.*
+
+**121/121 core tests passing.**
+
+## [1.5.457] - 2026-07-10
+### Fixed — whole-frame Pearson measures the cell shape, not colocalisation
+Continuing the *"what does my simulation assume that real data does not?"* sweep. My
+colocalization test used **independent uniform noise per pixel**. Real channels share a **cell
+shape** — both are bright inside the cell and dark outside.
+
+**That shared structure alone saturates Pearson.** Measured on channels that are **completely
+independent** — zero real colocalisation — both carrying the same cell shape:
+
+| scene | whole frame | **cell ROI** |
+|---|---|---|
+| **independent** *(r should be 0)* | **0.987** | **0.011** |
+| 50 % co-localised | 0.997 | **0.712** |
+| fully co-localised | 1.000 | 1.000 |
+
+**Over the whole frame all three read ~0.99.** No colocalisation and half colocalisation are
+**indistinguishable**. Pearson asks *"are both channels bright in the same places"*, and the
+biggest structure they share is the cell.
+
+An ROI covering more than 95 % of the frame now warns and says so. Inside a cell ROI the shared
+shape is gone (every pixel is in the cell) and Pearson measures the real correlation —
+**verified, not asserted**, and the test's failure message says: *if the ROI does not rescue the
+metric, the advice in the warning is hollow.*
+
+**The camera pedestal, by contrast, does not matter here** — Pearson is invariant to an additive
+offset. A pedestal of 500 leaves r unchanged at 0.010. Worth stating, because it is the opposite
+of the partition coefficient (1.5.422), where the pedestal is the whole problem. **The same
+artifact does not affect every metric, and assuming it does is its own error.**
+
+### Note — fusion was checked and is clean
+The same question applied to ``fit_aspect_ratio_relaxation``: *what if the first frame is caught
+LATE, after the relaxation has already begun?* Fusion is fast, so this is a real risk.
+
+**τ survives it.** An exponential is memoryless — ``exp(-(t+Δ)/τ) = exp(-Δ/τ)·exp(-t/τ)`` — so a
+late start rescales the **amplitude**, not the time constant. Measured: catching the first frame
+a full time constant late still recovers **τ = 9.56 against a true 10.0** (only ``AR_0`` is
+understated, 1.75 against 3.0). Since **η/γ comes from τ**, the physics survives.
+
+And ``characteristic_length_um`` defaults to ``None``, which makes ``η/γ`` return ``NaN`` rather
+than a silent wrong number. Nothing to fix.
+
+**120/120 core tests passing.**
+
+## [1.5.456] - 2026-07-10
+### Fixed — stage drift is reported as SUPERDIFFUSION, and nothing said so
+Asking *"what does my simulation assume that real data does not?"* — the question that found the
+FRAP bleaching bug (1.5.455) — applied to MSD. **My simulation assumed no stage drift.**
+
+**Confinement is guarded** (1.5.401): it pulls α *down*, and a probe hitting a wall was being
+reported as "subdiffusion". **The opposite direction was not** — and in bead tracking it is the
+more common artifact.
+
+Drift is **ballistic**: a stage moving at speed v contributes ``(v·τ)²`` to the MSD, which grows
+as τ² and pushes α toward 2. **And the slower the probe, the worse it is**, because the drift
+term is compared against a smaller diffusive signal.
+
+**In a viscous condensate this is severe — which is exactly the VPT regime.** For η = 8 Pa·s and
+a 100 nm bead, Stokes–Einstein gives **D = 0.00027 µm²/s**, a near-stationary probe:
+
+| stage drift | D uncorrected | α | D corrected | α |
+|---|---|---|---|---|
+| 0 | 0.000259 | 1.03 | 0.000253 | 1.03 |
+| 0.02 µm/s | 0.000294 | **1.62** | 0.000253 | **1.03** |
+| 0.05 µm/s | **0.000809** (3×) | **1.91** | 0.000253 | **1.03** |
+
+**Fifty nanometres per second of stage drift triples D and drives α to 1.91** — which a reader
+takes as directed, active transport. It is the stage. And R² does not move (0.993 throughout).
+
+``motion_type`` is read straight off α, so this was being reported as ``'superdiffusion'`` with
+no caveat. It now warns, and names the cause.
+
+**And the advice is verified, not asserted** (the 1.5.453 / 1.5.455 lesson): ``drift_correct_com``
+— already applied in the VPT pipeline — **recovers both D and α exactly, at every drift level
+tested.** That check is now a test, whose failure message reads: *if this fails, the advice in
+the superdiffusion warning is hollow.*
+
+### Relevance to the open VPT problem
+This is the classic reason a VPT viscosity comes out **too low**: uncorrected drift inflates D,
+and η = kT/(6πRD) is *inversely* proportional to D. The pipeline does apply the correction — but
+anything fitting an MSD outside it, or any residual drift after it, produces exactly this
+signature, and now says so.
+
+**119/119 core tests passing.**
+
+## [1.5.455] - 2026-07-10
+### FIXED — FRAP with no reference region: the half-time was 2.5× too fast, reported confidently
+Finishing the simulation audit (1.5.454) turned up a bug I had not been looking for.
+
+My 1.5.446 FRAP simulation assumed **no acquisition bleaching** — but every frame of a real
+recovery bleaches the sample a little more, so **the plateau sags.** The fit reads that as a
+**faster recovery to a lower plateau**, and both the half-time and the mobile fraction are
+corrupted.
+
+Measured, true t½ = 8.0 s and mobile fraction 0.875:
+
+| acquisition bleaching | t½ fitted | mobile | R² | identifiable |
+|---|---|---|---|---|
+| none | 8.57 | 0.880 | 0.988 | True |
+| τ = 600 s (mild) | 6.10 | 0.765 | 0.985 | True |
+| **τ = 200 s (typical)** | **3.24** | **0.602** | 0.942 | **True** |
+| τ = 60 s (severe) | 0.19 | 0.278 | 0.217 | False |
+
+**At entirely typical acquisition bleaching the half-time is 2.5× too fast and the mobile
+fraction 31 % too low — reported confidently, flagged identifiable, with R² = 0.94.** Neither
+the fit statistic nor the confidence interval catches it, **because the curve still fits.**
+
+### The fix was already in the module, and was optional
+``photofading_correction`` — the standard reference-region correction — has been there all
+along. The pipeline called it **only if a reference mask was supplied**, and when it was not, it
+silently used a correction factor of 1 and carried on.
+
+It now warns, and states exactly what the omission costs.
+
+**And the advice is verified, not asserted.** Supplying a reference recovers the truth:
+
+| | t½ | mobile |
+|---|---|---|
+| uncorrected | 3.24 | 0.602 |
+| **corrected (reference supplied)** | **8.91** | **0.855** |
+| *true* | *8.00* | *0.875* |
+
+That check is now a test. Its failure message says: *if this fails, the advice in the
+no-reference warning is hollow — it tells the user to supply a reference, and that must actually
+fix the problem.* (The lesson of 1.5.453, where I nearly shipped advice I had not confirmed
+worked.)
+
+### The audit, closed
+Every finding this session that rests on a simulation I wrote has now been re-derived under a
+more realistic model:
+
+| release | claim | verdict |
+|---|---|---|
+| 1.5.446 | FRAP t½ unidentifiable on short windows | **holds** — short windows are flagged with or without bleaching |
+| 1.5.447 | MSD D/α coupled, R² *rises* as the window shrinks | **holds** |
+| 1.5.450 | 42 % of coarsening series called "arrested" | **holds** — 40 % under additive noise too |
+| 1.5.451 | photobleaching window check | **wrong** — cried wolf on a floor; fixed in 1.5.454 |
+| 1.5.453 | N&B "20× bug" | **wrong** — my simulation had a fixed occupancy; the estimator is correct |
+
+Two of five were wrong, **and both were caught by questioning the simulation rather than the
+code.** That is the habit worth keeping.
+
+**117/117 core tests passing.**
+
+## [1.5.454] - 2026-07-10
+### Fixed — the photobleaching window check cried wolf on good movies with a floor
+The N&B episode (1.5.453) — where a badly-posed simulation nearly led me to "fix" a correct
+estimator — prompted an audit of every finding this session that rests on a simulation I wrote.
+Two were worth re-deriving.
+
+**The coarsening finding (1.5.450) holds.** My test used *multiplicative* noise (``R × (1+ε)``);
+real radius error is *additive* (segmentation uncertainty, independent of object size). Re-run
+with additive noise, the old ``R² < 0.3`` criterion **still false-arrests 40 % of genuinely
+coarsening series** at 2 µm scatter. The bug and the fix are independent of the noise model.
+
+**The photobleaching check (1.5.451) was wrong.** My test used ``I = A·exp(-t/τ)`` — decaying to
+*zero*. Real bleaching leaves a non-bleaching floor (autofluorescence, an immobile fraction),
+which never decays, so ``-log(I_end / I_start)`` **saturates and understates the decay.** With a
+50 % floor, a **perfectly adequate 2 τ movie** (τ fitted = 53.4 against a true 50) reported an
+observed window of **0.50** and fired the SEVERE warning.
+
+Both bounds are now reported, and the check is monotonic — a shorter movie never looks better
+than a longer one.
+
+### Note — six attempts, five of them wrong, and the sixth is only honest
+Recording all of them, because the next person will try the same ones.
+
+1. **``movie_length / τ_fitted``** — circular. On a movie a fifth of the true bleach time, τ
+   fits to 11 s (true 50), so the ratio is 10/11 = **0.9** and the check *passes*. **The
+   quantity being checked against is the thing that is wrong.**
+2. **``-log(I_end / I_start)`` on the raw intensity** — the 1.5.451 version. Cries wolf on any
+   sample with a floor (above).
+3. **Subtract the fitted ``I_inf``.** I argued this was safe, on the grounds that ``I_inf`` is
+   anchored by the last frames while τ needs curvature — **then measured it, and I was wrong.**
+   On a 0.2 τ movie ``I_inf`` fits to **771 against a true 200.** It is just as badly determined
+   as τ, and the circularity bites exactly where it matters.
+4. **Subtract ``I_min``** — overstates the decay; the minimum is a noise excursion.
+5. **Compare the exponential fit to a LINEAR fit** (*"did the curve turn over?"*). The right
+   question in principle — but the R² gap came out **non-monotonic** with the window (0.057,
+   0.013, 0.016, 0.015 for 2.0, 1.0, 0.5, 0.2 τ) and does not separate them.
+6. **Take the max of bounds (2) and (3)** — also not monotonic. The over-fitted floor-subtracted
+   bound *rescues* a bad movie, so a 0.5 τ movie came out **quieter than a 1.0 τ one.** A metric
+   that ranks a worse movie above a better one is not a metric.
+
+**There is no single scalar here that is both floor-robust and non-circular.** The warning now
+fires on the no-floor bound — the conservative one — and **states its known weakness**: it
+understates the decay when the sample has a large floor, so it will warn on some adequate movies.
+It reports both bounds and tells the user to compare them.
+
+*A loud, honest, occasionally-wrong warning beats a silent wrong number. And after six attempts,
+saying so is more useful than shipping a seventh tuning.*
+
+**116/116 core tests passing.**
+
+## [1.5.453] - 2026-07-10
+### Fixed — N&B labelled `brightness` as "apparent" but left `number` unlabelled
+``brightness`` carries ``brightness_kind='apparent'`` and fires a warning when the camera is
+uncalibrated. **``number`` carried nothing** — and it is the more dangerous of the two, because
+**it looks like a molecule count.** ``N = mean / B``, so an uncalibrated B makes N uncalibrated
+too. ``number_kind`` now travels with it, on the same basis.
+
+The warning now names N explicitly, and states the thing that actually matters: **the offset
+adds to the mean but not to the variance**, so it drags B down and inflates N.
+
+### Note — I nearly "fixed" a correct estimator on the strength of a bad simulation
+I simulated ``Poisson(N · ε)`` photons per pixel and found N&B reporting **N = 200 against a
+"true" 10**. That looked like a 20× bug, and I had already written the alarming changelog entry.
+
+**It was not a bug.** With a *fixed* occupancy there is **no molecular fluctuation at all** —
+every "molecule" is indistinguishable from shot noise, so ``var = mean``, ``B = 1``, and
+``N = mean`` is the **correct** answer to the question I asked. The simulation was wrong, not the
+code.
+
+The molecular signal in N&B lives in the fluctuation of the **occupancy** — molecules entering
+and leaving the volume. Simulated properly, the estimator is exact:
+
+| true | recovered |
+|---|---|
+| N = 10, ε = 5 | **B = 6.01** (expect 6.0), **N = 8.30** (expect 10) |
+| N = 5, ε = 20 | **B = 21.06** (expect 21.0), **N = 4.75** (expect 5) |
+
+**The +1 in B is the shot-noise floor**: a perfectly monomeric sample reads B = 1, not B = 0,
+because a Poisson emitter's variance equals its mean. **That floor is precisely what a monomeric
+reference calibrates away** — which is why an absolute oligomeric state cannot be claimed without
+one, and why the uncalibrated output is labelled *apparent*.
+
+Locked in by ``tests/test_nb_estimator.py``, whose failure message says: *if this fails, check
+the simulation before the code.*
+
+### Note — ``git checkout`` in the sandbox reverts to the v1.5.329 baseline, not to HEAD
+A botched edit left ``nb_tools.py`` unparseable, and I reached for ``git checkout`` — which
+**wiped 140 lines of this session's work**, because the sandbox git is pinned at v1.5.329.
+
+Recovered from the shipped ``pycat_1.5.394_changed.zip``. **The shipped ZIPs are the backup; the
+sandbox git is not.** Noted, and not to be repeated.
+
+**116/116 core tests passing.**
+
+## [1.5.452] - 2026-07-10
+### FIXED — the CI-faithful runner was stubbing compute dependencies. It was not faithful.
+Gable asked why CI keeps going red on things that pass locally. The answer is not git, and it is
+not the release ritual. **It is that my pre-ship check has been lying to me**, and this release
+is about stopping that.
+
+``tools/run_core_tests.py`` (1.5.433) exists to run the suite *the way CI runs it* — its own
+docstring says **"no conveniences"**. And it contained:
+
+```python
+for name in ('pywt', 'SimpleITK', 'cv2', 'matplotlib'):
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        stub = types.ModuleType(name)          # <- fabricate it
+        sys.modules[name] = stub
+```
+
+**That is precisely the mechanism that produced the red builds:**
+
+| release | package | what happened |
+|---|---|---|
+| 1.5.442 | ``largestinteriorrectangle`` | stubbed locally → imported fine → **red in CI** |
+| 1.5.444 | ``scikit-learn`` | stubbed locally → imported fine → **red in CI** |
+
+The module imports cleanly against a fake package, so the missing dependency is invisible until
+the real environment rejects it.
+
+**And it has been running that way all session.** ``pywt`` and ``SimpleITK`` are **not installed
+in the sandbox at all** — every *"115/115 passed"* was reported with two real dependencies faked.
+
+### What it does now
+It reads the packages CI installs **from the workflow** (not a hard-coded list — a
+hand-maintained copy of a derivable fact drifts, per 1.5.445), checks each is genuinely
+importable, and if any is missing it prints:
+
+```
+==============================================================================
+  WARNING: THIS IS NOT A FAITHFUL CI RUN
+==============================================================================
+  These packages are installed by CI but are ABSENT here, and are being
+  STUBBED. Any import error they would have caused is invisible in this run:
+    pywt  (pip install pywavelets)
+    SimpleITK  (pip install simpleitk)
+```
+
+The tests still run — a sandbox with no network cannot install them, and a degraded run is
+better than none. **What it must not do is report a clean result and let me believe it.** A green
+result under that banner does not mean the import surface is clean; only ``pytest -m core`` in CI
+can say that.
+
+### The rule
+*A test environment that differs from the real one in a convenient way will hide exactly the
+bugs that matter.* I wrote that in 1.5.409, wrote it again in 1.5.432, and **built the tool that
+was still doing it.** Recording a lesson is not the same as enforcing it.
+
+## [1.5.451] - 2026-07-10
+### Fixed — a movie shorter than the bleach time cannot measure the bleach time
+``fit_photobleaching`` produces τ, and **the bleach correction divides by exp(-t/τ)** — so every
+corrected intensity downstream inherits any error in it, and **the error compounds exponentially
+with time.**
+
+Measured, true τ = 50 s, 30 realisations:
+
+| movie length | τ (sd) | mean R² |
+|---|---|---|
+| 100 s (2 τ) | 49.6 (0.8) | 0.993 |
+| 50 s (1 τ) | 48.9 (1.7) | 0.988 |
+| 25 s (½ τ) | 42.6 (8.6) | 0.971 |
+| **10 s (⅕ τ)** | **35.2 (18.9)** | 0.881 |
+
+R² stays high throughout. **And the consequence is far larger than the scatter suggests** — the
+over-correction of the *final frame*:
+
+| movie | τ fitted | over-correction |
+|---|---|---|
+| 100 s | 50.0 | −0.0 % |
+| 25 s | 25.0 | **+63.5 %** |
+| **10 s** | **11.0** | **+95.6 %** |
+
+**The correction nearly doubles the final intensity** on a movie a fifth of the bleach time.
+
+τ now carries a 95 % CI (the 10 s movie gives **[−1.8, 23.9]** — it does not exclude a *negative*
+time constant), and the observation window is reported and warned on in two tiers, set from the
+measured bias (under 5 % from ~0.8 τ onward, −15 % at ½ τ, **−30 % at ⅕ τ**).
+
+### Note — the check must not use the fitted τ, and my first two attempts did
+**That is circular, and it let the worst case straight through.** On a movie a fifth of the true
+bleach time, τ fits to **11 s** — so ``movie_length / τ_fitted`` = 10/11 = **0.9**, and a check
+against the fitted τ **passes**. *The quantity being checked against is itself the thing that is
+wrong.*
+
+Subtracting the fitted ``I_inf`` was no better: on a short movie ``I_inf`` is also badly
+determined, and it **scrambled the ordering** — a 0.5 τ movie came out looking *better observed*
+than a 0.6 τ one.
+
+The non-circular test uses the **raw** intensities: *how far did the signal actually fall?*
+``exp(-1) = 0.368``, ``exp(-0.5) = 0.607``. That is a property of the data, not of the fit. The
+reported window now tracks the truth — 1.80, 0.91, 0.55, 0.41, 0.16 for movies of 2.0, 1.0, 0.6,
+0.5 and 0.2 τ.
+
+**115/115 core tests passing.**
+
 ## [1.5.450] - 2026-07-10
 ### FIXED — 42 % of genuinely coarsening series were being reported as "arrested"
 ``fit_coarsening`` decides whether a condensate population is coarsening (Ostwald ripening,

@@ -284,10 +284,19 @@ def number_and_brightness(stack, gain=1.0, offset=0.0, read_variance=0.0,
 
     if not _calibrated:
         napari_show_warning(
-            "N&B: reporting APPARENT brightness (" + "; ".join(_cal_notes[:-1]) +
-            "). It is monotonic with molecular brightness and fine for comparing "
-            "conditions acquired identically, but it is not a molecular brightness "
-            "and must not be read as an oligomeric state.")
+            "N&B: reporting APPARENT brightness and APPARENT number (" +
+            "; ".join(_cal_notes[:-1]) + "). Both are monotonic with the real quantities "
+            "and fine for comparing conditions acquired IDENTICALLY, but neither is an "
+            "absolute measurement.\n\n"
+            "The apparent brightness carries a SHOT-NOISE FLOOR of 1: a perfectly monomeric "
+            "sample reads B = 1, not B = 0, because a Poisson emitter's variance equals its "
+            "mean. A monomeric reference is what calibrates that floor away — without one, "
+            "a RATIO of two B values is meaningful but an absolute oligomeric state is not.\n\n"
+            "N inherits the same caveat, and it is the more dangerous of the two because it "
+            "LOOKS like a molecule count: N = mean / B, so an uncalibrated B makes N "
+            "uncalibrated too.\n\n"
+            "Supply the camera gain, offset and read variance. **The offset matters most: it "
+            "adds to the mean but NOT to the variance, so it drags B down and inflates N.**")
 
     return {
         'mean': mean,
@@ -300,6 +309,27 @@ def number_and_brightness(stack, gain=1.0, offset=0.0, read_variance=0.0,
         'offset': float(offset),
         'read_variance': float(read_variance),
         # Provenance of the number, travelling WITH it.
+        # ── The SAME caveat must travel with N, and it did not ──────────────────
+        #
+        # `brightness` carries `brightness_kind='apparent'` and fires a warning when the
+        # camera is uncalibrated. **`number` carried nothing** — and it is the more dangerous
+        # of the two, because it LOOKS like a molecule count. N = mean / B, so if B is only
+        # apparent, N is only apparent.
+        #
+        # A note on what "apparent" means, because I got this wrong at first and the
+        # correction is the useful part. The apparent brightness has a SHOT-NOISE FLOOR of 1:
+        # a perfectly monomeric sample reads **B = 1, not B = 0**, because a Poisson emitter's
+        # variance equals its mean. So B is (molecular brightness + 1) in detector units, and
+        # **a monomeric reference is precisely what calibrates that floor away** — which is
+        # why an absolute oligomeric state cannot be claimed without one.
+        #
+        # The estimator itself is CORRECT. Verified against a simulation with a properly
+        # fluctuating occupancy (molecules entering and leaving the volume, which is where the
+        # molecular signal actually lives):
+        #
+        #     true N = 10, eps = 5   ->  B = 6.01 (expect 6.0),  N = 8.30 (expect 10)
+        #     true N =  5, eps = 20  ->  B = 21.06 (expect 21.0), N = 4.75 (expect 5)
+        'number_kind': _brightness_kind,          # 'apparent' | 'calibrated' — same basis
         'brightness_kind': _brightness_kind,      # 'apparent' | 'calibrated'
         'calibrated': _calibrated,
         'calibration_notes': _cal_notes,

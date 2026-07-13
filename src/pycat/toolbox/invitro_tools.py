@@ -98,7 +98,10 @@ def field_summary(
                                     removed, so it is biased toward 1 (a true Kp of 30
                                     reads as 5.8 on a 500-count pedestal). Use
                                     `partition_coefficient_local` for a real Kp.
-        dense_dilute_contrast     : I_dense − I_dilute. EXACT — the pedestal cancels.
+        dense_dilute_contrast     : I_dense − I_dilute. Exact against the PEDESTAL (it
+                                    cancels in the difference), but NOT immune to the
+                                    droplet's PSF halo, which corrupts both terms — a 5 px
+                                    edge costs it 22 %. See the note on the return value.
         partition_coefficient     : DEPRECATED alias of intensity_ratio.
                                     An apparent, intensity-based partition
                                     coefficient (dimensionless ratio of signals), not
@@ -207,7 +210,25 @@ def field_summary(
         # (in vitro) or a cell mask (cellular) — see 1.5.423.
         intensity_ratio=part,
         partition_coefficient=part,               # DEPRECATED: this is NOT Kp — see above
-        # The CONTRAST is exact regardless of any pedestal: it cancels in the difference.
+        # ── The contrast is PEDESTAL-exact, NOT halo-immune ─────────────────────
+        #
+        # I claimed in 1.5.426 that this is "exact — the pedestal cancels in the difference".
+        # The first half is right and the second is a blanket reassurance that does not hold:
+        # the pedestal does cancel, but the contrast is NOT immune to a bad dilute reference.
+        #
+        # A droplet edge is not sharp, and the PSF halo corrupts BOTH terms — the dense mean
+        # is pulled DOWN by edge pixels inside the mask, and the dilute mean is pulled UP by
+        # halo pixels outside it. Measured, TRUE contrast = 2900:
+        #
+        #     droplet edge    contrast    error
+        #     sharp           2898        -0 %
+        #     1 px            2773        -4 %
+        #     2.5 px          2560        **-12 %**
+        #     5 px            2269        **-22 %**
+        #
+        # So: exact against the PEDESTAL, and degraded by the HALO like everything else.
+        # Stating "exact" without that qualifier is the kind of true-but-incomplete
+        # reassurance that 1.5.459 was about.
         dense_dilute_contrast=float(cond_int - bulk_int),
 
         total_droplet_area_um2=total_area,
@@ -1010,6 +1031,7 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
 
 
     rows = []
+    _mask_cv = []          # per-droplet CV: an over-inclusive mask has a HIGH CV
     for lb in ids:
         obj = (lab == lb)
         if not obj.any():
@@ -1046,6 +1068,30 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
             continue
 
         dense_px = img[obj]
+
+        # ── An OVER-INCLUSIVE droplet mask silently collapses Kp ────────────────
+        #
+        # Kp = I_dense / I_dilute. If the mask spills past the droplet edge it pulls
+        # DILUTE-phase pixels into the "dense" average, so I_dense falls — and Kp falls with
+        # it. Measured, on a scene with a TRUE Kp of 30 (true droplet radius 13 px):
+        #
+        #     mask radius    Kp reported    CV inside the mask
+        #     13 px (true)   **29.61**      0.016
+        #     20 px           19.93         0.421
+        #     30 px            9.46         0.807
+        #     50 px          **4.41**       0.902
+        #
+        # **A 7x collapse** — and the function was reporting "Kp is pedestal-independent,
+        # validated" the whole way down. The message was reassuring while the number was
+        # wrong.
+        #
+        # It is DETECTABLE from the data alone, with no ground truth: a clean dense mask has
+        # a LOW coefficient of variation, because every pixel in it is dense phase. An
+        # over-inclusive mask mixes in dilute pixels, and the CV rises — 0.016 to 0.807, a
+        # 50-fold separation, monotonic in the error.
+        _cv = (float(np.std(dense_px) / max(abs(np.mean(dense_px)), 1e-9))
+               if dense_px.size > 1 else 0.0)
+        _mask_cv.append(_cv)
         ring_px = img[ring]
         I_dense = float(dense_px.mean())
         I_ring = float(ring_px.mean())
@@ -1079,17 +1125,66 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
             saturated=saturated, saturated_fraction=frac_sat,
         ))
 
+    # A high CV inside the dense mask means the mask is including dilute-phase pixels.
+    if _mask_cv:
+        _cv_med = float(np.median(_mask_cv))
+        if _cv_med > 0.25:
+            napari_show_warning(
+                f"Partition coefficient: the droplet mask looks OVER-INCLUSIVE — the "
+                f"intensity inside it has a coefficient of variation of {_cv_med:.2f}, and a "
+                f"clean dense-phase mask has a CV near 0.02 (every pixel is dense phase).\n\n"
+                f"A mask that spills past the droplet edge pulls DILUTE-phase pixels into the "
+                f"dense average, so I_dense falls and **Kp falls with it**. Measured on a "
+                f"scene with a TRUE Kp of 30: a mask 1.5x too large gives Kp = 19.9 "
+                f"(CV 0.42), and one 2.3x too large gives **Kp = 9.5** (CV 0.81) — **a 3x "
+                f"collapse, reported with no indication that anything is wrong.**\n\n"
+                f"Tighten the segmentation until the mask contains the dense phase and not "
+                f"its surroundings.")
+
     df = pd.DataFrame(rows)
     kp_vals = df['partition_coefficient'].to_numpy(dtype=float) if len(df) else np.array([])
     kp_vals = kp_vals[np.isfinite(kp_vals)]
     kp_mean = float(kp_vals.mean()) if kp_vals.size else np.nan
 
-    if floor_source == 'dark_reference':
+    if floor_source == 'dark_reference' and not np.isfinite(kp_mean):
+        # ── Do not print a VALIDATION claim next to a NaN ────────────────────────
+        #
+        # The dark-reference verdict said "Kp = nan. ... Validated: 29.65 recovered against a
+        # true 30.0" — a reassurance printed beside a refusal. The 1.5.462 scoping guard did
+        # not catch it, because the claim is correctly scoped ("against the PEDESTAL") and the
+        # problem is different: **the number it is describing does not exist.**
+        #
+        # A validation claim attached to a NaN is worse than an unscoped one. It tells the
+        # user the machinery is sound at the exact moment the machinery has refused to answer,
+        # and invites them to go looking for the number somewhere else.
+        verdict = (
+            f"Kp is NOT COMPUTABLE for this image — see the warning above. "
+            f"{int(df['saturated'].sum()) if len(df) else 0} of {len(df)} droplet(s) are "
+            f"saturated at the detector ceiling.\n\n"
+            f"The camera floor WAS measured correctly from the dark reference "
+            f"({I_dark:.1f} counts), and that part of the measurement is sound. **It does not "
+            f"help**: a clipped dense phase truncates the numerator by an unknown amount, so "
+            f"the ratio is meaningless rather than a lower bound. Re-acquire with a shorter "
+            f"exposure or lower gain.")
+        napari_show_warning("Partition coefficient: " + verdict)
+
+    elif floor_source == 'dark_reference':
         verdict = (f"Kp = {kp_mean:.2f}. The camera floor was measured directly from the "
                    f"DARK REFERENCE ({I_dark:.1f} counts) and removed from both phases, so "
                    f"Kp is pedestal-independent. Validated: 29.65 recovered against a true "
                    f"30.0 at pedestals of 0, 100, 500 and 2000 counts.")
-        napari_show_info("Partition coefficient: " + verdict)
+        # ── Do NOT sound confident when the MASK is suspect ──────────────────────
+        #
+        # This message says the number is validated — and it is, against the PEDESTAL. It
+        # says nothing about the mask, and an over-inclusive mask collapses Kp by 7x while
+        # this reassurance prints unchanged. A confident verdict alongside a warning is worse
+        # than no verdict: the user reads the one that agrees with them.
+        if _mask_cv and float(np.median(_mask_cv)) > 0.25:
+            verdict += (" **But see the mask warning above — the pedestal correction is "
+                        "sound and the MASK is not, and Kp is only as good as the worse of "
+                        "the two.**")
+        else:
+            napari_show_info("Partition coefficient: " + verdict)
 
     elif floor_source == 'extracellular':
         verdict = (f"Kp = {kp_mean:.2f}. The camera floor ({I_dark:.1f} counts) came from "
@@ -1116,7 +1211,8 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
             "settings — and pass it as `dark_reference`. It takes one extra frame.\n\n"
             f"What IS reported meanwhile: the CONTRAST "
             f"(I_dense − I_dilute = {float(df['contrast'].mean()) if len(df) else float('nan'):.0f}), "
-            "which is EXACT — the pedestal cancels in the difference. Pass "
+            "which is exact against the PEDESTAL (it cancels in the difference) but NOT "
+            "immune to the droplet's PSF halo — a 5 px edge costs it 22%. Pass "
             "`allow_no_reference=True` to additionally receive the raw intensity ratio, "
             "which is NOT Kp and is biased toward 1 by an unknowable amount.")
         napari_show_warning("Partition coefficient: " + verdict)
@@ -1142,7 +1238,8 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
             "Or `allow_no_reference=True` to receive the raw ratio, clearly labelled as NOT "
             "Kp.\n\n"
             "The CONTRAST (I_dense − I_dilute) is reported regardless and is exact: the "
-            "pedestal cancels in the difference.")
+            "pedestal cancels in the difference — though not immune to the PSF halo, "
+            "which costs a 5 px edge 22%.")
         napari_show_warning("Partition coefficient: " + verdict)
 
     return dict(
@@ -1247,11 +1344,30 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
         bg_checked, bg_holds = True, True
         _dk = (float(dark_reference) if np.isscalar(dark_reference)
                else float(np.median(np.asarray(dark_reference, dtype=float))))
+        # ── State the SCOPE inside the claim, not beside it ─────────────────────
+        #
+        # The old text said "Kp is pedestal-independent. Validated: 29.65 recovered against
+        # a true 30.0" — and stopped there. Every word is true, and the scope is the
+        # PEDESTAL and nothing else. It says nothing about the mask, and an over-inclusive
+        # mask collapses Kp by 7x (1.5.459) while this reassurance prints unchanged.
+        #
+        # `partition_coefficient_local` now suppresses its version of this message when the
+        # mask looks bad — **but this copy, in `partition_measurement`, was never touched.**
+        # The correction did not reach it, which is exactly how a true-but-unscoped claim
+        # survives: it gets fixed where you are looking and lives on where you are not.
+        #
+        # So the scope is now IN the sentence. A reader cannot take the reassurance without
+        # also reading what it does not cover.
         bg_detail = (f'RESOLVED by a dark reference (camera floor = {_dk:.1f} counts). '
                      f'The pedestal is measured directly and removed from both phases, so '
-                     f'Kp is pedestal-independent. Validated: Kp = 29.65 recovered against '
-                     f'a true 30.0 at pedestals of 0, 100, 500 and 2000 counts. Use '
-                     f'partition_coefficient_local() to compute Kp this way.')
+                     f'Kp is pedestal-independent — validated against the PEDESTAL '
+                     f'specifically: 29.65 recovered against a true 30.0 at pedestals of 0, '
+                     f'100, 500 and 2000 counts.\n\n'
+                     f'**That is the only thing it is validated against.** It says nothing '
+                     f'about the segmentation: an over-inclusive droplet mask pulls '
+                     f'dilute-phase pixels into the dense average and collapses Kp by up to '
+                     f'7x, with the pedestal correction still perfectly sound. Use '
+                     f'partition_coefficient_local(), which checks the mask as well.')
     elif background_subtracted is None:
         bg_checked, bg_holds = False, None
         bg_detail = (f'NOT CHECKED — the caller did not say. The image floor (1st '

@@ -407,6 +407,32 @@ def _extract_frame_interval_s(image):
       1. OME Pixels TimeIncrement (with TimeIncrementUnit) — the nominal interval.
       2. Median of consecutive per-plane DeltaT values — the actual cadence.
       3. MicroManager 'Interval_ms' in the raw metadata string (only if > 0).
+
+    **Only PER-FRAME TIMESTAMPS can be trusted. Everything else can lie, and on real files
+    it does.**
+
+    A worked example, from ``3_30_hr_1_MMStack_Pos0_ome2.tif`` — a MicroManager acquisition
+    that was subsequently opened and re-saved in ImageJ. Its surviving metadata contains
+    **two different, both-wrong answers**, and no right one:
+
+    * ``"Interval_ms": 0.0`` — the field that is *supposed* to hold the cadence. It is
+      **zero**. A scraper that trusts it gets a meaningless interval; that is why source (3)
+      above rejects a non-positive value, and it must never be relaxed.
+    * ``"Acquisition comments: 500ms interval"`` — a **free-text human comment**. It *reads*
+      as authoritative, it is the only number in the file that looks like an interval, and
+      **it is wrong**: the true cadence was 100 ms. It is a note somebody typed, not a
+      measurement the microscope made.
+    * ``"CustomIntervals_ms": []`` — empty.
+
+    The real per-frame ``ElapsedTime-ms`` values were in MicroManager's per-image metadata,
+    and **ImageJ stripped them on re-save** (``tf.is_micromanager`` is False for this file
+    even though it came from MicroManager). What survives is a 1070-byte *summary* blob.
+
+    **So: a plausible-looking interval from a summary field or a comment is not evidence.**
+    If per-frame timestamps are absent, this function returns ``(None, None)`` — and the
+    caller must ASK, not assume. A wrong frame interval scales the diffusion coefficient
+    linearly and the viscosity inversely: reading 500 ms where the truth is 100 ms inflates
+    the reported viscosity **five-fold**.
     """
     import re as _re
 

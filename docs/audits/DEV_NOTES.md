@@ -346,3 +346,205 @@ ours to worry about: as condensates grow and brighten, a fixed threshold detects
 them and detects them *larger* — which mimics a growth law. Any coarsening exponent we
 report should be accompanied by the supporting signatures (number density, total dense-phase
 area, mass conservation) and by evidence that the segmentation did not drift.
+
+
+---
+
+## VPT viscosity: the settled parameters, and an apparent regression (2026-07-12)
+
+**This section exists because the same facts were lost twice and re-derived wrongly both
+times. They are recorded here so that does not happen again.**
+
+### The settled acquisition parameters
+
+| parameter | value | how it was established |
+|---|---|---|
+| **pixel size** | **0.067 µm/px** | Reasoned through from the optics with Gable. An earlier value of 0.67 µm/px was an **error** and appears in older notes and transcripts — it is wrong by 10×, which is **100× in the MSD** (distance squared) and therefore 100× in D and in the viscosity. |
+| **frame interval** | **0.1 s** | Settled with Gable. |
+| bead radius | 0.100 µm | 200 nm beads. |
+| temperature | 24 °C | |
+| reference viscosity | **8.325 Pa·s** | Validated by an experienced user through PyCAT detection → **TrackMate** linking at v1.5.329. |
+
+### The metadata for this file cannot be trusted — at any depth short of per-frame timestamps
+
+``3_30_hr_1_MMStack_Pos0_ome2.tif`` is a MicroManager acquisition that was **re-saved through
+ImageJ**, which **stripped the per-image metadata**. ``tifffile`` reports
+``is_micromanager = False``. What survives is a 1070-byte summary blob containing **two
+different, both-wrong answers and no right one**:
+
+* ``"Interval_ms": 0.0`` — the field that is *supposed* to hold the cadence. It is **zero**.
+* ``"Acquisition comments: 500ms interval"`` — a **free-text human note**. It *reads* as
+  authoritative, it is the only number in the file that looks like an interval, and **it is
+  wrong**: the true cadence is 100 ms.
+* ``"CustomIntervals_ms": []`` — empty.
+
+**A plausible-looking interval from a summary field or a comment is not evidence.** Reading
+500 ms where the truth is 100 ms inflates the reported viscosity **five-fold**. This is now
+documented in ``_extract_frame_interval_s`` (``metadata_extract.py``), which correctly returns
+``(None, None)`` rather than guessing. *Do not relax that.*
+
+(Note: the file Gable uploaded is a substack made for upload-size reasons. The original file's
+metadata was dumped in an earlier session. The trap above may be an artifact of the substack —
+but the **lesson stands regardless**, because the substack is what a user would hand the tool.)
+
+### The measured chain — two days ago vs now
+
+**2026-07-10** (transcript ``2026-07-10-21-50-11-pycat-vpt-tagging-tools``), automated linkers,
+after the classifier-flicker fix:
+
+| linker | gap | tracks | D (µm²/s) | **α** | **η (Pa·s)** |
+|---|---|---|---|---|---|
+| GREEDY | **1** | 90 | 0.0003 | **0.928** | **8.452** |
+| BAYES | **1** | 91 | 0.0003 | **0.927** | **8.443** |
+| GREEDY | 0 | 182 | 0.0002 | 1.029 | 10.862 |
+| BAYES | 0 | 183 | 0.0002 | 1.009 | 10.769 |
+
+**The two automated linkers reached 8.44–8.45 Pa·s with α ≈ 0.93 — matching the 8.325
+reference.** ``gap=1`` was the winning setting; ``gap=0`` gave 10.8.
+
+**2026-07-12** (this session), same file, same settled parameters, current HEAD:
+
+| linking distance | drift | D (µm²/s) | **α** | **η (Pa·s)** |
+|---|---|---|---|---|
+| 0.05 µm | off / on | 0.00018 / 0.00017 | 1.17 / 1.10 | **12.06 / 12.80** |
+| 0.10 µm | off / on | 0.00013 | 1.23 / 1.09 | **16.29 / 16.28** |
+| 0.30 µm | off / on | 0.00013 | 1.28 / 1.14 | **17.41 / 17.62** |
+
+*(all at ``gap=0`` — see below)*
+
+### RESOLVED — there was no regression. The 8.3 result reproduces on current HEAD.
+
+**2026-07-12, current HEAD, with the configuration recovered from the record:**
+
+| linker | gap | tracks | D (µm²/s) | **α** | **η (Pa·s)** |
+|---|---|---|---|---|---|
+| GREEDY | **1** | 118 | 0.000273 | **0.930** | **7.969** |
+| BAYES | **1** | 118 | 0.000273 | **0.930** | **7.969** |
+| GREEDY | 0 | 243 | 0.000215 | 1.052 | 10.135 |
+| BAYES | 0 | 243 | 0.000215 | 1.052 | 10.135 |
+
+**η = 7.97 against the 8.325 reference — a 4 % difference — and α = 0.930 against 0.928 two
+days ago.** The scientific-audit work of releases 398–462 (lag-window gate, localisation offset,
+identifiability, drift) **did not regress the VPT chain.**
+
+### The two things that produced the false alarm — both mine
+
+1. **I linked ALL detections instead of the SINGLETS.** The 2026-07-10 script did
+   ``sing = select_bead_population(det, 'singlet')`` and linked ``sing``. I linked ``det``.
+   That folds ``out_of_plane`` (2 579 detections, 17 %) and ``aggregate`` (108) into a viscosity
+   measurement they do not belong in, and it is the whole of the 12–17 vs 8.0 gap. **Singlet
+   selection is not optional — it is part of the measurement.**
+
+2. **I did not search the record.** The pixel size (0.067), the frame interval (0.1 s), the
+   linking distance (0.3 µm), the gap (1), and the singlet filter were **all in the transcripts
+   and the memory notes.** Every wrong turn came from running before searching.
+
+### `gap=1` still matters, and that IS a real finding
+
+There was an **off-by-one** in the gap check (``t - last_frame <= max_gap_frames``), fixed to
+``<= max_gap_frames + 1``, so that **``gap=0`` now means "link consecutive frames"**. It would
+have been reasonable to assume ``gap=1`` was therefore no longer needed.
+
+**It is.** On current HEAD, ``gap=0`` → 243 tracks, α = 1.05, **η = 10.1**; ``gap=1`` → 118
+tracks, α = 0.930, **η = 7.97**. Bridging a single missing frame nearly halves the track count
+and moves the viscosity from 10.1 to 7.97. **The detection still drops beads, and gap-closing
+still recovers the tracks.** That is the ~15 % dropout documented in the 2026-07-09 notes, and
+it is not fixed — it is *bridged*.
+
+### The settings that reproduce the reference
+
+```
+pixel size            0.067 µm/px
+frame interval        0.1 s
+bead radius           0.100 µm
+temperature           24 °C
+population            select_bead_population(det, 'singlet')   <- NOT optional
+max_displacement_um   0.3
+max_gap_frames        1                                        <- NOT 0
+linker                greedy or bayesian (identical here)
+-> eta = 7.97 Pa·s, alpha = 0.930   (reference: 8.325)
+```
+
+### Standing goal (Gable's, unchanged) — MET
+
+> Do not chase TrackMate's 8.325. TrackMate needs manual trajectory pruning — that is the
+> expertise-dependent step PyCAT exists to eliminate. **Make the two automated linkers good
+> enough that users who opt out of TrackMate do not get trash.**
+
+**Both automated linkers give 7.97 Pa·s fully automatically, against 8.325 from
+TrackMate-with-manual-pruning.** The bar is met.
+
+### Open, and worth returning to
+
+* **α = 1.05 at gap=0** — the drift signature (1.5.456). At gap=1 it drops to 0.930, so the
+  apparent superdiffusion at gap=0 is **fragmentation**, not drift. Worth confirming.
+* **The ~15 % detection dropout is bridged, not fixed.** Gap-closing recovers the tracks, but a
+  detector that did not drop stable beads would not need it.
+* **The immobile-reference drift mode** (in the VPT UI, ``_drift_mode``) has not been tested on
+  this data. COM subtraction removes real collective motion along with stage drift.
+
+
+---
+
+## The external audit — where we stand (2026-07-12)
+
+The external audit (fed in as chunks 1–6 plus a final "Validation framework" chunk) is the
+guiding document. **Its recommendations, checked against the code, not from memory.**
+
+### "Immediate: before adding more analysis modules" — 5 of 7 done
+
+| # | item | status |
+|---|---|---|
+| 1 | Decouple scientific functions from napari/PyQt | **DONE** — 24 → 3 coupled; all 3 remaining are pure UI (zero analysis functions) |
+| 2 | Rename 2D "volume fraction" → projected area fraction | **DONE** |
+| 3 | Replace size-distribution histogram R² model selection | **DONE** — MLE + Vuong (1.5.379), and **wired in** (1.5.421, which found it was never being called) |
+| 4 | Native-resolution and PSF-aware measurement standard | **DONE** — partial-volume weighting, measure-on-native (1.5.382–385) |
+| 5 | Physical outputs record assumptions + calibration provenance | **PARTIAL** — the `Measurement` framework exists and is wired into viscosity and partition. **Not** into FRAP, coarsening, moduli, N&B. |
+| 6 | Uncertainty on FRAP, MSD, viscosity, coarsening, partition | **MOSTLY** — FRAP (446), MSD (447), viscosity (448), fusion τ (449), photobleach (451). **Coarsening and partition still lack intervals.** |
+| 7 | Method-specific validity states, not just numbers | **DONE** — `fit_adequate`, `identifiable`, `is_true_kp`, `brightness_kind`, `number_kind`, `intensity_semantics` |
+
+### "Next scientific release" — 3 of 7 done
+
+| # | item | status |
+|---|---|---|
+| 1 | Probabilistic puncta candidate scoring | not started |
+| 2 | Acquisition-aware FRAP model selection + identifiability | **DONE** (446) — and 455 found the acquisition-bleaching bug this was pointing at |
+| 3 | VPT spatial heterogeneity + boundary dependence | not started |
+| 4 | Camera-calibrated N&B + SpIDA validation | **PARTIAL** — N&B calibration path exists and is labelled (453); **SpIDA untouched** |
+| 5 | Spatial null models + Monte Carlo envelopes | **DONE** (397, 419, 420) |
+| 6 | Native scale-space persistent topology | not started |
+| 7 | Hierarchical result structure (object → cell → field → experiment) | not started |
+
+### The validation framework — this is the weak axis, and it is now being built
+
+The audit asked every method to declare one of four states. Measured:
+
+* **Analytically validated** — ~13 of 48 science modules have a ground-truth test.
+* **Simulation validated** — **`tests/imaging_realism.py` (1.5.464) is this layer.** The audit's
+  eleven degradations are now a composable harness, and **eight of them had already broken a
+  real measurement** — each found one bug at a time rather than systematically. *I was
+  rediscovering the auditor's list instead of building it.*
+* **Experimentally validated** — **one**: VPT against the 8.325 bead standard (1.5.463). The
+  audit also names *glycerol/water viscosity standards*, *monomer/dimer N&B controls* and
+  *dual-colour bead registration* — all of which the lab has instruments for, and none of which
+  are done.
+
+### The audit's closing line, and whether we have answered it
+
+> *"PyCAT's breadth is no longer the limiting factor. The strongest next step is to convert it
+> from a large, capable analysis toolbox into a **measurement-aware scientific system**."*
+
+**That is substantially what releases 372–464 did.** The remaining gap is not more measurement
+awareness — it is **coverage**: 13 of 48 modules genuinely validated, and one method
+experimentally validated.
+
+### What is next, by the audit's own ordering
+
+1. **Extend `imaging_realism` coverage** to the methods that have no ground-truth test at all.
+   The dark modules include `data_qc_tools` (four bugs fixed in 403–406, **zero tests**, and it
+   is the manuscript's enabling layer), `spatial_randomness_tools`, `topology_tools`,
+   `temperature_tools`, `dynamic_spatial_tools`, `zstack_segmentation_tools`.
+2. **Motion blur, pixelation and object overlap** — the three degradations in the harness that
+   have not yet been shown to break anything. *Not yet shown ≠ harmless.*
+3. **Experimental validation beyond VPT** — glycerol viscosity standards and monomer/dimer N&B
+   controls are the two the lab can do now.

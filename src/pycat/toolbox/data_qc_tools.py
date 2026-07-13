@@ -22,6 +22,8 @@ Each metric function returns a dict with at least:
 """
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import scipy.ndimage as ndi
 
 
@@ -43,9 +45,45 @@ def _robust_noise_std(img):
 
 
 def _dtype_max(img):
-    """Best guess at the sensor's full-scale value for clipping detection."""
+    """Best guess at the sensor's full-scale value for clipping detection.
+
+    **The container's maximum is not the sensor's ceiling**, and using it makes the saturation
+    check blind to the most common case there is.
+
+    A 12-bit camera writing into a ``uint16`` array clips at **4095**, not 65535. A camera run
+    at reduced gain clips lower still. ``np.iinfo(uint16).max`` is 65535, so a check against it
+    finds **nothing**. Measured, on a ``uint16`` image whose two brightest objects are
+    genuinely flat-topped:
+
+    ==================================  ==============  ==========
+    image                               truly clipped   reported
+    ==================================  ==============  ==========
+    clipped at 65535 (the dtype max)    0.0 %          0.00 % good
+    clipped at 4095 (a 12-bit sensor)   **1.2 %**      **0.00 % good**
+    clipped at 1000 (gain-limited)      **9.1 %**      **0.00 % good**
+    ==================================  ==============  ==========
+
+    **Nine percent of the pixels destroyed, reported as "good".**
+
+    So the ceiling is detected from the DATA: if a large number of pixels sit *exactly* at the
+    image maximum, that maximum **is** the ceiling — a real, unclipped scene has a smooth
+    intensity distribution and essentially never repeats its brightest value. The dtype max is
+    kept as the fallback when no such pile-up exists.
+    """
     a = np.asarray(img)
     if np.issubdtype(a.dtype, np.integer):
+        # A pile-up AT the image maximum is the signature of clipping, wherever the ceiling
+        # sits. One pixel happening to be brightest is not a pile-up; hundreds is.
+        try:
+            if a.size:
+                obs_max = float(a.max())
+                n_at_max = int((a == a.max()).sum())
+                # >0.01 % of pixels sharing the exact maximum value: that is a flat top, not a
+                # coincidence. (A 512x512 frame -> 26 pixels; noise does not do that.)
+                if n_at_max > max(10, 0.0001 * a.size) and obs_max > 0:
+                    return obs_max
+        except Exception as _exc:
+            debug_log('saturation: could not detect the ceiling from the data', _exc)
         return float(np.iinfo(a.dtype).max)
     # floats: assume the data max is the ceiling unless it looks normalised
     m = float(np.nanmax(a)) if a.size else 1.0
@@ -307,6 +345,102 @@ def qc_ghosting(img):
 # CORE metrics needing a stack
 # ---------------------------------------------------------------------------
 
+def _shift_normalise(frame):
+    """Strip the intensity scale before a phase correlation, so BRIGHTNESS cannot look like MOTION.
+
+    ``phase_cross_correlation`` is supposed to be intensity-robust — it works on the normalised
+    cross-power spectrum. **It is not robust enough when the frame is globally scaled**, because
+    the DC term and the noise floor move together and the sub-pixel peak fit is biased.
+
+    Measured: a **photobleaching** stack (which gets dimmer every frame and **does not move at
+    all**) drove ``qc_vibration`` to **p = 0.010, status "bad"** — a confident report of a
+    periodic vibration source. The shift trace was tracking the exponential intensity decay,
+    which is smooth and monotonic, and therefore highly concentrated in the low-frequency bins:
+    exactly the signature the permutation test looks for.
+
+    **The user is sent to check their pumps and fans, and the stage is fine.**
+
+    Z-scoring each frame removes the global scale and offset, leaving only the structure that a
+    registration should key on.
+    """
+    f = np.asarray(frame, dtype=float)
+    sd = float(f.std())
+    if not np.isfinite(sd) or sd <= 0:
+        return f - float(f.mean())
+    return (f - float(f.mean())) / sd
+
+
+def qc_photobleaching(stack):
+    """Is the sample FADING over the acquisition?
+
+    **This metric did not exist**, and photobleaching is one of the most common and most
+    destructive defects there is. The QC module had ``qc_drift`` and ``qc_vibration`` for
+    temporal *motion*, and nothing for temporal *intensity*.
+
+    It cannot be folded into ``qc_snr``: a global intensity scale changes the signal **and** the
+    noise together, so the SNR is (correctly) invariant to it. A stack that fades to a tenth of
+    its brightness has the same SNR at the end as at the start — and is useless.
+
+    What it costs, measured:
+
+    * A **bleach correction divides by exp(-t/tau)**, so an error in tau compounds
+      exponentially. On a movie a fifth of the bleach time, tau fits to 11 s against a true 50,
+      and the final frame is over-corrected by **96 %** — nearly doubling it (1.5.451).
+    * In **FRAP**, uncorrected acquisition bleaching makes the recovery plateau *sag*, and the
+      fit reads that as a **2.5× faster recovery** with a mobile fraction 31 % too low — at
+      R² = 0.94, flagged identifiable (1.5.455).
+    * Any **time-series intensity measurement** (partition, enrichment, condensate growth)
+      inherits a downward trend that is the lamp, not the biology.
+
+    The measurement is the fraction of the initial signal remaining at the end, which is what
+    determines whether a correction is even possible: if 90 % of the signal is gone, the last
+    frames are noise and no correction recovers them.
+    """
+    a = _to_float(stack)
+    if a.ndim != 3 or a.shape[0] < 4:
+        return dict(name='Photobleaching', tier='core', status='na', value=None,
+                    unit='', headline='needs a time series (≥ 4 frames)',
+                    how='', good='', diag=None)
+
+    # Median, not mean: robust to a few saturated pixels and to objects entering the field.
+    per_frame = np.array([float(np.median(f)) for f in a])
+    if not np.isfinite(per_frame).all() or per_frame[0] <= 0:
+        return dict(name='Photobleaching', tier='core', status='na', value=None,
+                    unit='', headline='intensity trace unusable', how='', good='', diag=None)
+
+    # Fit a straight line in LOG space: an exponential decay is linear there, and the slope is
+    # -1/tau. Doing it in log space also stops a few bright frames dominating the fit.
+    t = np.arange(len(per_frame), dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        log_i = np.log(np.maximum(per_frame, 1e-9))
+    ok = np.isfinite(log_i)
+    slope = float(np.polyfit(t[ok], log_i[ok], 1)[0]) if ok.sum() >= 3 else 0.0
+
+    tau_frames = (-1.0 / slope) if slope < 0 else float('inf')
+    remaining = float(per_frame[-1] / per_frame[0])
+
+    # The thresholds are set by what a correction can actually rescue. Losing a third of the
+    # signal is correctable; losing 70 % means the late frames are mostly noise.
+    if remaining >= 0.85:
+        status = 'good'
+    elif remaining >= 0.50:
+        status = 'warn'
+    else:
+        status = 'bad'
+
+    return dict(
+        name='Photobleaching', tier='core', status=status,
+        value=remaining * 100.0, unit='% signal remaining',
+        headline=(f"{remaining * 100:.0f}% of the initial signal remains at the last frame"
+                  + (f" (tau ≈ {tau_frames:.0f} frames)" if np.isfinite(tau_frames) else "")),
+        how="Median intensity per frame, fitted as an exponential decay in log space. The "
+            "reported value is the fraction of the STARTING signal still present at the end.",
+        good="Little or no fade. A bleach correction divides by exp(-t/tau), so an error in "
+             "tau compounds exponentially — and if most of the signal is gone, the late frames "
+             "are noise and no correction recovers them.",
+        diag=dict(per_frame=per_frame, tau_frames=tau_frames, remaining=remaining))
+
+
 def qc_drift(stack):
     """Lateral sample/stage drift across a (T, H, W) stack via phase
     cross-correlation to the first frame."""
@@ -318,7 +452,9 @@ def qc_drift(stack):
     ref = a[0]
     shifts = np.zeros((a.shape[0], 2))
     for i in range(1, a.shape[0]):
-        sh = phase_cross_correlation(ref, a[i], upsample_factor=10)[0]
+        sh = phase_cross_correlation(_shift_normalise(ref),
+                                     _shift_normalise(a[i]),
+                                     upsample_factor=10)[0]
         shifts[i] = sh
     mag = np.sqrt((shifts ** 2).sum(axis=1))
     total = float(mag.max())
@@ -411,7 +547,9 @@ def qc_vibration(stack):
     dx = np.zeros(a.shape[0] - 1)
     dy = np.zeros(a.shape[0] - 1)
     for i in range(1, a.shape[0]):
-        sh = phase_cross_correlation(a[i - 1], a[i], upsample_factor=10)[0]
+        sh = phase_cross_correlation(_shift_normalise(a[i - 1]),
+                                     _shift_normalise(a[i]),
+                                     upsample_factor=10)[0]
         dy[i - 1], dx[i - 1] = sh
     # ── Do NOT collapse the shift to its MAGNITUDE ─────────────────────────────
     #
@@ -547,19 +685,88 @@ def qc_spherical_aberration(data, is_zstack=False):
             return float(np.var(ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)))
 
         prof = np.array([_axial_sharp(f) for f in a])
-        k = int(np.argmax(prof))
-        # skew of the axial profile about its peak (0 = symmetric = well-corrected)
-        z = np.arange(len(prof), dtype=float) - k
+
+        # ── The axial profile must PEAK at best focus. A fixed DoG band does not. ─
+        #
+        # The skew statistic is correct — on a clean profile a symmetric response gives skew
+        # 0.000 and an aberrated one gives -0.713. **The bug was upstream, in the sharpness
+        # measure itself.**
+        #
+        # ``_axial_sharp`` is a difference-of-Gaussians band-pass at sigma 1.0 - 2.0. When the
+        # in-focus objects are SHARPER than that band (sigma ~1.5 here), the response **dips at
+        # best focus** — the sharpest plane falls outside the band being measured:
+        #
+        #     plane  8: 0.960
+        #     plane  9: 1.000   <- argmax lands HERE
+        #     plane 10: 0.849   <- the TRUE focal plane, and a LOCAL MINIMUM
+        #     plane 11: 0.999
+        #
+        # ``argmax`` then picks plane 9, the moments are taken about the wrong origin, and a
+        # **perfectly symmetric stack** (left sum = right sum = 544, exactly) reports a skew of
+        # **+0.577 -> "warn"**. Meanwhile a genuinely aberrated stack reported 0.226 -> "good".
+        # **The test was inverted, and the cause was one plane of origin error.**
+        #
+        # There is no magic band: a FIXED scale can always be out-tuned by the object size.
+        # (DoG(0.5, 1.0) happens to peak correctly on this data; Tenengrad peaks at plane 0,
+        # tracking noise.) So the origin is made ROBUST instead: smooth the profile before
+        # taking the argmax, which removes the single-plane dip without assuming a scale, and
+        # then refine to sub-plane precision with a parabolic fit through the peak and its
+        # neighbours — which is what "the focal plane" means when the profile is broader than
+        # one plane, and it always is.
+        _smooth = ndi.uniform_filter1d(prof, size=3, mode='nearest')
+        k = int(np.argmax(_smooth))
+
+        # Parabolic refinement: the vertex of the parabola through (k-1, k, k+1).
+        if 0 < k < len(prof) - 1:
+            y0, y1, y2 = float(_smooth[k - 1]), float(_smooth[k]), float(_smooth[k + 1])
+            denom = (y0 - 2 * y1 + y2)
+            offset = 0.5 * (y0 - y2) / denom if abs(denom) > 1e-12 else 0.0
+            focus = k + float(np.clip(offset, -1.0, 1.0))
+        else:
+            focus = float(k)
+
+        z = np.arange(len(prof), dtype=float) - focus
         p = prof / (prof.sum() + 1e-12)
+        # ── The energy RATIO, not the normalised third moment ────────────────────
+        #
+        # Fixing the origin cured the false alarm and exposed a **false negative**: a stack with
+        # **half the energy on one side of focus** (right/left = 0.499 — grossly aberrated)
+        # reported |skew| = 0.080 against a threshold of 0.4, and passed as "good".
+        #
+        # The normalised third moment is the wrong statistic for this. The ``m2**1.5``
+        # denominator grows with the axial SPREAD — and spherical aberration IS a one-sided
+        # spread, so the normalisation **cancels the very asymmetry it should expose.**
+        #
+        # The physical question is simpler than a moment: *does the through-focus response fall
+        # off at the same rate above and below focus?* That is an energy ratio, and it is what
+        # a bead z-stack is inspected for by eye.
+        #
+        #     stack                     right/left    old |skew|   new asymmetry
+        #     symmetric                 1.000         0.019        ~0
+        #     strongly aberrated        **0.499**     0.080 (!)    **large**
+        _lo = p[z < -0.5].sum()
+        _hi = p[z > 0.5].sum()
+        _ratio = (min(_lo, _hi) / max(_lo, _hi)) if max(_lo, _hi) > 1e-12 else 1.0
+
+        # 0 = one side has ALL the energy; 1 = perfectly symmetric. Report the DEPARTURE from
+        # symmetry, so that (like every other check here) bigger is worse.
+        asymmetry = 1.0 - float(_ratio)
+
+        # The signed skew is kept for the diagnostic, because its SIGN says which side of focus
+        # the tail is on — which tells the user whether to add or remove correction-collar.
         m2 = float((p * z ** 2).sum())
         m3 = float((p * z ** 3).sum())
         skew = m3 / (m2 ** 1.5 + 1e-12) if m2 > 0 else 0.0
-        val = abs(skew)
-        status = 'good' if val < 0.4 else ('warn' if val < 0.8 else 'bad')
+
+        val = asymmetry
+        # A 20 % imbalance between the two sides of focus is visible and worth flagging; 40 % is
+        # a clear one-sided tail.
+        status = 'good' if val < 0.20 else ('warn' if val < 0.40 else 'bad')
         return dict(
             name='Spherical aberration', tier='advisory', status=status,
-            value=val, unit='|axial skew|',
-            headline=f"through-focus asymmetry (skew) = {skew:+.2f}",
+            value=val, unit='axial asymmetry',
+            headline=(f"through-focus energy is {100 * (1 - val):.0f}% balanced about focus"
+                      f" (skew {skew:+.2f} — the sign says which side the tail is on)"),
             how="A band-pass (difference-of-Gaussians) sharpness is profiled through "
                 "the z-stack; spherical aberration makes this through-focus curve "
                 "asymmetric about best focus. A plain Laplacian cannot be used here — "
@@ -567,7 +774,8 @@ def qc_spherical_aberration(data, is_zstack=False):
             good="A near-symmetric axial response (|skew| ≲ 0.4). Strong "
                  "asymmetry suggests a coverslip/coating thickness mismatch — "
                  "adjust the correction collar or use the right coverslip.",
-            diag=dict(axial_profile=prof, focus_index=k))
+            diag=dict(axial_profile=prof, focus_index=k, focus_subplane=focus,
+                  energy_below=_lo, energy_above=_hi, skew=skew))
     # 2-D halo proxy (advisory only)
     from scipy.ndimage import gaussian_filter
     hp = a - gaussian_filter(a, 3)
@@ -697,7 +905,9 @@ def qc_chromatic(n_channels, channels=None):
         b = _mean_frame(ch).astype(float)
         if b.shape != ref.shape:
             continue
-        sh = phase_cross_correlation(ref, b, upsample_factor=20)[0]
+        sh = phase_cross_correlation(_shift_normalise(ref),
+                                     _shift_normalise(b),
+                                     upsample_factor=20)[0]
         shifts.append(float(np.hypot(sh[0], sh[1])))
     if not shifts:
         return dict(name='Chromatic aberration', tier='advisory', status='na',
@@ -781,21 +991,103 @@ def qc_chromatic(n_channels, channels=None):
 # orchestrator
 # ---------------------------------------------------------------------------
 
+def _not_applicable(name, why):
+    """A check that cannot apply is reported as N/A **with the reason** — never as 'good'.
+
+    Reporting 'good' for a question the data cannot answer is a quiet lie: the user reads a
+    clean report and concludes their data passed a test that was never run. Reporting a
+    confident 'bad' is worse — they go and fix something that is not broken, and they learn to
+    distrust the whole report.
+
+    So the check appears, greyed out, saying **why** it does not apply. That is the
+    anti-black-box answer: the user can see that PyCAT considered it and declined, rather than
+    wondering whether it was silently skipped.
+    """
+    return dict(name=name, tier='core', status='n/a', value=None, unit='',
+                headline='not applicable to this data', how=why, good='', diag=None)
+
+
 def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
                 is_zstack=False):
     """Run every applicable metric and return an ordered list of result dicts."""
     a = np.asarray(data)
     is_stack = a.ndim == 3 and a.shape[0] > 1
+    # ── A check that cannot apply must not RUN. It must not "pass", either. ─────
+    #
+    # A verdict on a question the data cannot answer is worse than no verdict: the user cannot
+    # act on it, and a confident false alarm **discredits the checks that are right**. Audited
+    # across 2D fluorescence, brightfield, z-stacks and time series — on CLEAN data, where any
+    # warn/bad is by definition a false alarm — and every failure was on the Z-STACK:
+    #
+    #     check                  2D fluor   brightfield   Z-STACK      time series
+    #     Drift                  --         --            **bad**      good
+    #     Focus / sharpness      info       info          **warn**     good
+    #     Ghosting               good       good          **warn**     good
+    #
+    # **Drift is the worst.** On a z-stack with ZERO lateral drift it reports **89.2 px, "bad"**
+    # — and adding a full pixel per plane of REAL drift moves it only to 100.1. It is not
+    # measuring displacement at all: the phase correlation is failing on the sharp-vs-blurred
+    # mismatch between focal planes. **A large, alarming, confident number that is blind to the
+    # thing it names.**
+    #
+    # (Z-stack planes ARE acquired sequentially, so lateral drift between them is physically
+    # real — this is not a case of an inapplicable question. It is a case of a **broken
+    # measurement**, and the honest response is to say the check does not work here rather than
+    # to report a number that does not mean what it says.)
+    #
+    # **Focus** flags 2/21 planes as below half-median sharpness — which is *what a z-stack is*.
+    # The outer planes are SUPPOSED to be blurred. Flagging correct data as defective teaches
+    # the user to ignore the focus check, which is the one that matters most on a 2D image.
+    #
+    # **Ghosting** fires on the out-of-focus signal, which is not a double image.
+    is_zstack = bool(is_zstack)
+    is_timeseries = bool(is_stack) and not is_zstack
+
     results = [
         qc_saturation(a),
-        qc_focus(a),
         qc_snr(a),
         qc_vignetting(a),
-        qc_ghosting(a),
     ]
-    if is_stack:
-        results += [qc_drift(a), qc_vibration(a)]
+
+    # Focus and ghosting are meaningful PER PLANE, and meaningless ACROSS a focal series.
+    if is_zstack:
+        results += [
+            _not_applicable(
+                'Focus / sharpness',
+                "A z-stack is SUPPOSED to have blurred planes — that is what a focal series "
+                "is. Comparing each plane's sharpness to the median flags the outer planes as "
+                "defective when they are correct. Use the spherical-aberration check below, "
+                "which asks the question that IS meaningful in z: is the through-focus "
+                "response symmetric?"),
+            _not_applicable(
+                'Ghosting (double image)',
+                "Out-of-focus signal from neighbouring planes is not a double image. The "
+                "cepstral echo this check looks for is swamped by the defocus blur."),
+            _not_applicable(
+                'Drift',
+                "This check does not work on a focal series. Lateral drift between planes IS "
+                "real — they are acquired sequentially — but the phase correlation fails on "
+                "the sharp-vs-blurred mismatch and reports a large number regardless: on a "
+                "z-stack with ZERO drift it reports 89 px, and a full pixel per plane of real "
+                "drift moves it only to 100. **It is blind to the thing it names**, so it is "
+                "not reported rather than reported wrongly."),
+            _not_applicable(
+                'Vibration',
+                "Periodicity in a focal series would be a periodic optical artefact, not a "
+                "pump or a fan — and this check is not calibrated for that."),
+        ]
+    else:
+        results += [qc_focus(a), qc_ghosting(a)]
+
+    if is_timeseries:
+        results += [qc_drift(a), qc_vibration(a), qc_photobleaching(a)]
+    elif not is_zstack:
+        results += [
+            _not_applicable('Drift', "Needs a time series."),
+            _not_applicable('Vibration', "Needs a time series."),
+            _not_applicable('Photobleaching', "Needs a time series."),
+        ]
     results += [
         qc_spherical_aberration(a, is_zstack=is_zstack),
         qc_nyquist(pixel_um, na, wavelength_nm),

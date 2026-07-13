@@ -95,3 +95,138 @@ def test_pearson_partial_overlap_matches_reference():
     ch2 = (0.6 * ch1 + 0.4 * noise).astype(np.float32)
     pcc, _p = pearsons_correlation(ch1, ch2, roi)
     assert pcc == pytest.approx(EMPIRICAL_PARTIAL_OVERLAP_PEARSON, abs=1e-2)
+
+
+@pytest.mark.core
+def test_whole_frame_pearson_measures_the_cell_shape_not_colocalisation():
+    """Pearson over the whole frame is saturated by the shared cell shape.
+
+    Pearson asks *"are both channels bright in the same places"* — and the biggest structure
+    both channels share is **the cell itself**, bright inside and dark outside. That alone
+    saturates the metric.
+
+    Measured on channels that are **completely independent** (zero real colocalisation), both
+    carrying the same cell shape:
+
+    ===============================  =============  ==========
+    scene                            whole frame    cell ROI
+    ===============================  =============  ==========
+    independent (r should be 0)      **0.987**      **0.011**
+    50 % co-localised                0.997          0.712
+    fully co-localised               1.000          1.000
+    ===============================  =============  ==========
+
+    **Over the whole frame all three read ~0.99 — no colocalisation and half colocalisation
+    are indistinguishable.** Inside the cell ROI the shared shape is gone (every pixel is in
+    the cell) and Pearson measures the real correlation.
+
+    (The camera pedestal, by contrast, does not matter: Pearson is invariant to an additive
+    offset. A pedestal of 500 leaves r unchanged at 0.010.)
+    """
+    h = w = 128
+    yy, xx = np.mgrid[0:h, 0:w]
+    rng = np.random.default_rng(0)
+
+    cell = ((yy - 64) ** 2 + (xx - 64) ** 2) < 50 ** 2
+
+    # Two INDEPENDENT channels — there is no colocalisation to find.
+    ch1 = rng.random((h, w))
+    ch2 = rng.random((h, w))
+
+    # Both are brighter inside the cell. This is the ONLY thing they share.
+    ch1[cell] += 5.0
+    ch2[cell] += 5.0
+
+    whole_frame, _ = pearsons_correlation(ch1, ch2, np.ones((h, w), bool))
+    in_cell, _ = pearsons_correlation(ch1, ch2, cell)
+
+    assert whole_frame > 0.9, (
+        "the premise of this test is that a shared cell shape saturates whole-frame Pearson "
+        f"(it came out at {whole_frame:.3f}). If that is no longer true, the warning text in "
+        f"pearsons_correlation needs re-measuring."
+    )
+    assert abs(in_cell) < 0.1, (
+        f"restricted to the cell ROI, Pearson on two INDEPENDENT channels is {in_cell:.3f} — "
+        f"it must be ~0. The whole-frame value is {whole_frame:.3f}, which is the cell shape, "
+        f"not colocalisation. If the ROI does not rescue the metric, the advice in the "
+        f"warning is hollow."
+    )
+
+
+@pytest.mark.core
+def test_manders_warns_when_the_threshold_is_below_the_background():
+    """A threshold below the background gives M = 1.0 on pure noise.
+
+    Manders' coefficients are computed from BINARY masks, and the masks come from a
+    threshold. If that threshold sits **below the background**, the mask covers the whole
+    frame — and then **every pixel is "positive" in both channels**, so M1 = M2 = 1.0:
+    *perfect colocalisation, of noise.*
+
+    Measured on a scene where channel 2 overlaps exactly HALF of channel 1's puncta
+    (true M1 = 0.5), background = 20:
+
+    =========================  =========  =========  ===============
+    threshold                  M1         M2         mask coverage
+    =========================  =========  =========  ===============
+    **10 (below background)**  **1.000**  **1.000**  **100 %**
+    15 (below background)      0.957      0.960      96 %
+    20 (~ the background)      0.543      0.569      55 %
+    **40 (correct)**           **0.474**  0.930      4 %
+    =========================  =========  =========  ===============
+
+    **Above the background the coefficients are stable and converge on the truth** — Manders
+    is more robust than its reputation in that regime. The failure is entirely at the low end,
+    and it is detectable: a mask covering most of the frame means the threshold is below the
+    background.
+    """
+    from pycat.toolbox import obj_based_coloc_analysis_tools as coloc
+
+    h = w = 128
+    yy, xx = np.mgrid[0:h, 0:w]
+    rng = np.random.default_rng(0)
+
+    ch1 = np.zeros((h, w))
+    ch2 = np.zeros((h, w))
+    for i, (cy, cx) in enumerate([(40, 40), (40, 90), (90, 40), (90, 90)]):
+        ch1 += 100 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 4.0 ** 2))
+        if i < 2:                                    # ch2 overlaps HALF of ch1's puncta
+            ch2 += 100 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 4.0 ** 2))
+
+    background = 20.0
+    ch1 += background + rng.normal(0, 3, (h, w))
+    ch2 += background + rng.normal(0, 3, (h, w))
+    roi = np.ones((h, w), bool)
+
+    messages = []
+    real_warn = coloc.napari_show_warning
+    coloc.napari_show_warning = lambda msg, *a, **k: messages.append(msg)
+    try:
+        # A threshold WELL BELOW the background: the mask is the whole frame.
+        m1_bad = coloc.manders_m1_calculation(ch1 > 10, ch2 > 10, roi)
+        n_warnings_bad = len(messages)
+
+        messages.clear()
+        # The correct threshold, well above the background.
+        m1_good = coloc.manders_m1_calculation(ch1 > 40, ch2 > 40, roi)
+        n_warnings_good = len(messages)
+    finally:
+        coloc.napari_show_warning = real_warn
+
+    assert m1_bad > 0.95, (
+        "the premise of this test is that a below-background threshold drives M1 to 1.0 "
+        f"(it came out at {m1_bad:.3f})"
+    )
+    assert n_warnings_bad > 0, (
+        f"M1 = {m1_bad:.3f} — perfect colocalisation — from a threshold BELOW the background, "
+        f"and the user was told NOTHING. The mask covers the whole frame, so every pixel is "
+        f"'positive' in both channels. This is colocalisation of noise."
+    )
+
+    assert m1_good == pytest.approx(0.5, abs=0.1), (
+        f"at the correct threshold M1 is {m1_good:.3f}, expected ~0.5 (channel 2 overlaps "
+        f"exactly half of channel 1's puncta)"
+    )
+    assert n_warnings_good == 0, (
+        "the guard fired on a CORRECT threshold — it must not cry wolf, or it will be ignored "
+        "when it matters"
+    )

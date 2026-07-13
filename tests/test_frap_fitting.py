@@ -158,3 +158,65 @@ def test_frap_reports_when_the_data_cannot_determine_the_half_time():
         "the confidence interval must be wider than the value itself for this to count as "
         "unidentifiable — that is the definition being used"
     )
+
+
+@pytest.mark.core
+def test_acquisition_bleaching_corrupts_frap_and_the_reference_fixes_it():
+    """Acquisition bleaching makes the plateau sag — and neither R² nor the CI catches it.
+
+    Every frame of the recovery bleaches the sample a little more, so the plateau **sags**,
+    and the fit reads that as a **faster recovery to a lower plateau**. Both the half-time and
+    the mobile fraction are corrupted.
+
+    Measured, true t½ = 8.0 s and mobile fraction 0.875:
+
+    =========================  ===========  ========  ======  =============
+    acquisition bleaching      t½ fitted    mobile    R²      identifiable
+    =========================  ===========  ========  ======  =============
+    none                       8.57         0.880     0.988   True
+    τ = 600 s (mild)           6.10         0.765     0.985   True
+    **τ = 200 s (typical)**    **3.24**     **0.602** 0.942   **True**
+    =========================  ===========  ========  ======  =============
+
+    **At entirely typical acquisition bleaching the half-time is 2.5× too fast and the mobile
+    fraction 31 % too low — reported confidently, flagged identifiable, with R² = 0.94.**
+
+    The fix is standard and already in the module: a **reference region** that the FRAP pulse
+    did not bleach but which sees the same acquisition. ``photofading_correction`` removes it.
+    It was simply optional, and skipping it was silent.
+    """
+    from pycat.toolbox.frap_tools import photofading_correction, frap_recovery_model
+
+    true_half_time, true_mobile = 8.0, 0.875
+    tau_acquisition_bleach = 200.0          # entirely typical
+
+    t = np.linspace(0, 60, 40)
+    rng = np.random.default_rng(0)
+
+    # The bleached ROI sees BOTH the FRAP recovery and the acquisition bleaching.
+    bleached = (frap_recovery_model(t, 0.2, 0.9, true_half_time)
+                * np.exp(-t / tau_acquisition_bleach)
+                + rng.normal(0, 0.02, 40))
+
+    # The reference ROI is NOT FRAP-bleached, but sees the SAME acquisition.
+    reference = 1.0 * np.exp(-t / tau_acquisition_bleach) + rng.normal(0, 0.02, 40)
+
+    uncorrected = fit_frap_recovery(t, bleached)
+    assert uncorrected["half_time_s"] < 0.6 * true_half_time, (
+        "the uncorrected fit was expected to be badly too FAST — if it is not, this test's "
+        "premise has changed and the warning text needs re-measuring"
+    )
+
+    corrected_trace, _factors = photofading_correction(bleached, reference)
+    corrected = fit_frap_recovery(t, corrected_trace)
+
+    assert corrected["half_time_s"] == pytest.approx(true_half_time, rel=0.20), (
+        f"the reference correction returned a half-time of {corrected['half_time_s']:.2f} s "
+        f"against a true {true_half_time} s. If this fails, the advice in the "
+        f"no-reference warning is HOLLOW — it tells the user to supply a reference, and that "
+        f"must actually fix the problem."
+    )
+    assert corrected["mobile_fraction"] == pytest.approx(true_mobile, rel=0.10), (
+        f"the reference correction returned a mobile fraction of "
+        f"{corrected['mobile_fraction']:.3f} against a true {true_mobile}"
+    )
