@@ -31,23 +31,55 @@ import numpy as np
 
 def _snr_of_array(arr):
     """
-    Returns (snr, signal_mean, noise_std) for a 2-D float array.
+    Returns (cnr, snr_raw, signal_mean, background_mean, noise_std) for a 2-D array.
     NaN values indicate the IQR noise floor collapsed to zero.
+
+    TWO metrics, because they answer different questions and only one of them is a
+    property of the DATA:
+
+      snr_raw = <signal> / sigma_bg
+          The plain intensity-to-noise ratio. It does NOT subtract the background,
+          so it is inflated by any pedestal the camera adds — and a camera offset is
+          an instrument constant with no physical content. Measured on a synthetic
+          image with a real contrast of 50 over a noise sigma of 5: adding a pedestal
+          of 0 / 100 / 500 / 2000 counts reported an "SNR" of 28 / 78 / 282 / 1049.
+          The identical image. This is retained (some users expect it, and it is a
+          fine relative number *within* one image) but it must be labelled as what it
+          is: an INTENSITY-to-noise ratio.
+
+      cnr = (<signal> - <background>) / sigma_bg
+          The contrast-to-noise ratio: how far the signal stands above the background,
+          in units of the noise. This is the interpretable quantity, and it is
+          invariant to the camera offset — it reported ~27 in all four cases above.
+
+    Why this matters here specifically: this module computes ``delta_snr`` ACROSS
+    preprocessing steps to tell the user whether a step helped. Background
+    subtraction REMOVES the pedestal — so with the un-subtracted metric, one of the
+    most useful steps in the pipeline appears to CRATER the SNR (measured:
+    delta_snr = -257 when the true contrast changed by +1.5). The tool actively
+    misled about the very thing it exists to evaluate. The verdict is therefore
+    driven by CNR.
     """
     flat = np.asarray(arr, dtype=np.float64).ravel()
     nz = flat[flat > 0]
     if len(nz) < 10:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan, np.nan
     sig_thresh = np.percentile(nz, 98)
     signal_px = nz[nz >= sig_thresh]
     p25, p75 = np.percentile(flat, 25), np.percentile(flat, 75)
     noise_px = flat[(flat >= p25) & (flat <= p75)]
     if len(noise_px) < 10:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan, np.nan
+
+    sig_mean = float(signal_px.mean())
+    bg_mean = float(noise_px.mean())
     ns = float(noise_px.std())
     if ns < 1e-12:
-        return np.nan, float(signal_px.mean()), ns
-    return float(signal_px.mean() / ns), float(signal_px.mean()), ns
+        return np.nan, np.nan, sig_mean, bg_mean, ns
+
+    cnr = (sig_mean - bg_mean) / ns          # background-subtracted: the honest one
+    snr_raw = sig_mean / ns                  # legacy intensity-to-noise ratio
+    return float(cnr), float(snr_raw), sig_mean, bg_mean, ns
 
 
 # Step-name prefixes produced by pipeline_diagnostic_tools.py
@@ -58,16 +90,21 @@ _ALL_PREFIXES     = _CURRENT_PREFIXES + _V100_PREFIXES
 
 def compute_snr_table(viewer):
     """
-    Scan the viewer for all diagnostic step layers and compute SNR for each.
+    Scan the viewer for all diagnostic step layers and compute contrast metrics.
     Returns a list of dicts with keys:
-      step, pipeline, snr, signal, noise_std, delta_snr
-    where delta_snr is relative to the first step (raw input) of that pipeline.
+      step, pipeline, cnr, snr_raw, signal, background, noise_std, delta_cnr, delta_snr
+
+    ``delta_cnr`` — the change in CONTRAST-to-noise relative to the first step — is
+    the number to trust when judging whether a preprocessing step helped.
+    ``delta_snr`` (the un-subtracted intensity-to-noise ratio) is retained for
+    continuity but is inflated by the camera pedestal, so background subtraction makes
+    it collapse even when the real contrast is unchanged. See ``_snr_of_array``.
     """
     import napari.layers as _nl
 
     rows = []
-    current_baseline = None
-    v100_baseline    = None
+    cur_base_cnr = cur_base_snr = None
+    v100_base_cnr = v100_base_snr = None
 
     # Collect layers in order (bottom-to-top matches step order)
     ordered = [l for l in reversed(list(viewer.layers))
@@ -78,18 +115,29 @@ def compute_snr_table(viewer):
         nm = layer.name
         pipeline = 'v1.0.0' if any(nm.startswith(p) for p in _V100_PREFIXES) else 'current'
         arr = np.asarray(layer.data, dtype=np.float32)
-        s, sig, ns = _snr_of_array(arr)
+        cnr, snr_raw, sig, bg, ns = _snr_of_array(arr)
 
-        if pipeline == 'current' and current_baseline is None:
-            current_baseline = s
-        if pipeline == 'v1.0.0' and v100_baseline is None:
-            v100_baseline = s
+        if pipeline == 'current' and cur_base_cnr is None:
+            cur_base_cnr, cur_base_snr = cnr, snr_raw
+        if pipeline == 'v1.0.0' and v100_base_cnr is None:
+            v100_base_cnr, v100_base_snr = cnr, snr_raw
 
-        baseline = current_baseline if pipeline == 'current' else v100_baseline
-        delta = (s - baseline) if (baseline is not None and not np.isnan(s)
-                                   and not np.isnan(baseline)) else np.nan
+        b_cnr = cur_base_cnr if pipeline == 'current' else v100_base_cnr
+        b_snr = cur_base_snr if pipeline == 'current' else v100_base_snr
+
+        def _delta(v, base):
+            if base is None or np.isnan(v) or np.isnan(base):
+                return np.nan
+            return float(v - base)
+
         rows.append(dict(step=nm, pipeline=pipeline,
-                         snr=s, signal=sig, noise_std=ns, delta_snr=delta))
+                         cnr=cnr, snr_raw=snr_raw,
+                         signal=sig, background=bg, noise_std=ns,
+                         delta_cnr=_delta(cnr, b_cnr),
+                         delta_snr=_delta(snr_raw, b_snr),
+                         # legacy key so existing consumers keep working; it now
+                         # carries the HONEST metric rather than the inflated one.
+                         snr=cnr))
     return rows
 
 
@@ -125,7 +173,10 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
     outer.addWidget(desc)
 
     table = QTableWidget(0, 5)
-    table.setHorizontalHeaderLabels(['Step', 'Pipeline', 'SNR', 'ΔSNR', 'Noise σ'])
+    # 'CNR' not 'SNR': the column shows the background-SUBTRACTED contrast-to-noise
+    # ratio. The un-subtracted ratio is inflated by the camera pedestal and made
+    # background subtraction look destructive (see _snr_of_array).
+    table.setHorizontalHeaderLabels(['Step', 'Pipeline', 'CNR', 'ΔCNR', 'Noise σ'])
     table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
     for c in range(1, 5):
         table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
@@ -171,8 +222,8 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
                 QTableWidgetItem(r['pipeline']),
                 QTableWidgetItem('NaN' if np.isnan(r['snr'])
                                  else f"{r['snr']:.1f}"),
-                QTableWidgetItem('NaN' if np.isnan(r['delta_snr'])
-                                 else f"{r['delta_snr']:+.1f}"),
+                QTableWidgetItem('NaN' if np.isnan(r['delta_cnr'])
+                                 else f"{r['delta_cnr']:+.1f}"),
                 QTableWidgetItem('0 (clipped)' if (not np.isnan(r['snr']) and r['noise_std'] < 1e-12)
                                  else ('NaN' if np.isnan(r['noise_std'])
                                        else f"{r['noise_std']:.2e}")),
@@ -182,12 +233,15 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
             if np.isnan(r['snr']):
                 bg = QColor(80, 40, 40)   # dark red — destructive
                 fg = QColor(200, 120, 120)
-            elif not np.isnan(r['delta_snr']) and r['delta_snr'] > 0:
-                # Green intensity proportional to relative gain
-                frac = min(r['delta_snr'] / max(abs(r['delta_snr']), 1.0), 1.0) * 0.6
+            elif not np.isnan(r['delta_cnr']) and r['delta_cnr'] > 0:
+                # Green intensity proportional to relative gain. Driven by the
+                # CONTRAST-to-noise change: the un-subtracted SNR collapses whenever
+                # a step removes the camera pedestal, which would paint background
+                # subtraction as 'destructive' when it is nothing of the kind.
+                frac = min(r['delta_cnr'] / max(abs(r['delta_cnr']), 1.0), 1.0) * 0.6
                 bg = QColor(int(30 + frac*40), int(80 + frac*120), int(30 + frac*40))
                 fg = QColor(220, 255, 220)
-            elif not np.isnan(r['delta_snr']) and r['delta_snr'] < 0:
+            elif not np.isnan(r['delta_cnr']) and r['delta_cnr'] < 0:
                 bg = QColor(80, 50, 30)   # dark orange — regression
                 fg = QColor(220, 160, 100)
             else:
@@ -209,11 +263,11 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
         summary = ''
         if best_row:
             summary += (f"Best step: <b>{best_row['step']}</b> "
-                        f"(SNR {best_row['snr']:.1f}, "
-                        f"Δ{best_row['delta_snr']:+.1f} vs raw). ")
+                        f"(CNR {best_row['cnr']:.1f}, "
+                        f"Δ{best_row['delta_cnr']:+.1f} vs raw). ")
         if nan_steps:
             summary += (f"<b>{len(nan_steps)} step(s) collapse background to 0</b> "
-                        f"(NaN SNR) — they hard-zero the noise floor, "
+                        f"(NaN CNR) — they hard-zero the noise floor, "
                         f"making weak signal indistinguishable from background.")
         note.setText(summary)
 

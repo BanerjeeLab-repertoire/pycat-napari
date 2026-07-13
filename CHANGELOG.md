@@ -4,6 +4,32 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.476] - 2026-07-10
+### FIXED — CI red: `measurement.py` shipped in 1.5.384 and never landed in the repo
+``ModuleNotFoundError: No module named 'pycat.utils.measurement'``. It is imported by
+**``vpt_tools``** (viscosity) and **``invitro_tools``** (partition coefficient), and it has been
+missing from the repository since **1.5.384** — roughly ninety releases.
+
+Diffed the whole tree against Gable's actual repository. The result is narrow and clean:
+
+| | |
+|---|---|
+| identical | **113 files** |
+| **missing** | **1** — ``src/pycat/utils/measurement.py`` |
+| **stale** | **1** — ``src/pycat/toolbox/pipeline_snr_tools.py`` (the CNR/SNR fix) |
+| tests / tools | **0 missing, 0 stale** |
+
+**Both were in shipped ZIPs and neither landed.** That is not a git fault — it is a hole in the
+delivery, and the diff is the only way to find it. *A file that is in the ZIP and not in the
+repository is invisible to every test that passes locally.*
+
+``pipeline_snr_tools`` carries the CNR correction: the old ``snr_raw`` does **not** subtract the
+background, so it is inflated by the camera pedestal — the identical image reported an "SNR" of
+**28 / 78 / 282 / 1049** at pedestals of 0 / 100 / 500 / 2000 counts. The repository has been
+running the uncorrected version.
+
+**170/170 core tests passing.**
+
 ## [1.5.475] - 2026-07-10
 ### Rebuilt the report layout on `SubFigure` — overlap is now structurally impossible
 **Ten attempts to hand-tune the geometry all failed the same way**, and each fix on one report
