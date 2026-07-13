@@ -404,12 +404,49 @@ def run_pycat_func():
 
     if os.environ.get('PYCAT_SKIP_WARMUP', '') not in ('1', 'true', 'True'):
         import threading
+
         def _warmup():
-            try:
-                from pycat.toolbox.numba_utils import warmup_numba
-                warmup_numba()
-            except Exception as e:
-                print(f"[PyCAT Numba] Warmup skipped: {e}")
+            # ── The Numba warm-up SEGFAULTS on Apple Silicon, for the reason the
+            #    comment below already gives — and it was doing it anyway ────────
+            #
+            # Reported on an M2 (Meet/Pratibha, 2026-07-13). The fault handler is unambiguous:
+            #
+            #     File ".../numba_utils.py", line 192 in rescale_intensity_fast
+            #     File ".../numba_utils.py", line 300 in warmup_numba
+            #     Fatal Python error: Segmentation fault
+            #
+            # and immediately before it:
+            #
+            #     OMP: Info #276: omp_set_nested routine deprecated...
+            #
+            # **That OpenMP line is the tell.** Line 192 is the first call into a
+            # ``@njit(parallel=True)`` kernel, so it is where Numba's parallel backend spins up
+            # its OpenMP runtime — **on this worker thread, while ``CentralManager(viewer)`` is
+            # initialising Qt on the main thread.**
+            #
+            # **The comment fifteen lines below describes exactly this race**, for torch:
+            #
+            #     "importing torch on this worker thread *while* Qt/CentralManager initialise on
+            #      the main thread is a known cause of a C-level segfault at launch on arm64 Macs"
+            #
+            # **It was fixed for torch and left in place for Numba.** Two native runtimes
+            # (libomp and Qt) initialising concurrently on arm64 is the same bug whichever library
+            # pulls the trigger.
+            #
+            # The warm-up exists purely to hide a first-use compile delay. **It is a
+            # nice-to-have, and it is not worth a crash at launch** — so on Darwin it is
+            # deferred, exactly as the torch check is. The kernels still compile on first real
+            # use, on the main thread, with nothing else initialising alongside them.
+            if sys.platform == 'darwin':
+                print("[PyCAT Numba] Warm-up deferred on macOS — the kernels will compile on "
+                      "first use. (Numba's OpenMP backend and Qt initialising concurrently "
+                      "segfaults on Apple Silicon.)")
+            else:
+                try:
+                    from pycat.toolbox.numba_utils import warmup_numba
+                    warmup_numba()
+                except Exception as e:
+                    print(f"[PyCAT Numba] Warmup skipped: {e}")
             # PyTorch/CUDA status check — background so the GUI stays responsive.
             # SKIPPED on macOS: (a) there is no CUDA on Apple Silicon, so the
             # check has no useful result there, and (b) importing torch on this

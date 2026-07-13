@@ -4,6 +4,66 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.503] - 2026-07-13
+### FIXED — PyCAT segfaults at launch on Apple Silicon
+Reported on an M2 (Meet / Pratibha). The fault handler is unambiguous:
+
+```
+File ".../numba_utils.py", line 192 in rescale_intensity_fast
+File ".../numba_utils.py", line 300 in warmup_numba
+Fatal Python error: Segmentation fault
+```
+
+and immediately before it:
+
+```
+OMP: Info #276: omp_set_nested routine deprecated...
+```
+
+**That OpenMP banner is the tell.** Line 192 is the first call into a ``@njit(parallel=True)``
+kernel — where Numba's parallel backend spins up its **OpenMP runtime**, on a **worker thread**,
+**while ``CentralManager(viewer)`` initialises Qt on the main thread.**
+
+### `run_pycat` already documented this exact race — for torch
+> *"importing torch on this worker thread **while** Qt/CentralManager initialise on the main
+> thread is a known cause of a C-level segfault at launch on arm64 Macs"*
+
+**It was fixed for torch and left in place for Numba.** Two native runtimes (libomp and Qt) coming
+up concurrently on arm64 is the same bug **whichever library pulls the trigger.** The warm-up is
+now deferred on Darwin, exactly as the torch check is.
+
+### But deferring alone would be a GUESS — so the parallel backend is off on macOS too
+**Two things could produce that traceback, and it cannot distinguish them:**
+
+1. **the native-init race** (fixed above), or
+2. **the parallel backend itself** — ``parallel=True`` + ``cache=True`` on arm64 loads a threading
+   layer *and* a cached object file, and that combination is fragile on macOS ARM.
+
+**If (2) is the real cause, fixing only (1) moves the crash from launch to first use — which is
+worse, because it would then happen mid-analysis.**
+
+So ``parallel`` is **off by default on Darwin**. The kernels still JIT (single-threaded Numba is
+fine), and **every one has a NumPy fallback besides** — verified: with Numba forced unavailable,
+``rescale_intensity_fast`` still returns a correctly rescaled array.
+
+**Parallelism here is a speed-up, not a capability — and it is not worth a segfault.** On the
+64×64 warm-up image it buys nothing at all.
+
+``PYCAT_NUMBA_PARALLEL=1`` forces it back on, so **testing whether a newer numba/llvmlite has fixed
+it does not require editing the source.** *That is the experiment worth running.*
+
+### And a diagnostic that tells the two causes apart
+``numba_arm64_diag.py`` runs each Numba mode **alone, in a fresh process, with no Qt anywhere near
+it**:
+
+- **parallel crashes there** → it is the **backend**, and disabling it was necessary
+- **everything passes there** → it was the **race**, and the warm-up defer is sufficient
+- **even plain ``@njit`` crashes** → the numba/llvmlite/numpy stack is broken on that machine
+  (the mixed conda/pip history — numpy 2.4.6 by conda, then 1.26.4 by pip — is the likely cause),
+  and PyCAT will still run on the NumPy fallback
+
+**298/298 core tests passing.**
+
 ## [1.5.502] - 2026-07-10
 ### RESOLVED — `topo_n_basins`: the information was not in the envelope
 **It was a constant.** A flat field with nothing but noise reported **6.3 basins** — at a noise sd

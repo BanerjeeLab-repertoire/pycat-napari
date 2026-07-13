@@ -44,12 +44,53 @@ import numpy as np
 # Numba availability check
 # ---------------------------------------------------------------------------
 
+# ── `parallel=True` is what segfaults on Apple Silicon ──────────────────────────────────────
+#
+# Reported on an M2 (2026-07-13). The fault handler landed on line 192 — **the first call into a
+# ``@njit(parallel=True)`` kernel** — with an OpenMP banner printed immediately before it:
+#
+#     OMP: Info #276: omp_set_nested routine deprecated...
+#     Fatal Python error: Segmentation fault
+#
+# Two things could produce that, and **the traceback cannot distinguish them**:
+#
+# 1. **A native-init race.** The warm-up ran on a worker thread while Qt initialised on the main
+#    thread, so Numba's OpenMP runtime and Qt were coming up **concurrently**. ``run_pycat``
+#    already documents exactly this race for torch, and already defers torch on Darwin for it —
+#    **and was letting Numba do it anyway.** That is fixed there.
+#
+# 2. **The parallel backend itself.** ``parallel=True`` + ``cache=True`` on arm64 has to load a
+#    threading layer (OpenMP/TBB) and a cached object file, and that combination is fragile on
+#    macOS ARM.
+#
+# **Fixing only (1) would be a guess**, and if (2) is the real cause the crash simply moves from
+# launch to first use — which is *worse*, because it would then happen mid-analysis.
+#
+# So the parallel backend is **off by default on Darwin**. The kernels still JIT (single-threaded
+# Numba is fine), and every one of them has a NumPy fallback besides. On a 64x64 warm-up image
+# the parallelism buys nothing anyway; on a real image it is a speed-up, not a capability — **and
+# it is not worth a segfault.**
+#
+# ``PYCAT_NUMBA_PARALLEL=1`` forces it back on, for anyone who wants to test whether a newer
+# numba/llvmlite has fixed it. **That is the experiment worth running**, and it should not require
+# editing the source.
+import os as _os
+import sys as _sys
+
+_PARALLEL_DEFAULT = _sys.platform != 'darwin'
+NUMBA_PARALLEL: bool = _os.environ.get(
+    'PYCAT_NUMBA_PARALLEL', '1' if _PARALLEL_DEFAULT else '0') in ('1', 'true', 'True')
+
 NUMBA_AVAILABLE: bool = False
 try:
     import numba
     from numba import njit, prange
     NUMBA_AVAILABLE = True
-    print("[PyCAT Numba] Numba detected — JIT acceleration enabled.")
+    if NUMBA_PARALLEL:
+        print("[PyCAT Numba] Numba detected — JIT acceleration enabled.")
+    else:
+        print("[PyCAT Numba] Numba detected — JIT enabled, parallel backend OFF "
+              "(it segfaults on Apple Silicon; set PYCAT_NUMBA_PARALLEL=1 to re-enable).")
 except ImportError:
     print("[PyCAT Numba] Numba not installed — using NumPy fallback.")
     # Provide a no-op decorator so the rest of the file is syntax-valid
@@ -64,7 +105,7 @@ except ImportError:
 # JIT-compiled arithmetic kernels
 # ---------------------------------------------------------------------------
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=True, parallel=NUMBA_PARALLEL, fastmath=True)
 def _rescale_intensity_kernel(image: np.ndarray,
                                img_min: float,
                                img_max: float,
@@ -91,7 +132,7 @@ def _rescale_intensity_kernel(image: np.ndarray,
     return result
 
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=True, parallel=NUMBA_PARALLEL, fastmath=True)
 def _clip_to_zero_kernel(image: np.ndarray) -> np.ndarray:
     """Clip all negative values to zero (positivity constraint)."""
     result = np.empty_like(image)
@@ -103,7 +144,7 @@ def _clip_to_zero_kernel(image: np.ndarray) -> np.ndarray:
     return result
 
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=True, parallel=NUMBA_PARALLEL, fastmath=True)
 def _invert_kernel(image: np.ndarray, img_max: float) -> np.ndarray:
     """Invert image: result = max_val - image.
     Max passed in explicitly to avoid serial loop bottleneck.
@@ -116,7 +157,7 @@ def _invert_kernel(image: np.ndarray, img_max: float) -> np.ndarray:
     return result
 
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=True, parallel=NUMBA_PARALLEL, fastmath=True)
 def _elementwise_multiply_kernel(a: np.ndarray,
                                   b: np.ndarray) -> np.ndarray:
     """Elementwise multiply two same-shape float32 arrays."""
@@ -128,7 +169,7 @@ def _elementwise_multiply_kernel(a: np.ndarray,
     return result
 
 
-@njit(cache=True, parallel=True, fastmath=True)
+@njit(cache=True, parallel=NUMBA_PARALLEL, fastmath=True)
 def _wbns_post_process_kernel(img: np.ndarray,
                                background: np.ndarray,
                                noise_smooth: np.ndarray,
