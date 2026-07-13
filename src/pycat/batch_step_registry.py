@@ -440,8 +440,36 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
 
     def _proc(arr):
+        # ── BATCH MUST PASS RAW COUNTS. It was pre-normalising, and that is the bug. ──
+        #
+        # **Gable's report: batch segments the same image differently from the recording.**
+        #
+        # ``pre_process_image`` **normalises internally** — ``img = img / img.max()``. It expects
+        # **raw counts**, and it divides. Batch was calling ``_normalize_to_float`` first, which
+        # does ``(x - min) / (max - min)`` — **it subtracts the pedestal too.** The subsequent
+        # ``/max`` inside ``pre_process_image`` is then a **no-op**, so the two callers hand the
+        # rolling ball genuinely different images::
+        #
+        #     INTERACTIVE   img / max            ->  range **[0.425, 1.0]**
+        #     BATCH         (img-min)/(max-min)  ->  range **[0.000, 1.0]**
+        #
+        # **And the rolling ball is NOT scale-invariant.** ``skimage.restoration.rolling_ball``
+        # rolls a ball in **(x, y, INTENSITY)**, and its ``radius`` applies to **all three axes**.
+        # Change the intensity range and the same radius fits the background differently.
+        #
+        # Measured — the mean of the background-subtracted image, same input, same radius:
+        #
+        #     interactive       **0.0205**
+        #     batch (before)    **0.0493**   <- **2.4x more background removed**
+        #     batch (fixed)     **0.0205**   <- bit-for-bit identical to the recording
+        #
+        # ``_raw_counts`` in this very file already documents that ``_normalize_to_float`` is
+        # *"fatal for any intensity measurement"* — a **14x** swing in partition coefficient — and
+        # says it *"is correct for SEGMENTATION"*. **That last part is wrong**, and this is why:
+        # the rolling ball's radius has an intensity component, so pedestal subtraction changes
+        # the segmentation too.
         return np.asarray(pre_process_image(
-            _normalize_to_float(arr), ball_radius, window_size,
+            _raw_counts(arr), ball_radius, window_size,
             suppress_foreground=suppress_foreground,
             suppression_params=suppression_params)).astype(np.float32)
 
@@ -817,7 +845,9 @@ def replay_calibration_correction(state: dict, image_path: Path, params: dict, o
     ref = np.squeeze(np.asarray(tifffile.imread(calib), dtype=np.float32))
     if ref.ndim == 3:
         ref = np.median(ref, axis=0)
-    img = _normalize_to_float(state.get('preprocessed', state['image']))
+    # RAW counts: the rolling ball's radius has an INTENSITY component (see _proc, above), and
+    # `_normalize_to_float` subtracts the pedestal. The GUI passes the raw layer.
+    img = _raw_counts(state.get('preprocessed', state['image']))
     if img.shape[-2:] != ref.shape[-2:]:
         print(f'[PyCAT Batch]   Calibration correction skipped (shape {ref.shape} != image {img.shape[-2:]}).')
         return
@@ -861,7 +891,24 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
     on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
 
     def _enhance(img):
-        img = _normalize_to_float(img)
+        # ── The "already enhanced" HEURISTIC IS SCALE-DEPENDENT, and batch changed the scale ──
+        #
+        # ``_already_enhanced = median(nonzero) < 0.05`` — and ``_normalize_to_float`` maps the
+        # image minimum to **zero**, which **moves the median.**
+        #
+        # Measured, on a **high-contrast image — a bright spot on a dim background, i.e. exactly a
+        # condensate image**:
+        #
+        #     path            median          verdict              processing applied
+        #     INTERACTIVE     **403 counts**  not enhanced         **full rolling-ball removal**
+        #     BATCH           **0.030**       **"already enhanced"**  **soft suppression only**
+        #
+        # ***The two paths take DIFFERENT BRANCHES and apply COMPLETELY DIFFERENT PROCESSING.***
+        # This is not a scale shift in one number — it is a different algorithm.
+        #
+        # The GUI hands ``active_layer.data`` — **raw counts** — to the same heuristic. Batch must
+        # do the same, or the branch it takes is decided by a normalisation the GUI never applied.
+        img = _raw_counts(img)
         # Detect already-preprocessed input (same heuristic as the GUI runner).
         n = img.astype(np.float32)
         m = float(n.max())
@@ -1075,6 +1122,8 @@ def replay_auto_crop_roi(state: dict, image_path: Path, params: dict, output_dir
 
     else:
         # Multi-Otsu strategy
+        # Multi-Otsu is SCALE-INVARIANT (it thresholds on the histogram's shape), so the
+        # normalisation is harmless here — unlike the rolling-ball steps. Left as-is.
         image = _normalize_to_float(state.get('preprocessed', state['image']))
         n_classes = int(params.get('n_otsu_classes', 3))
         bbox = multi_otsu_foreground_bbox(image, n_classes=n_classes,
@@ -1115,7 +1164,9 @@ def replay_bf_preprocess(state: dict, image_path: Path, params: dict, output_dir
     """Replay brightfield preprocessing (flat-field, BG subtract, halo, CLAHE)."""
     from pycat.toolbox.brightfield_tools import preprocess_brightfield
 
-    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    # RAW counts: this feeds `pre_process_image`, whose rolling ball is NOT scale-invariant.
+    # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
+    image = _raw_counts(state.get('preprocessed', state['image']))
     result = preprocess_brightfield(
         image,
         bg_kernel=params.get('bg_kernel', 50),
@@ -1155,7 +1206,9 @@ def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dic
 
 def replay_bf_cell_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
     """Replay brightfield Cellpose cell segmentation."""
-    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    # RAW counts: this feeds `pre_process_image`, whose rolling ball is NOT scale-invariant.
+    # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
+    image = _raw_counts(state.get('preprocessed', state['image']))
     diameter = params.get('cell_diameter', 80)
 
     try:
@@ -1177,7 +1230,9 @@ def replay_ivf_preprocess(state: dict, image_path: Path, params: dict, output_di
     """Replay in vitro fluorescence preprocessing (no cell mask)."""
     from pycat.toolbox.image_processing_tools import pre_process_image
 
-    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    # RAW counts: this feeds `pre_process_image`, whose rolling ball is NOT scale-invariant.
+    # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
+    image = _raw_counts(state.get('preprocessed', state['image']))
     ball  = params.get('ball_radius', 15)
     proc  = pre_process_image(image, ball_radius=ball, window_size=ball * 2)
     state['preprocessed'] = np.asarray(proc).astype(np.float32)
@@ -1341,7 +1396,9 @@ def replay_ivbf_preprocess(state: dict, image_path: Path, params: dict, output_d
     """Replay in vitro brightfield preprocessing."""
     from pycat.toolbox.brightfield_tools import preprocess_brightfield
 
-    image = _normalize_to_float(state.get('preprocessed', state['image']))
+    # RAW counts: this feeds `pre_process_image`, whose rolling ball is NOT scale-invariant.
+    # `_normalize_to_float` subtracts the pedestal; the GUI does not. See _proc, above.
+    image = _raw_counts(state.get('preprocessed', state['image']))
     result = preprocess_brightfield(
         image,
         bg_kernel=params.get('bg_kernel', 60),

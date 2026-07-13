@@ -4,6 +4,160 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.526] - 2026-07-13
+### RESTORED — spurious puncta came back because the tree had REGRESSED
+Meet reported spurious puncta returning and **sent the file that worked.** Diffing it against the
+tree was decisive: ***the tree was the older file.***
+
+It had lost an entire subsystem — and **Meet's copy already contained the module-level
+``from cellpose import models``** that 1.5.523 "discovered". *A newer file was overwritten with an
+older one during this session's validation work.*
+
+### The mechanism — verified, not assumed
+``sk.exposure.equalize_adapthist`` **normalises every cell to unit maximum.**
+
+So a cell containing **only noise** is amplified by ``1 / cell_max`` — **measured at 500×** on a
+cell holding nothing but background — and **both cells come out of CLAHE with the same [0, 1]
+range.** The empty cell's noise now has structure, and **it segments as puncta.**
+
+### Why the existing contrast check could never catch it
+The restored code says it plainly:
+
+> *"``check_contrast_func`` **cannot catch this**: it inspects the image AFTER those
+> contrast-maximising steps, so it essentially **never fires**. This gate runs BEFORE them, on the
+> raw intensity image, and is **the only place in the chain where absolute brightness is still
+> available**."*
+
+### What was restored
+- **``compute_image_intensity_stats``** — measures the image's absolute background and noise floor
+  **once, before any per-cell renormalisation**
+- **``cell_has_punctate_signal``** — ***a hypothesis test, not a contrast heuristic.*** A pixel
+  counts as evidence only if it clears **both** a local floor **and** an absolute one
+- **``min_relative_max``** in ``cell_mask_stretching`` — the dim-cell gain ceiling (a **50× cap**)
+- the **four parameters** threaded back through both segmentation entry points
+
+**Verified end-to-end:**
+
+| cell | has puncta? | largest blob | peak z |
+|---|---|---|---|
+| **real (3 puncta)** | **True** | 278 px | **122.3σ** |
+| **empty (noise only)** | **False** | **0 px** | 0.9σ |
+
+### Merged, not pasted
+**A blind overwrite would have destroyed real work in both directions.** The tree had newer changes
+Meet's file lacked — ``_robust_bg``, the bbox sweep, the ``@tags_layer`` decorators. **Full parity
+verified in both directions: nothing lost either way.**
+
+### And the ratchet caught the restore
+Two long functions came **back**, taking the count from 137 to 139. **That is the ratchet working**
+— and the honest response is to record that they returned, not to shave them to squeeze back under.
+
+**338/338 core tests passing.**
+
+## [1.5.525] - 2026-07-13
+### FIXED — batch segmented the same image differently from the recording
+Reported by Gable, and it is the failure that makes the whole feature unusable: ***a batch run that
+does not reproduce what the user saw interactively is not a batch run — it is a different
+experiment.***
+
+### The cause: batch pre-normalised the image; the GUI did not
+``pre_process_image`` **normalises internally** — ``img = img / img.max()``. It expects **raw
+counts**, and it **divides**.
+
+Batch called ``_normalize_to_float`` first, which does ``(x - min) / (max - min)`` — **it subtracts
+the pedestal too.** The ``/max`` inside ``pre_process_image`` is then a **no-op**, and the two
+callers hand the rolling ball genuinely different images:
+
+```
+INTERACTIVE   img / max            ->  range [0.425, 1.0]
+BATCH         (img-min)/(max-min)  ->  range [0.000, 1.0]
+```
+
+**And the rolling ball is NOT scale-invariant.** ``skimage.restoration.rolling_ball`` rolls a ball
+in **(x, y, INTENSITY)**, and its ``radius`` applies to **all three axes.**
+
+| path | mean of the background-subtracted image |
+|---|---|
+| interactive | **0.0205** |
+| **batch (before)** | **0.0493** — *2.4× more background removed* |
+| batch (fixed) | **0.0205** — *bit-for-bit identical* |
+
+### And a WORSE one, found while auditing: the BRANCH diverged
+``run_enhanced_rb_gaussian_bg_removal`` decides whether the input is *"already preprocessed"* with
+``median(nonzero) < 0.05``. **That heuristic is scale-dependent, and batch changed the scale.**
+
+On a **bright condensate on a dark background** — flat background, contrast ≥ 3000 counts, entirely
+normal for in-vitro data:
+
+| path | median | verdict | processing applied |
+|---|---|---|---|
+| **INTERACTIVE** | **406 counts** | not enhanced | **full rolling-ball removal** |
+| **BATCH** | **0.028** | **"already enhanced"** | **soft suppression only** |
+
+***Not a shifted number — a different algorithm.***
+
+**Six call sites fixed** to pass ``_raw_counts``. Verified: **zero rolling-ball paths still
+normalise.**
+
+### What was NOT broken — verified, not assumed
+- **The recorded parameters.** ``ball_radius``, ``window_size`` and ``cell_diameter`` are all saved
+  and replayed correctly. *The first hypothesis — that the measured lines were not being recorded —
+  was wrong, and ruling it out took ten minutes.*
+- **Cellpose.** Its default ``normalize=True`` percentile-rescales internally, and a percentile
+  transform is **invariant** under an affine ``(x-min)/(max-min)``. Verified through the full chain
+  (raw → ``img_as_uint`` → percentile-norm): **max difference 1.85e-05.**
+- **Multi-Otsu.** Thresholds on the histogram's *shape*. Scale-invariant by construction.
+
+***Not every normalisation is a bug, and saying which ones are not is part of the audit.***
+
+### And the test fixture had to be re-derived
+A first version of the regression test used the standard fixture at contrast 3000 — and its
+normalised median came out at **0.0588**, *above* the 0.05 threshold. **It did not reproduce the
+bug**, and loosening the assertion would have produced a test that asserts nothing.
+
+The background **gradient** keeps the background wide, which **raises** the normalised median. On a
+**flat** background — which is what in-vitro data has — the divergence appears at **3000 counts of
+contrast.** The test now uses that condition, and **says so.**
+
+**335/335 core tests passing.**
+
+## [1.5.524] - 2026-07-13
+### The Cellpose bug is the most important datum in this audit
+A **one-line** bug made **cell segmentation — the single most-used feature — completely
+non-functional for every Cellpose 3.x user.** It survived **300+ tests and a fifteen-bug audit**,
+and shipped.
+
+**Why?** Every test in the suite is one of two shapes:
+
+- **source-reading** — walks the AST, checks a property of the *text*
+- **unit** — calls a pure function with numpy arrays
+
+***Nothing imports the package and runs a workflow.*** So an integration failure — a version
+branch, a missing import, a decorator that throws at registration, a signature drift between a
+caller and its callee — is **invisible**.
+
+### And it is not a hypothetical class
+**All three user-blocking bugs reported this month were integration failures:**
+
+| | |
+|---|---|
+| Meet — arm64 segfault | torch's libomp against numba's |
+| Abhradeep — OpenGL corruption | a GPU driver against Qt |
+| Meet — **Cellpose dead** | a version branch that never imported |
+
+***Zero of them were unit-testable. All of them would have been caught by actually running the
+thing.***
+
+### `test_smoke_the_real_code`
+The cheapest possible version of *"run the thing"*: **import every module, and call the code that
+actually breaks.** It does not check that the answers are right — 38 other test files do that.
+**It checks that the code runs at all.**
+
+**Verified by re-introducing the Cellpose bug: three tests now catch it**, including the one that
+*calls the function*.
+
+**331/331 core tests passing.**
+
 ## [1.5.523] - 2026-07-13
 ### CRITICAL — Cellpose segmentation was completely dead on Cellpose < 4
 ```python

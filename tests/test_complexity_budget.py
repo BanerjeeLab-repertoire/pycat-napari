@@ -54,7 +54,13 @@ _LONG_FUNCTION_LIMIT = 120
 # **That is the ratchet working.** The honest response is to record that the count went up, not to
 # quietly widen the limit or shave a comment somewhere else to squeeze back under. A number that is
 # raised whenever it is hit is not a ceiling.
-_MAX_LONG_FUNCTIONS = 137
+# 139. It was 137, and TWO functions came BACK: `cell_has_punctate_signal` and
+# `compute_image_intensity_stats`, restored in 1.5.526 after Meet reported spurious puncta and
+# sent the file that worked. **The tree had regressed and lost them.**
+#
+# The ratchet caught the count going up, which is the ratchet working — and the honest response is
+# to record that two long functions returned, not to shave them to squeeze back under.
+_MAX_LONG_FUNCTIONS = 139
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

@@ -1770,9 +1770,216 @@ def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_ma
     return refined_mask
 
 
+# ── RESTORED: the ABSOLUTE-INTENSITY punctate gate ───────────────────────────────────────
+#
+# **Meet reported spurious puncta returning, and sent the file that worked.** Diffing it
+# against the tree showed the tree had **regressed**: it had lost this entire subsystem — and
+# Meet's file also already contained the Cellpose module-level import that 1.5.523 'fixed'.
+# *A newer file was overwritten with an older copy at some point.*
+#
+# **The mechanism, verified:** ``sk.exposure.equalize_adapthist`` normalises **every cell to
+# unit maximum**. So a cell containing only noise is amplified by ``1 / cell_max`` — measured
+# at **500x** on a cell holding nothing but background — and **both cells come out of CLAHE
+# with the same [0, 1] range.** The empty cell's noise now has structure, and it segments as
+# puncta.
+#
+# These two functions are the fix, and they are a **hypothesis test, not a contrast
+# heuristic**: a pixel counts as evidence only if it clears **both** a LOCAL floor and an
+# ABSOLUTE one measured from the image background **before any per-cell renormalisation**.
+
+
+def compute_image_intensity_stats(image, labeled_cells=None, smooth_sigma=1.0,
+                                  min_bg_px=1000):
+    """
+    Measure the image's ABSOLUTE background level and noise floor, once, before
+    any per-cell or per-crop renormalisation.
+
+    Why this exists
+    ---------------
+    Every stage between the raw image and `fz_segmentation_and_binarization`
+    rescales intensity relative to whatever it is currently looking at:
+
+      * `cell_mask_stretching` runs `equalize_adapthist` PER CELL;
+      * `segment_subcellular_objects` normalises each crop by that crop's own
+        maximum (`_proc_norm = proc_crop / proc_crop.max()`);
+      * `rb_gaussian_background_removal` again divides by `img.max()`, then
+        rescales to [0.75, 1.0] and CLAHEs;
+      * `fz_segmentation_and_binarization` CLAHEs a third time and OR-combines
+        an Otsu "bright" mask.
+
+    After all of that, a cell containing nothing but camera noise is
+    indistinguishable from a cell full of condensates: its noise has been
+    stretched to the full dynamic range. The `check_contrast_func` guard cannot
+    help, because it is evaluated *after* those stretches.
+
+    The only quantity that survives is absolute brightness, and it must be
+    captured up front. This function does that; `cell_has_punctate_signal`
+    consumes it.
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        The RAW intensity image the puncta will be measured on (the same array
+        later passed to `segment_subcellular_objects` as `original_image`).
+    labeled_cells : numpy.ndarray, optional
+        Labelled cell mask. Background is taken as `labeled_cells == 0`. If not
+        supplied, or if fewer than `min_bg_px` background pixels exist, the
+        darkest quartile of the image is used instead.
+    smooth_sigma : float, optional
+        Gaussian sigma applied before measuring. Must match the value used by
+        `cell_has_punctate_signal`, otherwise the two noise estimates are not
+        comparable. Default 1.0 (= `min_spot_radius / 2` for the default
+        `min_spot_radius=2`).
+    min_bg_px : int, optional
+        Minimum number of background pixels required to trust `labeled_cells`.
+
+    Returns
+    -------
+    dict with keys ``bg_median``, ``bg_sigma``, ``smooth_sigma``.
+
+    Notes
+    -----
+    `sk.util.img_as_float32` performs a DTYPE-RANGE conversion (uint16 -> /65535),
+    not a per-image min/max rescale, so absolute intensities are preserved and
+    stats measured here remain comparable to crops converted the same way.
+    Sigma is a robust MAD estimate, so a background containing a few stray
+    bright pixels does not inflate the noise floor.
+    """
+    img = sk.util.img_as_float32(image)
+    sm = ndi.gaussian_filter(img, smooth_sigma) if smooth_sigma > 0 else img
+
+    bg = None
+    if labeled_cells is not None:
+        candidate = sm[np.asarray(labeled_cells) == 0]
+        if candidate.size >= min_bg_px:
+            bg = candidate
+    if bg is None:
+        bg = sm[sm <= np.percentile(sm, 25)]
+
+    med = float(np.median(bg))
+    mad = float(np.median(np.abs(bg - med)))
+    sigma = 1.4826 * mad
+    if sigma <= 0:
+        sigma = float(np.std(bg)) or 1e-6
+
+    return {'bg_median': med, 'bg_sigma': float(sigma),
+            'smooth_sigma': float(smooth_sigma)}
+
+
+def cell_has_punctate_signal(original_crop, cell_mask, image_stats=None,
+                             n_sigma=5.0, abs_n_sigma=3.0, min_spot_radius=2,
+                             min_area_px=None, smooth_sigma=None):
+    """
+    Decide whether a cell contains anything punctate, using ABSOLUTE intensity.
+
+    This is a hypothesis test, not a contrast heuristic. A pixel counts as
+    evidence only if it clears BOTH:
+
+      1. a LOCAL floor  -- `median(cell) + n_sigma * MAD_sigma(cell)`. For pure
+         Gaussian noise the 99.9th percentile sits near +3.1 sigma, so a 5-sigma
+         floor is essentially never crossed by noise alone. `MAD_sigma` is taken
+         over the whole cell, so it reflects the nucleoplasm's own fluctuation
+         (puncta are a small area fraction and barely move the MAD).
+
+      2. an ABSOLUTE floor -- `bg_median + abs_n_sigma * bg_sigma` from
+         `compute_image_intensity_stats`. This is what a dim, out-of-focus cell
+         cannot fake: its noise may be locally stretched, but it never gets
+         brighter than the image's own background noise floor.
+
+    Evidence is then required to be *shaped like a punctum*: at least one
+    CONNECTED component of `min_area_px` pixels must clear the threshold. Noise
+    crosses 5 sigma at isolated pixels, never in 12-pixel blobs, which is what
+    makes this robust to the pixel correlation introduced by 2x bicubic
+    upscaling.
+
+    Deliberately NOT triggered by broad out-of-focus haze: haze raises the cell
+    baseline (`median`) along with everything else, so it never produces a
+    bright tail. Only genuinely punctate structure does.
+
+    Parameters
+    ----------
+    original_crop : numpy.ndarray
+        Raw intensity image (or a crop of it). Must be on the same absolute
+        scale as the image `image_stats` was computed from.
+    cell_mask : numpy.ndarray
+        Boolean mask of this cell, same shape as `original_crop`.
+    image_stats : dict, optional
+        Output of `compute_image_intensity_stats`. If omitted, only the local
+        criterion applies (still useful, but the absolute floor is the part that
+        catches phantom cells, so supplying this is strongly recommended).
+    n_sigma : float, optional
+        Local threshold in robust sigmas above the cell median. Default 5.0.
+    abs_n_sigma : float, optional
+        Absolute threshold in sigmas above the image background. Default 3.0.
+    min_spot_radius : int, optional
+        Used to derive `min_area_px` (= pi * r^2) and the smoothing sigma.
+    min_area_px : int, optional
+        Override the connected-component area requirement.
+    smooth_sigma : float, optional
+        Defaults to `image_stats['smooth_sigma']` if given, else
+        `max(0.5, min_spot_radius / 2)`.
+
+    Returns
+    -------
+    has_signal : bool
+    info : dict
+        Diagnostics: ``z_local`` (peak-to-baseline in robust sigmas),
+        ``largest_blob_px``, ``min_area_px``, ``binding`` ('local' or
+        'absolute'), ``base``, ``sigma_cell``, ``threshold``.
+    """
+    if smooth_sigma is None:
+        smooth_sigma = (image_stats['smooth_sigma'] if image_stats is not None
+                        else max(0.5, min_spot_radius / 2.0))
+    if min_area_px is None:
+        min_area_px = max(4, int(round(math.pi * float(min_spot_radius) ** 2)))
+
+    img = sk.util.img_as_float32(original_crop)
+    sm = ndi.gaussian_filter(img, smooth_sigma) if smooth_sigma > 0 else img
+
+    cell_mask = np.asarray(cell_mask, dtype=bool)
+    vals = sm[cell_mask]
+    info = {'z_local': 0.0, 'largest_blob_px': 0, 'min_area_px': min_area_px,
+            'binding': 'local', 'base': 0.0, 'sigma_cell': 0.0, 'threshold': 0.0}
+    if vals.size < 10:
+        return False, info
+
+    base = float(np.median(vals))
+    mad = float(np.median(np.abs(vals - base)))
+    sigma_cell = 1.4826 * mad
+    if sigma_cell <= 0:
+        sigma_cell = float(np.std(vals)) or 1e-6
+    if image_stats is not None:
+        # A cell's own fluctuation can never sit below the image noise floor.
+        # Without this, a flat or saturated region drives sigma_cell -> 0 and
+        # `base + n_sigma * sigma_cell` degenerates into "anything above the
+        # median", which would pass every cell.
+        sigma_cell = max(sigma_cell, image_stats['bg_sigma'])
+
+    thr_local = base + n_sigma * sigma_cell
+    thr_abs = -np.inf
+    if image_stats is not None:
+        thr_abs = image_stats['bg_median'] + abs_n_sigma * image_stats['bg_sigma']
+    threshold = max(thr_local, thr_abs)
+
+    candidate = (sm > threshold) & cell_mask
+    labelled, n_found = ndi.label(candidate)
+    largest = 0
+    if n_found:
+        largest = int(np.bincount(labelled.ravel())[1:].max())
+
+    peak = float(np.percentile(vals, 99.9))
+    info.update({'z_local': (peak - base) / sigma_cell,
+                 'largest_blob_px': largest,
+                 'binding': 'absolute' if thr_abs > thr_local else 'local',
+                 'base': base, 'sigma_cell': sigma_cell,
+                 'threshold': float(threshold)})
+    return largest >= min_area_px, info
+
+
 @tags_layer('mask_stretch', role='mask',
             summary='Cell-mask dilation to the true boundary', target='cell')
-def cell_mask_stretching(image, cell_masks):
+def cell_mask_stretching(image, cell_masks, min_relative_max=0.02,
+                         preserve_scale=False):
     """
     Enhances the contrast within specific areas of an image defined by cell masks, followed by smoothing operations.
 
@@ -1787,6 +1994,38 @@ def cell_mask_stretching(image, cell_masks):
         The input image to perform contrast stretching on. Must be a 2D array.
     cell_masks : numpy.ndarray
         A labeled mask image where each cell is represented by a unique integer label, and the background is 0.
+    min_relative_max : float, optional
+        A cell whose maximum is below ``min_relative_max * image_max`` contains
+        nothing comparable to the brightest object anywhere in the image, and is
+        zeroed instead of being amplified. Default 0.02 (a 50x gain ceiling).
+
+        WHY THIS EXISTS. ``sk.exposure.equalize_adapthist`` calls
+        ``rescale_intensity`` on BOTH its input and its output::
+
+            image = rescale_intensity(image, out_range=(0, NR_OF_GRAY - 1))
+            ...
+            return rescale_intensity(image)
+
+        Because this function hands it ONE CELL AT A TIME (``img * dilated_mask``,
+        whose min is 0 and whose max is that cell's max), every cell is divided by
+        its own maximum. The gain is exactly ``1 / cell_max``. A cell holding a
+        bright condensate (max 0.94) is amplified 1.1x; a cell holding only
+        nucleoplasm noise (max 3.2e-4) is amplified **3150x**, turning its shot
+        noise into speckle that segments as puncta. Nothing downstream can undo
+        that: the speckle is real structure by then.
+
+        The pre-existing ``check_contrast_func`` guard cannot catch this. It is a
+        RELATIVE range test -- ``(max - min) / max < 0.001`` -- which for a
+        noise-only cell evaluates to ~1.0. It fires only when a cell is exactly
+        constant.
+
+        Set to 0 to restore the unguarded behaviour.
+    preserve_scale : bool, optional
+        If True, map the CLAHE output back onto the cell's ORIGINAL intensity
+        range, so the per-cell equalisation reshapes the histogram without
+        applying any gain. This removes the amplification entirely rather than
+        merely bounding it, but changes the values seen by every downstream
+        stage, so it is off by default.
 
     Returns
     -------
@@ -1809,13 +2048,33 @@ def cell_mask_stretching(image, cell_masks):
     # Initialize a total cell mask with the same shape as the input image but with boolean type
     total_cell_mask = np.zeros_like(cell_masks, dtype=bool)
 
+    # The one absolute intensity reference available here: the brightest pixel in
+    # the whole image. Per-cell CLAHE destroys it (see `min_relative_max`), so it
+    # has to be captured before the loop.
+    img_max = float(img.max())
 
     for label in np.unique(cell_masks)[1:]:  # Exclude the background label (0).
         # Create a mask for the current cell.
         cell_mask = (cell_masks == label).astype(bool)
         # Check the contrast of the cell
         contrast_flag = check_contrast_func(img * cell_mask)
-        if contrast_flag:
+
+        # Absolute-brightness guard. equalize_adapthist normalises every cell to
+        # unit maximum, so a cell containing only noise is amplified by
+        # 1/cell_max -- often 1000x or more -- and its noise becomes speckle that
+        # segments as puncta. A cell with no pixel within `min_relative_max` of
+        # the image maximum holds nothing worth enhancing.
+        cell_max = float(img[cell_mask].max()) if cell_mask.any() else 0.0
+        below_floor = bool(min_relative_max > 0 and img_max > 0
+                           and cell_max < min_relative_max * img_max)
+        if below_floor and not contrast_flag:
+            gain = (1.0 / cell_max) if cell_max > 0 else float('inf')
+            napari_show_info(
+                f"Cell {label}: max {cell_max:.3g} is {cell_max / img_max:.1e} of the "
+                f"image max ({img_max:.3g}); per-cell CLAHE would amplify it "
+                f"{gain:.0f}x. Treating as empty (no condensates).")
+
+        if contrast_flag or below_floor:
             # Update the contrast-stretched image within the mask
             img_contrast_stretched[cell_mask] = 0
             # Update the total cell mask.
@@ -1834,6 +2093,15 @@ def cell_mask_stretching(image, cell_masks):
         clip_lim = 0.0025  # Clip limit for CLAHE.
         # Apply CLAHE to the masked cell.
         stretched_cell = sk.exposure.equalize_adapthist(masked_cell, kernel_size=k_size, clip_limit=clip_lim)
+
+        # equalize_adapthist always returns [0, 1] (it rescale_intensity's its own
+        # output). Optionally map it back onto the cell's original range so the
+        # histogram is reshaped without any gain being applied.
+        if preserve_scale:
+            _cmin = float(img[cell_mask].min())
+            _span = cell_max - _cmin
+            if _span > 0:
+                stretched_cell = (stretched_cell * _span + _cmin).astype(np.float32)
 
         # Erode the dilated mask to reduce artifacts at the edges.
         eroded_mask = ndi.binary_erosion(dilated_mask, sk.morphology.disk(3)).astype(bool)
@@ -1856,14 +2124,14 @@ def cell_mask_stretching(image, cell_masks):
     output_image = dtype_conversion_func(output_image, output_bit_depth=input_dtype)
     
     return output_image
-
-
 @tags_layer('subcellular_segment', role='labels',
             summary='Subcellular object segmentation within cells')
 def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
                                 kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                 intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
-                                crop_to_cell=True, refine_fast=None):
+                                crop_to_cell=True, refine_fast=None,
+                                image_stats=None, punctate_gate=True,
+                                punctate_gate_sigma=5.0, punctate_gate_abs_sigma=3.0):
     """
     Segments and refines subcellular objects within a specified cell mask from microscopy images.
     The function uses pre-processed images and cell-specific metrics to remove background, enhance
@@ -1942,6 +2210,29 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     proc_crop  = pre_processed_img[r0p:r1p, c0p:c1p]
     mask_crop  = cell_mask[r0p:r1p, c0p:c1p]
 
+    # ── The ABSOLUTE-INTENSITY gate. It must run BEFORE the contrast steps. ─────
+    #
+    # ``check_contrast_func`` **cannot catch this**: it inspects the image AFTER the
+    # contrast-maximising steps (per-cell CLAHE, background removal), so it essentially
+    # **never fires**. This gate runs BEFORE them, on the raw intensity image, and is
+    # **the only place in the chain where absolute brightness is still available.**
+    #
+    # Restored after Meet reported spurious puncta returning and sent the file that
+    # worked. The tree had regressed and lost it.
+    if punctate_gate:
+        has_signal, gate_info = cell_has_punctate_signal(
+            orig_crop, mask_crop, image_stats=image_stats,
+            n_sigma=punctate_gate_sigma, abs_n_sigma=punctate_gate_abs_sigma,
+            min_spot_radius=min_spot_radius)
+        if not has_signal:
+            napari_show_info(
+                f"Cell {cell_label}: no punctate signal above the absolute "
+                f"intensity floor (largest blob {gate_info['largest_blob_px']}px "
+                f"< {gate_info['min_area_px']}px required; peak z="
+                f"{gate_info['z_local']:.1f} sigma). Skipping -- no puncta.")
+            _empty = np.zeros(cell_mask.shape, dtype=bool)
+            return _empty, _empty
+
     # Initialize a flag indicating whether to perform background removal
     perform_bg_removal = True
     # Check if conditions are met to potentially skip background removal
@@ -2002,7 +2293,9 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
 
 def run_segment_subcellular_objects(pre_processed_image_layer, original_image_layer, data_instance, viewer,
                                     kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
-                                    intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2):
+                                    intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,
+                                    punctate_gate=True, punctate_gate_sigma=5.0,
+                                    punctate_gate_abs_sigma=3.0):
     """
     Orchestrates the segmentation and refinement of subcellular objects across all cells
     in an image. It utilizes the napari viewer for visualization and operates on pre-processed
@@ -2067,6 +2360,18 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
     unique_labels = np.unique(cell_masks)
     unique_labels = unique_labels[1:]
 
+    # ── Measure the ABSOLUTE background ONCE, before any per-cell renormalisation ──
+    #
+    # This is what lets ``segment_subcellular_objects`` tell **"this cell is empty"** apart
+    # from **"this cell's noise has been stretched to look like signal"** — a distinction that
+    # is destroyed the moment per-cell CLAHE runs, because it normalises every cell to unit
+    # maximum.
+    image_stats = None
+    if punctate_gate:
+        image_stats = compute_image_intensity_stats(
+            original_image, cell_masks,
+            smooth_sigma=max(0.5, min_spot_radius / 2.0))
+
     # Initialize total masks to store the combined results
     total_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(cell_masks, dtype=bool)
@@ -2089,7 +2394,10 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
             original_img, contrast_stretched_img, cell_mask_holder, label, ball_radius, cell_df,
             kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
             global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
-            max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius)
+            max_area_fraction=max_area_fraction, min_spot_radius=min_spot_radius,
+                image_stats=image_stats, punctate_gate=punctate_gate,
+                punctate_gate_sigma=punctate_gate_sigma,
+                punctate_gate_abs_sigma=punctate_gate_abs_sigma)
 
         # Add the segmented mask to the total mask
         total_puncta_mask += puncta_mask 
