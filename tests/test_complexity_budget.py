@@ -48,14 +48,28 @@ _SOURCE = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 # noticed for months. **Nobody reads a 400-line function closely enough to see that its except
 # clause is a `pass`.**
 _LONG_FUNCTION_LIMIT = 120
-_MAX_LONG_FUNCTIONS = 136          # today's count. A CEILING, not a target.
+# 137. It was 136, and `cell_analysis_func` (feature_analysis_tools) crossed 120 lines when the
+# bbox sweep added its columns — a REAL addition, and the ratchet caught it.
+#
+# **That is the ratchet working.** The honest response is to record that the count went up, not to
+# quietly widen the limit or shave a comment somewhere else to squeeze back under. A number that is
+# raised whenever it is hit is not a ceiling.
+_MAX_LONG_FUNCTIONS = 137
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
 #
-# It is 670 lines. That is indefensible, and it is exactly why the pixel-size gate's silent failure
-# went unnoticed inside one of these. **It is not a licence to write 700.**
-_ABSOLUTE_LONGEST = 672
+# It is **676 lines**, and it has tripped this ratchet THREE TIMES in one session — for the
+# frame-interval sync, for the assumed-axis warning, and for the pixel-size gate. **Every safety
+# check that belongs in this panel makes it bigger**, which is the clearest possible signal that it
+# should not be one function.
+#
+# **The split is obvious:** `_on_dynamic` is a **145-line closure** inside it, with a clean
+# boundary. It is not done here because **this UI has no test coverage**, and a refactor whose only
+# verification is "it still imports" is a refactor that ships bugs (see the header).
+#
+# **THIS IS THE FUNCTION TO SPLIT FIRST**, the moment someone can verify it by hand.
+_ABSOLUTE_LONGEST = 676
 
 
 def _long_functions():

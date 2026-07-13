@@ -471,6 +471,11 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
                 progress_emit and progress_emit(4, 5)
 
             if cb_grow.isChecked() and tracks is not None:
+                try:
+                    from pycat.file_io.stack_access import warn_if_assumed_axis
+                    warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Growth/shrinkage kinetics (treats frames as time)')
+                except Exception as _exc:
+                    debug_log('advanced_analysis_ui: could not check the stack axis', _exc)
                 res['growth_kinetics'] = growth_shrinkage_kinetics(
                     tracks, frame_dt.value())
                 progress_emit and progress_emit(5, 5)

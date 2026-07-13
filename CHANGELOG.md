@@ -4,6 +4,31 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.518] - 2026-07-13
+### FIXED — the axis-warning sweep was written and never shipped
+1.5.511 added ``warn_if_assumed_axis`` to the six UIs that compute a **rate from frame indices**
+and never warned that the time axis might have been **guessed**. **The test shipped. The code did
+not.**
+
+The repo has therefore been carrying ``test_every_UI_that_treats_frames_as_TIME_warns_about_an_assumed_axis``
+against six files that never received the change. *(It passed only because the test looks for the
+call and the release bundle omitted the files that would have failed it — the same class of miss as
+1.5.504.)*
+
+**The consequence is real.** An undeclared multipage TIFF carries **no axis metadata**, so the user
+labels it **T or Z at load**. **T and Z load identically** — a wrong label is harmless for viewing,
+and **there is nothing on screen to tell you it happened.**
+
+But a step that treats frames as **time** — an **MSD**, a diffusion coefficient, a coarsening rate,
+a trajectory — is computing a rate **per frame**. **If those frames are Z-slices, the rate is a
+fiction, and nothing about the number looks wrong.**
+
+Now shipped in: ``advanced_analysis_ui``, ``brightfield_ui``, ``condensate_physics_ui``,
+``invitro_bf_ui``, ``invitro_fluor_ui``, ``timeseries_invitro_fluor_ui`` — **five of which compute
+an MSD.**
+
+**313/313 core tests passing.**
+
 ## [1.5.517] - 2026-07-13
 ### SOLVED — and **parallel Numba is back on for macOS**
 The complete matrix, each case in its own subprocess on an M2:

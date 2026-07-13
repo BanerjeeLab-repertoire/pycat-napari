@@ -179,7 +179,21 @@ def iter_frames(stack_like, dtype=np.float32, indices=None):
             yield int(t), arr[t]
 
 def warn_if_assumed_axis(data_repository, operation="this analysis"):
-    """Flash a one-time warning if the active stack's axis type was ASSUMED (an
+    """**A wrong axis label makes every RATE meaningless, and nothing about the number looks wrong.**
+
+    An undeclared multipage TIFF has no axis metadata, so the user labels it **T or Z at load**.
+    **T and Z load identically** — a wrong label is completely harmless for viewing, and there is
+    nothing on screen to tell you it happened.
+
+    But a step that treats frames as **TIME** (an MSD, a diffusion coefficient, a coarsening rate,
+    a recovery half-time) is computing a rate **per frame**, and if those frames are actually
+    **Z-slices**, the rate is a fiction. Ten UIs run a time-dependent analysis; **four warned.**
+    Five of the other six compute an **MSD**.
+
+    Fires at most once per stack per session. **Safe no-op if the axis was declared in metadata** —
+    it only speaks when the label really was a guess.
+
+    (Original docstring: flash a one-time warning if the active stack's axis type was ASSUMED (an
     undeclared multipage TIFF the user labelled T or Z at load; see 1.5.351) and
     an axis-dependent operation is about to use it. T and Z load identically, so a
     wrong label is harmless for loading/viewing, but a step that treats frames as
@@ -189,7 +203,7 @@ def warn_if_assumed_axis(data_repository, operation="this analysis"):
 
     This is a module-level function (not a FileIOClass method) so any analysis UI
     can call it directly with the data_repository it already holds, without
-    reaching back into the file-IO instance."""
+    reaching back into the file-IO instance.)"""
     try:
         dr = data_repository
         if not dr or not dr.get('stack_axis_assumed') or dr.get('_axis_warned'):

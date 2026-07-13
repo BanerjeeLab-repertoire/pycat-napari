@@ -531,6 +531,11 @@ def _ivbf_dynamics(ui, layout):
             if do['s']:
                 res['sedimentation'] = detect_sedimentation(cs)
             if do['m']:
+                try:
+                    from pycat.file_io.stack_access import warn_if_assumed_axis
+                    warn_if_assumed_axis(ui._dr(), 'Condensate MSD / coarsening (treats frames as time)')
+                except Exception as _exc:
+                    debug_log('invitro_bf_ui: could not check the stack axis', _exc)
                 msd_df = compute_msd(tracks, frame_interval_s=dt)
                 res['msd']    = msd_df
                 res['msd_fit']= fit_anomalous_diffusion(msd_df)

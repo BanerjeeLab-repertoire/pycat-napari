@@ -536,3 +536,52 @@ def test_every_UI_with_a_frame_interval_SYNCS_it_from_the_file():
         f"result — a diffusion coefficient, an MSD exponent, a recovery half-time — scales with "
         f"it directly."
     )
+
+
+@pytest.mark.core
+def test_every_UI_that_treats_frames_as_TIME_warns_about_an_assumed_axis():
+    """**A wrong axis label makes every RATE meaningless, and nothing about the number looks wrong.**
+
+    An undeclared multipage TIFF carries no axis metadata, so the user labels it **T or Z at
+    load**. **T and Z load identically** — a wrong label is completely harmless for viewing, and
+    there is **nothing on screen to tell you it happened.**
+
+    But a step that treats frames as **time** — an MSD, a diffusion coefficient, a coarsening rate,
+    a recovery half-time — is computing a rate **per frame**. If those frames are actually
+    **Z-slices**, *the rate is a fiction.*
+
+    ``warn_if_assumed_axis`` exists for exactly this, and it is a **safe no-op when the axis was
+    declared in the metadata** — it only speaks when the label really was a guess.
+
+    **Ten UIs run a time-dependent analysis. Four warned.** Five of the other six compute an
+    **MSD**.
+    """
+    import re
+
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    # The calls that treat a frame index as a TIME index.
+    time_dependent = ('compute_msd', 'msd_per_track', 'coarsening_statistics',
+                      'growth_shrinkage_kinetics', 'aspect_ratio_signal',
+                      'field_trajectories', 'fit_photobleaching')
+
+    missing = []
+    for path in sorted(toolbox.glob("*_ui.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+
+        # Does this panel actually RUN one? (An import alone does not count.)
+        runs_one = any(re.search(rf'\b{call}\s*\(\s*[^)\s]', source)
+                       for call in time_dependent)
+        if not runs_one:
+            continue
+
+        if 'warn_if_assumed_axis' not in source:
+            missing.append(path.name)
+
+    assert not missing, (
+        f"these UIs compute a RATE from frame indices and never warn that the axis may have been "
+        f"assumed: {missing}\n\n"
+        f"T and Z load identically. If the user labelled a z-stack as a time-series, every "
+        f"diffusion coefficient, coarsening rate and recovery half-time from this panel is a "
+        f"fiction — **and nothing about the number looks wrong.**"
+    )

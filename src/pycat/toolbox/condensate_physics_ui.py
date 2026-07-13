@@ -171,6 +171,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             tracks = link_trajectories_bayesian(props,
                          max_displacement_um=float(dr.get('object_size', 3))*mpx*2)
             max_l  = lag_spin.value() or None
+            try:
+                from pycat.file_io.stack_access import warn_if_assumed_axis
+                warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Condensate MSD / viscosity (treats frames as time)')
+            except Exception as _exc:
+                debug_log('condensate_physics_ui: could not check the stack axis', _exc)
             msd_df = compute_msd(tracks, max_lag=max_l,
                                   frame_interval_s=dt_spin.value(),
                                   min_track_length=min_len.value())

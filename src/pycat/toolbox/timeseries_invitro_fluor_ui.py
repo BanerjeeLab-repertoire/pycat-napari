@@ -22,6 +22,8 @@ records built here.
 
 import numpy as np
 
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.pixel_size import pixel_size_um_or_default
 import pandas as pd
 import napari
@@ -564,6 +566,11 @@ def _tsivf_field_trajectories(ui, layout):
         run.setEnabled(False)
 
         def _task(progress):
+            try:
+                from pycat.file_io.stack_access import warn_if_assumed_axis
+                warn_if_assumed_axis(ui._dr(), 'Object trajectories (treats frames as time)')
+            except Exception as _exc:
+                debug_log('timeseries_invitro_fluor_ui: could not check the stack axis', _exc)
             return field_trajectories(
                 label_stack, intensity, microns_per_pixel=mpx,
                 frame_interval_s=dt, progress_callback=progress)
