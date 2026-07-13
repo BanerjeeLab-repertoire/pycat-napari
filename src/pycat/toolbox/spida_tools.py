@@ -546,7 +546,17 @@ def _roi_pixels(image_layer, roi_shapes_layer, viewer):
     if image_layer is None:
         napari_show_warning("SpIDA: select an image layer.")
         return None
-    img = np.asarray(image_layer.data)
+    # ── `np.asarray` on a lazy stack returns FRAME 0, not the frame you are looking at ──
+    #
+    # SpIDA analyses ONE plane, and the code below picks it from the viewer's current step —
+    # which is right. But ``np.asarray`` on a lazy wrapper hands back **frame 0 only**, so the
+    # array is already 2D by the time that choice is made, and ``img.ndim > 2`` is False.
+    #
+    # **The user scrolls to frame 40, runs SpIDA, and silently analyses frame 0.** Nothing errors,
+    # and the number looks fine. ``stack_access.materialize_stack`` exists for exactly this, and
+    # its own docstring names the bug.
+    from pycat.file_io.stack_access import materialize_stack
+    img = materialize_stack(image_layer.data)
     if img.ndim > 2:
         # Use the current step's 2D plane if a stack is provided.
         try:

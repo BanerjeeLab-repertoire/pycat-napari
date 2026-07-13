@@ -4,30 +4,82 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.505] - 2026-07-13
+### HEALTH AUDIT — three real bugs, and the structure that produced them
+
+### FIXED — N&B told users their time-series was 2D
+``nb_tools`` called ``np.asarray(image_layer.data)``. On one of PyCAT's **lazy wrappers that
+returns FRAME 0 ONLY** — the ``__array__`` is deliberately truncated so napari's thumbnail request
+does not materialise a multi-gigabyte movie.
+
+**Nothing errors. The array simply comes back 2D** — and the very next line is:
+
+```
+if data.ndim < 3:  "N&B needs a time-series ... but this layer is 2D"
+```
+
+**So a user who loaded a CORRECT time-series was told their data was 2D.** The message was not
+merely unhelpful — **it was wrong**, and it sent them off to fix a problem they did not have.
+*(And N&B's entire measurement is a variance ACROSS TIME. On one frame that is zero.)*
+
+### FIXED — SpIDA silently analysed frame 0
+Same call. SpIDA picks its plane from the viewer's current step — **but the array was already 2D by
+the time that choice was made.** The user scrolls to frame 40, runs SpIDA, and **analyses frame 0.**
+Nothing errors, and the number looks fine.
+
+### FIXED — the FRAP dead time returned a PLAUSIBLE zero
+``compute_lumicks_timelag`` returned **0.0** when it could not read the scan timestamps. **0.0 is a
+physically meaningful value**: it says *"the recovery frame was captured the instant the bleach
+ended."* That is a **claim**, not an absence of one.
+
+Recovery starts at ``t = lag``, not ``t = 0``, so the fit proceeded on a wrong number — and the
+caller **cannot catch what does not raise** (``frap_ui`` wraps it in a ``try`` that never fires).
+Now returns **NaN**, which propagates and is visible. *A wrong number that looks right is worse than
+no number.*
+
+### REFACTORED — the stack helpers were implemented TWICE
+``materialize_stack``, ``iter_frames``, ``layer_is_stack``, ``extract_2d_plane`` and
+``warn_if_assumed_axis`` were defined in **both** ``file_io.py`` **and** ``stack_access.py`` —
+**byte-identical copies.**
+
+**They agreed, so nothing would catch the day they stopped.** And these are not any five functions:
+**they are the functions that FIX the lazy-stack bug** — the one that has now silently collapsed a
+movie to frame 0 **four separate times** (VPT 1.5.273, the temperature UI 1.5.253, and N&B and SpIDA
+above). *Fixing one copy and missing the other is exactly how that bug survives.*
+
+``stack_access.py`` now owns them; ``file_io.py`` re-exports, so all 25 call sites keep working.
+
+### GUARDED — because it is a missing guard, not a recurring mistake
+A test now scans every module for ``np.asarray(layer.data)`` and fails on any site not on an
+explicit allow-list of genuinely-2D consumers. **If the list grows, the guard is being eroded by
+exception rather than the bug being fixed.**
+
+### Audited and CLEAN
+- **0 mutable default arguments**
+- **0 bare ``except:``**
+- **0 undefined names** across 121 modules and 83,000 lines
+- **419 ``except Exception: pass``** — but the dangerous subset (a handler returning a *plausible
+  number*) is now **1**, and it is guarded
+
+**301/301 core tests passing.**
+
 ## [1.5.504] - 2026-07-13
 ### FIXED — CI red: three files were edited and never shipped
 ``test_the_per_object_results_tables_KEEP_the_bbox`` failed in CI. **It was right.**
 
-The bbox sweep (1.5.495) was applied to **eight** modules in the sandbox and **three of them were
-left out of the release bundle**:
+The bbox sweep (1.5.495) was applied to **eight** modules and **three were left out of the release
+bundle**: ``condensate_physics_tools.py``, ``feature_analysis_tools.py``, ``segmentation_tools.py``.
 
-- ``condensate_physics_tools.py``
-- ``feature_analysis_tools.py``
-- ``segmentation_tools.py``
+**A file edited in a sandbox and left out of a release is a file that does not exist**, and a test
+that reads the *source* rather than the *behaviour* is exactly what catches that.
 
-The repo therefore carried a test asserting a property of three files **that had never been
-shipped**. **A file edited in a sandbox and left out of a release is a file that does not exist**,
-and a test that reads the *source* rather than the *behaviour* is exactly what catches that —
-which is what it did.
-
-Without them, those three results tables **could not be brushed**: their rows carry no bounding
+Without them, those three results tables **could not be brushed** — their rows carry no bounding
 box, so a point in a plot built from them **cannot be turned back into an image.** In batch that is
 the only route back to the object at all.
 
 ### And a guard for the OTHER half of the same mistake
-A new test asserts that any module which **calls** a bbox helper also **imports** it. That catches a
-*half*-applied sweep — where the call sites land and the import does not — which **fails at
-runtime, not at import**, so nothing catches it until a user runs that analysis.
+A new test asserts that any module which **calls** a bbox helper also **imports** it — catching a
+*half*-applied sweep, which **fails at runtime, not at import**.
 
 **299/299 core tests passing.**
 

@@ -131,7 +131,23 @@ def compute_lumicks_timelag(
     the gap between the end of the bleach scan and the start of the first
     recovery frame.
 
-    Returns the lag in seconds, or 0.0 if it cannot be determined.
+    Returns the lag in seconds, or **NaN** if it cannot be determined.
+
+    .. warning::
+
+       **This used to return 0.0 on failure, and 0.0 is a PHYSICALLY MEANINGFUL VALUE.**
+
+       The dead time between the bleach and the first recovery frame is a real quantity that goes
+       into the FRAP fit: recovery starts at ``t = lag``, not at ``t = 0``. A zero lag says *"the
+       recovery frame was captured the instant the bleach ended"* — which is a claim, not an
+       absence of one.
+
+       So a timestamp-reading failure was **indistinguishable from a genuinely instantaneous
+       acquisition**, and the fit proceeded on it. The caller cannot catch what does not raise,
+       and ``frap_ui`` wraps this call in a ``try`` that never fires.
+
+       **NaN propagates.** A fit given a NaN lag produces NaN, which is visible. *A wrong number
+       that looks right is worse than no number.*
     """
     try:
         import lumicks.pylake as pylake
@@ -142,8 +158,16 @@ def compute_lumicks_timelag(
         bl_end  = bl.timestamps[-1][-1][-1] if np.ndim(bl.timestamps) >= 3 else bl.timestamps[-1]
         rec_start = rec.timestamps[0][0][0] if np.ndim(rec.timestamps) >= 3 else rec.timestamps[0]
         return abs(float(rec_start) - float(bl_end)) / 1e9
-    except Exception:
-        return 0.0
+    except Exception as exc:
+        # NOT 0.0 — see the docstring. A zero lag is a CLAIM about the acquisition, and a
+        # failure to read the timestamps is not evidence for it.
+        debug_log('compute_lumicks_timelag: could not read the scan timestamps', exc)
+        napari_show_warning(
+            "The bleach-to-recovery dead time could not be read from this .h5 file. "
+            "**The FRAP fit needs it** — recovery starts at t = lag, not t = 0 — so it is "
+            "reported as NaN rather than as zero. A zero lag would be a claim that the recovery "
+            "frame was captured the instant the bleach ended.")
+        return float('nan')
 
 
 # ---------------------------------------------------------------------------

@@ -997,147 +997,35 @@ class _TiffPageStack:
                 pass
 
 
-def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
-    """Return a real (T, H, W) numpy array from any stack-like layer data.
-
-    Handles PyCAT's lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS
-    readers) whose __array__ is deliberately truncated to one frame for napari's
-    sake, plus plain numpy/dask arrays. Analysis code that needs every frame
-    should call THIS, not np.asarray(layer.data) — the latter can silently
-    return a single 2D frame from a lazy wrapper and make a (T,H,W) stack look
-    2D (breaking shape checks and per-frame analysis).
-
-    progress_callback : optional callable(done, total) invoked as frames are
-        read, so a caller can show a determinate "Materializing…" bar. Only the
-        frame-by-frame rebuild path reports progress (the only genuinely slow
-        case); eager arrays return immediately.
-    """
-    # Lazy wrappers expose as_full_array() or are safely indexable by frame.
-    if hasattr(stack_like, 'as_full_array'):
-        return stack_like.as_full_array(dtype=dtype, progress_callback=progress_callback)
-    # dask
-    if hasattr(stack_like, 'compute'):
-        out = np.asarray(stack_like.compute())
-        return out if dtype is None else out.astype(dtype)
-    arr = np.asarray(stack_like)
-    # If __array__ truncated a 3D wrapper to 2D but it advertises a 3D shape,
-    # rebuild by indexing frames.
-    shp = getattr(stack_like, 'shape', None)
-    if arr.ndim == 2 and shp is not None and len(shp) == 3:
-        # Preserve source dtype when dtype is None (e.g. integer label masks
-        # must NOT be floated). Infer from the first frame otherwise.
-        _f0 = np.asarray(stack_like[0])
-        _dt = _f0.dtype if dtype is None else dtype
-        out = np.empty(shp, dtype=_dt)
-        out[0] = _f0.astype(_dt)
-        n = shp[0]
-        if progress_callback is not None:
-            try: progress_callback(1, n)
-            except Exception: pass
-        for t in range(1, n):
-            out[t] = np.asarray(stack_like[t]).astype(_dt)
-            if progress_callback is not None:
-                try: progress_callback(t + 1, n)
-                except Exception: pass
-        return out
-    return arr if dtype is None else arr.astype(dtype)
+# ── ONE implementation of the stack helpers, not two ────────────────────────────────────────
+#
+# ``materialize_stack``, ``iter_frames``, ``layer_is_stack``, ``extract_2d_plane`` and
+# ``warn_if_assumed_axis`` were defined **in this file AND in stack_access.py** — byte-identical
+# copies.
+#
+# **That is the dangerous state**: they agree today, so nothing catches the day they do not. And
+# these are not any five functions — they are **the functions that fix the lazy-stack bug**, the
+# one that has silently collapsed a movie to frame 0 four separate times. Fixing one copy and
+# missing the other is exactly how that bug survives.
+#
+# ``stack_access.py`` is the purpose-built module (its docstring names the bug), so it owns the
+# implementation. This file re-exports, so all 25 existing ``from pycat.file_io.file_io import
+# materialize_stack`` call sites keep working unchanged.
+from pycat.file_io.stack_access import (       # noqa: F401  (re-exported for callers)
+    materialize_stack,
+    iter_frames,
+    layer_is_stack,
+    extract_2d_plane,
+    warn_if_assumed_axis,
+)
 
 
-def iter_frames(stack_like, dtype=np.float32, indices=None):
-    """Yield frames of a (T, H, W) stack ONE AT A TIME, without ever holding
-    the whole stack in memory.
-
-    This is the streaming counterpart to materialize_stack(): use it for
-    per-frame analysis (e.g. bead detection) that only needs one frame at a
-    time, so a long movie never has to be fully materialised. Handles PyCAT's
-    lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS readers) by indexing
-    them frame-by-frame, dask arrays by computing one frame at a time, and plain
-    numpy arrays by iterating rows of the T axis. A 2D input yields a single
-    frame.
-
-    Parameters
-    ----------
-    stack_like : array-like or lazy wrapper with .shape and __getitem__.
-    dtype : frames are returned as this dtype.
-    indices : optional iterable of frame indices to yield (e.g. a keyframe
-        subset). If None, all frames are yielded in order.
-
-    Yields
-    ------
-    (t, frame) : the frame index and the 2D frame as a numpy array.
-    """
-    shp = getattr(stack_like, 'shape', None)
-    # 2D single frame
-    if shp is not None and len(shp) == 2:
-        yield 0, np.asarray(stack_like).astype(dtype)
-        return
-
-    if shp is not None and len(shp) == 3:
-        n = shp[0]
-        idxs = range(n) if indices is None else list(indices)
-        is_dask = hasattr(stack_like, 'compute') and not hasattr(stack_like, 'as_full_array')
-        for t in idxs:
-            if t < 0 or t >= n:
-                continue
-            frame = stack_like[t]
-            if is_dask and hasattr(frame, 'compute'):
-                frame = frame.compute()
-            yield int(t), np.asarray(frame).astype(dtype)
-        return
-
-    # Fallback: unknown shape — materialise once and iterate (last resort).
-    arr = materialize_stack(stack_like, dtype=dtype)
-    if arr.ndim == 2:
-        arr = arr[np.newaxis, ...]
-    idxs = range(arr.shape[0]) if indices is None else list(indices)
-    for t in idxs:
-        if 0 <= t < arr.shape[0]:
-            yield int(t), arr[t]
 
 
-def layer_is_stack(layer_data):
-    """True if this layer data is a multi-frame (T/Z, H, W) stack — whether a
-    plain 3D numpy array or one of PyCAT's lazy wrappers. Used by 2D analyses to
-    decide whether an input is genuinely 2D or a stack that needs a frame chosen
-    (or sequential processing). Safe on anything (returns False on failure)."""
-    try:
-        shp = getattr(layer_data, 'shape', None)
-        return shp is not None and len(shp) == 3 and int(shp[0]) > 1
-    except Exception:
-        return False
 
 
-def extract_2d_plane(layer_data, frame_index=0, dtype=np.float32):
-    """Safely extract ONE 2D plane from possibly-lazy layer data.
 
-    This is the correct way for a 2D analysis to read a single frame from a layer
-    that MIGHT be a lazy stack — using ``np.asarray(layer.data)`` there would
-    trigger the deliberately-truncated ``__array__`` and silently return frame 0
-    regardless of which frame the user is viewing. This indexes the requested
-    frame explicitly (the fast per-frame path on lazy wrappers) and returns a real
-    2D array. A genuinely 2D input is returned as-is.
 
-    frame_index : which frame to take from a stack (e.g. the current viewer step).
-    """
-    try:
-        shp = getattr(layer_data, 'shape', None)
-        if shp is not None and len(shp) == 3:
-            n = int(shp[0])
-            t = int(frame_index)
-            t = 0 if t < 0 else (n - 1 if t >= n else t)
-            frame = layer_data[t]
-            if hasattr(frame, 'compute'):
-                frame = frame.compute()
-            out = np.asarray(frame)
-            return out if dtype is None else out.astype(dtype)
-        # 2D (or unknown) — materialize a single plane defensively.
-        out = np.asarray(layer_data)
-        if out.ndim == 3:                       # a wrapper that slipped through
-            out = out[min(int(frame_index), out.shape[0] - 1)]
-        return out if dtype is None else out.astype(dtype)
-    except Exception:
-        out = np.asarray(layer_data)
-        return out if dtype is None else out.astype(dtype)
 
 
 class _ZarrTYX_generic:
@@ -1180,34 +1068,6 @@ class _ZarrTYX_generic:
 EAGER_DIAMETER_LAYERS = False
 
 
-def warn_if_assumed_axis(data_repository, operation="this analysis"):
-    """Flash a one-time warning if the active stack's axis type was ASSUMED (an
-    undeclared multipage TIFF the user labelled T or Z at load; see 1.5.351) and
-    an axis-dependent operation is about to use it. T and Z load identically, so a
-    wrong label is harmless for loading/viewing, but a step that treats frames as
-    TIME (rates, MSD, recovery) or as Z (projections, 3-D metrics) should remind
-    the user the axis was assumed. Fires at most once per stack per session.
-    Safe no-op if the axis was declared in metadata or the repo is unavailable.
-
-    This is a module-level function (not a FileIOClass method) so any analysis UI
-    can call it directly with the data_repository it already holds, without
-    reaching back into the file-IO instance."""
-    try:
-        dr = data_repository
-        if not dr or not dr.get('stack_axis_assumed') or dr.get('_axis_warned'):
-            return
-        label = dr.get('stack_axis_label', '?')
-        try:
-            from napari.utils.notifications import show_warning
-            show_warning(
-                f"Note: this stack's axis was assumed to be '{label}' (the file "
-                f"had no axis metadata). {operation} depends on the axis type — "
-                f"if it's actually the other kind, reopen and relabel.")
-        except Exception:
-            pass
-        dr['_axis_warned'] = True
-    except Exception:
-        pass
 
 
 class FileIOClass:

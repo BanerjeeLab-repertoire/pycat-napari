@@ -350,7 +350,22 @@ def run_nb_analysis(image_layer, gain, offset, read_variance, detrend_window,
     if image_layer is None:
         napari_show_warning("N&B: select a time-series image layer.")
         return
-    data = np.asarray(image_layer.data)
+    # ── `np.asarray` on a lazy stack returns FRAME 0 ONLY ───────────────────────
+    #
+    # PyCAT's lazy wrappers deliberately truncate ``__array__`` so napari's thumbnail request does
+    # not materialise a multi-gigabyte movie. **Nothing errors.** The array simply comes back 2D.
+    #
+    # For N&B that is the **worst possible** failure, because the very next check is:
+    #
+    #     if data.ndim < 3:  "N&B needs a time-series ... but this layer is 2D"
+    #
+    # So a user who loads a **correct time-series** is told their data is **2D**. The message is
+    # not merely unhelpful — it is **wrong**, and it sends them off to fix a problem they do not
+    # have. And N&B computes a variance ACROSS TIME: on one frame that is zero.
+    #
+    # ``stack_access.materialize_stack`` exists for exactly this, and its docstring names the bug.
+    from pycat.file_io.stack_access import materialize_stack
+    data = materialize_stack(image_layer.data)
 
     # Minimalist axis handling: N&B needs (T,H,W). If the array has more than 3
     # dims (e.g. T,Z,C,H,W from lazy loading), collapse leading non-spatial axes
