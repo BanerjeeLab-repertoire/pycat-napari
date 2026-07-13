@@ -497,3 +497,39 @@ def test_the_ensemble_plots_are_NOT_made_pickable():
             f"**not objects**. A click would land on whichever row sat at that index, and the "
             f"user would think they were looking at the object they clicked."
         )
+
+
+@pytest.mark.core
+def test_the_bbox_import_is_PRESENT_wherever_it_is_USED():
+    """**A file edited in a sandbox and left out of a release is a file that does not exist.**
+
+    ``condensate_physics_tools``, ``feature_analysis_tools`` and ``segmentation_tools`` all had
+    the bbox sweep applied (1.5.495) and **none of the three was included in the release bundle.**
+    The repo therefore had a test asserting a property of three files that had never been shipped,
+    and CI caught it — which is the entire point of a test that reads the source rather than the
+    behaviour.
+
+    This test closes the loop the other way: if a module *calls* the bbox helper, it must also
+    *import* it. That catches a half-applied sweep — the failure mode where the call sites land
+    and the import does not, which fails at **runtime**, not at import.
+    """
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    broken = []
+    for path in sorted(toolbox.glob("*.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+
+        uses = ("bbox_columns_from_regionprops(" in source
+                or "_bbox_cols(" in source
+                or "normalise_bbox_columns(" in source)
+        if not uses:
+            continue
+
+        if "from pycat.utils.object_ref import" not in source:
+            broken.append(path.name)
+
+    assert not broken, (
+        f"these modules CALL a bbox helper and never IMPORT it: {broken}. The sweep was applied "
+        f"to the call sites and not to the import — which fails at RUNTIME, not at import, so "
+        f"nothing catches it until a user runs that analysis."
+    )

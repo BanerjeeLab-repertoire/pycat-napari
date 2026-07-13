@@ -23,6 +23,8 @@ import math
 # Third party imports
 import numpy as np
 
+
+from pycat.utils.object_ref import normalise_bbox_columns
 from pycat.utils.tag_registry import tags_layer
 import skimage as sk
 import cv2
@@ -1286,8 +1288,22 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     cell_bg_std = np.std(cell_bg_iqr)
 
     # Measure properties of each object in the labeled mask
-    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'solidity')
+
+    # ── 'bbox' is what makes a results row BRUSHABLE ────────────────────────────
+    #
+    # regionprops hands it over free, and PyCAT threw it away at every site. **A table without a
+    # bbox is a table whose rows cannot be turned back into an image** — which is the difference
+    # between a plot you can click and a plot you can only look at.
+    #
+    # It matters most in BATCH: a point in a plot built over a hundred files points at an object
+    # in an image that is NOT LOADED. With the bbox, that object's region is read straight out of
+    # the file. Without it, the only way back is to re-run the whole analysis.
+    #
+    # skimage expands 'bbox' into bbox-0..bbox-3; _normalise_bbox_columns renames them to the
+    # bbox_y0/x0/y1/x1 that ObjectRef.from_row expects.
+    properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'solidity', 'bbox')
     puncta_region_props_df = pd.DataFrame(sk.measure.regionprops_table(labeled_puncta_mask, intensity_image=original_img, properties=properties))
+    puncta_region_props_df = normalise_bbox_columns(puncta_region_props_df)    # bbox-0..3 -> bbox_y0..x1, so a row can be brushed
     cell_area = np.sum(cell_mask)
     
     # Analyze each object individually

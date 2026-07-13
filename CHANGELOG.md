@@ -4,6 +4,33 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.504] - 2026-07-13
+### FIXED — CI red: three files were edited and never shipped
+``test_the_per_object_results_tables_KEEP_the_bbox`` failed in CI. **It was right.**
+
+The bbox sweep (1.5.495) was applied to **eight** modules in the sandbox and **three of them were
+left out of the release bundle**:
+
+- ``condensate_physics_tools.py``
+- ``feature_analysis_tools.py``
+- ``segmentation_tools.py``
+
+The repo therefore carried a test asserting a property of three files **that had never been
+shipped**. **A file edited in a sandbox and left out of a release is a file that does not exist**,
+and a test that reads the *source* rather than the *behaviour* is exactly what catches that —
+which is what it did.
+
+Without them, those three results tables **could not be brushed**: their rows carry no bounding
+box, so a point in a plot built from them **cannot be turned back into an image.** In batch that is
+the only route back to the object at all.
+
+### And a guard for the OTHER half of the same mistake
+A new test asserts that any module which **calls** a bbox helper also **imports** it. That catches a
+*half*-applied sweep — where the call sites land and the import does not — which **fails at
+runtime, not at import**, so nothing catches it until a user runs that analysis.
+
+**299/299 core tests passing.**
+
 ## [1.5.503] - 2026-07-13
 ### FIXED — PyCAT segfaults at launch on Apple Silicon
 Reported on an M2 (Meet / Pratibha). The fault handler is unambiguous:

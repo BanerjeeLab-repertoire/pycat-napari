@@ -58,6 +58,8 @@ from __future__ import annotations
 import warnings
 import numpy as np
 
+
+from pycat.utils.object_ref import bbox_columns_from_regionprops as _bbox_cols
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 
@@ -888,7 +890,9 @@ def intensity_decomposition_per_cell(
         cmask = (labeled_cells == prop.label)
         result = fit_bimodal_intensity(image, cmask)
         row = {'cell_label': prop.label,
-               'cell_area_um2': prop.area * microns_per_pixel**2}
+               'cell_area_um2': prop.area * microns_per_pixel**2,
+               # Keep the bbox: a row without it cannot be brushed back to an image.
+               **_bbox_cols(prop)}
         if result.get('fit_success'):
             row.update({k: result[k] for k in
                         ('dilute_mean','dilute_std','dense_mean',
