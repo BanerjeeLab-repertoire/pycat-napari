@@ -854,7 +854,7 @@ def opencv_contour_func(input_mask, min_area=1, max_area=1024**2, border_size=3)
 
 
 
-def split_touching_objects(binary_mask, sigma=3.5):
+def split_touching_objects(binary_mask, sigma=3.5, return_mask=False):
     """
     Splits touching objects in a binary image using a watershed algorithm. The function applies
     morphological closing to connect close objects, followed by a distance transform and Gaussian
@@ -925,13 +925,40 @@ def split_touching_objects(binary_mask, sigma=3.5):
         napari_show_warning("3D not supported yet")
         return
     
-    # Find the edges where the watershed and binary mask agree, so as to not introduce new erroneous edges
-    common_edges_mask = np.logical_not(np.logical_xor(watershed_edges != 0, binary_mask_edges != 0)) * binary_mask
+    # ── The watershed computed the split, and the function THREW IT AWAY ────────
+    #
+    # ``labels`` above IS the answer: it separates two touching discs correctly at every real
+    # overlap, and correctly DECLINES to split when they have merged into one blob. Verified
+    # against known geometry:
+    #
+    #     overlap    components in    watershed labels
+    #     0 px       2                **2**
+    #     4 px       1                **2**
+    #     8 px       1                **2**
+    #     14 px      1                1      (genuinely one object now)
+    #     20 px      1                1
+    #
+    # The function then **discarded ``labels``** and rebuilt a BOOLEAN mask by subtracting Sobel
+    # edges. **A boolean mask cannot express a split.** The two halves stay 8-connected through
+    # the corner of the one-pixel cut, so ``label()`` on the output still returns ONE object —
+    # measured, at every overlap, including the case where the two discs merely TOUCH and were
+    # already two separate components on the way in. **It merged them.**
+    #
+    # **Touching condensates were always counted as one**, and every count, size distribution and
+    # per-object measurement downstream inherited that.
+    #
+    # The labels are returned. ``return_mask=True`` restores the old boolean output for any
+    # caller that needs it — but note that output is the thing that could not represent a split
+    # in the first place.
+    if return_mask:
+        # Find the edges where the watershed and binary mask agree, so as to not introduce new
+        # erroneous edges.
+        common_edges_mask = np.logical_not(
+            np.logical_xor(watershed_edges != 0, binary_mask_edges != 0)) * binary_mask
+        return binary_morph_operation(common_edges_mask, iterations=7, element_size=1,
+                                      element_shape='Disk', mode='Opening')
 
-    # Run morphological opening to separate the split objects (watershed lines are only 1 pixel which may not fully separate objects)
-    refined_split_mask = binary_morph_operation(common_edges_mask, iterations=7, element_size=1, element_shape='Disk', mode='Opening')
-
-    return refined_split_mask
+    return labels
 
 def run_expand_labels(labels_layer, distance, viewer):
     """

@@ -4,6 +4,231 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.485] - 2026-07-10
+### GROUP B COMPLETE — a 57 % difference in fractal dimension, from geometry alone
+Two conditions containing nothing but **DISCS** — identical shape, only the size differs:
+
+| condition | fractal D |
+|---|---|
+| small discs (r = 6 px) | **0.966** (sd 0.021) |
+| large discs (r = 20 px) | **1.516** (sd 0.016) |
+
+**A 57 % difference, and the scatter is so small it would test as overwhelmingly significant.**
+*"Condensates in condition B are more space-filling"* — **completely false. A disc is a disc.**
+
+Box counting on a finite image has a finite range of box sizes, and D approaches its true value
+only as the object grows. A **filled square** — true dimension exactly 2.0 — measures **1.751 at
+64 px** and **1.881 at 512 px**. *It never gets there.*
+
+The algorithm itself is **exact where it can be**: a Sierpinski triangle measures **1.5850**
+against an analytic log(3)/log(2) = **1.5850**. **The bug is not in the maths — it is in comparing
+D between objects of different size**, and nothing said so.
+
+Now documented, and ``fractal_dimension_per_cell`` carries ``mean_object_area_px`` beside every D
+— **because without the size next to it, a size-driven difference is invisible.**
+
+### `topo_n_basins` counts noise — and I could not fix it, so I said so
+``peak_local_max`` with only a ``min_distance`` accepts **every** local maximum however small. On
+a **flat field with nothing but noise** it reports **6.3 basins** — and 6.3 at a noise sd of 5, 20
+and 60 alike.
+
+**It is a constant, and it is anti-correlated with the truth**: a flat field reports 7 and a field
+with 3 genuine peaks reports 6. It is measuring **how many points of separation ``min_distance``
+fit inside the mask.**
+
+**A global prominence gate made it worse** — the flat field still reported 4, and a field with 6
+genuine peaks dropped to **2.3**. *Real structure raises the median, which then excludes the
+structure.* A correct fix needs a **topological** prominence (how far a peak rises above its
+saddle), which is a persistence computation, not a parameter tweak.
+
+**Shipping a fix I cannot validate would be worse than shipping the bug with a warning.**
+Reverted, written up in ``docs/audits/DEV_NOTES.md``, and every result now carries
+``topo_n_basins_is_unreliable``.
+
+**``topo_cov`` behaves correctly on the same data — 0.001 on a flat field, 0.42 with real
+structure.** The module already had a good statistic sitting beside the broken one. **Prefer it.**
+
+**225/225 core tests passing.**
+
+## [1.5.484] - 2026-07-10
+### GROUP B — "we found 8 clusters" is not evidence of clustering
+A **complete-spatial-randomness** pattern — 120 uniformly distributed points, *by definition not
+clustered* — produces clusters **every single time**. Over 20 realisations: **mean 9.0, range
+6–13.**
+
+``cluster_size_distribution`` reports the count correctly. **The count is meaningless on its
+own**, and the Ripley/PCF null machinery (1.5.397, 419, 420) was sitting unused two modules away.
+
+### And the cluster COUNT points the wrong way
+**Clustering makes FEWER, BIGGER clusters**; randomness scatters many small accidental ones:
+
+| pattern | n_clusters | **largest cluster** | **noise points** |
+|---|---|---|---|
+| CSR | 8.0 | **9.6** | **76.7** |
+| **CLUSTERED** | **4.8** | **45.6** | **2.5** |
+
+**The clustered pattern has FEWER clusters than the random one.** A count-based test is not
+merely underpowered — it is **anti-correlated with the truth**, and a first version of the
+significance test got the answer *exactly backwards* (CSR "clustered" at p = 0.030; a real cluster
+"random" at p = 0.790).
+
+New ``cluster_count_significance`` tests the **fraction of points in any cluster at all** (36 %
+for CSR against 98 % for a real cluster) against a **compartment-constrained** null — points
+re-scattered *inside the actual region mask*, because **an irregular cell manufactures apparent
+clustering all by itself**. **False positives 4 %, power 100 %.**
+
+### Note — validating a null requires the same point process
+An early run showed a **40 % false-positive rate**, and it was **my test, not the null**: the CSR
+pattern was drawn from a 180×180 box while the mask was 200×200, so **the data was 1.23× denser
+than the compartment** — and the null was correctly reporting that. **A null can only be validated
+against a process drawn from the same region it re-scatters into.**
+
+### The hypothesis did NOT hold for `spatial_randomness_tools` — it is a model for the others
+Moran's I is textbook-correct: **0.0001** on white noise, 0.97 on smoothed, and **exactly −1.0 on
+a checkerboard**.
+
+And ``structure_beyond_optics`` answers the question a microscopist actually has. *Every* image is
+autocorrelated — **the PSF puts structure there for free** — and its docstring explains, correctly,
+why a pixel-shuffled null cannot see past that:
+
+| field | **p** | kurtosis |
+|---|---|---|
+| PSF-blurred noise (**no** real structure) | 0.119 | 0.19 |
+| **bright blobs + the same PSF blur** | **0.005** | **4.85** |
+
+**False positives 4–12 %, power 100 %** — detecting real structure at a blob amplitude of 0.5
+against a noise sd of 0.3.
+
+**221/221 core tests passing.**
+
+## [1.5.483] - 2026-07-10
+### GROUP C COMPLETE — a 4 µm object elongated in z was reported as **1 µm**
+``prop`` came from a ``regionprops`` call with **no spacing**, so its axis lengths were in
+**voxels** — and the code multiplied them by ``microns_per_pixel``, the **xy** pitch. On a
+confocal stack the z step is typically **3–5× the xy pixel**, so **every z extent was divided by
+that factor.**
+
+Measured on a 0.1 × 0.1 × 0.5 µm voxel (5× anisotropic), against known geometry:
+
+| object | true major | reported | **after** |
+|---|---|---|---|
+| sphere, r = 1 µm | 2.00 µm | 2.06 *(fine)* | 1.84 |
+| **Z-elongated, 4 µm long** | **4.00 µm** | **0.98** | **3.58** |
+| Z-elongated, 6 µm long | 6.00 µm | — | **5.34** |
+| XY-elongated, 4 µm long | 4.00 µm | 4.45 *(fine)* | **3.98** |
+
+**The error is invisible on anything round**, which is exactly why it survived — *the sphere case
+is right.* And the ``spacing`` argument **was** being passed a few lines above, to the
+marching-cubes surface area. **The axis lengths simply never used it.**
+
+The axes are now computed from the central second-moment tensor **in physical units**. The
+residual ~10 % on a z-elongated object is z-voxelization (only ~8 slices span it), not a units
+error.
+
+### Audited and correct — the 3D volume
+A 1 µm sphere in that voxel occupies 787 voxels. **Assuming isotropy gives 0.787 µm³; the truth
+is 4.19.** The module reports **3.94** — it uses the z step correctly, and avoids a **5× error**.
+
+### Noted — `centroid_z` is in VOXELS while `centroid_x_um` and `centroid_y_um` are in microns
+Not a bug — the name carries no ``_um`` — but **a trap**: a user computing a 3D distance from
+``(centroid_z, centroid_y_um, centroid_x_um)`` mixes units and gets a wrong answer silently.
+
+**215/215 core tests passing.**
+
+## [1.5.482] - 2026-07-10
+### GROUP C — `split_touching_objects` computed the right answer and threw it away
+The watershed inside it **works**. It separates two touching discs at every real overlap, and
+correctly **declines** when they have genuinely merged into one blob:
+
+| overlap | components in | watershed labels |
+|---|---|---|
+| 0 px | 2 | **2** |
+| 4 px | 1 | **2** |
+| 8 px | 1 | **2** |
+| 14 px | 1 | 1 *(one object now)* |
+| 20 px | 1 | 1 |
+
+The function then **discarded the labels** and rebuilt a **boolean mask** by subtracting Sobel
+edges. **A boolean mask cannot express a split.** The two halves stay 8-connected through the
+corner of the one-pixel cut, so ``label()`` on the output returned **ONE object at every
+overlap** — including at zero overlap, where the discs merely *touch* and were **already two
+separate components on the way in**. ***It merged them.***
+
+**Touching condensates were always counted as one**, and every count, size distribution and
+per-object measurement downstream inherited it. Now returns the labels; ``return_mask=True``
+restores the old output for any caller that wants it — *though that output is the thing that
+could not represent a split in the first place*.
+
+### Audited — `partial_volume_tools` is among the best modules in the codebase
+**It predicts an intensity bias it cannot remove**, which is exactly the right thing to do.
+
+The PV weight fixes the **area** — a 1.5 px object reads **−43 %** through a plain mask and
+**−3.6 %** through PV. But it **cannot fix the intensity**, because **the PSF has physically moved
+photons out of the object**. They are not in those pixels to be re-weighted.
+
+``intensity_bias_for_size`` predicts the residual to within a few percent:
+
+| radius | predicted | **measured** |
+|---|---|---|
+| 2 px | −51 % | **−55 %** |
+| 5 px | −22 % | **−22 %** |
+| 10 px | −11 % | **−11 %** |
+
+**A 2 px condensate reads 55 % too dim.** That is a *size-dependent* bias, and it can manufacture
+a spurious intensity-vs-size trend where none exists. The module's own docstring says it plainly:
+*"PV weighting minimises the software-added bias; it cannot undo the optics."*
+
+### Audited and correct — `gaussian_localization_tools`, `clean_spot_detection_tools`
+Sub-pixel localization to **0.008 px**, σ exact, and **fully pedestal-invariant** — because
+``gaussian_2d_offset`` **has a background term**. *The estimators that fit an offset do not have
+the bug that the ones without it do* (compare the CCF and ACF fits, 1.5.481). CLEAN detection
+finds the exact spot count at every separation down to 3× the PSF σ.
+
+**214/214 core tests passing.**
+
+## [1.5.481] - 2026-07-10
+### GROUP A COMPLETE — two more bugs, both in the LENGTH SCALE a paper reports
+### FIXED — `ccf_sigma` was the std of the correlation VALUES, not the peak width
+``np.std(ccf_values[peak_row, :])`` is the spread of the correlation **coefficients** along a
+slice — a number in correlation units, bounded by the [−1, 1] range of a Pearson coefficient.
+**It is not a length.**
+
+It came out at **0.33** on data whose true correlation length is **4.24 px** — a **13-fold
+underestimate**, and **it would have been 0.33 for any structure size.**
+
+**And the real σ was computed and thrown away.** ``curve_fit`` fits
+``gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y)``, and ``popt[3]``/``popt[4]`` **are** the
+widths — in pixels, on the same axes the peak position was already being reported in. Now within
+**3–9 %** of the analytic truth across the range.
+
+### FIXED — the ACF Gaussian had no baseline, and σ blew up by 43 %
+**A spatial ACF does not decay to zero.** It sits on a floor, and a Gaussian **forced through
+zero must widen to reach it** — the inflation growing with σ, because the floor becomes a larger
+fraction of the lobe:
+
+| blur σ | expected | reported | error |
+|---|---|---|---|
+| 2.0 | 2.83 | 3.10 | +9 % |
+| 4.0 | 5.66 | 6.11 | +8 % |
+| **6.0** | 8.49 | **12.17** | **+43 %** |
+| 8.0 | 11.31 | **15.51** | **+37 %** |
+
+**It is not a finite-window effect** — a 512 px ROI is just as biased as a 128 px one, which is
+what ruled that out. An independent Gaussian fit *with* an offset recovered the truth on exactly
+the same data, and that is how the missing term was isolated. Now **−1 % to −9 %** across the
+range.
+
+### The pedestal hypothesis does NOT hold for the ACF — and that is worth recording
+An autocorrelation is **normalised**, so an additive offset cancels exactly: σ = 5.29 at pedestals
+of 0, 1000 and 4000. **The physics differs from SpIDA and N&B.** *A hypothesis that holds for
+three modules and not the fourth is only useful if the exception is known.*
+
+### Audited and correct — the CCF peak
+Recovers a known inter-channel shift **exactly** at every offset tested. This is chromatic-shift
+detection, and it works.
+
+**204/204 core tests passing.**
+
 ## [1.5.480] - 2026-07-10
 ### GROUP A — the pedestal hypothesis was right, and worse than expected
 **Stated before any code was run:** SpIDA, molecular counting, N&B and the correlation tools all

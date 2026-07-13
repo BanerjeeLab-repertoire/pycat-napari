@@ -651,3 +651,46 @@ the fit find it avoids estimating s² and p separately. If that works, both corr
 into one and the composition problem disappears. **Test against the binomial-thinning simulation
 in ``tests/test_group_a_moments.py``, which is the correct one** — the first attempt used
 deterministic bleaching and had no binomial fluctuation for the estimator to fit at all.
+
+
+---
+
+## OPEN: `topo_n_basins` counts noise, and a prominence gate did not fix it (1.5.485)
+
+**Status: the bug is real and documented. The fix is not shipped, because I could not validate it.**
+
+``topology_metrics``'s ``topo_n_basins`` uses ``peak_local_max`` with only a ``min_distance``,
+which accepts **every** local maximum however small. Measured:
+
+===========================  ============  ============
+field                        n_basins      topo_cov
+===========================  ============  ============
+FLAT (0 structure), noise 5  **6.3**       0.001
+FLAT, noise 20               **6.3**       0.004
+FLAT, noise 60               **6.3**       0.013
+3 real peaks                 6             0.424
+6 real peaks                 6             0.338
+===========================  ============  ============
+
+**It is a constant, and it is anti-correlated with the truth** — a flat field reports 7 and a
+field with 3 genuine peaks reports 6. It is not measuring the field: it is measuring **how many
+points of separation ``min_distance`` fit inside the mask**. *"We found 7 chromatin domains"*
+would be a statement about the image dimensions.
+
+### The attempted fix, and why it was reverted
+A global prominence gate (median + 1 MAD of the envelope inside the mask) **made things worse**:
+the flat field still reported 4, while a field with 6 genuine peaks dropped to **2.3**.
+
+**The threshold interacts with the peaks it is supposed to count.** Real structure raises the
+median, which then excludes the structure. A global threshold cannot work here.
+
+### What a correct fix needs
+A **topological** prominence — how far each peak rises above the saddle that separates it from a
+higher peak — not a global intensity threshold. That is a persistence computation (the same
+machinery as persistent homology, which ``topology_tools`` is nominally about), and it is a real
+piece of work rather than a parameter tweak.
+
+**Until then, ``topo_cov`` is the statistic to trust**: 0.001 on a flat field, 0.42 with real
+structure. It responds correctly to exactly what ``n_basins`` cannot see. The module already
+carries a good statistic beside the broken one, and ``topo_n_basins_is_unreliable`` is now set on
+every result so a consumer can see which is which.

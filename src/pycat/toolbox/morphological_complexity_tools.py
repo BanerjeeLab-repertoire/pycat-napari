@@ -37,6 +37,34 @@ def fractal_dimension_box_counting(binary_mask: np.ndarray) -> float:
     D = 2 → space-filling / compact object.
     Values between 1 and 2 indicate fractal / irregular boundaries.
 
+    .. warning::
+
+       **D DEPENDS ON OBJECT SIZE, and comparing it across conditions whose objects differ in
+       size will manufacture a result.**
+
+       Box counting on a finite image has a finite range of box sizes, and the estimate
+       approaches its true value only as the object grows. A **filled square** — whose true
+       dimension is exactly 2.0 — measures:
+
+           64 px:  1.751     256 px:  1.852
+           128 px: 1.810     512 px:  1.881
+
+       It is climbing toward 2.0, and it never gets there.
+
+       **The consequence is a false conclusion that looks solid.** Two conditions containing
+       nothing but DISCS — identical shape, only the size differs:
+
+           small discs (r = 6 px):   **D = 0.966**  (sd 0.021)
+           large discs (r = 20 px):  **D = 1.516**  (sd 0.016)
+
+       **A 57 % difference in fractal dimension, from geometry alone.** The scatter is tiny, so
+       it would test as overwhelmingly significant — and *"condensates in condition B are more
+       space-filling"* is **completely false**. A disc is a disc.
+
+       **Only compare D between objects of comparable size**, or report it alongside the size so
+       a reader can see the confound. The algorithm itself is exact where it can be: a Sierpinski
+       triangle measures **1.5850** against an analytic log(3)/log(2) = **1.5850**.
+
     Parameters
     ----------
     binary_mask : (H, W) bool or 0/1 array
@@ -97,18 +125,35 @@ def fractal_dimension_per_cell(
         # Cell-level FD (all condensates together as one mask)
         cell_fd = fractal_dimension_box_counting(cell_puncta)
 
-        # Per-object FD (individual condensates)
+        # ── The SIZE must travel with D, or the confound is invisible ───────────
+        #
+        # D depends on object size (see the warning on `fractal_dimension_box_counting`), and
+        # this table is what a user compares between conditions. Two conditions containing
+        # nothing but DISCS — identical shape, only the size differs — give:
+        #
+        #     small discs (r = 6 px):   **D = 0.966**  (sd 0.021)
+        #     large discs (r = 20 px):  **D = 1.516**  (sd 0.016)
+        #
+        # **A 57 % difference from geometry alone**, with a scatter so small it would test as
+        # overwhelmingly significant. Without the size beside it, *"condition B is more
+        # space-filling"* is a false conclusion that looks solid.
         obj_fds = []
+        obj_areas = []
         for prop in sk.measure.regionprops(sk.measure.label(cell_puncta)):
             if prop.area >= 16:
                 b = prop.image
                 obj_fds.append(fractal_dimension_box_counting(b))
+                obj_areas.append(float(prop.area))
 
         rows.append({
             'cell_label':     int(cell_lbl),
             'cell_fd':        cell_fd,
             'mean_object_fd': float(np.nanmean(obj_fds)) if obj_fds else np.nan,
             'std_object_fd':  float(np.nanstd(obj_fds))  if obj_fds else np.nan,
+            # D is size-dependent. Compare it only between objects of comparable size, and this
+            # is the column that lets a reader check that.
+            'mean_object_area_px': float(np.mean(obj_areas)) if obj_areas else np.nan,
+            'total_puncta_area_px': float(cell_puncta.sum()),
             'n_objects_fd':   len(obj_fds),
         })
     return pd.DataFrame(rows)

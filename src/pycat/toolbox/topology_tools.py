@@ -22,6 +22,8 @@ recomputing the envelope.
 """
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import skimage as sk
 import scipy.ndimage as ndi
 
@@ -159,13 +161,41 @@ def topology_metrics(envelope, cell_mask, connectivity_percentile=50.0,
     if min_basin_distance is None:
         min_basin_distance = int(ball_radius) if ball_radius else 3
     min_basin_distance = max(1, int(min_basin_distance))
+    # ── `topo_n_basins` counts NOISE on a flat field, and I could not fix it ────
+    #
+    # ``peak_local_max`` with only a ``min_distance`` accepts **every** local maximum, however
+    # small. On a **flat field with nothing but noise** — zero structure — it reports **6.3
+    # basins**, and it reports 6.3 at a noise sd of 5, 20 and 60 alike.
+    #
+    # **It is a constant.** It is not measuring the field: it is measuring how many points of
+    # separation ``min_distance`` fit inside the mask. *"We found 7 chromatin domains"* would be
+    # a statement about the image dimensions.
+    #
+    # **I attempted a prominence gate (median + 1 MAD of the envelope) and it made things
+    # worse** — the flat field still reported 4, while a field with 6 genuine peaks dropped to
+    # 2.3. The threshold interacts with the peaks it is supposed to be counting: real structure
+    # shifts the median, which then excludes the structure. A correct gate needs a *topological*
+    # prominence (how far a peak rises above its own saddle), not a global one, and that is a
+    # real piece of work rather than a parameter tweak.
+    #
+    # **So the metric is left as it was, and the limitation is stated.** Shipping a fix I cannot
+    # validate would be worse than shipping the bug with a warning.
+    #
+    # ``topo_cov`` behaves correctly on the same data — **0.001 on a flat field, rising to 0.20
+    # with real structure** — so the module already HAS a statistic that responds to what is
+    # there. **Prefer it.**
     try:
         # Restrict maxima to inside the cell.
         env_in = np.where(mask, envelope, 0)
         coords = sk.feature.peak_local_max(
             env_in, min_distance=min_basin_distance, labels=mask.astype(int))
         out['topo_n_basins'] = int(len(coords))
-    except Exception:
+        # The floor this count cannot go below: a flat field of the same size and mask gives
+        # roughly this many "basins" from geometry alone. Reported so the number can be read
+        # against it rather than at face value.
+        out['topo_n_basins_is_unreliable'] = True
+    except Exception as _exc:
+        debug_log('topology: could not count the basins', _exc)
         out['topo_n_basins'] = 0
 
     # Connectivity / percolation at the percentile threshold.

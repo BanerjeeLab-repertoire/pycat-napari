@@ -195,3 +195,127 @@ def test_the_pedestal_is_removed_before_the_variance_pairs_are_built():
         f"was 17.86 (+79%), because nu came out at 49.0 instead of 100 — the pedestal was in "
         f"BOTH axes of the variance regression."
     )
+
+
+# ── Spatial correlation: the LENGTH SCALE, which is what a paper reports ──────────────────
+
+def _blurred_noise(blur_sigma, size=256, pedestal=0.0, seed=0):
+    """White noise blurred by a KNOWN sigma.
+
+    The ACF of ``noise * G(s)`` is ``G(s) (*) G(s) = G(s*sqrt(2))`` — so the correlation width
+    is **analytically ``blur_sigma * sqrt(2)``**, and this is exact ground truth.
+    """
+    from scipy import ndimage as ndi
+
+    rng = np.random.default_rng(seed)
+    field = ndi.gaussian_filter(rng.normal(0, 1, (size, size)), blur_sigma)
+    field = (field - field.min()) / (field.max() - field.min()) * 1000
+    return (field + 100 + pedestal).astype(np.float32)
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("blur", [2.0, 4.0, 6.0, 8.0])
+def test_the_acf_gaussian_needs_a_baseline_or_sigma_blows_up(blur):
+    """**A 43 % overestimate of the correlation length** — and the fix is one parameter.
+
+    ``_gaussian`` had **no offset term** (its docstring said so). But **a spatial ACF does not
+    decay to zero** — it sits on a floor — and a Gaussian forced through zero **must widen to
+    reach that floor.** The inflation grows with σ, because the floor is a larger fraction of the
+    lobe:
+
+    ===========  ==========  =====================  ===========
+    blur σ       expected    reported (no offset)   error
+    ===========  ==========  =====================  ===========
+    2.0          2.83        3.10                   +9 %
+    4.0          5.66        6.11                   +8 %
+    **6.0**      8.49        **12.17**              **+43 %**
+    8.0          11.31       **15.51**              **+37 %**
+    ===========  ==========  =====================  ===========
+
+    **It is not a finite-window effect** — a 512 px ROI is just as biased as a 128 px one. And an
+    independent Gaussian fit *with* an offset recovers the truth on exactly the same data, which
+    is how the missing term was isolated.
+    """
+    acf = pytest.importorskip("pycat.toolbox.spatial_acf_tools")
+
+    sigma_x, sigma_y, _map = acf.sacf_single_roi(_blurred_noise(blur))
+    measured = 0.5 * (sigma_x + sigma_y)
+    expected = blur * np.sqrt(2)
+
+    assert measured == pytest.approx(expected, rel=0.15), (
+        f"the ACF correlation length came out at {measured:.2f} px against an analytic "
+        f"{expected:.2f}. This is the length scale a paper reports."
+    )
+
+
+@pytest.mark.core
+def test_the_acf_is_pedestal_invariant():
+    """**Group A's pedestal hypothesis does NOT apply here** — and that is worth recording.
+
+    An autocorrelation is normalised, so an additive offset cancels. Verified: σ = 5.29 at
+    pedestals of 0, 1000 and 4000. **The physics differs from SpIDA and N&B**, and a hypothesis
+    that holds for three modules and not the fourth is only useful if the exception is known.
+    """
+    acf = pytest.importorskip("pycat.toolbox.spatial_acf_tools")
+
+    sigmas = []
+    for pedestal in (0.0, 1000.0, 4000.0):
+        sigma_x, sigma_y, _ = acf.sacf_single_roi(_blurred_noise(4.0, pedestal=pedestal))
+        sigmas.append(0.5 * (sigma_x + sigma_y))
+
+    assert max(sigmas) - min(sigmas) < 0.05, (
+        f"the ACF sigma moved across pedestals: {[round(s, 2) for s in sigmas]}. An ACF is "
+        f"normalised — an additive offset must cancel exactly."
+    )
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("blur", [2.0, 3.0, 4.0, 6.0])
+def test_ccf_sigma_was_the_std_of_the_VALUES_not_the_peak_width(blur):
+    """**A 13-fold underestimate**, and it would have been the same number for any structure.
+
+    ``ccf_sigma`` was ``np.std(ccf_values[peak_row, :])`` — the spread of the correlation
+    **coefficients** along a slice. That is a number in correlation units, bounded by the [−1, 1]
+    range of a Pearson coefficient. **It is not a length.** It came out at **0.33** on data whose
+    true correlation length is **4.24 px**.
+
+    **And the real σ was computed and thrown away.** ``curve_fit`` fits
+    ``gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y)``, and ``popt[3]``/``popt[4]`` ARE the
+    widths — in pixels, on the same axes the peak position is already reported in.
+    """
+    ccf_mod = pytest.importorskip("pycat.toolbox.correlation_func_analysis_tools")
+
+    channel = _blurred_noise(blur, size=128)
+    result = ccf_mod.process_ccf(channel, channel.copy(),
+                                 np.ones(channel.shape, bool))
+
+    sigma_x, sigma_y = result["ccf_sigma"]
+    measured = 0.5 * (sigma_x + sigma_y)
+    expected = blur * np.sqrt(2)
+
+    assert measured == pytest.approx(expected, rel=0.15), (
+        f"ccf_sigma = {measured:.2f} against an analytic correlation length of {expected:.2f} "
+        f"px. The old value was 0.33 for EVERY structure size — it was the standard deviation "
+        f"of the correlation VALUES, which is not a length at all."
+    )
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("shift", [(0, 3), (5, 0), (4, 4)])
+def test_the_ccf_peak_recovers_a_known_inter_channel_shift(shift):
+    """Audited and correct: the peak position is exact. This is chromatic-shift detection."""
+    from scipy import ndimage as ndi
+
+    ccf_mod = pytest.importorskip("pycat.toolbox.correlation_func_analysis_tools")
+
+    dy, dx = shift
+    channel_1 = _blurred_noise(3.0, size=128)
+    channel_2 = ndi.shift(channel_1, (dy, dx), order=3, mode='wrap').astype(np.float32)
+
+    result = ccf_mod.process_ccf(channel_1, channel_2, np.ones(channel_1.shape, bool))
+    peak = result["peak_location"]
+
+    # The sign and axis convention is the module's own; the MAGNITUDES are what must be right.
+    assert sorted(abs(int(v)) for v in peak) == sorted([abs(dy), abs(dx)]), (
+        f"a known shift of ({dy}, {dx}) was recovered as {peak}"
+    )

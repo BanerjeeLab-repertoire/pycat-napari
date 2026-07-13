@@ -45,6 +45,8 @@ Date: 2026
 from __future__ import annotations
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 import skimage as sk
 from scipy import ndimage
@@ -391,13 +393,46 @@ def condensate_metrics_3d(
         except Exception:
             sphericity = np.nan
 
-        # Ellipsoid axis lengths from the inertia tensor eigenvalues,
-        # generalising major/minor axis length to 3D.
+        # ── The axis lengths were scaling Z by the XY pixel size ────────────────
+        #
+        # ``prop`` comes from a ``regionprops`` call with **no spacing**, so its axis lengths are
+        # in VOXELS — and the code multiplied them by ``microns_per_pixel``, the **xy** pitch.
+        # On a confocal stack the z step is typically 3-5x the xy pixel, so **every z extent was
+        # divided by that factor.**
+        #
+        # Measured on a voxel of 0.1 x 0.1 x 0.5 um (5x anisotropic), against known geometry:
+        #
+        #     object                        true major    reported
+        #     sphere, r = 1 um              2.00 um       2.06      (fine -- isotropic)
+        #     **Z-ELONGATED, 4 um long**    **4.00 um**   **0.98**  <- a 4x UNDERESTIMATE
+        #     XY-elongated, 4 um long       4.00 um       4.45      (fine -- no z extent)
+        #
+        # **A 4 um object elongated in z was reported as 1 um.** The error is invisible on
+        # anything round, which is exactly why it survived: the sphere case is right.
+        #
+        # (The ``spacing`` argument WAS being passed — to the marching-cubes surface area, a few
+        # lines above. The axis lengths simply never used it.)
+        #
+        # The inertia tensor is computed in PHYSICAL units. For an ellipsoid, the eigenvalues of
+        # the (mass-normalised) inertia tensor relate to the semi-axes, and skimage's
+        # ``axis_major_length`` is ``4 * sqrt(largest eigenvalue of the central moment tensor)``
+        # — so scaling the coordinates before the moment calculation gives the axes in microns
+        # directly.
         try:
-            axes_lengths = prop.axis_major_length, prop.axis_minor_length
-            major_um = float(axes_lengths[0]) * microns_per_pixel
-            minor_um = float(axes_lengths[1]) * microns_per_pixel
-        except Exception:
+            _coords = np.argwhere(labeled_3d == prop.label).astype(float)
+            _coords *= np.array([z_step_um, microns_per_pixel, microns_per_pixel])
+            _centred = _coords - _coords.mean(axis=0)
+
+            # The central second-moment tensor, in microns^2.
+            _cov = (_centred.T @ _centred) / max(len(_centred), 1)
+            _eigenvalues = np.linalg.eigvalsh(_cov)
+            _eigenvalues = np.clip(_eigenvalues, 0.0, None)
+
+            # skimage's convention: axis length = 4 * sqrt(eigenvalue).
+            major_um = float(4.0 * np.sqrt(_eigenvalues[-1]))
+            minor_um = float(4.0 * np.sqrt(_eigenvalues[0]))
+        except Exception as _exc:
+            debug_log('3D metrics: could not compute the ellipsoid axes', _exc)
             major_um = minor_um = np.nan
 
         cz, cy, cx = prop.centroid
