@@ -42,24 +42,21 @@ import functools
 from pycat.utils.general_utils import debug_log
 
 
-# ── The roles a layer can have ────────────────────────────────────────────────────────────
+# ── THE ROLES ARE layer_tags.CORE_VALUES['role']. There is ONE vocabulary. ─────────────────
 #
-# Small and closed. A layer that does not fit one of these is a design question, not a new role.
-ROLES = (
-    'raw',              # straight off the microscope, untouched
-    'preprocessed',     # an image that has been filtered/corrected but is still an IMAGE
-    'mask',             # binary
-    'labels',           # integer-labelled objects
-    'overlay',          # points / shapes / tracks drawn ON something
-    'measurement',      # a derived quantity rendered as a layer (a map, a field)
-    'reference',        # a dark frame, a flat field, a PSF
-)
+# A first version of this module invented its OWN role set — 'raw', 'preprocessed', ... — and
+# ``layer_tags`` rejected every tag written with it. **I built the exact degeneracy this module
+# exists to prevent, into the thing that prevents it.**
+#
+# The roles are imported, not redeclared. If a role is missing, it is added in ONE place
+# (``layer_tags.CORE_VALUES``) and everything downstream sees it.
+#
+# Note that **'raw' vs 'derived' is PROVENANCE, not role** — ``layer_tags`` already carries that
+# distinction on its own key, and duplicating it here is what produced the collision.
+from pycat.utils.layer_tags import CORE_VALUES as _CORE_VALUES
 
-# ── What a layer can be OF ────────────────────────────────────────────────────────────────
-TARGETS = (
-    'condensate', 'cell', 'nucleus', 'punctum', 'bead', 'fibril', 'chromatin',
-    'droplet', 'aggregate', 'background', 'field',
-)
+ROLES = tuple(sorted(_CORE_VALUES['role']))
+TARGETS = tuple(sorted(_CORE_VALUES['target']))
 
 
 _OPERATIONS: dict[str, dict] = {}
@@ -94,8 +91,18 @@ def register_operation(op: str, *, role: str, summary: str,
 
     if not op:
         raise ValueError("an operation tag cannot be empty")
+    # The sweep uses a few convenience names that map onto the real roles. Mapping them here,
+    # ONCE, is better than either (a) inventing a second vocabulary or (b) rewriting 63
+    # decorators to say 'image' when they mean 'a filtered image'.
+    role = {'preprocessed': 'image', 'measurement': 'result', 'raw': 'image'}.get(role, role)
+
     if role not in ROLES:
-        raise ValueError(f"role '{role}' is not one of {ROLES}")
+        raise ValueError(
+            f"role '{role}' is not one of {ROLES}.\n\n"
+            f"**These are layer_tags.CORE_VALUES['role'] — there is ONE vocabulary.** If a new "
+            f"kind of layer genuinely exists, add it THERE and everything downstream sees it. "
+            f"Inventing a second set here is what produced a version of this module whose every "
+            f"tag was rejected by the validator.")
     if target is not None and target not in TARGETS:
         raise ValueError(f"target '{target}' is not one of {TARGETS}")
 
@@ -282,3 +289,65 @@ def attach_plot_tags(figure, source_layers, *, plot_of=None, **extra):
     except Exception as exc:
         debug_log('tag_registry: could not attach tags to the figure', exc)
     return tags
+
+# ── Operations that live only in the UI ───────────────────────────────────────────────────
+#
+# Not every operation is a toolbox function. **CLAHE is a UI action** — ``_add_run_clahe`` calls
+# ``skimage.exposure.equalize_adapthist`` directly, and a sweep of ``*_tools.py`` misses it
+# entirely. So does every napari-native action: a user drawing a shape, merging two label layers,
+# expanding labels.
+#
+# These are registered here, in one place, because **an operation with no home is an operation
+# that produces an untagged layer** — and Gable's requirement is that *everything* that makes,
+# merges or changes a layer tags it.
+
+def _register_ui_operations():
+    """The operations that have no toolbox function to decorate. **Registered explicitly.**"""
+
+    _UI_OPS = [
+        # ---- filtering (ui_filtering_mixin) --------------------------------------------------
+        ('clahe', 'preprocessed', 'Contrast-limited adaptive histogram equalisation', None,
+         ('equalize_adapthist',)),
+        ('im2bw', 'mask', 'Binarise at a threshold', None, ('binarize',)),
+        ('best_slice', 'preprocessed', 'Select the best-focused slice of a stack', None, ()),
+        ('morph_gaussian', 'preprocessed', 'Morphological Gaussian filter', None, ()),
+
+        # ---- labels & masks (ui_labels_mixin) ------------------------------------------------
+        #
+        # **These are the MERGES.** A user combining two masks is changing a layer, and the
+        # result must say how it was made — otherwise "what is this mask?" has no answer.
+        ('labels_to_mask', 'mask', 'Convert a labels layer to a binary mask', None, ()),
+        ('label_mask', 'labels', 'Label a binary mask into distinct objects', None, ()),
+        ('expand_labels', 'labels', 'Expand labels outward by a distance', None, ()),
+        ('mask_merge', 'mask', 'Logical merge of two masks (AND/OR/XOR/subtract)', None,
+         ('mask_logic_merge',)),
+        ('multi_merge', 'mask', 'Merge several mask layers at once', None, ()),
+        ('two_layer_merge', 'labels', 'Advanced merge of two label layers', None, ()),
+        ('relabel', 'labels', 'Renumber or increment label values', None, ()),
+
+        # ---- segmentation (ui_segmentation_mixin) --------------------------------------------
+        ('stardist', 'labels', 'StarDist star-convex object segmentation', 'cell', ()),
+        ('rf_classifier', 'labels', 'Trained random-forest pixel classifier', None, ()),
+
+        # ---- napari-native user actions ------------------------------------------------------
+        #
+        # A user drawing an ROI, painting a label, or picking points IS changing the data, and the
+        # layer that results is as real as any computed one. **An untagged hand-drawn ROI is
+        # indistinguishable from a computed mask**, which is exactly the confusion the tag system
+        # exists to remove.
+        ('hand_drawn', 'annotation', 'Drawn by the user in napari (shapes/points)', None,
+         ('user_drawn',)),
+        ('hand_painted', 'labels', 'Painted by the user in the napari labels editor', None, ()),
+        ('cropped', 'image', 'Cropped to a region', None, ()),
+    ]
+
+    for op, role, summary, target, aliases in _UI_OPS:
+        try:
+            register_operation(op, role=role, summary=summary, target=target, aliases=aliases)
+            _OPERATIONS[op]['registered_by'] = 'pycat.utils.tag_registry (UI operation)'
+        except TagCollision:
+            # Already registered by a toolbox function -- that is fine and correct.
+            pass
+
+
+_register_ui_operations()

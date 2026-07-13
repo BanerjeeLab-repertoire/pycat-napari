@@ -4,6 +4,71 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.493] - 2026-07-10
+### Every layer is tagged, and **no call site can forget**
+**116 ``viewer.add_*`` call sites. 2 of them tagged anything.**
+
+Editing the other 114 by hand is a one-off sweep that decays the moment someone adds the 117th —
+**and the 117th is exactly the one that will be forgotten**, because nobody adding a layer is
+thinking about the tag system.
+
+So the interception happens **once, at the viewer** (``layer_tag_hook.install``). **A new call
+site is tagged automatically, because it does not know it is being tagged.**
+
+### What can be known, and what cannot — the guarantee is deliberately asymmetric
+| source | reliability |
+|---|---|
+| **The caller** — a function on the stack carrying ``__pycat_op__`` | **Definitional.** But it usually will not fire: UI code calls the transform and *then* adds the layer, so the decorated function has already returned. |
+| **The layer name** — ``'CLAHE'``, ``'Cellpose labels'`` | **A heuristic**, and treated as one (``source='inferred'``). Only ~10 names are literals in the source; the rest are built at runtime. |
+| **The data** — an integer array with max ≤ 1 is a *mask*; more values are *labels* | **Always knowable, with certainty.** |
+
+- **``role`` is ALWAYS set.** This is what makes *"where is the mask?"* answerable for **every**
+  layer in the viewer.
+- **``op`` is set only when it is KNOWN.** **An absent tag is honest; a guessed one is a lie that
+  will be queried as truth.**
+
+A layer with a role and no op is still queryable. **A layer with nothing is invisible.**
+
+### FOUND — I built the exact degeneracy the registry exists to prevent, **into the registry**
+``tag_registry`` declared its own ``ROLES`` — ``'raw'``, ``'preprocessed'``, ``'measurement'`` —
+and ``layer_tags.CORE_VALUES['role']`` is a **different set**. **Every tag the hook wrote was
+rejected by the validator**, silently, in the debug log, *while the tag system appeared to work.*
+
+Then the hook did the same thing again, independently.
+
+**The roles are now IMPORTED, not redeclared.** There is **one** vocabulary. If a new kind of
+layer genuinely exists, it is added in **one** place and everything downstream sees it.
+
+*(And ``'raw'`` vs ``'derived'`` is what **provenance** already carries — duplicating it as a role
+is what produced the collision.)* Guarded by
+``test_there_is_ONE_role_vocabulary_and_the_registry_does_not_invent_a_second``.
+
+### `layer_tags` extended, not replaced
+- **``role``** gains ``labels``, ``overlay``, ``reference`` — the original set could not
+  distinguish a **mask** (binary) from **labels** (many objects), and had nowhere to put an
+  overlay or a dark-frame reference. **A layer whose kind cannot be expressed is a layer that
+  cannot be found.**
+- **``op``, ``target``, ``layer_type``** are new core keys.
+- **``op`` is validated against the REGISTRY**, not a set in the file — because **the vocabulary
+  of operations IS the set of functions that exist**, and a hand-maintained list would drift from
+  them the first time someone adds a filter. **An unregistered op is refused.**
+
+### CLAHE is a UI action, and a sweep of the toolbox misses it
+``_add_run_clahe`` calls ``skimage.exposure.equalize_adapthist`` **directly** — there is no
+toolbox function to decorate. **So do all the napari-native operations.**
+
+**16 UI-only operations registered**, including exactly what Gable asked for:
+
+- **``clahe``** — the one he named
+- **``mask_merge``, ``multi_merge``, ``two_layer_merge``** — *the merges*
+- **``expand_labels``, ``relabel``** — *changes* a layer
+- **``hand_drawn``, ``hand_painted``** — **napari-native user actions**
+
+> **An untagged hand-drawn ROI is indistinguishable from a computed mask** — which is exactly the
+> confusion the tag system exists to remove.
+
+**79 operations in the vocabulary. 262/262 core tests passing.**
+
 ## [1.5.492] - 2026-07-10
 ### PINNED — two audit findings that change numbers in existing data
 Written up in ``docs/audits/DEV_NOTES.md`` with enough detail to pick up cold: what was wrong,

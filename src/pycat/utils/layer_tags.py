@@ -60,6 +60,9 @@ METADATA_KEY = 'pycat_tags'
 # exists. Free tags are allowed under a 'user:' key prefix (permissive extras).
 CORE_KEYS = {
     'role',          # what the layer IS in the workflow
+    'op',            # WHICH OPERATION produced it -- see pycat.utils.tag_registry
+    'target',        # what the layer is OF: condensate / cell / nucleus / punctum / bead...
+    'layer_type',    # the napari type it was added as (image/labels/points/shapes/tracks)
     'dimensionality',# 2d / 2d+t / z-stack / multi-position
     'modality',      # fluorescence / brightfield
     'channel',       # fluorophore / stain identity (free value from metadata)
@@ -69,8 +72,23 @@ CORE_KEYS = {
 }
 
 CORE_VALUES = {
-    'role': {'image', 'mask', 'bead_stack', 'host_mask', 'roi',
-             'annotation', 'result'},
+    # ── 'labels', 'overlay' and 'reference' are ADDITIONS (1.5.493) ─────────────
+    #
+    # The original set could not distinguish a MASK (binary) from LABELS (many objects), and had
+    # nowhere to put a points/shapes/tracks overlay or a dark-frame reference. All three are real
+    # kinds of layer, and a layer whose kind cannot be expressed is a layer that cannot be found.
+    #
+    # NOTE: 'raw' and 'preprocessed' deliberately do NOT go here — that is what 'provenance'
+    # already carries ('raw' / 'derived'). **A second vocabulary for the same idea is exactly the
+    # degeneracy the tag system exists to prevent**, and a first version of the auto-tagging hook
+    # tried to invent one before this was noticed.
+    'role': {'image', 'mask', 'labels', 'bead_stack', 'host_mask', 'roi',
+             'annotation', 'result', 'overlay', 'reference'},
+    'target': {'condensate', 'cell', 'nucleus', 'punctum', 'bead', 'fibril',
+               'chromatin', 'droplet', 'aggregate', 'background', 'field'},
+    'layer_type': {'image', 'labels', 'points', 'shapes', 'tracks', 'vectors', 'surface'},
+    # 'op' has its values validated against the OPERATION REGISTRY, not a set here -- see
+    # tag_registry.get_operation(). A tag that is not a registered operation is REFUSED.
     'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
     'modality': {'fluorescence', 'brightfield'},
     'scale': {'calibrated', 'uncalibrated'},
@@ -151,6 +169,26 @@ def _validate(key, value):
         if value not in CORE_VALUES[key]:
             return False, (f"value '{value}' not in controlled set for core key "
                            f"'{key}' ({sorted(CORE_VALUES[key])})")
+
+    # ── 'op' is validated against the OPERATION REGISTRY ────────────────────────
+    #
+    # Not against a set written here, because the vocabulary of operations IS the set of
+    # functions that exist — and a list maintained by hand in this file would drift away from
+    # them the first time someone adds a filter.
+    #
+    # **An op that is not registered is a degenerate tag**: nothing else will ever match it, no
+    # query will find it, and it rots in the data looking like a real tag. It is refused.
+    if key == 'op':
+        try:
+            from pycat.utils.tag_registry import get_operation
+        except Exception:
+            return True, ''          # the registry is optional; do not break tagging on it
+        if get_operation(value) is None:
+            return False, (
+                f"'{value}' is not a registered operation. **A tag outside the vocabulary "
+                f"cannot be queried** — declare it with @tags_layer on the function that "
+                f"performs it (see pycat.utils.tag_registry).")
+
     return True, ''
 
 

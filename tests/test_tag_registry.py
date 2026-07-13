@@ -132,14 +132,21 @@ def test_the_canonical_tags_exist_and_mean_what_they_say():
 
     operations = registry.list_operations()
 
+    # NOTE: the roles are layer_tags.CORE_VALUES['role'] — there is ONE vocabulary. A filtered
+    # image is still an 'image'; 'raw' vs 'derived' is what PROVENANCE carries. A first version
+    # of the registry invented 'preprocessed' as a role, and layer_tags rejected every tag it
+    # wrote — **the exact degeneracy the registry exists to prevent, built into the preventer.**
     for op, expected_role in [
-        ('log', 'preprocessed'),            # Laplacian of Gaussian — Gable named this one
-        ('dog', 'preprocessed'),            # difference of Gaussians
-        ('rolling_ball', 'preprocessed'),   # the background remover everyone uses
+        ('clahe', 'image'),                 # Gable named this one
+        ('log', 'image'),                   # Laplacian of Gaussian — and this one
+        ('dog', 'image'),                   # difference of Gaussians
+        ('rolling_ball', 'image'),          # the background remover everyone uses
         ('watershed', 'labels'),            # the splitter
         ('cellpose', 'labels'),             # the segmenter
-        ('bandpass', 'preprocessed'),
-        ('invert', 'preprocessed'),
+        ('mask_merge', 'mask'),             # a MERGE — a user combining two masks
+        ('hand_drawn', 'annotation'),       # a napari-native user action
+        ('bandpass', 'image'),
+        ('invert', 'image'),
     ]:
         assert op in operations, f"'{op}' is not in the vocabulary"
         assert operations[op]['produces'] == expected_role, (
@@ -283,3 +290,94 @@ def test_every_layer_producing_transform_declares_a_tag():
           "Add @tags_layer to the function — or, if it does not produce a layer, add it to "
           "_KNOWN_UNTAGGED with a reason."
     )
+
+
+@pytest.mark.core
+def test_there_is_ONE_role_vocabulary_and_the_registry_does_not_invent_a_second():
+    """**I made this mistake twice, in the module built to prevent it.**
+
+    The first version of ``tag_registry`` declared its own ``ROLES`` — ``'raw'``,
+    ``'preprocessed'``, ``'measurement'`` — and ``layer_tags`` **rejected every tag it wrote**,
+    because ``layer_tags.CORE_VALUES['role']`` is a *different set*. Then the auto-tagging hook
+    did the same thing, independently.
+
+    **That is the exact degeneracy the tag system exists to prevent, built into the preventer.**
+
+    So the roles are **imported**, not redeclared. If a new kind of layer genuinely exists, it is
+    added in **one** place and everything downstream sees it.
+
+    *(And ``'raw'`` vs ``'derived'`` is what **provenance** already carries — duplicating it as a
+    role is what produced the collision.)*
+    """
+    registry = _registry()
+    layer_tags = pytest.importorskip("pycat.utils.layer_tags")
+
+    assert set(registry.ROLES) == set(layer_tags.CORE_VALUES['role']), (
+        f"the registry's roles ({sorted(registry.ROLES)}) are not layer_tags' roles "
+        f"({sorted(layer_tags.CORE_VALUES['role'])}). **There must be ONE vocabulary.** If they "
+        f"diverge, every tag the registry writes will be rejected by the validator — silently, "
+        f"in the debug log, while the tag system appears to work."
+    )
+
+    _load_tagged_modules()
+    for op, entry in registry.list_operations().items():
+        assert entry['produces'] in layer_tags.CORE_VALUES['role'], (
+            f"'{op}' produces '{entry['produces']}', which layer_tags will REJECT"
+        )
+
+
+@pytest.mark.core
+def test_the_op_key_is_validated_against_the_REGISTRY():
+    """**A tag outside the vocabulary rots in the data**, looking like a real tag.
+
+    ``layer_tags`` validates ``role`` against a set written in that file. It cannot do the same
+    for ``op``, because **the vocabulary of operations IS the set of functions that exist** — a
+    hand-maintained list would drift from them the first time someone adds a filter.
+
+    So ``op`` is validated against the registry, and an unregistered value is refused.
+    """
+    layer_tags = pytest.importorskip("pycat.utils.layer_tags")
+    _load_tagged_modules()
+
+    class _FakeLayer:
+        def __init__(self):
+            self.metadata = {}
+            self.name = 'x'
+
+    layer = _FakeLayer()
+
+    assert layer_tags.tag_layer(layer, 'op', 'clahe', source='derived'), (
+        "a REGISTERED operation must be accepted"
+    )
+    assert not layer_tags.tag_layer(layer, 'op', 'not_a_real_operation', source='derived'), (
+        "an UNREGISTERED operation must be REFUSED. A tag nothing will ever match is worse than "
+        "no tag: it looks like data."
+    )
+
+
+@pytest.mark.core
+def test_the_UI_only_operations_are_registered():
+    """**CLAHE is a UI action, not a toolbox function.** A sweep of ``*_tools.py`` misses it.
+
+    So do all the napari-native ones — a user **drawing** a shape, **merging** two label layers,
+    **painting** a label. Gable's requirement is that *everything* that **makes, merges or
+    changes** a layer tags it, and **an operation with no home produces an untagged layer.**
+
+    **An untagged hand-drawn ROI is indistinguishable from a computed mask** — which is exactly
+    the confusion the tag system exists to remove.
+    """
+    registry = _registry()
+    operations = registry.list_operations()
+
+    for op in ('clahe',            # the one Gable named — and it lives in ui_filtering_mixin
+               'mask_merge',       # a MERGE
+               'multi_merge',
+               'two_layer_merge',
+               'expand_labels',    # CHANGES a layer
+               'hand_drawn',       # a napari-native user action
+               'hand_painted',
+               'stardist'):        # a segmenter with no toolbox function
+        assert op in operations, (
+            f"'{op}' is not in the vocabulary. It makes, merges or changes a layer — and an "
+            f"operation with no home produces an UNTAGGED layer."
+        )

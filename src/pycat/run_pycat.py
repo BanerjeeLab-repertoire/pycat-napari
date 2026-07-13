@@ -107,6 +107,8 @@ import importlib.resources as resources
 
 # Third party imports
 import napari
+
+from pycat.utils.general_utils import debug_log
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon 
 
@@ -374,6 +376,21 @@ def run_pycat_func():
     # its main-thread setup before the warmup thread starts. The warmup can also
     # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
     viewer = napari.Viewer(title="PyCAT")
+
+    # ── Every layer this viewer makes is tagged, and no call site can forget ────
+    #
+    # There are 116 ``viewer.add_*`` call sites in PyCAT, and 2 of them tagged anything. Editing
+    # the other 114 by hand is a one-off sweep that decays the moment someone adds the 117th —
+    # **and the 117th is exactly the one that will be forgotten**, because nobody adding a layer
+    # is thinking about the tag system.
+    #
+    # So the interception happens ONCE, here. A new call site is tagged automatically, because it
+    # does not know it is being tagged.
+    try:
+        from pycat.utils.layer_tag_hook import install as _install_tag_hook
+        _install_tag_hook(viewer)
+    except Exception as _exc:
+        debug_log('run_pycat: could not install the layer tag hook', _exc)
 
     # Dual pixel / micron coordinate readout in the status bar. PyCAT scales
     # layers by pixel size (µm/px), so napari's default status shows microns
