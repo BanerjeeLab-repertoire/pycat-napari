@@ -238,3 +238,177 @@ def test_regionprops_bbox_is_kept_not_discarded():
     assert columns == dict(bbox_y0=10, bbox_x0=30, bbox_y1=20, bbox_x1=45), (
         f"the bbox columns are wrong: {columns}"
     )
+
+
+@pytest.mark.core
+def test_a_grouped_scatter_needs_PER_GROUP_refs_or_it_resolves_to_the_WRONG_OBJECT():
+    """**The silent mis-indexing trap**, and it would never be noticed.
+
+    ``plot_focus_diagnostic`` draws its scatter **per group** (bright / sharp-dim / blurry-dim).
+    matplotlib reports the index **within the picked artist** — and each group is its own artist.
+
+    A single flat list of refs would therefore be mis-indexed: clicking the **third green point**
+    resolves to the **third row of the whole table**, which is a **different object**. The click
+    would open an image, the image would look plausible, and it would be the wrong object.
+
+    Measured on a real grouped scatter: the click resolves to **object 4** with per-group refs,
+    and would have given **object 1** with a flat list.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+
+    plots = pytest.importorskip("pycat.toolbox.analysis_plots")
+
+    rng = np.random.default_rng(0)
+    n = 30
+    table = pd.DataFrame(dict(
+        label=range(n),
+        intensity_ratio=rng.uniform(0.3, 1.2, n),
+        sharpness_ratio=rng.uniform(0.4, 1.1, n),
+        interpretation=rng.choice(['bright',
+                                   'sharp_dim (likely nucleation/growth)',
+                                   'blurry_dim (likely below focus)'], n),
+        bbox_y0=rng.integers(0, 80, n), bbox_x0=rng.integers(0, 80, n)))
+    table['bbox_y1'] = table.bbox_y0 + 16
+    table['bbox_x1'] = table.bbox_x0 + 16
+
+    picked = []
+    figure = plots.plot_focus_diagnostic(table, source_path='/tmp/x.tif',
+                                         on_select=picked.append)
+
+    first_group_name = sorted(table.interpretation.unique())[0]
+    first_group = table[table.interpretation == first_group_name]
+
+    class _PickEvent:
+        artist = figure.axes[0].collections[0]
+        ind = [1]
+
+        class canvas:
+            @staticmethod
+            def draw_idle():
+                pass
+
+    figure.canvas.callbacks.process('pick_event', _PickEvent())
+
+    assert picked, "the grouped scatter is not pickable"
+    ref = picked[0]
+
+    expected = first_group.iloc[1]
+    assert ref.object_id == int(expected.label), (
+        f"the click resolved to object {ref.object_id}; the second point of that GROUP is object "
+        f"{int(expected.label)}. A flat ref list would give object {int(table.iloc[1].label)} — "
+        f"**the wrong object, silently.**"
+    )
+
+
+@pytest.mark.core
+def test_the_bbox_survives_regionprops_table_into_an_ObjectRef():
+    """**The main cell and puncta tables go through ``regionprops_table``, not a loop.**
+
+    skimage expands ``'bbox'`` into ``bbox-0..bbox-3`` — hyphenated names that are awkward in a
+    DataFrame (``df.bbox-0`` is a subtraction). They are renamed once, where they are produced, to
+    the ``bbox_y0..bbox_x1`` that ``ObjectRef`` reads.
+    """
+    import skimage as sk
+
+    ref_mod = pytest.importorskip("pycat.utils.object_ref")
+
+    labels = np.zeros((64, 64), np.int32)
+    labels[10:20, 30:45] = 1
+    image = np.where(labels > 0, 900.0, 100.0)
+
+    table = pd.DataFrame(sk.measure.regionprops_table(
+        labels, intensity_image=image, properties=('label', 'area', 'bbox')))
+
+    assert 'bbox-0' in table.columns, "skimage's raw column naming has changed"
+
+    table = ref_mod.normalise_bbox_columns(table)
+    assert 'bbox_y0' in table.columns and 'bbox-0' not in table.columns
+
+    ref = ref_mod.ObjectRef.from_row(table.iloc[0], source_path='/tmp/x.tif')
+    assert ref.bbox == (10, 30, 20, 45), f"the bbox came through as {ref.bbox}"
+    assert ref.is_resolvable_offline()
+
+
+# ── The bbox sweep must STAY complete ─────────────────────────────────────────────────────
+
+@pytest.mark.core
+def test_a_ref_points_at_the_OBJECT_and_not_at_its_PARENT():
+    """**A ref that points at the wrong object is worse than one that points at nothing.**
+
+    The click **lands** — on the wrong thing — and nothing says so.
+
+    A first version listed ``cell_label`` as a fallback for ``object_id``. On a puncta table,
+    whose column is ``punctum_label``, that fallback fired: **four different puncta all came back
+    as object 1**, because they all live in cell 1.
+
+    The object's own identity and its parent's are **different questions**, and they get different
+    fields.
+    """
+    ref_mod = pytest.importorskip("pycat.utils.object_ref")
+
+    table = pd.DataFrame([
+        dict(punctum_label=1, cell_label=1, bbox_y0=16, bbox_x0=16, bbox_y1=25, bbox_x1=25),
+        dict(punctum_label=2, cell_label=1, bbox_y0=16, bbox_x0=40, bbox_y1=25, bbox_x1=49),
+        dict(punctum_label=3, cell_label=1, bbox_y0=40, bbox_x0=16, bbox_y1=49, bbox_x1=25),
+    ])
+
+    refs = ref_mod.refs_from_dataframe(table, source_path='/tmp/x.tif')
+    object_ids = [ref.object_id for ref in refs]
+
+    assert len(set(object_ids)) == 3, (
+        f"three different puncta resolved to object ids {object_ids}. They all live in cell 1, "
+        f"and the ref is reporting the CELL's id — so every click would land on the same object."
+    )
+    assert all(ref.parent_id == 1 for ref in refs), (
+        "the parent (the cell) must still be recorded — it is a different question, not a "
+        "competing answer"
+    )
+
+
+@pytest.mark.core
+def test_the_per_object_results_tables_KEEP_the_bbox():
+    """**24 of 25 regionprops call sites were discarding it.**
+
+    A per-object results table without a bbox is a table whose rows **cannot be turned back into
+    an image** — which is the difference between a plot you can click and a plot you can only look
+    at. In **batch** it is the only route back to the object at all, because the layer is gone.
+
+    This test reads the source, so a **new** per-object table that forgets the bbox is caught at
+    the moment it is written.
+
+    *(Per-FRAME and per-CELL aggregates are correctly excluded: a row that summarises forty
+    objects has no single object to point at, and giving it a bbox would be a lie.)*
+    """
+    import ast
+
+    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+
+    # The per-object tables — a `prop` is in scope where the row is built, so there IS a single
+    # object to point at.
+    should_keep_bbox = {
+        'spatial_metrology_tools.py',
+        'label_and_mask_tools.py',
+        'brightfield_tools.py',
+        'dynamic_spatial_tools.py',
+        'morphological_complexity_tools.py',
+        'condensate_physics_tools.py',
+        'zstack_segmentation_tools.py',
+    }
+
+    missing = []
+    for name in sorted(should_keep_bbox):
+        path = toolbox / name
+        if not path.exists():
+            continue
+        source = path.read_text(encoding='utf-8', errors='ignore')
+        if 'regionprops' not in source:
+            continue
+        if 'bbox' not in source:
+            missing.append(name)
+
+    assert not missing, (
+        f"these modules build per-object results tables from regionprops and keep NO bbox: "
+        f"{missing}. Their rows cannot be turned back into an image — regionprops provides the "
+        f"bbox free, and discarding it is what makes a plot unclickable."
+    )

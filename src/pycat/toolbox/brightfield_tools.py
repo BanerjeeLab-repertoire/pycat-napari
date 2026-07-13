@@ -60,6 +60,8 @@ from __future__ import annotations
 import numpy as np
 
 
+
+from pycat.utils.object_ref import bbox_columns_from_regionprops
 from pycat.utils.tag_registry import tags_layer
 # Optical density is a LOG of a RATIO, so it needs the detector's zero point. An image
 # that has been normalised, CLAHE'd or top-hatted cannot produce one: measured, the
@@ -978,6 +980,13 @@ def bf_per_cell_summary(
 
         if n == 0:
             rows.append({
+                # ── KEEP THE BBOX. It is what makes this row brushable. ────────────────
+                #
+                # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25
+                # call sites. **A row without a bbox cannot be turned back into an image** —
+                # which is the difference between a plot you can click and one you can only
+                # look at. In BATCH it is the only route back to the object at all.
+                **bbox_columns_from_regionprops(prop),
                 'cell_label': prop.label,
                 'cell_area_um2': cell_area_um2,
                 'n_condensates': 0,

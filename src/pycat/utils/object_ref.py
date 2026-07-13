@@ -124,8 +124,20 @@ class ObjectRef:
             except Exception as exc:
                 debug_log('ObjectRef: could not assemble a bbox from columns', exc)
 
+        # ── The OBJECT's own id, and NOT its parent's ────────────────────────────
+        #
+        # A first version listed 'cell_label' as a fallback for object_id, and on a puncta table
+        # — whose column is 'punctum_label' — **every punctum reported its CELL's id.** Four
+        # different puncta all came back as object 1.
+        #
+        # A ref that points at the wrong object is worse than one that points at nothing: the
+        # click LANDS, on the wrong thing, and nothing says so.
+        #
+        # So the object's own identity is looked for by every name PyCAT actually uses, and the
+        # PARENT is a separate field. They are different questions.
         return cls(
-            object_id=_get('object_id', 'label', 'condensate_label', 'cell_label'),
+            object_id=_get('object_id', 'label', 'punctum_label', 'condensate_label',
+                           'droplet_label', 'bead_label', 'track_id', 'cell_label'),
             frame=_get('frame', 't', 'z'),
             bbox=bbox,
             source_path=(str(source_path) if source_path
@@ -252,3 +264,32 @@ def resolve_offline(ref: ObjectRef, *, pad_px=8):
     except Exception as exc:
         debug_log('resolve_offline: could not read the crop', exc)
         return None, f"Could not read {path.name}: {exc}"
+
+def normalise_bbox_columns(df):
+    """**Rename skimage's ``bbox-0..bbox-3`` to the ``bbox_y0..bbox_x1`` an ObjectRef reads.**
+
+    ``regionprops_table(..., properties=(..., 'bbox'))`` expands the bounding box into four
+    columns named ``bbox-0``, ``bbox-1``, ``bbox-2``, ``bbox-3`` — in ``(min_row, min_col,
+    max_row, max_col)`` order, which is ``(y0, x0, y1, x1)``.
+
+    Those hyphenated names are awkward in a DataFrame (``df.bbox-0`` is a subtraction), and they
+    do not survive a round-trip through a user's spreadsheet intact in anyone's memory. So they
+    are renamed once, here, at the point they are produced.
+
+    **Idempotent** — a table that has already been normalised, or never had a bbox, passes
+    through untouched.
+    """
+    if df is None or not hasattr(df, 'columns'):
+        return df
+
+    mapping = {'bbox-0': 'bbox_y0', 'bbox-1': 'bbox_x0',
+               'bbox-2': 'bbox_y1', 'bbox-3': 'bbox_x1'}
+    present = {k: v for k, v in mapping.items() if k in df.columns}
+
+    if present:
+        try:
+            df = df.rename(columns=present)
+        except Exception as exc:
+            debug_log('normalise_bbox_columns: the rename failed', exc)
+
+    return df

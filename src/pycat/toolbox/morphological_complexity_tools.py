@@ -20,6 +20,8 @@ Date: 2025
 from __future__ import annotations
 import warnings
 import numpy as np
+
+from pycat.utils.object_ref import bbox_columns_from_regionprops
 import pandas as pd
 import skimage as sk
 from scipy import ndimage
@@ -254,6 +256,13 @@ def tortuosity_per_object(
 
         if len(skel_pts) < 2:
             rows.append({'label': prop.label, 'tortuosity': np.nan,
+                # ── KEEP THE BBOX. It is what makes this row brushable. ────────────────
+                #
+                # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25
+                # call sites. **A row without a bbox cannot be turned back into an image** —
+                # which is the difference between a plot you can click and one you can only
+                # look at. In BATCH it is the only route back to the object at all.
+                **bbox_columns_from_regionprops(prop),
                          'path_length_um': np.nan, 'end_to_end_um': np.nan,
                          'eccentricity': prop.eccentricity})
             continue
@@ -330,6 +339,13 @@ def orientation_order_parameter(
         minn = prop.axis_minor_length
         aniso = (1 - minn / maj) if maj > 0 else 0.0
         rows.append({
+            # ── KEEP THE BBOX. It is what makes this row brushable. ────────────────
+            #
+            # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25
+            # call sites. **A row without a bbox cannot be turned back into an image** —
+            # which is the difference between a plot you can click and one you can only
+            # look at. In BATCH it is the only route back to the object at all.
+            **bbox_columns_from_regionprops(prop),
             'label':           prop.label,
             'orientation_rad': prop.orientation,
             'eccentricity':    prop.eccentricity,

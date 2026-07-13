@@ -21,6 +21,9 @@ Date: 2025
 """
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.object_ref import bbox_columns_from_regionprops
+from pycat.utils.object_ref import bbox_columns_from_regionprops as _bbox_cols
 import pandas as pd
 import skimage as sk
 from scipy.spatial import cKDTree
@@ -58,6 +61,9 @@ def extract_frame_properties(
                 'major_axis_um': prop.axis_major_length * microns_per_pixel,
                 'minor_axis_um': prop.axis_minor_length * microns_per_pixel,
                 'eccentricity':  prop.eccentricity,
+                # The bbox is what lets a plot point be turned back into an image — essential in
+                # batch, where the source file is not loaded. regionprops gives it free.
+                **_bbox_cols(prop),
             })
     return pd.DataFrame(rows)
 
@@ -612,6 +618,13 @@ def detect_merge_fission(
             if len(overlap_labels) >= 2:
                 cy, cx = prop1.centroid
                 rows.append({
+                    # ── KEEP THE BBOX. It is what makes this row brushable. ────────────────
+                    #
+                    # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25
+                    # call sites. **A row without a bbox cannot be turned back into an image** —
+                    # which is the difference between a plot you can click and one you can only
+                    # look at. In BATCH it is the only route back to the object at all.
+                    **bbox_columns_from_regionprops(prop1),
                     'frame':       t + 1,
                     'event_type':  'merge',
                     'n_objects':   len(overlap_labels),
@@ -627,6 +640,13 @@ def detect_merge_fission(
             if len(overlap_labels) >= 2:
                 cy, cx = prop0.centroid
                 rows.append({
+                    # ── KEEP THE BBOX. It is what makes this row brushable. ────────────────
+                    #
+                    # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25
+                    # call sites. **A row without a bbox cannot be turned back into an image** —
+                    # which is the difference between a plot you can click and one you can only
+                    # look at. In BATCH it is the only route back to the object at all.
+                    **bbox_columns_from_regionprops(prop0),
                     'frame':       t,
                     'event_type':  'fission',
                     'n_objects':   len(overlap_labels),

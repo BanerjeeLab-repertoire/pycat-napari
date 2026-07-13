@@ -4,6 +4,98 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.495] - 2026-07-10
+### The bbox now travels with the results tables — **without it, nothing is brushable**
+**25 files call ``regionprops``. One kept the bbox.** Every results table that discarded it is a
+table whose rows **cannot be turned back into an image**.
+
+Swept:
+- **``feature_analysis_tools``** — the **main cell and puncta tables**, the ones a user actually
+  plots. These go through ``regionprops_table``, not a loop, so ``'bbox'`` is added to the
+  properties tuple.
+- **``segmentation_tools``** — the puncta table.
+- **``dynamic_spatial_tools``** — the per-frame object table that feeds **every tracking plot**.
+- **``condensate_physics_tools``** — the per-cell partition table.
+
+skimage expands ``'bbox'`` into ``bbox-0..bbox-3`` — hyphenated names that are awkward in a
+DataFrame (``df.bbox-0`` is a *subtraction*). ``normalise_bbox_columns`` renames them once, where
+they are produced, to the ``bbox_y0..bbox_x1`` an ``ObjectRef`` reads.
+
+### 8 plots made brushable. **5 deliberately not.**
+Of the 13 unpickable plots, **only 8 have points that ARE objects.** The other five draw **ensemble
+curves**:
+
+| plot | what a point is |
+|---|---|
+| `plot_frap_recovery` | a **timepoint** |
+| `plot_coarsening` | a **moment** |
+| `plot_fusion_relaxation` | a **moment** |
+| `plot_molecular_counting` | a **variance bin** |
+| `plot_phase_diagram` | a point on a **boundary** |
+
+**There is no object behind them, and making them pickable would be a lie** — the user would click
+expecting an image and get whichever row happened to sit at that index.
+
+### FOUND — a grouped scatter needs PER-GROUP refs, or it opens the WRONG OBJECT
+``plot_focus_diagnostic`` draws its scatter **per group** (bright / sharp-dim / blurry-dim), and
+**matplotlib reports the index within the picked artist.** Each group is its own artist.
+
+**A single flat list of refs is therefore silently mis-indexed**: clicking the *third green point*
+resolves to the *third row of the whole table* — **a different object.** The click would open an
+image, **the image would look plausible, and it would be the wrong one.**
+
+Measured on a real grouped scatter: the click resolves to **object 4** with per-group refs, and
+would have given **object 1** with a flat list. Guarded by
+``test_a_grouped_scatter_needs_PER_GROUP_refs_or_it_resolves_to_the_WRONG_OBJECT``.
+
+### `add_brushing` — one call, and a plot is done
+```python
+points = ax.scatter(df.area_um2, df.partition_coeff, picker=5)
+add_brushing(fig, points, df, source_path=path, viewer=viewer)
+```
+
+Reveal-in-viewer when a session is live; **a cropped thumbnail out of the source file when it is
+not**; propagation to any other view on the hub.
+
+**269/269 core tests passing.**
+
+## [1.5.495] - 2026-07-10
+### The bbox sweep — **15 of 18 results tables could not be brushed at all**
+Brushing (1.5.494) only works if the row can find its object. **It could not**, in almost every
+table PyCAT produces: ``regionprops`` hands over ``prop.bbox`` free, and **24 of the 25 call sites
+were throwing it away.**
+
+**A row without a bbox cannot be turned back into an image.** Interactively that is an annoyance.
+**In batch it is fatal** — the layer is gone, and the bbox is the *only* route back to the object.
+
+Swept into every **per-object** results table:
+``spatial_metrology_tools``, ``label_and_mask_tools`` (including the new ``neck_geometry`` and
+``assess_and_split_touching``), ``brightfield_tools``, ``dynamic_spatial_tools``,
+``morphological_complexity_tools``, ``invitro_tools``.
+
+**Per-FRAME and per-CELL aggregates are deliberately excluded**: a row that summarises forty
+objects **has no single object to point at**, and giving it a bbox would be a lie.
+
+### FOUND — a ref was pointing at the wrong object, and the click would have LANDED
+``ObjectRef.from_row`` listed ``cell_label`` as a fallback for ``object_id``. On a puncta table —
+whose column is ``punctum_label`` — **that fallback fired**:
+
+> **Four different puncta all came back as object 1**, because they all live in cell 1.
+
+**A ref that points at the wrong object is worse than one that points at nothing.** The click
+lands, on the wrong thing, and **nothing says so.**
+
+The object's own identity and its parent's are **different questions**, and they now get different
+fields (``object_id`` and ``parent_id``). Verified: four puncta → four distinct ids, all correctly
+recording ``parent_id = 1``.
+
+### Guarded
+- ``test_a_ref_points_at_the_OBJECT_and_not_at_its_PARENT``
+- ``test_the_per_object_results_tables_KEEP_the_bbox`` — reads the source, so **a new per-object
+  table that forgets the bbox is caught at the moment it is written.**
+
+**271/271 core tests passing.**
+
 ## [1.5.494] - 2026-07-10
 ### Brushing — **plot → object → image**, and it works in batch where the session is gone
 Gable asked for two things, and **the second one is what forces the design**:

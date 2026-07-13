@@ -19,6 +19,8 @@ Date
 import numpy as np
 
 
+
+from pycat.utils.object_ref import bbox_columns_from_regionprops
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
 import pandas as pd
@@ -1139,6 +1141,12 @@ def assess_and_split_touching(binary_mask, intensity_image=None, sigma=2.0,
 
         record = dict(
             label=int(prop.label),
+            # ── KEEP THE BBOX. It is what makes this row brushable. ─────────────
+            #
+            # regionprops hands it over free, and PyCAT was discarding it at 24 of its 25 call
+            # sites. **A row without a bbox cannot be turned back into an image** — and in BATCH
+            # that is the ONLY route back to the object, because the layer is gone.
+            **bbox_columns_from_regionprops(prop),
             area_um2=float(prop.area) * microns_per_pixel ** 2,
             solidity=float(prop.solidity),
             n_peaks=int(len(peaks)),
@@ -1329,6 +1337,8 @@ def neck_geometry(binary_mask, microns_per_pixel=1.0, sigma=2.0, min_peak_distan
 
         record = dict(
             label=int(prop.label),
+            # The bbox: a neck measurement a user wants to SEE is one they can click back to.
+            **bbox_columns_from_regionprops(prop),
             n_lobes=int(len(peaks)),
             radius_um=np.nan, neck_radius_um=np.nan,
             neck_over_radius=np.nan, dihedral_deg=np.nan,
