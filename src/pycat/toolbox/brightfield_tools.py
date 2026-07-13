@@ -599,7 +599,11 @@ def bf_condensate_metrics(
         mean_od, max_od, integrated_od,   (optical density metrics)
         major_axis_um, minor_axis_um, eccentricity, circularity,
         cnr,                               (contrast-to-noise ratio)
-        od_partition_coeff,                (dense OD / dilute OD)
+        od_partition_coeff,                the TRANSMITTANCE RATIO, 10**OD -- how many
+                                           times more light the object absorbs than the
+                                           background. (A ratio of ODs is undefined: the
+                                           background's OD is ZERO by construction, since
+                                           OD is measured against it.)
         x_um, y_um                         (centroid in µm)
     """
     od_image = compute_optical_density(image, background_image, bg_kernel)
@@ -635,7 +639,34 @@ def bf_condensate_metrics(
         cnr = (raw_bg_mean - spot_raw) / max(raw_bg_std, 1e-9)
 
         # Optical density partition coefficient: condensate OD / background OD
-        od_part = mean_od / max(bg_od, 1e-9)
+        # ── A partition coefficient of OD is DIVISION BY A DEFINITIONAL ZERO ────
+        #
+        # Optical density is measured **relative to the background**: ``OD = -log10(I / I0)``.
+        # So **the background's own OD is zero by construction** — that is what "background"
+        # means in Beer-Lambert.
+        #
+        # ``mean_od / max(bg_od, 1e-9)`` therefore divides by **1e-9**, and it reported
+        # **96,910,007** for a condensate whose true OD is 0.097. The number is not large: it is
+        # **undefined**, and the guard against division by zero turned an undefined quantity into
+        # a confident one.
+        #
+        # **And the correct quantity was already there.** OD IS the enrichment: it is the log of
+        # the intensity ratio between the object and the background, which is exactly what a
+        # partition coefficient measures — the fluorescence Kp of ``I_dense / I_dilute``
+        # corresponds to ``10**OD``, because ``OD = log10(I0 / I_dense)``.
+        #
+        # So the ratio is reported as what it physically is: **the transmittance ratio**,
+        # ``10**OD``. For an object transmitting 50 % of the light, OD = 0.301 and the ratio is
+        # **2.0** — the object absorbs twice what the background does. That is a number a reader
+        # can interpret.
+        if np.isfinite(mean_od) and abs(bg_od) < 1e-6:
+            # The background OD is zero because OD is DEFINED against it. The enrichment is the
+            # transmittance ratio, which is what OD already encodes.
+            od_part = float(10.0 ** mean_od)
+        else:
+            # A non-zero background OD means the reference was NOT the true incident intensity
+            # (e.g. an absorbing medium). Then a ratio is meaningful.
+            od_part = mean_od / max(abs(bg_od), 1e-9)
 
         rows.append({
             'condensate_label':   prop.label,

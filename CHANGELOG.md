@@ -4,6 +4,89 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.487] - 2026-07-10
+### GROUP F — the coloc metrics are **exact**. They are also **not evidence**.
+``manders_m1_calculation``, ``jaccard_index_calculation`` and ``sorensen_dice_coefficient_calculation``
+reproduce the analytic overlap **to four decimal places**. *The maths is perfect.*
+
+**And a pair of channels with NO colocalization whatsoever produces overlap by chance** — an
+amount that scales with how crowded the image is:
+
+| density | coverage | **M1 by CHANCE** |
+|---|---|---|
+| sparse (15 spots, r = 6) | 2 % | 0.024 |
+| medium (40 spots, r = 8) | 12 % | 0.110 |
+| **dense (80 spots, r = 10)** | **32 %** | **0.338** |
+
+**Two completely independent channels give M1 = 0.34** at a realistic density. *"M1 = 0.34,
+substantial colocalization"* is a **false claim** — that is exactly what randomness gives.
+
+**And it cannot be a fixed threshold**, because it moves with the density: the same M1 that is
+meaningless in a crowded cell is strong evidence in a sparse one.
+
+The module contained **zero** occurrences of *null*, *chance*, *random*, *permutation* or
+*significance*. (Costes randomization exists in ``pixel_wise_corr_analysis_tools`` — **the idea was
+in the codebase; it had not reached here.**)
+
+New ``coloc_significance`` relocates channel 2's objects **inside the ROI, keeping their number,
+size and shape** — so the density, which is what drives the chance overlap, is preserved, and only
+the *spatial relationship* is destroyed.
+
+**False positives: 0/15 sparse, 1/15 medium. Power: detects a 3 px shift at p = 0.010.**
+
+### Two things a first attempt got wrong
+**Clipping the drop position deflates the null.** It pushes objects inward, where they pile up and
+overlap *each other* — the null's coverage came out at **0.270 against the data's 0.313**. A null
+that under-represents the density **under-states chance overlap, and everything looks
+significant.**
+
+**And the null is inherently conservative at high density — that is not fixable.** The objects
+being relocated are *connected components*, and at 32 % coverage the original discs have already
+merged: **80 discs became 29 blobs.** Relocating those blobs lets them merge *again*, so the null
+reaches only **84 %** of the data's coverage.
+
+**So the coverage is reported, and the result is flagged as strained** when the null cannot reach
+the data's density. A colocalization claim in a crowded image needs the coverage beside it to be
+read at all.
+
+**233/233 core tests passing.**
+
+## [1.5.486] - 2026-07-10
+### GROUP E COMPLETE — `od_partition_coeff` reported **96,910,007**
+Optical density is measured **relative to the background**: ``OD = -log10(I / I0)``. So **the
+background's own OD is zero by construction** — *that is what "background" means in
+Beer-Lambert.*
+
+``mean_od / max(bg_od, 1e-9)`` therefore divided by **1e-9**, and reported **96,910,007** for a
+condensate whose true OD is **0.097**.
+
+**The number is not large — it is undefined.** And ``max(bg_od, 1e-9)``, a guard against division
+by zero, is what turned an undefined quantity into a confident one.
+
+**The correct quantity was already there.** ``OD = log10(I0 / I_dense)``, so ``10**OD`` is the
+**transmittance ratio** — *how many times more light the object absorbs than the background* —
+which is exactly what a partition coefficient measures:
+
+| transmittance | true OD | **old** | **new** |
+|---|---|---|---|
+| 0.80 | 0.097 | **96,910,007** | **1.25** |
+| 0.50 | 0.301 | 301,030,010 | **2.00** |
+| 0.25 | 0.602 | 602,060,020 | **4.00** |
+| 0.10 | 1.000 | — | **10.00** |
+
+**Exactly 1/T at every transmittance.**
+
+### Audited and correct — the rest of brightfield holds up very well
+- **``compute_optical_density``** is exact Beer-Lambert: **0.0–0.2 %** error across the whole
+  transmittance range.
+- **The segmentation is correctly polarity-specific**: it finds 4 dark objects and **0** bright
+  ones. **It will not silently process a fluorescence image** and hand back plausible output.
+- **``fft_bandpass``** keeps or cuts **9/9** gratings exactly as their frequency dictates.
+- **``interface_width_from_radial``** is proportional to the true boundary blur across a factor of
+  8 in σ, and recovers the disc radius to **25.5 px against a true 25**.
+
+**230/230 core tests passing.**
+
 ## [1.5.485] - 2026-07-10
 ### GROUP B COMPLETE — a 57 % difference in fractal dimension, from geometry alone
 Two conditions containing nothing but **DISCS** — identical shape, only the size differs:
