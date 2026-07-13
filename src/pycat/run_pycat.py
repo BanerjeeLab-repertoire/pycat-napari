@@ -350,6 +350,30 @@ def run_pycat_func():
     """
     Function to run the PyCAT application by creating a napari viewer instance and initializing the CentralManager.
     """
+    # ── Is this environment the one PyCAT was built against? ────────────────────
+    #
+    # **A user can break PyCAT by installing a napari plugin, and there is no way to stop
+    # them.** pip has no 'conflicts-with' field; napari discovers plugins from whatever is
+    # installed; and napari's own plugin manager makes installing one a single click.
+    #
+    # So PyCAT cannot prevent the damage — **it can only refuse to pretend nothing happened.**
+    #
+    # Not hypothetical: installing ``bioio`` into a working environment silently pulled in
+    # numpy 2.5.1, zarr 3.2.1 and tifffile 2026.6.1, **uninstalling the pinned ones**, and broke
+    # cellpose, numba and the image loader in one command. The failure the user actually saw
+    # was ``AttributeError: '_TIFF' object has no attribute 'RESUNIT'`` — *which sends a
+    # scientist looking at their microscope.*
+    #
+    # This runs BEFORE the cellpose prewarm, because a numpy mismatch will take cellpose down
+    # first and the user would never see the explanation.
+    try:
+        from pycat.utils.environment_check import warn_if_environment_is_broken
+        warn_if_environment_is_broken()
+    except Exception as _env_exc:
+        # A guard that crashes the program it is guarding has done more harm than the bug it
+        # was looking for.
+        log.debug('environment check unavailable: %s', _env_exc)
+
     _prewarm_cellpose_model()  # Cache Cellpose model before GUI opens to avoid silent hang on first use
 
     app = QApplication(sys.argv)  # sys.argv is necessary for proper app initialization

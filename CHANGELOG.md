@@ -4,6 +4,64 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.530] - 2026-07-13
+### PyCAT now says when its environment has been broken — because it cannot stop it happening
+Gable: *"I just wanted to make certain that somebody couldn't bork their PyCAT by downloading and
+installing a napari plugin."*
+
+**They can, and there is no way to prevent it.** pip has no *"conflicts-with"* field; napari
+discovers plugins from whatever is installed; and napari's own plugin manager makes installing one a
+**single click.**
+
+> ***So PyCAT cannot prevent the damage — it can only refuse to pretend nothing happened.***
+
+### This is not hypothetical
+Installing ``bioio`` into a working PyCAT environment silently pulled in **numpy 2.5.1**, **zarr
+3.2.1** and **tifffile 2026.6.1**, ***uninstalling the pinned ones***, and broke **cellpose, numba
+and the image loader** in one command.
+
+The failure the user actually saw:
+
+```
+AttributeError: '_TIFF' object has no attribute 'RESUNIT'
+```
+
+***That message sends a scientist looking at their microscope.*** It is ``aicsimageio`` reading a
+``tifffile`` **three years newer than it supports** — and **nothing in that traceback says so.**
+
+Now, at startup:
+
+```
+tifffile
+    installed : 2026.6.1
+    required  : <2023.3.15,>=2021.8.30
+    pinned by : aicsimageio
+    this is   : the TIFF reader. A too-new one breaks aicsimageio: 'no attribute RESUNIT'
+
+TO REPAIR:
+    pip install "tifffile<2023.3.15,>=2021.8.30" ...
+```
+
+### The first version of the check was BLIND to the failure that prompted it
+It read only ``pycat-napari``'s own requirements — **and PyCAT does not pin tifffile at all.**
+``aicsimageio`` does.
+
+> ***A guard that misses the exact failure that prompted it is theatre.***
+
+It now walks the packages that **hold** the load-bearing pins — ``aicsimageio``, ``cellpose``,
+``numba``, ``napari``, ``bioio`` — and **names which one declared each constraint.** *"tifffile is
+wrong"* is not actionable; *"aicsimageio requires tifffile<2023.3.15"* is.
+
+### The pins are read from METADATA, never hardcoded
+**They are about to move.** The entire point of the BioIO work is that ``aicsimageio`` is frozen in
+2023 and is what holds ``numpy<2`` and ``zarr<3`` in place.
+
+***A check that hardcoded today's pins would start lying the day they change*** — and a lying check
+is worse than none, because it would **confidently clear a broken environment.** A test enforces
+this.
+
+**351/351 core tests passing.**
+
 ## [1.5.529] - 2026-07-13
 ### BioIO: one seam, and the audit behind it
 ``aicsimageio`` is in **maintenance mode**; its maintainers name ``bioio`` as the *"compatible
