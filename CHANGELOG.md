@@ -4,6 +4,50 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.496] - 2026-07-10
+### The `PlottingWidget` is the natural wiring point — and **"wire the 13 plots" was the wrong goal**
+Gable: *"the plotting widget should also wire things naturally."* It does, and it is the **better**
+place — but working out why took discarding the plan.
+
+### Almost none of the analysis plots have points that ARE objects
+| plot | what a point IS |
+|---|---|
+| `plot_msd_trajectories` | a line **is a track** → *brushable, and already was* |
+| `plot_moduli` | a **frequency** |
+| `plot_frap_recovery` | a **timepoint** |
+| `plot_coarsening` | a **moment** |
+| `plot_molecular_counting` | a **variance bin** |
+| `plot_km_survival` | a **survival time**, aggregated |
+| `plot_enrichment_distribution` | a bar is a **bin** — it holds twelve condensates |
+| `plot_spatial_metrology` | every panel is a **curve**; a point on a Ripley plot is a **radius** |
+| `plot_distributions` | a bar is a **bin** |
+
+**There is no object behind any of them**, and making them pickable would be a **lie**: the user
+clicks expecting an image and gets **whichever row happened to sit at that index.**
+
+### The brushable view of per-object data is a SCATTER — and that is what the widget builds
+``PlottingWidget`` lets the user pick **any** results DataFrame and **any** two columns. When a row
+is one object — which every per-object table now is (1.5.495) — **each point IS an object.**
+
+**One wiring point, covering every per-object table**, instead of fifteen fixed figures. And a
+click resolves in **both worlds**: the object is revealed in napari if a session is live, or its
+region is **read straight out of the source file** if the table came from a batch CSV and the
+session is long gone.
+
+**The widget declines silently when a row is an aggregate.** The tell is the **bbox**: a row that
+can be located in an image has one; a row that averages forty objects cannot. *A click that lands
+on the wrong object is worse than a click that does nothing — it lands, and nothing says so.*
+
+### And I got the triage wrong once, in the safe direction
+A first pass excluded ``plot_focus_diagnostic`` as "ensemble". **It is not.** It is a QC scatter
+where **each point is one image/field**, and the thing a user wants when they click a
+blurry-looking point is *that field*. It is correctly brushed.
+
+**The distinction is not "curve vs scatter". It is: does one point correspond to one thing you
+could show?** A FRAP timepoint does not. **A QC point does.**
+
+**273/273 core tests passing.**
+
 ## [1.5.495] - 2026-07-10
 ### The bbox now travels with the results tables — **without it, nothing is brushable**
 **25 files call ``regionprops``. One kept the bbox.** Every results table that discarded it is a

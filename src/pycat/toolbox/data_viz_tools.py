@@ -19,6 +19,9 @@ Date
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+from pycat.utils.general_utils import debug_log
+from napari.utils.notifications import show_warning as napari_show_warning
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButtonGroup, QGroupBox, QHBoxLayout, QLabel, QCheckBox, QScrollArea, QLineEdit, QPushButton, QSizePolicy
 from PyQt5.QtCore import Qt
 
@@ -394,6 +397,62 @@ class PlottingWidget(QWidget):
 
         return group
 
+    def _wire_brushing(self, figure, artist, df):
+        """**Make the points clickable, if the rows are objects.**
+
+        A row of a per-object results table IS an object — it carries a ``label``, a ``bbox``, and
+        the file it came from (1.5.495). So a point on a plot of that table can be clicked back to
+        the object it measures, and the object can be shown.
+
+        **A row that is an AGGREGATE cannot.** A per-frame or per-cell summary row has no single
+        object to point at, and this method **declines silently** rather than wiring a click that
+        would land somewhere arbitrary. *A click that lands on the wrong object is worse than a
+        click that does nothing — it lands, and nothing says so.*
+
+        The resolution works in **both worlds**, and the plot does not know which:
+
+        * a **live session** — the object is revealed in the napari viewer
+        * a **batch table**, loaded from a CSV with the session long gone — the object's region is
+          read straight out of the source file, and shown as a crop
+
+        The second is only possible because the **bbox travelled with the row.**
+        """
+        try:
+            from pycat.utils.object_ref import refs_from_dataframe
+            from pycat.utils.brushing import make_pickable, crop_for_ref
+        except Exception as exc:
+            debug_log('PlottingWidget: the brushing machinery is unavailable', exc)
+            return
+
+        # Is this a table of OBJECTS, or a table of summaries? The bbox is the tell: a row that
+        # can be located in an image has one; a row that averages forty objects cannot.
+        has_bbox = ('bbox' in df.columns
+                    or all(c in df.columns for c in ('bbox_y0', 'bbox_x0', 'bbox_y1', 'bbox_x1')))
+        if not has_bbox:
+            return
+
+        refs = refs_from_dataframe(df)
+
+        def _on_select(ref):
+            crop, message = crop_for_ref(ref, viewer=getattr(self, 'viewer', None))
+            if crop is None:
+                napari_show_warning(
+                    f"That point cannot be shown as an image. {message}")
+                return
+            try:
+                viewer = getattr(self, 'viewer', None)
+                if viewer is not None:
+                    name = f"object {ref.object_id}"
+                    if name in viewer.layers:
+                        viewer.layers[name].data = crop
+                    else:
+                        viewer.add_image(crop, name=name)
+            except Exception as exc:
+                debug_log('PlottingWidget: could not show the picked object', exc)
+
+        make_pickable(figure, artist, refs, on_select=_on_select,
+                      viewer=getattr(self, 'viewer', None))
+
     def plot_data(self):
         """
         Generates and displays the plot based on the selected DataFrame, plot type, and associated options.
@@ -412,8 +471,23 @@ class PlottingWidget(QWidget):
             y_scale = self.y_scale_combo.currentText() # Get the selected Y scale
             x_lim = self.x_limit.text() # Get the X limit
             y_lim = self.y_limit.text() # Get the Y limit
-            # Setup the plot based on selcted options 
-            plt.plot(df[x_col], df[y_col], linestyle=ls, marker=ms)
+            # ── The plot the user builds HERE is the brushable one ─────────────
+            #
+            # This widget lets the user pick ANY results DataFrame and ANY two columns. When a row
+            # of that DataFrame is ONE OBJECT — which every per-object results table now is
+            # (1.5.495) — **each point on this plot IS an object**, and clicking it should show
+            # that object.
+            #
+            # That is the natural wiring point, and it is better than hand-wiring the fifteen
+            # analysis plots: those each make one fixed figure, while **anything the user plots
+            # here becomes clickable for free.**
+            #
+            # A `picker` radius is set so matplotlib will emit a pick event at all. Without it the
+            # click is swallowed and nothing happens — which is the failure mode that makes people
+            # think brushing is broken.
+            _line, = plt.plot(df[x_col], df[y_col], linestyle=ls, marker=ms, picker=5)
+            self._wire_brushing(plt.gcf(), _line, df)
+
             plt.xscale(x_scale)
             plt.yscale(y_scale)
             if x_lim:

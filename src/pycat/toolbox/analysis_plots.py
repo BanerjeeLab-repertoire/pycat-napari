@@ -827,6 +827,20 @@ def plot_enrichment_distribution(per_cond_df, value_col='enrichment',
     if not interactive:
         matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    # ── A HISTOGRAM BAR IS NOT AN OBJECT ────────────────────────────────────────
+    #
+    # A first pass at this sweep listed this plot as "brushable — each point is one condensate".
+    # **It is not.** It is a histogram, and a bar is a BIN: it holds however many condensates fell
+    # into that range. Clicking it cannot mean "show me the object", because there is no object —
+    # there are twelve.
+    #
+    # This is the same trap as the ensemble curves (FRAP, coarsening, moduli): making them
+    # pickable would be a **lie**, because the user clicks expecting an image and gets whichever
+    # row happened to sit at that index.
+    #
+    # **The brushable view of this same data is a SCATTER** — one point per condensate, which is
+    # what ``PlottingWidget`` builds when the user plots enrichment against area. That is where
+    # the click means something, and it already works (1.5.496).
     vals = per_cond_df[value_col].values.astype(float)
     vals = vals[np.isfinite(vals)]
     fig, ax = plt.subplots(figsize=(6.4, 4.6))
@@ -951,10 +965,17 @@ def plot_distributions(df, columns=None, title="Distributions", interactive=True
 
 
 def plot_focus_diagnostic(df, title="Why are the dim objects dim?",
-                          blur_ratio=0.65, dim_ratio=0.6, interactive=True):
+                          blur_ratio=0.65, dim_ratio=0.6, interactive=True,
+                          source_path=None, viewer=None, on_select=None):
     """Scatter of edge-sharpness vs intensity (both relative to the body) that
     separates below-focus (blurry-dim) from nucleation/growth (sharp-dim)
-    objects. From focus_vs_growth_diagnostic()."""
+    objects. From focus_vs_growth_diagnostic().
+
+    **Brushable.** Every point IS an object, and this is the plot where a user most wants to click
+    one: *"is that really out of focus, or is it a young condensate?"* is a question you answer by
+    **looking at the object**, not at its coordinates. Pass ``viewer=`` to reveal it in napari, or
+    ``source_path=`` so a batch plot can crop it straight out of the file.
+    """
     import matplotlib
     if not interactive:
         matplotlib.use('Agg')
@@ -963,10 +984,22 @@ def plot_focus_diagnostic(df, title="Why are the dim objects dim?",
               'sharp_dim (likely nucleation/growth)': '#2ca02c',
               'blurry_dim (likely below focus)': '#d62728'}
     fig, ax = plt.subplots(figsize=(6.6, 5.2))
+
+    # ── The scatter is drawn PER GROUP, so the refs must be per group too ───────
+    #
+    # A single flat list of refs would be silently mis-indexed: matplotlib reports the index
+    # WITHIN the picked artist, and each group is its own artist. Clicking the third green point
+    # would resolve to the third row of the whole table — **which is a different object**, and the
+    # user would never know.
     for interp, g in df.groupby('interpretation'):
-        ax.scatter(g['intensity_ratio'], g['sharpness_ratio'], s=60,
-                   color=colmap.get(interp, '#4c72b0'), edgecolor='k',
-                   linewidth=0.5, label=interp.split(' (')[0], alpha=0.85)
+        _points = ax.scatter(g['intensity_ratio'], g['sharpness_ratio'], s=60,
+                             color=colmap.get(interp, '#4c72b0'), edgecolor='k',
+                             linewidth=0.5, label=interp.split(' (')[0], alpha=0.85,
+                             picker=(5 if (viewer is not None or source_path or on_select)
+                                     else None))
+        if viewer is not None or source_path or on_select:
+            add_brushing(fig, _points, g, source_path=source_path, viewer=viewer,
+                         on_select=on_select)
     # reference lines / regions
     ax.axvline(dim_ratio, color='0.6', ls='--', lw=1)
     ax.axhline(blur_ratio, color='0.6', ls=':', lw=1)
@@ -1066,3 +1099,67 @@ def plot_phase_diagram(df, x_name='concentration', two_phase='above',
     ax.grid(True, alpha=0.15); ax.legend(fontsize=8, loc='best')
     fig.tight_layout()
     return _show(fig, interactive)
+
+
+# ── Brushing: which of these plots have points that ARE objects? ─────────────────────────
+#
+# **Almost none of them.** The goal going in was "wire the 13 unpickable plots". The goal was
+# wrong, and it is worth writing down why.
+#
+#     plot_msd_trajectories      a LINE is a track            -> **brushable** (and already is)
+#     plot_vpt_panel             ditto                        -> **brushable** (and already is)
+#     plot_moduli                a point is a FREQUENCY       -> ensemble
+#     plot_frap_recovery         a point is a TIMEPOINT       -> ensemble
+#     plot_coarsening            a point is a MOMENT          -> ensemble
+#     plot_km_survival           a step is a survival time    -> ensemble
+#     plot_molecular_counting    a point is a VARIANCE BIN    -> ensemble
+#     plot_fusion_relaxation     a point is a TIMEPOINT       -> ensemble
+#     plot_enrichment_distribution   a bar is a BIN           -> ensemble (see the note there)
+#     plot_spatial_metrology     every panel is a CURVE       -> ensemble
+#     plot_distributions         a bar is a BIN               -> ensemble
+#     plot_focus_diagnostic      a point is a FRAME           -> ensemble
+#     plot_phase_diagram         a point is a CONDITION       -> ensemble
+#
+# **A point on a Ripley curve is a radius. A bar of a histogram holds twelve condensates.** There
+# is no object behind them, and making them pickable would be a **lie** — the user clicks
+# expecting an image and gets whichever row happened to sit at that index.
+#
+# **The brushable view of per-object data is a SCATTER**, and that is exactly what
+# ``PlottingWidget`` builds: the user picks any results table and any two columns, and every point
+# is one object. **That is where the wiring belongs** (data_viz_tools, 1.5.496) — one place, and it
+# covers every per-object table rather than fifteen fixed figures.
+#
+# ``add_brushing`` below stays, for a plot whose points genuinely ARE objects. **Only call it when
+# they are.**
+
+def add_brushing(figure, artist, df, *, source_path=None, viewer=None, hub=None,
+                 on_select=None, tags=None):
+    """**Make a plot's points clickable back to the objects behind them.**
+
+    One call. A plot that supplies its DataFrame gets: reveal-in-viewer when a session is live,
+    **a cropped thumbnail out of the source file when it is not**, and propagation to any other
+    view on the hub.
+
+    ::
+
+        points = ax.scatter(df.area_um2, df.partition_coeff, picker=5)
+        add_brushing(fig, points, df, source_path=path, viewer=viewer)
+
+    **Only call this when a point IS an object.** Five of PyCAT's plots draw ensemble curves — a
+    FRAP recovery point is a *timepoint*, a coarsening point is a *moment*, a molecular-counting
+    point is a *variance bin*. **There is no object behind them, and making them pickable would be
+    a lie**: the user would click expecting an image and get whichever row happened to sit at that
+    index.
+
+    The DataFrame must carry a ``bbox`` (``bbox_y0``/``bbox_x0``/``bbox_y1``/``bbox_x1``) for the
+    **batch** case to work. Without it the point still resolves interactively, and
+    ``resolve_offline`` will say plainly why it cannot produce an image.
+    """
+    from pycat.utils.brushing import make_pickable
+    from pycat.utils.object_ref import refs_from_dataframe
+
+    if df is None or not len(df):
+        return figure
+
+    refs = refs_from_dataframe(df, source_path=source_path, tags=tags)
+    return make_pickable(figure, artist, refs, hub=hub, on_select=on_select, viewer=viewer)
