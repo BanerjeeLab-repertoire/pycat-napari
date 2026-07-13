@@ -198,26 +198,88 @@ def _setup_environment(repo_root):
     return stub
 
 
+def _parametrize_cases(function_node, source, namespace):
+    """**Every case pytest would generate from this function's parametrize decorators.**
+
+    ── The regex that stood here MISSED 40 % of them ────────────────────────────
+
+    It matched a **single** parameter name and a **single-line** list, and nothing else. It caught
+    32 decorators and **missed 20**, including:
+
+    * multi-parameter forms — ``parametrize("scene,expected", [...])``
+    * multi-line value lists
+    * **computed** value lists — ``parametrize("mod", SCIENTIFIC_MODULES)``, which is *every
+      scientific module*, and it was **never run**
+
+    CI collected **433** items. This runner reported **354**. ***I was shipping against a different
+    test suite than the one that gates the build*** — which is the exact failure this file's own
+    docstring was written to prevent, arrived at from the other direction.
+
+    An AST walk handles every form, because it **reads** the decorator instead of guessing its
+    shape.
+    """
+    cases = []
+
+    for decorator in function_node.decorator_list:
+        segment = ast.get_source_segment(source, decorator) or ''
+        if 'parametrize' not in segment:
+            continue
+        if not isinstance(decorator, ast.Call) or len(decorator.args) < 2:
+            continue
+
+        # The names: "a", or "a,b", or ["a", "b"].
+        try:
+            names_node = decorator.args[0]
+            if isinstance(names_node, ast.Constant):
+                names = [n.strip() for n in str(names_node.value).split(',')]
+            else:
+                names = [str(ast.literal_eval(element)) for element in names_node.elts]
+        except Exception:
+            continue
+
+        # The values: a literal list, OR a name/call resolved from the module namespace.
+        values_node = decorator.args[1]
+        try:
+            values = ast.literal_eval(values_node)
+        except Exception:
+            # `parametrize("mod", SCIENTIFIC_MODULES)` — computed values. Resolve them from the
+            # module that has already been executed. **This is the form that hid every scientific
+            # module from this runner.**
+            try:
+                values = eval(compile(ast.Expression(values_node), '<param>', 'eval'), namespace)
+            except Exception:
+                continue
+
+        try:
+            cases.append((names, list(values)))
+        except Exception:
+            continue
+
+    return cases
+
+
 def _load(path, pytest_stub):
-    """Execute the test module, capturing its parametrize values before stripping them."""
+    """Execute the test module, and collect every parametrize case pytest would generate."""
     source = path.read_text(encoding='utf-8')
 
-    params = {}
-    for m in re.finditer(
-            r'@pytest\.mark\.parametrize\(\s*"(\w+)",\s*(\[[^\]]*\])\s*\)\s*\ndef (\w+)',
-            source):
-        try:
-            params[m.group(3)] = (m.group(1), ast.literal_eval(m.group(2)))
-        except (ValueError, SyntaxError):
-            pass
-
     stripped = source.replace('import pytest\n', '')
-    stripped = re.sub(r'@pytest\.mark\.parametrize\([^)]*\)\n', '', stripped)
-    stripped = re.sub(r'@pytest\.mark\.\w+\n', '', stripped)
+    stripped = re.sub(r'@pytest\.mark\.parametrize\((?:[^()]|\([^()]*\))*\)\s*\n', '', stripped)
+    stripped = re.sub(r'@pytest\.mark\.\w+\s*\n', '', stripped)
 
-    ns = {'__file__': str(path.resolve()), 'pytest': pytest_stub}
-    exec(compile(stripped, path.name, 'exec'), ns)
-    return ns, params
+    namespace = {'__file__': str(path.resolve()), 'pytest': pytest_stub}
+    exec(compile(stripped, path.name, 'exec'), namespace)
+
+    # The module has now run, so its module-level values (SCIENTIFIC_MODULES, _linkers(), ...) are
+    # available — which is what makes the COMPUTED parametrize forms resolvable at all.
+    params = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith('test_'):
+            continue
+        cases = _parametrize_cases(node, source, namespace)
+        if cases:
+            params[node.name] = cases
+
+    return namespace, params
 
 
 def main():
@@ -267,24 +329,47 @@ def main():
 
             # Parametrized. These are the tests that cover all 13 science modules and both
             # spatial statistics — skipping them left five of eight unchecked.
+            # ── Every case pytest would generate, including the ones the old regex missed ──
+            #
+            # `params[name]` is now a LIST of (names, values) — one entry per parametrize
+            # decorator. pytest takes the CROSS PRODUCT when decorators are stacked, and it
+            # supports MULTI-NAME forms: parametrize("scene,expected", [...]).
+            #
+            # The regex this replaced handled neither, and missed 20 of 52 decorators — including
+            # `parametrize("mod", SCIENTIFIC_MODULES)`, which is EVERY scientific module.
+            import itertools
+
             if name in params:
-                argname, values = params[name]
+                decorators = params[name]
+                # Cross-product of every decorator, as pytest does.
+                combinations = []
+                for bundle in itertools.product(*[
+                        [(names, value) for value in values] for names, values in decorators]):
+                    kwargs = {}
+                    for names, value in bundle:
+                        if len(names) == 1:
+                            kwargs[names[0]] = value
+                        else:
+                            for parameter, item in zip(names, value):
+                                kwargs[parameter] = item
+                    combinations.append(kwargs)
             else:
-                argname = list(sig.parameters)[0]
-                values = ns.get('SCIENTIFIC_MODULES', [])
+                only = list(sig.parameters)[0]
+                combinations = [{only: value}
+                                for value in ns.get('SCIENTIFIC_MODULES', [])]
 
             n_fail = 0
             first = ''
-            for value in values:
+            for kwargs in combinations:
                 total += 1
                 try:
-                    fn(**{argname: value})
+                    fn(**kwargs)
                 except Exception as exc:               # noqa: BLE001
                     n_fail += 1
                     failed += 1
                     if not first:
-                        first = f"{value}: {type(exc).__name__}: {str(exc)[:40]}"
-            status = 'PASS' if n_fail == 0 else f'FAIL ({n_fail}/{len(values)})'
+                        first = f"{kwargs}: {type(exc).__name__}: {str(exc)[:40]}"
+            status = 'PASS' if n_fail == 0 else f'FAIL ({n_fail}/{len(combinations)})'
             print(f"    {name:36} {status}  {first}")
 
     print(f"\n  {total - failed}/{total} passed")

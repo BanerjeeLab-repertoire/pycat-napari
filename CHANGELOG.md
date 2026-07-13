@@ -4,6 +4,60 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.532] - 2026-07-13
+### ⚑ THE LAST WHOLLY BioIO-FREE VERSION — the revert point for the 1.6.0 migration
+**1.5.532 is the last release with no BioIO code path at all.** Everything from here stages toward
+**1.6.0**, which will be the first release with **BioIO and no aicsimageio**.
+
+*(The reader seam shipped in 1.5.529 is inert: ``aicsimageio`` remains the default and the only
+library installed. Nothing in this release depends on BioIO.)*
+
+**If the migration goes wrong, revert here.**
+
+---
+
+### FIXED — the test runner was hiding 58 tests from me
+CI collected **433 items, 411 selected.** ``tools/run_core_tests.py`` reported **354/354 passed.**
+
+> ***I was shipping against a different test suite than the one that gates the build.***
+
+This sandbox has **no pytest and no network**, so the runner is a **hand-rolled substitute**. It
+found parametrize cases with a **regex**:
+
+```
+r'@pytest\.mark\.parametrize\(\s*"(\w+)",\s*(\[[^\]]*\])\s*\)'
+```
+
+A **single** parameter name, a **single-line** literal list, and nothing else. It caught **32**
+decorators and **missed 20**:
+
+- multi-parameter forms — ``parametrize("scene,expected", [...])``
+- multi-line value lists
+- **computed** value lists — ``parametrize("mod", SCIENTIFIC_MODULES)``, ***which is every
+  scientific module, and it never ran***
+
+**This is the exact failure ``run_core_tests.py``'s own docstring was written to prevent** — a
+development check *more forgiving than the runner it stands in for* — arrived at from the other
+direction.
+
+**A regex cannot model pytest's collection rules. An AST walk can**, because it **reads** the
+decorator instead of guessing its shape. It also resolves **computed** value lists by executing the
+module first — the form that hid the scientific modules.
+
+**354 → 415.** All pass.
+
+### GUARDED, as Gable asked
+``test_the_runner_matches_pytest.py`` now fails the build if:
+- the runner loses its AST-based collection *(verified: restore the old regex and it fires)*
+- any parametrize decorator in the suite is written in a form the runner cannot read — **because a
+  decorator the runner cannot parse is a test that silently does not run**
+- the collected count drops below the floor
+
+> ***A runner that silently under-collects is worse than no runner: it produces a green number that
+> is not true, and the divergence only surfaces when CI goes red — after the release is cut.***
+
+**415/415 core tests passing.**
+
 ## [1.5.531] - 2026-07-13
 ### The environment check cried wolf on a HEALTHY environment — fixed
 1.5.530 reported this to Gable on an environment that was **fine**:
