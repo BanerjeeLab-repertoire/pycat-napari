@@ -4,6 +4,67 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.477] - 2026-07-10
+### The linkers had NEVER been tested — and the default was costing 20 % of the viscosity
+``dynamic_spatial_tools`` holds the two automated linkers that turn detections into
+trajectories. **Every VPT viscosity PyCAT reports comes through one of them, and nothing tested
+them.**
+
+The only honest test of a linker is **ground-truth identity**: simulate objects whose true
+identity is known, link the detections, and ask what fraction got the right one. A track count
+catches nothing — 20 objects can produce 20 tracks that are all wrong.
+
+### FIXED — the gap default was 0, and the reasoning behind it was backwards
+The tooltip said bridging a gap is *dangerous* — that a bead which vanishes and reappears is
+*"more likely a broken trajectory that should be pruned"*. **Ground truth says the opposite.**
+
+A detector that misses **10 % of frames** turns **20 objects into 92 tracks** at ``gap=0``, with
+only **49 %** of detections keeping their identity:
+
+| dropout | gap | purity | tracks (true = 20) |
+|---|---|---|---|
+| 10 % | **0** | **49 %** | **92** |
+| 10 % | 1 | 87 % | 32 |
+| 10 % | **3** | **99 %** | **21** |
+| 20 % | **0** | **29 %** | **147** |
+| 20 % | **3** | **99 %** | **21** |
+
+**And it is safe: zero mixed tracks at any gap** on separated objects. Bridging *repairs a
+break*; it does not invent a link. (A mixed track *would* be dangerous — it injects a spurious
+jump into the MSD and **deflates** the viscosity — which is presumably the fear the old default
+was built on. **The fear is real; the setting was aimed at the wrong end.**)
+
+### It moves the real measurement, toward the reference
+On the bead file, against the **8.325 Pa·s** reference:
+
+| gap | tracks | α | **η** |
+|---|---|---|---|
+| 0 *(the old default)* | 243 | 1.052 | **10.14** |
+| 1 | 118 | 0.930 | 7.97 |
+| **2** | 85 | **0.972** | **8.54** |
+| **3** | 74 | **0.968** | **8.57** |
+| 5 | 61 | 1.055 | 9.91 |
+
+**η = 8.54 against 8.325 — a 2.6 % difference — with α = 0.97**, closer to the Brownian 1.0 than
+gap=1's 0.93. **Default changed to 2**, with the measurement in the tooltip.
+
+*The synthetic ground truth predicted this before the real data was touched. That is what the
+harness is for.*
+
+### Found — the two linkers are identical until objects get confusable
+And then the Bayesian one wins, exactly where an assignment model should:
+
+| object spacing | greedy purity / mixed | bayesian purity / mixed |
+|---|---|---|
+| 1.0 µm | 100 % / 0 | 100 % / 0 |
+| 0.3 µm | 70 % / 11 | **79 % / 14** |
+| 0.2 µm | **52 % / 25** | **67 % / 14** |
+
+Gable's beads sit ~1.7 µm apart, which is why the two give **byte-identical** results on that
+data. **The choice only matters in a crowded field** — worth knowing, and it was not known.
+
+**171/171 core tests passing.**
+
 ## [1.5.476] - 2026-07-10
 ### FIXED — CI red: `measurement.py` shipped in 1.5.384 and never landed in the repo
 ``ModuleNotFoundError: No module named 'pycat.utils.measurement'``. It is imported by

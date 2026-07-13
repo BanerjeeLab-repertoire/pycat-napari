@@ -1205,14 +1205,49 @@ class VideoParticleTrackingUI:
         form.addRow(self._show_link_adv)
         form.addRow(self._link_k_row)
 
+        # ── The default was 0, and the reasoning was backwards ──────────────────
+        #
+        # The old tooltip said bridging a gap is DANGEROUS — that a bead which vanishes and
+        # reappears is "more likely a broken trajectory that should be pruned". **Ground truth
+        # says the opposite** (tests/test_linkers.py, 1.5.477: the first test the linkers have
+        # ever had).
+        #
+        # With objects whose true identity is known, a detector that misses 10 % of frames turns
+        # **20 objects into 92 tracks at gap=0**, with only **49 %** of detections keeping their
+        # identity:
+        #
+        #     dropout   gap   purity     tracks (true = 20)
+        #     10 %      0     **49 %**   **92**
+        #     10 %      1     87 %       32
+        #     10 %      **3** **99 %**   **21**
+        #     20 %      0     **29 %**   **147**
+        #     20 %      **3** **99 %**   **21**
+        #
+        # And it is SAFE: **zero mixed tracks at any gap** on separated objects. Bridging repairs
+        # a break; it does not invent a link. (A mixed track WOULD be dangerous — it injects a
+        # spurious jump into the MSD and deflates the viscosity — which is presumably the fear
+        # the old default was built on. The fear is real; the setting was aimed at the wrong
+        # end.)
+        #
+        # **On Gable's real bead data it moves the answer.** Against the 8.325 Pa·s reference:
+        # gap=0 gives 10.14, gap=1 gives 7.97, and **gap=2-3 gives 8.54-8.57 (2.6 %)** with
+        # alpha = 0.97 — closer to the Brownian 1.0 than gap=1's 0.93.
+        #
+        # Default 2: enough to bridge the ~15 % dropout measured on real bead data, without
+        # reaching so far that a genuinely lost bead is stitched to a new one.
         self._max_gap = QSpinBox()
-        self._max_gap.setRange(0, 20); self._max_gap.setValue(0)
+        self._max_gap.setRange(0, 20); self._max_gap.setValue(2)
         self._max_gap.setToolTip(
-            "Max frames a bead can vanish and still be reconnected. Default 0: "
-            "do NOT bridge gaps — a bead that disappears and reappears is more "
-            "likely a broken/mis-linked trajectory that should be pruned than a "
-            "real continuous track. Increase only if you specifically want to "
-            "reconnect across brief dropouts.")
+            "Max frames a bead can vanish and still be reconnected.\n\n"
+            "**Default 2.** Detection drops beads — around 15% of frames on real data — and a "
+            "linker that cannot bridge that SHATTERS the tracks. Measured against known "
+            "identities: a 10% dropout turns 20 objects into 92 tracks at gap=0, with only 49% "
+            "of detections keeping their identity. At gap=3 it is 21 tracks and 99%.\n\n"
+            "Bridging is safe on separated objects: zero mixed tracks at any gap. It repairs a "
+            "break rather than inventing a link.\n\n"
+            "On the reference bead data (true viscosity 8.325 Pa\u00b7s): gap=0 gives 10.1, "
+            "gap=1 gives 8.0, gap=2-3 gives 8.5. Raise it if your detection is poor; lower it "
+            "only if beads are close enough to be confused with each other.")
         form.addRow("Max frame gap:", self._max_gap)
 
         self._track_prog = QProgressBar(); self._track_prog.setVisible(False)
