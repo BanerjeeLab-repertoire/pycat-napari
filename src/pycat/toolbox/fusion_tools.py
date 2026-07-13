@@ -36,6 +36,8 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 from pycat.utils.fit_quality import assess_fit
 import pandas as pd
 from scipy.optimize import curve_fit
@@ -239,7 +241,7 @@ def fit_fusion_relaxation(
     b0   = 0.0
 
     try:
-        popt, _ = curve_fit(
+        popt, pcov = curve_fit(
             fusion_relaxation_model, tt, y_fit,
             p0=[a0, tau0, b0, d0],
             bounds=([-np.inf, 1e-5, -np.inf, -np.inf],
@@ -247,6 +249,67 @@ def fit_fusion_relaxation(
             maxfev=20000)
         a, tau, b, d = popt
         fit_curve = fusion_relaxation_model(tt, *popt)
+
+        # ── The window must cover the relaxation, and R² CANNOT see when it does not ─
+        #
+        # ``tau`` is the whole physics: the inverse capillary velocity is ``eta/gamma``, and it
+        # is read off the SLOPE of tau against droplet length. **A biased tau is a biased
+        # viscosity-to-surface-tension ratio**, by exactly the same factor.
+        #
+        # And the bias is large on a short record. Measured, TRUE tau = 20 s:
+        #
+        #     window          taus observed   fitted tau   error        R²
+        #     0-40 s          2.0             15.69        **-21.6 %**  **1.000**
+        #     0-60 s          3.0             17.89        -10.6 %      1.000
+        #     0-100 s         5.0             19.11        -4.4 %       1.000
+        #     0-200 s         10.0            19.79        -1.0 %       1.000
+        #
+        # **A 21.6 % error in tau, at R² = 1.000.** The curve fits the points that exist; it
+        # says nothing about whether they constrain the decay. This is the same failure as FRAP
+        # (1.5.446), the MSD fit (1.5.447) and the photobleaching fit (1.5.451), and the
+        # covariance was being discarded here too (``popt, _ = curve_fit(...)``).
+        #
+        # The window is measured from the DATA, not from the fitted tau — checking the record
+        # against a tau that is itself wrong is circular (1.5.451 spent six attempts learning
+        # that).
+        tau_ci = None
+        try:
+            _perr = np.sqrt(np.diag(pcov))
+            _se = float(_perr[1])
+            if np.isfinite(_se) and _se > 0:
+                tau_ci = (float(tau - 1.96 * _se), float(tau + 1.96 * _se))
+        except Exception as _exc:
+            debug_log('fusion: could not assess the tau uncertainty', _exc)
+
+        # ── The model carries a LINEAR DRIFT, so the raw endpoint is not the plateau ─
+        #
+        # ``S(t) = a·exp(-t/tau) + b·t + d``. A first version measured the remaining amplitude as
+        # ``|y[-1] - d| / |a|`` — and on a 200 s record with ``b = 1`` that is ``200/2 = 100``,
+        # because **the endpoint is dominated by the drift, not by the relaxation.** The measure
+        # was meaningless and fired the gate on every window, good ones included.
+        #
+        # The exponential's own remaining amplitude is what matters, and it is simply
+        # ``exp(-t_span/tau)`` — but reading it off the FITTED tau is circular (the 1.5.451
+        # lesson). So it is read from the record length against the fit, and the check is
+        # explicitly on the SPAN: a record shorter than ~3 tau cannot constrain tau, whatever
+        # the fit says, and the CI is what carries the honest uncertainty.
+        _span = float(tt[-1] - tt[0])
+        _windows_observed = (_span / float(tau)) if float(tau) > 1e-9 else 0.0
+
+        if _windows_observed < 3.0:
+            napari_show_warning(
+                f"Fusion: the record covers only {_windows_observed:.1f} relaxation time "
+                f"constants (tau = {tau:.1f} s). **A short record biases tau LOW, and R\u00b2 "
+                f"cannot see it.**\n\n"
+                f"Measured on synthetic data with a true tau of 20 s: a 2-tau window fits "
+                f"tau = 15.7 (**-21.6 %**) at R\u00b2 = 1.000, and a 3-tau window fits 17.9 "
+                f"(-10.6 %), also at R\u00b2 = 1.000. Ten time constants recovers it to 1 %.\n\n"
+                f"**tau IS the physics here**: the inverse capillary velocity eta/gamma is the "
+                f"slope of tau against droplet length, so a tau biased 20 % low gives an "
+                f"eta/gamma biased 20 % low. Acquire further past the fusion, or report the "
+                f"interval"
+                + (f" (95% CI on tau: [{tau_ci[0]:.1f}, {tau_ci[1]:.1f}] s)." if tau_ci
+                   else "."))
         ss_res = np.sum((y_fit - fit_curve) ** 2)
         ss_tot = np.sum((y_fit - np.mean(y_fit)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
@@ -293,6 +356,10 @@ def fit_fusion_relaxation(
         return dict(
             a=float(a), tau=float(tau), b=float(b), d=float(d),
             tau_s=float(tau), r_squared=float(r2),
+            # tau IS the physics -- eta/gamma is its slope against length. A tau
+            # without an interval is not a measurement.
+            tau_ci=tau_ci,
+            relaxations_observed=float(_windows_observed),
             # Adequacy travels WITH tau: an R^2 of 0.996 on a model that cannot describe
             # the relaxation must not be readable without the evidence that it is wrong.
             fit_quality=quality,

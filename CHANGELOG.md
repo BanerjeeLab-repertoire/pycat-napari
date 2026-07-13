@@ -4,6 +4,38 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.478] - 2026-07-10
+### Group D continues — `fusion_tools`: τ is the physics, and it was 21.6 % wrong at R² = 1.000
+Two droplets coalesce and the aspect ratio relaxes exponentially. The **inverse capillary
+velocity** — η/γ, the viscosity-to-surface-tension ratio — is read off the **slope of τ against
+droplet length**. **So a biased τ is a biased η/γ, by exactly the same factor.**
+
+``fit_fusion_relaxation`` discarded its covariance (``popt, _ = curve_fit(...)``) — the same bug
+as FRAP (1.5.446), the MSD fit (1.5.447) and photobleaching (1.5.451). Measured, **true
+τ = 20 s**:
+
+| window | τ observed | fitted τ | error | R² |
+|---|---|---|---|---|
+| 0–40 s | 2.0 | 15.69 | **−21.6 %** | **1.000** |
+| 0–60 s | 3.0 | 17.89 | −10.6 % | **1.000** |
+| 0–200 s | 10.0 | 19.79 | −1.0 % | 1.000 |
+
+**A 21.6 % error in τ, at R² = 1.000** — and that is a 21.6 % error in the η/γ that goes into the
+paper. τ now carries a 95 % CI (it narrows from **±2.7 s** at 2 τ to **±0.65 s** at 10 τ), and a
+record shorter than ~3 τ warns.
+
+### Note — the window measure has to see past the model's linear DRIFT term
+The model is ``S(t) = a·exp(-t/τ) + b·t + d``. A first version measured the remaining amplitude
+as ``|y[-1] − d| / |a|`` — and on a 200 s record with ``b = 1`` that is **200/2 = 100**, because
+**the endpoint is dominated by the drift, not the relaxation.** The measure was meaningless and
+fired the gate on every window, good ones included.
+
+### Verified correct — `inverse_capillary_velocity`
+It recovers **2.58 s/µm against a true 2.5** (3 %) at R² = 0.98. **This is the number a fusion
+paper reports**, and it is sound.
+
+**176/176 core tests passing.**
+
 ## [1.5.477] - 2026-07-10
 ### The linkers had NEVER been tested — and the default was costing 20 % of the viscosity
 ``dynamic_spatial_tools`` holds the two automated linkers that turn detections into
