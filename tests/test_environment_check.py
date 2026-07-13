@@ -144,3 +144,79 @@ def test_the_check_NEVER_crashes_the_program_it_guards():
         assert result == []
     finally:
         check._constraints_declared_by = original
+
+
+@pytest.mark.core
+def test_a_requirement_guarded_by_an_EXTRA_is_not_a_requirement():
+    """**The bug that cried wolf on a healthy environment.**
+
+    It reported::
+
+        tifffile   required: <2022.4.22,>=2022.7.28
+
+    ***Nothing can be simultaneously below 2022.4.22 and above 2022.7.28.***
+
+    ``napari`` declares ``tifffile<2022.4.22; extra == 'testing'`` — a pin that applies **only** to
+    ``napari[testing]``, which nobody installs. The first version split on ``;``, **threw the marker
+    away, and kept the line anyway** — merging a test-only pin into the runtime constraint.
+
+    **A check that emits an unsatisfiable requirement has not found a problem — it IS the problem**,
+    and it trains the user to ignore the one message that might one day matter.
+    """
+    check = pytest.importorskip("pycat.utils.environment_check")
+
+    from packaging.requirements import Requirement
+
+    poisoned = [
+        "tifffile>=2022.7.28",
+        "tifffile<2022.4.22; extra == 'testing'",       # only for napari[testing]
+        "fsspec>=2023.10.0; extra == 'optional'",
+    ]
+
+    kept = {}
+    for line in poisoned:
+        requirement = Requirement(line)
+        if 'extra ==' in str(requirement.marker or ''):
+            continue
+        kept[requirement.name] = str(requirement.specifier)
+
+    assert kept == {'tifffile': '>=2022.7.28'}, (
+        f"an extra-guarded requirement leaked into the runtime constraints: {kept}"
+    )
+
+
+@pytest.mark.core
+def test_an_IMPOSSIBLE_constraint_is_never_shown_to_the_user():
+    """**If the constraint cannot be satisfied, the bug is in this file, not in the environment.**
+
+    Reporting it sends the user chasing a fix that **cannot exist.**
+    """
+    check = pytest.importorskip("pycat.utils.environment_check")
+
+    assert check._is_satisfiable('>=1.0,<2.0') is True
+    assert check._is_satisfiable('<2022.4.22,>=2022.7.28') is False, (
+        "the exact impossible constraint that was shown to Gable must be recognised as impossible"
+    )
+    assert check._is_satisfiable('<2023.3.15,>=2021.8.30,>=2022.7.28') is True, (
+        "a REAL merged constraint (aicsimageio + napari) must still be considered satisfiable — "
+        "otherwise the guard suppresses everything and catches nothing"
+    )
+
+
+@pytest.mark.core
+def test_dependency_names_are_PARSED_not_PREFIX_MATCHED():
+    """``'numpydoc'.startswith('numpy')`` is **True**, and the remainder (``doc>=1.0``) is garbage.
+
+    The name comes from a real requirement parser, or not at all.
+    """
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "utils"
+              / "environment_check.py").read_text(encoding='utf-8', errors='ignore')
+
+    assert 'packaging.requirements' in source, (
+        "requirements must be parsed, not prefix-matched — 'numpydoc' starts with 'numpy'"
+    )
+    assert 'startswith(name)' not in source, (
+        "prefix matching is still in the source. It is how a garbage specifier got built."
+    )

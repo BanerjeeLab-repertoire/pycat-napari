@@ -4,6 +4,47 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.531] - 2026-07-13
+### The environment check cried wolf on a HEALTHY environment — fixed
+1.5.530 reported this to Gable on an environment that was **fine**:
+
+```
+tifffile   required: <2022.4.22,>=2022.7.28
+```
+
+***Nothing can be simultaneously below 2022.4.22 and above 2022.7.28.***
+
+> **A check that emits an unsatisfiable requirement has not found a problem — *it IS the problem*,**
+> and it trains the user to ignore the one message that might one day matter.
+
+### Two bugs, both mine
+**1. It kept requirements that only apply to an EXTRA.** ``napari`` declares
+``tifffile<2022.4.22; extra == 'testing'`` — a pin that applies **only** to ``napari[testing]``,
+which nobody installs. The code split on ``;``, ***threw the marker away, and kept the line
+anyway*** — merging a test-only pin into the runtime constraint and intersecting it with
+``aicsimageio``'s into something impossible.
+
+**2. It matched dependency names by PREFIX.** ``'numpydoc'.startswith('numpy')`` is **True**, and
+the remainder (``doc>=1.0``) is garbage.
+
+Both are fixed by **parsing the requirement properly** (``packaging.requirements.Requirement``)
+instead of guessing at its shape.
+
+### And a guard on the guard
+**If a constraint cannot be satisfied by any version, the bug is in the checker, not the
+environment.** It is now suppressed and logged rather than shown — *reporting it sends the user
+chasing a fix that cannot exist.*
+
+### Verified both ways
+| environment | result |
+|---|---|
+| **Gable's, after repair** | **silent** — correctly reports nothing |
+| **the BioIO disaster** (numpy 2.5.1, zarr 3.2.1, tifffile 2026.6.1, fsspec 2026.6.0, lxml 6.1.1) | **catches all five**, with **satisfiable** constraints |
+
+*A guard that has gone quiet everywhere is worse than useless, so both halves are tested.*
+
+**354/354 core tests passing.**
+
 ## [1.5.530] - 2026-07-13
 ### PyCAT now says when its environment has been broken — because it cannot stop it happening
 Gable: *"I just wanted to make certain that somebody couldn't bork their PyCAT by downloading and

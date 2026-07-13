@@ -67,29 +67,108 @@ def _installed_version(name):
 
 
 def _constraints_declared_by(package):
-    """Every load-bearing pin that ``package`` declares. ``{}`` if it is not installed."""
+    """Every load-bearing pin that ``package`` declares **for a normal install.**
+
+    ── Two bugs lived here, and they produced an IMPOSSIBLE requirement ─────────
+
+    The first version reported this to Gable on a **healthy** environment::
+
+        tifffile   required: <2022.4.22,>=2022.7.28
+
+    ***Nothing can be simultaneously below 2022.4.22 and above 2022.7.28.*** A check that emits an
+    unsatisfiable constraint has not found a problem — **it IS the problem**, and it would have
+    trained him to ignore the one message that might one day matter.
+
+    **Bug 1: it kept requirements that only apply to an EXTRA.** ``napari`` declares
+    ``tifffile<2022.4.22; extra == 'testing'`` — a pin that applies **only** to
+    ``napari[testing]``, which nobody installs. The code split on ``;``, **threw the marker away,
+    and kept the line anyway.** So a test-only pin was merged into the runtime constraint.
+
+    **Bug 2: it matched dependency names by PREFIX.** ``specification.startswith('numpy')`` is also
+    true of ``numpydoc``, and the remainder (``doc>=1.0``) is garbage.
+
+    Both are fixed by **parsing the requirement properly** instead of guessing at its shape.
+    """
     try:
         from importlib.metadata import requires
+        from packaging.requirements import Requirement
         lines = requires(package) or []
     except Exception:
         return {}
 
     constraints = {}
-    for line in lines:
-        # e.g. "numpy>=1.22,<2.0" or "torch>=2.2.0,<2.3.0; platform_system=='Darwin'"
-        specification = line.split(';')[0].strip()
 
-        for name in _LOAD_BEARING:
-            if not specification.lower().startswith(name):
-                continue
-            remainder = specification[len(name):].strip()
-            if remainder.startswith('['):        # an extra, e.g. "bioio[czi]"
-                continue
-            if remainder:
-                constraints[name] = remainder
-            break
+    for line in lines:
+        try:
+            requirement = Requirement(line)
+        except Exception:
+            continue
+
+        # ── A requirement guarded by `extra == '...'` is NOT INSTALLED ──────────
+        #
+        # unless the user asked for that extra — which, for `napari[testing]`, nobody does. Keeping
+        # it is what produced the impossible tifffile constraint.
+        marker = str(requirement.marker or '')
+        if 'extra ==' in marker:
+            continue
+
+        # Exact name, from the parser. Not a prefix guess.
+        name = requirement.name.lower().replace('_', '-')
+        if name not in _LOAD_BEARING:
+            continue
+
+        specification = str(requirement.specifier)
+        if not specification:
+            continue                        # a bare dependency with no pin constrains nothing
+
+        # A package can declare the same dependency more than once (different platform markers).
+        # Intersect rather than overwrite — the old code kept whichever came last.
+        if name in constraints:
+            constraints[name] = _intersect(constraints[name], specification)
+        else:
+            constraints[name] = specification
 
     return constraints
+
+
+def _intersect(first, second):
+    """Both constraints, combined. Falls back to the first if they cannot be merged."""
+    try:
+        from packaging.specifiers import SpecifierSet
+        return str(SpecifierSet(first) & SpecifierSet(second))
+    except Exception:
+        return first
+
+
+def _is_satisfiable(specification):
+    """**Can ANY version satisfy this?**
+
+    An unsatisfiable constraint means the check has built a nonsense requirement — *which is a bug
+    in this file, not a problem with the user's environment.* Reporting it would be worse than
+    saying nothing, because the user would go chasing a fix that cannot exist.
+    """
+    try:
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        specifier_set = SpecifierSet(specification)
+
+        lower = None
+        upper = None
+        for specifier in specifier_set:
+            if specifier.operator in ('>=', '>', '=='):
+                candidate = Version(specifier.version)
+                lower = candidate if lower is None else max(lower, candidate)
+            if specifier.operator in ('<=', '<'):
+                candidate = Version(specifier.version)
+                upper = candidate if upper is None else min(upper, candidate)
+
+        if lower is not None and upper is not None and lower >= upper:
+            return False
+        return True
+
+    except Exception:
+        return True         # cannot decide — assume it is fine rather than cry wolf
 
 
 def _all_constraints():
@@ -179,6 +258,22 @@ def check_environment(verbose=True):
         installed = _installed_version(name)
         if installed is None:
             continue        # not installed at all — a different failure, and it will say so itself
+
+        # ── If the constraint is IMPOSSIBLE, the bug is HERE, not in the environment ──
+        #
+        # The first version of this check reported ``tifffile <2022.4.22,>=2022.7.28`` on a healthy
+        # environment. **Nothing can satisfy that.** A check that emits an unsatisfiable
+        # requirement has not found a problem — ***it IS the problem***, and it would have trained
+        # the user to ignore the one message that might one day matter.
+        #
+        # So: stay quiet, and say so in the log rather than to the user's face.
+        if not _is_satisfiable(specification):
+            import logging
+            logging.getLogger(__name__).debug(
+                "environment check built an unsatisfiable constraint for %s (%s, from %s) — "
+                "this is a bug in environment_check, not a problem with the environment",
+                name, specification, declared_by)
+            continue
 
         verdict = _satisfies(installed, specification)
         if verdict is False:
