@@ -4,6 +4,48 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.522] - 2026-07-13
+### `extend_mask_to_edges` wrote into the CALLER's array — and returned the same object
+```python
+mask[0:size, :] = mask[size, None]
+```
+
+That modifies the array it was **given**. Measured: a caller's mask went from **361 px to 400 px**,
+and ``result is mask`` was **True** — ***there was no new array at all.***
+
+**If that array is a napari layer, the user's mask on screen silently changes.** And a workflow
+re-run starts from data that is **no longer what the user segmented**.
+
+It happened to be **idempotent** — running it twice gave the same answer — but that was **luck, not
+design**: the second call simply found the border already filled. ***The aliasing is the bug, and
+idempotence does not excuse it.***
+
+And ``segmentation_tools`` passes ``refined_labels`` to it — a **labels** array, not a boolean mask
+— so the propagated border carries **label IDs**.
+
+**Fixed and verified**: the caller's mask is untouched (361 → 361), the result is still correctly
+extended (400 px), it is a **new object**, and the labels case preserves its IDs.
+
+### GUARDED as a category
+A test now fails any toolbox function that writes into a parameter array without copying it first.
+The four exceptions are deliberate and **say so in their names** — ``stitch_into``,
+``_draw_msd_into``, and the two plotters that fill a caller-supplied ``line_registry``.
+
+### Audited and CLEAN — the magic-threshold class
+**30 bare-number thresholds** on measured quantities. Checked the consequential ones, and they hold
+up:
+
+- **``N > 70`` in SpIDA** — a *numerical* switch, not a magic number: 70! overflows float64, and the
+  Poisson→Gaussian difference there is **0.00134 and shrinking.** Verified.
+- **``floor/spread > 0.17``** — already calibrated with a table in the source (the error passes 15 %
+  between 0.148 and 0.189).
+- **the QC thresholds** — already carry their reasoning, including one that documents *"I tried to
+  subtract it, and it cannot be done from this image."*
+
+***Not every suspicious-looking number is a bug, and saying so is part of the audit.***
+
+**327/327 core tests passing.**
+
 ## [1.5.521] - 2026-07-13
 ### Fit-quality audit COMPLETE — and two `popt, _ = curve_fit(...)` that are CORRECT
 ``_fit_sigma`` (in ``vpt_tools`` and ``general_image_tools``) discards the covariance, exactly like

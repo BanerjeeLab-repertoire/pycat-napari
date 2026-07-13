@@ -109,6 +109,23 @@ def extend_mask_to_edges(mask, size_to_extend=1):
     unmodified mask.
     """
 
+    # ── It wrote into the CALLER's array, and returned the same object ───────────
+    #
+    # ``mask[0:size, :] = ...`` modifies the array it was **given**. Measured: a caller's mask goes
+    # from **361 px to 400 px**, and ``result is mask`` is **True** — *there is no new array at
+    # all.*
+    #
+    # **If that array is a napari layer, the user's mask on screen silently changes.** And a
+    # workflow re-run starts from data that is no longer what the user segmented.
+    #
+    # It happens to be idempotent — running it twice gives the same answer — but that is **luck,
+    # not design**: the second call simply finds the border already filled. *The aliasing is the
+    # bug, and idempotence does not excuse it.*
+    #
+    # ``segmentation_tools`` passes ``refined_labels`` here — a **labels** array, not a boolean
+    # mask — so the propagated border carries **label IDs**, not just True.
+    mask = np.array(mask, copy=True)
+
     h, w = mask.shape # Get the height and width of the mask
 
     size_to_extend = int(size_to_extend) # Ensure the size to extend is an integer
