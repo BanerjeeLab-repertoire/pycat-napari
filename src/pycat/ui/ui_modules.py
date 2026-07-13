@@ -1688,8 +1688,8 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 import numpy as _np
                 arr = None
                 try:
-                    from aicsimageio import AICSImage
-                    arr = _np.asarray(AICSImage(p).get_image_data("ZYX", C=0, T=0)).astype(_np.float32)
+                    from pycat.file_io.image_reader import open_image
+                    arr = _np.asarray(open_image(p).get_image_data("ZYX", C=0, T=0)).astype(_np.float32)
                     arr = _np.squeeze(arr)
                 except Exception:
                     import tifffile

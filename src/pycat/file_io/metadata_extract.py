@@ -32,6 +32,7 @@ partial file still produces a usable record.
 """
 
 import os
+from pycat.file_io.image_reader import open_image
 
 try:
     from pycat.utils.general_utils import debug_log
@@ -500,8 +501,7 @@ def extract_aicsimage_metadata(file_path, image=None):
     raw = {}
     try:
         if image is None:
-            from aicsimageio import AICSImage
-            image = AICSImage(file_path)
+            image = open_image(file_path)
 
         # Dimensions.
         try:

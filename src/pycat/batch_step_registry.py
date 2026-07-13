@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from pycat.file_io.image_reader import open_image
 
 if TYPE_CHECKING:
     from pycat.batch_processor import BatchProcessor
@@ -99,8 +100,7 @@ def _load_image(image_path: Path, channel: int = 0):
     microns_per_pixel = 1.0
 
     try:
-        from aicsimageio import AICSImage
-        img = AICSImage(str(image_path))
+        img = open_image(str(image_path))
         data = img.get_image_data("YX", S=0, T=0, C=channel)
         try:
             px_size = img.physical_pixel_sizes

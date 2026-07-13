@@ -215,6 +215,7 @@ def _tiff_pixel_size_um(file_path):
 
 import skimage as sk
 from aicsimageio import AICSImage
+from pycat.file_io.image_reader import open_image
 from pycat.utils.channel_naming import (
     extract_channel_info_from_aicsimage,
     extract_channel_info_from_ims,
@@ -1266,7 +1267,7 @@ class FileIOClass:
             # eagerly as these trigger full image reads on large files.
             _use_fallback = False
             try:
-                image = AICSImage(file_path)
+                image = open_image(file_path)
                 # Access only the dask-backed metadata — does not read pixel data
                 _ = image.xarray_dask_data.dims
             except AttributeError as _e:
@@ -1276,7 +1277,7 @@ class FileIOClass:
                 print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
             except Exception:
                 # Any other error on metadata access — try normal path anyway
-                image = AICSImage(file_path)
+                image = open_image(file_path)
 
             if _use_fallback:
                 # skimage also uses tifffile internally so hits the same NumPy 2.0
@@ -1314,7 +1315,7 @@ class FileIOClass:
                     print(f"[PyCAT] PIL fallback also failed: {_pil_e}")
                 continue  # skip the AICSImage path below
 
-            image = AICSImage(file_path)
+            image = open_image(file_path)
             self.central_manager.active_data_class.update_metadata(image)
             # Also store the normalised metadata record for the metadata widget
             # and results export.
@@ -1680,9 +1681,8 @@ class FileIOClass:
         # whether we MUST ask (no imaging metadata at all).
         looks_like_mask = False
         try:
-            from aicsimageio import AICSImage
             import numpy as _np
-            img = AICSImage(file_path)
+            img = open_image(file_path)
             plane = _np.asarray(img.get_image_data("YX", C=0, T=0, Z=0))
             is_int = _np.issubdtype(plane.dtype, _np.integer)
             uniq = _np.unique(plane)
@@ -1803,8 +1803,7 @@ class FileIOClass:
         n_t = n_z = n_c = n_p = 1
         parsed = False
         try:
-            from aicsimageio import AICSImage
-            img = AICSImage(file_path)
+            img = open_image(file_path)
             dims = img.dims  # has .T .C .Z .Y .X
             n_t = int(getattr(dims, 'T', 1) or 1)
             n_z = int(getattr(dims, 'Z', 1) or 1)
@@ -2438,15 +2437,10 @@ class FileIOClass:
 
         # ── Read metadata ────────────────────────────────────────────────
         try:
-            try:
-                from aicsimageio import AICSImage as _AICSImage
-                AICSImage = _AICSImage
-            except ImportError as _e:
-                raise RuntimeError(
-                    "aicsimageio is required to open TIFF/CZI stacks. "
-                    "Install with: pip install aicsimageio"
-                ) from _e
-            image = AICSImage(file_path)
+            # `open_image` is the seam: it routes to aicsimageio or bioio, and raises
+            # ImageReaderUnavailable with the exact `pip install` line when neither is
+            # present. The hand-rolled ImportError that used to live here said less.
+            image = open_image(file_path)
             use_aicsimage = True
 
             # ── Multi-position (scene) detection ───────────────────────
@@ -2959,7 +2953,7 @@ class FileIOClass:
                 pass 
 
             # Open the mask using AICSImage package
-            mask = AICSImage(file_path)
+            mask = open_image(file_path)
 
             # Get the number of pages and channels in the mask
             num_pages = getattr(mask.dims, 'S', 1)

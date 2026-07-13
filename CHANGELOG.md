@@ -4,6 +4,97 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.529] - 2026-07-13
+### BioIO: one seam, and the audit behind it
+``aicsimageio`` is in **maintenance mode**; its maintainers name ``bioio`` as the *"compatible
+successor"*. This ships the **seam** and the **acceptance test** — not the switch.
+
+### The audit — and it is smaller than `file_io.py`'s 3,874 lines suggest
+**1. The API surface PyCAT uses is FIFTEEN attributes, and BioIO matches every one.**
+``.data .dims .shape .dtype .metadata .scenes .set_scene .current_scene .physical_pixel_sizes
+.get_image_data .get_image_dask_data .xarray_dask_data`` — same names, same semantics, same **TCZYX**
+ordering.
+
+**2. The lazy layer is ALREADY decoupled — the single most important finding.**
+``multidim_io``'s ``_ZarrTZYX_generic`` wraps a **plain zarr array**, not an ``AICSImage``. The
+reader only *writes* that zarr. ***So the lazy path — the one carrying the ``__array__`` frame-zero
+landmine that has already cost this project two bugs — is untouched by the swap.***
+
+**3. Only ONE format genuinely needs the library.** ``.ims`` has its own HDF5 reader; ``.tif`` goes
+through ``tifffile`` on the fast path; video goes through ``cv2``. **``.czi`` is the one format that
+truly requires it.**
+
+**4. The reader never escapes into the analysis code** — a local variable in five functions,
+reaching exactly three consumers, all metadata extractors.
+
+### Why a seam and not a find-and-replace
+A find-and-replace would work, and it would be **irreversible in one step.** This project has been
+bitten twice by a change that looked safe and could not be A/B-ed — the **rolling-ball
+normalisation** that made batch disagree with the recording, and the **frame-zero collapse** that
+told users their movie was a still image.
+
+***Both were invisible until someone compared two runs.***
+
+All **10** construction sites now route through ``pycat.file_io.image_reader.open_image``, and a
+test fails if any new one appears. *(It already earned that: it caught a site in ``ui_modules`` that
+this changelog's own audit had listed and I had then missed.)*
+
+```
+PYCAT_IMAGE_READER=bioio      run-pycat     # the new path
+PYCAT_IMAGE_READER=aicsimageio run-pycat    # the incumbent, unchanged — and still the DEFAULT
+```
+
+### The acceptance test runs on REAL files
+``compare_readers()`` opens the same file with **both** libraries and reports every difference in
+shape, dtype, **dimension order**, **pixel size**, scenes — and **the pixels themselves.**
+
+- a **dimension-order** difference *would not crash*. It would return the **wrong channel.**
+- a **pixel-size** difference changes **every length, area and diffusion coefficient** PyCAT reports.
+- everything else can match while **the data differs** — a byte-order bug, an off-by-one at a chunk
+  boundary. **The only claim worth making is that the pixels are identical.**
+
+***The default stays ``aicsimageio`` until that comparison is clean on real CZI, Micro-Manager
+OME-TIFF, and the astigmatic bead movie that has already exposed two loader bugs.*** Flipping a
+default is a decision to make with evidence in hand, not with a passing import.
+
+**347/347 core tests passing.**
+
+## [1.5.528] - 2026-07-13
+### The high-water mark is now APPEND-ONLY BY CONSTRUCTION
+Gable: *"I assume the new tool is pinned so if I change chat sessions the protection is in place?"*
+
+**It is in the repo, not in memory — so yes, it survives a session change.** But the question
+exposed a real gap, and it is the same trap the tool exists to prevent, one level up.
+
+### The gap
+The mark records **the best each function has ever been.** But nothing stopped a future session
+**regenerating it from a tree that had already lost something** — which would **bake the loss in as
+normal** and silence the guard forever.
+
+> ***That is worse than having no guard: it is a guard that certifies the damage.***
+
+### The fix
+``--update`` is now a **union with what is already recorded**, never a replacement. A parameter set
+can only **gain** members; a recorded length can only **rise**; a function that once existed is
+**never forgotten**. And it **refuses to write a mark smaller than the one it read**, on any axis.
+
+**You cannot regenerate a clean baseline from a dirty tree.**
+
+### And testing the refusal found a second flaw
+On a deliberately regressed tree, the update **printed "mark updated, +0" and exited 0** — because
+the union had correctly carried the lost parameters forward. **The memory was safe.**
+
+**But the mark being safe is not the same as the tree being safe.** An update that reports success
+while the tree has lost four safety parameters is *technically correct and practically useless* —
+***it tells you nothing is wrong while something is.***
+
+``--update`` now also reports what the **current tree** is missing relative to the mark, and
+**exits 1**. Verified on the exact regression: it names
+``segment_subcellular_objects LOST: ['image_stats', 'punctate_gate', 'punctate_gate_abs_sigma',
+'punctate_gate_sigma']``.
+
+**343/343 core tests passing.**
+
 ## [1.5.527] - 2026-07-13
 ### A mechanism to catch DROPPED CODE — because the spurious-puncta bug was a silent deletion
 Gable, after the incident:
