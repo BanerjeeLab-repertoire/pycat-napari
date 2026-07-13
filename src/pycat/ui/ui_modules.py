@@ -29,6 +29,7 @@ import math
 import napari 
 
 from pycat.utils.general_utils import debug_log
+from napari.utils.notifications import show_warning as napari_show_warning
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, 
@@ -1071,8 +1072,22 @@ class BaseUIClass:
                             lambda e: _px_refresh())
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except Exception as _exc:
+            # ── The PIXEL-SIZE GATE must never fail SILENTLY ────────────────────
+            #
+            # This block installs the gate — the thing that tells a user their lengths are in            # PIXELS because the metadata carried no resolution. **35 lines of it, including            # ``add_pixel_size_gate`` itself, were wrapped in ``except Exception: pass``.**
+            #
+            # So if ANYTHING in here threw, **the gate simply never appeared** — and the user            # got no warning at all. That is not hypothetical: the gate stopped firing once            # before (the 1.5.273-278 regression), and a silent handler is exactly why it took            # a bracketing hunt through git tags to find out why.
+            #
+            # **A guard that can vanish without saying so is not a guard.**
+            debug_log('BaseUIClass: the pixel-size gate could NOT be installed', _exc)
+            try:
+                napari_show_warning(
+                    'The pixel-size check could not be installed on this panel. **Lengths and '
+                    'areas from it may be in PIXELS, not microns** — there is nothing here to '
+                    'tell you if the metadata carried no resolution. See the debug log.')
+            except Exception:
+                pass
 
 class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidgetsMixin, _SegmentationWidgetsMixin, _AnalysisWidgetsMixin, _LabelsMasksWidgetsMixin, _ImageOpsWidgetsMixin):
     """

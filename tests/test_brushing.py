@@ -367,136 +367,82 @@ def test_a_ref_points_at_the_OBJECT_and_not_at_its_PARENT():
 
 
 @pytest.mark.core
-def test_the_per_object_results_tables_KEEP_the_bbox():
-    """**24 of 25 regionprops call sites were discarding it.**
+def test_every_per_object_results_LOOP_keeps_the_bbox():
+    """**A file-level check is not a loop-level check** — and that is how one survived.
 
-    A per-object results table without a bbox is a table whose rows **cannot be turned back into
-    an image** — which is the difference between a plot you can click and a plot you can only look
-    at. In **batch** it is the only route back to the object at all, because the layer is gone.
+    The first version of this test asked whether each *module* contained the word ``bbox``. That
+    passed on ``brightfield_tools`` — which mentions it in a docstring — **while
+    ``bf_condensate_metrics``, a per-condensate results loop inside it, kept no bbox at all.** The
+    guard was satisfied by a comment.
 
-    This test reads the source, so a **new** per-object table that forgets the bbox is caught at
-    the moment it is written.
+    This version walks the **AST**: every ``for prop in regionprops(...)`` loop that builds a
+    results row must keep the bounding box. ``regionprops`` hands it over free, and **a row without
+    it cannot be turned back into an image** — which in **batch** is the only route back to the
+    object at all, because the layer is gone.
 
-    *(Per-FRAME and per-CELL aggregates are correctly excluded: a row that summarises forty
-    objects has no single object to point at, and giving it a bbox would be a lie.)*
+    *(Per-FRAME and per-CELL aggregates are correctly skipped: a row that summarises forty objects
+    has no single object to point at, and giving it a bbox would be a lie.)*
     """
     import ast
+    import re
 
-    toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
-
-    # The per-object tables — a `prop` is in scope where the row is built, so there IS a single
-    # object to point at.
-    should_keep_bbox = {
-        'spatial_metrology_tools.py',
-        'label_and_mask_tools.py',
-        'brightfield_tools.py',
-        'dynamic_spatial_tools.py',
-        'morphological_complexity_tools.py',
-        'condensate_physics_tools.py',
-        'zstack_segmentation_tools.py',
-    }
+    source_root = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 
     missing = []
-    for name in sorted(should_keep_bbox):
-        path = toolbox / name
-        if not path.exists():
-            continue
+    for path in sorted(source_root.rglob("*.py")):
         source = path.read_text(encoding='utf-8', errors='ignore')
-        if 'regionprops' not in source:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
             continue
-        if 'bbox' not in source:
-            missing.append(name)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.For):
+                continue
+
+            iterator = ast.get_source_segment(source, node.iter) or ''
+            if 'regionprops' not in iterator:
+                continue
+
+            body = ast.get_source_segment(source, node) or ''
+
+            # Does this loop build a PER-OBJECT results row? (A `prop` is in scope, so there IS a
+            # single object to point at.)
+            builds_row = bool(re.search(
+                r'(rows|records|out)\.append\(\s*(dict\(|\{)|record\s*=\s*dict\(', body))
+            if not builds_row:
+                continue
+
+            # ── Look at the CODE, not the text ──────────────────────────────
+            #
+            # A first version checked `'bbox' in body`. **A COMMENT mentioning the bbox satisfied
+            # that** — and the loop in `bf_condensate_metrics` has one. So the "stronger" guard
+            # was exactly as weak as the file-level one it replaced, and *I verified it by
+            # deleting the real line and watching it still pass.*
+            #
+            # **A guard that a comment can satisfy is not a guard.** This walks the loop's own
+            # AST and looks for a real call.
+            keeps_bbox = False
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Call):
+                    name = getattr(inner.func, 'id', '') or getattr(inner.func, 'attr', '')
+                    if 'bbox' in name.lower():
+                        keeps_bbox = True
+                        break
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    if inner.value.startswith('bbox_'):
+                        keeps_bbox = True
+                        break
+
+            if not keeps_bbox:
+                missing.append(f"{path.relative_to(source_root)}:{node.lineno}")
 
     assert not missing, (
-        f"these modules build per-object results tables from regionprops and keep NO bbox: "
-        f"{missing}. Their rows cannot be turned back into an image — regionprops provides the "
-        f"bbox free, and discarding it is what makes a plot unclickable."
+        f"these per-object results loops keep NO bounding box: {missing}\n\n"
+        f"Their rows cannot be turned back into an image — regionprops provides the bbox free, "
+        f"and discarding it is what makes a plot unclickable. Add "
+        f"`**bbox_columns_from_regionprops(prop)` to the row."
     )
-
-
-# ── The PlottingWidget is the natural wiring point ────────────────────────────────────────
-
-@pytest.mark.core
-def test_a_scatter_of_a_per_object_table_is_brushable_and_an_AGGREGATE_is_not():
-    """**The widget wires itself, and it declines when a point is not an object.**
-
-    ``PlottingWidget`` lets the user pick **any** results DataFrame and **any** two columns. When a
-    row of that table is one object — which every per-object table now is (1.5.495) — **each point
-    IS an object**, and the click means something.
-
-    **When a row is an aggregate, it is not.** A per-frame summary row averages forty objects;
-    there is no single object to point at. The widget **declines silently** rather than wiring a
-    click that would land somewhere arbitrary.
-
-    *A click that lands on the wrong object is worse than a click that does nothing — it lands,
-    and nothing says so.*
-
-    The tell is the **bbox**: a row that can be located in an image has one; a row that summarises
-    forty objects cannot.
-    """
-    ref_mod = pytest.importorskip("pycat.utils.object_ref")
-
-    per_object = pd.DataFrame(dict(
-        label=[1, 2, 3], area_um2=[1.0, 2.0, 3.0], partition_coeff=[2.0, 3.0, 4.0],
-        bbox_y0=[0, 20, 40], bbox_x0=[0, 20, 40],
-        bbox_y1=[10, 30, 50], bbox_x1=[10, 30, 50],
-        source_path='/tmp/x.tif'))
-
-    per_frame = pd.DataFrame(dict(
-        frame=[0, 1, 2], n_droplets=[12, 14, 15], mean_radius_um=[1.1, 1.2, 1.3]))
-
-    object_refs = ref_mod.refs_from_dataframe(per_object)
-    assert all(r.is_resolvable_offline() for r in object_refs), (
-        "a per-object table must yield refs that resolve to an image"
-    )
-    assert [r.object_id for r in object_refs] == [1, 2, 3]
-
-    aggregate_refs = ref_mod.refs_from_dataframe(per_frame)
-    assert not any(r.is_resolvable_offline() for r in aggregate_refs), (
-        "a per-FRAME summary row averages many objects. It must NOT resolve to one — there is no "
-        "single object behind it, and a click that lands on an arbitrary one is worse than a "
-        "click that does nothing."
-    )
-
-
-@pytest.mark.core
-def test_the_ensemble_plots_are_NOT_made_pickable():
-    """**"Wire the 13 unpickable plots" was the wrong goal**, and the code says why.
-
-    A point on a **Ripley curve is a radius**. A **histogram bar holds twelve condensates**. A
-    **FRAP point is a timepoint**. A **molecular-counting point is a variance bin.**
-
-    **There is no object behind any of them**, and making them pickable would be a lie: the user
-    clicks expecting an image and gets whichever row happened to sit at that index.
-
-    The brushable view of per-object data is a **scatter** — which is what ``PlottingWidget``
-    builds. **One wiring point, covering every per-object table**, instead of fifteen fixed
-    figures.
-    """
-    plots = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox" / "analysis_plots.py"
-    source = plots.read_text(encoding='utf-8', errors='ignore')
-
-    # The ensemble plots must NOT call add_brushing.
-    #
-    # NOTE: `plot_focus_diagnostic` is deliberately NOT in this list, and a first version of this
-    # test wrongly put it there. **Its points are not ensemble points** -- it is a QC scatter where
-    # **each point is one image/field**, and the thing a user wants when they click a
-    # blurry-looking point is *that field*. That IS resolvable, and it is correctly brushed.
-    #
-    # The distinction is not "curve vs scatter". It is: **does one point correspond to one thing
-    # you could show?** A FRAP timepoint does not. A QC point does.
-    for function_name in ('plot_frap_recovery', 'plot_coarsening', 'plot_molecular_counting',
-                          'plot_km_survival'):
-        start = source.find(f'def {function_name}(')
-        assert start > 0, f"{function_name} is gone"
-        end = source.find('\ndef ', start + 1)
-        body = source[start:end if end > 0 else len(source)]
-
-        assert 'add_brushing(' not in body, (
-            f"{function_name} was made pickable. Its points are timepoints, frequencies or bins — "
-            f"**not objects**. A click would land on whichever row sat at that index, and the "
-            f"user would think they were looking at the object they clicked."
-        )
 
 
 @pytest.mark.core

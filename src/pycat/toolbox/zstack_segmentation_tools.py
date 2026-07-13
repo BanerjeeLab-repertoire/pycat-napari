@@ -446,6 +446,18 @@ def condensate_metrics_3d(
         cz, cy, cx = prop.centroid
 
         rows.append({
+            # ── KEEP THE BBOX. A 3D row must still be findable in an IMAGE. ────
+            #
+            # These loops ALREADY unpack ``prop.bbox`` — and then throw it away. A per-object 3D
+            # table whose rows cannot be turned back into a picture is a table you can only read,
+            # not click.
+            #
+            # The Z extent becomes the FRAME (an ObjectRef crops one plane), and the YX extent
+            # becomes the 2D bounding box. That is exactly what a crop needs: which slice, and
+            # where in it.
+            'frame':    int((z0 + z1) // 2),          # the object's central slice
+            'bbox_y0':  int(y0), 'bbox_x0': int(x0),
+            'bbox_y1':  int(y1), 'bbox_x1': int(x1),
             'condensate_label':     prop.label,
             'n_z_slices':           n_z_slices,
             'volume_voxels':        volume_vox,
@@ -484,6 +496,18 @@ def cell_metrics_3d(
         z0, y0, x0, z1, y1, x1 = prop.bbox
         cz, cy, cx = prop.centroid
         rows.append({
+            # ── KEEP THE BBOX. A 3D row must still be findable in an IMAGE. ────
+            #
+            # These loops ALREADY unpack ``prop.bbox`` — and then throw it away. A per-object 3D
+            # table whose rows cannot be turned back into a picture is a table you can only read,
+            # not click.
+            #
+            # The Z extent becomes the FRAME (an ObjectRef crops one plane), and the YX extent
+            # becomes the 2D bounding box. That is exactly what a crop needs: which slice, and
+            # where in it.
+            'frame':    int((z0 + z1) // 2),          # the object's central slice
+            'bbox_y0':  int(y0), 'bbox_x0': int(x0),
+            'bbox_y1':  int(y1), 'bbox_x1': int(x1),
             'cell_label':    prop.label,
             'n_z_slices':    z1 - z0,
             'volume_voxels': prop.area,

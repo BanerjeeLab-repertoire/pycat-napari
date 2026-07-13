@@ -685,6 +685,13 @@ def bf_condensate_metrics(
             od_part = mean_od / max(abs(bg_od), 1e-9)
 
         rows.append({
+            # ── KEEP THE BBOX. It is what makes this row brushable. ────────────
+            #
+            # This is the per-condensate BRIGHTFIELD table, and it was the ONE per-object loop
+            # the 1.5.495 sweep missed. regionprops hands the bbox over free, and a row without
+            # it **cannot be turned back into an image** — which in BATCH is the only route back
+            # to the object at all, because the layer is gone.
+            **bbox_columns_from_regionprops(prop),
             'condensate_label':   prop.label,
             'cell_label':         cell_lbl,
             'area_px':            prop.area,

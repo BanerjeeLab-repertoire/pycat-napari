@@ -4,6 +4,108 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.510] - 2026-07-13
+### THE REFACTOR — derived from the bugs, not from the line count
+Fifteen bugs this session. **Thirteen would have been prevented by a structural change, not by
+care.** And the structure is the same one every time:
+
+> **PyCAT passes RAW ARRAYS and RAW FLOATS between layers, and every consumer re-derives what they
+> mean.**
+>
+> **A lazy stack looks like an array. A pixel size looks like a float. A bool mask looks like
+> labels. Microns look like pixels.**
+
+*The bugs are not carelessness. They are the absence of types.*
+
+### `require_stack` — because the shape is the thing that LIES
+**Four separate bugs** had one shape (VPT, the temperature UI, N&B, SpIDA):
+
+```python
+data = np.asarray(layer.data)     # a lazy wrapper returns FRAME 0. Nothing errors.
+if data.ndim < 3:
+    warn("this layer is 2D")      # ...on a correct time-series.
+```
+
+``layer_is_stack`` reads ``.shape``, which the wrapper reports **honestly** — it is only
+``__array__`` that truncates. So the question *"is this a movie?"* has a correct answer, and **27
+toolbox modules re-derive it by hand from ``.ndim``**, on an array that may already have been
+collapsed.
+
+``require_stack`` **raises** instead of handing back one frame. *A test guard is an allow-list that
+erodes; a type is a wall.*
+
+### FOUND — the bbox guard could be satisfied by a COMMENT
+The 1.5.504 guard asked whether each **module** contained the word ``bbox``. It passed on
+``brightfield_tools`` — which mentions it in a docstring — **while ``bf_condensate_metrics``, a
+per-condensate results loop inside it, kept no bbox at all.**
+
+I rewrote it to walk the AST, **and it was exactly as weak**: the loop's own body contains a
+comment about the bbox, and ``'bbox' in body`` was satisfied by that too. *I only found out by
+deleting the real line and watching the "stronger" guard still pass.*
+
+> ***A guard that a comment can satisfy is not a guard.***
+
+It now looks for a real **call** in the AST — and the moment it did, **it found two more**.
+
+### FIXED — the 3D tables were not brushable
+``condensate_metrics_3d`` and ``cell_metrics_3d`` **already unpack ``prop.bbox``** — and then throw
+it away.
+
+They now emit the **Z extent as the frame** and the **YX extent as the bounding box** — which is
+exactly what a crop needs: **which slice, and where in it.** Verified: a z-stack object at slice 6
+resolves to ``frame=6, bbox=(11,11,30,30)``.
+
+**306/306 core tests passing.**
+
+## [1.5.509] - 2026-07-13
+### The PIXEL-SIZE GATE could vanish silently — and once did
+**35 lines installing the gate — including ``add_pixel_size_gate`` itself — were wrapped in
+``except Exception: pass``.**
+
+The gate is the thing that tells a user **their lengths are in PIXELS** because the metadata
+carried no resolution. If anything in that block threw, **the gate simply never appeared, and the
+user got no warning at all.**
+
+**That is not hypothetical.** The gate stopped firing once before (the 1.5.273–278 regression), and
+a silent handler is exactly why finding out *why* took a bracketing hunt through git tags.
+
+> ***A guard that can vanish without saying so is not a guard.***
+
+It now logs the failure **and warns the user** that lengths from that panel may be in pixels.
+
+### And it was hiding inside a 400-line function
+``_add_reference_frame_selector`` is **398 lines**. ``MenuManager`` is **2,062 lines across 31
+methods**. ``ui_modules.py`` is **5,423 lines**.
+
+**Nobody reads a 400-line function.** They skim it — and a ``try/except: pass`` around the one
+thing that mattered goes unnoticed.
+
+### So why not split MenuManager? **Because it cannot be verified.**
+``ui_modules`` has **~17 % name-coverage** in the test suite, and most of that is ``__init__``.
+
+**A refactor whose only verification is "it still imports" is a refactor that ships bugs** — and
+the value of splitting is preventing *future* bugs, while the cost would be **introducing them
+today, blind.**
+
+*The honest move is not to rewrite it. It is to stop it growing.*
+
+### A RATCHET instead of a rewrite
+**136 functions exceed 120 lines, totalling 27,478 lines — a third of the codebase.** A
+per-function allow-list of 136 entries would be noise: nobody reads it, and adding a line to it is
+easier than splitting a function, **so it would only ever grow.**
+
+So the budget is the **count itself**, set at today's value:
+
+- **no 137th** unreviewable function
+- **nothing longer than 660 lines** (today's worst — *indefensible already, and not a licence to
+  write 700*)
+- **``ui_modules.py`` may not grow** past 5,600 lines. *When something new belongs in the UI, it
+  goes in a **new module**. That is the only way this number comes down.*
+
+**Nothing has to be fixed to make these pass.** They fail only when something gets **worse**.
+
+**307/307 core tests passing.**
+
 ## [1.5.508] - 2026-07-13
 ### A pixel size of EXACTLY 1 is a SENTINEL, not a measurement
 ``file_io`` writes ``microns_per_pixel_sq = 1`` when the metadata carries no resolution — and it

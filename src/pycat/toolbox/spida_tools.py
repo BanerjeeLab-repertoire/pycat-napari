@@ -555,6 +555,15 @@ def _roi_pixels(image_layer, roi_shapes_layer, viewer):
     # **The user scrolls to frame 40, runs SpIDA, and silently analyses frame 0.** Nothing errors,
     # and the number looks fine. ``stack_access.materialize_stack`` exists for exactly this, and
     # its own docstring names the bug.
+    # ── `materialize_stack`, NOT `require_plane` ────────────────────────────────
+    #
+    # The block below ALREADY picks the right plane — it indexes by the viewer's ``current_step``.
+    # It simply never ran: ``np.asarray`` had already collapsed the array to frame 0, so
+    # ``img.ndim > 2`` was False and the correct code was skipped entirely.
+    #
+    # **The frame-selection logic was never broken. It was unreachable.** So the fix is to hand it
+    # a real stack, not to reimplement the choice it was already making. *(A first pass here
+    # reached for ``require_plane`` and would have duplicated logic that was already correct.)*
     from pycat.file_io.stack_access import materialize_stack
     img = materialize_stack(image_layer.data)
     if img.ndim > 2:

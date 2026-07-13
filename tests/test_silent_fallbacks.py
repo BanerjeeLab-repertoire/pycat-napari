@@ -380,3 +380,52 @@ def test_the_UIs_read_the_pixel_size_through_the_ACCESSOR():
         f"`pixel_size_um_or_default` does — **minus the warning that says the result is in PIXEL "
         f"units, not microns.** Call the accessor."
     )
+
+
+@pytest.mark.core
+def test_require_stack_RAISES_instead_of_returning_frame_zero():
+    """**A test guard is an allow-list that erodes. A type is a wall.**
+
+    ``layer_is_stack`` reads ``.shape``, which a lazy wrapper reports **honestly** — it is only
+    ``__array__`` that truncates. So the question *"is this a movie?"* has a correct answer, and
+    **27 toolbox modules re-derive it by hand from ``.ndim``** on an array that may already have
+    been collapsed.
+
+    **The shape is the thing that lies.** ``require_stack`` asks the wrapper instead, and **raises**
+    rather than handing back one frame and letting the caller conclude the data is 2-D.
+    """
+    stack_access = pytest.importorskip("pycat.file_io.stack_access")
+
+    class _LazyStack:
+        """Exactly PyCAT's contract: `.shape` is honest, `__array__` is truncated."""
+
+        def __init__(self, frames, height, width):
+            self.shape = (frames, height, width)
+            self._data = np.random.rand(frames, height, width).astype(np.float32)
+
+        def __array__(self, dtype=None):
+            return self._data[0]          # <-- the bug: frame 0 only
+
+        def __getitem__(self, key):
+            return self._data[key]
+
+        def __len__(self):
+            return self.shape[0]
+
+    lazy = _LazyStack(40, 32, 32)
+
+    # The trap, demonstrated.
+    assert np.asarray(lazy).ndim == 2, (
+        "the fixture must reproduce the real failure: np.asarray on a lazy wrapper returns 2-D"
+    )
+    assert stack_access.layer_is_stack(lazy), (
+        "...while `.shape` reports the truth. That asymmetry IS the bug."
+    )
+
+    # The accessor gets the whole movie.
+    data = stack_access.require_stack(lazy, context='a test')
+    assert data.shape == (40, 32, 32), f"require_stack returned {data.shape}, not the full movie"
+
+    # And REFUSES a genuinely 2-D layer, instead of proceeding.
+    with pytest.raises(stack_access.NotAStack):
+        stack_access.require_stack(np.random.rand(32, 32), context='a test')

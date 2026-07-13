@@ -341,3 +341,70 @@ def stream_stats(stack_like, percentiles=(1, 99)):
     return dict(min=float(gmin), max=float(gmax), mean=float(mean),
                 std=float(np.sqrt(m2 / count)) if count > 1 else 0.0,
                 n=int(count), percentiles=pct)
+
+
+# ── The accessors that RAISE. A test guard erodes; a type is a wall. ──────────────────────
+
+class NotAStack(TypeError):
+    """**A time-series analysis was handed something that is not a time-series.**
+
+    Or — far more likely — it was handed a **lazy stack that `np.asarray` had already collapsed to
+    frame 0**, and it is about to conclude the data is 2D.
+    """
+
+
+class NotAPlane(TypeError):
+    """A 2-D analysis was handed a stack, and would have silently used frame 0."""
+
+
+def require_stack(layer_or_data, *, context='this analysis', dtype=np.float32):
+    """**Get the whole movie, or RAISE.** For anything that measures across time.
+
+    Why this exists
+    ---------------
+    Four separate bugs this year had the same shape::
+
+        data = np.asarray(layer.data)     # a lazy wrapper returns FRAME 0. Nothing errors.
+        if data.ndim < 3:
+            warn("this layer is 2D")      # ...on a correct time-series.
+
+    N&B (which measures a **variance across time** — zero on one frame) told users their movie was
+    2D. SpIDA silently analysed frame 0 while the user was looking at frame 40. VPT collapsed a
+    1000-frame bead movie. The temperature UI did the same.
+
+    **The shape is the thing that lies.** ``layer_is_stack`` answers the question correctly, and
+    **27 toolbox modules re-derive it by hand from ``.ndim``** — on an array that may already have
+    been collapsed.
+
+    A test can catch a bad call site. **This catches it at the moment it happens**, with a message
+    that says what went wrong instead of a plausible-looking number.
+    """
+    data = getattr(layer_or_data, 'data', layer_or_data)
+
+    if not layer_is_stack(data):
+        shape = getattr(data, 'shape', None)
+        raise NotAStack(
+            f"{context} needs a time-series (a stack of frames), and this layer is "
+            f"{'2-D' if shape and len(shape) < 3 else f'shaped {shape}'}.\n\n"
+            f"**If you loaded a movie, this is a bug, not your data.** PyCAT's lazy wrappers "
+            f"return frame 0 from `np.asarray`, so a stack can silently look 2-D — which is "
+            f"exactly what this check exists to catch.")
+
+    return materialize_stack(data, dtype=dtype)
+
+
+def require_plane(layer_or_data, *, frame=0, context='this analysis', dtype=np.float32):
+    """**Get ONE frame, deliberately.** For anything that measures on a single image.
+
+    The counterpart trap: a 2-D analysis handed a stack **silently uses frame 0** — and the user,
+    who is looking at frame 40, never finds out. SpIDA did exactly this.
+
+    Passing ``frame`` explicitly makes the choice visible. Getting frame 0 because nobody thought
+    about it is not a choice.
+    """
+    data = getattr(layer_or_data, 'data', layer_or_data)
+
+    if not layer_is_stack(data):
+        return np.asarray(data, dtype=dtype)
+
+    return extract_2d_plane(data, frame_index=int(frame), dtype=dtype)

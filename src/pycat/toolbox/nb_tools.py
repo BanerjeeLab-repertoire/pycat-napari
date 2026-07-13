@@ -364,8 +364,14 @@ def run_nb_analysis(image_layer, gain, offset, read_variance, detrend_window,
     # have. And N&B computes a variance ACROSS TIME: on one frame that is zero.
     #
     # ``stack_access.materialize_stack`` exists for exactly this, and its docstring names the bug.
-    from pycat.file_io.stack_access import materialize_stack
-    data = materialize_stack(image_layer.data)
+    # ``require_stack`` RAISES if this is not a movie, instead of quietly handing back one frame
+    # and letting the check below announce that the user's time-series is "2D".
+    from pycat.file_io.stack_access import require_stack, NotAStack
+    try:
+        data = require_stack(image_layer, context='N&B')
+    except NotAStack as _exc:
+        napari_show_warning(str(_exc))
+        return
 
     # Minimalist axis handling: N&B needs (T,H,W). If the array has more than 3
     # dims (e.g. T,Z,C,H,W from lazy loading), collapse leading non-spatial axes
