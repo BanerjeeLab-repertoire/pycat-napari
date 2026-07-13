@@ -247,7 +247,25 @@ def _fit_sacf_1d(y_axis, x_axis):
         return np.nan
     try:
         _floor = float(np.min(y_trim))
-        popt, _ = curve_fit(
+        # ── The COVARIANCE was thrown away, and it is the only failure signal ────
+        #
+        # ``popt, _ = curve_fit(...)`` — that ``_`` is ``pcov``, and it is what tells you whether
+        # the Gaussian **describes the data at all.**
+        #
+        # ``curve_fit`` succeeds on **anything**. Measured, on this exact function:
+        #
+        #     real ACF, sigma = 2 / 5 / 10   ->  **2.000 / 5.000 / 10.000**  (exact)
+        #     **PURE NOISE**                 ->  **119.8**, **0.624**, nan, nan
+        #
+        # **Two of four white-noise inputs returned a finite, plausible-looking correlation
+        # length** — 119.8 px and 0.62 px — **and nothing said they were meaningless.** A spatial
+        # autocorrelation length is a physical claim about structure in the image, and there is no
+        # structure in white noise.
+        #
+        # ``_relative_sigma_error`` is the standard error on the width **as a fraction of the
+        # width** — scale-free, so one threshold works from 2 px to 100 px. **> 0.5 means the fit
+        # does not believe its own answer.**
+        popt, pcov = curve_fit(
             _gaussian, x_trim, y_trim,
             # The 4th parameter is the ACF's baseline. Without it the Gaussian is forced
             # through zero and widens to reach the floor -- a 43% overestimate of sigma.
@@ -257,6 +275,16 @@ def _fit_sacf_1d(y_axis, x_axis):
                 _floor],
             maxfev=20000,
         )
+
+        from pycat.toolbox.correlation_func_analysis_tools import _relative_sigma_error
+        # This model is (amp, mu, sigma, BASELINE) — the width is at index 2, and index 3 is the
+        # baseline. **The index is passed explicitly**: a helper that guesses it from len(popt)
+        # read the baseline as the width and rejected every real fit.
+        if _relative_sigma_error(popt, pcov, width_indices=[2]) >= 0.5:
+            # The fit ran, and its own error bar says the width is meaningless. **NaN is the
+            # honest answer** — a NaN correlation length is visibly wrong; a 119.8 is not.
+            return np.nan
+
         return abs(popt[2])
     except (RuntimeError, ValueError):
         return np.nan

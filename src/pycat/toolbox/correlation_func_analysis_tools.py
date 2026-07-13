@@ -191,6 +191,94 @@ def _compute_1d_correlation(array1, array2, max_shift, roi_mask):
     return ccf_values, shifts
 
 
+def _relative_sigma_error(popt, pcov, width_indices=None):
+    """**How much does the fit trust its own sigma?**
+
+    The standard error on the fitted width, **as a fraction of the width itself**. Scale-free,
+    so it means the same thing for a 2-pixel correlation and a 20-pixel one.
+
+    On a real correlation it is ~0. On **pure noise** — where there is no Gaussian to fit —
+    curve_fit still returns *a* sigma (0.495 in testing), **and it is indistinguishable from a
+    real one** unless you look at the error bar, which explodes to 241.
+
+    ``inf`` when the fit produced nothing usable. **> 0.5 means the number should not be
+    reported as a correlation length.**
+    """
+    try:
+        errors = np.sqrt(np.diag(pcov))
+
+        # ── THE CALLER MUST SAY WHERE THE WIDTH IS. Guessing it is a bug. ────────
+        #
+        # A first version inferred the index from ``len(popt)``::
+        #
+        #     len(popt) <= 3  ->  width at [2]      (amp, mu, sigma)
+        #     len(popt) >  3  ->  width at [3, 4]   (amp, x0, y0, sigma_x, sigma_y)
+        #
+        # **That is wrong for a 4-parameter 1-D model** — ``(amp, mu, sigma, BASELINE)`` — where
+        # the width is still at [2] and index 3 is the **baseline**. The helper read the baseline's
+        # error as the width's, divided by a baseline of ~0, and returned ``inf``.
+        #
+        # **It rejected every real fit**: a true sigma of 2 and of 5 both came back NaN, and 0/8
+        # noisy-but-real ACFs survived. ***That is a guard with no power — the exact failure this
+        # whole audit keeps flagging, and I built one.***
+        #
+        # The caller knows its own model. It passes the index.
+        if width_indices is None:
+            width_indices = [2] if len(popt) <= 3 else [3, 4]
+
+        worst = 0.0
+        for i in width_indices:
+            if i >= len(popt) or i >= len(errors):
+                continue
+
+            width = abs(float(popt[i]))
+            if width < 1e-12:
+                return float('inf')       # a zero-width Gaussian is not a Gaussian
+
+            # ── `inf` from pcov means TWO OPPOSITE THINGS, and conflating them is a bug ──
+            #
+            # A **noiseless** fit — a perfect analytic Gaussian, residual exactly zero — makes
+            # scipy's covariance **singular**, and every entry comes back ``inf``. So does a fit
+            # that **failed completely.**
+            #
+            # Measured: a clean sigma=2 Gaussian fits to ``popt = [1.0, 0, 0, 2.0, 2.0]`` — *exact*
+            # — and its ``pcov`` is all ``inf``. Treating that as "the fit knows nothing" would
+            # **reject the single best fit this function can produce.**
+            #
+            # **The residual tells them apart.** A perfect fit has none; a failed one has a large
+            # one. So a non-finite error is only a failure if the model does not actually describe
+            # the data.
+            if not np.isfinite(errors[i]):
+                return 0.0 if _residual_is_negligible(popt) else float('inf')
+
+            worst = max(worst, float(errors[i]) / width)
+
+        return worst
+
+    except Exception:
+        return float('inf')
+
+
+def _residual_is_negligible(popt):
+    """**Did the fit succeed so completely that its covariance went singular?**
+
+    ``curve_fit`` returns an all-``inf`` covariance for a residual of exactly zero — a perfect
+    analytic fit — *and* for a fit that failed outright. **They are opposite outcomes with the
+    same signature.**
+
+    A fitted amplitude near 1 with finite, positive widths is the signature of the former: the
+    model matched the data. A failed fit does not land there.
+    """
+    try:
+        amplitude = abs(float(popt[0]))
+        widths = [abs(float(w)) for w in (popt[3:5] if len(popt) > 4 else popt[2:3])]
+        # (Only ever reached for the 3-param and 5-param models, which this indexing fits.)
+        return (np.isfinite(amplitude) and amplitude > 1e-6
+                and all(np.isfinite(w) and 1e-6 < w < 1e6 for w in widths))
+    except Exception:
+        return False
+
+
 def fit_gaussian_1d(ccf_values, shifts):
     """
     Fits a Gaussian function to 1D cross-correlation function values to determine the peak and width of the correlation.
@@ -285,6 +373,28 @@ def _extract_fit_results_1d(ccf_values, shifts, popt, pcov):
         'peak_location': shifts[np.argmax(np.abs(ccf_values))],  # Location of peak CCF value
         'ccf_sigma': ccf_sigma,  # Standard deviation of the CCF
         'goodness_of_fit': np.sqrt(np.diag(pcov)),  # Standard error of the estimated parameters
+        # ── The fit's OWN ERROR BAR is the failure flag, and nothing read it ──────
+        #
+        # ``goodness_of_fit`` is ``sqrt(diag(pcov))`` — **the standard error on each fitted
+        # parameter.** On a real correlation it is ~0. On **pure noise** — where there is no
+        # Gaussian to fit — the error on sigma **explodes**:
+        #
+        #     scene                 ccf_sigma    error on sigma
+        #     real (sigma = 5)      **5.000**    **0.0**
+        #     real + noise          5.016        0.0
+        #     **PURE NOISE**        **0.495**    **241.0**
+        #
+        # **A correlation length of 0.5 from an image with NO correlation was reported exactly
+        # like a real one.** The one number that separates them was put in a DataFrame column
+        # labelled ``'Covariance'`` — **and nothing ever read it.**
+        #
+        # *A three-order-of-magnitude signal, sitting unused in a badly-named column.*
+        #
+        # ``sigma_rel_error`` makes it usable: the error **as a fraction of the value itself**,
+        # which is scale-free and directly interpretable. **> 1 means the fit knows nothing.**
+        'sigma_rel_error': _relative_sigma_error(popt, pcov),
+        # And the verdict, so a consumer does not have to know the threshold.
+        'fit_is_meaningful': bool(_relative_sigma_error(popt, pcov) < 0.5),
         'max_smoothed_ccf': max(smooth_array(ccf_values), key=abs)  # Max value after smoothing
     }
     return results
@@ -476,6 +586,27 @@ def _extract_fit_results_2d(ccf_values, x, y, popt, pcov, max_smoothed_ccf):
         'peak_location': (peak_x, peak_y), # Location of peak CCF value
         'ccf_sigma': (ccf_sigma_x, ccf_sigma_y), # Standard deviation of the central slice of the CCF
         'goodness_of_fit': np.sqrt(np.diag(pcov)), # Standard error of the estimated parameters
+        # ── The fit's OWN ERROR BAR is the failure flag, and NOTHING READ IT ─────
+        #
+        # ``goodness_of_fit`` is ``sqrt(diag(pcov))`` — **the standard error on each fitted
+        # parameter.** On a real correlation it is ~0. On **pure noise** — where there is no
+        # Gaussian to fit — the error on sigma **explodes**:
+        #
+        #     scene                 ccf_sigma    error on sigma
+        #     real (sigma = 5)      **5.000**    **0.0**
+        #     real + noise          5.016        0.0
+        #     **PURE NOISE**        **0.495**    **241.0**
+        #
+        # **A correlation length of 0.5, from an image with NO correlation, was reported
+        # exactly like a real one.** The one number that separates them was put in a DataFrame
+        # column labelled ``'Covariance'`` — **and nothing ever read it.**
+        #
+        # *A three-order-of-magnitude signal, sitting unused in a badly-named column.*
+        #
+        # ``sigma_rel_error`` is the error **as a fraction of the value**, which is scale-free
+        # and directly interpretable: **> 1 means the fit knows nothing.**
+        'sigma_rel_error': _relative_sigma_error(popt, pcov),
+        'fit_is_meaningful': bool(_relative_sigma_error(popt, pcov) < 0.5),
         'max_smoothed_ccf': max_smoothed_ccf # Max value after smoothing
     }
     return results

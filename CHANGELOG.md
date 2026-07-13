@@ -4,6 +4,96 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.520] - 2026-07-13
+### The SACF threw its covariance away — and reported a **119.8 px** correlation length for noise
+``_fit_sacf_1d`` ended with ``popt, _ = curve_fit(...)``. **That ``_`` is ``pcov``**, and it is the
+only thing that says whether the Gaussian describes the data at all.
+
+``curve_fit`` succeeds on **anything**. Measured on this exact function:
+
+| input | fitted sigma |
+|---|---|
+| real ACF, σ = 2 / 5 / 10 | **2.000 / 5.000 / 10.000** *(exact)* |
+| **PURE NOISE** | **119.8**, **0.624**, nan, nan |
+
+**Two of four white-noise inputs returned a finite, plausible-looking correlation length** — and
+nothing said they were meaningless. **A spatial autocorrelation length is a physical claim about
+structure in the image, and there is no structure in white noise.**
+
+Now gated on the fit's own error bar: **pure noise 6/12 → 3/12**, and **real correlations survive
+8/8 at every noise level.**
+
+### FOUND — I built a guard with no power, and caught it
+The shared helper **inferred the width index from ``len(popt)``**::
+
+    len(popt) > 3  ->  width at [3, 4]
+
+That is right for the **5**-parameter 2-D model ``(amp, x0, y0, σx, σy)`` and **wrong for the
+4-parameter 1-D model** ``(amp, μ, σ, baseline)`` — where the width is still at **[2]** and index 3
+is the **baseline**.
+
+**It read the baseline's error as the width's**, divided by a baseline of ~0, and returned ``inf``
+— ***rejecting every real fit.*** A true σ of 2 and of 5 both came back NaN.
+
+> ***That is a guard with no power — the exact failure this audit keeps flagging, and I built one.***
+
+**The caller knows its own model. It now passes the index.**
+
+### And my TEST was wrong too, in a way worth recording
+The first version built ``exp(-x²/2σ²) + white noise`` and concluded the guard was rejecting good
+data. **That is not what an ACF looks like.** An autocorrelation is **smooth by construction** —
+correlating an image averages its noise away.
+
+**I was measuring a real failure of the estimator on an input it will never see, and blaming the
+guard.** The test now builds the ACF from an actual image.
+
+**324/324 core tests passing.**
+
+## [1.5.519] - 2026-07-13
+### A correlation length from an image with NO correlation was reported like a real one
+``fit_gaussian_2d`` returns the width of a Gaussian fitted to the correlation function — the
+**correlation length**. On **pure noise**, where there is no Gaussian to fit, ``curve_fit`` still
+returns *a* number: **0.495**. **Nothing distinguished it from a real measurement.**
+
+### The signal was there, and unused
+``goodness_of_fit`` is ``sqrt(diag(pcov))`` — **the standard error on each fitted parameter:**
+
+| scene | ccf_sigma | **error on sigma** |
+|---|---|---|
+| real (σ = 5) | **5.000** | **0.0** |
+| real + noise | 5.016 | 0.0 |
+| **PURE NOISE** | **0.495** | **241.0** |
+
+**A three-order-of-magnitude signal** — and it was placed in a DataFrame column labelled
+``'Covariance'``, ***which nothing ever read.***
+
+### `sigma_rel_error` and `fit_is_meaningful`
+The error **as a fraction of the value** — scale-free, so one threshold works from a 2-px
+correlation to a 20-px one. **> 0.5 means the fit does not believe its own answer.**
+
+| scene | rel_error | meaningful? |
+|---|---|---|
+| real σ=5 | 0.000 | **100 %** |
+| real, **heavy** noise | 0.078 | **100 %** |
+| **pure noise** | **45.9** | **12 %** |
+
+*(The power matters: a guard that rejects heavy-noise data would look impressive and be useless.)*
+
+### FOUND — `inf` from pcov means TWO OPPOSITE THINGS
+A **noiseless** fit — a perfect analytic Gaussian, residual exactly zero — makes scipy's covariance
+**singular**, and every entry comes back ``inf``. **So does a fit that failed completely.**
+
+Measured: a clean σ = 2 Gaussian fits to ``popt = [1.0, 0, 0, 2.0, 2.0]`` — **exact** — and its
+``pcov`` is all ``inf``. **A first version of this flag rejected it** — *it would have thrown away
+the single best fit the function can produce.*
+
+**The residual tells them apart**, and now does.
+
+*(Same module whose ``ccf_sigma`` was a 13× underestimate in 1.5.481. That fix holds: a true σ = 5
+recovers as **5.000**.)*
+
+**319/319 core tests passing.**
+
 ## [1.5.518] - 2026-07-13
 ### FIXED — the axis-warning sweep was written and never shipped
 1.5.511 added ``warn_if_assumed_axis`` to the six UIs that compute a **rate from frame indices**
