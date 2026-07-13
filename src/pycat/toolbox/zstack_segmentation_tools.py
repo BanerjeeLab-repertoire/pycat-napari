@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import numpy as np
 
+
+from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 import skimage as sk
@@ -57,6 +59,8 @@ from typing import Optional
 # 1. 3D background removal (per-slice, assembled into a volume)
 # ---------------------------------------------------------------------------
 
+@tags_layer('bg_subtract_3d', role='preprocessed',
+            summary='3D background removal')
 def bg_removal_3d(
     volume: np.ndarray,
     ball_radius: float,
@@ -163,6 +167,8 @@ def bg_removal_3d(
 # 2. 3D cell segmentation — per-slice Cellpose + Z-stitching by IoU overlap
 # ---------------------------------------------------------------------------
 
+@tags_layer('cellpose_3d', role='labels',
+            summary='Cellpose 3D segmentation', target='cell')
 def cellpose_segmentation_3d(
     volume: np.ndarray,
     object_diameter: float,
@@ -248,6 +254,8 @@ def cellpose_segmentation_3d(
 # 3. 3D condensate segmentation — per-slice 2D pipeline + 3D Z-linking
 # ---------------------------------------------------------------------------
 
+@tags_layer('subcellular_segment_3d', role='labels',
+            summary='3D subcellular object segmentation')
 def segment_subcellular_objects_3d(
     original_volume: np.ndarray,
     preprocessed_volume: np.ndarray,

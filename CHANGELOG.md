@@ -4,6 +4,76 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.492] - 2026-07-10
+### PINNED — two audit findings that change numbers in existing data
+Written up in ``docs/audits/DEV_NOTES.md`` with enough detail to pick up cold: what was wrong,
+what it affects, how to tell if a dataset is hit, and what to re-run.
+
+1. **Touching condensates were always counted as one** (1.5.482). Affects counts, **size
+   distributions** (a merged pair reads as one large object — this shifts the mean up and inflates
+   the tail), every per-object measurement, and any coarsening exponent read from a size
+   distribution.
+2. **``ccf_sigma`` was a 13× underestimate** of the correlation length (1.5.481) — it reported the
+   std of the correlation *values*, not the peak width, and **would have been 0.33 for any
+   structure size**. *This is a false-negative generator*: a comparison between conditions would
+   have shown **no difference where a real one existed.* The CCF **peak position** (chromatic
+   shift) was always correct.
+
+*(The VPT linker gap is deliberately NOT pinned — the automated linkers are a backup to TrackMate,
+and the corrected default has achieved sufficient similarity.)*
+
+### NEW — the tag vocabulary. **Non-degenerate by construction.**
+**91 of 116 layer creations were in files that never tagged anything.**
+
+Hand-tagging them would produce a vocabulary that **drifts**: someone writes ``'clahe'``, someone
+else ``'CLAHE'``, a third ``'contrast_limited_ahe'`` — **and the tag becomes unqueryable, which is
+the one thing it exists to be.**
+
+So the tag is declared **on the function that performs the operation**, not at the call site:
+
+```python
+@tags_layer('log', role='preprocessed',
+            summary='Laplacian-of-Gaussian filter',
+            aliases=('laplacian_of_gaussian',))
+def apply_laplace_of_gauss_filter(image, ...):
+```
+
+- **It cannot be forgotten** — the tag travels with the code, not with the 116 callers.
+- **It cannot collide** — a duplicate name raises ``TagCollision`` **at import time**. *A silent
+  collision would be worse than an error: a query for ``'watershed'`` would return a mixture of two
+  operations, and the tag system would look like it works.*
+- **It cannot drift** — the vocabulary **is** the set of functions that exist.
+- **A new transform that forgets the decorator is caught by a test.**
+
+**63 operations registered across 12 modules**, and they read the way Gable asked: **`log`, `dog`,
+`gabor`, `clahe`, `bilateral`, `rolling_ball`, `wbns`, `invert`, `watershed`, `cellpose`,
+`otsu`** — *names, not descriptions*. The 2D/3D pairs are properly distinguished (``dog`` /
+``dog_3d``), which is the non-degeneracy doing its job.
+
+### Four keys, because one string cannot answer four questions
+| key | answers |
+|---|---|
+| ``role`` | *What KIND of layer is this?* — raw, preprocessed, mask, labels, overlay, measurement, reference |
+| ``op`` | *What was DONE to it?* — the 63 operations |
+| ``target`` | *What is it OF?* — condensate, cell, nucleus, punctum, bead, fibril… |
+| ``parent`` | *Where did it come FROM?* — a lineage edge |
+
+**An unregistered tag is REFUSED, not written.** A tag outside the vocabulary is a degenerate tag:
+it cannot be queried, nothing will ever match it, and writing it lets it **rot in the data**.
+
+### And a plot can carry the tags of the data behind it
+> *"a plot that is generated should probably have tags if possible"*
+
+``attach_plot_tags(figure, source_layers, plot_of='msd', track_id_column='track_id')``.
+
+A figure is not a napari layer, so it cannot carry layer tags — **but it can carry the same
+dictionary**, and **that is what makes brushing possible**: a point in an MSD plot that knows its
+``track_id`` and the layer it came from **can be clicked back to the object.**
+
+*The identity plumbing has to exist before the interaction can be built. This is that plumbing.*
+
+**259/259 core tests passing.**
+
 ## [1.5.491] - 2026-07-10
 ### Validated the neck/elastocapillary module against the literature — and against published data
 Full write-up: **``docs/validation/neck_geometry_and_elastocapillarity.md``**

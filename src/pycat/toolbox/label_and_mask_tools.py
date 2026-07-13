@@ -18,6 +18,8 @@ Date
 # Third party imports
 import numpy as np
 
+
+from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
 import pandas as pd
 import scipy.ndimage as ndi
@@ -76,6 +78,8 @@ except Exception:                                    # pragma: no cover - headle
 
 
 
+@tags_layer('extend_edges', role='mask',
+            summary='Extend a mask to the image border')
 def extend_mask_to_edges(mask, size_to_extend=1):
     """
     Extend a segmentation mask outwards to the edges of an image, ensuring coverage up to the image borders. 
@@ -148,6 +152,8 @@ def generate_cross_structuring_element(radius):
 
     return structuring_element
 
+@tags_layer('binary_open', role='mask',
+            summary='Binary morphological opening')
 def custom_binary_opening(binary_mask, structure=None, iterations=1, mask=None):
     """
     Performs a binary opening on a binary image, which is an erosion followed by a dilation. This operation 
@@ -175,6 +181,8 @@ def custom_binary_opening(binary_mask, structure=None, iterations=1, mask=None):
 
     return binary_mask
 
+@tags_layer('binary_close', role='mask',
+            summary='Binary morphological closing')
 def custom_binary_closing(binary_mask, structure=None, iterations=1, mask=None):
     """
     Performs a binary closing on a binary image, which is a dilation followed by an erosion. This operation 
@@ -203,6 +211,8 @@ def custom_binary_closing(binary_mask, structure=None, iterations=1, mask=None):
 
     return binary_mask
 
+@tags_layer('binary_morph', role='mask',
+            summary='Binary morphological operation (open/close/erode/dilate)')
 def binary_morph_operation(binary_mask_input, iterations=1, element_size=3, element_shape='Disk', mode='Opening', roi_mask=None):
     """
     Performs specified binary morphological operations using various structuring elements on a binary image. This 
@@ -784,6 +794,8 @@ def run_measure_region_props(mask_layer, image_layer, data_instance):
     show_dataframes_dialog(window_title, tables_info)
 
 
+@tags_layer('contour_filter', role='mask',
+            summary='Contour-based area filtering')
 def opencv_contour_func(input_mask, min_area=1, max_area=1024**2, border_size=3): 
     """
     Extracts and draws contours from a binary input mask based on specified area thresholds. This function converts
@@ -856,6 +868,8 @@ def opencv_contour_func(input_mask, min_area=1, max_area=1024**2, border_size=3)
 
 
 
+@tags_layer('split_watershed', role='labels',
+            summary='Watershed split of touching objects')
 def split_touching_objects(binary_mask, sigma=3.5, return_mask=False):
     """
     Splits touching objects in a binary image using a watershed algorithm. The function applies
@@ -1007,6 +1021,8 @@ def run_mask_logic_merge(mask_layer1, mask_layer2, mode, viewer):
     viewer.add_labels(
         merged, name=f"{key} ({mask_layer1.name} · {mask_layer2.name})")
 
+@tags_layer('split_assessed', role='labels',
+            summary='Morphology-aware split: two droplets vs arrested fusion vs chain', target='condensate')
 def assess_and_split_touching(binary_mask, intensity_image=None, sigma=2.0,
                               neck_threshold=0.6, min_peak_distance=6,
                               chain_min_units=4, microns_per_pixel=1.0):

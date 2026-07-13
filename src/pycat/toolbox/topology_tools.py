@@ -23,6 +23,8 @@ recomputing the envelope.
 
 import numpy as np
 
+
+from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
 import skimage as sk
 import scipy.ndimage as ndi
@@ -31,6 +33,8 @@ from pycat.utils.general_utils import dtype_conversion_func
 from pycat.toolbox.image_processing_tools import compute_rolling_ball_background
 
 
+@tags_layer('topology_envelope', role='measurement',
+            summary='Smoothed structural intensity envelope', target='chromatin')
 def compute_topology_envelope(image, ball_radius, mode='rolling_ball', smooth=True):
     """
     Compute the smoothed structural intensity envelope of an image.
@@ -336,6 +340,8 @@ def _nuclear_territory(dapi, smooth_sigma=4.0, thr_scale=0.4, min_area=800):
     return keep
 
 
+@tags_layer('void_detect', role='labels',
+            summary='Chromatin void detection', target='chromatin')
 def detect_chromatin_voids(dapi, ball_radius, condensate_image=None,
                            params=None, territory=None):
     """

@@ -59,6 +59,8 @@ from __future__ import annotations
 
 import numpy as np
 
+
+from pycat.utils.tag_registry import tags_layer
 # Optical density is a LOG of a RATIO, so it needs the detector's zero point. An image
 # that has been normalised, CLAHE'd or top-hatted cannot produce one: measured, the
 # strongest condensate (which SETS the image minimum) had its OD go from a true 1.699
@@ -74,6 +76,8 @@ from typing import Optional
 # 1. Brightfield preprocessing
 # ---------------------------------------------------------------------------
 
+@tags_layer('bf_flatfield', role='preprocessed',
+            summary='Brightfield flat-field correction')
 def bf_flat_field_correction(
     image: np.ndarray,
     background_image: Optional[np.ndarray] = None,
@@ -116,6 +120,8 @@ def bf_flat_field_correction(
     return ((corrected - mn) / (mx - mn + 1e-8)).astype(np.float32)
 
 
+@tags_layer('bf_bg_subtract', role='preprocessed',
+            summary='Brightfield background subtraction')
 def bf_background_subtract(
     image: np.ndarray,
     kernel_size: int = 50,
@@ -153,6 +159,8 @@ def bf_background_subtract(
     return (bg_sub / (mx + 1e-8)).astype(np.float32)
 
 
+@tags_layer('bf_halo', role='preprocessed',
+            summary='Brightfield halo correction')
 def bf_halo_correction(
     bg_subtracted: np.ndarray,
     halo_sigma_factor: float = 1.8,
@@ -202,6 +210,8 @@ def bf_halo_correction(
     return (corrected / (mx + 1e-8)).astype(np.float32)
 
 
+@tags_layer('bf_contrast', role='preprocessed',
+            summary='Brightfield local contrast enhancement')
 def bf_enhance_contrast(
     image: np.ndarray,
     local_kernel: int = 20,
@@ -313,6 +323,8 @@ def _watershed_split(binary, min_diameter_px, split_touching, _skfeat, _skseg):
         return sk.measure.label(binary)
 
 
+@tags_layer('bf_segment', role='labels',
+            summary='Brightfield condensate segmentation (DARK objects)', target='condensate')
 def segment_bf_condensates(
     enhanced_image: np.ndarray,
     min_diameter_px: float = 3.0,
@@ -496,6 +508,8 @@ def segment_bf_condensates(
 # ---------------------------------------------------------------------------
 
 @require_intensity(IntensitySemantics.ABSOLUTE, 'optical density')
+@tags_layer('optical_density', role='measurement',
+            summary='Optical density, -log10(I/I0) (Beer-Lambert)')
 def compute_optical_density(
     image: np.ndarray,
     background_image: Optional[np.ndarray] = None,

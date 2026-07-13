@@ -39,6 +39,8 @@ import numpy as np
 
 
 
+
+from pycat.utils.tag_registry import tags_layer
 from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.general_utils import debug_log
 # ---------------------------------------------------------------------------
@@ -89,6 +91,8 @@ def _enhance_frame(frame, ball_radius, norm_max=None, clahe_ref=None):
 # Temporal enhancement strategies
 # ---------------------------------------------------------------------------
 
+@tags_layer('temporal_enhance', role='preprocessed',
+            summary='Temporally-aware contrast enhancement (DESTROYS intensity trends)')
 def enhance_stack(stack, ball_radius, method='pooled_stats', window=2,
                   progress_cb=None):
     """Enhance a (T, H, W) stack with a temporally-aware strategy.

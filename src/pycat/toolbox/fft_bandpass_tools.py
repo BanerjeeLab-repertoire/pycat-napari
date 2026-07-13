@@ -25,6 +25,8 @@ Author
 from __future__ import annotations
 
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import skimage as sk
 from scipy import fftpack
 
@@ -81,6 +83,8 @@ def fft_annular_mask(shape: tuple, low_radius: float, high_radius: float) -> np.
 # Bandpass filter
 # ---------------------------------------------------------------------------
 
+@tags_layer('bandpass', role='preprocessed',
+            summary='FFT bandpass filter')
 def fft_bandpass(image: np.ndarray, low_cutoff: float, high_cutoff: float) -> np.ndarray:
     """
     Apply a Fourier-domain bandpass filter to a 2D image or a (T/Z, H, W) stack.

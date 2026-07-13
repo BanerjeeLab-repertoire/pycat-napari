@@ -22,6 +22,8 @@ import warnings
 
 # Third party imports
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import skimage as sk
 # GUI is imported LAZILY. This module's pure array operations (filters, background
 # removal, upscaling, intensity rescaling) are imported by other SCIENTIFIC modules --
@@ -194,16 +196,22 @@ def pseudo3d_tri_planar_filter(volume: np.ndarray, filter_2d_fn, **filter_kwargs
     return (xy_result + xz_result + yz_result) / 3.0
 
 
+@tags_layer('gaussian', role='preprocessed',
+            summary='Gaussian smoothing')
 def gaussian_smooth_2d(image: np.ndarray, sigma: float) -> np.ndarray:
     """Thin wrapper around ndi.gaussian_filter for use with pseudo3d_tri_planar_filter."""
     return ndi.gaussian_filter(np.asarray(image).astype(np.float32), sigma=sigma)
 
 
+@tags_layer('gaussian_3d', role='preprocessed',
+            summary='Pseudo-3D (tri-planar) Gaussian smoothing')
 def gaussian_smooth_3d_pseudo(volume: np.ndarray, sigma: float) -> np.ndarray:
     """Pseudo-3D (tri-planar) Gaussian smoothing of a (Z, H, W) volume."""
     return pseudo3d_tri_planar_filter(volume, gaussian_smooth_2d, sigma=sigma)
 
 
+@tags_layer('gabor_3d', role='preprocessed',
+            summary='Pseudo-3D (tri-planar) Gabor texture filter')
 def gabor_filter_3d_pseudo(volume: np.ndarray) -> np.ndarray:
     """
     Pseudo-3D (tri-planar) Gabor filtering of a (Z, H, W) volume.
@@ -214,6 +222,8 @@ def gabor_filter_3d_pseudo(volume: np.ndarray) -> np.ndarray:
     return pseudo3d_tri_planar_filter(volume, gabor_filter_func)
 
 
+@tags_layer('dog', role='preprocessed',
+            summary='Difference-of-Gaussians blob enhancement', aliases=('difference_of_gaussians',))
 def dog_blob_enhance_2d(image: np.ndarray, sigma_lo: float = 2.0, sigma_hi: float = 3.2) -> np.ndarray:
     """
     Difference-of-Gaussians blob enhancement (bright-blob convention,
@@ -228,6 +238,8 @@ def dog_blob_enhance_2d(image: np.ndarray, sigma_lo: float = 2.0, sigma_hi: floa
     return (enhanced / mx if mx > 0 else enhanced).astype(np.float32)
 
 
+@tags_layer('dog_3d', role='preprocessed',
+            summary='Pseudo-3D difference-of-Gaussians blob enhancement')
 def dog_blob_enhance_3d_pseudo(volume: np.ndarray, sigma_lo: float = 2.0,
                                sigma_hi: float = 3.2) -> np.ndarray:
     """Pseudo-3D (tri-planar) DoG blob enhancement of a (Z, H, W) volume."""
@@ -237,6 +249,8 @@ def dog_blob_enhance_3d_pseudo(volume: np.ndarray, sigma_lo: float = 2.0,
 
 # Image adjustments #
 
+@tags_layer('rescale', role='preprocessed',
+            summary='Intensity rescaling to a target range')
 def apply_rescale_intensity(image, out_min=None, out_max=None):
     """
     Rescales the intensity of an image to a specified range, adjusting its pixel values accordingly.
@@ -353,6 +367,8 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}", operation='rescale_intensity')
 
 
+@tags_layer('invert', role='preprocessed',
+            summary='Intensity inversion (dark <-> bright)')
 def invert_image(image):
     """
     Inverts the intensity of an image, mapping dark regions to light and vice versa, suitable for different data types.
@@ -420,6 +436,8 @@ def run_invert_image(viewer):
     _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}", operation='rescale_intensity')
 
 
+@tags_layer('upscale', role='preprocessed',
+            summary='Bicubic upscaling')
 def upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor=2, pad=False):
     """
     Upscales an image using bicubic interpolation to enhance its resolution. This function increases the density
@@ -686,6 +704,8 @@ _GABOR_KERNELS = [
 ]
 
 
+@tags_layer('gabor', role='preprocessed',
+            summary='Gabor texture filter')
 def gabor_filter_func(image):
     """
     Applies a Gabor filter to an image to enhance texture and feature visibility at specific orientations. This function 
@@ -741,6 +761,8 @@ def gabor_filter_func(image):
     return enhanced_image
 
 
+@tags_layer('peak_edge', role='preprocessed',
+            summary='Peak and edge enhancement')
 def peak_and_edge_enhancement_func(image, ball_radius):
   """
   Enhances the edges and peaks of features within an image through a sequence of image processing operations.
@@ -849,6 +871,8 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   _add_image(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}", operation='log_enhance')
 
 
+@tags_layer('log', role='preprocessed',
+            summary='Laplacian-of-Gaussian filter', aliases=('laplacian_of_gaussian',))
 def apply_laplace_of_gauss_filter(image, sigma=3):
     """
     Applies a Laplacian of Gaussian (LoG) filter to an input image for edge detection. This method combines 
@@ -879,6 +903,8 @@ def apply_laplace_of_gauss_filter(image, sigma=3):
     
     return gauss_laplace_image
 
+@tags_layer('log_enhance', role='preprocessed',
+            summary='Laplacian-of-Gaussian enhancement (LoG added back)')
 def apply_laplace_of_gauss_enhancement(image, sigma=3):
     """
     Enhances an image using a Laplacian of Gaussian (LoG) filter followed by intensity rescaling and inversion to highlight edges.
@@ -1078,6 +1104,8 @@ def run_clahe(clip_input, k_size_input, viewer):
     _add_image(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}", operation='clahe')
 
 
+@tags_layer('dpr', role='preprocessed',
+            summary='Deblurring by pixel reassignment', aliases=('pixel_reassignment',))
 def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
     """
     Performs Deblurring by Pixel Reassignment, adapted from MATLAB code, enhancing microscopy image quality by reducing
@@ -1230,6 +1258,8 @@ def run_dpr(psf_input, gain_input, data_instance, viewer):
 
 # Background and Noise Correction # 
 
+@tags_layer('inpaint', role='preprocessed',
+            summary='Biharmonic inpainting of a masked region')
 def background_inpainting_func(image, mask, ball_radius):
     """
     This function uses skimage biharmonic inpainting to 'extend' the masked region of an image to avoid edge effects and 
@@ -1277,6 +1307,8 @@ def background_inpainting_func(image, mask, ball_radius):
     return inpainted_img
 
 
+@tags_layer('rolling_ball_bg', role='reference',
+            summary='Rolling-ball background ESTIMATE (the background itself)')
 def compute_rolling_ball_background(image, ball_radius):
     """
     Compute a background estimate via morphological opening (grey erosion
@@ -1323,6 +1355,8 @@ def compute_rolling_ball_background(image, ball_radius):
     bg = ndi.grey_erosion(bg, footprint=sk.morphology.disk(1))
     return dtype_conversion_func(bg.astype(np.float32), input_dtype)
 
+@tags_layer('bg_subtract', role='preprocessed',
+            summary='Background subtraction')
 def subtract_background(image, background, bg_scaling_factor=0.75, equalize_intensity=False, window_size=None):
     """
     Subtracts the background from an image, optionally scaling the background intensity and applying local contrast enhancement.
@@ -1372,6 +1406,8 @@ def subtract_background(image, background, bg_scaling_factor=0.75, equalize_inte
     return ouput_image
 
 
+@tags_layer('rolling_ball', role='preprocessed',
+            summary='Rolling-ball + Gaussian background removal')
 def rb_gaussian_background_removal(image, ball_radius, equalize_intensity=False, roi_mask=None):
     """
     Removes background from an image using rolling ball and Gaussian blur techniques, aiming to enhance 
@@ -1693,6 +1729,8 @@ def _realness_weight(pp, ball_radius, log_p=10.0, con_p=4.0, min_area=3,
     return w.astype(np.float32)
 
 
+@tags_layer('fg_suppress', role='preprocessed',
+            summary='Soft attenuation of bright foreground')
 def soft_foreground_suppression(image, ball_radius, strength=None,
                                 log_p=None, con_p=None, min_area=None,
                                 border_grow=None, large_object_min_area=None):
@@ -1925,6 +1963,8 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
 
     return Background, Noise, BG_unfiltered
 
+@tags_layer('wbns', role='preprocessed',
+            summary='Wavelet-based background and noise subtraction')
 def wbns_func(img, psf_px_resolution, noise_lvl):
     """
     Wrapper function for wavelet-based background and noise subtraction (WBNS), adapted from [wbns_1]_. 
@@ -2108,6 +2148,8 @@ def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
     # Display the processed image
     _add_image(wavelet_noise_corrected, viewer, name=f"Wavelet Noise Corrected {active_layer.name}")
 
+@tags_layer('bilateral', role='preprocessed',
+            summary='Edge-preserving bilateral filter')
 def apply_bilateral_filter(image, radius):
     """
     Applies a bilateral filter to an image to reduce noise while preserving edges. The filter considers both
@@ -2192,6 +2234,8 @@ def run_apply_bilateral_filter(radius_input, viewer):
     _add_image(filtered_image, viewer, name=f"Bilateral Filtered {active_layer.name}")
 
 
+@tags_layer('preprocess', role='preprocessed',
+            summary='The standard preprocessing cascade')
 def pre_process_image(image, ball_radius, window_size,
                       suppress_foreground=True, suppression_params=None,
                       norm_max=None):
@@ -2409,6 +2453,8 @@ def run_pre_process_image(data_instance, viewer):
 # microscope + settings + sample combination, so it is loaded once and applied
 # to matching data rather than derived per-dataset.
 
+@tags_layer('flatfield', role='preprocessed',
+            summary='Flat-field (illumination) correction')
 def apply_flatfield_correction(image, flat, dark=None):
     """
     Flat-field (illumination) correction for a free-dye / flat reference.
@@ -2440,6 +2486,8 @@ def apply_flatfield_correction(image, flat, dark=None):
     return corrected.astype(np.float32)
 
 
+@tags_layer('bg_subtract_clear', role='preprocessed',
+            summary='Additive background subtraction from a clear frame')
 def apply_background_subtraction(image, background):
     """
     Additive background subtraction for a clear-frame (no-condensate) reference.

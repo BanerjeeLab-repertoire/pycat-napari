@@ -36,6 +36,8 @@ import warnings
 from typing import Optional
 
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import pandas as pd
 
 import skimage as sk
@@ -55,6 +57,8 @@ _K_BOLTZMANN = 1.38064852e-23
 # 1-2. Host condensate segmentation + interface erosion
 # ---------------------------------------------------------------------------
 
+@tags_layer('host_segment', role='mask',
+            summary='Host condensate segmentation for VPT', target='condensate')
 def segment_host_condensate(
     host_image: np.ndarray,
     method: str = 'otsu',
@@ -115,6 +119,8 @@ def segment_host_condensate(
     return labeled.astype(np.int32)
 
 
+@tags_layer('host_erode', role='mask',
+            summary='Erode the host mask away from the interface', target='condensate')
 def erode_host_mask(
     labeled_mask: np.ndarray,
     erosion_px: int = 5,
@@ -1542,6 +1548,8 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
         n_beads_used=len(motion_sigmas))
 
 
+@tags_layer('bead_detect', role='overlay',
+            summary='Bead detection across a stack (blob LoG)', target='bead')
 def detect_beads_stack(
     bead_stack: np.ndarray,
     host_mask: Optional[np.ndarray] = None,
@@ -2031,6 +2039,8 @@ def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
     return df
 
 
+@tags_layer('drift_correct', role='overlay',
+            summary='Common-mode drift correction of tracks')
 def drift_correct_com(tracks_df: pd.DataFrame, mode: str = 'com',
                       immobile_fraction: float = 0.25) -> pd.DataFrame:
     """

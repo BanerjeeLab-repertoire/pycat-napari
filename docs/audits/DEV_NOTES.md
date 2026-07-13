@@ -739,3 +739,94 @@ route is exactly what produced the wrong conclusion above. The ``tests/imaging_r
 (1.5.464) has the pieces (``blur``, ``illumination_gradient``, ``photobleach``), and the right shape
 is: take a ramp Gable has already validated, degrade it by a known amount, and ask **at what
 degradation the cloud point moves by more than the experimental uncertainty.**
+
+
+---
+
+## PINNED: two audit findings that change numbers in EXISTING data (2026-07-12)
+
+**The audit's value is only realised if the corrected code touches the data.** Two findings
+change results already produced. Both are shipped and tested; what remains is **re-running the
+affected analyses.**
+
+*(A third — the VPT linker gap default, 1.5.477 — is NOT pinned: Gable notes the automated linkers
+exist only as a backup to TrackMate, which is what he actually uses, and the corrected default
+(gap=2 -> eta 8.54 vs the 8.325 TrackMate reference) has achieved sufficient similarity. Recorded
+in the changelog; no re-run needed.)*
+
+---
+
+### PIN 1 — touching condensates were ALWAYS counted as one (1.5.482)
+
+**What was wrong.** ``split_touching_objects`` ran a watershed, computed the correct split, and
+**threw the labels away** — rebuilding a BOOLEAN mask by subtracting Sobel edges. **A boolean mask
+cannot express a split.** The two halves stayed 8-connected through the corner of the one-pixel
+cut, so ``label()`` on the output returned **ONE object at every overlap** — including at zero
+overlap, where the discs merely *touch* and were **already two separate components on the way in**.
+**It merged them.**
+
+**What it affects.** Everything downstream of the object count on a field with any touching
+condensates:
+
+* **condensate counts** (two are reported as one)
+* **size distributions** (a merged pair reads as one large object — this SHIFTS THE MEAN SIZE UP
+  and inflates the tail)
+* **any per-object measurement**: partition coefficient, intensity, circularity, area
+* **the coarsening exponent**, if it is read from a size distribution
+* **cluster/spatial statistics** built on object centroids
+
+**How to tell if a given dataset is affected.** Run ``skimage.measure.label`` on the segmentation
+and compare against the object count that was reported. If any mask has two distance-transform
+maxima with a deep neck between them, it was merged.
+
+**What to do.** Re-segment with ``assess_and_split_touching`` (1.5.489), which additionally
+distinguishes **two droplets in contact** (deep neck -> split) from **arrested fusion** (shallow
+neck -> ONE object, and the arrest IS the finding). The old ``split_touching_objects`` now returns
+labels; ``return_mask=True`` restores the old boolean output for any caller that needs it.
+
+**Guards:** ``tests/test_group_c_geometry.py::test_touching_objects_are_actually_split`` and
+``::test_genuinely_merged_objects_are_not_split``.
+
+---
+
+### PIN 2 — `ccf_sigma` was a 13x UNDERESTIMATE of the correlation length (1.5.481)
+
+**What was wrong.** ``_extract_fit_results_2d`` in ``correlation_func_analysis_tools`` reported
+
+    ccf_sigma_x = np.std(ccf_values[peak_row, :])
+
+That is the **standard deviation of the correlation COEFFICIENTS** along a slice — a number in
+correlation units, bounded by the [-1, 1] range of a Pearson coefficient. **It is not a length.**
+It came out at **0.33** on data whose true correlation length is **4.24 px**, and **it would have
+been 0.33 for ANY structure size** — the number carried no information about the image at all.
+
+**And the real sigma was computed and thrown away.** ``curve_fit`` fits
+``gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y)``, and ``popt[3]``/``popt[4]`` ARE the
+widths, in pixels, on the same axes the peak position was already being reported in.
+
+**What it affects.** Any reported **correlation length** or **cluster size** from the CCF/ICS path:
+
+* ``process_ccf`` -> ``ccf_sigma`` (the direct consumer)
+* anything that read ``ccf_sigma`` as a length scale — a "cluster size" or "domain size" from
+  spatial correlation analysis
+* **the sign of the effect is severe and CONSTANT**: everything reads ~0.33 px regardless of the
+  true structure, so a comparison BETWEEN conditions would have shown **no difference** where a
+  real one existed. *This is a false-negative generator, not a false-positive one.*
+
+**What is NOT affected.** The **CCF peak position** — the inter-channel SHIFT — was always correct
+(audited: exact at every offset tested). Chromatic-shift measurements are fine.
+
+**What to do.** Re-run any CCF/ICS analysis that reported a correlation length. After the fix it is
+within **3-9 %** of the analytic truth across the range.
+
+**Guard:** ``tests/test_group_a_moments.py::test_ccf_sigma_was_the_std_of_the_VALUES_not_the_peak_width``.
+
+---
+
+### The related ACF finding (1.5.481) — worth knowing, less severe
+
+``spatial_acf_tools``'s Gaussian had **no baseline offset**, and a spatial ACF **does not decay to
+zero** — so the Gaussian **widened to reach the floor**, inflating sigma by **+43 % at blur 6** and
++37 % at blur 8. This is a *bias*, not a constant, so a comparison between conditions would
+partially survive it — but the absolute correlation lengths were wrong. Fixed; now -1 % to -9 %
+across the range.

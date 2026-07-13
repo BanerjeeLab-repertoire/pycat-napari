@@ -47,6 +47,8 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import pandas as pd
 
 # Via the notification shim: keeps the array functions importable with no GUI stack.
@@ -86,6 +88,8 @@ def gaussian_psf_3d(size_xy: int = 11, size_z: int = 13,
 # CLEAN core
 # ---------------------------------------------------------------------------
 
+@tags_layer('clean', role='overlay',
+            summary='CLEAN iterative deconvolution spot detection', target='punctum')
 def clean_detect(
     image: np.ndarray,
     psf: Optional[np.ndarray] = None,

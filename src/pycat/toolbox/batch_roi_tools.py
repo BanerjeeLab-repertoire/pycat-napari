@@ -34,6 +34,8 @@ Date: 2025
 
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 from typing import Optional
 
 
@@ -145,6 +147,9 @@ def multi_otsu_foreground_bbox(
     return (y0, y1, x0, x1)
 
 
+@tags_layer('multi_otsu', role='mask',
+            summary='Multi-Otsu cell mask (valid on fluorescence, NOT brightfield)',
+            target='cell')
 def multi_otsu_cell_mask(
     image: np.ndarray,
     n_classes: int = 3,

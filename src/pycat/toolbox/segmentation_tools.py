@@ -22,6 +22,8 @@ import math
 
 # Third party imports
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import skimage as sk
 import cv2
 import scipy.ndimage as ndi
@@ -206,6 +208,8 @@ def _build_cellpose_model(model_name):
 
 
 
+@tags_layer('local_threshold', role='mask',
+            summary='Local (adaptive) thresholding')
 def local_thresholding_func(image, window_size, k_val=-0.5, mode='AND'):
     """
     Applies local thresholding on the input image based on the specified method and parameters.
@@ -341,6 +345,8 @@ def run_local_thresholding(k_slider, window_slider, mode_dropdown, viewer):
     viewer.layers.selection.active = viewer.layers[current_active_layer_name]
 
 
+@tags_layer('watershed', role='labels',
+            summary='Watershed labelling from a distance transform')
 def apply_watershed_labeling(original_image, binary_mask, sigma=1.5):
     """
     Apply watershed segmentation to an image for labeling different segments. The segmentation
@@ -417,6 +423,8 @@ def apply_watershed_labeling(original_image, binary_mask, sigma=1.5):
     return labeled_segments
 
 
+@tags_layer('watershed_cv', role='labels',
+            summary='OpenCV marker-based watershed')
 def opencv_watershed_func(binary_mask, original_image=None, dist_thresh=0.5, sigma=3.5, dilation_size=2, dilation_iterations=3):
     """
     Applies the Watershed algorithm to segment objects from a binary mask of an image. This function refines the binary
@@ -563,6 +571,8 @@ def _weight_mean_color(graph, src, dst, n):
     # Return a dictionary with the calculated weight
     return {'weight': diff}
 
+@tags_layer('merge_mean_color', role='labels',
+            summary='Region merging by mean colour')
 def merge_mean_color(graph, src, dst):
     """
     Callback called before merging two nodes of a mean color distance graph.
@@ -588,6 +598,8 @@ def merge_mean_color(graph, src, dst):
                                       graph.nodes[dst]['pixel count'])
 
 
+@tags_layer('felzenszwalb', role='labels',
+            summary='Felzenszwalb graph segmentation with merging')
 def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=2):
     """
     Performs image segmentation using Felzenszwalb's method followed by merging based on color similarity.
@@ -701,6 +713,8 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
+@tags_layer('felzenszwalb_binary', role='mask',
+            summary='Felzenszwalb segmentation, binarised')
 def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=5,
                                      rim_close_min_result_area=150):
     """
@@ -885,6 +899,8 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
     return boolean_mask
 
 
+@tags_layer('cellpose', role='labels',
+            summary='Cellpose deep-learning segmentation', target='cell')
 def cellpose_segmentation(image, object_diameter, model_name=None, postprocess=True):
     """
     Perform cell segmentation on an image using Cellpose, a deep-learning-based method for cell/nucleus segmentation.
@@ -1111,6 +1127,8 @@ def train_and_apply_rf_classifier(image, training_labels, object_diameter):
 
     return refined_masks
 
+@tags_layer('contour_refine', role='labels',
+            summary='Label refinement against image contours')
 def refine_labels_with_contours(refined_labels, min_area):
     """
     Refines segmentation masks for each label within a given input mask using contour detection and area filtering. 
@@ -1205,6 +1223,8 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
             viewer.add_labels(output_mask, name=f"Random Forest Segmentation {idx+1} on {image_layer.name}")
 
 
+@tags_layer('puncta_filter', role='labels',
+            summary='Puncta filtering by size/shape/intensity', target='punctum')
 def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius,
                                      kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                      intensity_hwhm_scale=1.17, max_area_fraction=0.25):
@@ -1720,6 +1740,8 @@ def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_ma
     return refined_mask
 
 
+@tags_layer('mask_stretch', role='mask',
+            summary='Cell-mask dilation to the true boundary', target='cell')
 def cell_mask_stretching(image, cell_masks):
     """
     Enhances the contrast within specific areas of an image defined by cell masks, followed by smoothing operations.
@@ -1806,6 +1828,8 @@ def cell_mask_stretching(image, cell_masks):
     return output_image
 
 
+@tags_layer('subcellular_segment', role='labels',
+            summary='Subcellular object segmentation within cells')
 def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
                                 kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
                                 intensity_hwhm_scale=1.17, max_area_fraction=0.25, min_spot_radius=2,

@@ -25,6 +25,8 @@ The cascade approach
 """
 
 import numpy as np
+
+from pycat.utils.tag_registry import tags_layer
 import skimage as sk
 import scipy.ndimage as ndi
 
@@ -80,6 +82,8 @@ def contrast_cascade_bands(image, n_bands=4, method='percentile',
     return bands
 
 
+@tags_layer('tone_map', role='preprocessed',
+            summary='Tone mapping (log/gamma)')
 def tone_map(image, method='log', clip_limit=0.003):
     """Compress a high-dynamic-range image into one viewable image.
     'log' = log(1+x) stretch; 'clahe' = local adaptive contrast."""
@@ -96,6 +100,8 @@ def tone_map(image, method='log', clip_limit=0.003):
 # Part 2 — brightness-invariant features
 # ---------------------------------------------------------------------------
 
+@tags_layer('local_contrast', role='preprocessed',
+            summary='Local contrast normalisation')
 def local_contrast_normalize(image, sigma=15.0, mode='divide'):
     """Normalise each pixel relative to its LOCAL surround, so dim structures
     become as prominent as bright ones. 'divide' = image / local-mean;
@@ -108,6 +114,8 @@ def local_contrast_normalize(image, sigma=15.0, mode='divide'):
     return img / (local + np.percentile(img, 5) + 1e-6)
 
 
+@tags_layer('ridge', role='preprocessed',
+            summary='Ridge (Frangi/Sato) enhancement', target='fibril')
 def ridge_enhance(image, scales=(1, 2, 3), black_ridges=False):
     """Tubeness / vesselness (Sato) response — highlights elongated, fiber-like
     structures independent of their absolute brightness."""
