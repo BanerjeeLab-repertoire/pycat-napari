@@ -318,21 +318,36 @@ def test_the_fractal_table_carries_the_object_size():
 
 # ── Topology: one good statistic beside a broken one ──────────────────────────────────────
 
+
 @pytest.mark.core
-def test_topo_cov_responds_to_structure_and_n_basins_does_not():
-    """``topo_n_basins`` is **a constant**, and it is **anti-correlated** with the truth.
+@pytest.mark.parametrize("n_peaks,noise", [(0, 5.0), (0, 20.0), (0, 60.0),
+                                           (3, 20.0), (6, 20.0), (9, 20.0), (6, 60.0)])
+def test_topo_n_basins_counts_the_REAL_peaks_and_none_on_a_flat_field(n_peaks, noise):
+    """**It was a constant. Now it counts.**
 
-    ``peak_local_max`` with only a ``min_distance`` accepts every local maximum however small.
-    On a **flat field with nothing but noise** it reports **6.3 basins** — and it reports 6.3 at
-    a noise sd of 5, 20 and 60 alike. **It is measuring how many points of separation
-    ``min_distance`` fit inside the mask.**
+    ``peak_local_max`` with only a ``min_distance`` accepted **every** local maximum, however
+    small. On a **flat field with nothing but noise** it reported **6.3 basins** — and it reported
+    6.3 at a noise sd of 5, 20 and 60 alike. It was measuring **how many points of separation
+    ``min_distance`` fit inside the mask**, and *"we found 7 chromatin domains"* was a statement
+    about the image dimensions.
 
-    ``topo_cov`` on the same data behaves perfectly: **0.001 flat → 0.42 with real structure.**
+    What works is a **topological** prominence: how far does a peak rise above the **saddle** that
+    separates it from a higher peak? That is local and scale-free, and **it cannot be excluded by
+    its own presence** — which is what killed a global median gate (*real structure raises the
+    median, and the raised median then excludes the structure*)::
 
-    A global prominence gate was attempted and **made it worse** (the flat field still reported 4;
-    6 genuine peaks dropped to 2.3) — real structure raises the median, which then excludes the
-    structure. **A correct fix needs a topological prominence, not a threshold.** Written up in
-    ``docs/audits/DEV_NOTES.md``.
+        FLAT     [20.0, 5.5, 3.2, 3.1, 0.6]
+        6 peaks  [294.6, 42.7, 39.4, 38.7, 38.1, 33.2]
+
+    **Three gates failed before this one, and they failed for the same reason:**
+
+    *A flat field's envelope is scale-free noise. Its persistence distribution looks EXACTLY like
+    a real field's, only scaled down — and no ratio can separate them, because that is what
+    scale-free means.*
+
+    **The information is not in the envelope. It is in the raw image**, and it has to be carried
+    forward. With it, the separation is an order of magnitude: ``range/noise`` is **0.7** on a flat
+    field, **5.3** on a heavily-noisy real one, and **9–13** normally.
     """
     topo = pytest.importorskip("pycat.toolbox.topology_tools")
 
@@ -340,25 +355,50 @@ def test_topo_cov_responds_to_structure_and_n_basins_does_not():
     yy, xx = np.mgrid[0:size, 0:size]
     mask = np.ones((size, size), bool)
 
-    def _field(n_peaks, seed=0):
+    counts = []
+    for seed in range(4):
         rng = np.random.default_rng(seed)
-        img = np.full((size, size), 200.0)
+        image = np.full((size, size), 200.0)
         for i in range(n_peaks):
             cy = 25 + (i // 3) * 40
             cx = 25 + (i % 3) * 40
-            img += 800 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 10.0 ** 2))
-        return np.clip(img + rng.normal(0, 20, img.shape), 0, 4095).astype(np.float32)
+            image += 800 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 10.0 ** 2))
+        image = np.clip(image + rng.normal(0, noise, image.shape), 0, 4095).astype(np.float32)
 
-    flat = topo.topology_metrics(
-        topo.compute_topology_envelope(_field(0), ball_radius=15), mask)
-    structured = topo.topology_metrics(
-        topo.compute_topology_envelope(_field(6), ball_radius=15), mask)
+        envelope = topo.compute_topology_envelope(image, ball_radius=15)
+        metrics = topo.topology_metrics(
+            envelope, mask, image_noise=topo.estimate_image_noise(image))
+        counts.append(metrics['topo_n_basins'])
 
-    assert flat['topo_cov'] < 0.1 < structured['topo_cov'], (
-        f"topo_cov is the statistic that WORKS here: {flat['topo_cov']:.3f} on a flat field "
-        f"against {structured['topo_cov']:.3f} with real structure"
+    measured = float(np.mean(counts))
+
+    assert measured == pytest.approx(n_peaks, abs=0.75), (
+        f"{measured:.1f} basins found; {n_peaks} peaks were placed (noise sd {noise}). "
+        f"**The old implementation reported ~6.3 for EVERY field, flat or not.**"
     )
-    assert flat.get('topo_n_basins_is_unreliable'), (
-        "topo_n_basins counts noise on a flat field (6.3 basins, regardless of the noise level) "
-        "and must be flagged as unreliable so a consumer knows to prefer topo_cov"
+
+
+@pytest.mark.core
+def test_the_noise_must_come_from_the_RAW_IMAGE_not_the_envelope():
+    """**The envelope is smoothed, and smoothing destroys the noise.** That is the whole finding.
+
+    The MAD of the envelope's own local differences measures **the smoothing**. Using it gives
+    ``range/noise`` of **167 on a flat field against 64 on a real one** — *the wrong way round*,
+    which is why a gate built on it was anti-correlated with structure.
+    """
+    topo = pytest.importorskip("pycat.toolbox.topology_tools")
+
+    size = 128
+    rng = np.random.default_rng(0)
+    flat = np.clip(np.full((size, size), 200.0) + rng.normal(0, 20, (size, size)),
+                   0, 4095).astype(np.float32)
+
+    raw_noise = topo.estimate_image_noise(flat)
+    envelope = np.asarray(topo.compute_topology_envelope(flat, ball_radius=15), dtype=float)
+    envelope_noise = float(np.median(np.abs(np.diff(envelope, axis=0)))) * 1.4826
+
+    assert raw_noise > 5 * envelope_noise, (
+        f"the raw image's noise is {raw_noise:.2f} and the envelope's apparent noise is "
+        f"{envelope_noise:.2f}. The envelope has been SMOOTHED — its local differences measure "
+        f"the smoothing, not the noise."
     )

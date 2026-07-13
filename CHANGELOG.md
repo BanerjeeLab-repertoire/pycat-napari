@@ -4,6 +4,54 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.502] - 2026-07-10
+### RESOLVED — `topo_n_basins`: the information was not in the envelope
+**It was a constant.** A flat field with nothing but noise reported **6.3 basins** — at a noise sd
+of 5, 20 and 60 **alike**. It was measuring **how many points of separation ``min_distance`` fit
+inside the mask**, and *"we found 7 chromatin domains"* was a statement about the image dimensions.
+
+| field | **BEFORE** | **AFTER** |
+|---|---|---|
+| **FLAT** (noise 5 / 20 / 60) | **6.3** | **0** |
+| 3 peaks | ~6 | **3** |
+| 6 peaks | ~6 | **6** |
+| 9 peaks | ~6 | **9** |
+| 6 peaks, heavy noise | ~6 | **5.8** |
+| 6 peaks, dim | ~6 | **5.8** |
+
+### What works: TOPOLOGICAL persistence
+**How far does a peak rise above the SADDLE that separates it from a higher peak?** A watershed
+**is** a persistence computation — flood downward, and when two basins meet the lower peak **dies**
+at that level.
+
+It is **local and scale-free**, and **it cannot be excluded by its own presence** — which is what
+killed the global median gate (*real structure raises the median, and the raised median then
+excludes the structure*). **Real peaks are ~100× more persistent than noise bumps.**
+
+### THREE gates failed first, and all for the same reason
+- a **MAD-derived** threshold — *the MAD grows with the structure* (0.12 flat → 4.6 with six peaks)
+- a **fraction of the range** — *a flat field's range IS its noise*
+- the **second-largest persistence** as a fraction of the range — 0.37 flat vs 0.14 real, **the
+  wrong way round**
+
+> **A flat field's envelope is scale-free noise. Its persistence distribution looks EXACTLY like a
+> real field's, only scaled down — and no ratio can separate them, because that is what scale-free
+> means.**
+
+Worse, the MAD of the **envelope's** local differences measures **the smoothing**, not the noise:
+``range/noise`` came out at **167 on a flat field and 64 on a real one** — *anti-correlated with
+structure.*
+
+### The fix: the noise is a property of the RAW IMAGE
+**The envelope is a smoothed version, and smoothing destroys the noise by construction.**
+``topology_metrics`` **could not answer the question with the information it was given.**
+
+``estimate_image_noise(image)`` is computed on the raw image and passed through. The separation is
+then an **order of magnitude**: ``range/noise`` is **0.7** on a flat field, **5.3** on a heavily
+noisy real one, **9–13** normally.
+
+**295/295 core tests passing.**
+
 ## [1.5.501] - 2026-07-10
 ### RESOLVED — molecular counting: the corrections now compose
 | trace | **BEFORE** (recorded in DEV_NOTES) | **NOW** |

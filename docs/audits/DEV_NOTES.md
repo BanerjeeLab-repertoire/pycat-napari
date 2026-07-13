@@ -670,46 +670,66 @@ step, and it is a small one.
 
 ---
 
-## OPEN: `topo_n_basins` counts noise, and a prominence gate did not fix it (1.5.485)
+## RESOLVED: `topo_n_basins` — the information was not in the envelope (1.5.502)
 
-**Status: the bug is real and documented. The fix is not shipped, because I could not validate it.**
+**It was a constant.** ``peak_local_max`` with only a ``min_distance`` accepted every local
+maximum, however small. A **flat field with nothing but noise** reported **6.3 basins** — at a
+noise sd of 5, 20 and 60 **alike**. It was measuring how many points of separation
+``min_distance`` fit inside the mask, and *"we found 7 chromatin domains"* was a statement about
+the image dimensions.
 
-``topology_metrics``'s ``topo_n_basins`` uses ``peak_local_max`` with only a ``min_distance``,
-which accepts **every** local maximum however small. Measured:
+### What works: TOPOLOGICAL persistence
+**How far does a peak rise above the SADDLE that separates it from a higher peak?** A watershed
+**is** a persistence computation: flood downward, and when two basins meet, the lower peak **dies**
+at that level. Its persistence is ``peak − saddle``.
 
-===========================  ============  ============
-field                        n_basins      topo_cov
-===========================  ============  ============
-FLAT (0 structure), noise 5  **6.3**       0.001
-FLAT, noise 20               **6.3**       0.004
-FLAT, noise 60               **6.3**       0.013
-3 real peaks                 6             0.424
-6 real peaks                 6             0.338
-===========================  ============  ============
+That is **local and scale-free**, and — crucially — **it cannot be excluded by its own presence**,
+which is what killed the global median gate (*real structure raises the median, and the raised
+median then excludes the structure*)::
 
-**It is a constant, and it is anti-correlated with the truth** — a flat field reports 7 and a
-field with 3 genuine peaks reports 6. It is not measuring the field: it is measuring **how many
-points of separation ``min_distance`` fit inside the mask**. *"We found 7 chromatin domains"*
-would be a statement about the image dimensions.
+    FLAT     [20.0, 5.5, 3.2, 3.1, 0.6]
+    6 peaks  [294.6, **42.7, 39.4, 38.7, 38.1, 33.2**]
 
-### The attempted fix, and why it was reverted
-A global prominence gate (median + 1 MAD of the envelope inside the mask) **made things worse**:
-the flat field still reported 4, while a field with 6 genuine peaks dropped to **2.3**.
+**Real peaks are ~100× more persistent than noise bumps.**
 
-**The threshold interacts with the peaks it is supposed to count.** Real structure raises the
-median, which then excludes the structure. A global threshold cannot work here.
+### THREE gates failed before the right one, and they failed for the same reason
+* a MAD-derived threshold — **the MAD grows with the structure** (0.12 flat → 4.6 with six peaks)
+* a fraction of the envelope's range — **a flat field's range IS its noise**
+* the second-largest persistence as a fraction of the range — **0.37 flat vs 0.14 real**, the
+  wrong way round
 
-### What a correct fix needs
-A **topological** prominence — how far each peak rises above the saddle that separates it from a
-higher peak — not a global intensity threshold. That is a persistence computation (the same
-machinery as persistent homology, which ``topology_tools`` is nominally about), and it is a real
-piece of work rather than a parameter tweak.
+**A flat field's envelope is scale-free noise. Its persistence distribution looks EXACTLY like a
+real field's, only scaled down — and no ratio can separate them, because that is what scale-free
+means.**
 
-**Until then, ``topo_cov`` is the statistic to trust**: 0.001 on a flat field, 0.42 with real
-structure. It responds correctly to exactly what ``n_basins`` cannot see. The module already
-carries a good statistic beside the broken one, and ``topo_n_basins_is_unreliable`` is now set on
-every result so a consumer can see which is which.
+Worse, the MAD of the **envelope's** local differences measures **the smoothing**, not the noise:
+``range/noise`` came out at **167 on a flat field and 64 on a real one** — *anti*-correlated with
+structure.
 
+### The fix: the noise is a property of the RAW IMAGE
+**The envelope is a smoothed version, and smoothing destroys the noise by construction.**
+``topology_metrics`` could not answer the question with the information it was given.
+
+``estimate_image_noise(image)`` is now computed on the raw image and passed through. With it, the
+separation is an **order of magnitude**:
+
+    FLAT field (any noise level)     range/noise = **0.7**
+    6 real peaks, heavy noise        range/noise = **5.3**
+    3-9 real peaks, normal noise     range/noise = **9-13**
+
+============================  ==========  ==========
+field                         BEFORE      AFTER
+============================  ==========  ==========
+FLAT (noise 5 / 20 / 60)      **6.3**     **0**
+3 peaks                       ~6          **3**
+6 peaks                       ~6          **6**
+9 peaks                       ~6          **9**
+6 peaks, heavy noise          ~6          **5.8**
+6 peaks, dim (amp 300)        ~6          **5.8**
+============================  ==========  ==========
+
+*When the caller does not supply the noise, the field is assumed to have structure and the result
+is flagged (``topo_noise_known``) rather than quietly trusted.*
 
 ---
 
