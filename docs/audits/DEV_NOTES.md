@@ -548,3 +548,55 @@ experimentally validated.
    have not yet been shown to break anything. *Not yet shown ≠ harmless.*
 3. **Experimental validation beyond VPT** — glycerol viscosity standards and monomer/dimer N&B
    controls are the two the lab can do now.
+
+
+---
+
+## OPEN: the QC report overlap guard does not work under SubFigure (2026-07-12)
+
+**Status: the LAYOUT is fixed and verified. The mechanical GUARD is not, and was not shipped.**
+
+### What was fixed
+``plot_qc_report`` was rebuilt on ``SubFigure`` + ``constrained_layout`` (1.5.475). The scorecard
+is a text **list** and the panels are a plot **grid**; forcing them into one coordinate system
+caused every overlap, and ten attempts to hand-tune ``height_ratios`` / offsets each fixed one
+report size and broke the other.
+
+Under the rebuild, overlap is **structurally impossible** rather than tuned away:
+* the scorecard gets its own unconstrained subfigure and is laid out as a list;
+* the diagnostic grid gets ``constrained_layout``, which packs tick labels and titles correctly
+  by construction;
+* the per-panel captions are folded into the **x-label**, so the layout engine can see them (an
+  ``ax.text`` at a negative y is invisible to it);
+* the footer moved onto the scorecard subfigure (a ``fig.text`` at a fixed y is also invisible
+  to the engine, and it was being packed onto by the panels).
+
+**Verified visually at both report sizes** (2-D: 12 checks / 6 panels; time series: 12 checks /
+9 panels). Clean.
+
+### What does NOT work, and why
+A mechanical overlap test — compare every text artist's ``get_window_extent`` and flag
+intersecting boxes — **found the real bugs** while the geometry was hand-tuned, including a
+**65 px scorecard-vs-tick collision that looked fine by eye**.
+
+**It stops working under ``SubFigure``.** ``get_window_extent`` returns boxes that do not resolve
+correctly for artists inside a subfigure: it reports the footer (display y 907–918) as
+intersecting the histogram's ``10^5`` tick (y 906–920), and **cropping those exact pixels shows
+the footer alone, with no tick anywhere near it**. A second ``canvas.draw()`` does not resolve it.
+
+So the guard now reports **2 false positives on the 2-D report and 4 on the stack**, and **a guard
+that cries wolf will be disabled by whoever trips over it next.** It was therefore not shipped.
+
+### To pick up later
+1. **Find the right extent call under SubFigure.** Candidates: forcing the tight-bbox machinery
+   (``fig.get_tightbbox``), or resolving each artist's transform against the PARENT figure
+   explicitly rather than trusting ``get_window_extent``.
+2. **Or test the pixels.** Render the figure, render it again with one text artist hidden, and
+   diff — sound but slow. A cheaper variant: render each text artist's ink to its own mask and
+   check for intersecting non-zero pixels.
+3. **The guard is worth having.** It found bugs I could not see, and the display bugs it would
+   catch are exactly the ones that recur (every hand-tuned offset fix in this session broke a
+   different report size).
+
+**Do not re-enable the box-intersection version as-is.** It is wrong under the current layout,
+and passing it would require re-introducing the geometry it was written against.

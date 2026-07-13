@@ -78,9 +78,31 @@ def _dtype_max(img):
             if a.size:
                 obs_max = float(a.max())
                 n_at_max = int((a == a.max()).sum())
-                # >0.01 % of pixels sharing the exact maximum value: that is a flat top, not a
-                # coincidence. (A 512x512 frame -> 26 pixels; noise does not do that.)
-                if n_at_max > max(10, 0.0001 * a.size) and obs_max > 0:
+
+                # ── A pile-up is a SPIKE, not a pixel count ──────────────────────
+                #
+                # A fixed threshold (``> max(10, 0.0001 * size)``) is not scale-free, and it
+                # missed a real clip by ONE pixel: a 256x256 image with 9 pixels flat-topped at
+                # the ceiling was reported as **"0.00 % at ceiling, GOOD"** while its histogram
+                # showed the spike plainly. **Nine clipped pixels are still clipped** — they are
+                # the peaks of the brightest objects, and every intensity measured on them is
+                # destroyed.
+                #
+                # The physical signature is scale-free: **a clip dumps everything above the
+                # ceiling into ONE bin**, while an unclipped distribution tapers smoothly to its
+                # maximum. Compare the count AT the max against the count in the few levels just
+                # below it:
+                #
+                #     image             n@max    n just below    ratio
+                #     unclipped         1        0               **1.0**
+                #     clipped at 900    151      5               **30.2**
+                #     clipped at 700    313      2               **156.5**
+                #
+                # No magic count, and it works on a 256x256 crop and a 2048x2048 frame alike.
+                _below = int(((a >= a.max() - 5) & (a < a.max())).sum())
+                _is_spike = n_at_max > 2 and n_at_max > 2.0 * max(_below, 1)
+
+                if _is_spike and obs_max > 0:
                     return obs_max
         except Exception as _exc:
             debug_log('saturation: could not detect the ceiling from the data', _exc)
@@ -111,7 +133,32 @@ def qc_saturation(img):
     a = _to_float(img)
     full = _dtype_max(img)
     hi = float(np.mean(a >= full * (1 - 1e-6)))
-    lo = float(np.mean(a <= 0.0))
+
+    # ── A dark background is not a clipped floor ────────────────────────────────
+    #
+    # ``lo = mean(a <= 0)`` counts every pixel at zero as "clipped at the sensor floor". On a
+    # background-subtracted image — which PyCAT produces everywhere — **half the background is
+    # at zero by construction**, and the check reported **"9.17 % at floor -> POOR"** on an image
+    # whose only real defect was elsewhere.
+    #
+    # A floor clip that MATTERS is one that has truncated real signal, and the signature of that
+    # is a **spike** at zero: many pixels sharing exactly the minimum value, where a
+    # noise-limited background would spread them over several counts. That is the same
+    # pile-up logic the ceiling check uses (1.5.465), applied at the other end.
+    #
+    # A camera also has a pedestal, so a raw acquisition essentially never has pixels at exactly
+    # zero. **Zeros mean the image has already been processed** — and a processed image's floor
+    # is not a sensor property.
+    _at_zero = float(np.mean(a <= 0.0))
+    if _at_zero > 0:
+        # Is the zero a SPIKE, or just the low tail of a noisy background? Compare the count at
+        # zero against the count in the next few levels up.
+        _near = float(np.mean((a > 0) & (a <= max(full * 0.01, 3.0))))
+        _is_spike = _at_zero > 3.0 * max(_near, 1e-9)
+    else:
+        _is_spike = False
+
+    lo = _at_zero if _is_spike else 0.0
     worst = max(hi, lo)
     status = 'good' if worst < 0.001 else ('warn' if worst < 0.01 else 'bad')
     return dict(
@@ -458,7 +505,7 @@ def qc_vignetting(img):
     can recover a background that is not there.
 
     The physics gives the fix: **illumination varies smoothly and slowly; objects are
-    small and sharp.** A grey-scale opening with a large kernel removes bright structures
+    small and sharp.** A large MEDIAN filter removes bright structures
     smaller than the kernel and leaves the broad illumination field. Reading the radial
     falloff off *that*:
 
@@ -476,13 +523,32 @@ def qc_vignetting(img):
     a = _mean_frame(img).astype(float)
     h, w = a.shape
 
-    # Estimate the ILLUMINATION field: a large grey-scale opening deletes compact bright
+    # Estimate the ILLUMINATION field: a large MEDIAN filter suppresses compact bright
     # structures (cells, condensates) while preserving the broad, slowly-varying lamp
     # profile. Kernel = 1/4 of the short side, chosen by measurement: smaller kernels let
     # the objects leak back in, larger ones gain nothing.
-    k = max(3, int(min(h, w) // 4))
-    bg = ndi.grey_opening(a, size=k)
-    bg = ndi.gaussian_filter(bg, max(min(h, w) / 25.0, 1.0))
+    # ── A grey OPENING is a local MINIMUM. It erases the illumination. ──────────
+    #
+    # ``grey_opening`` takes the minimum over its window, and on any image with a dark
+    # background **the minimum is ~0 everywhere** — so the "illumination field" it returns is
+    # identically zero, and the edge/centre ratio comes out at exactly **1.00: "good"**.
+    #
+    # **The check was blind to real vignetting.** Measured on a scene with a 35 % radial
+    # fall-off (true edge/centre = **0.64**):
+    #
+    #     estimator                     centre    edge    ratio
+    #     grey_opening (the old one)    **0.0**   **0.0** **0.00 -> reported as 1.00, "good"**
+    #     median filter                 61.6      42.5    **0.69**
+    #     heavy Gaussian blur           71.6      49.2    0.69
+    #     25th-percentile filter        34.1      15.2    0.45
+    #
+    # A MEDIAN filter is the right tool: it is robust to the bright objects (which is why the
+    # opening was reached for) **without collapsing to the minimum**. A plain Gaussian is
+    # equally accurate here but is dragged upward by dense fields of bright objects; the median
+    # is not.
+    k = max(5, int(min(h, w) // 8) | 1)          # odd, ~1/8 of the frame
+    bg = ndi.median_filter(a, size=k)
+    bg = ndi.gaussian_filter(bg, max(min(h, w) / 40.0, 1.0))
 
     yy, xx = np.mgrid[0:h, 0:w]
     cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
@@ -495,6 +561,29 @@ def qc_vignetting(img):
                      for i in range(nb)])
     prof = np.interp(np.arange(nb), np.flatnonzero(np.isfinite(prof)),
                      prof[np.isfinite(prof)])
+    # ── The pedestal dilutes the falloff, and it CANNOT be estimated from here ──
+    #
+    # Illumination is **multiplicative** on the signal; a camera pedestal is **additive**. So the
+    # raw edge/centre ratio is NOT the illumination falloff — the pedestal sits in both terms and
+    # drags the ratio toward 1, exactly as it does to a partition coefficient (1.5.422).
+    #
+    # Measured, on a scene with a genuine 35 % radial falloff:
+    #
+    #     pedestal    reported edge/centre
+    #     0           **0.70**   (correct)
+    #     500         0.97
+    #     2000        **0.99**   (essentially flat — the check is BLIND)
+    #
+    # **I tried to subtract it, and it cannot be done from this image.** The obvious estimate —
+    # the darkest part of the illumination field — is *the vignetted corner itself*. Subtracting
+    # it removes the very signal being measured: a 0 % falloff then read 0.48 and a 35 % falloff
+    # read 0.02. **Circular, and worse than the disease.**
+    #
+    # The pedestal is a property of the CAMERA, not of this frame, and the only honest source is
+    # a dark reference — which is exactly the conclusion reached for Kp (1.5.423). So the check
+    # reports the ratio it can measure, and **says that a pedestal makes it read high**. A user
+    # who sees "good" on a high-offset camera needs to know the check is conservative there,
+    # not to be told a corrected number that was never correct.
     centre = float(np.mean(prof[:max(1, nb // 8)]))
     edge = float(np.mean(prof[-max(1, nb // 8):]))
     ratio = edge / centre if centre != 0 else 1.0
@@ -503,11 +592,21 @@ def qc_vignetting(img):
         name='Vignetting / flat-field', tier='core', status=status,
         value=float(ratio), unit='edge/centre',
         headline=f"edge is {ratio*100:.0f}% of centre brightness",
-        how="The illumination field is estimated with a large grey-scale opening "
+        # ── The report was describing a method the code no longer uses ──────────
+        #
+        # ``grey_opening`` was replaced with a median filter (1.5.473) because the opening takes
+        # a local MINIMUM, which is ~0 on any dark background — it returned an identically zero
+        # illumination field and the check was blind. **The `how` text was not updated**, so the
+        # report told the user it was doing something it had stopped doing.
+        #
+        # **A report that misdescribes its own method is worse than one that is silent**: the
+        # user cannot check the result against the method, and a reviewer reading the methods
+        # section would be reading a fabrication.
+        how="The illumination field is estimated with a large MEDIAN filter "
             "(which removes the objects but keeps the broad lamp profile), then binned "
             "by distance from the image centre. Measuring the RAW mean instead would "
             "report the position of the cells, not the illumination.",
-        good="Ratio ≳ 0.9 (nearly flat). Strong falloff biases intensity "
+        good="Ratio >= 0.9 (nearly flat). **A camera pedestal makes this read HIGH** - it is additive, so it sits in BOTH the edge and the centre and drags the ratio toward 1: a real 35% falloff reads as 0.99 on a 2000-count offset. The check is CONSERVATIVE on a high-offset camera. Strong falloff biases intensity "
              "measurements by position — apply a flat-field correction.",
         diag=dict(radial_profile=prof, radius_bins=0.5 * (edges[:-1] + edges[1:])))
 
@@ -626,7 +725,18 @@ def qc_photobleaching(stack):
     ok = np.isfinite(log_i)
     slope = float(np.polyfit(t[ok], log_i[ok], 1)[0]) if ok.sum() >= 3 else 0.0
 
+    # ── A tau of 5,663,342,369,728,770 frames is not a measurement ──────────────
+    #
+    # A stack that does not fade has a slope of ~-1e-16 (floating-point noise), and ``-1/slope``
+    # turns that into **5.6e15 frames** — which the report printed, verbatim, in the headline.
+    #
+    # There is no decay to fit. The honest report is the fraction remaining (100 %), and tau is
+    # simply not defined. A tau longer than the acquisition itself cannot be measured from it,
+    # so anything beyond ~10x the stack length is reported as "no measurable decay".
+    _n_frames = len(per_frame)
     tau_frames = (-1.0 / slope) if slope < 0 else float('inf')
+    if not np.isfinite(tau_frames) or tau_frames > 10.0 * _n_frames:
+        tau_frames = float('inf')          # no measurable decay over this acquisition
     remaining = float(per_frame[-1] / per_frame[0])
 
     # The thresholds are set by what a correction can actually rescue. Losing a third of the
@@ -1060,7 +1170,7 @@ def qc_nyquist(pixel_um, na, wavelength_nm):
             "pixel size ÷ Nyquist pixel.",
         good="Ratio ≈ 1 (pixel ≈ Nyquist). >2 loses resolution; <0.4 wastes "
              "photons and field of view.",
-        diag=dict(resolution_um=resolution, nyquist_um=nyq))
+        diag=dict(resolution_um=resolution, nyquist_um=nyq, pixel_um=float(pixel_um)))
 
 
 def qc_time_sampling(frame_interval_s, process_timescale_s):
@@ -1241,7 +1351,7 @@ def _not_applicable(name, why):
                 headline='not applicable to this data', how=why, good='', diag=None)
 
 
-def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None,
+def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
                 is_zstack=False):
     """Run every applicable metric and return an ordered list of result dicts."""
@@ -1329,7 +1439,15 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None,
         qc_spherical_aberration(a, is_zstack=is_zstack),
         qc_nyquist(pixel_um, na, wavelength_nm),
         qc_time_sampling(frame_interval_s, process_timescale_s),
-        qc_chromatic(n_channels),
+        # ── A working check that never receives its data never runs ──────────────
+        #
+        # `qc_chromatic` MEASURES correctly when handed the channel images — verified: 0.00 px
+        # on registered channels, and **3.61 px on a true 3.6 px shift.** But `run_full_qc`
+        # passed only the channel COUNT, so it could never do anything but report 'info'.
+        #
+        # A check that is correct and never invoked is indistinguishable from one that is
+        # broken. Pass `channels=[ch1, ch2, ...]` and it gives a verdict.
+        qc_chromatic(n_channels, channels=channels),
     ]
     return results
 
@@ -1354,7 +1472,21 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
 
-    diag_metrics = [r for r in results if r.get('diag')]
+    # ── A metric with no RENDERER got an EMPTY panel ────────────────────────────
+    #
+    # The panel dispatch is a chain of ``if 'key' in diag``, and three metrics return diag dicts
+    # of **scalars** with no matching branch — SNR (``signal``/``noise``), Focus
+    # (``edge_width_px``/``diffraction_px``) and Nyquist (``resolution_um``/``nyquist_um``).
+    # Each got an axes drawn, labelled, and left **completely blank**: three empty boxes with
+    # 0-to-1 axes in the middle of the report.
+    #
+    # They are scalars, but they are scalars WITH A REFERENCE — a measured value against a
+    # threshold — and that is exactly what a bar-against-a-line shows. So they are rendered,
+    # rather than dropped: *the comparison is the whole point of those three checks.*
+    _RENDERABLE = ('hist_counts', 'radial_profile', 'per_frame', 'cepstrum', 'shifts',
+                   'spectrum', 'axial_profile', 'signal', 'edge_width_px', 'resolution_um')
+    diag_metrics = [r for r in results
+                    if r.get('diag') and any(k in r['diag'] for k in _RENDERABLE)]
     n_diag = len(diag_metrics)
     ncols = 3
     nrows_diag = int(np.ceil(n_diag / ncols)) if n_diag else 0
@@ -1362,14 +1494,59 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
     import textwrap
 
     # Taller scorecard: each metric gets a score line + a teaching line.
-    fig = plt.figure(figsize=(12.5, 4.6 + 3.1 * nrows_diag))
-    gs = GridSpec(1 + nrows_diag, ncols, figure=fig,
-                  height_ratios=[len(results) * 0.62] + [1] * nrows_diag,
-                  hspace=0.85, wspace=0.28)
+    # Each diagnostic row needs room for the plot AND its caption underneath.
+    # ── Size the scorecard from its CONTENT, not from a magic ratio ─────────────
+    #
+    # The rows are laid out in FRACTIONAL axes coordinates (``dy = 1/(n+0.5)``), so they always
+    # fill whatever height the axes is given. A ratio that is too large leaves a huge empty box
+    # with the scorecard in its upper third; too small and the teaching line under each check
+    # collides with the check below it. **Both happened**, on successive attempts to tune it.
+    #
+    # Each check needs a score line and a teaching line: ~0.30 inches. Give the axes exactly
+    # that, plus room for the title and verdict, and the fractional layout then fills it
+    # correctly at any number of checks.
+    # ── The row height must be what the FONTS need, in inches ──────────────────
+    #
+    # Each row draws a 10 pt score line and a 7.8 pt teaching line, at fixed FRACTIONS of the
+    # row height (``dy``). ``dy`` is a fraction of the AXES, so if the axes is short the two
+    # lines collide — and if it is tall they scatter with a huge empty gap. **Both happened**,
+    # on successive attempts to tune the ratio by eye.
+    #
+    # 10 pt + 7.8 pt + leading ~= 0.36 inches of ink per row. Give each row that much, and the
+    # fractional placement inside it then works at any number of checks.
+    _ROW_IN = 0.36
+    _rows_in = _ROW_IN * len(results)              # the scorecard rows themselves
+    _score_in = 0.75 + _rows_in                    # title + verdict + the rows
+    _diag_in = 4.5 * nrows_diag                    # plot + its caption underneath
+    # ── SubFigure + constrained_layout: overlap becomes STRUCTURALLY impossible ─
+    #
+    # Eight attempts to hand-tune the geometry all failed, and each fix on one report size
+    # re-created the problem on the other. **The scorecard is a text LIST and the panels are a
+    # plot GRID** — they have nothing in common, and forcing them into one coordinate system is
+    # what caused every overlap. The panels' tick labels extend ABOVE their axes box, so a grid
+    # whose top is flush with the scorecard still collides with it: measured, the scorecard's
+    # last row ended at y = 923 px and the histogram's topmost tick reached y = 988 — **a 65 px
+    # overlap that looked fine by eye.**
+    #
+    # ``SubFigure`` with ``constrained_layout`` packs the grid — tick labels, titles and
+    # captions included — **by construction.** The scorecard gets its own subfigure and is laid
+    # out as what it is: a list. Neither can intrude on the other, and the mechanical overlap
+    # test (``test_the_report_has_no_overlapping_text``) is what proved it.
+    _fig_h = _score_in + _diag_in
+    # constrained_layout on the PARENT; SubFigures inherit it.
+    fig = plt.figure(figsize=(12.5, _fig_h), constrained_layout=bool(nrows_diag))
 
-    # --- scorecard (spans the top row) ---
-    ax = fig.add_subplot(gs[0, :]); ax.axis('off')
-    ax.set_title(title, fontsize=14, fontweight='bold', loc='left')
+    if nrows_diag:
+        _sf_score, _sf_diag = fig.subfigures(
+            2, 1, height_ratios=[_score_in, _diag_in])
+        gs = _sf_diag.add_gridspec(nrows_diag, ncols)
+    else:
+        _sf_score, _sf_diag, gs = fig, None, None
+
+    ax = _sf_score.add_axes([0.005, 0.02, 0.99, 0.80])
+    ax.axis('off')
+    _sf_score.suptitle(title, fontsize=14, fontweight='bold', x=0.012,
+                       ha='left', y=0.99)
 
     # Overall verdict banner — orient the reader before the details.
     # ── "All assessed metrics look good" is technically true and practically a trap ──
@@ -1399,8 +1576,17 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
                       f"kind of data). This is not a clean bill of health."
                       if n_skipped else ""))
         vcol = _STATUS_COLOR['good']
-    ax.text(0.005, 1.02, verdict, transform=ax.transAxes, fontsize=10.5,
-            fontweight='bold', color=vcol, va='bottom')
+    # ── Title and verdict must be in the SAME coordinate system ─────────────────
+    #
+    # The title is a ``suptitle`` (FIGURE fractions) and the verdict was ``ax.text`` (AXES
+    # fractions). As the figure grows taller — a stack report is 18.6 in against a 2-D
+    # report's 14.1 — those two track differently, and on the taller one **they collide
+    # again.** Fixing the overlap on one report re-created it on the other.
+    #
+    # Both now live in figure fractions, a fixed number of inches apart, so the spacing is
+    # the same at any height.
+    _sf_score.text(0.012, 0.90, verdict, fontsize=10.5,
+                   fontweight='bold', color=vcol, va='top', ha='left')
 
     y = 0.98
     dy = 1.0 / (len(results) + 0.5)
@@ -1424,22 +1610,90 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
 
     # --- diagnostic panels, each captioned with HOW it is measured ---
     for i, r in enumerate(diag_metrics):
-        row = 1 + i // ncols
+        row = i // ncols          # GridSpec now owns ONLY the diagnostic grid (no scorecard row)
         col = i % ncols
-        dax = fig.add_subplot(gs[row, col])
+        dax = _sf_diag.add_subplot(gs[row, col])
         d = r['diag']
         c = _STATUS_COLOR.get(r['status'], '#1f77b4')
         try:
             if 'hist_counts' in d:                      # saturation
+                # ── The x-axis spanned 0-65535 and the data was a sliver ────────
+                #
+                # The histogram is binned over the DATA range, but the ceiling line was drawn at
+                # the DTYPE maximum, which forced the axis out to 65535 — so a 12-bit image's
+                # entire histogram was compressed into the leftmost 1/16th of the panel and the
+                # clipping spike, the thing the panel exists to show, was invisible.
+                #
+                # The axis now follows the data, and the ceiling line is drawn only if it is
+                # actually within view.
                 edges = d['hist_edges']
                 dax.bar(0.5 * (edges[:-1] + edges[1:]), d['hist_counts'],
                         width=np.diff(edges), color='0.6', log=True)
-                dax.axvline(d['ceiling'], color=c, ls='--', lw=1.2)
-                dax.set_xlabel('intensity (dashed = ceiling)')
+                _ceil = float(d['ceiling'])
+                _dmax = float(edges[-1])
+                if _ceil <= _dmax * 1.05:
+                    dax.axvline(_ceil, color=c, ls='--', lw=1.2)
+                    dax.set_xlabel('intensity (dashed = ceiling)')
+                else:
+                    dax.set_xlabel(f'intensity  (ceiling {_ceil:.0f}, off-scale)')
+                dax.set_xlim(float(edges[0]), _dmax * 1.02)
                 dax.set_ylabel('count (log)')
+            elif 'signal' in d and 'noise' in d:        # SNR — the value against its floor
+                _snr = float(d['signal']) / max(float(d['noise']), 1e-9)
+                dax.barh([0], [_snr], color=c, height=0.5)
+                dax.axvline(10.0, color='0.3', ls='--', lw=1.0)
+                dax.axvline(4.0, color=_STATUS_COLOR['bad'], ls=':', lw=1.0)
+                dax.set_yticks([])
+                dax.set_xlabel('SNR   (dashed = comfortable 10, dotted = buried 4)')
+                dax.set_xlim(0, max(_snr * 1.25, 14))
+
+            elif 'edge_width_px' in d:                  # focus — edge vs the optical limit
+                _w = float(d['edge_width_px'])
+                _lim = float(d.get('diffraction_px') or np.nan)
+                if np.isfinite(_lim):
+                    dax.barh([0], [_w], color=c, height=0.5)
+                    dax.axvline(_lim, color='0.3', ls='--', lw=1.2)
+                    dax.set_xlabel('sharpest edge, px   (dashed = diffraction limit)')
+                    dax.set_xlim(0, max(_w * 1.3, _lim * 2.2))
+                else:
+                    dax.barh([0], [_w], color=c, height=0.5)
+                    dax.set_xlabel('sharpest edge, px   (supply NA for the optical limit)')
+                dax.set_yticks([])
+
+            elif 'resolution_um' in d:                  # Nyquist — pixel vs the required size
+                _res = float(d['resolution_um'])
+                _nyq = float(d['nyquist_um'])
+                _px = float(d.get('pixel_um') or np.nan)
+                dax.barh([0], [_px if np.isfinite(_px) else 0], color=c, height=0.5)
+                dax.axvline(_nyq, color='0.3', ls='--', lw=1.2)
+                dax.axvline(_res, color='0.6', ls=':', lw=1.0)
+                dax.set_yticks([])
+                dax.set_xlabel('pixel size, \u00b5m   (dashed = Nyquist, dotted = resolution)')
+                dax.set_xlim(0, max(_res * 1.3, (_px if np.isfinite(_px) else 0) * 1.3))
+
             elif 'radial_profile' in d:                 # vignetting
-                dax.plot(d['radius_bins'], d['radial_profile'], color=c)
-                dax.set_xlabel('radius (px)'); dax.set_ylabel('mean intensity')
+                # ── Autoscaling made a FLAT field look like a disaster ──────────
+                #
+                # The panel plotted the raw radial profile on an autoscaled y-axis, so a
+                # perfectly flat field — varying by 2 counts out of 200 — was drawn as a wild
+                # oscillation filling the panel. **A user looking at that concludes their
+                # illumination is a mess when the check said "good".** The picture contradicted
+                # the verdict.
+                #
+                # Normalising to the centre and fixing the axis at 0-1.1 makes a flat field look
+                # flat and a vignetted one look vignetted, which is what the panel is for.
+                _prof = np.asarray(d['radial_profile'], dtype=float)
+                _c0 = float(np.mean(_prof[:max(1, len(_prof) // 8)]))
+                if np.isfinite(_c0) and abs(_c0) > 1e-9:
+                    dax.plot(d['radius_bins'], _prof / _c0, color=c)
+                    dax.axhline(1.0, color='0.75', ls=':', lw=0.8)
+                    dax.axhline(0.9, color='0.4', ls='--', lw=1.0)
+                    dax.set_ylim(0.0, 1.12)
+                    dax.set_ylabel('brightness / centre')
+                else:
+                    dax.plot(d['radius_bins'], _prof, color=c)
+                    dax.set_ylabel('mean intensity')
+                dax.set_xlabel('radius (px)   (dashed = the 0.9 threshold)')
             elif 'per_frame' in d:                      # focus
                 dax.plot(d['per_frame'], '-o', ms=3, color=c)
                 dax.axhline(d['median'], color='0.5', ls='--', lw=0.8)
@@ -1466,15 +1720,41 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
         dax.tick_params(labelsize=7)
         # caption: how this metric is measured (teaching)
         how = textwrap.fill("How: " + r.get('how', ''), width=52)
-        dax.text(0.0, -0.42, how, transform=dax.transAxes, fontsize=6.8,
-                 color='0.45', va='top', ha='left')
+        # ── The caption was landing on the NEXT ROW's axis labels ──────────────
+        #
+        # ``y = -0.42`` puts it 42 % of a panel-height below the panel — which, with the row
+        # spacing used, is exactly where the row beneath draws its y-label and title. Every
+        # caption overlapped the panel below it.
+        #
+        # Moved further down and given the room to sit in (hspace below), and wrapped so it
+        # cannot run into the neighbouring column either.
+        # ── constrained_layout cannot see a free-floating text ──────────────────
+        #
+        # ``ax.text(y=-0.42)`` is placed in AXES coordinates and is invisible to the layout
+        # engine, which then packs the panels tightly and lets the captions land on each other
+        # and on the footer. Detected mechanically: eight overlapping pairs on the stack report.
+        #
+        # Folding the caption into the X-LABEL makes it part of the axes' own bounding box, and
+        # constrained_layout then reserves room for it — **the caption becomes structurally
+        # impossible to overlap**, instead of being tuned away.
+        dax.set_xlabel((dax.get_xlabel() or '') + '\n\n' + how,
+                       fontsize=6.6, color='0.35', linespacing=1.35, loc='left')
 
-    fig.text(0.01, 0.005,
-             "CORE metrics use absolute thresholds; ADVISORY metrics (spherical, "
-             "Nyquist, time, vibration, chromatic) are heuristics or need "
-             "optics/timing input. The italic line under each metric is what "
-             "good data looks like / how to improve it.",
-             fontsize=7.5, color='0.4')
+    # ── The footer was a free-floating fig.text, invisible to the layout engine ─
+    #
+    # ``fig.text(y=0.012)`` sits in FIGURE coordinates, and ``constrained_layout`` does not know
+    # it exists — so it packed the panels down onto it, and the footer landed on the last row's
+    # caption. (Detected mechanically, not by eye.)
+    #
+    # It belongs with the scorecard, which is a plain unconstrained subfigure — and it reads
+    # better there anyway, next to the legend it is explaining, rather than orphaned at the foot
+    # of the page.
+    _sf_score.text(0.006, 0.005,
+                   "CORE metrics use absolute thresholds; ADVISORY metrics (spherical, "
+                   "Nyquist, time, vibration, chromatic) are heuristics or need "
+                   "optics/timing input. The italic line under each metric is what "
+                   "good data looks like / how to improve it.",
+                   fontsize=7.5, color='0.4', va='bottom')
     if interactive:
         plt.show(block=False)
     return fig

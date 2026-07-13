@@ -24,7 +24,7 @@ from scipy import ndimage as ndi
 from tests.imaging_realism import blur, illumination_gradient, drift, photobleach
 
 
-def _scene(size=192, seed=0):
+def _scene(size=192, seed=0, noise=6.0, pedestal=100.0):
     """Puncta on a dim background — the thing every QC metric is pointed at.
 
     **This is deliberately NOT diffraction-limited** (sigma 3 px, where 1.4 NA at 0.065 um/px
@@ -38,11 +38,22 @@ def _scene(size=192, seed=0):
     yy, xx = np.mgrid[0:size, 0:size]
     rng = np.random.default_rng(seed)
 
-    img = np.full((size, size), 50.0)
+    # A REAL camera has a pedestal. Without one, a background-subtracted image has half its
+    # pixels at zero, and the saturation check reads that as a clipped floor (1.5.473).
+    img = np.full((size, size), 50.0 + pedestal)
     for _ in range(25):
         cy, cx = rng.integers(30, size - 30), rng.integers(30, size - 30)
         img += 500 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 3.0 ** 2))
-    return img
+
+    # **A real image has noise, and several checks need it.** A noiseless scene gives qc_snr an
+    # SNR of infinity, and it makes qc_ghosting FIRE — because randomly placed puncta produce
+    # spurious cepstral peaks (a random point pattern has repeated inter-object spacings by
+    # chance), and noise is what dithers them away. Measured: the noiseless scene reports an
+    # echo of 0.0063 -> "warn"; the same scene with sd=6 noise reports 0.0016 -> "good".
+    #
+    # A fixture that is CLEANER than any real acquisition is not a conservative test — it is a
+    # different test, and it fails for reasons that will never occur in practice.
+    return img + rng.normal(0, noise, img.shape) if noise else img
 
 
 def _focus_scene(size=192, seed=0, sigma_px=1.2):
@@ -63,8 +74,14 @@ def _focus_scene(size=192, seed=0, sigma_px=1.2):
 
 
 def _stack(n=10, seed=0):
+    """A time series. The BASE is noise-free — the per-frame noise is what varies.
+
+    (A noisy base plus per-frame noise gives every frame the same fixed noise pattern *plus* a
+    varying one, which is not what a camera does and which broke the drift checks: the fixed
+    pattern is a strong registration target that does not move.)
+    """
     rng = np.random.default_rng(seed)
-    base = _scene(seed=seed)
+    base = _scene(seed=seed, noise=0.0)
     return np.stack([base + rng.normal(0, 8, base.shape) for _ in range(n)])
 
 
@@ -187,11 +204,11 @@ def test_snr_and_vignetting_are_invariant_to_the_camera_pedestal():
         f"changes neither the contrast nor the noise."
     )
 
-    vig_clean = qc.qc_vignetting(img)["value"]
-    vig_ped = qc.qc_vignetting(with_pedestal)["value"]
-    assert vig_ped == pytest.approx(vig_clean, rel=0.15), (
-        f"the vignetting score moved from {vig_clean:.3f} to {vig_ped:.3f} on a pedestal"
-    )
+    # Vignetting is NOT pedestal-invariant, and it cannot be — see
+    # test_vignetting_reads_high_on_a_pedestal_and_says_so. The old test asserted invariance,
+    # and it PASSED only because the check was broken: `grey_opening` returned an identically
+    # zero illumination field, so the ratio was always 1.00 regardless of the input. **A test
+    # that passes on a broken metric is worse than no test.**
 
 
 @pytest.mark.core
@@ -668,4 +685,286 @@ def test_the_absolute_focus_verdict_admits_its_systematic_floor():
     assert "across your dataset" in result["good"].lower(), (
         "it must point the user at the COMPARATIVE measure, which is exact where this one is "
         "not"
+    )
+
+
+# ── The five checks that had no test at all ──────────────────────────────────────────────
+
+@pytest.mark.core
+def test_ghosting_detects_a_reflection_and_recovers_its_offset():
+    """A reflection ghost is a faint SHIFTED COPY — from a filter, or a coverslip.
+
+    Audited and **correct**, and better than expected: it fires monotonically with the ghost
+    amplitude *and* **recovers the offset**, reporting ~12 px for a 12 px ghost and ~25 px for a
+    25 px one. That offset is what tells the user which optical surface to suspect.
+
+    ==========================  ========  ========
+    image                       echo      verdict
+    ==========================  ========  ========
+    clean                       0.0016    good
+    5 % ghost, 12 px            0.0036    good
+    15 % ghost, 12 px           0.0105    warn
+    30 % ghost, 25 px           0.0199    bad
+    ==========================  ========  ========
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    base = _scene()
+
+    clean = qc.qc_ghosting(np.clip(base, 0, 4095).astype(np.uint16))
+    ghosted = qc.qc_ghosting(
+        np.clip(base + 0.30 * np.roll(base, 25, axis=1), 0, 4095).astype(np.uint16))
+
+    assert clean["status"] == "good", f"a clean image was flagged: {clean['headline']}"
+    assert ghosted["status"] in ("warn", "bad"), (
+        f"a 30% reflection ghost was not detected ({ghosted['headline']})"
+    )
+    assert "25" in ghosted["headline"] or "24" in ghosted["headline"], (
+        f"the ghost offset should be recovered (~25 px): {ghosted['headline']!r}. The offset "
+        f"is what tells the user WHICH optical surface is reflecting."
+    )
+
+
+@pytest.mark.core
+@pytest.mark.parametrize("tau,expected_remaining", [(50.0, 53.8), (15.0, 12.7)])
+def test_photobleaching_reports_the_true_fraction_remaining(tau, expected_remaining):
+    """The reported %-remaining must match the truth — it decides whether a correction is
+    even possible.
+
+    Verified against ``exp(-31/tau)`` over a 32-frame stack: reported **52.9 %** against a true
+    53.8 %, and **11.8 %** against a true 12.7 %.
+
+    **If 90 % of the signal is gone, the late frames are noise and no bleach correction recovers
+    them** — so this number is not cosmetic, it is the decision.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+    gallery = pytest.importorskip("pycat.toolbox.qc_gallery")
+
+    faded = gallery._bleach(gallery.reference_stack(n_frames=32), tau)
+    result = qc.qc_photobleaching(faded)
+
+    assert result["value"] == pytest.approx(expected_remaining, abs=3.0), (
+        f"reported {result['value']:.1f}% remaining against a true {expected_remaining:.1f}% "
+        f"(tau = {tau} frames over 32 frames). A bleach correction divides by exp(-t/tau), so "
+        f"an error here compounds exponentially."
+    )
+
+
+@pytest.mark.core
+def test_time_sampling_is_nyquist_in_time():
+    """At least two samples per process timescale, or the dynamics are aliased."""
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    assert qc.qc_time_sampling(0.1, 10.0)["status"] == "good", (
+        "100 frames per process timescale is ample sampling"
+    )
+    assert qc.qc_time_sampling(5.0, 1.0)["status"] == "bad", (
+        "a 5 s frame interval on a 1 s process is ALIASED — the dynamics are unrecoverable, "
+        "and a fitted rate constant from it is meaningless"
+    )
+
+
+@pytest.mark.core
+def test_chromatic_measures_the_shift_when_it_is_given_the_channels():
+    """**A working check that never receives its data never runs.**
+
+    ``qc_chromatic`` MEASURES correctly when handed the channel images — **0.00 px** on
+    registered channels, and **3.61 px on a true 3.6 px shift.** But ``run_full_qc`` passed only
+    the channel COUNT, so it could never do anything but report *"info — pass the channel
+    images"*.
+
+    **A check that is correct and never invoked is indistinguishable from one that is broken.**
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    ch1 = _scene()
+    aligned = qc.qc_chromatic(2, channels=[ch1, ch1.copy()])
+    shifted = qc.qc_chromatic(2, channels=[ch1, ndi.shift(ch1, (3.0, 2.0), order=3)])
+
+    assert aligned["status"] == "good", (
+        f"perfectly registered channels were flagged: {aligned['headline']}"
+    )
+    assert shifted["status"] in ("warn", "bad"), (
+        f"a 3.6 px chromatic shift was not flagged: {shifted['headline']}"
+    )
+    assert shifted["value"] == pytest.approx(3.6, abs=0.3), (
+        f"the measured shift is {shifted['value']:.2f} px against a true 3.61 px"
+    )
+
+    # And the report must actually PASS them.
+    report = {r["name"]: r for r in qc.run_full_qc(
+        ch1, n_channels=2, channels=[ch1, ndi.shift(ch1, (3.0, 2.0), order=3)])}
+    assert report["Chromatic aberration"]["status"] in ("warn", "bad"), (
+        "run_full_qc did not pass the channel images through, so a working check never ran"
+    )
+
+
+@pytest.mark.core
+def test_diffraction_limit_is_a_sigma_not_a_resolution():
+    """Abbe ``d = lambda/(2·NA)`` is a RESOLUTION (~a FWHM), not a standard deviation.
+
+    Comparing an edge **sigma** against an Abbe **distance** is comparing two different
+    quantities, and it produced ratios **below 1 on images already at the diffraction limit** —
+    physically impossible. A Gaussian's FWHM is ``2.355 * sigma``.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    sigma_px = qc.diffraction_limit_px(0.065, 1.4, 520)
+    abbe_px = (520 / 1000.0) / (2 * 1.4) / 0.065
+
+    assert sigma_px == pytest.approx(abbe_px / 2.355, rel=0.01), (
+        f"the diffraction limit must be returned as a SIGMA ({abbe_px / 2.355:.2f} px), not as "
+        f"the Abbe distance ({abbe_px:.2f} px) — otherwise it is not comparable with an edge "
+        f"sigma"
+    )
+    assert sigma_px == pytest.approx(1.21, abs=0.02), (
+        "1.4 NA at 520 nm and 0.065 um/px gives a diffraction-limited edge sigma of ~1.21 px"
+    )
+
+
+@pytest.mark.core
+def test_vignetting_detects_a_real_falloff():
+    """``grey_opening`` returned an identically ZERO illumination field. The check was blind.
+
+    A grey opening takes the local MINIMUM over its window, and on any image with a dark
+    background **the minimum is ~0 everywhere** — so the "illumination field" it produced was
+    identically zero, and the edge/centre ratio came out at exactly **1.00: "good"**, on a scene
+    with a **35 % radial falloff**.
+
+    Measured (true edge/centre = 0.64):
+
+    ==========================  ========  ========  ========
+    estimator                   centre    edge      ratio
+    ==========================  ========  ========  ========
+    grey_opening (the old one)  **0.0**   **0.0**   **0.00** → reported 1.00, "good"
+    median filter               61.6      42.5      **0.69**
+    ==========================  ========  ========  ========
+
+    A median is robust to the bright objects — which is why the opening was reached for — **and
+    it does not collapse to the minimum.**
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    size = 256
+    yy, xx = np.mgrid[0:size, 0:size]
+    rng = np.random.default_rng(0)
+
+    def _field(falloff):
+        img = np.full((size, size), 60.0)
+        for _ in range(35):
+            cy, cx = rng.integers(25, size - 25, size=2)
+            img += 900 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 1.6 ** 2))
+        r = np.sqrt((yy - size / 2) ** 2 + (xx - size / 2) ** 2)
+        r = r / r.max()
+        return np.clip(img * (1 - falloff * r ** 2) + rng.normal(0, 20, img.shape),
+                       0, 4095).astype(np.uint16)
+
+    flat = qc.qc_vignetting(_field(0.0))
+    vignetted = qc.qc_vignetting(_field(0.35))
+
+    assert flat["status"] == "good", f"a FLAT field was flagged: {flat['headline']}"
+    assert vignetted["status"] in ("warn", "bad"), (
+        f"a 35% radial falloff was not detected ({vignetted['headline']}). This is the "
+        f"grey_opening bug: a local MINIMUM over a dark background is zero everywhere, so the "
+        f"illumination field it returns is identically flat and the ratio is always 1.00."
+    )
+    assert vignetted["value"] == pytest.approx(0.65, abs=0.12), (
+        f"measured edge/centre {vignetted['value']:.2f} against a true 0.65"
+    )
+
+
+@pytest.mark.core
+def test_vignetting_reads_high_on_a_pedestal_and_says_so():
+    """The pedestal is ADDITIVE and the illumination is MULTIPLICATIVE. It cannot be corrected.
+
+    A camera offset sits in **both** the edge and the centre, and drags the ratio toward 1 —
+    exactly as it does to a partition coefficient (1.5.422). On a genuine 35 % falloff:
+
+    ==========  =====================
+    pedestal    reported edge/centre
+    ==========  =====================
+    0           **0.70** (correct)
+    500         0.97
+    2000        **0.99** (blind)
+    ==========  =====================
+
+    **I tried to subtract it, and it cannot be done from this image.** The obvious estimate —
+    the darkest part of the illumination field — **is the vignetted corner itself.** Subtracting
+    it removes the signal being measured: a 0 % falloff then read 0.48 and a 35 % falloff read
+    0.02. *Circular, and worse than the disease.*
+
+    The pedestal is a property of the CAMERA, not of this frame, and the only honest source is a
+    dark reference — the same conclusion reached for Kp (1.5.423). **So the check states that it
+    reads high on a high-offset camera**, rather than reporting a corrected number that was never
+    correct.
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    result = qc.qc_vignetting(_scene())
+
+    assert "pedestal" in result["good"].lower(), (
+        "the vignetting check must tell the user that a camera pedestal makes it read HIGH — "
+        "otherwise a 'good' on a high-offset camera is read as evidence of a flat field when it "
+        "is evidence of nothing"
+    )
+
+
+@pytest.mark.core
+def test_the_report_does_not_misdescribe_its_own_method():
+    """**A report that misdescribes its own method is worse than one that is silent.**
+
+    ``qc_vignetting`` was rebuilt on a median filter (1.5.473) because ``grey_opening`` takes a
+    local MINIMUM — which is ~0 on any dark background, so it returned an identically zero
+    illumination field and the check was blind. **The ``how`` text was not updated.**
+
+    For one release the report told the user it was estimating the illumination with a grey-scale
+    opening, and it was not. A reviewer reading that methods section would have been reading a
+    fabrication, and a user could not have checked the result against the method.
+
+    This is a narrow guard on a specific drift, but the class is general: **the teaching text is
+    part of the output, and it goes stale the moment the code changes underneath it.**
+    """
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    how = qc.qc_vignetting(_scene())["how"].lower()
+
+    assert "median" in how, (
+        "the vignetting check no longer uses a grey-scale opening — it uses a median filter — "
+        "and the `how` text must say so"
+    )
+    # The opening MAY be mentioned, but only as the thing that was replaced.
+    if "opening" in how:
+        assert "until" in how or "was used" in how or "blind" in how, (
+            "the `how` text mentions a grey opening without making clear it is the OLD method"
+        )
+
+
+@pytest.mark.core
+def test_the_vignetting_panel_does_not_contradict_its_own_verdict():
+    """A flat field must LOOK flat.
+
+    The panel plotted the raw radial profile on an **autoscaled** y-axis, so a perfectly flat
+    field — varying by 2 counts out of 200 — was drawn as a wild oscillation filling the panel.
+    **A user looking at that concludes their illumination is a mess while the check says
+    "good".** *The picture contradicted the verdict.*
+
+    Normalising to the centre and fixing the axis makes a flat field look flat and a vignetted
+    one look vignetted, which is what the panel is for.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+
+    result = qc.qc_vignetting(_scene())
+    figure = qc.plot_qc_report([result], title="t", interactive=False)
+
+    panels = [ax for ax in figure.axes if 'radius' in (ax.get_xlabel() or '')]
+    assert panels, "the vignetting panel was not drawn"
+
+    low, high = panels[0].get_ylim()
+    assert high <= 1.2 and low >= -0.05, (
+        f"the vignetting panel y-axis is {low:.2f}-{high:.2f}. It must be FIXED (0 to ~1.1, "
+        f"normalised to the centre) — an autoscaled axis draws a flat field as a wild "
+        f"oscillation, and the picture then contradicts the 'good' verdict beside it."
     )

@@ -9,6 +9,8 @@ and what good data looks like.
 
 from __future__ import annotations
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import napari
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
@@ -16,6 +18,33 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
     QDoubleSpinBox, QSpinBox, QCheckBox, QWidget, QSizePolicy,
 )
+
+
+def _sibling_channels(ui_instance, active_name, active_data):
+    """The other image layers of the same shape — i.e. the other colour channels.
+
+    Chromatic aberration is a comparison BETWEEN channels, so the check needs them. A
+    multi-colour acquisition loads as several same-shaped image layers, and that is what this
+    collects. Returns None if there is nothing to compare against, which the check reports
+    honestly as "single channel — cannot assess".
+    """
+    try:
+        import numpy as _np
+        shape = _np.shape(active_data)
+        out = [_np.asarray(active_data)]
+        for layer in ui_instance.viewer.layers:
+            if layer.name == active_name:
+                continue
+            arr = getattr(layer, 'data', None)
+            if arr is None or getattr(arr, 'ndim', 0) != len(shape):
+                continue
+            if tuple(_np.shape(arr)) != tuple(shape):
+                continue
+            out.append(_np.asarray(arr))
+        return out if len(out) > 1 else None
+    except Exception as exc:
+        debug_log('QC: could not collect sibling channels', exc)
+        return None
 
 
 def _add_data_qc(ui_instance, layout=None, separate_widget=False):
@@ -87,7 +116,22 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         name = image_dd.currentText()
         if name not in [l.name for l in ui_instance.viewer.layers]:
             napari_show_warning("Select an image layer first."); return
-        data = np.asarray(ui_instance.viewer.layers[name].data)
+        # ── np.asarray() on a lazy stack returns FRAME 0 ONLY ───────────────────
+        #
+        # This is the 1.5.273 bug, still live in the QC UI. A lazy `_TiffPageStack` implements
+        # `__array__` as a deliberately-truncated single frame, so `np.asarray(layer.data)`
+        # silently collapses a 1000-frame movie to one image.
+        #
+        # **The consequence here is that QC lies about what it checked.** Drift, vibration and
+        # photobleaching all need a time series; given one frame they report "n/a — needs a time
+        # series", and the user — who is looking at a movie — reads that as "PyCAT looked and
+        # found nothing to report". It did not look.
+        #
+        # Every other stack-consuming UI already uses `materialize_stack`. This one did not.
+        from pycat.file_io.file_io import materialize_stack
+        _layer_data = ui_instance.viewer.layers[name].data
+        data = materialize_stack(_layer_data) if getattr(_layer_data, 'ndim', 2) == 3 \
+            else np.asarray(_layer_data)
         if data.ndim not in (2, 3):
             napari_show_warning("QC needs a 2-D image or a 3-D (T/Z, H, W) stack."); return
         from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report
@@ -98,7 +142,17 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 wavelength_nm=(wl.value() or None),
                 frame_interval_s=(dt.value() or None),
                 process_timescale_s=(tau.value() or None),
-                n_channels=nch.value(), is_zstack=zstack_cb.isChecked())
+                n_channels=nch.value(), is_zstack=zstack_cb.isChecked(),
+                # ── A correct check that never receives its data never runs ──────
+                #
+                # `qc_chromatic` MEASURES correctly when handed the channel images (0.00 px on
+                # registered channels, 3.61 px on a true 3.6 px shift — 1.5.471). The UI passed
+                # only the channel COUNT, so it could never do anything but report "info — pass
+                # the channel images", and a **working check sat idle in every session.**
+                #
+                # The channels are the other 2-D image layers of the same shape in the viewer —
+                # which is exactly what a multi-colour acquisition looks like once loaded.
+                channels=_sibling_channels(ui_instance, name, data))
         except Exception as e:
             napari_show_warning(f"QC failed: {e}")
             import traceback; traceback.print_exc(); return
@@ -117,7 +171,18 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         elif warn:
             napari_show_info("QC — CHECK: " + ", ".join(warn))
         else:
-            napari_show_info("QC — all assessed metrics look good.")
+            # ── "All assessed metrics look good" is the coverage trap ────────────
+            #
+            # Fixed in `plot_qc_report` in 1.5.469 — and the UI carried its own hardcoded copy
+            # of the same sentence, so the fix never reached the message the user actually sees.
+            # **A correction that lands in one of two copies has not landed.**
+            _ran = sum(1 for r in results if r['status'] in ('good', 'warn', 'bad'))
+            _skipped = len(results) - _ran
+            napari_show_info(
+                f"QC — all {_ran} checks that ran look good."
+                + (f"  BUT {_skipped} could NOT run (missing metadata, or the wrong kind of "
+                   f"data) — this is not a clean bill of health. See the report."
+                   if _skipped else ""))
         try:
             _state['fig'] = plot_qc_report(
                 results, title=f"Data Quality Report — {name}", interactive=True)
@@ -168,8 +233,34 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     outer.addWidget(grp)
     outer.addWidget(opt)
     outer.addWidget(tim)
+    # ── The gallery must be REACHABLE, or it is not a teaching tool ─────────────
+    #
+    # The exemplar gallery (1.5.466) shows a clean image beside one carrying a known defect,
+    # with the verdict PyCAT gives each — the *Image* half of Image → Assessment →
+    # Interpretation → Recommendation. **It was built and never wired to anything.**
+    #
+    # A user reading "Focus: bad" on their own data has no reference for what "bad" looks like
+    # unless they can open it from here, next to the report that just told them.
+    gallery_btn = QPushButton("What does a quality problem look like?")
+    gallery_btn.setToolTip(
+        "Open a side-by-side gallery: a clean image next to one carrying each defect, and "
+        "what PyCAT says about both. The exemplars are simulated, and each one names the "
+        "exact parameter that produced it.")
+
+    def _open_gallery():
+        try:
+            from pycat.toolbox.qc_gallery_ui import make_qc_gallery_widget
+            ui_instance.viewer.window.add_dock_widget(
+                make_qc_gallery_widget(), name="QC — what a problem looks like", area="right")
+        except Exception as exc:
+            debug_log('QC: could not open the exemplar gallery', exc)
+            napari_show_warning(f"Could not open the gallery: {exc}")
+
+    gallery_btn.clicked.connect(_open_gallery)
+
     outer.addWidget(run_btn)
     outer.addWidget(save_btn)
+    outer.addWidget(gallery_btn)
 
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)

@@ -4,6 +4,255 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.475] - 2026-07-10
+### Rebuilt the report layout on `SubFigure` — overlap is now structurally impossible
+**Ten attempts to hand-tune the geometry all failed the same way**, and each fix on one report
+size re-created the problem on the other.
+
+The cause: **the scorecard is a text LIST and the panels are a plot GRID.** They have nothing in
+common, and forcing them into one coordinate system caused every overlap. The rows are laid out
+in *fractional axes coordinates*, so a height ratio that is too small crushes the teaching line
+into the score line above it, and one that is too large leaves a huge empty box — **dead space
+and overlap are the same bug seen from two sides.** And the panels' tick labels extend *above*
+their axes box, so a grid whose top is flush with the scorecard still collides with it.
+
+``SubFigure`` + ``constrained_layout`` packs the grid — tick labels, titles and captions
+included — **by construction**:
+
+- the scorecard gets its own unconstrained subfigure and is laid out as what it is: a list;
+- the per-panel captions are folded into the **x-label**, so the layout engine can see them (an
+  ``ax.text`` at a negative y is invisible to it, and it was packing the panels down onto them);
+- the footer moved onto the scorecard subfigure — a ``fig.text`` at a fixed y is *also* invisible
+  to the engine, and it reads better next to the legend it explains than orphaned at the foot of
+  the page.
+
+Verified at both report sizes: 2-D (12 checks, 6 panels) and time series (12 checks, 9 panels).
+
+### Note — a mechanical overlap guard found real bugs, and it does NOT work under SubFigure
+Comparing every text artist's rendered bounding box **found collisions I could not see by eye** —
+including a **65 px overlap** between the scorecard's last row and the histogram's topmost tick,
+on a report that looked fine.
+
+**It stops working under ``SubFigure``.** ``get_window_extent`` returns boxes that do not resolve
+for artists inside a subfigure: it reports the footer as intersecting a ``10^5`` tick, and
+**cropping those exact pixels shows the footer alone, with no tick anywhere near it.** A second
+``canvas.draw()`` does not fix it.
+
+So the guard now reports **2 false positives on the 2-D report and 4 on the stack**, and **a guard
+that cries wolf will be disabled by whoever trips over it next.** It is therefore *not shipped*,
+and the problem is written up in ``docs/audits/DEV_NOTES.md`` with three concrete approaches to
+try. **The guard is worth having** — it caught bugs invisible to inspection, and the display bugs
+it would catch are exactly the ones that recurred all session.
+
+**170/170 core tests passing.**
+
+## [1.5.474] - 2026-07-10
+### FIXED — the report was describing a method the code no longer used
+``qc_vignetting`` was rebuilt on a **median filter** in 1.5.473, because ``grey_opening`` takes a
+local *minimum* — which is ~0 on any dark background, so it returned an identically zero
+illumination field and **the check was blind**.
+
+**The `how` text was not updated.** For one release the report told the user it was estimating
+the illumination with *"a large grey-scale opening"*, and it was not.
+
+**A report that misdescribes its own method is worse than one that is silent.** A reviewer
+reading that methods section would have been reading a fabrication, and a user could not have
+checked the result against the method. Corrected in all three places, and guarded — *the teaching
+text is part of the output, and it goes stale the moment the code changes underneath it.*
+
+### FIXED — the vignetting panel contradicted its own verdict
+The panel plotted the raw radial profile on an **autoscaled** y-axis, so a perfectly flat field —
+varying by **2 counts out of 200** — was drawn as a wild oscillation filling the panel.
+
+**A user looking at that concludes their illumination is a mess while the check beside it says
+"good".** *The picture contradicted the verdict.*
+
+Normalised to the centre, with the axis fixed at 0–1.1 and the 0.9 threshold drawn. A flat field
+now looks flat; a vignetted one looks vignetted.
+
+### Confirmed — the gallery was teaching a lie about vignetting, and now is not
+The exemplar showed a clean field and a 55 %-vignetted one **and reported "100 % of centre" for
+both** — because the metric it calls was blind. It now reads **99 % clean, 55 % degraded**.
+
+**The gallery and the metrics check each other**, and this is what that is for: an exemplar that
+does not trip its own metric fails the build, and a metric that cannot see its own exemplar is
+caught by the picture.
+
+### Checked and correct — no change needed
+- **The CSV export carries the teaching text.** ``how_measured`` and ``good_data`` travel with
+  every number, which is what a methods section needs.
+- **``bbox_inches='tight'`` on save is right.** It *expands* the canvas (1502 px against 1407) to
+  include the captions rather than cropping them.
+
+**170/170 core tests passing.**
+
+## [1.5.473] - 2026-07-10
+### The report had never been RENDERED. Six display bugs and three science bugs.
+Gable asked to see the output. **I had never looked at it.** Every audit so far checked the
+numbers; nobody checked the page the scientist reads.
+
+### Science — three real bugs, two of them blinding a core check
+**`qc_vignetting` was blind to vignetting.** ``grey_opening`` takes the local **minimum**, and on
+any image with a dark background **the minimum is ~0 everywhere** — so the "illumination field"
+it produced was **identically zero**, and the edge/centre ratio came out at exactly **1.00,
+"good"**, on a scene with a **35 % radial falloff**. A median filter is robust to the bright
+objects *without* collapsing to the minimum: it recovers **0.69** against a true 0.64.
+
+**`qc_saturation` missed a real clip by one pixel.** The pile-up threshold was a fixed count
+(``> max(10, 0.0001·size)``), and a 256×256 image with **9 clipped pixels** was reported as
+**"0.00 % at ceiling, GOOD"** while its histogram showed the spike plainly. **Nine clipped pixels
+are still clipped** — they are the peaks of the brightest objects. The signature is scale-free: a
+clip dumps everything above the ceiling into **one bin** (n@max = 313 against 2 in the levels
+below), while an unclipped distribution tapers smoothly (n@max = 1, and 0 below).
+
+**A dark background was being called a clipped floor.** ``mean(a <= 0)`` counts every zero as
+"clipped at the sensor floor" — and on a background-subtracted image, which PyCAT produces
+everywhere, **half the background is at zero by construction**. It reported **"9.17 % at floor →
+POOR"**.
+
+**And photobleaching reported a τ of 5,663,342,369,728,770 frames** on a stack that does not
+fade. That is floating-point noise in the slope, not a measurement.
+
+### Display — six bugs
+1. **The title and the verdict were printed on top of each other.** ``suptitle`` and
+   ``ax.text(y=1.02)`` on the same axes. *The first thing a user sees was two superimposed
+   sentences.*
+2. **Every caption overlapped the panel below it** (``y = -0.42`` of a panel-height, which is
+   exactly where the next row draws its labels).
+3. **Three diagnostic panels were completely empty** — SNR, Focus and Nyquist return diag dicts
+   of *scalars*, and the panel dispatch had no branch for them. They are scalars **with a
+   reference**, so they now render as a bar against the threshold: *the comparison is the whole
+   point of those three checks.*
+4. **The saturation histogram spanned 0–65535** while the data occupied the first 1/16th — the
+   clipping spike, the thing the panel exists to show, was invisible.
+5. **Huge dead space** between the scorecard and the panels.
+6. **The bottom captions were cut off** by the footer.
+
+### Note — the scorecard is a LIST, and GridSpec cannot size a list
+Five attempts to tune ``height_ratios`` by eye all failed the same way. The rows are laid out in
+**fractional axes coordinates**, so a ratio that is too small crushes the teaching line into the
+score line above it, and one that is too large leaves a huge empty box. **Dead space and overlap
+are the same bug seen from two sides.**
+
+The scorecard now gets its own axes, placed in **figure fractions and sized in inches** — one
+row's worth of height per check. ``dy`` is then a real physical distance. *And the title and
+verdict now live in the same coordinate system, because fixing their overlap on the 2-D report
+(14.1 in) had re-created it on the stack report (18.6 in).*
+
+### Note — I tried to correct the vignetting pedestal, and it cannot be done
+The pedestal is **additive** and the illumination is **multiplicative**, so a camera offset drags
+the ratio toward 1: a real 35 % falloff reads **0.99 on a 2000-count offset**. The check goes
+blind on a high-offset camera.
+
+**The obvious correction is circular.** The darkest part of the illumination field — the natural
+pedestal estimate — **is the vignetted corner itself.** Subtracting it removes the signal being
+measured: a 0 % falloff then read 0.48 and a 35 % falloff read 0.02. *Worse than the disease.*
+
+The pedestal is a property of the **camera**, not of this frame, and the only honest source is a
+dark reference — the same conclusion reached for Kp (1.5.423). **So the check says it reads high
+on a high-offset camera**, rather than reporting a corrected number that was never correct.
+
+### And a test that passed on a broken metric
+``test_snr_and_vignetting_are_invariant_to_the_camera_pedestal`` asserted that vignetting is
+pedestal-invariant, and it **passed** — because the metric was broken and always returned 1.00.
+
+**A test that passes on a broken metric is worse than no test.**
+
+**168/168 core tests passing.**
+
+## [1.5.472] - 2026-07-10
+### The QC *UI* had never been audited — and it carried three fixes that never reached it
+Gable asked, for the third time, whether the QC audit was finished. **It was not.** Releases
+1.5.465–471 audited the library. **``data_qc_ui.py`` — the thing a user actually touches — had
+never been looked at**, and it carried its own copies of bugs already fixed one layer down.
+
+### 1. `np.asarray(layer.data)` on a lazy stack returns FRAME 0 ONLY
+This is the **1.5.273 bug**, still live in the QC UI while every other stack-consuming UI had
+moved to ``materialize_stack``. A lazy ``_TiffPageStack`` implements ``__array__`` as a
+deliberately-truncated single frame, so a **1000-frame movie silently becomes one image** — no
+error, no indication.
+
+**The consequence is that QC lies about what it checked.** Drift, vibration and photobleaching
+all need a time series, and given one frame they report *"n/a — needs a time series"*. **A user
+looking at their movie reads that as "PyCAT looked and found nothing to report." It did not
+look.**
+
+*This class of bug has now bitten this codebase three times.*
+
+### 2. The coverage trap, in a second copy
+*"QC — all assessed metrics look good"* was fixed in ``plot_qc_report`` in 1.5.469 — **and the
+UI carried its own hardcoded copy of the same sentence**, so the fix never reached the message
+the user actually sees.
+
+**A correction that lands in one of two copies has not landed.**
+
+### 3. `qc_chromatic` could never run from the UI
+It measures correctly when handed the channel images — 0.00 px on registered channels, **3.61 px
+on a true 3.6 px shift** (1.5.471). The UI passed only ``n_channels``. **A working check sat
+idle in every session.**
+
+The channels are now collected from the viewer (the other same-shaped image layers — which is
+exactly what a multi-colour acquisition looks like once loaded) and passed through.
+
+### 4. The exemplar gallery was reachable from nothing
+Built in 1.5.466, wired to **nothing**. A user reading *"Focus: bad"* on their own data had no
+way to see what *bad* looks like. **A teaching tool nothing can open is not a teaching tool.**
+
+Now a button on the QC report: *"What does a quality problem look like?"*
+
+### Guarded
+``tests/test_qc_ui_contract.py`` — four static contract tests, because the bugs are **structural,
+not behavioural**, and a Qt widget cannot be instantiated headlessly.
+
+*(The coverage guard checks the string literals the user sees, not the source text — a comment
+documenting the bug is not the bug, and a guard that cannot tell the difference will be disabled
+by the next person who trips over it.)*
+
+**166/166 core tests passing.**
+
+## [1.5.471] - 2026-07-10
+### The QC audit is finished — 16 of 16 functions now have tests (was 11)
+Gable asked whether the audit was done. **It was not.** Five functions had never been checked
+against the defect they name: ``qc_ghosting``, ``qc_photobleaching``, ``qc_time_sampling``,
+``qc_chromatic`` and ``diffraction_limit_px``.
+
+**Four of the five were correct** — and one, ``qc_ghosting``, is better than expected. It detects
+a reflection ghost *and* **recovers its offset**, reporting ~12 px for a 12 px ghost and ~25 px
+for a 25 px one. **That offset is what tells the user which optical surface is reflecting.**
+
+| image | echo | verdict |
+|---|---|---|
+| clean | 0.0016 | good |
+| 15 % ghost, 12 px | 0.0105 | warn |
+| 30 % ghost, 25 px | 0.0199 | bad |
+
+``qc_photobleaching`` reports the fraction remaining to ~1 % of truth (52.9 % against 53.8 %).
+``qc_time_sampling`` is correct Nyquist-in-time. ``diffraction_limit_px`` is exact Abbe physics.
+
+### FIXED — a correct check that could never run
+**``qc_chromatic`` measures perfectly when handed the channel images** — 0.00 px on registered
+channels, and **3.61 px on a true 3.6 px shift.** But ``run_full_qc`` passed only the channel
+**count**, so it could never do anything but report *"info — pass the channel images."*
+
+**A check that is correct and never invoked is indistinguishable from one that is broken.**
+``run_full_qc`` now takes ``channels=[ch1, ch2, ...]`` and passes them through.
+
+### Note — the test fixture was cleaner than any real acquisition, and that is not conservative
+Two checks failed on the shared test scene for the same root cause: **it had no noise.**
+
+- ``qc_snr`` returned **infinity** (nothing to divide by).
+- ``qc_ghosting`` **fired on a clean image** (0.0063 → warn). Randomly placed puncta produce
+  spurious cepstral peaks — a random point pattern *has* repeated inter-object spacings by
+  chance — and **noise is what dithers them away.** The same scene with sd = 6 noise reports
+  0.0016 → good.
+
+**A fixture that is cleaner than any real image is not a conservative test. It is a different
+test, and it fails for reasons that will never occur in practice.** (And the stack fixture needs
+the *opposite*: a noise-free base, because a fixed noise pattern repeated in every frame is a
+strong registration target that does not move — which broke the drift checks.)
+
+**162/162 core tests passing. Every QC function is now exercised against the defect it names.**
+
 ## [1.5.470] - 2026-07-10
 ### Gable was right — a single image CAN be judged for focus, via the sharpness of object edges
 The old check refused a verdict and headlined *"sharpness = 545.3 (relative)"*. It was right that
