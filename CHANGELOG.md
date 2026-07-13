@@ -4,6 +4,71 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.494] - 2026-07-10
+### Brushing — **plot → object → image**, and it works in batch where the session is gone
+Gable asked for two things, and **the second one is what forces the design**:
+
+> *"extensible so that as I write more plots this can be extended easily to them"*
+>
+> *"batch a data set and select points in the resulting plot and see the data and bounded images"*
+
+**A point in a batch plot points at an object in an image that is not loaded**, produced by a
+segmentation that is not in memory. *"Highlight the layer"* is **not available.**
+
+So the identity a point carries cannot be a live reference. It has to be **serialisable**:
+
+| | |
+|---|---|
+| ``source_path`` | **which file** |
+| ``frame`` | **which frame / z-slice** |
+| ``object_id`` | **which object** — the label value in that frame's mask |
+| ``bbox`` | **where it is** — ``(y0, x0, y1, x1)`` |
+| ``tags`` | **what produced it** — from the operation registry |
+
+### The bbox is the piece that makes it work
+With it, a batch plot reads the object's region **straight out of the file** — **no reload of the
+full stack, and no re-segmentation.** Without it, the only route back to the object is to redo the
+analysis.
+
+**And it is free.** ``regionprops`` hands over ``prop.bbox`` at every segmentation site. **25 files
+call regionprops; ONE keeps the bbox.** *It is being discarded everywhere.*
+
+Verified end-to-end: a batch of files, segmented, the session discarded — then a point is clicked
+and **the crop comes back with the right object's peak intensity, matching the table.**
+
+### What already existed, and what was welded shut
+A complete three-way brushing hub is **already in ``vpt_ui``** — plot ↔ image ↔ table, keyed on
+``track_id``, with a **re-entrancy guard** (*without it, a click oscillates*). The design was
+right. **It was welded to VPT**: 2 of PyCAT's 15 plots are pickable; the other 13 are pictures.
+
+Lifted out, keyed on an **``ObjectRef``** instead of a ``track_id`` — so it works for a condensate,
+a punctum, a cell or a bead **without knowing which**.
+
+### A new plot becomes brushable in ONE line
+```python
+points = ax.scatter(df.area_um2, df.partition_coeff, picker=5)
+make_pickable(fig, points, refs_from_dataframe(df, source_path=path))
+```
+
+**No hub edit, no registration, no callback plumbing.** The plot supplies the identity behind its
+points and gets **plot→image brushing, batch crops, and hub propagation** for free.
+
+### Interactive and batch are the SAME mechanism
+The plot **does not know which world it is in.** It hands over an ``ObjectRef``; the resolver
+decides:
+
+- **live session** → the ref finds the layer, and the viewer reveals the object
+- **batch** → the ref finds the **file and the crop**, and a thumbnail of that object is shown
+
+*That is what makes one implementation serve both.*
+
+### And a point that cannot be resolved says WHY
+*"Nothing happened"* is the worst possible answer to a click. A ref with a ``track_id`` and no
+bbox works interactively and **cannot** work in batch — and the message says so, **and says that
+``regionprops`` provides the bbox free.**
+
+**267/267 core tests passing.**
+
 ## [1.5.493] - 2026-07-10
 ### Every layer is tagged, and **no call site can forget**
 **116 ``viewer.add_*`` call sites. 2 of them tagged anything.**
