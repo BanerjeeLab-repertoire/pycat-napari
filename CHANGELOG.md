@@ -4,6 +4,66 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.527] - 2026-07-13
+### A mechanism to catch DROPPED CODE — because the spurious-puncta bug was a silent deletion
+Gable, after the incident:
+
+> *"how do we make sure you don't throw away good code while doing these audits — the rationale was
+> even in the code and you dropped it. We need some mechanism to track these drops, because for all
+> I know every module we've validated has truncated features away."*
+
+**The concern is exactly right.** Every edit in this workflow is a **whole-file rewrite** — no diff,
+no merge, no three-way. **If a rewrite emits fewer lines than it read, the difference is simply
+gone**, and:
+
+- the file still **compiles**
+- every test still **passes**
+- the function still **exists**, just with fewer parameters
+
+***A capability can disappear and nothing anywhere notices.***
+
+### The audit: what actually happened across the whole session
+Nine repo snapshots (**1.5.304 → 1.5.517**) were replayed function-by-function. **In my session's
+window — 1.5.475 → 1.5.526, 1742 → 1819 functions:**
+
+| | |
+|---|---|
+| functions vanished | **5** — *all five the ``file_io`` stack helpers I deliberately moved to ``stack_access.py``, which re-exports them. Verified.* |
+| **parameters lost** | **0** |
+| **function bodies shrunk** | **0** |
+
+**Nothing was thrown away.** *(And ``punctate_gate`` was never in ANY snapshot I was given — Meet's
+file is a lineage that only existed locally.)*
+
+### And the first version of the guard was BLIND — which is the deepest form of the bug
+It compared the tree against the **most recent snapshot**, and reported *"nothing dropped"* while
+the punctate gate was **entirely missing** — because **the baseline was itself regressed.**
+
+> ***A tool that compares against a broken baseline reports ALL CLEAR while everything is gone.***
+> That is the same failure it exists to prevent, one level up.
+
+### The fix: a HIGH-WATER MARK, not a diff
+``.pycat/high_water_mark.json`` — for every function ever seen in **any** snapshot, the **largest
+parameter set** and the **longest body** it has ever had. **1,825 functions**, from nine snapshots
+plus the working file Meet sent.
+
+**A capability that disappeared three versions ago is still missing today, and this still says so.**
+
+Three tests now run on every change:
+- **no scientific parameter has been dropped** — *a lost parameter is a lost capability*
+- **no function has vanished**
+- **no function body has been truncated** by >30% — *``cell_mask_stretching`` went 146 → 85 lines
+  and still had two of its four parameters, so a signature check alone would have missed it*
+
+**Verified by re-introducing the exact regression: the guard fires.**
+
+### Every hit is a QUESTION, not a verdict
+**A legitimate deletion looks exactly like an accidental one.** When a removal is deliberate it goes
+in ``_DELIBERATE`` **with a reason** — and *that list is itself the record of what was removed and
+why.*
+
+**343/343 core tests passing.**
+
 ## [1.5.526] - 2026-07-13
 ### RESTORED — spurious puncta came back because the tree had REGRESSED
 Meet reported spurious puncta returning and **sent the file that worked.** Diffing it against the

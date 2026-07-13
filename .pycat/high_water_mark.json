@@ -1,0 +1,13200 @@
+{
+"advanced_analysis_ui.py::__init__": {
+"lines": 3,
+"params": [
+"kwargs",
+"self",
+"task"
+]
+},
+"advanced_analysis_ui.py::_add_advanced_analysis": {
+"lines": 674,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"advanced_analysis_ui.py::_cancelled": {
+"lines": 1,
+"params": []
+},
+"advanced_analysis_ui.py::_done": {
+"lines": 10,
+"params": [
+"res"
+]
+},
+"advanced_analysis_ui.py::_err": {
+"lines": 3,
+"params": [
+"msg"
+]
+},
+"advanced_analysis_ui.py::_fit_tab_height": {
+"lines": 11,
+"params": [
+"idx"
+]
+},
+"advanced_analysis_ui.py::_has_time_stack": {
+"lines": 8,
+"params": []
+},
+"advanced_analysis_ui.py::_on_dynamic": {
+"lines": 145,
+"params": []
+},
+"advanced_analysis_ui.py::_on_linker_changed": {
+"lines": 11,
+"params": []
+},
+"advanced_analysis_ui.py::_on_morph": {
+"lines": 76,
+"params": []
+},
+"advanced_analysis_ui.py::_on_org": {
+"lines": 97,
+"params": []
+},
+"advanced_analysis_ui.py::_sync_dynamic_tab": {
+"lines": 11,
+"params": []
+},
+"advanced_analysis_ui.py::_task": {
+"lines": 47,
+"params": [
+"progress_emit",
+"should_cancel"
+]
+},
+"advanced_analysis_ui.py::_toggle_tabs": {
+"lines": 5,
+"params": [
+"checked"
+]
+},
+"advanced_analysis_ui.py::run": {
+"lines": 7,
+"params": [
+"self"
+]
+},
+"analysis_plots.py::_band": {
+"lines": 9,
+"params": [
+"colour",
+"hi_c",
+"lo_c"
+]
+},
+"analysis_plots.py::_draw_centered_tracks": {
+"lines": 25,
+"params": [
+"ax",
+"max_tracks",
+"tracks_df"
+]
+},
+"analysis_plots.py::_draw_moduli_into": {
+"lines": 68,
+"params": [
+"ax",
+"moduli_df"
+]
+},
+"analysis_plots.py::_draw_msd_into": {
+"lines": 42,
+"params": [
+"ax",
+"ensemble_msd_df",
+"fit",
+"line_registry",
+"max_spaghetti",
+"per_track_df",
+"pickable"
+]
+},
+"analysis_plots.py::_draw_van_hove": {
+"lines": 53,
+"params": [
+"ax",
+"bins",
+"frame_interval_s",
+"lag_frames",
+"tracks_df"
+]
+},
+"analysis_plots.py::_grouped": {
+"lines": 12,
+"params": [
+"ax",
+"df",
+"ref",
+"xcol",
+"ycol"
+]
+},
+"analysis_plots.py::_intensity_col": {
+"lines": 9,
+"params": [
+"df"
+]
+},
+"analysis_plots.py::_on_pick": {
+"lines": 20,
+"params": [
+"event"
+]
+},
+"analysis_plots.py::_plot_modulus": {
+"lines": 11,
+"params": [
+"colour",
+"label",
+"marker",
+"vals"
+]
+},
+"analysis_plots.py::_render_consolidated": {
+"lines": 61,
+"params": []
+},
+"analysis_plots.py::_render_separate": {
+"lines": 8,
+"params": []
+},
+"analysis_plots.py::_show": {
+"lines": 4,
+"params": [
+"fig",
+"interactive"
+]
+},
+"analysis_plots.py::_switch": {
+"lines": 5,
+"params": [
+"_evt"
+]
+},
+"analysis_plots.py::add_brushing": {
+"lines": 30,
+"params": [
+"artist",
+"df",
+"figure",
+"hub",
+"on_select",
+"source_path",
+"tags",
+"viewer"
+]
+},
+"analysis_plots.py::plot_coarsening": {
+"lines": 29,
+"params": [
+"interactive",
+"radius_um",
+"res",
+"time_s",
+"title"
+]
+},
+"analysis_plots.py::plot_distributions": {
+"lines": 32,
+"params": [
+"columns",
+"df",
+"interactive",
+"max_panels",
+"title"
+]
+},
+"analysis_plots.py::plot_enrichment_distribution": {
+"lines": 37,
+"params": [
+"interactive",
+"per_cond_df",
+"title",
+"value_col"
+]
+},
+"analysis_plots.py::plot_focus_diagnostic": {
+"lines": 59,
+"params": [
+"blur_ratio",
+"df",
+"dim_ratio",
+"interactive",
+"on_select",
+"source_path",
+"title",
+"viewer"
+]
+},
+"analysis_plots.py::plot_frap_recovery": {
+"lines": 50,
+"params": [
+"fit",
+"interactive",
+"norm_intensity",
+"time_s",
+"title"
+]
+},
+"analysis_plots.py::plot_fusion_relaxation": {
+"lines": 29,
+"params": [
+"aspect_ratio",
+"fit",
+"interactive",
+"time_s",
+"title"
+]
+},
+"analysis_plots.py::plot_km_survival": {
+"lines": 18,
+"params": [
+"interactive",
+"km_df",
+"title"
+]
+},
+"analysis_plots.py::plot_line_profiles": {
+"lines": 20,
+"params": [
+"df",
+"group_col",
+"interactive",
+"title"
+]
+},
+"analysis_plots.py::plot_moduli": {
+"lines": 124,
+"params": [
+"interactive",
+"moduli_df",
+"title"
+]
+},
+"analysis_plots.py::plot_molecular_counting": {
+"lines": 35,
+"params": [
+"interactive",
+"n_values",
+"nu",
+"title",
+"var_x",
+"var_y"
+]
+},
+"analysis_plots.py::plot_msd_trajectories": {
+"lines": 136,
+"params": [
+"ensemble_msd_df",
+"fit",
+"interactive",
+"line_registry",
+"on_pick_track",
+"per_track_df",
+"title"
+]
+},
+"analysis_plots.py::plot_phase_diagram": {
+"lines": 72,
+"params": [
+"df",
+"interactive",
+"title",
+"two_phase",
+"x_name"
+]
+},
+"analysis_plots.py::plot_radial_profiles": {
+"lines": 23,
+"params": [
+"df",
+"group_col",
+"interactive",
+"title"
+]
+},
+"analysis_plots.py::plot_spatial_metrology": {
+"lines": 67,
+"params": [
+"dfs",
+"interactive",
+"title"
+]
+},
+"analysis_plots.py::plot_vpt_panel": {
+"lines": 96,
+"params": [
+"consolidated",
+"ensemble_msd_df",
+"fit",
+"frame_interval_s",
+"interactive",
+"line_registry",
+"moduli_df",
+"on_pick_track",
+"per_track_df",
+"tracks_df",
+"van_hove_lag"
+]
+},
+"batch_processor.py::__init__": {
+"lines": 13,
+"params": [
+"self",
+"viewer"
+]
+},
+"batch_processor.py::_auto_ball_radius_active": {
+"lines": 25,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_browse_folder": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_build_ui": {
+"lines": 68,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_cancel_or_close": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_config_uses_split_source_files": {
+"lines": 7,
+"params": [
+"config"
+]
+},
+"batch_processor.py::_detect_folder": {
+"lines": 17,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_empty_config": {
+"lines": 5,
+"params": []
+},
+"batch_processor.py::_filter_split_source_primaries": {
+"lines": 17,
+"params": [
+"config",
+"files"
+]
+},
+"batch_processor.py::_first_step": {
+"lines": 5,
+"params": [
+"config"
+]
+},
+"batch_processor.py::_load_config": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_make_save_handler": {
+"lines": 11,
+"params": [
+"processor"
+]
+},
+"batch_processor.py::_on_error": {
+"lines": 3,
+"params": [
+"msg",
+"self"
+]
+},
+"batch_processor.py::_on_finished": {
+"lines": 4,
+"params": [
+"self",
+"summary"
+]
+},
+"batch_processor.py::_on_progress": {
+"lines": 2,
+"params": [
+"current",
+"message",
+"self",
+"total"
+]
+},
+"batch_processor.py::_primary_source_suffix": {
+"lines": 26,
+"params": [
+"config"
+]
+},
+"batch_processor.py::_process_file": {
+"lines": 36,
+"params": [
+"image_path",
+"output_dir",
+"self"
+]
+},
+"batch_processor.py::_reset_colormaps": {
+"lines": 24,
+"params": []
+},
+"batch_processor.py::_run_batch": {
+"lines": 54,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_save": {
+"lines": 9,
+"params": []
+},
+"batch_processor.py::_save_config": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"batch_processor.py::_sync_record_action": {
+"lines": 14,
+"params": []
+},
+"batch_processor.py::_toggle_all_layers": {
+"lines": 21,
+"params": []
+},
+"batch_processor.py::_toggle_grid": {
+"lines": 10,
+"params": []
+},
+"batch_processor.py::_toggle_record": {
+"lines": 5,
+"params": []
+},
+"batch_processor.py::add_batch_toolbar_button": {
+"lines": 241,
+"params": [
+"processor",
+"viewer"
+]
+},
+"batch_processor.py::cancel": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"batch_processor.py::clear_recording": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"batch_processor.py::decorator": {
+"lines": 27,
+"params": [
+"fn"
+]
+},
+"batch_processor.py::has_unsaved_steps": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"batch_processor.py::load_config": {
+"lines": 5,
+"params": [
+"path",
+"self"
+]
+},
+"batch_processor.py::open_batch_dialog": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"batch_processor.py::record": {
+"lines": 36,
+"params": [
+"params",
+"self",
+"step_name"
+]
+},
+"batch_processor.py::record_step": {
+"lines": 46,
+"params": [
+"processor_attr",
+"step_name"
+]
+},
+"batch_processor.py::register_step": {
+"lines": 19,
+"params": [
+"fn",
+"name",
+"self"
+]
+},
+"batch_processor.py::run": {
+"lines": 46,
+"params": [
+"self"
+]
+},
+"batch_processor.py::save_config": {
+"lines": 6,
+"params": [
+"path",
+"self"
+]
+},
+"batch_processor.py::terminate_recording": {
+"lines": 8,
+"params": [
+"self"
+]
+},
+"batch_processor.py::wrapper": {
+"lines": 25,
+"params": []
+},
+"batch_roi_tools.py::cell_bboxes_from_mask": {
+"lines": 26,
+"params": [
+"labeled_cells",
+"padding_px"
+]
+},
+"batch_roi_tools.py::crop_to_bbox": {
+"lines": 3,
+"params": [
+"array",
+"bbox"
+]
+},
+"batch_roi_tools.py::multi_otsu_cell_mask": {
+"lines": 81,
+"params": [
+"cell_diameter",
+"image",
+"n_classes"
+]
+},
+"batch_roi_tools.py::multi_otsu_foreground_bbox": {
+"lines": 68,
+"params": [
+"image",
+"min_foreground_fraction",
+"n_classes",
+"padding_px"
+]
+},
+"batch_roi_tools.py::stitch_into": {
+"lines": 23,
+"params": [
+"bbox",
+"combine",
+"cropped",
+"full_array"
+]
+},
+"batch_step_registry.py::_derive_split_companion_path": {
+"lines": 23,
+"params": [
+"companion_recorded_stem",
+"companion_suffix",
+"primary_path",
+"primary_recorded_stem"
+]
+},
+"batch_step_registry.py::_enhance": {
+"lines": 32,
+"params": [
+"img"
+]
+},
+"batch_step_registry.py::_flatten_scalars": {
+"lines": 6,
+"params": [
+"obj",
+"out",
+"prefix"
+]
+},
+"batch_step_registry.py::_get_data": {
+"lines": 2,
+"params": [
+"data_instance",
+"default",
+"key"
+]
+},
+"batch_step_registry.py::_ivf_droplet_mask_and_image": {
+"lines": 32,
+"params": [
+"state"
+]
+},
+"batch_step_registry.py::_load_image": {
+"lines": 48,
+"params": [
+"channel",
+"image_path"
+]
+},
+"batch_step_registry.py::_normalize_to_float": {
+"lines": 10,
+"params": [
+"arr"
+]
+},
+"batch_step_registry.py::_proc": {
+"lines": 32,
+"params": [
+"arr"
+]
+},
+"batch_step_registry.py::_raw_counts": {
+"lines": 28,
+"params": [
+"arr"
+]
+},
+"batch_step_registry.py::_resolve_channel_for_layer": {
+"lines": 42,
+"params": [
+"channel_assignment",
+"default",
+"layer_name_substring"
+]
+},
+"batch_step_registry.py::_resolve_image_layer": {
+"lines": 65,
+"params": [
+"fallback",
+"layer_name",
+"state"
+]
+},
+"batch_step_registry.py::_save_array": {
+"lines": 3,
+"params": [
+"arr",
+"path"
+]
+},
+"batch_step_registry.py::_source_path_for_recorded_channel": {
+"lines": 20,
+"params": [
+"channel",
+"channel_assignment",
+"image_path"
+]
+},
+"batch_step_registry.py::_warn_on_duplicate_step_keys": {
+"lines": 21,
+"params": []
+},
+"batch_step_registry.py::register_all_steps": {
+"lines": 10,
+"params": [
+"bp"
+]
+},
+"batch_step_registry.py::replay_auto_crop_roi": {
+"lines": 82,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_background_removal": {
+"lines": 73,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_bf_cell_segmentation": {
+"lines": 19,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_bf_condensate_segmentation": {
+"lines": 21,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_bf_preprocess": {
+"lines": 17,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_calibration_correction": {
+"lines": 28,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_cell_analysis": {
+"lines": 41,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_cellpose_segmentation": {
+"lines": 50,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_condensate_analysis": {
+"lines": 44,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_condensate_segmentation": {
+"lines": 95,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivbf_preprocess": {
+"lines": 18,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivbf_segmentation": {
+"lines": 21,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivf_field_summary": {
+"lines": 17,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivf_preprocess": {
+"lines": 13,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivf_segmentation": {
+"lines": 30,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivf_size_distribution": {
+"lines": 19,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ivf_spatial_metrology": {
+"lines": 37,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_measure_line": {
+"lines": 30,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_open_image": {
+"lines": 99,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_open_stack": {
+"lines": 11,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_preprocessing": {
+"lines": 81,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_sacf_analysis": {
+"lines": 24,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_save_and_clear": {
+"lines": 3,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_set_frame_range": {
+"lines": 48,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_ts_cellpose_keyframe": {
+"lines": 30,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"batch_step_registry.py::replay_upscaling": {
+"lines": 57,
+"params": [
+"image_path",
+"output_dir",
+"params",
+"state"
+]
+},
+"benchmark_tools.py::__init__": {
+"lines": 6,
+"params": [
+"external",
+"mask",
+"method_fn",
+"name",
+"params",
+"self"
+]
+},
+"benchmark_tools.py::_add": {
+"lines": 2,
+"params": [
+"fn",
+"key",
+"name",
+"params"
+]
+},
+"benchmark_tools.py::_cellpose": {
+"lines": 6,
+"params": [
+"img"
+]
+},
+"benchmark_tools.py::_felzen": {
+"lines": 5,
+"params": [
+"img"
+]
+},
+"benchmark_tools.py::_labelled": {
+"lines": 8,
+"params": [
+"mask"
+]
+},
+"benchmark_tools.py::_mean_object_radius": {
+"lines": 4,
+"params": [
+"areas"
+]
+},
+"benchmark_tools.py::_multiotsu": {
+"lines": 7,
+"params": [
+"img"
+]
+},
+"benchmark_tools.py::_object_table": {
+"lines": 8,
+"params": [
+"labelled"
+]
+},
+"benchmark_tools.py::_otsu": {
+"lines": 7,
+"params": [
+"img"
+]
+},
+"benchmark_tools.py::_resolve_tolerance": {
+"lines": 7,
+"params": [
+"fixed_px",
+"ref_labelled",
+"scale_fraction",
+"tolerance_mode"
+]
+},
+"benchmark_tools.py::_sauvola": {
+"lines": 7,
+"params": [
+"img"
+]
+},
+"benchmark_tools.py::basic_metrics": {
+"lines": 12,
+"params": [
+"labelled",
+"microns_per_px",
+"runtime_s"
+]
+},
+"benchmark_tools.py::builtin_method_candidates": {
+"lines": 71,
+"params": [
+"ball_radius",
+"include",
+"object_diameter"
+]
+},
+"benchmark_tools.py::matched_detection": {
+"lines": 39,
+"params": [
+"labelled_pred",
+"labelled_true",
+"tolerance_px"
+]
+},
+"benchmark_tools.py::pixel_overlap": {
+"lines": 9,
+"params": [
+"mask_a",
+"mask_b"
+]
+},
+"benchmark_tools.py::run_benchmark": {
+"lines": 62,
+"params": [
+"candidates",
+"fixed_tolerance_px",
+"ground_truth_name",
+"image",
+"microns_per_px",
+"progress_cb",
+"scale_fraction",
+"tolerance_mode"
+]
+},
+"benchmark_tools.py::run_candidate": {
+"lines": 9,
+"params": [
+"cand",
+"image"
+]
+},
+"benchmark_tools.py::to_markdown_table": {
+"lines": 37,
+"params": [
+"results"
+]
+},
+"brightfield_tools.py::_feats": {
+"lines": 17,
+"params": [
+"cond_mask",
+"cytoplasm_mask",
+"od"
+]
+},
+"brightfield_tools.py::_norm": {
+"lines": 2,
+"params": [
+"arr"
+]
+},
+"brightfield_tools.py::_remove_small": {
+"lines": 15,
+"params": [
+"binary",
+"min_area"
+]
+},
+"brightfield_tools.py::_tophat_mask": {
+"lines": 8,
+"params": [
+"a"
+]
+},
+"brightfield_tools.py::_watershed_split": {
+"lines": 14,
+"params": [
+"_skfeat",
+"_skseg",
+"binary",
+"min_diameter_px",
+"split_touching"
+]
+},
+"brightfield_tools.py::bf_analyse_focus_series": {
+"lines": 53,
+"params": [
+"stack",
+"threshold_fraction"
+]
+},
+"brightfield_tools.py::bf_analyse_frame_quality": {
+"lines": 93,
+"params": [
+"frame_interval_s",
+"stack",
+"threshold_fraction"
+]
+},
+"brightfield_tools.py::bf_background_subtract": {
+"lines": 34,
+"params": [
+"image",
+"kernel_size",
+"method"
+]
+},
+"brightfield_tools.py::bf_condensate_metrics": {
+"lines": 116,
+"params": [
+"background_image",
+"bg_kernel",
+"image",
+"labeled_cells",
+"labeled_condensates",
+"microns_per_pixel"
+]
+},
+"brightfield_tools.py::bf_enhance_contrast": {
+"lines": 23,
+"params": [
+"image",
+"local_kernel"
+]
+},
+"brightfield_tools.py::bf_flat_field_correction": {
+"lines": 39,
+"params": [
+"background_image",
+"background_sigma",
+"image"
+]
+},
+"brightfield_tools.py::bf_focus_metric": {
+"lines": 43,
+"params": [
+"image",
+"mask"
+]
+},
+"brightfield_tools.py::bf_halo_correction": {
+"lines": 46,
+"params": [
+"bg_subtracted",
+"halo_sigma_factor",
+"halo_weight"
+]
+},
+"brightfield_tools.py::bf_od_kinetics": {
+"lines": 55,
+"params": [
+"background_image",
+"bg_kernel",
+"frame_interval_s",
+"labeled_condensates_stack",
+"microns_per_pixel",
+"stack"
+]
+},
+"brightfield_tools.py::bf_per_cell_summary": {
+"lines": 72,
+"params": [
+"condensate_metrics_df",
+"labeled_cells",
+"microns_per_pixel"
+]
+},
+"brightfield_tools.py::bf_texture_features": {
+"lines": 57,
+"params": [
+"condensate_mask",
+"labeled_cells",
+"od_image"
+]
+},
+"brightfield_tools.py::compute_optical_density": {
+"lines": 75,
+"params": [
+"background_image",
+"bg_kernel",
+"image"
+]
+},
+"brightfield_tools.py::preprocess_brightfield": {
+"lines": 43,
+"params": [
+"background_image",
+"bg_kernel",
+"clahe_kernel",
+"halo_weight",
+"image"
+]
+},
+"brightfield_tools.py::run_best_slice": {
+"lines": 20,
+"params": [
+"method_dropdown",
+"viewer"
+]
+},
+"brightfield_tools.py::segment_bf_condensates": {
+"lines": 175,
+"params": [
+"enhanced_image",
+"max_diameter_px",
+"method",
+"min_circularity",
+"min_diameter_px",
+"split_touching",
+"texture_window",
+"threshold_method"
+]
+},
+"brightfield_tools.py::select_best_slice": {
+"lines": 42,
+"params": [
+"method",
+"stack"
+]
+},
+"brightfield_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"brightfield_ui.py::_add_bf_cell_segmentation": {
+"lines": 73,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_condensate_segmentation": {
+"lines": 67,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_dynamics": {
+"lines": 149,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_frame_qc": {
+"lines": 83,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_od_metrics": {
+"lines": 73,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_per_cell_summary": {
+"lines": 38,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_preprocessing": {
+"lines": 96,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_spatial": {
+"lines": 72,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_bf_texture": {
+"lines": 47,
+"params": [
+"layout",
+"ui"
+]
+},
+"brightfield_ui.py::_add_label": {
+"lines": 5,
+"params": [
+"bold",
+"layout",
+"self",
+"text"
+]
+},
+"brightfield_ui.py::_done": {
+"lines": 20,
+"params": [
+"result"
+]
+},
+"brightfield_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"brightfield_ui.py::_err": {
+"lines": 3,
+"params": [
+"msg"
+]
+},
+"brightfield_ui.py::_get_image": {
+"lines": 25,
+"params": [
+"dropdown",
+"self"
+]
+},
+"brightfield_ui.py::_get_image_raw": {
+"lines": 9,
+"params": [
+"dropdown",
+"self"
+]
+},
+"brightfield_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"brightfield_ui.py::_on_run": {
+"lines": 51,
+"params": []
+},
+"brightfield_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"brightfield_ui.py::_task": {
+"lines": 4,
+"params": []
+},
+"brightfield_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"self"
+]
+},
+"brightfield_ui.py::run": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"brightfield_ui.py::setup_ui": {
+"lines": 66,
+"params": [
+"self"
+]
+},
+"brushing.py::__init__": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"brushing.py::_emphasise": {
+"lines": 18,
+"params": [
+"artist",
+"index",
+"state"
+]
+},
+"brushing.py::_on_pick": {
+"lines": 37,
+"params": [
+"event"
+]
+},
+"brushing.py::crop_for_ref": {
+"lines": 25,
+"params": [
+"pad_px",
+"ref",
+"viewer"
+]
+},
+"brushing.py::make_pickable": {
+"lines": 70,
+"params": [
+"artist",
+"figure",
+"hub",
+"on_select",
+"refs",
+"viewer"
+]
+},
+"brushing.py::register_view": {
+"lines": 3,
+"params": [
+"name",
+"on_select",
+"self"
+]
+},
+"brushing.py::select": {
+"lines": 15,
+"params": [
+"ref",
+"self",
+"source"
+]
+},
+"brushing.py::selected": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"central_manager.py::__init__": {
+"lines": 38,
+"params": [
+"self",
+"viewer"
+]
+},
+"central_manager.py::notify_data_changed": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"central_manager.py::register_data_switch_callback": {
+"lines": 7,
+"params": [
+"cb",
+"self"
+]
+},
+"central_manager.py::set_active_data_class": {
+"lines": 19,
+"params": [
+"data_class",
+"self"
+]
+},
+"channel_naming.py::_decode": {
+"lines": 9,
+"params": [
+"v"
+]
+},
+"channel_naming.py::_first_float": {
+"lines": 8,
+"params": [
+"v"
+]
+},
+"channel_naming.py::_match_fluorophore_name": {
+"lines": 9,
+"params": [
+"name"
+]
+},
+"channel_naming.py::_match_wavelength": {
+"lines": 12,
+"params": [
+"emission_nm"
+]
+},
+"channel_naming.py::extract_channel_info_from_aicsimage": {
+"lines": 49,
+"params": [
+"channel_index",
+"image"
+]
+},
+"channel_naming.py::extract_channel_info_from_ims": {
+"lines": 85,
+"params": [
+"channel_index",
+"reader"
+]
+},
+"channel_naming.py::identify_channel": {
+"lines": 73,
+"params": [
+"channel_index",
+"channel_name",
+"emission_wavelength",
+"excitation_wavelength",
+"fluorophore_name"
+]
+},
+"channel_naming.py::suggest_colormap": {
+"lines": 12,
+"params": [
+"bucket"
+]
+},
+"clean_spot_detection_tools.py::_consolidate": {
+"lines": 21,
+"params": [
+"hits",
+"is_3d",
+"merge_radius"
+]
+},
+"clean_spot_detection_tools.py::clean_detect": {
+"lines": 101,
+"params": [
+"damping",
+"image",
+"mask",
+"max_iterations",
+"max_threshold",
+"merge_radius",
+"psf",
+"psf_sigma",
+"psf_sigma_z",
+"psf_size",
+"psf_size_z"
+]
+},
+"clean_spot_detection_tools.py::clean_spots_per_region": {
+"lines": 35,
+"params": [
+"image",
+"label_mask"
+]
+},
+"clean_spot_detection_tools.py::gaussian_psf_2d": {
+"lines": 5,
+"params": [
+"sigma",
+"size"
+]
+},
+"clean_spot_detection_tools.py::gaussian_psf_3d": {
+"lines": 13,
+"params": [
+"sigma_xy",
+"sigma_z",
+"size_xy",
+"size_z"
+]
+},
+"clean_spot_detection_tools.py::run_clean_detection": {
+"lines": 51,
+"params": [
+"damping_input",
+"mask_dropdown",
+"sigma_input",
+"threshold_input",
+"viewer"
+]
+},
+"condensate_physics_tools.py::_aicc": {
+"lines": 5,
+"params": [
+"k",
+"y",
+"y_fit"
+]
+},
+"condensate_physics_tools.py::_confined_msd": {
+"lines": 2,
+"params": [
+"D",
+"L2",
+"off",
+"t"
+]
+},
+"condensate_physics_tools.py::_fit_linear_trend": {
+"lines": 5,
+"params": [
+"values"
+]
+},
+"condensate_physics_tools.py::_frame_entropy": {
+"lines": 10,
+"params": [
+"frame",
+"n_bins"
+]
+},
+"condensate_physics_tools.py::_frame_gradient_energy": {
+"lines": 8,
+"params": [
+"frame"
+]
+},
+"condensate_physics_tools.py::_iw_Jtilde": {
+"lines": 6,
+"params": [
+"w"
+]
+},
+"condensate_physics_tools.py::_norm_slope": {
+"lines": 3,
+"params": [
+"arr"
+]
+},
+"condensate_physics_tools.py::analyse_frame_quality": {
+"lines": 157,
+"params": [
+"bleach_r2_min",
+"drift_slope_threshold",
+"entropy_bins",
+"frame_interval_s",
+"stack",
+"threshold_fraction"
+]
+},
+"condensate_physics_tools.py::apply_bleach_correction": {
+"lines": 19,
+"params": [
+"correction_factors",
+"stack"
+]
+},
+"condensate_physics_tools.py::bimodal": {
+"lines": 3,
+"params": [
+"a1",
+"a2",
+"m1",
+"m2",
+"s1",
+"s2",
+"x"
+]
+},
+"condensate_physics_tools.py::coalescence": {
+"lines": 1,
+"params": [
+"K",
+"R0",
+"t"
+]
+},
+"condensate_physics_tools.py::compute_moduli_evans": {
+"lines": 164,
+"params": [
+"bead_radius_um",
+"dimensions",
+"drop_edges",
+"msd_df",
+"temperature_C"
+]
+},
+"condensate_physics_tools.py::compute_moduli_evans_bootstrap": {
+"lines": 113,
+"params": [
+"bead_radius_um",
+"ci",
+"dimensions",
+"drop_edges",
+"n_boot",
+"per_track_msd_df",
+"random_state",
+"temperature_C"
+]
+},
+"condensate_physics_tools.py::compute_moduli_gser": {
+"lines": 81,
+"params": [
+"bead_radius_um",
+"dimensions",
+"msd_df",
+"temperature_C"
+]
+},
+"condensate_physics_tools.py::compute_msd": {
+"lines": 149,
+"params": [
+"frame_interval_s",
+"max_lag",
+"min_track_length",
+"outlier_iqr_factor",
+"reject_outlier_tracks",
+"tracks_df"
+]
+},
+"condensate_physics_tools.py::detect_out_of_focus": {
+"lines": 17,
+"params": [
+"stack",
+"threshold_fraction"
+]
+},
+"condensate_physics_tools.py::extract_fusion_relaxation": {
+"lines": 49,
+"params": [
+"frame_interval_s",
+"mask_stack",
+"microns_per_pixel",
+"min_frames",
+"proximity_um"
+]
+},
+"condensate_physics_tools.py::fit_anomalous_diffusion": {
+"lines": 393,
+"params": [
+"confine_to_defensible_bounds",
+"fit_localization_offset",
+"frame_interval_s",
+"max_lag_fit",
+"min_independent_pairs",
+"msd_df",
+"upper_lag_fixed_s",
+"upper_lag_fraction",
+"upper_lag_rule"
+]
+},
+"condensate_physics_tools.py::fit_aspect_ratio_relaxation": {
+"lines": 129,
+"params": [
+"aspect_ratio",
+"characteristic_length_um",
+"t0_frame",
+"time_s"
+]
+},
+"condensate_physics_tools.py::fit_bimodal_intensity": {
+"lines": 93,
+"params": [
+"cell_mask",
+"image",
+"min_dense_fraction",
+"n_bins"
+]
+},
+"condensate_physics_tools.py::fit_coarsening": {
+"lines": 227,
+"params": [
+"mean_radius_um",
+"time_s"
+]
+},
+"condensate_physics_tools.py::fit_photobleaching": {
+"lines": 232,
+"params": [
+"frame_interval_s",
+"mean_intensities"
+]
+},
+"condensate_physics_tools.py::intensity_decomposition_per_cell": {
+"lines": 20,
+"params": [
+"image",
+"labeled_cells",
+"microns_per_pixel"
+]
+},
+"condensate_physics_tools.py::kaplan_meier_lifetimes": {
+"lines": 68,
+"params": [
+"total_frames",
+"tracks_df"
+]
+},
+"condensate_physics_tools.py::model": {
+"lines": 1,
+"params": [
+"I0",
+"I_inf",
+"t",
+"tau"
+]
+},
+"condensate_physics_tools.py::msd_per_track": {
+"lines": 48,
+"params": [
+"frame_interval_s",
+"min_track_length",
+"tracks_df"
+]
+},
+"condensate_physics_tools.py::ostwald": {
+"lines": 1,
+"params": [
+"K",
+"R0",
+"t"
+]
+},
+"condensate_physics_tools.py::per_track_msd_curves": {
+"lines": 59,
+"params": [
+"frame_interval_s",
+"max_lag",
+"min_track_length",
+"n_lags",
+"tracks_df"
+]
+},
+"condensate_physics_tools.py::test_confinement": {
+"lines": 90,
+"params": [
+"msd",
+"tau"
+]
+},
+"condensate_physics_ui.py::__init__": {
+"lines": 2,
+"params": [
+"fn",
+"kwargs",
+"self"
+]
+},
+"condensate_physics_ui.py::_add_condensate_physics": {
+"lines": 563,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"condensate_physics_ui.py::_do": {
+"lines": 3,
+"params": []
+},
+"condensate_physics_ui.py::_done": {
+"lines": 50,
+"params": [
+"result"
+]
+},
+"condensate_physics_ui.py::_err": {
+"lines": 3,
+"params": [
+"msg"
+]
+},
+"condensate_physics_ui.py::_fit_tab_height": {
+"lines": 8,
+"params": [
+"tabs"
+]
+},
+"condensate_physics_ui.py::_has_time_stack": {
+"lines": 8,
+"params": []
+},
+"condensate_physics_ui.py::_on_coarsen": {
+"lines": 25,
+"params": []
+},
+"condensate_physics_ui.py::_on_fusion": {
+"lines": 37,
+"params": []
+},
+"condensate_physics_ui.py::_on_hist": {
+"lines": 29,
+"params": []
+},
+"condensate_physics_ui.py::_on_msd": {
+"lines": 71,
+"params": []
+},
+"condensate_physics_ui.py::_on_qc": {
+"lines": 89,
+"params": []
+},
+"condensate_physics_ui.py::_on_surv": {
+"lines": 17,
+"params": []
+},
+"condensate_physics_ui.py::_sync_time_tabs": {
+"lines": 10,
+"params": []
+},
+"condensate_physics_ui.py::_task": {
+"lines": 11,
+"params": []
+},
+"condensate_physics_ui.py::run": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"contrast_cascade_tools.py::_interp": {
+"lines": 5,
+"params": [
+"r"
+]
+},
+"contrast_cascade_tools.py::_local_sharpness": {
+"lines": 22,
+"params": [
+"image",
+"mask"
+]
+},
+"contrast_cascade_tools.py::cascade_feature_stack": {
+"lines": 15,
+"params": [
+"image",
+"object_diameter"
+]
+},
+"contrast_cascade_tools.py::cascade_rf_segment": {
+"lines": 22,
+"params": [
+"image",
+"n_estimators",
+"object_diameter",
+"training_labels"
+]
+},
+"contrast_cascade_tools.py::contrast_cascade_bands": {
+"lines": 44,
+"params": [
+"image",
+"method",
+"n_bands",
+"roi_mask"
+]
+},
+"contrast_cascade_tools.py::focus_vs_growth_diagnostic": {
+"lines": 56,
+"params": [
+"blur_ratio",
+"body_label",
+"dim_ratio",
+"image",
+"labels"
+]
+},
+"contrast_cascade_tools.py::local_contrast_normalize": {
+"lines": 9,
+"params": [
+"image",
+"mode",
+"sigma"
+]
+},
+"contrast_cascade_tools.py::ridge_enhance": {
+"lines": 15,
+"params": [
+"black_ridges",
+"image",
+"scales"
+]
+},
+"contrast_cascade_tools.py::tone_map": {
+"lines": 9,
+"params": [
+"clip_limit",
+"image",
+"method"
+]
+},
+"contrast_cascade_ui.py::_add_contrast_cascade": {
+"lines": 201,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"contrast_cascade_ui.py::_on_bands": {
+"lines": 16,
+"params": []
+},
+"contrast_cascade_ui.py::_on_diag": {
+"lines": 37,
+"params": []
+},
+"contrast_cascade_ui.py::_on_scribble": {
+"lines": 12,
+"params": []
+},
+"contrast_cascade_ui.py::_on_segment": {
+"lines": 18,
+"params": []
+},
+"contrast_cascade_ui.py::_on_tone": {
+"lines": 9,
+"params": []
+},
+"coordinate_readout.py::_coordinate_status": {
+"lines": 57,
+"params": [
+"viewer"
+]
+},
+"coordinate_readout.py::_fmt": {
+"lines": 6,
+"params": [
+"nd",
+"v"
+]
+},
+"coordinate_readout.py::_on_mouse_move": {
+"lines": 7,
+"params": [
+"event",
+"v"
+]
+},
+"coordinate_readout.py::_top_data_layer": {
+"lines": 13,
+"params": [
+"viewer"
+]
+},
+"coordinate_readout.py::install_coordinate_readout": {
+"lines": 23,
+"params": [
+"viewer"
+]
+},
+"correlation_func_analysis_tools.py::_compute_1d_correlation": {
+"lines": 49,
+"params": [
+"array1",
+"array2",
+"max_shift",
+"roi_mask"
+]
+},
+"correlation_func_analysis_tools.py::_compute_2d_correlation": {
+"lines": 53,
+"params": [
+"array1",
+"array2",
+"max_shift",
+"roi_mask"
+]
+},
+"correlation_func_analysis_tools.py::_extract_fit_results_1d": {
+"lines": 75,
+"params": [
+"ccf_values",
+"pcov",
+"popt",
+"shifts"
+]
+},
+"correlation_func_analysis_tools.py::_extract_fit_results_2d": {
+"lines": 104,
+"params": [
+"ccf_values",
+"max_smoothed_ccf",
+"pcov",
+"popt",
+"x",
+"y"
+]
+},
+"correlation_func_analysis_tools.py::_relative_sigma_error": {
+"lines": 65,
+"params": [
+"pcov",
+"popt",
+"width_indices"
+]
+},
+"correlation_func_analysis_tools.py::_residual_is_negligible": {
+"lines": 17,
+"params": [
+"popt"
+]
+},
+"correlation_func_analysis_tools.py::autocorrelation_analysis": {
+"lines": 117,
+"params": [
+"image",
+"label_flag",
+"lower_limit",
+"micron_resolution",
+"roi_mask",
+"upper_limit"
+]
+},
+"correlation_func_analysis_tools.py::calculate_autocorrelation": {
+"lines": 41,
+"params": [
+"image"
+]
+},
+"correlation_func_analysis_tools.py::calculate_indices_and_plot_limits": {
+"lines": 69,
+"params": [
+"acf_shape",
+"lower_limit",
+"upper_limit"
+]
+},
+"correlation_func_analysis_tools.py::ccf_analysis": {
+"lines": 63,
+"params": [
+"image1",
+"image2",
+"label_flag",
+"roi_mask"
+]
+},
+"correlation_func_analysis_tools.py::fit_gaussian_1d": {
+"lines": 40,
+"params": [
+"ccf_values",
+"shifts"
+]
+},
+"correlation_func_analysis_tools.py::fit_gaussian_1d_acf": {
+"lines": 44,
+"params": [
+"acf_values",
+"shifts"
+]
+},
+"correlation_func_analysis_tools.py::fit_gaussian_2d": {
+"lines": 46,
+"params": [
+"ccf_values",
+"x",
+"y"
+]
+},
+"correlation_func_analysis_tools.py::gaussian_1d": {
+"lines": 27,
+"params": [
+"amplitude",
+"mean",
+"stddev",
+"x"
+]
+},
+"correlation_func_analysis_tools.py::gaussian_1d_offset": {
+"lines": 25,
+"params": [
+"amplitude",
+"dc_offset",
+"mean",
+"stddev",
+"x"
+]
+},
+"correlation_func_analysis_tools.py::gaussian_2d": {
+"lines": 38,
+"params": [
+"amplitude",
+"sigma_x",
+"sigma_y",
+"x0",
+"xy",
+"y0"
+]
+},
+"correlation_func_analysis_tools.py::plot_1d_auto_correlation": {
+"lines": 52,
+"params": [
+"autocorrelation",
+"gaussian_params_df",
+"title",
+"x_lims"
+]
+},
+"correlation_func_analysis_tools.py::plot_1d_results": {
+"lines": 23,
+"params": [
+"results"
+]
+},
+"correlation_func_analysis_tools.py::plot_2d_autocorrelation": {
+"lines": 45,
+"params": [
+"autocorrelation",
+"title",
+"x_lims",
+"y_lims"
+]
+},
+"correlation_func_analysis_tools.py::plot_2d_results": {
+"lines": 34,
+"params": [
+"results"
+]
+},
+"correlation_func_analysis_tools.py::plot_acf_image": {
+"lines": 30,
+"params": [
+"cmap",
+"image",
+"title"
+]
+},
+"correlation_func_analysis_tools.py::prepare_1d_result_dfs": {
+"lines": 41,
+"params": [
+"results"
+]
+},
+"correlation_func_analysis_tools.py::prepare_2d_result_dfs": {
+"lines": 46,
+"params": [
+"results"
+]
+},
+"correlation_func_analysis_tools.py::process_ccf": {
+"lines": 41,
+"params": [
+"array1",
+"array2",
+"roi_mask"
+]
+},
+"correlation_func_analysis_tools.py::run_autocorrelation_analysis": {
+"lines": 106,
+"params": [
+"data_instance",
+"image_layer",
+"lower_lim_input",
+"roi_mask_layer",
+"upper_lim_input"
+]
+},
+"correlation_func_analysis_tools.py::run_ccf_analysis": {
+"lines": 107,
+"params": [
+"data_instance",
+"image_layer1",
+"image_layer2",
+"roi_mask_layer"
+]
+},
+"correlation_func_analysis_tools.py::smooth_array": {
+"lines": 24,
+"params": [
+"array",
+"window_size"
+]
+},
+"data_modules.py::__init__": {
+"lines": 10,
+"params": [
+"base_data_repository",
+"self"
+]
+},
+"data_modules.py::_initialize_repository": {
+"lines": 18,
+"params": [
+"self"
+]
+},
+"data_modules.py::_last_real_line": {
+"lines": 9,
+"params": [
+"layer"
+]
+},
+"data_modules.py::add_column_to_df": {
+"lines": 19,
+"params": [
+"column_name",
+"default_value",
+"key",
+"self"
+]
+},
+"data_modules.py::append_to_df": {
+"lines": 20,
+"params": [
+"data",
+"key",
+"self"
+]
+},
+"data_modules.py::calculate_length": {
+"lines": 59,
+"params": [
+"self",
+"viewer"
+]
+},
+"data_modules.py::get_all_variables": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"data_modules.py::get_data": {
+"lines": 20,
+"params": [
+"default_value",
+"key",
+"self"
+]
+},
+"data_modules.py::get_dataframes": {
+"lines": 10,
+"params": [
+"self"
+]
+},
+"data_modules.py::reset_values": {
+"lines": 39,
+"params": [
+"clear_all",
+"df_names_to_reset",
+"self"
+]
+},
+"data_modules.py::set_data": {
+"lines": 26,
+"params": [
+"data",
+"key",
+"self"
+]
+},
+"data_modules.py::update_df": {
+"lines": 19,
+"params": [
+"column",
+"index",
+"key",
+"self",
+"value"
+]
+},
+"data_modules.py::update_metadata": {
+"lines": 62,
+"params": [
+"image",
+"self"
+]
+},
+"data_qc_tools.py::_axial_sharp": {
+"lines": 2,
+"params": [
+"f"
+]
+},
+"data_qc_tools.py::_conc": {
+"lines": 4,
+"params": [
+"s"
+]
+},
+"data_qc_tools.py::_dtype_max": {
+"lines": 71,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::_feature_scale": {
+"lines": 14,
+"params": [
+"f"
+]
+},
+"data_qc_tools.py::_mean_frame": {
+"lines": 3,
+"params": [
+"data"
+]
+},
+"data_qc_tools.py::_not_applicable": {
+"lines": 13,
+"params": [
+"name",
+"why"
+]
+},
+"data_qc_tools.py::_robust_noise_std": {
+"lines": 6,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::_sharp": {
+"lines": 4,
+"params": [
+"f"
+]
+},
+"data_qc_tools.py::_shift_normalise": {
+"lines": 22,
+"params": [
+"frame"
+]
+},
+"data_qc_tools.py::_to_float": {
+"lines": 1,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::diffraction_limit_px": {
+"lines": 21,
+"params": [
+"na",
+"pixel_um",
+"wavelength_nm"
+]
+},
+"data_qc_tools.py::edge_width_px": {
+"lines": 53,
+"params": [
+"image"
+]
+},
+"data_qc_tools.py::plot_qc_report": {
+"lines": 295,
+"params": [
+"interactive",
+"results",
+"title"
+]
+},
+"data_qc_tools.py::qc_chromatic": {
+"lines": 133,
+"params": [
+"channels",
+"n_channels"
+]
+},
+"data_qc_tools.py::qc_drift": {
+"lines": 92,
+"params": [
+"stack"
+]
+},
+"data_qc_tools.py::qc_focus": {
+"lines": 203,
+"params": [
+"data",
+"na",
+"pixel_um",
+"wavelength_nm"
+]
+},
+"data_qc_tools.py::qc_ghosting": {
+"lines": 36,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::qc_nyquist": {
+"lines": 34,
+"params": [
+"na",
+"pixel_um",
+"wavelength_nm"
+]
+},
+"data_qc_tools.py::qc_photobleaching": {
+"lines": 79,
+"params": [
+"stack"
+]
+},
+"data_qc_tools.py::qc_saturation": {
+"lines": 42,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::qc_snr": {
+"lines": 18,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::qc_spherical_aberration": {
+"lines": 134,
+"params": [
+"data",
+"is_zstack"
+]
+},
+"data_qc_tools.py::qc_time_sampling": {
+"lines": 19,
+"params": [
+"frame_interval_s",
+"process_timescale_s"
+]
+},
+"data_qc_tools.py::qc_vibration": {
+"lines": 136,
+"params": [
+"stack"
+]
+},
+"data_qc_tools.py::qc_vignetting": {
+"lines": 128,
+"params": [
+"img"
+]
+},
+"data_qc_tools.py::run_full_qc": {
+"lines": 98,
+"params": [
+"channels",
+"data",
+"frame_interval_s",
+"is_zstack",
+"n_channels",
+"na",
+"pixel_um",
+"process_timescale_s",
+"wavelength_nm"
+]
+},
+"data_qc_ui.py::_add_data_qc": {
+"lines": 219,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"data_qc_ui.py::_on_run": {
+"lines": 76,
+"params": []
+},
+"data_qc_ui.py::_on_save": {
+"lines": 30,
+"params": []
+},
+"data_qc_ui.py::_open_gallery": {
+"lines": 7,
+"params": []
+},
+"data_qc_ui.py::_sibling_channels": {
+"lines": 24,
+"params": [
+"active_data",
+"active_name",
+"ui_instance"
+]
+},
+"data_viz_tools.py::__init__": {
+"lines": 84,
+"params": [
+"central_manager",
+"self"
+]
+},
+"data_viz_tools.py::_backend": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::_on_select": {
+"lines": 15,
+"params": [
+"ref"
+]
+},
+"data_viz_tools.py::_show_plotly": {
+"lines": 36,
+"params": [
+"df",
+"self",
+"x_col",
+"y_col"
+]
+},
+"data_viz_tools.py::_wire_brushing": {
+"lines": 54,
+"params": [
+"artist",
+"df",
+"figure",
+"self"
+]
+},
+"data_viz_tools.py::create_hist_options": {
+"lines": 65,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::create_line_options": {
+"lines": 73,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::create_violin_options": {
+"lines": 54,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::on_dataframe_changed": {
+"lines": 12,
+"params": [
+"index",
+"self"
+]
+},
+"data_viz_tools.py::plot_data": {
+"lines": 111,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::update_dataframes": {
+"lines": 29,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::update_plot_options_dropdowns": {
+"lines": 25,
+"params": [
+"self"
+]
+},
+"data_viz_tools.py::update_ui": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"drawing_layers.py::add_drawing_layer": {
+"lines": 80,
+"params": [
+"activate",
+"edge_color",
+"edge_width",
+"kind",
+"name",
+"purpose",
+"viewer"
+]
+},
+"dynamic_spatial_tools.py::_close_gaps_bayesian": {
+"lines": 82,
+"params": [
+"area_weight",
+"df",
+"max_displacement_um",
+"max_gap_frames",
+"sigma_um"
+]
+},
+"dynamic_spatial_tools.py::_gaussian_cost": {
+"lines": 6,
+"params": [
+"d",
+"sigma"
+]
+},
+"dynamic_spatial_tools.py::cluster_lifetime_analysis": {
+"lines": 20,
+"params": [
+"tracks_df"
+]
+},
+"dynamic_spatial_tools.py::detect_merge_fission": {
+"lines": 68,
+"params": [
+"mask_stack",
+"microns_per_pixel",
+"proximity_um"
+]
+},
+"dynamic_spatial_tools.py::extract_frame_properties": {
+"lines": 31,
+"params": [
+"mask_stack",
+"microns_per_pixel"
+]
+},
+"dynamic_spatial_tools.py::growth_shrinkage_kinetics": {
+"lines": 52,
+"params": [
+"frame_interval_s",
+"tracks_df"
+]
+},
+"dynamic_spatial_tools.py::link_trajectories": {
+"lines": 96,
+"params": [
+"max_displacement_um",
+"max_gap_frames",
+"props_df"
+]
+},
+"dynamic_spatial_tools.py::link_trajectories_bayesian": {
+"lines": 244,
+"params": [
+"area_weight",
+"birth_cost",
+"death_cost",
+"max_displacement_um",
+"max_gap_frames",
+"progress_callback",
+"props_df",
+"sigma_um",
+"use_velocity",
+"velocity_alpha"
+]
+},
+"dynamic_spatial_tools.py::neighbourhood_persistence": {
+"lines": 55,
+"params": [
+"n_neighbours",
+"props_df",
+"radius_um",
+"tracks_df"
+]
+},
+"dynamic_spatial_tools.py::trajectory_metrics": {
+"lines": 38,
+"params": [
+"tracks_df"
+]
+},
+"fd_curve_tools.py::analyze_stretch_rips": {
+"lines": 47,
+"params": [
+"distance",
+"force",
+"kT_pN_nm",
+"kuhn_length_nm",
+"min_force_drop_pN",
+"rise_nm_per_nt",
+"stretch_modulus_pN"
+]
+},
+"fd_curve_tools.py::contour_increment_to_nucleotides": {
+"lines": 3,
+"params": [
+"delta_Lc_um",
+"rise_nm_per_nt"
+]
+},
+"fd_curve_tools.py::contour_length_from_fjc": {
+"lines": 20,
+"params": [
+"extension_um",
+"force_pN",
+"kT_pN_nm",
+"kuhn_length_nm",
+"stretch_modulus_pN"
+]
+},
+"fd_curve_tools.py::cycles_to_dataframe": {
+"lines": 16,
+"params": [
+"kind",
+"segments"
+]
+},
+"fd_curve_tools.py::detect_all_rips": {
+"lines": 16,
+"params": [
+"seg_result",
+"which"
+]
+},
+"fd_curve_tools.py::detect_rips": {
+"lines": 44,
+"params": [
+"distance",
+"force",
+"min_force_drop_pN",
+"min_separation"
+]
+},
+"fd_curve_tools.py::find_turning_points": {
+"lines": 46,
+"params": [
+"distance",
+"min_segment",
+"smooth_window"
+]
+},
+"fd_curve_tools.py::fjc_extensible_ssna": {
+"lines": 25,
+"params": [
+"contour_length_um",
+"force_pN",
+"kT_pN_nm",
+"kuhn_length_nm",
+"stretch_modulus_pN"
+]
+},
+"fd_curve_tools.py::segment_fd_cycles": {
+"lines": 30,
+"params": [
+"distance",
+"force",
+"min_segment",
+"smooth_window"
+]
+},
+"fd_curve_tools.py::smooth_force": {
+"lines": 10,
+"params": [
+"force",
+"polyorder",
+"window_length"
+]
+},
+"fd_curve_tools.py::summarise_cycles": {
+"lines": 13,
+"params": [
+"seg_result"
+]
+},
+"fd_curve_tools.py::wlc_extensible": {
+"lines": 25,
+"params": [
+"contour_length_um",
+"force_pN",
+"kT_pN_nm",
+"persistence_length_nm",
+"stretch_modulus_pN"
+]
+},
+"fd_curve_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"fd_curve_ui.py::_add_load": {
+"lines": 28,
+"params": [
+"layout",
+"self"
+]
+},
+"fd_curve_ui.py::_add_plot": {
+"lines": 34,
+"params": [
+"layout",
+"self"
+]
+},
+"fd_curve_ui.py::_add_rips": {
+"lines": 40,
+"params": [
+"layout",
+"self"
+]
+},
+"fd_curve_ui.py::_add_segment": {
+"lines": 33,
+"params": [
+"layout",
+"self"
+]
+},
+"fd_curve_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_mpl_canvas": {
+"lines": 2,
+"params": [
+"fig",
+"self"
+]
+},
+"fd_curve_ui.py::_on_export": {
+"lines": 20,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_on_load": {
+"lines": 42,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_on_plot": {
+"lines": 39,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_on_rechannel": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_on_rips": {
+"lines": 41,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_on_segment": {
+"lines": 31,
+"params": [
+"self"
+]
+},
+"fd_curve_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"fd_curve_ui.py::setup_ui": {
+"lines": 34,
+"params": [
+"self"
+]
+},
+"feature_analysis_tools.py::calculate_glcm_features": {
+"lines": 56,
+"params": [
+"image",
+"min_object_size",
+"object_size",
+"roi_mask"
+]
+},
+"feature_analysis_tools.py::calculate_image_entropy": {
+"lines": 59,
+"params": [
+"ball_radius",
+"image",
+"roi_mask"
+]
+},
+"feature_analysis_tools.py::calculate_image_features": {
+"lines": 48,
+"params": [
+"data_instance",
+"image",
+"roi_mask"
+]
+},
+"feature_analysis_tools.py::calculate_image_kurtosis": {
+"lines": 68,
+"params": [
+"image",
+"roi_mask"
+]
+},
+"feature_analysis_tools.py::calculate_lbp_features": {
+"lines": 60,
+"params": [
+"image",
+"min_object_size",
+"roi_mask"
+]
+},
+"feature_analysis_tools.py::cell_analysis_func": {
+"lines": 131,
+"params": [
+"cell_masks",
+"data_instance",
+"image",
+"omission_mask"
+]
+},
+"feature_analysis_tools.py::puncta_analysis_func": {
+"lines": 114,
+"params": [
+"data_instance",
+"image",
+"labeled_cells",
+"puncta_masks"
+]
+},
+"feature_analysis_tools.py::run_cell_analysis_func": {
+"lines": 94,
+"params": [
+"data_instance",
+"image_layer",
+"mask_layer",
+"omit_mask_layer",
+"viewer"
+]
+},
+"feature_analysis_tools.py::run_puncta_analysis_func": {
+"lines": 162,
+"params": [
+"data_instance",
+"image_layer",
+"puncta_mask_layer",
+"viewer"
+]
+},
+"fft_bandpass_tools.py::_filter_2d": {
+"lines": 3,
+"params": [
+"frame"
+]
+},
+"fft_bandpass_tools.py::fft_annular_mask": {
+"lines": 37,
+"params": [
+"high_radius",
+"low_radius",
+"shape"
+]
+},
+"fft_bandpass_tools.py::fft_bandpass": {
+"lines": 32,
+"params": [
+"high_cutoff",
+"image",
+"low_cutoff"
+]
+},
+"fft_bandpass_tools.py::im2bw": {
+"lines": 19,
+"params": [
+"image",
+"threshold"
+]
+},
+"fft_bandpass_tools.py::run_fft_bandpass": {
+"lines": 19,
+"params": [
+"high_input",
+"low_input",
+"viewer"
+]
+},
+"fft_bandpass_tools.py::run_im2bw": {
+"lines": 22,
+"params": [
+"threshold_input",
+"viewer"
+]
+},
+"fibril_tools.py::_kind": {
+"lines": 3,
+"params": [
+"d"
+]
+},
+"fibril_tools.py::build_skeleton_graph": {
+"lines": 93,
+"params": [
+"binary_mask"
+]
+},
+"fibril_tools.py::detect_beads_on_fibrils": {
+"lines": 76,
+"params": [
+"binary_mask",
+"max_bead_area_px",
+"min_bead_area_px",
+"min_bead_radius",
+"width_threshold_factor"
+]
+},
+"fibril_tools.py::fibril_graph_analysis": {
+"lines": 70,
+"params": [
+"binary_mask",
+"px_size_um"
+]
+},
+"fibril_tools.py::fibril_morphometry": {
+"lines": 146,
+"params": [
+"binary_mask",
+"px_size_um"
+]
+},
+"fibril_tools.py::napari_show_info": {
+"lines": 0,
+"params": [
+"msg"
+]
+},
+"fibril_tools.py::napari_show_warning": {
+"lines": 0,
+"params": [
+"msg"
+]
+},
+"fibril_tools.py::register_images": {
+"lines": 26,
+"params": [
+"moving",
+"reference"
+]
+},
+"fibril_tools.py::run_bead_detection": {
+"lines": 37,
+"params": [
+"image_layer",
+"mask_layer",
+"min_bead_radius",
+"viewer",
+"width_factor"
+]
+},
+"fibril_tools.py::run_fibril_graph": {
+"lines": 39,
+"params": [
+"mask_layer",
+"px_size_um",
+"viewer"
+]
+},
+"fibril_tools.py::run_fibril_morphometry": {
+"lines": 24,
+"params": [
+"mask_layer",
+"px_size_um",
+"viewer"
+]
+},
+"fibril_tools.py::run_fibril_registration": {
+"lines": 27,
+"params": [
+"moving_layer",
+"ref_layer",
+"viewer"
+]
+},
+"fibril_ui.py::_add_fibril_analysis": {
+"lines": 104,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"fibril_ui.py::_layer": {
+"lines": 7,
+"params": [
+"dropdown",
+"ui_instance"
+]
+},
+"field_status.py::__init__": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"field_status.py::_accept": {
+"lines": 16,
+"params": []
+},
+"field_status.py::_apply_value": {
+"lines": 9,
+"params": [
+"v"
+]
+},
+"field_status.py::_connect": {
+"lines": 11,
+"params": [
+"self",
+"widget"
+]
+},
+"field_status.py::_from_metadata": {
+"lines": 2,
+"params": []
+},
+"field_status.py::_has_image": {
+"lines": 1,
+"params": []
+},
+"field_status.py::_has_value": {
+"lines": 6,
+"params": [
+"widget"
+]
+},
+"field_status.py::_image_present": {
+"lines": 11,
+"params": []
+},
+"field_status.py::_mark_done": {
+"lines": 2,
+"params": []
+},
+"field_status.py::_ok": {
+"lines": 3,
+"params": [
+"dd"
+]
+},
+"field_status.py::_on_confirm": {
+"lines": 8,
+"params": []
+},
+"field_status.py::_on_edit": {
+"lines": 4,
+"params": [
+"v"
+]
+},
+"field_status.py::_on_persist_toggle": {
+"lines": 3,
+"params": [
+"checked"
+]
+},
+"field_status.py::_read": {
+"lines": 9,
+"params": [
+"widget"
+]
+},
+"field_status.py::_refresh": {
+"lines": 17,
+"params": []
+},
+"field_status.py::_refresh_entry": {
+"lines": 6,
+"params": [
+"entry",
+"self"
+]
+},
+"field_status.py::_reset_gate": {
+"lines": 5,
+"params": []
+},
+"field_status.py::_set": {
+"lines": 3,
+"params": [
+"color_key",
+"self",
+"tip"
+]
+},
+"field_status.py::_upd": {
+"lines": 4,
+"params": []
+},
+"field_status.py::_update": {
+"lines": 11,
+"params": []
+},
+"field_status.py::_valid_scale": {
+"lines": 3,
+"params": []
+},
+"field_status.py::_write": {
+"lines": 13,
+"params": [
+"value",
+"widget"
+]
+},
+"field_status.py::add_pixel_size_gate": {
+"lines": 193,
+"params": [
+"central_manager",
+"get_dr",
+"layout",
+"on_set"
+]
+},
+"field_status.py::add_reset_buttons": {
+"lines": 14,
+"params": [
+"form",
+"registry",
+"step"
+]
+},
+"field_status.py::add_step1_file_io": {
+"lines": 74,
+"params": [
+"instruction_html",
+"layout",
+"on_change",
+"registry",
+"viewer"
+]
+},
+"field_status.py::button_with_circle": {
+"lines": 68,
+"params": [
+"button",
+"optional",
+"watch_dropdowns"
+]
+},
+"field_status.py::decide": {
+"lines": 18,
+"params": [
+"default",
+"name_hint",
+"role",
+"widget"
+]
+},
+"field_status.py::label_with_circle": {
+"lines": 21,
+"params": [
+"dropdown",
+"optional",
+"text"
+]
+},
+"field_status.py::paintEvent": {
+"lines": 9,
+"params": [
+"_event",
+"self"
+]
+},
+"field_status.py::prompt_pixel_size_on_load": {
+"lines": 84,
+"params": [
+"central_manager",
+"get_dr",
+"parent"
+]
+},
+"field_status.py::refresh": {
+"lines": 51,
+"params": []
+},
+"field_status.py::register": {
+"lines": 13,
+"params": [
+"default",
+"name_hint",
+"role",
+"row_widget",
+"self",
+"step",
+"widget"
+]
+},
+"field_status.py::reset": {
+"lines": 2,
+"params": []
+},
+"field_status.py::reset_all": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"field_status.py::reset_step": {
+"lines": 4,
+"params": [
+"self",
+"step"
+]
+},
+"field_status.py::set_advanced": {
+"lines": 7,
+"params": [
+"advanced",
+"self"
+]
+},
+"field_status.py::status_row": {
+"lines": 20,
+"params": [
+"default",
+"form",
+"label",
+"name_hint",
+"registry",
+"role",
+"step",
+"widget"
+]
+},
+"file_io.py::__array__": {
+"lines": 2,
+"params": [
+"dtype",
+"self"
+]
+},
+"file_io.py::__getitem__": {
+"lines": 8,
+"params": [
+"idx",
+"self"
+]
+},
+"file_io.py::__init__": {
+"lines": 25,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"file_io.py::__len__": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"file_io.py::_add_diameter_annotation_layers": {
+"lines": 35,
+"params": [
+"self"
+]
+},
+"file_io.py::_add_image_or_mask_single": {
+"lines": 83,
+"params": [
+"clear_first",
+"file_path",
+"self"
+]
+},
+"file_io.py::_align_layer_scales": {
+"lines": 61,
+"params": [
+"self"
+]
+},
+"file_io.py::_apply_saved_tags_to_layer": {
+"lines": 37,
+"params": [
+"layer",
+"self",
+"tag_store"
+]
+},
+"file_io.py::_ask_copy_to_local": {
+"lines": 30,
+"params": [
+"file_path",
+"self",
+"verdict"
+]
+},
+"file_io.py::_ask_multipage_axis": {
+"lines": 41,
+"params": [
+"file_path",
+"n_pages",
+"self"
+]
+},
+"file_io.py::_auto_clear_before_load": {
+"lines": 43,
+"params": [
+"self"
+]
+},
+"file_io.py::_clear_everything": {
+"lines": 87,
+"params": [
+"self",
+"viewer"
+]
+},
+"file_io.py::_copy_to_local_with_progress": {
+"lines": 96,
+"params": [
+"file_path",
+"self",
+"verdict"
+]
+},
+"file_io.py::_enable_auto_scale_bar": {
+"lines": 55,
+"params": [
+"image_layer",
+"self"
+]
+},
+"file_io.py::_est_size_mb": {
+"lines": 21,
+"params": [
+"layer"
+]
+},
+"file_io.py::_file_has_imaging_metadata": {
+"lines": 11,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_file_has_imaging_metadata_safe": {
+"lines": 35,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_finalise_stack_load": {
+"lines": 103,
+"params": [
+"H",
+"W",
+"channels_to_load",
+"file_path",
+"microns_per_pixel",
+"n_t",
+"n_z",
+"self",
+"source"
+]
+},
+"file_io.py::_fit_view_to_layer": {
+"lines": 74,
+"params": [
+"attempt",
+"layer",
+"margin",
+"self"
+]
+},
+"file_io.py::_frame": {
+"lines": 2,
+"params": [
+"t"
+]
+},
+"file_io.py::_frames": {
+"lines": 3,
+"params": []
+},
+"file_io.py::_get_handle": {
+"lines": 7,
+"params": [
+"path",
+"self"
+]
+},
+"file_io.py::_ims_frame_2d": {
+"lines": 12,
+"params": [
+"raw"
+]
+},
+"file_io.py::_ims_indices": {
+"lines": 8,
+"params": [
+"selector",
+"size"
+]
+},
+"file_io.py::_ims_pixel_size_um": {
+"lines": 61,
+"params": [
+"reader",
+"width_px"
+]
+},
+"file_io.py::_is_reconstructable": {
+"lines": 21,
+"params": [
+"layer"
+]
+},
+"file_io.py::_lazy_contrast_limits": {
+"lines": 17,
+"params": [
+"lazy_layer",
+"prefetched"
+]
+},
+"file_io.py::_mask_frames": {
+"lines": 2,
+"params": []
+},
+"file_io.py::_minimal_label_dtype": {
+"lines": 19,
+"params": [
+"arr"
+]
+},
+"file_io.py::_on_discard": {
+"lines": 8,
+"params": []
+},
+"file_io.py::_open_image_auto_single": {
+"lines": 72,
+"params": [
+"_skip_storage_probe",
+"clear_first",
+"file_path",
+"self"
+]
+},
+"file_io.py::_open_stack_generic": {
+"lines": 313,
+"params": [
+"ext",
+"file_path",
+"self"
+]
+},
+"file_io.py::_open_stack_ims": {
+"lines": 227,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_page_index": {
+"lines": 2,
+"params": [
+"self",
+"t"
+]
+},
+"file_io.py::_prompt_pixel_size_if_needed": {
+"lines": 10,
+"params": [
+"self"
+]
+},
+"file_io.py::_pycat_tag": {
+"lines": 14,
+"params": [
+"kind"
+]
+},
+"file_io.py::_read_frame": {
+"lines": 14,
+"params": [
+"self",
+"t"
+]
+},
+"file_io.py::_read_plane": {
+"lines": 3,
+"params": [
+"self",
+"t",
+"z"
+]
+},
+"file_io.py::_read_pycat_signifier": {
+"lines": 30,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_read_pycat_tags": {
+"lines": 29,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_save_layer": {
+"lines": 237,
+"params": [
+"data",
+"layer_type",
+"safe_name",
+"save_name",
+"self",
+"tag_store"
+]
+},
+"file_io.py::_suppress_ims_chunk_prints": {
+"lines": 14,
+"params": []
+},
+"file_io.py::_tag_loaded_layer": {
+"lines": 63,
+"params": [
+"channel",
+"file_path",
+"layer",
+"microns_per_pixel",
+"modality",
+"n_p",
+"n_t",
+"n_z",
+"provenance",
+"role",
+"self"
+]
+},
+"file_io.py::_tiff_multipage_undeclared": {
+"lines": 20,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::_tiff_pixel_size_um": {
+"lines": 52,
+"params": [
+"file_path"
+]
+},
+"file_io.py::_to_float": {
+"lines": 11,
+"params": [
+"raw"
+]
+},
+"file_io.py::_to_label_array": {
+"lines": 1,
+"params": [
+"arr"
+]
+},
+"file_io.py::_to_uint16": {
+"lines": 34,
+"params": [
+"arr"
+]
+},
+"file_io.py::_update_scale_bar_for_active_layer": {
+"lines": 43,
+"params": [
+"self"
+]
+},
+"file_io.py::_warn_if_slow_storage": {
+"lines": 48,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::add_image_or_mask": {
+"lines": 91,
+"params": [
+"file_path",
+"self"
+]
+},
+"file_io.py::as_full_array": {
+"lines": 23,
+"params": [
+"dtype",
+"progress_callback",
+"self"
+]
+},
+"file_io.py::assign_channels_in_dialog": {
+"lines": 57,
+"params": [
+"all_channels",
+"channel_info",
+"is_mask",
+"self"
+]
+},
+"file_io.py::build_ome_page_map": {
+"lines": 47,
+"params": [
+"primary_path"
+]
+},
+"file_io.py::clear_all_without_saving": {
+"lines": 16,
+"params": [
+"confirm",
+"self",
+"viewer"
+]
+},
+"file_io.py::close": {
+"lines": 13,
+"params": [
+"self"
+]
+},
+"file_io.py::determine_file_format_and_process_data": {
+"lines": 10,
+"params": [
+"data",
+"layer_type",
+"self"
+]
+},
+"file_io.py::extract_2d_plane": {
+"lines": 30,
+"params": [
+"dtype",
+"frame_index",
+"layer_data"
+]
+},
+"file_io.py::get_selections": {
+"lines": 17,
+"params": [
+"self"
+]
+},
+"file_io.py::initUI": {
+"lines": 54,
+"params": [
+"self"
+]
+},
+"file_io.py::iter_frames": {
+"lines": 49,
+"params": [
+"dtype",
+"indices",
+"stack_like"
+]
+},
+"file_io.py::layer_is_stack": {
+"lines": 9,
+"params": [
+"layer_data"
+]
+},
+"file_io.py::load_into_viewer": {
+"lines": 81,
+"params": [
+"data",
+"is_mask",
+"name",
+"self"
+]
+},
+"file_io.py::materialize_stack": {
+"lines": 43,
+"params": [
+"dtype",
+"progress_callback",
+"stack_like"
+]
+},
+"file_io.py::open_2d_image": {
+"lines": 215,
+"params": [
+"clear_first",
+"file_paths",
+"self"
+]
+},
+"file_io.py::open_2d_mask": {
+"lines": 78,
+"params": [
+"clear_first",
+"file_paths",
+"self"
+]
+},
+"file_io.py::open_image_auto": {
+"lines": 62,
+"params": [
+"clear_first",
+"file_path",
+"self"
+]
+},
+"file_io.py::open_stack": {
+"lines": 76,
+"params": [
+"clear_first",
+"file_path",
+"self"
+]
+},
+"file_io.py::resolve_ome_file_set": {
+"lines": 60,
+"params": [
+"primary_path"
+]
+},
+"file_io.py::save_and_clear_all": {
+"lines": 179,
+"params": [
+"self",
+"viewer"
+]
+},
+"file_io.py::transpose": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"file_io.py::warn_if_assumed_axis": {
+"lines": 27,
+"params": [
+"data_repository",
+"operation"
+]
+},
+"fit_quality.py::assess_fit": {
+"lines": 64,
+"params": [
+"model_name",
+"n_params",
+"y",
+"y_fit"
+]
+},
+"fit_quality.py::r_squared": {
+"lines": 9,
+"params": [
+"y",
+"y_fit"
+]
+},
+"fit_quality.py::residual_runs_test": {
+"lines": 26,
+"params": [
+"residuals"
+]
+},
+"frame_interval.py::_warn_once": {
+"lines": 9,
+"params": [
+"key",
+"message"
+]
+},
+"frame_interval.py::frame_interval_s": {
+"lines": 41,
+"params": [
+"context",
+"data_repository"
+]
+},
+"frame_interval.py::sync_spinbox_from_metadata": {
+"lines": 28,
+"params": [
+"context",
+"data_repository",
+"owner",
+"spinbox",
+"touched_flag"
+]
+},
+"frap_io.py::_best_fd_force_channel": {
+"lines": 40,
+"params": [
+"dist_obj",
+"f",
+"force_channels",
+"force_group"
+]
+},
+"frap_io.py::_list_group": {
+"lines": 4,
+"params": [
+"group_name"
+]
+},
+"frap_io.py::_visit": {
+"lines": 4,
+"params": [
+"name",
+"obj"
+]
+},
+"frap_io.py::compute_lumicks_timelag": {
+"lines": 46,
+"params": [
+"bleach_scan_index",
+"h5_path",
+"recovery_scan_index"
+]
+},
+"frap_io.py::extract_andor_photostim_rois": {
+"lines": 58,
+"params": [
+"ims_path"
+]
+},
+"frap_io.py::load_lumicks_fd": {
+"lines": 100,
+"params": [
+"distance_channel",
+"force_channel",
+"h5_path"
+]
+},
+"frap_io.py::load_lumicks_frap": {
+"lines": 79,
+"params": [
+"channel",
+"h5_path",
+"recovery_scan_index",
+"trim_last_frames"
+]
+},
+"frap_io.py::load_lumicks_fusion": {
+"lines": 65,
+"params": [
+"h5_path"
+]
+},
+"frap_io.py::lumicks_available": {
+"lines": 5,
+"params": []
+},
+"frap_tools.py::_numeric_hessian": {
+"lines": 13,
+"params": [
+"eps",
+"f",
+"x"
+]
+},
+"frap_tools.py::_shape_to_mask": {
+"lines": 11,
+"params": [
+"stype",
+"vertices"
+]
+},
+"frap_tools.py::circular_mask": {
+"lines": 5,
+"params": [
+"center_yx",
+"radius",
+"shape"
+]
+},
+"frap_tools.py::circular_soumpasis_recovery": {
+"lines": 19,
+"params": [
+"f_f",
+"offset",
+"t",
+"tau_D"
+]
+},
+"frap_tools.py::estimate_bleach_depth": {
+"lines": 16,
+"params": [
+"bl_intensity",
+"n_points",
+"spline_k",
+"time"
+]
+},
+"frap_tools.py::extract_roi_intensity": {
+"lines": 7,
+"params": [
+"mask",
+"stack"
+]
+},
+"frap_tools.py::fit_circular_soumpasis": {
+"lines": 78,
+"params": [
+"bleach_radius_um",
+"norm_intensity",
+"time"
+]
+},
+"frap_tools.py::fit_frap_recovery": {
+"lines": 205,
+"params": [
+"norm_intensity",
+"time"
+]
+},
+"frap_tools.py::fit_reaction_diffusion": {
+"lines": 75,
+"params": [
+"d_x_um",
+"d_y_um",
+"fit_koff",
+"norm_intensity",
+"time"
+]
+},
+"frap_tools.py::frap_recovery_model": {
+"lines": 8,
+"params": [
+"a",
+"b",
+"t",
+"tau_half"
+]
+},
+"frap_tools.py::log_post": {
+"lines": 1,
+"params": [
+"p"
+]
+},
+"frap_tools.py::masks_from_shapes": {
+"lines": 31,
+"params": [
+"image_shape",
+"shapes_layer"
+]
+},
+"frap_tools.py::masks_from_shapes_multi": {
+"lines": 56,
+"params": [
+"image_shape",
+"n_reference",
+"shapes_layer"
+]
+},
+"frap_tools.py::model": {
+"lines": 2,
+"params": [
+"p",
+"tt"
+]
+},
+"frap_tools.py::photofading_correction": {
+"lines": 13,
+"params": [
+"bl_intensity",
+"ref_intensity"
+]
+},
+"frap_tools.py::prebleach_normalize": {
+"lines": 29,
+"params": [
+"corrected_bl",
+"prebleach"
+]
+},
+"frap_tools.py::psi": {
+"lines": 3,
+"params": [
+"d_i",
+"tt"
+]
+},
+"frap_tools.py::reaction_diffusion_recovery": {
+"lines": 14,
+"params": [
+"D",
+"d_x",
+"d_y",
+"f_b",
+"f_f",
+"k_off",
+"t"
+]
+},
+"frap_tools.py::resid": {
+"lines": 1,
+"params": [
+"p"
+]
+},
+"frap_tools.py::run_frap_analysis": {
+"lines": 153,
+"params": [
+"bleach_mask",
+"bleach_radius_um",
+"fit_koff",
+"fit_model",
+"frame_interval_s",
+"n_spline_points",
+"normalization",
+"prebleach_stack",
+"recovery_stack",
+"reference_mask",
+"roi_dims_um",
+"time_lag_s"
+]
+},
+"frap_tools.py::run_frap_analysis_multi": {
+"lines": 39,
+"params": [
+"bleach_masks",
+"frame_interval_s",
+"n_spline_points",
+"normalization",
+"prebleach_stack",
+"recovery_stack",
+"reference_mask",
+"time_lag_s"
+]
+},
+"frap_tools.py::taylor_normalize": {
+"lines": 28,
+"params": [
+"corrected_bl",
+"intensity_0",
+"prebleach"
+]
+},
+"frap_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"frap_ui.py::_add_analysis": {
+"lines": 129,
+"params": [
+"layout",
+"self"
+]
+},
+"frap_ui.py::_add_roi_definition": {
+"lines": 101,
+"params": [
+"layout",
+"self"
+]
+},
+"frap_ui.py::_build_masks": {
+"lines": 12,
+"params": [
+"image_shape",
+"self"
+]
+},
+"frap_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"frap_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"frap_ui.py::_offer_stack_2d_images": {
+"lines": 51,
+"params": [
+"current_name",
+"current_stack",
+"self"
+]
+},
+"frap_ui.py::_on_add_shapes": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"frap_ui.py::_on_analyze": {
+"lines": 229,
+"params": [
+"self"
+]
+},
+"frap_ui.py::_on_load_lumicks": {
+"lines": 39,
+"params": [
+"self"
+]
+},
+"frap_ui.py::_on_mode": {
+"lines": 4,
+"params": []
+},
+"frap_ui.py::_on_model": {
+"lines": 7,
+"params": []
+},
+"frap_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"frap_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"name_hint",
+"self"
+]
+},
+"frap_ui.py::setup_ui": {
+"lines": 51,
+"params": [
+"self"
+]
+},
+"fusion_tools.py::_aicc": {
+"lines": 5,
+"params": [
+"fit",
+"k"
+]
+},
+"fusion_tools.py::_fusion_two_mode": {
+"lines": 2,
+"params": [
+"a1",
+"a2",
+"b",
+"d",
+"t",
+"tau1",
+"tau2"
+]
+},
+"fusion_tools.py::_get": {
+"lines": 2,
+"params": [
+"k"
+]
+},
+"fusion_tools.py::aspect_ratio_signal": {
+"lines": 55,
+"params": [
+"frame_interval_s",
+"stack",
+"threshold_method"
+]
+},
+"fusion_tools.py::build_fusion_signal_from_forces": {
+"lines": 54,
+"params": [
+"force_traces",
+"sample_rate_hz",
+"which"
+]
+},
+"fusion_tools.py::combined_force_signal": {
+"lines": 5,
+"params": [
+"fx",
+"fy"
+]
+},
+"fusion_tools.py::fit_fusion_relaxation": {
+"lines": 183,
+"params": [
+"signal",
+"t_end",
+"t_start",
+"time"
+]
+},
+"fusion_tools.py::fusion_relaxation_model": {
+"lines": 9,
+"params": [
+"a",
+"b",
+"d",
+"t",
+"tau"
+]
+},
+"fusion_tools.py::inverse_capillary_velocity": {
+"lines": 33,
+"params": [
+"length_um",
+"tau_s"
+]
+},
+"fusion_tools.py::test_two_mode_relaxation": {
+"lines": 118,
+"params": [
+"t",
+"y"
+]
+},
+"fusion_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"fusion_ui.py::_add_data_source": {
+"lines": 52,
+"params": [
+"layout",
+"self"
+]
+},
+"fusion_ui.py::_add_fit": {
+"lines": 38,
+"params": [
+"layout",
+"self"
+]
+},
+"fusion_ui.py::_add_signal_build": {
+"lines": 68,
+"params": [
+"layout",
+"self"
+]
+},
+"fusion_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"fusion_ui.py::_fit_span": {
+"lines": 4,
+"params": [
+"_evt"
+]
+},
+"fusion_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"fusion_ui.py::_on_build_signal": {
+"lines": 53,
+"params": [
+"self"
+]
+},
+"fusion_ui.py::_on_fit": {
+"lines": 51,
+"params": [
+"self"
+]
+},
+"fusion_ui.py::_on_load_forces": {
+"lines": 22,
+"params": [
+"self"
+]
+},
+"fusion_ui.py::_on_mode": {
+"lines": 2,
+"params": []
+},
+"fusion_ui.py::_on_span": {
+"lines": 9,
+"params": [
+"hi",
+"lo"
+]
+},
+"fusion_ui.py::_period_changed": {
+"lines": 7,
+"params": [
+"v"
+]
+},
+"fusion_ui.py::_plot_fusion_fit": {
+"lines": 36,
+"params": [
+"fit",
+"self",
+"sig",
+"time"
+]
+},
+"fusion_ui.py::_plot_fusion_signal": {
+"lines": 72,
+"params": [
+"self",
+"sig",
+"src",
+"time"
+]
+},
+"fusion_ui.py::_rate_changed": {
+"lines": 7,
+"params": [
+"v"
+]
+},
+"fusion_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"fusion_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"name_hint",
+"self"
+]
+},
+"fusion_ui.py::setup_ui": {
+"lines": 34,
+"params": [
+"self"
+]
+},
+"gaussian_localization_tools.py::_add_gaussian_localization": {
+"lines": 183,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"gaussian_localization_tools.py::_crop_2d": {
+"lines": 5,
+"params": [
+"cx",
+"cy",
+"half",
+"image"
+]
+},
+"gaussian_localization_tools.py::_crop_3d": {
+"lines": 7,
+"params": [
+"cx",
+"cy",
+"cz",
+"half_xy",
+"half_z",
+"vol"
+]
+},
+"gaussian_localization_tools.py::_on_run": {
+"lines": 87,
+"params": []
+},
+"gaussian_localization_tools.py::classify_spot_fit": {
+"lines": 115,
+"params": [
+"fit",
+"max_aspect",
+"psf_sigma_px",
+"sigma_tolerance"
+]
+},
+"gaussian_localization_tools.py::fit_gaussian_2d_spot": {
+"lines": 58,
+"params": [
+"fast",
+"patch",
+"sigma_guess"
+]
+},
+"gaussian_localization_tools.py::fit_gaussian_3d_spot": {
+"lines": 37,
+"params": [
+"patch",
+"sigma_xy_guess",
+"sigma_z_guess"
+]
+},
+"gaussian_localization_tools.py::gaussian_2d_offset": {
+"lines": 5,
+"params": [
+"amplitude",
+"coords",
+"offset",
+"sigma_x",
+"sigma_y",
+"x0",
+"y0"
+]
+},
+"gaussian_localization_tools.py::gaussian_3d_offset": {
+"lines": 6,
+"params": [
+"amplitude",
+"coords",
+"offset",
+"sigma_x",
+"sigma_y",
+"sigma_z",
+"x0",
+"y0",
+"z0"
+]
+},
+"gaussian_localization_tools.py::localize_spots": {
+"lines": 146,
+"params": [
+"coords",
+"image",
+"min_r_squared",
+"pixel_size_um",
+"pixel_size_z_um",
+"psf_sigma_px",
+"sigma_guess",
+"window",
+"window_z"
+]
+},
+"gaussian_localization_tools.py::spots_to_mask": {
+"lines": 31,
+"params": [
+"df",
+"shape"
+]
+},
+"general_image_tools.py::_add_bleach_correction": {
+"lines": 113,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_add_detrend_stack": {
+"lines": 85,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_add_frame_quality_qc": {
+"lines": 198,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_add_image_registration": {
+"lines": 73,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_add_motion_scale_estimator": {
+"lines": 260,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_add_partial_volume_measure": {
+"lines": 256,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"general_image_tools.py::_as_stack": {
+"lines": 7,
+"params": [
+"layer"
+]
+},
+"general_image_tools.py::_auto_resolve": {
+"lines": 24,
+"params": []
+},
+"general_image_tools.py::_current_2d": {
+"lines": 10,
+"params": [
+"layer",
+"viewer"
+]
+},
+"general_image_tools.py::_fit_sigma": {
+"lines": 42,
+"params": [
+"h",
+"patch"
+]
+},
+"general_image_tools.py::_image_layer_names": {
+"lines": 2,
+"params": [
+"viewer"
+]
+},
+"general_image_tools.py::_refresh": {
+"lines": 10,
+"params": []
+},
+"general_image_tools.py::_refresh_dropdown": {
+"lines": 7,
+"params": [
+"dd",
+"viewer"
+]
+},
+"general_image_tools.py::_run": {
+"lines": 144,
+"params": []
+},
+"general_image_tools.py::g": {
+"lines": 3,
+"params": [
+"A",
+"c",
+"o",
+"s",
+"x0",
+"y0"
+]
+},
+"general_utils.py::_pycat_debug_enabled": {
+"lines": 4,
+"params": []
+},
+"general_utils.py::check_contrast_func": {
+"lines": 42,
+"params": [
+"image"
+]
+},
+"general_utils.py::create_overlay_image": {
+"lines": 48,
+"params": [
+"alpha",
+"green_channel",
+"overlay_mask"
+]
+},
+"general_utils.py::crop_bounding_box": {
+"lines": 42,
+"params": [
+"image",
+"roi_mask"
+]
+},
+"general_utils.py::debug_log": {
+"lines": 33,
+"params": [
+"context",
+"exc"
+]
+},
+"general_utils.py::dtype_conversion_func": {
+"lines": 48,
+"params": [
+"image",
+"output_bit_depth"
+]
+},
+"general_utils.py::get_default_intensity_range": {
+"lines": 41,
+"params": [
+"dtype_str"
+]
+},
+"general_utils.py::normalize01": {
+"lines": 28,
+"params": [
+"arr",
+"out_dtype"
+]
+},
+"gpu_utils.py::gpu_available": {
+"lines": 2,
+"params": []
+},
+"gpu_utils.py::gpu_disk": {
+"lines": 9,
+"params": [
+"radius"
+]
+},
+"gpu_utils.py::gpu_gaussian_filter": {
+"lines": 7,
+"params": [
+"image",
+"sigma"
+]
+},
+"gpu_utils.py::gpu_grey_dilation": {
+"lines": 10,
+"params": [
+"image",
+"radius"
+]
+},
+"gpu_utils.py::gpu_grey_erosion": {
+"lines": 10,
+"params": [
+"image",
+"radius"
+]
+},
+"gpu_utils.py::gpu_laplace_of_gaussian": {
+"lines": 12,
+"params": [
+"image",
+"sigma"
+]
+},
+"gpu_utils.py::gpu_memory_info": {
+"lines": 8,
+"params": []
+},
+"gpu_utils.py::gpu_pre_process_image": {
+"lines": 113,
+"params": [
+"ball_radius",
+"image",
+"window_size"
+]
+},
+"gpu_utils.py::gpu_rolling_ball_background": {
+"lines": 16,
+"params": [
+"ball_radius",
+"image"
+]
+},
+"gpu_utils.py::gpu_wavelet_bg_and_noise": {
+"lines": 50,
+"params": [
+"image",
+"noise_lvl",
+"num_levels"
+]
+},
+"gpu_utils.py::gpu_white_tophat": {
+"lines": 13,
+"params": [
+"image",
+"radius"
+]
+},
+"gpu_utils.py::to_cpu": {
+"lines": 4,
+"params": [
+"arr"
+]
+},
+"gpu_utils.py::to_gpu": {
+"lines": 4,
+"params": [
+"arr"
+]
+},
+"image_processing_tools.py::_add_image": {
+"lines": 24,
+"params": [
+"image",
+"operation",
+"viewer"
+]
+},
+"image_processing_tools.py::_convolve_k": {
+"lines": 1,
+"params": [
+"k"
+]
+},
+"image_processing_tools.py::_equiv_diam": {
+"lines": 2,
+"params": [
+"p"
+]
+},
+"image_processing_tools.py::_napari": {
+"lines": 3,
+"params": []
+},
+"image_processing_tools.py::_norm01": {
+"lines": 3,
+"params": [
+"a"
+]
+},
+"image_processing_tools.py::_realness_weight": {
+"lines": 143,
+"params": [
+"ball_radius",
+"border_grow",
+"con_p",
+"large_object_min_area",
+"log_p",
+"min_area",
+"pp"
+]
+},
+"image_processing_tools.py::_safe_equalize_adapthist": {
+"lines": 16,
+"params": [
+"img"
+]
+},
+"image_processing_tools.py::_soft": {
+"lines": 9,
+"params": [
+"phi",
+"plo",
+"x"
+]
+},
+"image_processing_tools.py::apply_background_subtraction": {
+"lines": 12,
+"params": [
+"background",
+"image"
+]
+},
+"image_processing_tools.py::apply_bilateral_filter": {
+"lines": 41,
+"params": [
+"image",
+"radius"
+]
+},
+"image_processing_tools.py::apply_flatfield_correction": {
+"lines": 28,
+"params": [
+"dark",
+"flat",
+"image"
+]
+},
+"image_processing_tools.py::apply_laplace_of_gauss_enhancement": {
+"lines": 42,
+"params": [
+"image",
+"sigma"
+]
+},
+"image_processing_tools.py::apply_laplace_of_gauss_filter": {
+"lines": 28,
+"params": [
+"image",
+"sigma"
+]
+},
+"image_processing_tools.py::apply_rescale_intensity": {
+"lines": 54,
+"params": [
+"image",
+"out_max",
+"out_min"
+]
+},
+"image_processing_tools.py::auto_object_size_valid": {
+"lines": 3,
+"params": [
+"workflow"
+]
+},
+"image_processing_tools.py::background_inpainting_func": {
+"lines": 44,
+"params": [
+"ball_radius",
+"image",
+"mask"
+]
+},
+"image_processing_tools.py::compute_rolling_ball_background": {
+"lines": 44,
+"params": [
+"ball_radius",
+"image"
+]
+},
+"image_processing_tools.py::deblur_by_pixel_reassignment": {
+"lines": 109,
+"params": [
+"I_in",
+"PSF",
+"gain",
+"window_radius"
+]
+},
+"image_processing_tools.py::dog_blob_enhance_2d": {
+"lines": 11,
+"params": [
+"image",
+"sigma_hi",
+"sigma_lo"
+]
+},
+"image_processing_tools.py::dog_blob_enhance_3d_pseudo": {
+"lines": 4,
+"params": [
+"sigma_hi",
+"sigma_lo",
+"volume"
+]
+},
+"image_processing_tools.py::estimate_object_size_px": {
+"lines": 89,
+"params": [
+"image",
+"min_area_px",
+"return_diagnostics",
+"tophat_radius",
+"workflow"
+]
+},
+"image_processing_tools.py::estimate_object_size_px_brightfield": {
+"lines": 49,
+"params": [
+"image",
+"min_area_px",
+"return_diagnostics"
+]
+},
+"image_processing_tools.py::gabor_filter_3d_pseudo": {
+"lines": 7,
+"params": [
+"volume"
+]
+},
+"image_processing_tools.py::gabor_filter_func": {
+"lines": 52,
+"params": [
+"image"
+]
+},
+"image_processing_tools.py::gaussian_smooth_2d": {
+"lines": 2,
+"params": [
+"image",
+"sigma"
+]
+},
+"image_processing_tools.py::gaussian_smooth_3d_pseudo": {
+"lines": 2,
+"params": [
+"sigma",
+"volume"
+]
+},
+"image_processing_tools.py::invert_image": {
+"lines": 29,
+"params": [
+"image"
+]
+},
+"image_processing_tools.py::peak_and_edge_enhancement_func": {
+"lines": 65,
+"params": [
+"ball_radius",
+"image"
+]
+},
+"image_processing_tools.py::pre_process_image": {
+"lines": 142,
+"params": [
+"ball_radius",
+"image",
+"norm_max",
+"suppress_foreground",
+"suppression_params",
+"window_size"
+]
+},
+"image_processing_tools.py::pseudo3d_tri_planar_filter": {
+"lines": 70,
+"params": [
+"filter_2d_fn",
+"volume"
+]
+},
+"image_processing_tools.py::rb_gaussian_background_removal": {
+"lines": 67,
+"params": [
+"ball_radius",
+"equalize_intensity",
+"image",
+"roi_mask"
+]
+},
+"image_processing_tools.py::rb_gaussian_bg_removal_with_edge_enhancement": {
+"lines": 38,
+"params": [
+"ball_radius",
+"image",
+"roi_mask"
+]
+},
+"image_processing_tools.py::run_apply_bilateral_filter": {
+"lines": 38,
+"params": [
+"radius_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_apply_laplace_of_gauss_filter": {
+"lines": 32,
+"params": [
+"sigma_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_apply_rescale_intensity": {
+"lines": 56,
+"params": [
+"out_max_input",
+"out_min_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_clahe": {
+"lines": 55,
+"params": [
+"clip_input",
+"k_size_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_dpr": {
+"lines": 36,
+"params": [
+"data_instance",
+"gain_input",
+"psf_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_enhanced_rb_gaussian_bg_removal": {
+"lines": 82,
+"params": [
+"data_instance",
+"viewer"
+]
+},
+"image_processing_tools.py::run_invert_image": {
+"lines": 32,
+"params": [
+"viewer"
+]
+},
+"image_processing_tools.py::run_morphological_gaussian_filter": {
+"lines": 58,
+"params": [
+"filter_size_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_peak_and_edge_enhancement": {
+"lines": 38,
+"params": [
+"data_instance",
+"viewer"
+]
+},
+"image_processing_tools.py::run_pre_process_image": {
+"lines": 61,
+"params": [
+"data_instance",
+"viewer"
+]
+},
+"image_processing_tools.py::run_rb_gaussian_background_removal": {
+"lines": 46,
+"params": [
+"data_instance",
+"eq_int_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_upscaling_func": {
+"lines": 185,
+"params": [
+"data_checkbox",
+"data_instance",
+"viewer"
+]
+},
+"image_processing_tools.py::run_wavelet_noise_subtraction": {
+"lines": 36,
+"params": [
+"noise_level_input",
+"psf_input",
+"viewer"
+]
+},
+"image_processing_tools.py::run_wbns": {
+"lines": 39,
+"params": [
+"noise_level_input",
+"psf_input",
+"viewer"
+]
+},
+"image_processing_tools.py::soft_foreground_suppression": {
+"lines": 89,
+"params": [
+"ball_radius",
+"border_grow",
+"con_p",
+"image",
+"large_object_min_area",
+"log_p",
+"min_area",
+"strength"
+]
+},
+"image_processing_tools.py::subtract_background": {
+"lines": 46,
+"params": [
+"background",
+"bg_scaling_factor",
+"equalize_intensity",
+"image",
+"window_size"
+]
+},
+"image_processing_tools.py::upscale_image_interp": {
+"lines": 63,
+"params": [
+"image",
+"num_col_initial",
+"num_row_initial",
+"pad",
+"upscale_factor"
+]
+},
+"image_processing_tools.py::wavelet_bg_and_noise_calculation": {
+"lines": 53,
+"params": [
+"image",
+"noise_lvl",
+"num_levels"
+]
+},
+"image_processing_tools.py::wbns_func": {
+"lines": 101,
+"params": [
+"img",
+"noise_lvl",
+"psf_px_resolution"
+]
+},
+"intensity_profile_tools.py::_add_intensity_profile": {
+"lines": 200,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"intensity_profile_tools.py::_first_cross": {
+"lines": 3,
+"params": [
+"level"
+]
+},
+"intensity_profile_tools.py::_first_cross_um": {
+"lines": 2,
+"params": [
+"level"
+]
+},
+"intensity_profile_tools.py::_mpx": {
+"lines": 16,
+"params": []
+},
+"intensity_profile_tools.py::_on_run": {
+"lines": 92,
+"params": []
+},
+"intensity_profile_tools.py::interface_width_from_radial": {
+"lines": 45,
+"params": [
+"radial_df",
+"signal_col"
+]
+},
+"intensity_profile_tools.py::line_profile": {
+"lines": 25,
+"params": [
+"end_yx",
+"image",
+"linewidth",
+"microns_per_pixel",
+"start_yx"
+]
+},
+"intensity_profile_tools.py::line_profiles_from_shapes": {
+"lines": 23,
+"params": [
+"image",
+"linewidth",
+"microns_per_pixel",
+"shapes_layer"
+]
+},
+"intensity_profile_tools.py::radial_profile": {
+"lines": 50,
+"params": [
+"center_yx",
+"image",
+"max_radius_px",
+"microns_per_pixel",
+"n_bins"
+]
+},
+"intensity_semantics.py::_decorate": {
+"lines": 23,
+"params": [
+"fn"
+]
+},
+"intensity_semantics.py::_wrapped": {
+"lines": 16,
+"params": [
+"image_layer"
+]
+},
+"intensity_semantics.py::check_measurement_input": {
+"lines": 50,
+"params": [
+"layer",
+"measurement_name",
+"required"
+]
+},
+"intensity_semantics.py::mark_intensity_semantics": {
+"lines": 31,
+"params": [
+"layer",
+"operation"
+]
+},
+"intensity_semantics.py::require_intensity": {
+"lines": 50,
+"params": [
+"name",
+"required"
+]
+},
+"invitro_bf_ui.py::__init__": {
+"lines": 1,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"invitro_bf_ui.py::_done": {
+"lines": 10,
+"params": [
+"res"
+]
+},
+"invitro_bf_ui.py::_dr": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"invitro_bf_ui.py::_err": {
+"lines": 1,
+"params": [
+"msg"
+]
+},
+"invitro_bf_ui.py::_img": {
+"lines": 3,
+"params": [
+"dd",
+"self"
+]
+},
+"invitro_bf_ui.py::_ivbf_dynamics": {
+"lines": 101,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_focus_qc": {
+"lines": 49,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_od_field": {
+"lines": 63,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_preprocessing": {
+"lines": 52,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_segmentation": {
+"lines": 85,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_size_contact": {
+"lines": 65,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_ivbf_spatial": {
+"lines": 47,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_bf_ui.py::_mpx": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"invitro_bf_ui.py::_on_method": {
+"lines": 5,
+"params": []
+},
+"invitro_bf_ui.py::_on_run": {
+"lines": 28,
+"params": []
+},
+"invitro_bf_ui.py::_record": {
+"lines": 2,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"invitro_bf_ui.py::_run_btn": {
+"lines": 4,
+"params": [
+"form",
+"label"
+]
+},
+"invitro_bf_ui.py::_show": {
+"lines": 3,
+"params": [
+"tables",
+"title"
+]
+},
+"invitro_bf_ui.py::_task": {
+"lines": 1,
+"params": []
+},
+"invitro_bf_ui.py::create_layer_dropdown": {
+"lines": 1,
+"params": [
+"lt",
+"self"
+]
+},
+"invitro_bf_ui.py::run": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"invitro_bf_ui.py::setup_ui": {
+"lines": 60,
+"params": [
+"self"
+]
+},
+"invitro_fluor_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"invitro_fluor_ui.py::_done": {
+"lines": 15,
+"params": [
+"res"
+]
+},
+"invitro_fluor_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"invitro_fluor_ui.py::_err": {
+"lines": 2,
+"params": [
+"msg"
+]
+},
+"invitro_fluor_ui.py::_has_time_series": {
+"lines": 26,
+"params": [
+"self"
+]
+},
+"invitro_fluor_ui.py::_img": {
+"lines": 3,
+"params": [
+"dd",
+"self"
+]
+},
+"invitro_fluor_ui.py::_ivf_dynamics": {
+"lines": 161,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_field_summary": {
+"lines": 163,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_frame_qc": {
+"lines": 62,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_phase_diagram": {
+"lines": 86,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_preprocessing": {
+"lines": 80,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_segmentation": {
+"lines": 265,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_size_distribution": {
+"lines": 35,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_ivf_spatial": {
+"lines": 56,
+"params": [
+"layout",
+"ui"
+]
+},
+"invitro_fluor_ui.py::_layer_is_time_series": {
+"lines": 28,
+"params": [
+"layer"
+]
+},
+"invitro_fluor_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"invitro_fluor_ui.py::_on_method": {
+"lines": 3,
+"params": []
+},
+"invitro_fluor_ui.py::_on_method_change": {
+"lines": 3,
+"params": []
+},
+"invitro_fluor_ui.py::_on_run": {
+"lines": 43,
+"params": []
+},
+"invitro_fluor_ui.py::_on_scribble": {
+"lines": 19,
+"params": []
+},
+"invitro_fluor_ui.py::_postfilter": {
+"lines": 11,
+"params": [
+"binary"
+]
+},
+"invitro_fluor_ui.py::_record": {
+"lines": 2,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"invitro_fluor_ui.py::_run_btn": {
+"lines": 4,
+"params": [
+"form",
+"label"
+]
+},
+"invitro_fluor_ui.py::_show": {
+"lines": 3,
+"params": [
+"tables",
+"title"
+]
+},
+"invitro_fluor_ui.py::_task": {
+"lines": 5,
+"params": []
+},
+"invitro_fluor_ui.py::_toggle_dark": {
+"lines": 20,
+"params": [
+"checked"
+]
+},
+"invitro_fluor_ui.py::_update_timeseries_steps": {
+"lines": 12,
+"params": []
+},
+"invitro_fluor_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"self"
+]
+},
+"invitro_fluor_ui.py::run": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"invitro_fluor_ui.py::setup_ui": {
+"lines": 89,
+"params": [
+"self"
+]
+},
+"invitro_tools.py::_add": {
+"lines": 4,
+"params": [
+"k",
+"loglik",
+"name",
+"params"
+]
+},
+"invitro_tools.py::_circle_residuals": {
+"lines": 2,
+"params": [
+"p",
+"x",
+"y"
+]
+},
+"invitro_tools.py::_fit": {
+"lines": 20,
+"params": [
+"cc",
+"pp"
+]
+},
+"invitro_tools.py::_hinge": {
+"lines": 2,
+"params": [
+"cc",
+"params"
+]
+},
+"invitro_tools.py::_pointwise": {
+"lines": 8,
+"params": [
+"m",
+"nm"
+]
+},
+"invitro_tools.py::_resid": {
+"lines": 1,
+"params": [
+"cc",
+"params",
+"pp"
+]
+},
+"invitro_tools.py::_slope_r2": {
+"lines": 2,
+"params": [
+"x",
+"y"
+]
+},
+"invitro_tools.py::coarsening_statistics": {
+"lines": 49,
+"params": [
+"frame_interval_s",
+"mask_stack",
+"microns_per_pixel"
+]
+},
+"invitro_tools.py::detect_and_fit_fusions": {
+"lines": 116,
+"params": [
+"frame_interval_s",
+"image_stack",
+"mask_stack",
+"match_radius_um",
+"microns_per_pixel",
+"tracks_df"
+]
+},
+"invitro_tools.py::detect_sedimentation": {
+"lines": 112,
+"params": [
+"field_summary_df"
+]
+},
+"invitro_tools.py::estimate_contact_angle": {
+"lines": 95,
+"params": [
+"droplet_label",
+"droplet_mask",
+"image"
+]
+},
+"invitro_tools.py::estimate_csat_lever_rule": {
+"lines": 123,
+"params": [
+"concentrations",
+"volume_fractions"
+]
+},
+"invitro_tools.py::estimate_phase_boundary": {
+"lines": 150,
+"params": [
+"concentrations",
+"fractions",
+"n_boot",
+"random_state"
+]
+},
+"invitro_tools.py::field_summary": {
+"lines": 182,
+"params": [
+"field_area_um2",
+"image",
+"labeled_droplets",
+"microns_per_pixel"
+]
+},
+"invitro_tools.py::fit_size_distribution": {
+"lines": 130,
+"params": [
+"n_bins",
+"radii_um"
+]
+},
+"invitro_tools.py::fit_size_distribution_mle": {
+"lines": 300,
+"params": [
+"candidates",
+"radii_um",
+"xmin"
+]
+},
+"invitro_tools.py::lognormal_pdf": {
+"lines": 2,
+"params": [
+"mu",
+"sigma",
+"x"
+]
+},
+"invitro_tools.py::partition_coefficient_field": {
+"lines": 141,
+"params": [
+"image",
+"labeled_droplets",
+"percentile_bulk",
+"saturation_level"
+]
+},
+"invitro_tools.py::partition_coefficient_local": {
+"lines": 393,
+"params": [
+"allow_no_reference",
+"cell_mask",
+"dark_reference",
+"gap_px",
+"image",
+"image_layer",
+"labeled_droplets",
+"ring_width_px",
+"sample_type",
+"saturation_level"
+]
+},
+"invitro_tools.py::partition_measurement": {
+"lines": 190,
+"params": [
+"background_subtracted",
+"dark_reference",
+"image",
+"labeled_droplets",
+"percentile_bulk",
+"saturation_level"
+]
+},
+"label_and_mask_tools.py::__init__": {
+"lines": 78,
+"params": [
+"parent",
+"props_list",
+"self"
+]
+},
+"label_and_mask_tools.py::_napari": {
+"lines": 3,
+"params": []
+},
+"label_and_mask_tools.py::_sigmoid": {
+"lines": 1,
+"params": [
+"log_lec",
+"log_r",
+"sharpness"
+]
+},
+"label_and_mask_tools.py::assess_and_split_touching": {
+"lines": 227,
+"params": [
+"binary_mask",
+"chain_min_units",
+"intensity_image",
+"microns_per_pixel",
+"min_peak_distance",
+"neck_threshold",
+"sigma"
+]
+},
+"label_and_mask_tools.py::binary_morph_operation": {
+"lines": 63,
+"params": [
+"binary_mask_input",
+"element_shape",
+"element_size",
+"iterations",
+"mode",
+"roi_mask"
+]
+},
+"label_and_mask_tools.py::custom_binary_closing": {
+"lines": 26,
+"params": [
+"binary_mask",
+"iterations",
+"mask",
+"structure"
+]
+},
+"label_and_mask_tools.py::custom_binary_opening": {
+"lines": 25,
+"params": [
+"binary_mask",
+"iterations",
+"mask",
+"structure"
+]
+},
+"label_and_mask_tools.py::deselect_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"label_and_mask_tools.py::extend_mask_to_edges": {
+"lines": 59,
+"params": [
+"mask",
+"size_to_extend"
+]
+},
+"label_and_mask_tools.py::fit_elastocapillary_length": {
+"lines": 129,
+"params": [
+"is_irregular",
+"radii_um"
+]
+},
+"label_and_mask_tools.py::generate_cross_structuring_element": {
+"lines": 25,
+"params": [
+"radius"
+]
+},
+"label_and_mask_tools.py::get_selected_props": {
+"lines": 6,
+"params": [
+"self"
+]
+},
+"label_and_mask_tools.py::measure_region_props": {
+"lines": 28,
+"params": [
+"image",
+"labeled_mask",
+"selected_props"
+]
+},
+"label_and_mask_tools.py::neck_geometry": {
+"lines": 161,
+"params": [
+"binary_mask",
+"microns_per_pixel",
+"min_peak_distance",
+"sigma"
+]
+},
+"label_and_mask_tools.py::opencv_contour_func": {
+"lines": 68,
+"params": [
+"border_size",
+"input_mask",
+"max_area",
+"min_area"
+]
+},
+"label_and_mask_tools.py::run_binary_morph_operation": {
+"lines": 71,
+"params": [
+"elem_shape_dropdown",
+"elem_size_input",
+"iter_input",
+"mode_dropdown",
+"roi_mask_layer",
+"viewer"
+]
+},
+"label_and_mask_tools.py::run_convert_labels_to_mask": {
+"lines": 28,
+"params": [
+"labels_layer",
+"viewer"
+]
+},
+"label_and_mask_tools.py::run_expand_labels": {
+"lines": 17,
+"params": [
+"distance",
+"labels_layer",
+"viewer"
+]
+},
+"label_and_mask_tools.py::run_label_binary_mask": {
+"lines": 33,
+"params": [
+"mask_layer",
+"viewer"
+]
+},
+"label_and_mask_tools.py::run_mask_logic_merge": {
+"lines": 23,
+"params": [
+"mask_layer1",
+"mask_layer2",
+"mode",
+"viewer"
+]
+},
+"label_and_mask_tools.py::run_measure_binary_mask": {
+"lines": 72,
+"params": [
+"data_instance",
+"image_layer",
+"mask_layer"
+]
+},
+"label_and_mask_tools.py::run_measure_region_props": {
+"lines": 68,
+"params": [
+"data_instance",
+"image_layer",
+"mask_layer"
+]
+},
+"label_and_mask_tools.py::run_update_labels": {
+"lines": 54,
+"params": [
+"increment_mode",
+"new_label_input",
+"viewer"
+]
+},
+"label_and_mask_tools.py::select_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"label_and_mask_tools.py::split_touching_objects": {
+"lines": 104,
+"params": [
+"binary_mask",
+"return_mask",
+"sigma"
+]
+},
+"label_and_mask_tools.py::toggle_scroll_area": {
+"lines": 7,
+"params": [
+"self"
+]
+},
+"layer_tag_hook.py::_add": {
+"lines": 58,
+"params": []
+},
+"layer_tag_hook.py::_op_from_name": {
+"lines": 8,
+"params": [
+"name"
+]
+},
+"layer_tag_hook.py::_op_from_stack": {
+"lines": 15,
+"params": [
+"max_depth"
+]
+},
+"layer_tag_hook.py::_role_from": {
+"lines": 14,
+"params": [
+"data",
+"layer_type",
+"viewer"
+]
+},
+"layer_tag_hook.py::_wrap": {
+"lines": 66,
+"params": [
+"layer_type",
+"original",
+"viewer"
+]
+},
+"layer_tag_hook.py::install": {
+"lines": 19,
+"params": [
+"viewer"
+]
+},
+"layer_tags.py::_index_put": {
+"lines": 9,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::_store": {
+"lines": 12,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::_validate": {
+"lines": 29,
+"params": [
+"key",
+"value"
+]
+},
+"layer_tags.py::add_edge": {
+"lines": 18,
+"params": [
+"layer",
+"relation",
+"target_layer",
+"via"
+]
+},
+"layer_tags.py::clear_all_tags": {
+"lines": 9,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::get_edges": {
+"lines": 6,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::get_tag": {
+"lines": 5,
+"params": [
+"default",
+"key",
+"layer"
+]
+},
+"layer_tags.py::get_tags": {
+"lines": 6,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::has_tag": {
+"lines": 5,
+"params": [
+"key",
+"layer",
+"value"
+]
+},
+"layer_tags.py::layer_tag_id": {
+"lines": 18,
+"params": [
+"layer"
+]
+},
+"layer_tags.py::mark_derived": {
+"lines": 26,
+"params": [
+"new_layer",
+"source_layer",
+"via"
+]
+},
+"layer_tags.py::rebuild_index": {
+"lines": 8,
+"params": [
+"viewer"
+]
+},
+"layer_tags.py::set_user_tag": {
+"lines": 3,
+"params": [
+"key",
+"layer",
+"value"
+]
+},
+"layer_tags.py::tag_layer": {
+"lines": 41,
+"params": [
+"confidence",
+"key",
+"layer",
+"overwrite",
+"source",
+"value"
+]
+},
+"layer_tools.py::run_advanced_two_layer_merge": {
+"lines": 65,
+"params": [
+"input_layer1",
+"input_layer2",
+"mode",
+"slider",
+"viewer"
+]
+},
+"layer_tools.py::run_simple_multi_merge": {
+"lines": 72,
+"params": [
+"mode",
+"viewer"
+]
+},
+"logging_utils.py::_configure_once": {
+"lines": 37,
+"params": []
+},
+"logging_utils.py::get_logger": {
+"lines": 9,
+"params": [
+"name"
+]
+},
+"math_utils.py::calculate_r_squared": {
+"lines": 30,
+"params": [
+"actual",
+"predicted"
+]
+},
+"math_utils.py::create_2d_gaussian_kernel": {
+"lines": 41,
+"params": [
+"kernel_size",
+"sigma"
+]
+},
+"math_utils.py::remove_outliers_iqr": {
+"lines": 50,
+"params": [
+"data"
+]
+},
+"measurement.py::interpretability": {
+"lines": 7,
+"params": [
+"self"
+]
+},
+"measurement.py::is_trustworthy": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"measurement.py::status": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"measurement.py::summary": {
+"lines": 33,
+"params": [
+"self"
+]
+},
+"measurement.py::to_dict": {
+"lines": 13,
+"params": [
+"self"
+]
+},
+"measurement.py::unchecked_assumptions": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"measurement.py::untrustworthy_parameters": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"measurement.py::violated_assumptions": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"metadata_extract.py::_empty_common": {
+"lines": 39,
+"params": [
+"file_path"
+]
+},
+"metadata_extract.py::_eq": {
+"lines": 4,
+"params": [
+"a",
+"b"
+]
+},
+"metadata_extract.py::_extract_frame_interval_s": {
+"lines": 87,
+"params": [
+"image"
+]
+},
+"metadata_extract.py::_extract_mm_frame_times_from_tiff": {
+"lines": 94,
+"params": [
+"file_path",
+"max_pages"
+]
+},
+"metadata_extract.py::_safe_float": {
+"lines": 13,
+"params": [
+"x"
+]
+},
+"metadata_extract.py::_safe_str": {
+"lines": 11,
+"params": [
+"x"
+]
+},
+"metadata_extract.py::_tagval": {
+"lines": 2,
+"params": [
+"name"
+]
+},
+"metadata_extract.py::_to_seconds": {
+"lines": 11,
+"params": [
+"unit",
+"val"
+]
+},
+"metadata_extract.py::_values_differ": {
+"lines": 14,
+"params": [
+"values"
+]
+},
+"metadata_extract.py::compare_acquisition_metadata": {
+"lines": 54,
+"params": [
+"metadata_list",
+"names"
+]
+},
+"metadata_extract.py::debug_log": {
+"lines": 1,
+"params": [
+"context",
+"exc"
+]
+},
+"metadata_extract.py::extract_aicsimage_metadata": {
+"lines": 101,
+"params": [
+"file_path",
+"image"
+]
+},
+"metadata_extract.py::extract_ims_metadata": {
+"lines": 82,
+"params": [
+"file_path",
+"reader",
+"width_px"
+]
+},
+"metadata_extract.py::extract_metadata": {
+"lines": 25,
+"params": [
+"file_path",
+"image",
+"reader",
+"width_px"
+]
+},
+"metadata_extract.py::extract_tiff_metadata": {
+"lines": 82,
+"params": [
+"file_path"
+]
+},
+"molecular_counting_tools.py::_add_molecular_counting": {
+"lines": 141,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"molecular_counting_tools.py::_double_exp_offset": {
+"lines": 2,
+"params": [
+"a",
+"b",
+"c",
+"d",
+"e",
+"x"
+]
+},
+"molecular_counting_tools.py::_on_run": {
+"lines": 68,
+"params": []
+},
+"molecular_counting_tools.py::_slope_through_origin": {
+"lines": 3,
+"params": [
+"x",
+"y"
+]
+},
+"molecular_counting_tools.py::_variance_pairs": {
+"lines": 19,
+"params": [
+"bleach_fit",
+"fast",
+"trace"
+]
+},
+"molecular_counting_tools.py::count_molecules_pooled": {
+"lines": 77,
+"params": [
+"fast",
+"r2_min",
+"traces"
+]
+},
+"molecular_counting_tools.py::count_molecules_single": {
+"lines": 213,
+"params": [
+"fast",
+"r2_min",
+"trace"
+]
+},
+"molecular_counting_tools.py::extract_spot_traces": {
+"lines": 52,
+"params": [
+"label_mask",
+"stack"
+]
+},
+"molecular_counting_tools.py::fit_bleaching_trace": {
+"lines": 23,
+"params": [
+"trace"
+]
+},
+"morphological_complexity_tools.py::_add_morphological_complexity": {
+"lines": 151,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"morphological_complexity_tools.py::_mpx": {
+"lines": 16,
+"params": []
+},
+"morphological_complexity_tools.py::_on_run": {
+"lines": 68,
+"params": []
+},
+"morphological_complexity_tools.py::fractal_dimension_box_counting": {
+"lines": 70,
+"params": [
+"binary_mask"
+]
+},
+"morphological_complexity_tools.py::fractal_dimension_per_cell": {
+"lines": 54,
+"params": [
+"labeled_cells",
+"puncta_mask"
+]
+},
+"morphological_complexity_tools.py::lacunarity": {
+"lines": 55,
+"params": [
+"binary_mask",
+"box_sizes"
+]
+},
+"morphological_complexity_tools.py::orientation_order_parameter": {
+"lines": 65,
+"params": [
+"labeled_mask"
+]
+},
+"morphological_complexity_tools.py::tortuosity_per_object": {
+"lines": 76,
+"params": [
+"labeled_mask",
+"microns_per_pixel"
+]
+},
+"multidim_io.py::__array__": {
+"lines": 2,
+"params": [
+"dtype",
+"self"
+]
+},
+"multidim_io.py::__enter__": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"multidim_io.py::__exit__": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"multidim_io.py::__getitem__": {
+"lines": 2,
+"params": [
+"idx",
+"self"
+]
+},
+"multidim_io.py::__init__": {
+"lines": 4,
+"params": [
+"self",
+"z"
+]
+},
+"multidim_io.py::__len__": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"multidim_io.py::find_sibling_position_files": {
+"lines": 62,
+"params": [
+"file_path"
+]
+},
+"multidim_io.py::show_position_selection_dialog": {
+"lines": 77,
+"params": [
+"label_key",
+"positions",
+"title"
+]
+},
+"nb_tools.py::detrend_timeseries": {
+"lines": 59,
+"params": [
+"method",
+"stack",
+"window"
+]
+},
+"nb_tools.py::frame_count_adequacy": {
+"lines": 60,
+"params": [
+"n_frames"
+]
+},
+"nb_tools.py::napari_show_info": {
+"lines": 1,
+"params": [
+"msg"
+]
+},
+"nb_tools.py::napari_show_warning": {
+"lines": 1,
+"params": [
+"msg"
+]
+},
+"nb_tools.py::number_and_brightness": {
+"lines": 138,
+"params": [
+"detrend",
+"detrend_window",
+"gain",
+"offset",
+"read_variance",
+"stack"
+]
+},
+"nb_tools.py::run_nb_analysis": {
+"lines": 111,
+"params": [
+"detrend_window",
+"epsilon0",
+"gain",
+"image_layer",
+"offset",
+"read_variance",
+"roi_shapes_layer",
+"viewer"
+]
+},
+"nb_ui.py::_add_number_and_brightness": {
+"lines": 71,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"nb_ui.py::_layer": {
+"lines": 7,
+"params": [
+"dropdown",
+"ui_instance"
+]
+},
+"notify.py::_has_napari": {
+"lines": 10,
+"params": []
+},
+"notify.py::show_info": {
+"lines": 12,
+"params": [
+"message"
+]
+},
+"notify.py::show_warning": {
+"lines": 13,
+"params": [
+"message"
+]
+},
+"notify.py::ui_available": {
+"lines": 3,
+"params": []
+},
+"numba_utils.py::_clip_to_zero_kernel": {
+"lines": 8,
+"params": [
+"image"
+]
+},
+"numba_utils.py::_elementwise_multiply_kernel": {
+"lines": 8,
+"params": [
+"a",
+"b"
+]
+},
+"numba_utils.py::_invert_kernel": {
+"lines": 9,
+"params": [
+"image",
+"img_max"
+]
+},
+"numba_utils.py::_rescale_intensity_kernel": {
+"lines": 23,
+"params": [
+"image",
+"img_max",
+"img_min",
+"out_max",
+"out_min"
+]
+},
+"numba_utils.py::_wbns_post_process_kernel": {
+"lines": 41,
+"params": [
+"background",
+"bg_scale",
+"img",
+"noise_scale_bg",
+"noise_scale_img",
+"noise_smooth",
+"noise_threshold"
+]
+},
+"numba_utils.py::clip_to_zero_fast": {
+"lines": 8,
+"params": [
+"image"
+]
+},
+"numba_utils.py::decorator": {
+"lines": 1,
+"params": [
+"fn"
+]
+},
+"numba_utils.py::invert_fast": {
+"lines": 10,
+"params": [
+"image"
+]
+},
+"numba_utils.py::multiply_fast": {
+"lines": 9,
+"params": [
+"a",
+"b"
+]
+},
+"numba_utils.py::njit": {
+"lines": 3,
+"params": []
+},
+"numba_utils.py::rescale_intensity_fast": {
+"lines": 16,
+"params": [
+"image",
+"out_max",
+"out_min"
+]
+},
+"numba_utils.py::warmup_numba": {
+"lines": 15,
+"params": []
+},
+"numba_utils.py::wbns_post_process_fast": {
+"lines": 47,
+"params": [
+"background",
+"bg_scale",
+"img",
+"noise_scale_bg",
+"noise_scale_img",
+"noise_smooth",
+"noise_threshold"
+]
+},
+"obj_based_coloc_analysis_tools.py::__init__": {
+"lines": 28,
+"params": [
+"parent",
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::_create_action_buttons": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::_create_section_layout": {
+"lines": 27,
+"params": [
+"options",
+"self",
+"title"
+]
+},
+"obj_based_coloc_analysis_tools.py::_create_selection_buttons": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::_make_obca_dialog_class": {
+"lines": 161,
+"params": []
+},
+"obj_based_coloc_analysis_tools.py::calculate_centroid_distance": {
+"lines": 18,
+"params": [
+"region1",
+"region2"
+]
+},
+"obj_based_coloc_analysis_tools.py::categorize_pairings": {
+"lines": 39,
+"params": [
+"overlap_df"
+]
+},
+"obj_based_coloc_analysis_tools.py::coloc_significance": {
+"lines": 142,
+"params": [
+"mask1",
+"mask2",
+"n_simulations",
+"roi_mask",
+"seed"
+]
+},
+"obj_based_coloc_analysis_tools.py::deselect_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::get_selected_methods": {
+"lines": 9,
+"params": [
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::jaccard_index_calculation": {
+"lines": 46,
+"params": [
+"mask1",
+"mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::manders_coloc": {
+"lines": 38,
+"params": [
+"image1",
+"mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::manders_m1_calculation": {
+"lines": 84,
+"params": [
+"mask1",
+"mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::manders_m2_calculation": {
+"lines": 45,
+"params": [
+"mask1",
+"mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::object_based_colocalization_analysis": {
+"lines": 81,
+"params": [
+"data_instance",
+"method_selections",
+"object_mask1",
+"object_mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::object_based_distance_analysis": {
+"lines": 97,
+"params": [
+"mask1",
+"mask2",
+"roi_mask"
+]
+},
+"obj_based_coloc_analysis_tools.py::process_multiple_pairs": {
+"lines": 41,
+"params": [
+"labels1",
+"labels2",
+"multiple_pairs_df"
+]
+},
+"obj_based_coloc_analysis_tools.py::process_obca_methods": {
+"lines": 47,
+"params": [
+"mask1",
+"mask2",
+"method_functions",
+"roi_mask",
+"selected_methods"
+]
+},
+"obj_based_coloc_analysis_tools.py::process_single_pairs": {
+"lines": 34,
+"params": [
+"labels1",
+"labels2",
+"single_pairs_df"
+]
+},
+"obj_based_coloc_analysis_tools.py::run_manders_coloc": {
+"lines": 78,
+"params": [
+"data_instance",
+"image_layer1",
+"mask_layer2",
+"roi_mask_layer"
+]
+},
+"obj_based_coloc_analysis_tools.py::run_obca": {
+"lines": 132,
+"params": [
+"data_instance",
+"mask_layer1",
+"mask_layer2",
+"roi_mask_layer"
+]
+},
+"obj_based_coloc_analysis_tools.py::select_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"obj_based_coloc_analysis_tools.py::sorensen_dice_coefficient_calculation": {
+"lines": 46,
+"params": [
+"mask1",
+"mask2",
+"roi_mask"
+]
+},
+"object_ref.py::_get": {
+"lines": 10,
+"params": [
+"cast"
+]
+},
+"object_ref.py::bbox_columns_from_regionprops": {
+"lines": 14,
+"params": [
+"prop"
+]
+},
+"object_ref.py::crop_slice": {
+"lines": 6,
+"params": [
+"pad_px",
+"self"
+]
+},
+"object_ref.py::from_row": {
+"lines": 58,
+"params": [
+"cls",
+"row",
+"source_path",
+"tags"
+]
+},
+"object_ref.py::is_resolvable_offline": {
+"lines": 6,
+"params": [
+"self"
+]
+},
+"object_ref.py::normalise_bbox_columns": {
+"lines": 27,
+"params": [
+"df"
+]
+},
+"object_ref.py::refs_from_dataframe": {
+"lines": 9,
+"params": [
+"df",
+"source_path",
+"tags"
+]
+},
+"object_ref.py::resolve_in_viewer": {
+"lines": 39,
+"params": [
+"centre",
+"pad_px",
+"ref",
+"viewer"
+]
+},
+"object_ref.py::resolve_offline": {
+"lines": 41,
+"params": [
+"pad_px",
+"ref"
+]
+},
+"object_ref.py::to_dict": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"organizational_metrics_tools.py::_cluster_stats": {
+"lines": 6,
+"params": [
+"points"
+]
+},
+"organizational_metrics_tools.py::cluster_count_significance": {
+"lines": 101,
+"params": [
+"coords",
+"eps_um",
+"microns_per_pixel",
+"min_samples",
+"n_simulations",
+"region_mask",
+"seed"
+]
+},
+"organizational_metrics_tools.py::cluster_size_distribution": {
+"lines": 46,
+"params": [
+"coords",
+"eps_um",
+"min_samples"
+]
+},
+"organizational_metrics_tools.py::distance_to_boundary": {
+"lines": 46,
+"params": [
+"cell_mask",
+"coords",
+"microns_per_pixel"
+]
+},
+"organizational_metrics_tools.py::inter_condensate_spacing": {
+"lines": 36,
+"params": [
+"coords",
+"k_neighbours"
+]
+},
+"organizational_metrics_tools.py::per_cell_occupancy": {
+"lines": 36,
+"params": [
+"labeled_cells",
+"microns_per_pixel",
+"puncta_mask"
+]
+},
+"organizational_metrics_tools.py::run_all_organizational_metrics": {
+"lines": 20,
+"params": [
+"cell_label",
+"cell_mask",
+"coords",
+"eps_um",
+"k_neighbours",
+"labeled_cells",
+"microns_per_pixel",
+"n_entropy_bins",
+"puncta_mask"
+]
+},
+"organizational_metrics_tools.py::spatial_entropy": {
+"lines": 59,
+"params": [
+"cell_mask",
+"coords",
+"microns_per_pixel",
+"n_bins"
+]
+},
+"partial_volume_tools.py::_by_id": {
+"lines": 7,
+"params": [
+"tag_id"
+]
+},
+"partial_volume_tools.py::_edges": {
+"lines": 4,
+"params": [
+"layer"
+]
+},
+"partial_volume_tools.py::effective_n": {
+"lines": 13,
+"params": [
+"weights"
+]
+},
+"partial_volume_tools.py::estimate_noise_sigma": {
+"lines": 28,
+"params": [
+"image",
+"mask"
+]
+},
+"partial_volume_tools.py::estimate_psf_sigma": {
+"lines": 67,
+"params": [
+"image",
+"mask",
+"max_objects"
+]
+},
+"partial_volume_tools.py::intensity_bias_for_size": {
+"lines": 33,
+"params": [
+"contrast",
+"psf_sigma_px",
+"radius_px"
+]
+},
+"partial_volume_tools.py::is_sub_resolution": {
+"lines": 4,
+"params": [
+"psf_sigma_px",
+"radius_px"
+]
+},
+"partial_volume_tools.py::looks_upscaled": {
+"lines": 16,
+"params": [
+"data",
+"layer_or_name",
+"native_shape"
+]
+},
+"partial_volume_tools.py::measure_objects_pv": {
+"lines": 95,
+"params": [
+"background",
+"factor",
+"hi_res_labels",
+"microns_per_pixel",
+"min_weight",
+"native_image"
+]
+},
+"partial_volume_tools.py::partial_volume_weights": {
+"lines": 44,
+"params": [
+"factor",
+"hi_res_mask",
+"label"
+]
+},
+"partial_volume_tools.py::resolve_measurement_source": {
+"lines": 96,
+"params": [
+"mask_layer",
+"viewer"
+]
+},
+"partial_volume_tools.py::size_bias_report": {
+"lines": 15,
+"params": [
+"contrast",
+"psf_sigma_px",
+"radii_px"
+]
+},
+"partial_volume_tools.py::size_confound_warning": {
+"lines": 54,
+"params": [
+"contrast",
+"psf_sigma_px",
+"radii_group_a",
+"radii_group_b"
+]
+},
+"partial_volume_tools.py::weighted_intensity_stats": {
+"lines": 63,
+"params": [
+"background",
+"image",
+"noise_sigma",
+"weights"
+]
+},
+"partial_volume_tools.py::weights_from_native_mask": {
+"lines": 8,
+"params": [
+"label",
+"mask"
+]
+},
+"partition_enrichment_tools.py::_add_client_enrichment": {
+"lines": 150,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"partition_enrichment_tools.py::_on_run": {
+"lines": 82,
+"params": []
+},
+"partition_enrichment_tools.py::client_enrichment": {
+"lines": 149,
+"params": [
+"background",
+"background_mask",
+"cell_mask",
+"client_image",
+"dense_mask",
+"dilute_dilation_px",
+"dilute_gap_px"
+]
+},
+"partition_enrichment_tools.py::client_enrichment_per_cell": {
+"lines": 62,
+"params": [
+"background",
+"cell_labels",
+"client_image",
+"dense_labels",
+"shell_px"
+]
+},
+"partition_enrichment_tools.py::client_enrichment_per_condensate": {
+"lines": 54,
+"params": [
+"background",
+"cell_mask",
+"client_image",
+"dense_labels",
+"shell_px"
+]
+},
+"pipeline_diagnostic_tools.py::_safe_clahe": {
+"lines": 2,
+"params": [
+"img"
+]
+},
+"pipeline_diagnostic_tools.py::_to_float_norm": {
+"lines": 6,
+"params": [
+"image"
+]
+},
+"pipeline_diagnostic_tools.py::_to_float_raw": {
+"lines": 4,
+"params": [
+"image"
+]
+},
+"pipeline_diagnostic_tools.py::bg_removal_steps_current": {
+"lines": 53,
+"params": [
+"ball_radius",
+"image",
+"roi_mask"
+]
+},
+"pipeline_diagnostic_tools.py::bg_removal_steps_v100": {
+"lines": 40,
+"params": [
+"ball_radius",
+"image",
+"roi_mask"
+]
+},
+"pipeline_diagnostic_tools.py::preprocess_steps_current": {
+"lines": 44,
+"params": [
+"ball_radius",
+"image",
+"window_size"
+]
+},
+"pipeline_diagnostic_tools.py::preprocess_steps_v100": {
+"lines": 49,
+"params": [
+"ball_radius",
+"image",
+"window_size"
+]
+},
+"pipeline_snr_tools.py::_add_pipeline_snr_analysis": {
+"lines": 136,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"pipeline_snr_tools.py::_delta": {
+"lines": 3,
+"params": [
+"base",
+"v"
+]
+},
+"pipeline_snr_tools.py::_populate": {
+"lines": 71,
+"params": []
+},
+"pipeline_snr_tools.py::_snr_of_array": {
+"lines": 50,
+"params": [
+"arr"
+]
+},
+"pipeline_snr_tools.py::compute_snr_table": {
+"lines": 50,
+"params": [
+"viewer"
+]
+},
+"pixel_size.py::_warn_once": {
+"lines": 3,
+"params": [
+"key",
+"message"
+]
+},
+"pixel_size.py::pixel_size_um": {
+"lines": 82,
+"params": [
+"context",
+"data_repository"
+]
+},
+"pixel_size.py::pixel_size_um_or_default": {
+"lines": 17,
+"params": [
+"context",
+"data_repository",
+"default"
+]
+},
+"pixel_wise_corr_analysis_tools.py::__init__": {
+"lines": 29,
+"params": [
+"parent",
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_base": {
+"lines": 5,
+"params": [
+"v"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_block_shuffle": {
+"lines": 18,
+"params": [
+"block_size",
+"image",
+"rng"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_coef": {
+"lines": 7,
+"params": [
+"x",
+"y"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_create_action_buttons": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_create_section_layout": {
+"lines": 27,
+"params": [
+"options",
+"self",
+"title"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_create_selection_buttons": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::_on_pick": {
+"lines": 18,
+"params": [
+"event"
+]
+},
+"pixel_wise_corr_analysis_tools.py::coloc_time_trace": {
+"lines": 83,
+"params": [
+"frame_interval_s",
+"progress_callback",
+"roi_stack",
+"selected_methods",
+"stack1",
+"stack2"
+]
+},
+"pixel_wise_corr_analysis_tools.py::costes_linear_model": {
+"lines": 25,
+"params": [
+"a",
+"b",
+"x"
+]
+},
+"pixel_wise_corr_analysis_tools.py::costes_thresholding": {
+"lines": 67,
+"params": [
+"green_channel",
+"red_channel",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::cross_correlation_matrix": {
+"lines": 52,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::cytofluorogram_plot": {
+"lines": 28,
+"params": [
+"image1",
+"image2"
+]
+},
+"pixel_wise_corr_analysis_tools.py::deselect_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::get_selected_methods": {
+"lines": 10,
+"params": [
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::kendall_tau_calculation": {
+"lines": 33,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::li_ica_histogram": {
+"lines": 36,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::li_ica_plot": {
+"lines": 47,
+"params": [
+"ica_product",
+"image1",
+"image2"
+]
+},
+"pixel_wise_corr_analysis_tools.py::li_intensity_correlation": {
+"lines": 61,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::manders_k1_calculation": {
+"lines": 33,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::manders_k2_calculation": {
+"lines": 33,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::manders_overlap": {
+"lines": 33,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::manders_threshold_sensitivity": {
+"lines": 101,
+"params": [
+"base_threshold1",
+"base_threshold2",
+"image1",
+"image2",
+"perturbations",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::pearsons_correlation": {
+"lines": 77,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::perform_costes_test": {
+"lines": 103,
+"params": [
+"cc_method",
+"image1",
+"image2",
+"num_randomizations",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::pixel_wise_correlation_analysis": {
+"lines": 266,
+"params": [
+"image1",
+"image2",
+"label_flag",
+"method_selections",
+"roi_mask",
+"viewer"
+]
+},
+"pixel_wise_corr_analysis_tools.py::plot_coloc_time_trace": {
+"lines": 64,
+"params": [
+"on_pick_frame",
+"title",
+"trace_df"
+]
+},
+"pixel_wise_corr_analysis_tools.py::plot_per_cell_coloc_time_trace": {
+"lines": 76,
+"params": [
+"metric",
+"on_pick_frame",
+"title",
+"trace_df"
+]
+},
+"pixel_wise_corr_analysis_tools.py::process_pwcca_methods": {
+"lines": 72,
+"params": [
+"image1",
+"image2",
+"method_functions",
+"roi_mask",
+"selected_methods"
+]
+},
+"pixel_wise_corr_analysis_tools.py::run_pwcca": {
+"lines": 151,
+"params": [
+"data_instance",
+"image_layer1",
+"image_layer2",
+"roi_mask_layer",
+"viewer"
+]
+},
+"pixel_wise_corr_analysis_tools.py::scramble_blocks": {
+"lines": 37,
+"params": [
+"block_size",
+"image"
+]
+},
+"pixel_wise_corr_analysis_tools.py::scramble_pixels": {
+"lines": 49,
+"params": [
+"block_size",
+"image",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::scramble_pixels_within_mask": {
+"lines": 33,
+"params": [
+"image",
+"mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::select_all": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"pixel_wise_corr_analysis_tools.py::spatial_correlation_length": {
+"lines": 21,
+"params": [
+"image",
+"max_lag",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::spatial_null_test": {
+"lines": 83,
+"params": [
+"block_size",
+"coefficient",
+"image1",
+"image2",
+"n_permutations",
+"roi_mask",
+"seed"
+]
+},
+"pixel_wise_corr_analysis_tools.py::spearman_r_calculation": {
+"lines": 34,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"pixel_wise_corr_analysis_tools.py::weighted_tau_calculation": {
+"lines": 34,
+"params": [
+"image1",
+"image2",
+"roi_mask"
+]
+},
+"plot_backends.py::_verify_row_order": {
+"lines": 45,
+"params": [
+"artist_xy",
+"df",
+"tolerance",
+"x_col",
+"y_col"
+]
+},
+"plot_backends.py::available_backends": {
+"lines": 31,
+"params": []
+},
+"plot_backends.py::plotly_scatter": {
+"lines": 61,
+"params": [
+"df",
+"hue",
+"refs",
+"title",
+"x_col",
+"y_col"
+]
+},
+"plot_backends.py::scatter": {
+"lines": 41,
+"params": [
+"ax",
+"backend",
+"df",
+"hue",
+"x_col",
+"y_col"
+]
+},
+"qc_gallery.py::_add_noise": {
+"lines": 3,
+"params": [
+"img",
+"sd",
+"seed"
+]
+},
+"qc_gallery.py::_bleach": {
+"lines": 3,
+"params": [
+"stack",
+"tau_frames"
+]
+},
+"qc_gallery.py::_defocus": {
+"lines": 1,
+"params": [
+"img",
+"sigma"
+]
+},
+"qc_gallery.py::_defocus_one_frame": {
+"lines": 4,
+"params": [
+"frame",
+"sigma",
+"stack"
+]
+},
+"qc_gallery.py::_drift": {
+"lines": 4,
+"params": [
+"per_frame",
+"stack"
+]
+},
+"qc_gallery.py::_saturate": {
+"lines": 1,
+"params": [
+"ceiling",
+"img"
+]
+},
+"qc_gallery.py::_verdict": {
+"lines": 6,
+"params": [
+"data"
+]
+},
+"qc_gallery.py::_vibrate": {
+"lines": 5,
+"params": [
+"amplitude_px",
+"period_frames",
+"stack"
+]
+},
+"qc_gallery.py::_vignette": {
+"lines": 6,
+"params": [
+"fraction",
+"img"
+]
+},
+"qc_gallery.py::build_exemplar": {
+"lines": 42,
+"params": [
+"spec"
+]
+},
+"qc_gallery.py::build_gallery": {
+"lines": 2,
+"params": []
+},
+"qc_gallery.py::flat_field_scene": {
+"lines": 24,
+"params": [
+"n_puncta",
+"seed",
+"size"
+]
+},
+"qc_gallery.py::reference_scene": {
+"lines": 22,
+"params": [
+"n_puncta",
+"seed",
+"size"
+]
+},
+"qc_gallery.py::reference_stack": {
+"lines": 6,
+"params": [
+"n_frames",
+"seed",
+"size"
+]
+},
+"qc_gallery_ui.py::_panel": {
+"lines": 26,
+"params": [
+"Q",
+"entry",
+"which"
+]
+},
+"qc_gallery_ui.py::_qt": {
+"lines": 8,
+"params": []
+},
+"qc_gallery_ui.py::_show": {
+"lines": 28,
+"params": [
+"_index"
+]
+},
+"qc_gallery_ui.py::_to_pixmap": {
+"lines": 17,
+"params": [
+"Q",
+"array",
+"is_stack",
+"side"
+]
+},
+"qc_gallery_ui.py::make_qc_gallery_widget": {
+"lines": 72,
+"params": []
+},
+"run_pycat.py::_apply_style": {
+"lines": 6,
+"params": []
+},
+"run_pycat.py::_brand_welcome": {
+"lines": 68,
+"params": []
+},
+"run_pycat.py::_cellpose_model_cached": {
+"lines": 32,
+"params": [
+"model_name"
+]
+},
+"run_pycat.py::_ensure_maximized": {
+"lines": 12,
+"params": []
+},
+"run_pycat.py::_is_macos_arch_mismatch": {
+"lines": 31,
+"params": []
+},
+"run_pycat.py::_is_maximized": {
+"lines": 4,
+"params": []
+},
+"run_pycat.py::_maximize": {
+"lines": 4,
+"params": []
+},
+"run_pycat.py::_prewarm_cellpose_model": {
+"lines": 93,
+"params": []
+},
+"run_pycat.py::_rebrand_if_empty": {
+"lines": 6,
+"params": []
+},
+"run_pycat.py::_warmup": {
+"lines": 86,
+"params": []
+},
+"run_pycat.py::main": {
+"lines": 4,
+"params": []
+},
+"run_pycat.py::run_pycat_func": {
+"lines": 376,
+"params": []
+},
+"segmentation_scale_advisor.py::_equiv_diameter": {
+"lines": 10,
+"params": [
+"prop"
+]
+},
+"segmentation_scale_advisor.py::advise_upscaling": {
+"lines": 69,
+"params": [
+"max_factor",
+"method",
+"object_diameter_px"
+]
+},
+"segmentation_scale_advisor.py::measure_object_diameter_px": {
+"lines": 41,
+"params": [
+"image",
+"mask",
+"method"
+]
+},
+"segmentation_tools.py::_build_cellpose_model": {
+"lines": 59,
+"params": [
+"model_name"
+]
+},
+"segmentation_tools.py::_cellpose_major_version": {
+"lines": 6,
+"params": []
+},
+"segmentation_tools.py::_get_cellpose_gpu": {
+"lines": 24,
+"params": []
+},
+"segmentation_tools.py::_refine_debug_enabled": {
+"lines": 4,
+"params": []
+},
+"segmentation_tools.py::_robust_bg": {
+"lines": 7,
+"params": [
+"vals"
+]
+},
+"segmentation_tools.py::_segment_core": {
+"lines": 28,
+"params": [
+"ball_radius",
+"cell_df",
+"cell_masks",
+"fast",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_image",
+"pre_processed_image"
+]
+},
+"segmentation_tools.py::_to_uint16_safe": {
+"lines": 15,
+"params": [
+"image"
+]
+},
+"segmentation_tools.py::_weight_mean_color": {
+"lines": 32,
+"params": [
+"dst",
+"graph",
+"n",
+"src"
+]
+},
+"segmentation_tools.py::apply_watershed_labeling": {
+"lines": 73,
+"params": [
+"binary_mask",
+"original_image",
+"sigma"
+]
+},
+"segmentation_tools.py::available_cellpose_models": {
+"lines": 8,
+"params": []
+},
+"segmentation_tools.py::cell_has_punctate_signal": {
+"lines": 107,
+"params": [
+"abs_n_sigma",
+"cell_mask",
+"image_stats",
+"min_area_px",
+"min_spot_radius",
+"n_sigma",
+"original_crop",
+"smooth_sigma"
+]
+},
+"segmentation_tools.py::cell_mask_stretching": {
+"lines": 145,
+"params": [
+"cell_masks",
+"image",
+"min_relative_max",
+"preserve_scale"
+]
+},
+"segmentation_tools.py::cellpose_segmentation": {
+"lines": 113,
+"params": [
+"image",
+"model_name",
+"object_diameter",
+"postprocess"
+]
+},
+"segmentation_tools.py::compare_segmentation_speed": {
+"lines": 61,
+"params": [
+"data_instance",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_image_layer",
+"pre_processed_image_layer",
+"viewer"
+]
+},
+"segmentation_tools.py::compute_image_intensity_stats": {
+"lines": 75,
+"params": [
+"image",
+"labeled_cells",
+"min_bg_px",
+"smooth_sigma"
+]
+},
+"segmentation_tools.py::default_cellpose_model": {
+"lines": 2,
+"params": []
+},
+"segmentation_tools.py::felzenszwalb_segmentation_and_merging": {
+"lines": 67,
+"params": [
+"image",
+"min_size",
+"scale",
+"sigma"
+]
+},
+"segmentation_tools.py::fz_segmentation_and_binarization": {
+"lines": 181,
+"params": [
+"ball_radius",
+"image",
+"mask",
+"rim_close_min_result_area",
+"rim_close_radius"
+]
+},
+"segmentation_tools.py::local_thresholding_func": {
+"lines": 72,
+"params": [
+"image",
+"k_val",
+"mode",
+"window_size"
+]
+},
+"segmentation_tools.py::merge_mean_color": {
+"lines": 22,
+"params": [
+"dst",
+"graph",
+"src"
+]
+},
+"segmentation_tools.py::opencv_watershed_func": {
+"lines": 109,
+"params": [
+"binary_mask",
+"dilation_iterations",
+"dilation_size",
+"dist_thresh",
+"original_image",
+"sigma"
+]
+},
+"segmentation_tools.py::puncta_refinement_filtering_func": {
+"lines": 302,
+"params": [
+"cell_mask",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"labeled_puncta_mask",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_img",
+"processed_img",
+"puncta_mask"
+]
+},
+"segmentation_tools.py::puncta_refinement_filtering_func_fast": {
+"lines": 131,
+"params": [
+"cell_mask",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"labeled_puncta_mask",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_img",
+"processed_img",
+"puncta_mask"
+]
+},
+"segmentation_tools.py::puncta_refinement_func": {
+"lines": 88,
+"params": [
+"cell_mask",
+"fast",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_image",
+"processed_image",
+"puncta_mask"
+]
+},
+"segmentation_tools.py::refine_labels_with_contours": {
+"lines": 47,
+"params": [
+"min_area",
+"refined_labels"
+]
+},
+"segmentation_tools.py::run_cellpose_segmentation": {
+"lines": 33,
+"params": [
+"data_instance",
+"image_layer",
+"viewer"
+]
+},
+"segmentation_tools.py::run_fz_segmentation_and_merging": {
+"lines": 40,
+"params": [
+"min_size_input",
+"scale_input",
+"sigma_input",
+"viewer"
+]
+},
+"segmentation_tools.py::run_local_thresholding": {
+"lines": 58,
+"params": [
+"k_slider",
+"mode_dropdown",
+"viewer",
+"window_slider"
+]
+},
+"segmentation_tools.py::run_segment_subcellular_objects": {
+"lines": 136,
+"params": [
+"data_instance",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_image_layer",
+"pre_processed_image_layer",
+"punctate_gate",
+"punctate_gate_abs_sigma",
+"punctate_gate_sigma",
+"viewer"
+]
+},
+"segmentation_tools.py::run_train_and_apply_rf_classifier": {
+"lines": 42,
+"params": [
+"data_instance",
+"image_layer",
+"label_layer",
+"viewer"
+]
+},
+"segmentation_tools.py::segment_subcellular_objects": {
+"lines": 163,
+"params": [
+"ball_radius",
+"cell_df",
+"cell_label",
+"cell_mask",
+"crop_to_cell",
+"global_snr_threshold",
+"image_stats",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_image",
+"pre_processed_image",
+"punctate_gate",
+"punctate_gate_abs_sigma",
+"punctate_gate_sigma",
+"refine_fast"
+]
+},
+"segmentation_tools.py::train_and_apply_rf_classifier": {
+"lines": 73,
+"params": [
+"image",
+"object_diameter",
+"training_labels"
+]
+},
+"session_loader.py::classify_file": {
+"lines": 85,
+"params": [
+"path"
+]
+},
+"session_loader.py::load_session": {
+"lines": 98,
+"params": [
+"data_instance",
+"folder",
+"progress_callback",
+"stem_filter",
+"viewer"
+]
+},
+"session_loader.py::scan_output_folder": {
+"lines": 27,
+"params": [
+"folder"
+]
+},
+"spatial_acf_tools.py::_add_run_sacf_analysis": {
+"lines": 131,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"spatial_acf_tools.py::_crops_from_shapes_layer": {
+"lines": 34,
+"params": [
+"image",
+"shapes_layer"
+]
+},
+"spatial_acf_tools.py::_fit_sacf_1d": {
+"lines": 47,
+"params": [
+"x_axis",
+"y_axis"
+]
+},
+"spatial_acf_tools.py::_gaussian": {
+"lines": 23,
+"params": [
+"amplitude",
+"mean",
+"offset",
+"sigma",
+"x"
+]
+},
+"spatial_acf_tools.py::_isolate_central_mode": {
+"lines": 19,
+"params": [
+"x_axis",
+"y_axis"
+]
+},
+"spatial_acf_tools.py::_lir_crop": {
+"lines": 24,
+"params": [
+"binary_mask",
+"image"
+]
+},
+"spatial_acf_tools.py::_make_record": {
+"lines": 15,
+"params": [
+"extra",
+"microns_per_pixel",
+"roi_label",
+"sigma_x",
+"sigma_y",
+"slice_idx"
+]
+},
+"spatial_acf_tools.py::_on_mode_changed": {
+"lines": 3,
+"params": [
+"btn_id"
+]
+},
+"spatial_acf_tools.py::_on_run": {
+"lines": 39,
+"params": []
+},
+"spatial_acf_tools.py::_rect_from_shape_vertices": {
+"lines": 29,
+"params": [
+"image_shape",
+"vertices"
+]
+},
+"spatial_acf_tools.py::plot_sigma_vs_slice": {
+"lines": 34,
+"params": [
+"results_df"
+]
+},
+"spatial_acf_tools.py::run_sacf_analysis": {
+"lines": 108,
+"params": [
+"data_instance",
+"image_layer",
+"labels_layer",
+"mode",
+"plot_results",
+"shapes_layer",
+"viewer"
+]
+},
+"spatial_acf_tools.py::sacf_drawn_rect_mode": {
+"lines": 57,
+"params": [
+"microns_per_pixel",
+"shapes_layer",
+"stack"
+]
+},
+"spatial_acf_tools.py::sacf_lir_mode": {
+"lines": 48,
+"params": [
+"labeled_cell_mask",
+"microns_per_pixel",
+"stack"
+]
+},
+"spatial_acf_tools.py::sacf_single_roi": {
+"lines": 25,
+"params": [
+"roi_image"
+]
+},
+"spatial_acf_tools.py::sacf_whole_image_mode": {
+"lines": 29,
+"params": [
+"microns_per_pixel",
+"stack"
+]
+},
+"spatial_metrology_tools.py::_cell_centroids": {
+"lines": 3,
+"params": [
+"cell_label",
+"df"
+]
+},
+"spatial_metrology_tools.py::_stat": {
+"lines": 25,
+"params": [
+"p_px"
+]
+},
+"spatial_metrology_tools.py::convex_hull_metrics": {
+"lines": 40,
+"params": [
+"cell_area_um2",
+"coords"
+]
+},
+"spatial_metrology_tools.py::delaunay_metrics": {
+"lines": 40,
+"params": [
+"coords"
+]
+},
+"spatial_metrology_tools.py::distance_to_roi": {
+"lines": 63,
+"params": [
+"coords",
+"roi_coords",
+"roi_type"
+]
+},
+"spatial_metrology_tools.py::get_puncta_centroids": {
+"lines": 42,
+"params": [
+"labeled_cells",
+"microns_per_pixel",
+"puncta_mask"
+]
+},
+"spatial_metrology_tools.py::local_object_density": {
+"lines": 28,
+"params": [
+"bandwidth",
+"coords"
+]
+},
+"spatial_metrology_tools.py::minimum_spanning_tree": {
+"lines": 43,
+"params": [
+"coords"
+]
+},
+"spatial_metrology_tools.py::nearest_neighbour_distance": {
+"lines": 26,
+"params": [
+"coords"
+]
+},
+"spatial_metrology_tools.py::pair_correlation_function": {
+"lines": 56,
+"params": [
+"cell_area_um2",
+"coords",
+"dr",
+"edge_correct",
+"r_max"
+]
+},
+"spatial_metrology_tools.py::radial_localization_profile": {
+"lines": 60,
+"params": [
+"cell_mask",
+"coords",
+"microns_per_pixel",
+"n_bins"
+]
+},
+"spatial_metrology_tools.py::ripleys_l": {
+"lines": 84,
+"params": [
+"boundary_dist_um",
+"cell_area_um2",
+"coords",
+"edge_correct",
+"r_values"
+]
+},
+"spatial_metrology_tools.py::run_all_spatial_metrics": {
+"lines": 70,
+"params": [
+"cell_mask",
+"coords",
+"microns_per_pixel",
+"n_radial_bins",
+"r_values",
+"roi_coords",
+"roi_type"
+]
+},
+"spatial_metrology_tools.py::spatial_null_envelope": {
+"lines": 132,
+"params": [
+"coords",
+"edge_correct",
+"microns_per_pixel",
+"n_simulations",
+"r_values",
+"region_mask",
+"seed",
+"statistic"
+]
+},
+"spatial_metrology_tools.py::voronoi_metrics": {
+"lines": 74,
+"params": [
+"cell_mask",
+"coords",
+"microns_per_pixel"
+]
+},
+"spatial_metrology_ui.py::__init__": {
+"lines": 10,
+"params": [
+"checks",
+"coords_df",
+"kwargs",
+"labeled_cells",
+"microns_per_pixel",
+"n_radial_bins",
+"roi_coords",
+"roi_type",
+"self"
+]
+},
+"spatial_metrology_ui.py::_add_spatial_metrology": {
+"lines": 241,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"spatial_metrology_ui.py::_on_error": {
+"lines": 5,
+"params": [
+"msg"
+]
+},
+"spatial_metrology_ui.py::_on_finished": {
+"lines": 32,
+"params": [
+"all_results"
+]
+},
+"spatial_metrology_ui.py::_on_progress": {
+"lines": 2,
+"params": [
+"done",
+"total"
+]
+},
+"spatial_metrology_ui.py::_on_run": {
+"lines": 97,
+"params": []
+},
+"spatial_metrology_ui.py::_results_to_dataframes": {
+"lines": 87,
+"params": [
+"all_results"
+]
+},
+"spatial_metrology_ui.py::run": {
+"lines": 96,
+"params": [
+"self"
+]
+},
+"spatial_randomness_tools.py::_add_spatial_randomness": {
+"lines": 129,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"spatial_randomness_tools.py::_kurt": {
+"lines": 2,
+"params": [
+"a"
+]
+},
+"spatial_randomness_tools.py::_on_run": {
+"lines": 56,
+"params": []
+},
+"spatial_randomness_tools.py::_phase_randomised_surrogate": {
+"lines": 16,
+"params": [
+"image",
+"rng"
+]
+},
+"spatial_randomness_tools.py::_spatial_entropy": {
+"lines": 26,
+"params": [
+"bins",
+"image",
+"mask"
+]
+},
+"spatial_randomness_tools.py::autocorrelation_length": {
+"lines": 32,
+"params": [
+"image",
+"mask"
+]
+},
+"spatial_randomness_tools.py::local_variance_ratio": {
+"lines": 21,
+"params": [
+"image",
+"mask",
+"window"
+]
+},
+"spatial_randomness_tools.py::measure_spatial_randomness": {
+"lines": 157,
+"params": [
+"entropy_bins",
+"image",
+"mask",
+"n_permutations",
+"random_seed",
+"window"
+]
+},
+"spatial_randomness_tools.py::morans_I": {
+"lines": 42,
+"params": [
+"image",
+"mask"
+]
+},
+"spatial_randomness_tools.py::morans_I_headroom": {
+"lines": 56,
+"params": [
+"image",
+"mask"
+]
+},
+"spatial_randomness_tools.py::structure_beyond_optics": {
+"lines": 102,
+"params": [
+"image",
+"mask",
+"n_permutations",
+"seed"
+]
+},
+"spida_tools.py::_dtype_from_layer": {
+"lines": 1,
+"params": [
+"image_layer"
+]
+},
+"spida_tools.py::_dtype_max": {
+"lines": 7,
+"params": [
+"image_layer"
+]
+},
+"spida_tools.py::_gaussian_curve": {
+"lines": 4,
+"params": [
+"amp",
+"mean",
+"width",
+"x"
+]
+},
+"spida_tools.py::_interpret_state": {
+"lines": 7,
+"params": [
+"state"
+]
+},
+"spida_tools.py::_poisson_curve": {
+"lines": 15,
+"params": [
+"amp",
+"div",
+"mea",
+"x"
+]
+},
+"spida_tools.py::_roi_pixels": {
+"lines": 55,
+"params": [
+"image_layer",
+"roi_shapes_layer",
+"viewer"
+]
+},
+"spida_tools.py::build_intensity_histogram": {
+"lines": 30,
+"params": [
+"n_bins",
+"pixels",
+"white_noise"
+]
+},
+"spida_tools.py::check_assumptions": {
+"lines": 95,
+"params": [
+"dtype_max",
+"pixels"
+]
+},
+"spida_tools.py::check_modality": {
+"lines": 70,
+"params": [
+"modality",
+"pixels"
+]
+},
+"spida_tools.py::fit_spida_histogram": {
+"lines": 54,
+"params": [
+"x",
+"y"
+]
+},
+"spida_tools.py::napari_show_info": {
+"lines": 1,
+"params": [
+"msg"
+]
+},
+"spida_tools.py::napari_show_warning": {
+"lines": 1,
+"params": [
+"msg"
+]
+},
+"spida_tools.py::run_spida_analysis": {
+"lines": 60,
+"params": [
+"epsilon0",
+"image_layer",
+"modality",
+"n_bins",
+"roi_shapes_layer",
+"viewer",
+"white_noise"
+]
+},
+"spida_tools.py::run_spida_calibration": {
+"lines": 30,
+"params": [
+"image_layer",
+"modality",
+"n_bins",
+"roi_shapes_layer",
+"viewer",
+"white_noise"
+]
+},
+"spida_tools.py::spida_model": {
+"lines": 48,
+"params": [
+"N",
+"amp",
+"epsilon",
+"x"
+]
+},
+"spida_ui.py::_add_spida": {
+"lines": 90,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"spida_ui.py::_layer": {
+"lines": 8,
+"params": [
+"dropdown",
+"ui_instance"
+]
+},
+"spida_ui.py::_modality": {
+"lines": 6,
+"params": []
+},
+"stack_access.py::extract_2d_plane": {
+"lines": 30,
+"params": [
+"dtype",
+"frame_index",
+"layer_data"
+]
+},
+"stack_access.py::get_array_source": {
+"lines": 53,
+"params": [
+"access_pattern",
+"allow_materialize",
+"dtype",
+"layer_or_data"
+]
+},
+"stack_access.py::iter_frames": {
+"lines": 49,
+"params": [
+"dtype",
+"indices",
+"stack_like"
+]
+},
+"stack_access.py::layer_is_stack": {
+"lines": 9,
+"params": [
+"layer_data"
+]
+},
+"stack_access.py::materialize_stack": {
+"lines": 43,
+"params": [
+"dtype",
+"progress_callback",
+"stack_like"
+]
+},
+"stack_access.py::read_frame": {
+"lines": 10,
+"params": [
+"dtype",
+"stack_like",
+"t"
+]
+},
+"stack_access.py::require_plane": {
+"lines": 14,
+"params": [
+"context",
+"dtype",
+"frame",
+"layer_or_data"
+]
+},
+"stack_access.py::require_stack": {
+"lines": 33,
+"params": [
+"context",
+"dtype",
+"layer_or_data"
+]
+},
+"stack_access.py::stack_shape": {
+"lines": 5,
+"params": [
+"stack_like"
+]
+},
+"stack_access.py::stream_stats": {
+"lines": 54,
+"params": [
+"percentiles",
+"stack_like"
+]
+},
+"stack_access.py::warn_if_assumed_axis": {
+"lines": 41,
+"params": [
+"data_repository",
+"operation"
+]
+},
+"storage_probe.py::__init__": {
+"lines": 7,
+"params": [
+"location",
+"message",
+"needs_download",
+"self",
+"size_bytes",
+"slow",
+"throughput_mbps"
+]
+},
+"storage_probe.py::__repr__": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"storage_probe.py::_build_message": {
+"lines": 23,
+"params": [
+"location",
+"needs_download",
+"size",
+"throughput"
+]
+},
+"storage_probe.py::_fmt_size": {
+"lines": 5,
+"params": [
+"nbytes"
+]
+},
+"storage_probe.py::_is_cloud_placeholder": {
+"lines": 19,
+"params": [
+"path"
+]
+},
+"storage_probe.py::_windows_drive_type": {
+"lines": 19,
+"params": [
+"path"
+]
+},
+"storage_probe.py::classify_location": {
+"lines": 8,
+"params": [
+"path"
+]
+},
+"storage_probe.py::measure_throughput": {
+"lines": 43,
+"params": [
+"nbytes",
+"path"
+]
+},
+"storage_probe.py::probe_path": {
+"lines": 29,
+"params": [
+"measure",
+"path"
+]
+},
+"tag_registry.py::_decorate": {
+"lines": 13,
+"params": [
+"fn"
+]
+},
+"tag_registry.py::_register_ui_operations": {
+"lines": 46,
+"params": []
+},
+"tag_registry.py::_reset_registry_for_tests": {
+"lines": 2,
+"params": []
+},
+"tag_registry.py::_wrapped": {
+"lines": 1,
+"params": []
+},
+"tag_registry.py::attach_plot_tags": {
+"lines": 7,
+"params": [
+"figure",
+"plot_of",
+"source_layers"
+]
+},
+"tag_registry.py::get_operation": {
+"lines": 8,
+"params": [
+"op"
+]
+},
+"tag_registry.py::list_operations": {
+"lines": 2,
+"params": []
+},
+"tag_registry.py::operation_of": {
+"lines": 2,
+"params": [
+"fn"
+]
+},
+"tag_registry.py::register_operation": {
+"lines": 58,
+"params": [
+"aliases",
+"op",
+"produces",
+"role",
+"summary",
+"target"
+]
+},
+"tag_registry.py::tag_from_operation": {
+"lines": 45,
+"params": [
+"fn_or_op",
+"layer",
+"source_layer",
+"target"
+]
+},
+"tag_registry.py::tags_for_plot": {
+"lines": 31,
+"params": [
+"plot_of",
+"source_layers"
+]
+},
+"tag_registry.py::tags_layer": {
+"lines": 36,
+"params": [
+"aliases",
+"op",
+"produces",
+"role",
+"summary",
+"target"
+]
+},
+"tag_resolver.py::_describe": {
+"lines": 10,
+"params": [
+"query"
+]
+},
+"tag_resolver.py::_has_parent": {
+"lines": 7,
+"params": [
+"layer"
+]
+},
+"tag_resolver.py::_load_bindings": {
+"lines": 22,
+"params": []
+},
+"tag_resolver.py::autopopulate": {
+"lines": 51,
+"params": [
+"auto_select_likely",
+"binding_key",
+"dropdown",
+"viewer"
+]
+},
+"tag_resolver.py::explain": {
+"lines": 35,
+"params": [
+"layer"
+]
+},
+"tag_resolver.py::matches": {
+"lines": 18,
+"params": [
+"layer",
+"query"
+]
+},
+"tag_resolver.py::resolve": {
+"lines": 96,
+"params": [
+"exclude",
+"query",
+"viewer"
+]
+},
+"tag_resolver.py::resolve_binding": {
+"lines": 29,
+"params": [
+"binding_key",
+"exclude",
+"viewer"
+]
+},
+"temperature_tools.py::_annotate": {
+"lines": 19,
+"params": [
+"T",
+"arrow_up",
+"color",
+"label"
+]
+},
+"temperature_tools.py::_baseline_onset": {
+"lines": 58,
+"params": [
+"frac",
+"n_bins",
+"signal",
+"temp"
+]
+},
+"temperature_tools.py::_fm": {
+"lines": 3,
+"params": [
+"i"
+]
+},
+"temperature_tools.py::_label": {
+"lines": 2,
+"params": [
+"key"
+]
+},
+"temperature_tools.py::_load_font": {
+"lines": 17,
+"params": [
+"px"
+]
+},
+"temperature_tools.py::_norm": {
+"lines": 2,
+"params": [
+"a"
+]
+},
+"temperature_tools.py::_rises": {
+"lines": 6,
+"params": [
+"s"
+]
+},
+"temperature_tools.py::_sigmoid_midpoint": {
+"lines": 49,
+"params": [
+"n_bins",
+"signal",
+"temp"
+]
+},
+"temperature_tools.py::apply_static_pattern_correction": {
+"lines": 38,
+"params": [
+"reference_index",
+"stack"
+]
+},
+"temperature_tools.py::build_temperature_labels": {
+"lines": 13,
+"params": [
+"elapsed_s",
+"temperatures"
+]
+},
+"temperature_tools.py::detect_transitions": {
+"lines": 88,
+"params": [
+"frac",
+"method",
+"signal_column",
+"turbidity_df"
+]
+},
+"temperature_tools.py::elapsed_to_seconds": {
+"lines": 3,
+"params": [
+"elapsed_ms"
+]
+},
+"temperature_tools.py::entropy_turbidity_curve": {
+"lines": 77,
+"params": [
+"bins",
+"correct_focal_drift",
+"reference_frame_index",
+"stack",
+"subtract_first_frame",
+"temperatures"
+]
+},
+"temperature_tools.py::find_subfolders_with_prefix": {
+"lines": 10,
+"params": [
+"parent_dir",
+"prefix"
+]
+},
+"temperature_tools.py::focus_scores": {
+"lines": 52,
+"params": [
+"mask",
+"stack"
+]
+},
+"temperature_tools.py::focus_scores_multimetric": {
+"lines": 62,
+"params": [
+"mask",
+"stack"
+]
+},
+"temperature_tools.py::frame_entropy": {
+"lines": 16,
+"params": [
+"bins",
+"frame"
+]
+},
+"temperature_tools.py::get_filenames_by_type": {
+"lines": 8,
+"params": [
+"file_extension",
+"root_folder"
+]
+},
+"temperature_tools.py::guess_clear_frame": {
+"lines": 43,
+"params": [
+"flatness_cov_threshold",
+"stack"
+]
+},
+"temperature_tools.py::locate_temperature_csv": {
+"lines": 17,
+"params": [
+"temperature_root",
+"tiff_path"
+]
+},
+"temperature_tools.py::parse_batch_filenames": {
+"lines": 74,
+"params": [
+"filenames"
+]
+},
+"temperature_tools.py::plot_turbidity_transitions": {
+"lines": 76,
+"params": [
+"df",
+"interactive",
+"signal_column",
+"transitions"
+]
+},
+"temperature_tools.py::read_micromanager_times": {
+"lines": 25,
+"params": [
+"tiff_path"
+]
+},
+"temperature_tools.py::reference_subtraction": {
+"lines": 98,
+"params": [
+"clip_fraction",
+"mode",
+"rebuild_reference_index",
+"reference",
+"stack"
+]
+},
+"temperature_tools.py::render_annotated_mp4": {
+"lines": 125,
+"params": [
+"colormap",
+"elapsed_s",
+"fps",
+"out_path",
+"pixel_um",
+"progress_callback",
+"scalebar_um",
+"stack",
+"temps"
+]
+},
+"temperature_tools.py::run_temperature_batch": {
+"lines": 105,
+"params": [
+"correct_focal_drift",
+"csv_header",
+"export_corrected",
+"export_mp4",
+"fps",
+"pixel_um",
+"progress_callback",
+"scalebar_um",
+"subtract_first_frame",
+"temp_column",
+"temperature_root",
+"tiff_root"
+]
+},
+"temperature_tools.py::sync_temperatures": {
+"lines": 52,
+"params": [
+"csv_header",
+"csv_path",
+"datetime_column",
+"received_times",
+"temp_column"
+]
+},
+"temperature_tools.py::to_integer": {
+"lines": 2,
+"params": [
+"dt"
+]
+},
+"temperature_ui.py::__init__": {
+"lines": 3,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"temperature_ui.py::_add_batch": {
+"lines": 63,
+"params": [
+"layout",
+"self"
+]
+},
+"temperature_ui.py::_add_export": {
+"lines": 49,
+"params": [
+"layout",
+"self"
+]
+},
+"temperature_ui.py::_add_sync": {
+"lines": 67,
+"params": [
+"layout",
+"self"
+]
+},
+"temperature_ui.py::_add_turbidity": {
+"lines": 113,
+"params": [
+"layout",
+"self"
+]
+},
+"temperature_ui.py::_auto_find_csv": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_autofill_tiff": {
+"lines": 4,
+"params": []
+},
+"temperature_ui.py::_browse_csv": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_browse_into": {
+"lines": 4,
+"params": [
+"line_edit",
+"self"
+]
+},
+"temperature_ui.py::_browse_tempfolder": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_browse_tiff": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_build_phase_diagram": {
+"lines": 31,
+"params": [
+"df",
+"self"
+]
+},
+"temperature_ui.py::_corrected_stack": {
+"lines": 10,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_get_stack": {
+"lines": 19,
+"params": [
+"self",
+"sname"
+]
+},
+"temperature_ui.py::_make_text_layer": {
+"lines": 47,
+"params": [
+"elapsed_s",
+"self",
+"stack_name",
+"temps"
+]
+},
+"temperature_ui.py::_on_add_corrected_layer": {
+"lines": 7,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_batch": {
+"lines": 42,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_clear_turbidity": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_export": {
+"lines": 34,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_guess_clear_frame": {
+"lines": 20,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_pixel_size_set": {
+"lines": 7,
+"params": [
+"self",
+"v"
+]
+},
+"temperature_ui.py::_on_preview_subtracted": {
+"lines": 28,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_save_turbidity": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_scalebar": {
+"lines": 22,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_sync": {
+"lines": 65,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_on_turbidity": {
+"lines": 64,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_pixel_size": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"temperature_ui.py::_prog": {
+"lines": 4,
+"params": [
+"i",
+"n"
+]
+},
+"temperature_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"temperature_ui.py::_render_annotated_mp4": {
+"lines": 12,
+"params": [
+"elapsed_s",
+"fps",
+"out_path",
+"pixel_um",
+"scalebar_um",
+"self",
+"stack",
+"temps"
+]
+},
+"temperature_ui.py::_update": {
+"lines": 9,
+"params": [
+"event"
+]
+},
+"temperature_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"name_hint",
+"self"
+]
+},
+"temperature_ui.py::setup_ui": {
+"lines": 45,
+"params": [
+"self"
+]
+},
+"temporal_enhancement_tools.py::_enhance_frame": {
+"lines": 35,
+"params": [
+"ball_radius",
+"clahe_ref",
+"frame",
+"norm_max"
+]
+},
+"temporal_enhancement_tools.py::_gauss2d": {
+"lines": 1,
+"params": [
+"a",
+"sigma"
+]
+},
+"temporal_enhancement_tools.py::_pearson": {
+"lines": 3,
+"params": [
+"a",
+"b"
+]
+},
+"temporal_enhancement_tools.py::_per_frame_signal": {
+"lines": 19,
+"params": [
+"mask",
+"stack"
+]
+},
+"temporal_enhancement_tools.py::_spearman": {
+"lines": 5,
+"params": [
+"a",
+"b"
+]
+},
+"temporal_enhancement_tools.py::compete_methods": {
+"lines": 46,
+"params": [
+"ball_radius",
+"mask",
+"methods",
+"progress_cb",
+"raw_stack",
+"windows"
+]
+},
+"temporal_enhancement_tools.py::enhance_stack": {
+"lines": 125,
+"params": [
+"ball_radius",
+"method",
+"progress_cb",
+"stack",
+"window"
+]
+},
+"temporal_enhancement_tools.py::score_trend_preservation": {
+"lines": 39,
+"params": [
+"enhanced_stack",
+"mask",
+"raw_stack"
+]
+},
+"timeseries_condensate_tools.py::__array__": {
+"lines": 2,
+"params": [
+"dtype",
+"self"
+]
+},
+"timeseries_condensate_tools.py::__getitem__": {
+"lines": 5,
+"params": [
+"idx",
+"self"
+]
+},
+"timeseries_condensate_tools.py::__init__": {
+"lines": 8,
+"params": [
+"_x0",
+"_x1",
+"_y0",
+"_y1",
+"self",
+"src"
+]
+},
+"timeseries_condensate_tools.py::__len__": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::_add_lazy_preprocess_stack": {
+"lines": 519,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"timeseries_condensate_tools.py::_add_run_timeseries_condensate_analysis": {
+"lines": 484,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"timeseries_condensate_tools.py::_add_ts_upscale_stack": {
+"lines": 134,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"timeseries_condensate_tools.py::_after_bg": {
+"lines": 3,
+"params": [
+"zarr_path"
+]
+},
+"timeseries_condensate_tools.py::_after_preproc": {
+"lines": 3,
+"params": [
+"zarr_path"
+]
+},
+"timeseries_condensate_tools.py::_apply_dissolution": {
+"lines": 3,
+"params": []
+},
+"timeseries_condensate_tools.py::_apply_shift": {
+"lines": 14,
+"params": [
+"dc",
+"dr",
+"image"
+]
+},
+"timeseries_condensate_tools.py::_apply_steady_state": {
+"lines": 3,
+"params": []
+},
+"timeseries_condensate_tools.py::_cb": {
+"lines": 3,
+"params": [
+"frame",
+"total"
+]
+},
+"timeseries_condensate_tools.py::_cellpose_min_diameter_px": {
+"lines": 4,
+"params": []
+},
+"timeseries_condensate_tools.py::_compute_stack_global_range": {
+"lines": 17,
+"params": [
+"n_t",
+"stack_data"
+]
+},
+"timeseries_condensate_tools.py::_condensate_metrics_per_cell": {
+"lines": 45,
+"params": [
+"cell_label",
+"cell_mask",
+"microns_per_pixel_sq",
+"refined_puncta_mask"
+]
+},
+"timeseries_condensate_tools.py::_dispatch": {
+"lines": 55,
+"params": [
+"dispatch_args"
+]
+},
+"timeseries_condensate_tools.py::_done": {
+"lines": 15,
+"params": [
+"f",
+"out"
+]
+},
+"timeseries_condensate_tools.py::_dspin": {
+"lines": 5,
+"params": [
+"hi",
+"lo",
+"step",
+"tip",
+"val"
+]
+},
+"timeseries_condensate_tools.py::_err": {
+"lines": 2,
+"params": [
+"msg"
+]
+},
+"timeseries_condensate_tools.py::_get_zarr_dir_path": {
+"lines": 15,
+"params": [
+"stack_like"
+]
+},
+"timeseries_condensate_tools.py::_init_worker_threads": {
+"lines": 31,
+"params": []
+},
+"timeseries_condensate_tools.py::_load_from_cache": {
+"lines": 17,
+"params": [
+"cache_paths",
+"existing",
+"layer_name",
+"want_bgrem",
+"want_preproc"
+]
+},
+"timeseries_condensate_tools.py::_make__stackprocessworker": {
+"lines": 398,
+"params": []
+},
+"timeseries_condensate_tools.py::_make_timeseriesworker": {
+"lines": 46,
+"params": []
+},
+"timeseries_condensate_tools.py::_materialize_stack_to_zarr": {
+"lines": 30,
+"params": [
+"H",
+"W",
+"n_frames",
+"prefix",
+"stack_like"
+]
+},
+"timeseries_condensate_tools.py::_on_build": {
+"lines": 358,
+"params": []
+},
+"timeseries_condensate_tools.py::_on_cancel": {
+"lines": 5,
+"params": []
+},
+"timeseries_condensate_tools.py::_on_check": {
+"lines": 30,
+"params": []
+},
+"timeseries_condensate_tools.py::_on_check_correlation": {
+"lines": 29,
+"params": []
+},
+"timeseries_condensate_tools.py::_on_discard_cache": {
+"lines": 11,
+"params": []
+},
+"timeseries_condensate_tools.py::_on_error": {
+"lines": 5,
+"params": [
+"msg"
+]
+},
+"timeseries_condensate_tools.py::_on_finished": {
+"lines": 9,
+"params": [
+"_path"
+]
+},
+"timeseries_condensate_tools.py::_on_progress": {
+"lines": 13,
+"params": [
+"done",
+"total"
+]
+},
+"timeseries_condensate_tools.py::_on_run": {
+"lines": 115,
+"params": []
+},
+"timeseries_condensate_tools.py::_phase_shift": {
+"lines": 9,
+"params": [
+"frame",
+"reference"
+]
+},
+"timeseries_condensate_tools.py::_plot_condensate_fraction": {
+"lines": 36,
+"params": [
+"results_df"
+]
+},
+"timeseries_condensate_tools.py::_prepare_source_zarr": {
+"lines": 44,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::_process_frame_worker": {
+"lines": 68,
+"params": [
+"args"
+]
+},
+"timeseries_condensate_tools.py::_prog": {
+"lines": 1,
+"params": [
+"i",
+"n"
+]
+},
+"timeseries_condensate_tools.py::_read_source_frame": {
+"lines": 35,
+"params": [
+"global_range",
+"stack_data",
+"t"
+]
+},
+"timeseries_condensate_tools.py::_session_zarr_dir": {
+"lines": 4,
+"params": []
+},
+"timeseries_condensate_tools.py::_source_descriptor": {
+"lines": 42,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::_start_bg": {
+"lines": 13,
+"params": [
+"source"
+]
+},
+"timeseries_condensate_tools.py::_start_worker": {
+"lines": 80,
+"params": [
+"colormap",
+"display_name",
+"fn_kwargs",
+"fn_name",
+"on_done_cb",
+"source",
+"zarr_name"
+]
+},
+"timeseries_condensate_tools.py::_ts_analyze_frame_worker": {
+"lines": 182,
+"params": [
+"args"
+]
+},
+"timeseries_condensate_tools.py::_worker_read_frame": {
+"lines": 29,
+"params": [
+"src_desc",
+"t"
+]
+},
+"timeseries_condensate_tools.py::cancel": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::estimate_temporal_correlation": {
+"lines": 89,
+"params": [
+"n_sample_pairs",
+"stack_data"
+]
+},
+"timeseries_condensate_tools.py::run": {
+"lines": 17,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::run_timeseries_condensate_analysis": {
+"lines": 361,
+"params": [
+"ball_radius",
+"cancel_check",
+"compute_spatial",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"labeled_cell_mask",
+"local_snr_threshold",
+"max_area_fraction",
+"microns_per_pixel_sq",
+"min_spot_radius",
+"n_workers",
+"per_frame_normalize",
+"preprocessed_stack",
+"progress_callback",
+"reference_frame",
+"stack",
+"use_drift_correction",
+"use_parallel"
+]
+},
+"timeseries_condensate_tools.py::transpose": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"timeseries_condensate_tools.py::upscale_stack_to_zarr": {
+"lines": 34,
+"params": [
+"factor",
+"progress_cb",
+"stack_like"
+]
+},
+"timeseries_invitro_fluor_ui.py::__init__": {
+"lines": 3,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"timeseries_invitro_fluor_ui.py::_done": {
+"lines": 13,
+"params": [
+"field_df"
+]
+},
+"timeseries_invitro_fluor_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::_drop_small": {
+"lines": 3,
+"params": [
+"lab",
+"min_area"
+]
+},
+"timeseries_invitro_fluor_ui.py::_err": {
+"lines": 3,
+"params": [
+"msg"
+]
+},
+"timeseries_invitro_fluor_ui.py::_frame_interval_s": {
+"lines": 9,
+"params": [
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::_on_run": {
+"lines": 59,
+"params": []
+},
+"timeseries_invitro_fluor_ui.py::_prog": {
+"lines": 3,
+"params": [
+"d",
+"t"
+]
+},
+"timeseries_invitro_fluor_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"timeseries_invitro_fluor_ui.py::_run_row": {
+"lines": 9,
+"params": [
+"form",
+"label"
+]
+},
+"timeseries_invitro_fluor_ui.py::_seg": {
+"lines": 31,
+"params": [
+"frame",
+"t"
+]
+},
+"timeseries_invitro_fluor_ui.py::_segment_frame_fn_factory": {
+"lines": 37,
+"params": []
+},
+"timeseries_invitro_fluor_ui.py::_show": {
+"lines": 11,
+"params": [
+"tables",
+"title"
+]
+},
+"timeseries_invitro_fluor_ui.py::_stack_layer": {
+"lines": 5,
+"params": [
+"dd",
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::_task": {
+"lines": 8,
+"params": [
+"progress"
+]
+},
+"timeseries_invitro_fluor_ui.py::_tsivf_field_trajectories": {
+"lines": 70,
+"params": [
+"layout",
+"ui"
+]
+},
+"timeseries_invitro_fluor_ui.py::_tsivf_linking": {
+"lines": 131,
+"params": [
+"layout",
+"ui"
+]
+},
+"timeseries_invitro_fluor_ui.py::_tsivf_object_trajectories": {
+"lines": 37,
+"params": [
+"layout",
+"ui"
+]
+},
+"timeseries_invitro_fluor_ui.py::_tsivf_preprocessing": {
+"lines": 12,
+"params": [
+"layout",
+"ui"
+]
+},
+"timeseries_invitro_fluor_ui.py::_tsivf_segmentation": {
+"lines": 144,
+"params": [
+"layout",
+"ui"
+]
+},
+"timeseries_invitro_fluor_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::run": {
+"lines": 6,
+"params": [
+"self"
+]
+},
+"timeseries_invitro_fluor_ui.py::setup_ui": {
+"lines": 51,
+"params": [
+"self"
+]
+},
+"timeseries_invitro_tools.py::_detect_fusions": {
+"lines": 76,
+"params": [
+"area_tol",
+"linked"
+]
+},
+"timeseries_invitro_tools.py::build_object_records": {
+"lines": 64,
+"params": [
+"frame_interval_s",
+"fusion_df",
+"linked_df"
+]
+},
+"timeseries_invitro_tools.py::field_trajectories": {
+"lines": 57,
+"params": [
+"frame_interval_s",
+"intensity_stack_like",
+"label_stack",
+"microns_per_pixel",
+"progress_callback"
+]
+},
+"timeseries_invitro_tools.py::link_condensates": {
+"lines": 70,
+"params": [
+"area_weight",
+"detect_fusion",
+"fusion_area_tol",
+"max_displacement_um",
+"max_gap_frames",
+"progress_callback",
+"props_df",
+"search_radius_scale"
+]
+},
+"timeseries_invitro_tools.py::object_records_to_df": {
+"lines": 19,
+"params": [
+"records"
+]
+},
+"timeseries_invitro_tools.py::relabel_stack_by_track": {
+"lines": 21,
+"params": [
+"label_stack",
+"linked_df"
+]
+},
+"timeseries_invitro_tools.py::segment_stack_per_frame": {
+"lines": 67,
+"params": [
+"dtype",
+"keyframe_every",
+"n_frames",
+"progress_callback",
+"segment_frame_fn",
+"stack_like"
+]
+},
+"timeseries_invitro_tools.py::stack_frame_properties": {
+"lines": 59,
+"params": [
+"intensity_stack_like",
+"label_stack",
+"microns_per_pixel"
+]
+},
+"topology_tools.py::_find": {
+"lines": 4,
+"params": [
+"node"
+]
+},
+"topology_tools.py::_nuclear_territory": {
+"lines": 15,
+"params": [
+"dapi",
+"min_area",
+"smooth_sigma",
+"thr_scale"
+]
+},
+"topology_tools.py::_peak_persistence": {
+"lines": 79,
+"params": [
+"image"
+]
+},
+"topology_tools.py::compute_topology_envelope": {
+"lines": 39,
+"params": [
+"ball_radius",
+"image",
+"mode",
+"smooth"
+]
+},
+"topology_tools.py::detect_chromatin_voids": {
+"lines": 113,
+"params": [
+"ball_radius",
+"condensate_image",
+"dapi",
+"params",
+"territory"
+]
+},
+"topology_tools.py::estimate_image_noise": {
+"lines": 32,
+"params": [
+"image"
+]
+},
+"topology_tools.py::normalize_within_mask": {
+"lines": 24,
+"params": [
+"field",
+"mask"
+]
+},
+"topology_tools.py::run_chromatin_topology": {
+"lines": 79,
+"params": [
+"connectivity_percentile",
+"data_instance",
+"image_layer",
+"mode",
+"viewer"
+]
+},
+"topology_tools.py::run_chromatin_void_detection": {
+"lines": 60,
+"params": [
+"condensate_layer",
+"dapi_layer",
+"data_instance",
+"params",
+"viewer"
+]
+},
+"topology_tools.py::topology_metrics": {
+"lines": 192,
+"params": [
+"ball_radius",
+"cell_mask",
+"connectivity_percentile",
+"envelope",
+"image_noise",
+"min_basin_distance"
+]
+},
+"trackmate_bridge.py::_get_gateway": {
+"lines": 93,
+"params": [
+"fiji_endpoint",
+"heap_gb"
+]
+},
+"trackmate_bridge.py::run_trackmate_lap_tracking": {
+"lines": 135,
+"params": [
+"allow_merging",
+"allow_splitting",
+"fiji_endpoint",
+"kalman_search_radius_um",
+"max_frame_gap",
+"max_gap_closing_distance_um",
+"max_linking_distance_um",
+"props_df",
+"use_kalman"
+]
+},
+"trackmate_bridge.py::shutdown_trackmate_bridge": {
+"lines": 15,
+"params": []
+},
+"trackmate_bridge.py::trackmate_bridge_available": {
+"lines": 6,
+"params": []
+},
+"ts_cache_manager.py::_cache_root": {
+"lines": 3,
+"params": [
+"source_file"
+]
+},
+"ts_cache_manager.py::_param_key": {
+"lines": 2,
+"params": [
+"ball_radius",
+"window_size"
+]
+},
+"ts_cache_manager.py::cache_exists": {
+"lines": 11,
+"params": [
+"ball_radius",
+"source_file",
+"window_size"
+]
+},
+"ts_cache_manager.py::cache_size_mb": {
+"lines": 10,
+"params": [
+"source_file"
+]
+},
+"ts_cache_manager.py::discard_cache": {
+"lines": 25,
+"params": [
+"ball_radius",
+"source_file",
+"window_size"
+]
+},
+"ts_cache_manager.py::get_cache_paths": {
+"lines": 16,
+"params": [
+"ball_radius",
+"source_file",
+"window_size"
+]
+},
+"ts_cache_manager.py::write_meta": {
+"lines": 23,
+"params": [
+"H",
+"W",
+"ball_radius",
+"n_frames",
+"source_file",
+"window_size"
+]
+},
+"ts_cellpose_tools.py::__array__": {
+"lines": 2,
+"params": [
+"dtype",
+"self"
+]
+},
+"ts_cellpose_tools.py::__getattr__": {
+"lines": 1,
+"params": [
+"attr",
+"self"
+]
+},
+"ts_cellpose_tools.py::__getitem__": {
+"lines": 12,
+"params": [
+"idx",
+"self"
+]
+},
+"ts_cellpose_tools.py::__init__": {
+"lines": 8,
+"params": [
+"cell_diameter",
+"interval",
+"model_name",
+"parent",
+"self",
+"stack",
+"upscale_factor",
+"use_stardist"
+]
+},
+"ts_cellpose_tools.py::__len__": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"ts_cellpose_tools.py::_add_run_ts_cellpose": {
+"lines": 545,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"ts_cellpose_tools.py::_cb": {
+"lines": 1,
+"params": [
+"done",
+"total"
+]
+},
+"ts_cellpose_tools.py::_load": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"ts_cellpose_tools.py::_make_keyframe_cellpose_worker": {
+"lines": 49,
+"params": []
+},
+"ts_cellpose_tools.py::_nearest_keyframe": {
+"lines": 1,
+"params": [
+"self",
+"t"
+]
+},
+"ts_cellpose_tools.py::_nearest_nonempty_keyframe": {
+"lines": 6,
+"params": [
+"self",
+"t"
+]
+},
+"ts_cellpose_tools.py::_on_error": {
+"lines": 5,
+"params": [
+"msg"
+]
+},
+"ts_cellpose_tools.py::_on_finished": {
+"lines": 125,
+"params": [
+"kf_indices",
+"mask_stack"
+]
+},
+"ts_cellpose_tools.py::_on_method": {
+"lines": 3,
+"params": []
+},
+"ts_cellpose_tools.py::_on_progress": {
+"lines": 2,
+"params": [
+"done",
+"total"
+]
+},
+"ts_cellpose_tools.py::_on_run": {
+"lines": 307,
+"params": []
+},
+"ts_cellpose_tools.py::apply_transfection_filter_to_stack": {
+"lines": 9,
+"params": [
+"kept_labels",
+"mask_stack"
+]
+},
+"ts_cellpose_tools.py::filter_cells_by_transfection": {
+"lines": 111,
+"params": [
+"bg_percentile",
+"fluor_frame",
+"labeled_mask",
+"snr_threshold"
+]
+},
+"ts_cellpose_tools.py::run": {
+"lines": 18,
+"params": [
+"self"
+]
+},
+"ts_cellpose_tools.py::run_keyframe_cellpose": {
+"lines": 83,
+"params": [
+"cell_diameter",
+"keyframe_interval",
+"model_name",
+"progress_callback",
+"stack",
+"upscale_factor"
+]
+},
+"ts_cellpose_tools.py::run_keyframe_stardist": {
+"lines": 43,
+"params": [
+"keyframe_interval",
+"progress_callback",
+"stack",
+"upscale_factor"
+]
+},
+"two_channel_coloc_tools.py::__init__": {
+"lines": 3,
+"params": [
+"kwargs",
+"mpx_sq",
+"parent",
+"self"
+]
+},
+"two_channel_coloc_tools.py::_add_run_two_channel_coloc": {
+"lines": 353,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"two_channel_coloc_tools.py::_build_refinement_group": {
+"lines": 24,
+"params": [
+"title"
+]
+},
+"two_channel_coloc_tools.py::_cb": {
+"lines": 1,
+"params": [
+"done",
+"i",
+"total"
+]
+},
+"two_channel_coloc_tools.py::_dspin": {
+"lines": 3,
+"params": [
+"hi",
+"lo",
+"step",
+"val"
+]
+},
+"two_channel_coloc_tools.py::_jump": {
+"lines": 6,
+"params": [
+"fr"
+]
+},
+"two_channel_coloc_tools.py::_make_condensatecoloctimeworker": {
+"lines": 42,
+"params": []
+},
+"two_channel_coloc_tools.py::_make_twochannelcolocworker": {
+"lines": 35,
+"params": []
+},
+"two_channel_coloc_tools.py::_on_done": {
+"lines": 33,
+"params": [
+"trace"
+]
+},
+"two_channel_coloc_tools.py::_on_err": {
+"lines": 4,
+"params": [
+"msg"
+]
+},
+"two_channel_coloc_tools.py::_on_error": {
+"lines": 4,
+"params": [
+"msg"
+]
+},
+"two_channel_coloc_tools.py::_on_finished": {
+"lines": 25,
+"params": [
+"mask1",
+"mask2",
+"results_df"
+]
+},
+"two_channel_coloc_tools.py::_on_prog": {
+"lines": 1,
+"params": [
+"done",
+"total"
+]
+},
+"two_channel_coloc_tools.py::_on_run": {
+"lines": 98,
+"params": []
+},
+"two_channel_coloc_tools.py::_on_run_time": {
+"lines": 95,
+"params": []
+},
+"two_channel_coloc_tools.py::_plane": {
+"lines": 3,
+"params": [
+"floaty",
+"layer"
+]
+},
+"two_channel_coloc_tools.py::cancel": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"two_channel_coloc_tools.py::condensate_coloc_time_trace": {
+"lines": 92,
+"params": [
+"ball_radius",
+"cancel_check",
+"cell_mask_stack",
+"coloc_methods",
+"frame_interval_s",
+"microns_per_pixel_sq",
+"per_cell",
+"progress_callback",
+"refinement_params_ch1",
+"refinement_params_ch2",
+"stack_ch1",
+"stack_ch2",
+"stack_proc_ch1",
+"stack_proc_ch2"
+]
+},
+"two_channel_coloc_tools.py::run": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"two_channel_coloc_tools.py::run_two_channel_condensate_colocalization": {
+"lines": 118,
+"params": [
+"ball_radius",
+"cell_df",
+"coloc_methods",
+"image_ch1",
+"image_ch2",
+"labeled_cell_mask",
+"microns_per_pixel_sq",
+"preprocessed_ch1",
+"preprocessed_ch2",
+"progress_callback",
+"refinement_params_ch1",
+"refinement_params_ch2"
+]
+},
+"ui_analysis_mixin.py::_add_run_autocorrelation_analysis": {
+"lines": 40,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_ccf_analysis": {
+"lines": 20,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_cell_analysis_func": {
+"lines": 59,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_manders_coloc": {
+"lines": 21,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_obca": {
+"lines": 20,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_puncta_analysis_func": {
+"lines": 34,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_add_run_pwcca": {
+"lines": 32,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_analysis_mixin.py::_check_upscaled_cell": {
+"lines": 14,
+"params": []
+},
+"ui_analysis_mixin.py::_jump": {
+"lines": 6,
+"params": [
+"fr"
+]
+},
+"ui_analysis_mixin.py::_on_acf": {
+"lines": 10,
+"params": []
+},
+"ui_analysis_mixin.py::_on_cell_analysis": {
+"lines": 10,
+"params": []
+},
+"ui_analysis_mixin.py::_on_puncta_analysis": {
+"lines": 8,
+"params": []
+},
+"ui_analysis_mixin.py::_run_coloc_time_trace": {
+"lines": 74,
+"params": [
+"img1_dd",
+"img2_dd",
+"roi_dd",
+"self"
+]
+},
+"ui_diagnostics_mixin.py::_add_chromatin_topology": {
+"lines": 66,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_display_diagnostics": {
+"lines": 109,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_foreground_suppression_tuner": {
+"lines": 152,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_nucleolus_void_estimator": {
+"lines": 102,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_pipeline_diagnostics": {
+"lines": 107,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_pipeline_snr_analysis": {
+"lines": 3,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_segmentation_benchmark": {
+"lines": 218,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_segmentation_speed_comparison": {
+"lines": 66,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_add_temporal_enhancement_optimizer": {
+"lines": 166,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_diagnostics_mixin.py::_apply": {
+"lines": 8,
+"params": []
+},
+"ui_diagnostics_mixin.py::_apply_default": {
+"lines": 10,
+"params": []
+},
+"ui_diagnostics_mixin.py::_check_corr": {
+"lines": 22,
+"params": []
+},
+"ui_diagnostics_mixin.py::_copy": {
+"lines": 7,
+"params": []
+},
+"ui_diagnostics_mixin.py::_current": {
+"lines": 7,
+"params": []
+},
+"ui_diagnostics_mixin.py::_make_panel": {
+"lines": 49,
+"params": [
+"label",
+"run_fn"
+]
+},
+"ui_diagnostics_mixin.py::_mk": {
+"lines": 3,
+"params": [
+"maxv",
+"minv",
+"scale",
+"val"
+]
+},
+"ui_diagnostics_mixin.py::_preview": {
+"lines": 31,
+"params": []
+},
+"ui_diagnostics_mixin.py::_refresh_ext_list": {
+"lines": 7,
+"params": []
+},
+"ui_diagnostics_mixin.py::_refresh_gt": {
+"lines": 10,
+"params": []
+},
+"ui_diagnostics_mixin.py::_reset": {
+"lines": 7,
+"params": []
+},
+"ui_diagnostics_mixin.py::_row": {
+"lines": 3,
+"params": [
+"label",
+"slider",
+"text"
+]
+},
+"ui_diagnostics_mixin.py::_run": {
+"lines": 32,
+"params": []
+},
+"ui_diagnostics_mixin.py::_run_current": {
+"lines": 1,
+"params": [
+"br",
+"img",
+"ws"
+]
+},
+"ui_diagnostics_mixin.py::_run_v100": {
+"lines": 1,
+"params": [
+"br",
+"img",
+"ws"
+]
+},
+"ui_diagnostics_mixin.py::_slider": {
+"lines": 9,
+"params": [
+"hi",
+"init",
+"key",
+"label",
+"lo",
+"scale"
+]
+},
+"ui_diagnostics_mixin.py::_ws": {
+"lines": 5,
+"params": [
+"img"
+]
+},
+"ui_filtering_mixin.py::_add_run_apply_bilateral_filter": {
+"lines": 14,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_apply_laplace_of_gauss_filter": {
+"lines": 14,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_best_slice": {
+"lines": 21,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_clahe": {
+"lines": 21,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_dpr": {
+"lines": 18,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_enhanced_rb_gaussian_bg_removal": {
+"lines": 25,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_fft_bandpass": {
+"lines": 21,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_im2bw": {
+"lines": 16,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_morphological_gaussian_filter": {
+"lines": 14,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_peak_and_edge_enhancement": {
+"lines": 11,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_wavelet_noise_subtraction": {
+"lines": 20,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_add_run_wbns": {
+"lines": 20,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_filtering_mixin.py::_on_enhanced_bg_removal": {
+"lines": 14,
+"params": []
+},
+"ui_imageops_mixin.py::_add_run_apply_rescale_intensity": {
+"lines": 19,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_imageops_mixin.py::_add_run_invert_image": {
+"lines": 10,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_imageops_mixin.py::_add_run_rb_gaussian_background_removal": {
+"lines": 14,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_imageops_mixin.py::_add_run_reference_subtraction": {
+"lines": 190,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_imageops_mixin.py::_add_run_upscaling": {
+"lines": 112,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_imageops_mixin.py::_apply": {
+"lines": 20,
+"params": [
+"add_layer"
+]
+},
+"ui_imageops_mixin.py::_export_mp4": {
+"lines": 28,
+"params": []
+},
+"ui_imageops_mixin.py::_export_tiff": {
+"lines": 17,
+"params": []
+},
+"ui_imageops_mixin.py::_on_advise": {
+"lines": 45,
+"params": []
+},
+"ui_imageops_mixin.py::_on_upscaling": {
+"lines": 12,
+"params": []
+},
+"ui_imageops_mixin.py::_resolve_inputs": {
+"lines": 31,
+"params": []
+},
+"ui_labels_mixin.py::_add_run_advanced_two_layer_merge": {
+"lines": 47,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_binary_morph_operation": {
+"lines": 35,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_convert_labels_to_mask": {
+"lines": 14,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_expand_labels": {
+"lines": 23,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_label_binary_mask": {
+"lines": 19,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_mask_logic_merge": {
+"lines": 25,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_measure_binary_mask": {
+"lines": 17,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_measure_region_props": {
+"lines": 24,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_simple_multi_merge": {
+"lines": 15,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_add_run_update_labels": {
+"lines": 21,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_labels_mixin.py::_on_label_mask": {
+"lines": 5,
+"params": []
+},
+"ui_labels_mixin.py::_on_rp": {
+"lines": 7,
+"params": []
+},
+"ui_labels_mixin.py::update_slider_label": {
+"lines": 3,
+"params": [
+"val"
+]
+},
+"ui_modules.py::__init__": {
+"lines": 15,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"ui_modules.py::_activate": {
+"lines": 27,
+"params": [
+"item"
+]
+},
+"ui_modules.py::_add_actions_to_menu": {
+"lines": 36,
+"params": [
+"actions_dict",
+"menu",
+"self"
+]
+},
+"ui_modules.py::_add_analysis_methods_to_menu": {
+"lines": 41,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_add_file_io_methods_to_menu": {
+"lines": 12,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_add_measure_line": {
+"lines": 258,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_open_2d_image": {
+"lines": 9,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_plotting_widget": {
+"lines": 3,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_pre_process": {
+"lines": 151,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_reference_frame_selector": {
+"lines": 398,
+"params": [
+"layout",
+"self"
+]
+},
+"ui_modules.py::_add_roi_shapes_layer": {
+"lines": 37,
+"params": []
+},
+"ui_modules.py::_add_run_calibration_correction": {
+"lines": 98,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_save_and_clear": {
+"lines": 20,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_modules.py::_add_toolbox_to_menu": {
+"lines": 232,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_add_widget_to_layout_or_dock": {
+"lines": 104,
+"params": [
+"dock_name",
+"layout",
+"self",
+"separate_widget",
+"widget"
+]
+},
+"ui_modules.py::_add_workflow_header": {
+"lines": 59,
+"params": [
+"include_pixel_gate",
+"instruction_html",
+"layout",
+"self"
+]
+},
+"ui_modules.py::_anchor_key": {
+"lines": 4,
+"params": [
+"layer"
+]
+},
+"ui_modules.py::_annotation_layers": {
+"lines": 12,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_apply_layer_suggestions": {
+"lines": 23,
+"params": [
+"root_widget",
+"self"
+]
+},
+"ui_modules.py::_apply_managed_grid": {
+"lines": 84,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_apply_override": {
+"lines": 14,
+"params": []
+},
+"ui_modules.py::_apply_scroll_guard": {
+"lines": 15,
+"params": [
+"widget"
+]
+},
+"ui_modules.py::_arm_line_drawing": {
+"lines": 57,
+"params": []
+},
+"ui_modules.py::_ask_clear_or_add": {
+"lines": 24,
+"params": [
+"n_files",
+"self"
+]
+},
+"ui_modules.py::_autotag_user_layer": {
+"lines": 33,
+"params": [
+"event"
+]
+},
+"ui_modules.py::_confirm_clear": {
+"lines": 17,
+"params": []
+},
+"ui_modules.py::_consume_step_label": {
+"lines": 9,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_count_real_lines": {
+"lines": 10,
+"params": [
+"layer"
+]
+},
+"ui_modules.py::_current_layer": {
+"lines": 2,
+"params": []
+},
+"ui_modules.py::_dead": {
+"lines": 3,
+"params": [
+"a"
+]
+},
+"ui_modules.py::_diameter_layers": {
+"lines": 4,
+"params": []
+},
+"ui_modules.py::_disable_in_menu": {
+"lines": 42,
+"params": [
+"depth",
+"menu"
+]
+},
+"ui_modules.py::_disable_napari_open_actions": {
+"lines": 145,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_disconnect": {
+"lines": 6,
+"params": []
+},
+"ui_modules.py::_disconnect_on_destroy": {
+"lines": 5,
+"params": []
+},
+"ui_modules.py::_do_add": {
+"lines": 25,
+"params": []
+},
+"ui_modules.py::_do_clear": {
+"lines": 33,
+"params": []
+},
+"ui_modules.py::_do_draw": {
+"lines": 2,
+"params": []
+},
+"ui_modules.py::_do_measure": {
+"lines": 15,
+"params": []
+},
+"ui_modules.py::_enable_drops": {
+"lines": 9,
+"params": [
+"widget"
+]
+},
+"ui_modules.py::_export": {
+"lines": 12,
+"params": []
+},
+"ui_modules.py::_fmt": {
+"lines": 7,
+"params": [
+"v"
+]
+},
+"ui_modules.py::_fmt_interval": {
+"lines": 9,
+"params": [
+"c"
+]
+},
+"ui_modules.py::_gather_compared_metadata": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_get_roi_bbox": {
+"lines": 20,
+"params": []
+},
+"ui_modules.py::_grid_tileable_visible": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_has_clearable": {
+"lines": 8,
+"params": []
+},
+"ui_modules.py::_hide_napari_native_menus": {
+"lines": 87,
+"params": [
+"hidden_default",
+"self"
+]
+},
+"ui_modules.py::_hint_matches": {
+"lines": 35,
+"params": [
+"layer_name",
+"name_hint",
+"self"
+]
+},
+"ui_modules.py::_home_fit_view": {
+"lines": 52,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_image_layer_present": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_is_load_action": {
+"lines": 9,
+"params": [
+"act"
+]
+},
+"ui_modules.py::_key": {
+"lines": 6,
+"params": [
+"ev"
+]
+},
+"ui_modules.py::_layer_row": {
+"lines": 120,
+"params": [
+"label_text",
+"layer_type",
+"layout",
+"name_hint",
+"optional",
+"self"
+]
+},
+"ui_modules.py::_make_dock_wrapper": {
+"lines": 12,
+"params": [
+"dock_name",
+"fn"
+]
+},
+"ui_modules.py::_mark_user_picked": {
+"lines": 1,
+"params": []
+},
+"ui_modules.py::_maybe_warn_metadata_diff": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_measure_state": {
+"lines": 15,
+"params": []
+},
+"ui_modules.py::_mk_slider": {
+"lines": 4,
+"params": [
+"init",
+"maxv",
+"minv",
+"scale"
+]
+},
+"ui_modules.py::_nm": {
+"lines": 2,
+"params": [
+"tid"
+]
+},
+"ui_modules.py::_norm": {
+"lines": 1,
+"params": [
+"t"
+]
+},
+"ui_modules.py::_obj_is_sample_loader": {
+"lines": 12,
+"params": [
+"object_name",
+"self"
+]
+},
+"ui_modules.py::_on_apply": {
+"lines": 28,
+"params": []
+},
+"ui_modules.py::_on_extract": {
+"lines": 109,
+"params": []
+},
+"ui_modules.py::_on_foreign_layer_inserted": {
+"lines": 30,
+"params": [
+"event"
+]
+},
+"ui_modules.py::_on_grid_layer_vis_changed": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_on_grid_layers_changed": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_on_inserted": {
+"lines": 36,
+"params": [
+"event"
+]
+},
+"ui_modules.py::_on_inserted_with_circle_refresh": {
+"lines": 13,
+"params": [
+"event"
+]
+},
+"ui_modules.py::_on_load": {
+"lines": 42,
+"params": []
+},
+"ui_modules.py::_on_measure_line": {
+"lines": 12,
+"params": []
+},
+"ui_modules.py::_on_persist_toggled": {
+"lines": 1,
+"params": [
+"checked"
+]
+},
+"ui_modules.py::_on_preprocess": {
+"lines": 42,
+"params": []
+},
+"ui_modules.py::_on_px": {
+"lines": 5,
+"params": [
+"v"
+]
+},
+"ui_modules.py::_on_range_check_toggled": {
+"lines": 3,
+"params": []
+},
+"ui_modules.py::_on_roi_toggle": {
+"lines": 4,
+"params": []
+},
+"ui_modules.py::_on_save_and_clear": {
+"lines": 2,
+"params": []
+},
+"ui_modules.py::_on_slider": {
+"lines": 6,
+"params": []
+},
+"ui_modules.py::_on_stack_changed": {
+"lines": 26,
+"params": []
+},
+"ui_modules.py::_on_toggle": {
+"lines": 2,
+"params": [
+"checked"
+]
+},
+"ui_modules.py::_on_toggled": {
+"lines": 2,
+"params": [
+"checked",
+"self"
+]
+},
+"ui_modules.py::_on_user_range_edit": {
+"lines": 6,
+"params": []
+},
+"ui_modules.py::_open_image_add": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_open_session_loader": {
+"lines": 114,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_populate": {
+"lines": 24,
+"params": [
+"show_raw"
+]
+},
+"ui_modules.py::_process_foreign_layers": {
+"lines": 47,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_prog": {
+"lines": 2,
+"params": [
+"done",
+"total"
+]
+},
+"ui_modules.py::_reassert_canvas_drops": {
+"lines": 9,
+"params": []
+},
+"ui_modules.py::_record": {
+"lines": 4,
+"params": [
+"params",
+"self",
+"step_name"
+]
+},
+"ui_modules.py::_refresh": {
+"lines": 16,
+"params": []
+},
+"ui_modules.py::_refresh_table": {
+"lines": 34,
+"params": []
+},
+"ui_modules.py::_relabel": {
+"lines": 7,
+"params": []
+},
+"ui_modules.py::_relax_min_widths": {
+"lines": 29,
+"params": [
+"widget"
+]
+},
+"ui_modules.py::_reorder_pycat_menu_bar": {
+"lines": 12,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_restore_grid_removed_layers": {
+"lines": 14,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_route": {
+"lines": 39,
+"params": [
+"paths",
+"self"
+]
+},
+"ui_modules.py::_route_one": {
+"lines": 11,
+"params": [
+"clear_first",
+"file_path",
+"self"
+]
+},
+"ui_modules.py::_row": {
+"lines": 3,
+"params": [
+"label",
+"slider",
+"text"
+]
+},
+"ui_modules.py::_score": {
+"lines": 23,
+"params": [
+"label",
+"query"
+]
+},
+"ui_modules.py::_set_napari_menus_visible": {
+"lines": 14,
+"params": [
+"self",
+"visible"
+]
+},
+"ui_modules.py::_setup_menu_bar": {
+"lines": 324,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_show_metadata_comparison": {
+"lines": 61,
+"params": [
+"result",
+"self"
+]
+},
+"ui_modules.py::_show_metadata_dialog": {
+"lines": 150,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_show_recorded_steps_dialog": {
+"lines": 81,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_stage_step": {
+"lines": 9,
+"params": [
+"self",
+"step_label"
+]
+},
+"ui_modules.py::_store_params": {
+"lines": 15,
+"params": []
+},
+"ui_modules.py::_suggest_layers": {
+"lines": 19,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_sweep": {
+"lines": 24,
+"params": []
+},
+"ui_modules.py::_switch_analysis": {
+"lines": 29,
+"params": [
+"data_class",
+"self",
+"ui_class"
+]
+},
+"ui_modules.py::_switch_to_brightfield_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_coloc_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_condensate_analysis": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_fd_curve_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_fibril_analysis": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_fibril_analysis_cellulo": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_fibril_analysis_vitro": {
+"lines": 5,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_frap_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_fusion_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_general_analysis": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_invitro_bf_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_invitro_fluor_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_object_coloc_analysis": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_pixel_coloc_analysis": {
+"lines": 11,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_temperature_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_timeseries_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_ts_invitro_fluor_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_vpt_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_switch_to_zstack_analysis": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_toggle_grid_view": {
+"lines": 82,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_toggle_napari_menus": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"ui_modules.py::_update_circle": {
+"lines": 43,
+"params": []
+},
+"ui_modules.py::_update_count": {
+"lines": 3,
+"params": []
+},
+"ui_modules.py::_update_range_controls": {
+"lines": 8,
+"params": []
+},
+"ui_modules.py::_wheel_guard": {
+"lines": 4,
+"params": []
+},
+"ui_modules.py::_wrapper": {
+"lines": 10,
+"params": [
+"layout",
+"separate_widget"
+]
+},
+"ui_modules.py::add": {
+"lines": 17,
+"params": [
+"fn",
+"layout"
+]
+},
+"ui_modules.py::add_text_label": {
+"lines": 49,
+"params": [
+"bold",
+"font_size",
+"layout",
+"self",
+"text"
+]
+},
+"ui_modules.py::bind_dropdown": {
+"lines": 19,
+"params": [
+"binding_key",
+"dropdown",
+"self"
+]
+},
+"ui_modules.py::clear_dock": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"ui_modules.py::create_layer_dropdown": {
+"lines": 121,
+"params": [
+"binding",
+"layer_type",
+"name_hint",
+"self"
+]
+},
+"ui_modules.py::eventFilter": {
+"lines": 21,
+"params": [
+"event",
+"obj",
+"self"
+]
+},
+"ui_modules.py::guard_wheel": {
+"lines": 11,
+"params": [
+"control"
+]
+},
+"ui_modules.py::make_lambda": {
+"lines": 18,
+"params": [
+"action_method",
+"kwargs",
+"self"
+]
+},
+"ui_modules.py::on_general_button_clicked": {
+"lines": 68,
+"params": [
+"processing_function",
+"self",
+"viewer"
+]
+},
+"ui_modules.py::open_command_palette": {
+"lines": 131,
+"params": [
+"self"
+]
+},
+"ui_modules.py::open_tag_inspector": {
+"lines": 120,
+"params": [
+"self"
+]
+},
+"ui_modules.py::section": {
+"lines": 3,
+"params": [
+"expanded",
+"title"
+]
+},
+"ui_modules.py::set_expanded": {
+"lines": 1,
+"params": [
+"expanded",
+"self"
+]
+},
+"ui_modules.py::setup_ui": {
+"lines": 94,
+"params": [
+"self"
+]
+},
+"ui_modules.py::update_dropdown_items": {
+"lines": 71,
+"params": [
+"dropdown",
+"layer_type",
+"self"
+]
+},
+"ui_modules.py::update_tool": {
+"lines": 25,
+"params": [
+"event",
+"self"
+]
+},
+"ui_segmentation_mixin.py::_add_run_cellpose_segmentation": {
+"lines": 140,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_segmentation_mixin.py::_add_run_fz_segmentation_and_merging": {
+"lines": 23,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_segmentation_mixin.py::_add_run_local_thresholding": {
+"lines": 69,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_segmentation_mixin.py::_add_run_segment_subcellular_objects": {
+"lines": 109,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_segmentation_mixin.py::_add_run_train_and_apply_rf_classifier": {
+"lines": 3,
+"params": [
+"layout",
+"self",
+"separate_widget"
+]
+},
+"ui_segmentation_mixin.py::_make_spinbox": {
+"lines": 6,
+"params": [
+"decimals",
+"default",
+"max_val",
+"min_val",
+"step"
+]
+},
+"ui_segmentation_mixin.py::_on_condensate_seg": {
+"lines": 26,
+"params": []
+},
+"ui_segmentation_mixin.py::_on_local_thresh": {
+"lines": 8,
+"params": []
+},
+"ui_segmentation_mixin.py::_on_method_changed": {
+"lines": 2,
+"params": []
+},
+"ui_segmentation_mixin.py::_on_run": {
+"lines": 36,
+"params": []
+},
+"ui_segmentation_mixin.py::_run_stardist_segmentation": {
+"lines": 38,
+"params": [
+"layer_name",
+"self"
+]
+},
+"ui_segmentation_mixin.py::update_k_label": {
+"lines": 3,
+"params": [
+"val"
+]
+},
+"ui_utils.py::__init__": {
+"lines": 27,
+"params": [
+"df",
+"label_widget",
+"phases",
+"progress_bar",
+"self"
+]
+},
+"ui_utils.py::add_image_with_default_colormap": {
+"lines": 24,
+"params": [
+"colormap",
+"data",
+"viewer"
+]
+},
+"ui_utils.py::callback": {
+"lines": 8,
+"params": [
+"done",
+"self",
+"total"
+]
+},
+"ui_utils.py::columnCount": {
+"lines": 4,
+"params": [
+"parent",
+"self"
+]
+},
+"ui_utils.py::copy_table_content": {
+"lines": 36,
+"params": [
+"table_view"
+]
+},
+"ui_utils.py::create_table_view": {
+"lines": 36,
+"params": [
+"dataframe"
+]
+},
+"ui_utils.py::data": {
+"lines": 18,
+"params": [
+"index",
+"role",
+"self"
+]
+},
+"ui_utils.py::draw_custom_scale_bar": {
+"lines": 82,
+"params": [
+"color",
+"image_layer",
+"layer_name",
+"pixel_um",
+"position",
+"scalebar_um",
+"viewer"
+]
+},
+"ui_utils.py::finish": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"ui_utils.py::headerData": {
+"lines": 24,
+"params": [
+"orientation",
+"role",
+"section",
+"self"
+]
+},
+"ui_utils.py::hide": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"ui_utils.py::refresh_viewer_with_new_data": {
+"lines": 41,
+"params": [
+"active_layer",
+"new_data",
+"viewer"
+]
+},
+"ui_utils.py::remove_custom_scale_bar": {
+"lines": 6,
+"params": [
+"layer_name",
+"viewer"
+]
+},
+"ui_utils.py::rowCount": {
+"lines": 4,
+"params": [
+"parent",
+"self"
+]
+},
+"ui_utils.py::save_table_as_csv": {
+"lines": 16,
+"params": [
+"dataframe"
+]
+},
+"ui_utils.py::show_dataframes_dialog": {
+"lines": 45,
+"params": [
+"tables_info",
+"window_title"
+]
+},
+"ui_utils.py::start_phase": {
+"lines": 10,
+"params": [
+"i",
+"self"
+]
+},
+"ui_utils.py::table_context_menu": {
+"lines": 28,
+"params": [
+"dataframe",
+"position",
+"table_view"
+]
+},
+"video_export_tools.py::__init__": {
+"lines": 2,
+"params": [
+"kwargs",
+"parent",
+"self"
+]
+},
+"video_export_tools.py::_add_export_timeseries_video": {
+"lines": 149,
+"params": [
+"layout",
+"separate_widget",
+"ui_instance"
+]
+},
+"video_export_tools.py::_cb": {
+"lines": 1,
+"params": [
+"i",
+"total"
+]
+},
+"video_export_tools.py::_on_auto_toggle": {
+"lines": 2,
+"params": [
+"checked"
+]
+},
+"video_export_tools.py::_on_error": {
+"lines": 4,
+"params": [
+"msg"
+]
+},
+"video_export_tools.py::_on_export": {
+"lines": 57,
+"params": []
+},
+"video_export_tools.py::_on_finished": {
+"lines": 3,
+"params": [
+"result_path"
+]
+},
+"video_export_tools.py::export_stack_as_mp4": {
+"lines": 78,
+"params": [
+"colormap",
+"contrast_limits",
+"fps",
+"output_path",
+"progress_callback",
+"quality",
+"stack"
+]
+},
+"video_export_tools.py::run": {
+"lines": 8,
+"params": [
+"self"
+]
+},
+"vpt_tools.py::_bead_source_descriptor": {
+"lines": 32,
+"params": [
+"bead_stack"
+]
+},
+"vpt_tools.py::_detect_frame_worker": {
+"lines": 22,
+"params": [
+"args"
+]
+},
+"vpt_tools.py::_fit_clipped_radius": {
+"lines": 24,
+"params": [
+"reg"
+]
+},
+"vpt_tools.py::_fit_sigma": {
+"lines": 41,
+"params": [
+"h",
+"patch"
+]
+},
+"vpt_tools.py::_key": {
+"lines": 2,
+"params": [
+"cs"
+]
+},
+"vpt_tools.py::_link": {
+"lines": 22,
+"params": [
+"detections",
+"linker",
+"max_dist_um",
+"max_gap",
+"mpp",
+"progress_callback"
+]
+},
+"vpt_tools.py::_read_frame_from_descriptor": {
+"lines": 56,
+"params": [
+"src_desc",
+"t"
+]
+},
+"vpt_tools.py::aggregate_population_stats": {
+"lines": 48,
+"params": [
+"aggregate_df",
+"total_by_frame"
+]
+},
+"vpt_tools.py::assess_linking_conditions": {
+"lines": 83,
+"params": [
+"bead_stack",
+"detections",
+"microns_per_pixel",
+"motion_sigma_um"
+]
+},
+"vpt_tools.py::bead_half_from_size": {
+"lines": 25,
+"params": [
+"bead_size_nm",
+"max_half",
+"microns_per_pixel",
+"min_half",
+"n_rings"
+]
+},
+"vpt_tools.py::blob_log_gpu": {
+"lines": 64,
+"params": [
+"image",
+"max_sigma",
+"min_sigma",
+"num_sigma",
+"overlap",
+"threshold"
+]
+},
+"vpt_tools.py::build_airy_template": {
+"lines": 23,
+"params": [
+"first_zero_px",
+"half"
+]
+},
+"vpt_tools.py::build_bead_template": {
+"lines": 32,
+"params": [
+"clean_percentile",
+"coords",
+"frame",
+"half"
+]
+},
+"vpt_tools.py::build_hot_pixel_mask": {
+"lines": 90,
+"params": [
+"bead_stack",
+"cv_max",
+"local_excess_min",
+"max_frames",
+"median_size",
+"tstd_max"
+]
+},
+"vpt_tools.py::classify_beads": {
+"lines": 305,
+"params": [
+"aggregate_intensity_factor",
+"beads_df",
+"defocus_r2_max",
+"sigma_outlier_factor",
+"strictness",
+"variant"
+]
+},
+"vpt_tools.py::compare_detection_variants": {
+"lines": 64,
+"params": [
+"bead_stack",
+"max_frames",
+"microns_per_pixel",
+"variant_a",
+"variant_b"
+]
+},
+"vpt_tools.py::dedup_detections": {
+"lines": 39,
+"params": [
+"coords",
+"frame",
+"keep",
+"merge_radius_px"
+]
+},
+"vpt_tools.py::dedup_detections_ring_merge": {
+"lines": 109,
+"params": [
+"base_radius_px",
+"coords",
+"frame",
+"k_sigma",
+"ring_dim_ratio",
+"sigmas"
+]
+},
+"vpt_tools.py::detect_beads_frame": {
+"lines": 110,
+"params": [
+"fast_fit",
+"fit_quality",
+"fit_window",
+"frame",
+"host_mask",
+"max_sigma",
+"min_sigma",
+"num_sigma",
+"return_sigma",
+"threshold",
+"use_gpu"
+]
+},
+"vpt_tools.py::detect_beads_stack": {
+"lines": 308,
+"params": [
+"bead_size_nm",
+"bead_stack",
+"detection_variant",
+"exclude_aggregates",
+"fit_quality",
+"fit_window",
+"frame_indices",
+"host_mask",
+"max_sigma",
+"merge_radius_px",
+"microns_per_pixel",
+"min_sigma",
+"n_workers",
+"num_sigma",
+"parallel",
+"progress_callback",
+"quality_mode",
+"recover_out_of_plane",
+"refine_with_airy",
+"strictness",
+"subpixel",
+"template_mode",
+"template_type",
+"threshold",
+"use_gpu"
+]
+},
+"vpt_tools.py::drift_correct_com": {
+"lines": 95,
+"params": [
+"immobile_fraction",
+"mode",
+"tracks_df"
+]
+},
+"vpt_tools.py::erode_host_mask": {
+"lines": 48,
+"params": [
+"erosion_px",
+"labeled_mask"
+]
+},
+"vpt_tools.py::estimate_linking_distance_um": {
+"lines": 150,
+"params": [
+"bead_stack",
+"coords_by_frame",
+"half",
+"k",
+"microns_per_pixel",
+"min_distance_um",
+"n_beads",
+"window"
+]
+},
+"vpt_tools.py::g": {
+"lines": 2,
+"params": [
+"A",
+"c",
+"o",
+"s",
+"x0",
+"y0"
+]
+},
+"vpt_tools.py::infer_host_from_beads": {
+"lines": 127,
+"params": [
+"bead_coords",
+"bin_px",
+"density_percentile",
+"image_shape",
+"microns_per_pixel",
+"min_beads_per_region",
+"min_condensate_radius_um",
+"smooth_sigma"
+]
+},
+"vpt_tools.py::local_intensity": {
+"lines": 6,
+"params": [
+"r",
+"x",
+"y"
+]
+},
+"vpt_tools.py::reclassify_by_temporal_stability": {
+"lines": 55,
+"params": [
+"max_gap_frac",
+"min_stable_len",
+"tracks_df"
+]
+},
+"vpt_tools.py::run_vpt_analysis": {
+"lines": 108,
+"params": [
+"bead_fit_quality",
+"bead_max_sigma",
+"bead_min_sigma",
+"bead_radius_um",
+"bead_stack",
+"bead_threshold",
+"erosion_px",
+"exclude_aggregates",
+"frame_interval_s",
+"host_image",
+"linker",
+"max_frame_gap",
+"max_linking_distance_um",
+"microns_per_pixel",
+"min_track_length",
+"progress_callback",
+"recover_out_of_plane",
+"seg_method",
+"temperature_C",
+"track_aggregates"
+]
+},
+"vpt_tools.py::score_beads_template": {
+"lines": 44,
+"params": [
+"coords",
+"frame",
+"half",
+"subpixel",
+"template_z"
+]
+},
+"vpt_tools.py::segment_host_condensate": {
+"lines": 57,
+"params": [
+"fill_holes",
+"host_image",
+"method",
+"min_area_px"
+]
+},
+"vpt_tools.py::select_bead_population": {
+"lines": 13,
+"params": [
+"detections_df",
+"which"
+]
+},
+"vpt_tools.py::split_bead_populations": {
+"lines": 42,
+"params": [
+"detections_df",
+"recover_out_of_plane"
+]
+},
+"vpt_tools.py::viscosity_from_diffusion": {
+"lines": 32,
+"params": [
+"D_um2_per_s",
+"bead_radius_um",
+"temperature_C"
+]
+},
+"vpt_tools.py::viscosity_interval_from_diffusion": {
+"lines": 80,
+"params": [
+"D_ci",
+"D_um2_per_s",
+"bead_radius_um",
+"temperature_C"
+]
+},
+"vpt_tools.py::viscosity_measurement": {
+"lines": 129,
+"params": [
+"D_ci",
+"D_um2_per_s",
+"alpha",
+"bead_radius_um",
+"bulk_sampling_checked",
+"bulk_sampling_detail",
+"bulk_sampling_holds",
+"n_tracks",
+"radius_source",
+"radius_uncertainty_um",
+"temperature_C"
+]
+},
+"vpt_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"vpt_ui.py::_add_bead_detection": {
+"lines": 163,
+"params": [
+"layout",
+"self"
+]
+},
+"vpt_ui.py::_add_host_segmentation": {
+"lines": 89,
+"params": [
+"layout",
+"self"
+]
+},
+"vpt_ui.py::_add_microrheology": {
+"lines": 201,
+"params": [
+"layout",
+"self"
+]
+},
+"vpt_ui.py::_add_pickable_bead_points": {
+"lines": 76,
+"params": [
+"img_layer",
+"mpp",
+"self",
+"tracks"
+]
+},
+"vpt_ui.py::_add_tracking": {
+"lines": 163,
+"params": [
+"layout",
+"self"
+]
+},
+"vpt_ui.py::_build_per_track_metrics": {
+"lines": 31,
+"params": [
+"ptc",
+"self",
+"tracks"
+]
+},
+"vpt_ui.py::_closeEvent": {
+"lines": 7,
+"params": [
+"ev"
+]
+},
+"vpt_ui.py::_done": {
+"lines": 115,
+"params": [
+"res"
+]
+},
+"vpt_ui.py::_dr": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_err": {
+"lines": 2,
+"params": [
+"msg"
+]
+},
+"vpt_ui.py::_highlight_track_in_plot": {
+"lines": 25,
+"params": [
+"self",
+"track_id"
+]
+},
+"vpt_ui.py::_highlight_track_in_table": {
+"lines": 23,
+"params": [
+"self",
+"track_id"
+]
+},
+"vpt_ui.py::_host_mode": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_infer_host_from_beads": {
+"lines": 82,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_job": {
+"lines": 39,
+"params": [
+"progress"
+]
+},
+"vpt_ui.py::_linker_name": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_mpx": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_on_bead_progress": {
+"lines": 6,
+"params": [
+"i",
+"n"
+]
+},
+"vpt_ui.py::_on_click": {
+"lines": 18,
+"params": [
+"event",
+"layer"
+]
+},
+"vpt_ui.py::_on_detect_beads": {
+"lines": 272,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_on_host_mode_changed": {
+"lines": 32,
+"params": [
+"_checked",
+"self"
+]
+},
+"vpt_ui.py::_on_link": {
+"lines": 182,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_on_quality_mode_changed": {
+"lines": 5,
+"params": [
+"_i",
+"self"
+]
+},
+"vpt_ui.py::_on_rheology": {
+"lines": 221,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_on_row": {
+"lines": 11,
+"params": []
+},
+"vpt_ui.py::_on_segment_host": {
+"lines": 30,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_record": {
+"lines": 3,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"vpt_ui.py::_reveal_track_in_viewer": {
+"lines": 96,
+"params": [
+"self",
+"track_id"
+]
+},
+"vpt_ui.py::_seg_method_name": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_select_track": {
+"lines": 27,
+"params": [
+"self",
+"source",
+"track_id"
+]
+},
+"vpt_ui.py::_show_per_track_table": {
+"lines": 72,
+"params": [
+"per_track_metrics",
+"self"
+]
+},
+"vpt_ui.py::_sync_frame_interval_from_metadata": {
+"lines": 16,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::_tracks_layer": {
+"lines": 21,
+"params": [
+"color",
+"name",
+"tr"
+]
+},
+"vpt_ui.py::_update_tracklen_hist": {
+"lines": 42,
+"params": [
+"self",
+"tracks"
+]
+},
+"vpt_ui.py::create_layer_dropdown": {
+"lines": 2,
+"params": [
+"layer_type",
+"name_hint",
+"self"
+]
+},
+"vpt_ui.py::run": {
+"lines": 4,
+"params": [
+"self"
+]
+},
+"vpt_ui.py::setup_ui": {
+"lines": 53,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::__init__": {
+"lines": 4,
+"params": [
+"parent",
+"self",
+"viewer"
+]
+},
+"workflow_checklist.py::_hide_detail": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::_is_opt": {
+"lines": 1,
+"params": [
+"i"
+]
+},
+"workflow_checklist.py::_refresh_pills": {
+"lines": 31,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::_required_prefix_done": {
+"lines": 1,
+"params": [
+"i"
+]
+},
+"workflow_checklist.py::_setup_ui": {
+"lines": 62,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::_show_detail": {
+"lines": 25,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::_toggle_detail": {
+"lines": 6,
+"params": [
+"checked",
+"self"
+]
+},
+"workflow_checklist.py::_update_detail_labels": {
+"lines": 15,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::activate": {
+"lines": 35,
+"params": [
+"pipeline_name",
+"self"
+]
+},
+"workflow_checklist.py::mark_step": {
+"lines": 4,
+"params": [
+"self",
+"step_key"
+]
+},
+"workflow_checklist.py::on_step_recorded": {
+"lines": 2,
+"params": [
+"self",
+"step_key"
+]
+},
+"workflow_checklist.py::reset": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::set_current": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::set_done": {
+"lines": 2,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::set_future": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"workflow_checklist.py::set_required": {
+"lines": 1,
+"params": [
+"self"
+]
+},
+"zstack_segmentation_tools.py::bg_removal_3d": {
+"lines": 100,
+"params": [
+"ball_radius",
+"progress_callback",
+"pseudo3d_linear",
+"volume"
+]
+},
+"zstack_segmentation_tools.py::cell_metrics_3d": {
+"lines": 40,
+"params": [
+"labeled_cells_3d",
+"microns_per_pixel",
+"z_step_um"
+]
+},
+"zstack_segmentation_tools.py::cellpose_segmentation_3d": {
+"lines": 78,
+"params": [
+"min_iou",
+"object_diameter",
+"progress_callback",
+"volume"
+]
+},
+"zstack_segmentation_tools.py::condensate_metrics_3d": {
+"lines": 137,
+"params": [
+"intensity_volume",
+"labeled_3d",
+"microns_per_pixel",
+"z_step_um"
+]
+},
+"zstack_segmentation_tools.py::segment_subcellular_objects_3d": {
+"lines": 73,
+"params": [
+"ball_radius",
+"cell_label",
+"cell_mask_3d",
+"connectivity",
+"global_snr_threshold",
+"intensity_hwhm_scale",
+"kurtosis_threshold",
+"local_snr_threshold",
+"max_area_fraction",
+"min_spot_radius",
+"original_volume",
+"preprocessed_volume",
+"progress_callback"
+]
+},
+"zstack_segmentation_ui.py::__init__": {
+"lines": 2,
+"params": [
+"central_manager",
+"self",
+"viewer"
+]
+},
+"zstack_segmentation_ui.py::_add_zstack_bg_removal": {
+"lines": 77,
+"params": [
+"layout",
+"ui"
+]
+},
+"zstack_segmentation_ui.py::_add_zstack_cell_seg": {
+"lines": 66,
+"params": [
+"layout",
+"ui"
+]
+},
+"zstack_segmentation_ui.py::_add_zstack_condensate_seg": {
+"lines": 104,
+"params": [
+"layout",
+"ui"
+]
+},
+"zstack_segmentation_ui.py::_add_zstack_metrics": {
+"lines": 52,
+"params": [
+"layout",
+"ui"
+]
+},
+"zstack_segmentation_ui.py::_done": {
+"lines": 12,
+"params": [
+"labeled_3d"
+]
+},
+"zstack_segmentation_ui.py::_dr": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"zstack_segmentation_ui.py::_err": {
+"lines": 3,
+"params": [
+"msg"
+]
+},
+"zstack_segmentation_ui.py::_mpx": {
+"lines": 0,
+"params": [
+"self"
+]
+},
+"zstack_segmentation_ui.py::_on_run": {
+"lines": 26,
+"params": []
+},
+"zstack_segmentation_ui.py::_record": {
+"lines": 2,
+"params": [
+"params",
+"self",
+"step"
+]
+},
+"zstack_segmentation_ui.py::_run_btn": {
+"lines": 4,
+"params": [
+"form",
+"label"
+]
+},
+"zstack_segmentation_ui.py::_show": {
+"lines": 3,
+"params": [
+"tables",
+"title"
+]
+},
+"zstack_segmentation_ui.py::_task": {
+"lines": 15,
+"params": []
+},
+"zstack_segmentation_ui.py::_vol": {
+"lines": 3,
+"params": [
+"dd",
+"self"
+]
+},
+"zstack_segmentation_ui.py::create_layer_dropdown": {
+"lines": 1,
+"params": [
+"lt",
+"self"
+]
+},
+"zstack_segmentation_ui.py::run": {
+"lines": 3,
+"params": [
+"self"
+]
+},
+"zstack_segmentation_ui.py::setup_ui": {
+"lines": 59,
+"params": [
+"self"
+]
+},
+"zstack_segmentation_ui.py::sk_label": {
+"lines": 2,
+"params": [
+"connectivity",
+"mask"
+]
+}
+}
