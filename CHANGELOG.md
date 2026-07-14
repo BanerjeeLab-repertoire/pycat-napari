@@ -4,6 +4,61 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.8] - 2026-07-13
+# Item 8 was NOT fixed — and the reader cache had introduced a correctness bug
+
+## Item 8: reported done, and never once ran
+The 1.6.4 "fix" called::
+
+    arr = _TiffPageStack(file_path)
+
+**One argument, where five are required.** It raised ``TypeError``, was caught by the surrounding
+``except Exception``, and ***fell straight through to the eager ``tifffile.imread`` anyway.***
+
+> **It compiled. The tests were green. The eager read happened every single time.**
+
+***A malformed call inside a ``try/except`` is invisible*** — it does not crash, it does not fail a
+test, it just silently takes the path it was written to avoid.
+
+**Now fixed properly** (the shape comes from tifffile, which is the whole point — *BioIO's metadata
+is what failed*), and **guarded**: the arity of every ``_TiffPageStack(...)`` call is checked
+statically.
+
+## The reader cache was handing out readers in someone else's state
+**1.6.6's cache made all four opens construct one reader.** But **BioIO readers are STATEFUL** —
+``set_scene()`` **mutates** them.
+
+Two call sites now hold the **same object.** So a site that moves to scene 2 left the next caller's
+reader ***parked on scene 2*** — reading **the wrong field of view**, with ***nothing about the
+image looking broken.*** On a multi-position CZI that is a **silently wrong analysis.**
+
+> ***I introduced this in 1.6.6, while fixing something else.*** It is exactly the class of quiet
+> wrongness this project keeps finding.
+
+A cached reader is now **rewound to its first scene** before it is handed out. If it cannot be
+rewound, it is **dropped and rebuilt** rather than shared in an unknown state. **Guarded.**
+
+## Item 4, honestly
+``_open_image_auto_single`` read ``.dims`` and ``.scenes``, decided 2-D versus stack — **and threw
+all of it away.** ``open_stack`` and ``open_2d_image`` then opened the file and worked it out again.
+
+**The cache made the re-*opening* free. It did not make the re-*inspection* free** — on a CZI,
+``.dims`` walks the subblock directory. *The cache hid the design flaw rather than fixing it.*
+
+``ImageStructure`` now carries the answer: **inspected once, at the top of the chain.**
+
+**But I will not oversell this.** ``_open_stack_generic`` **needs the reader object** to build its
+dask arrays, so it calls ``open_image`` regardless — *and the cache already made that free.* What
+the structure genuinely buys:
+
+- **the 2-D-versus-stack decision is made in ONE place** (``ImageStructure.is_stack``), not by an
+  inline expression each caller writes for itself. *Two callers can no longer get different
+  answers.*
+- **``parsed=False`` is explicit.** A file the reader could not understand no longer *looks like* a
+  2-D single-channel image — *a guess wearing the costume of a fact.*
+
+**463/463 core tests passing.**
+
 ## [1.6.7] - 2026-07-13
 # TIFF pixels no longer go through BioIO — because BioIO's TIFF path is broken on zarr 3.2
 

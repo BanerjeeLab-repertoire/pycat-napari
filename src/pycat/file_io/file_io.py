@@ -1848,19 +1848,33 @@ class FileIOClass:
         n_t = n_z = n_c = n_p = 1
         parsed = False
         try:
+            # ── Inspect ONCE, and CARRY the answer ──────────────────────────────
+            #
+            # This function reads ``.dims`` and ``.scenes`` to decide 2-D versus stack — and then
+            # **used to throw all of it away.** ``open_stack`` and ``open_2d_image`` then opened
+            # the file and worked it out again, each with its own subtly different rule.
+            #
+            # The 1.6.6 reader cache made the *re-opening* free. **It did not make the
+            # re-inspection free** — on a CZI, ``.dims`` walks the subblock directory. *The cache
+            # hid the design flaw rather than fixing it.*
+            #
+            # The structure is now stored on ``self`` and read by the loader that runs next. **One
+            # inspection, one answer** — and nothing downstream can disagree with it, which would
+            # be its own kind of bug and a very hard one to see.
+            from pycat.file_io.image_structure import inspect_image
+
             img = open_image(file_path)
-            dims = img.dims  # has .T .C .Z .Y .X
-            n_t = int(getattr(dims, 'T', 1) or 1)
-            n_z = int(getattr(dims, 'Z', 1) or 1)
-            n_c = int(getattr(dims, 'C', 1) or 1)
-            try:
-                n_p = len(img.scenes) if img.scenes is not None else 1
-            except Exception:
-                n_p = 1
-            parsed = True
+            _structure = inspect_image(img, file_path)
+            self._pending_structure = _structure
+
+            n_t = _structure.n_t
+            n_z = _structure.n_z
+            n_c = _structure.n_c
+            n_p = _structure.n_scenes
+            parsed = _structure.parsed
             print(f"[PyCAT open-auto] {os.path.basename(file_path)}: "
                   f"P={n_p} T={n_t} C={n_c} Z={n_z} → "
-                  f"{'stack' if (n_t > 1 or n_z > 1 or n_p > 1) else '2D'}")
+                  f"{'stack' if _structure.is_stack else '2D'}")
         except Exception as _e:
             debug_log("file_io: open_image_auto structure parse failed; "
                       "falling back to 2D loader", _e)
@@ -2553,13 +2567,36 @@ class FileIOClass:
             # If it cannot be built either, THEN the file is genuinely unreadable and the eager
             # read is the honest last resort.
             import tifffile
+            arr = None
+
+            # ── The 1.6.4 version of this was BROKEN and never ran ────────────────
+            #
+            # It called ``_TiffPageStack(file_path)`` — **one argument, where five are required.**
+            # That raised ``TypeError``, was caught by the ``except`` below, and **fell straight
+            # through to the eager read anyway.** *Item 8 was reported fixed and was not.*
+            #
+            # The shape comes from tifffile directly, which is the whole point: **BioIO's metadata
+            # is what failed**, and tifffile can still read the pages.
             try:
-                arr = _TiffPageStack(file_path)
-                debug_log("file_io: metadata unavailable — using the LAZY tifffile page "
-                          "reader, not a full eager read", _e)
+                with tifffile.TiffFile(file_path) as _probe:
+                    _pages = _probe.pages
+                    _n_pages = len(_pages)
+                    if _n_pages > 0:
+                        _first = _pages[0]
+                        _H, _W = int(_first.shape[-2]), int(_first.shape[-1])
+                        arr = _TiffPageStack(file_path, _n_pages, _H, _W, _first.dtype,
+                                             channel_idx=0, n_channels=1)
+                        debug_log("file_io: BioIO metadata unavailable — reading pages LAZILY "
+                                  "via tifffile, not a full eager read", _e)
             except Exception as _lazy_exc:
-                debug_log("file_io: the lazy TIFF page reader failed too — falling back to a "
-                          "full read, which is the honest last resort", _lazy_exc)
+                debug_log("file_io: the lazy TIFF page reader failed too", _lazy_exc)
+                arr = None
+
+            if arr is None:
+                # Genuinely unreadable lazily. **A full read is the honest last resort** — and it
+                # is now reached only when the lazy path has actually been tried and failed, rather
+                # than because the call to it was malformed.
+                debug_log("file_io: falling back to a FULL eager read of %s" % file_path)
                 arr = tifffile.imread(file_path)
             while arr.ndim > 3 and arr.shape[0] == 1:
                 arr = arr[0]

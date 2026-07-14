@@ -173,7 +173,37 @@ def open_image(path, **kwargs):
     # this project keeps finding.
     _key = _cache_key(path) if not kwargs else None
     if _key is not None and _key in _READER_CACHE:
-        return _READER_CACHE[_key]
+        _cached = _READER_CACHE[_key]
+
+        # ── A SHARED reader is STATEFUL, and that is a correctness bug ────────────
+        #
+        # ``set_scene()`` **mutates the reader.** With a cache, two call sites hold the *same
+        # object* — so a site that moves to scene 2 leaves the next caller's reader **parked on
+        # scene 2.**
+        #
+        # That caller reads **the wrong field of view**, and ***nothing about the image looks
+        # broken.*** For a multi-position CZI that is a silently wrong analysis.
+        #
+        # *This was introduced by the cache in 1.6.6, and it is exactly the class of quiet
+        # wrongness this project keeps finding.*
+        #
+        # So a cached reader is **returned to its first scene** before it is handed out. Callers
+        # that want a different scene say so — ``read_plane(scene=...)``, ``set_scene(...)`` — and
+        # the next caller still starts from a known state.
+        try:
+            _scenes = getattr(_cached, 'scenes', None)
+            if _scenes:
+                _first = _scenes[0]
+                if getattr(_cached, 'current_scene', _first) != _first:
+                    _cached.set_scene(_first)
+        except Exception:
+            # A reader that cannot be rewound is a reader that cannot be shared. **Drop it and
+            # build a fresh one** rather than hand out an object in an unknown state.
+            _READER_CACHE.pop(_key, None)
+            _cached = None
+
+        if _cached is not None:
+            return _cached
 
     if _BACKEND == 'bioio':
         try:

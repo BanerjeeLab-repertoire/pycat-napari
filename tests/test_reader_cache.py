@@ -150,3 +150,62 @@ def test_the_cache_is_BOUNDED():
         f"the reader cache holds {reader._READER_CACHE_LIMIT} readers. This is a "
         f"'same file, several times, within one load' cache — not a session cache."
     )
+
+
+class _StatefulReader:
+    """A reader with a **mutable current scene** — as BioIO's is."""
+
+    def __init__(self, path, **kwargs):
+        self.path = path
+        self.scenes = ['Image:0', 'Image:1', 'Image:2']
+        self.current_scene = 'Image:0'
+
+    def set_scene(self, scene):
+        self.current_scene = (self.scenes[scene] if isinstance(scene, int) else scene)
+
+
+@pytest.mark.core
+def test_a_CACHED_reader_is_REWOUND_before_it_is_handed_out(monkeypatch):
+    """***The cache introduced a correctness bug, and this is it.***
+
+    **A cached reader is SHARED, and ``set_scene()`` mutates it.** Two call sites hold the *same
+    object* — so a site that moves to scene 2 leaves the next caller's reader **parked on scene
+    2.**
+
+    That caller reads **the wrong field of view**, and ***nothing about the image looks broken.***
+    On a multi-position CZI that is a silently wrong analysis.
+
+    *This is exactly the class of quiet wrongness this project keeps finding — and I introduced it
+    in 1.6.6, while fixing something else.*
+    """
+    module = types.ModuleType('aicsimageio')
+    module.__version__ = '4.14.0'
+    module.AICSImage = _StatefulReader
+
+    monkeypatch.setitem(sys.modules, 'aicsimageio', module)
+    monkeypatch.setenv('PYCAT_IMAGE_READER', 'aicsimageio')
+
+    reader = pytest.importorskip("pycat.file_io.image_reader")
+    monkeypatch.setattr(reader, '_BACKEND', 'aicsimageio')
+    reader.clear_reader_cache()
+
+    handle, path = tempfile.mkstemp(suffix='.tif')
+    os.write(handle, b'x' * 100)
+    os.close(handle)
+
+    try:
+        first = reader.open_image(path)
+        first.set_scene(2)
+        assert first.current_scene == 'Image:2'
+
+        # A different call site opens "the same file" and has every right to expect a reader in a
+        # known state.
+        second = reader.open_image(path)
+
+        assert second.current_scene == 'Image:0', (
+            f"a cached reader was handed out parked on {second.current_scene!r}. The next caller "
+            f"reads the WRONG SCENE, and nothing about the image looks broken."
+        )
+    finally:
+        reader.clear_reader_cache()
+        os.unlink(path)

@@ -186,3 +186,56 @@ def test_read_plane_ROUTES_tiff_away_from_bioio():
         "`read_plane` does not route TIFF to the native page reader. BioIO's TIFF path goes "
         "through tifffile's zarr store, which is broken on zarr 3.2."
     )
+
+
+@pytest.mark.core
+def test_every_TiffPageStack_CONSTRUCTION_has_enough_arguments():
+    """**The 1.6.4 "fix" for item 8 was broken, and compiled fine.**
+
+    It called ``_TiffPageStack(file_path)`` — **one argument, where five are required.** That
+    raised ``TypeError``, was caught by the surrounding ``except Exception``, and **fell straight
+    through to the eager ``tifffile.imread`` anyway.**
+
+    ***The fix was reported as done, the tests were green, and the eager read still happened every
+    time.***
+
+    A malformed call inside a ``try/except`` is **invisible** — it does not crash, it does not fail
+    a test, it just silently takes the path it was supposed to avoid. So the arity is checked
+    statically.
+    """
+    import ast
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "file_io"
+              / "file_io.py").read_text(encoding='utf-8', errors='ignore')
+    tree = ast.parse(source)
+
+    definition = next((n for n in ast.walk(tree)
+                       if isinstance(n, ast.ClassDef) and n.name == '_TiffPageStack'), None)
+    assert definition is not None
+
+    init = next(n for n in definition.body
+                if isinstance(n, ast.FunctionDef) and n.name == '__init__')
+
+    parameters = [a.arg for a in init.args.args[1:]]          # drop `self`
+    n_required = len(parameters) - len(init.args.defaults)
+
+    malformed = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, 'id', None) != '_TiffPageStack':
+            continue
+
+        supplied = len(node.args) + len(node.keywords)
+        if supplied < n_required:
+            malformed.append(
+                f"line {node.lineno}: {supplied} argument(s), but {n_required} are required "
+                f"({', '.join(parameters[:n_required])})")
+
+    assert not malformed, (
+        "these `_TiffPageStack(...)` calls will raise TypeError:\n  " + "\n  ".join(malformed)
+        + "\n\n**Inside a try/except this is INVISIBLE** — it does not crash, it silently falls "
+          "through to the eager read it was written to avoid. That is exactly what shipped in "
+          "1.6.4."
+    )
