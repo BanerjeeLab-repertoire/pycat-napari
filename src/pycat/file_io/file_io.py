@@ -218,7 +218,7 @@ import skimage as sk
 #
 # This import was already DEAD — `open_image()` replaced every use of it in 1.5.529, and an
 # AST walk confirms `AICSImage` is referenced nowhere in this file's code.
-from pycat.file_io.image_reader import open_image
+from pycat.file_io.image_reader import open_image, read_plane
 from pycat.utils.channel_naming import (
     extract_channel_info_from_aicsimage,
     extract_channel_info_from_ims,
@@ -1343,12 +1343,12 @@ class FileIOClass:
                 for page_num in range(num_pages):
                     for channel_num in range(num_channels):
                         k += 1
-                        channel_data = image.get_image_data("YX", C=channel_num, S=page_num, T=0)
+                        channel_data = read_plane(image, scene=page_num, c=channel_num, t=0)
                         all_channels.append((channel_data, file_path, k))
             # If only one page, iterate over channels
             else: 
                 for channel_num in range(num_channels):
-                    channel_data = image.get_image_data("YX", C=channel_num, T=0)
+                    channel_data = read_plane(image, c=channel_num, t=0)
                     all_channels.append((channel_data, file_path, channel_num))
 
             # Identify channel identity from OME/Bio-Formats metadata
@@ -1686,7 +1686,7 @@ class FileIOClass:
         try:
             import numpy as _np
             img = open_image(file_path)
-            plane = _np.asarray(img.get_image_data("YX", C=0, T=0, Z=0))
+            plane = read_plane(img, c=0, t=0, z=0)
             is_int = _np.issubdtype(plane.dtype, _np.integer)
             uniq = _np.unique(plane)
             n_unique = int(uniq.size)
@@ -2576,8 +2576,7 @@ class FileIOClass:
                     continue
 
                 if n_t == 1 and n_z == 1:
-                    frame = image.get_image_data(
-                        'YX', C=channel_idx, T=0, Z=0).astype(np.float32)
+                    frame = read_plane(image, c=channel_idx, t=0, z=0, dtype=np.float32)
                     self.load_into_viewer(
                         frame,
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
@@ -2972,12 +2971,12 @@ class FileIOClass:
                 for page_num in range(num_pages):
                     for channel_num in range(num_channels):
                         k += 1
-                        channel_data = mask.get_image_data("YX", C=channel_num, S=page_num, T=0)
+                        channel_data = read_plane(mask, scene=page_num, c=channel_num, t=0)
                         all_channels.append((channel_data, file_path, k))
             # If only one page, iterate over channels
             else: 
                 for channel_num in range(num_channels):
-                    channel_data = mask.get_image_data("YX", C=channel_num, T=0)
+                    channel_data = read_plane(mask, c=channel_num, t=0)
                     all_channels.append((channel_data, file_path, channel_num))
 
         # Check if there are multiple channels to assign names

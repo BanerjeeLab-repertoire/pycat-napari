@@ -1,4 +1,11 @@
-aicsimageio
+# BioIO replaced aicsimageio in 1.6.0. aicsimageio is FROZEN in maintenance mode and its
+# pins (zarr<2.16, tifffile<2023.3, fsspec<2023.9, lxml<5) are what held numpy<2 and
+# zarr<3 in place. Removing it FREES the pins. BioIO's readers are separate packages --
+# bioio-czi is NOT optional (Zeiss market share).
+bioio
+bioio-ome-tiff
+bioio-tifffile
+bioio-czi
 cellpose
 matplotlib
 napari

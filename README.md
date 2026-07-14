@@ -332,10 +332,8 @@ If you encounter issues with the standard installation, use our tested environme
 
 ```bash
 # Windows
-mamba env create -f pycat-devbio-napari-env-x86-windows.yml
 
 # Mac M1/ARM
-mamba env create -f pycat-devbio-napari-env-arm-mac.yml
 ```
 
 </details>
@@ -648,10 +646,8 @@ cd pycat-napari
 2. Create development environment:
 ```bash
 # Windows
-mamba env create -f pycat-devbio-napari-env-x86-windows.yml
 
 # Mac M1/ARM
-mamba env create -f pycat-devbio-napari-env-arm-mac.yml
 
 mamba activate pycat-napari-env
 ```
@@ -840,7 +836,7 @@ This project was developed by Gable Wadsworth and Christian Neureuter in the Con
 - [pandas](https://pandas.pydata.org/) - Data analysis
 - [Cellpose](https://www.cellpose.org/) - Deep-learning cell/nucleus segmentation
 - [PyTorch](https://pytorch.org/) - Deep learning backend
-- [AICSImageIO](https://github.com/AllenCellModeling/aicsimageio) - Microscope file format reading
+- [BioIO](https://github.com/bioio-devs/bioio) (successor to AICSImageIO) - Microscope file format reading
 - [zarr](https://zarr.dev/) - Lazy, chunked array storage for large multi-dimensional acquisitions
 - [scipy](https://scipy.org/) - Scientific computing (optimization, linear assignment, filtering)
 - Optional: [CuPy](https://cupy.dev/) (GPU acceleration), [StarDist](https://github.com/stardist/stardist) (alternative segmentation), [pyimagej](https://github.com/imagej/pyimagej) (TrackMate bridge)

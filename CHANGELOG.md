@@ -4,6 +4,79 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-07-13
+### P0 — the freeze: eight EAGER reads, three self-materialising wrappers, and six install routes still shipping aicsimageio
+*(From an external audit Gable commissioned. Its findings check out; its headline does not — see
+below.)*
+
+### 1. `get_image_data()` loads the ENTIRE scene
+**Both libraries document it in the same words:**
+
+> *"The ``.get_image_data`` function will **load the whole scene into memory** and then retrieve the
+> specified chunk."*
+
+**PyCAT was calling it in EIGHT places in the loading path** — including to read a *single plane* in
+order to **classify** a file. On a large 4-D acquisition that pulls **the entire scene into memory to
+look at one frame**, and it happens **more than once per file**, because the reader is constructed
+several times before anything is displayed.
+
+***That is the freeze.***
+
+All eight now go through **``read_plane()``** — one function, using ``get_image_dask_data()``, which
+computes **exactly one plane.** *(The audit found 3. There were 8: it missed ``open_2d_mask``,
+``ui_modules``, and ``batch_step_registry``.)*
+
+### 2. `__array__` quietly stacked every frame
+``np.asarray(layer.data)`` on a lazy stack has already cost this project **two bugs** — N&B told
+users their movie was 2-D; SpIDA analysed frame 0 while they looked at frame 40. The fix there was
+``materialize_stack()``: **an explicit, named, deliberate full read.**
+
+**``__array__`` did the opposite.** Any thumbnail, plugin, layer refresh, contrast estimate or stray
+numpy operation could pull **an entire acquisition into memory** — *without anyone asking, and
+without anything saying so.*
+
+*A comment claimed pinned contrast limits stop napari calling it.* ***That is a hope, not a
+guarantee.***
+
+**All three now RAISE**, and name the two things the caller might actually have meant.
+
+### 3. SIX install routes still shipped aicsimageio — and this one was mine
+``requirements-base.txt``, ``meta.yaml``, and **four conda lockfiles.**
+
+**The lockfiles were worse than stale.** They were **exported conda environments pinned to Python
+3.9** — and PyCAT requires **``>=3.12``. They could not have worked.** They also pinned
+``aicsimageio=4.10.0``, ``numpy=1.23.5``, ``tifffile=2023.2.28``.
+
+***And the README told developers to build from them.***
+
+> **Until this was fixed, no performance report from any user was interpretable.**
+
+Deleted, with ``config/README.md`` recording what went and why. Guarded.
+
+### The audit's HEADLINE is wrong, and the distinction matters
+> *"the BioIO migration introduced an eager-read regression"*
+
+**aicsimageio documented the same eager semantics.** ***The calls were wrong in 1.5.x too.***
+
+What the migration did was **expose** them — ``bioio-czi`` uses a different backend
+(``pylibczirw``, not ``aicspylibczi``), so **the same mistake can cost very differently.**
+
+*Chasing "what did BioIO break?" would have been chasing a phantom.*
+
+### Three guards, and one lesson that keeps arriving
+- ``test_no_eager_reads`` — bans ``get_image_data()`` outright
+- ``test_install_routes_agree`` — no route may ship aicsimageio; every route must ship ``bioio-czi``
+- the lazy-stack guard now walks the **AST**
+
+**That last one:** the old guard was a regex over the raw source, and it **flagged the docstring
+explaining why ``np.asarray(layer.data)`` is dangerous.** The new eager-read guard then did the same
+thing to *its own* docstring.
+
+> ***Three times this session a guard has checked a comment. A guard that cannot tell code from
+> prose will eventually flag its own explanation — and the fix is not to stop explaining.***
+
+**450/450 core tests passing.**
+
 ## [1.6.2] - 2026-07-13
 ### The pixel-size gate stayed silent on a file whose scale is 2.3 PICOMETRES
 Gable loaded an ImageJ-exported substack and reported the gate did not fire. **It was right not to
@@ -65,6 +138,74 @@ neighbour**, which also sets the flag ``False``.
 
 **The AST knows where a branch ends. A character window does not.** Both guards now inspect the
 branch **node**, and both were verified by re-introducing the exact bug and watching them fire.
+
+**443/443 core tests passing.**
+
+## [1.6.2] - 2026-07-13
+### The pixel-size gate now asks *"could a microscope have produced this?"* — not merely *"is there a number?"*
+Gable: *"the pixel size gate does not fire on an image I know lacks a proper scale."*
+
+**It was firing correctly. The FILE was lying.**
+
+### The file
+An ImageJ-exported substack, ``polyA…Substack (109).tif``:
+
+```
+XResolution    = 2147054150 / 4999   ->  429,496.7 px per unit
+ResolutionUnit = 1                   ->  "no absolute unit"
+ImageJ unit    = µm
+```
+
+That is **0.0023 nanometres per pixel** — ***smaller than a hydrogen atom.***
+
+**``2147054150`` is a hair under ``2^31 = 2147483648``.** It is a **signed-integer overflow** in
+ImageJ's Substack export — a known artefact, and the exact operation that produced this file.
+
+### Why the gate stayed silent — and why that was RIGHT
+PyCAT saw a pixel size that was **not ``None``** and **not the ``1.0`` sentinel**, concluded the file
+carried a real scale, set ``pixel_size_from_metadata = True``, and hid the gate.
+
+> ***It was doing what it was told.***
+
+*(And this is why the **parent** TIFF and the **bead** TIFF **did** fire the gate: they carry no
+resolution tag at all, so PyCAT correctly fell back to the sentinel. Only the ImageJ-exported
+substack carries the poisoned one.)*
+
+### The fix: a PHYSICAL plausibility check
+Bounds from **Abbe and Nyquist**, and **deliberately loose** — they exist to catch a **corrupt tag**,
+not to second-guess a real acquisition:
+
+| | |
+|---|---|
+| **floor** | **1 nm/px** — below the finest SMLM render, by 1000× |
+| **ceiling** | **1 mm/px** — above any micrograph |
+
+| source | µm/px | |
+|---|---|---|
+| **the ImageJ substack** | **2.3e-06** | **REJECTED** |
+| SMLM render (1 nm) | 0.001 | ok |
+| confocal 63× | 0.0264 | ok |
+| the VPT beads | 0.067 | ok |
+| widefield 20× | 0.325 | ok |
+| slide scanner | 10.0 | ok |
+
+***Every real instrument passes. The corrupt file misses by 400×.*** It is not a borderline call.
+
+### It WARNS and PROMPTS — it does not block
+A corrupt tag is treated **exactly like a missing one**: the pixel size falls back to the sentinel,
+``pixel_size_from_metadata`` goes ``False``, **and the gate fires and asks for the scale** — the same
+path as a file with no tag at all.
+
+The only difference is that the warning is **honest about why**, naming the ImageJ Substack overflow
+rather than saying *"resolution data incomplete"*, which would be **a lie of its own.**
+
+**The image still loads.** *(Guarded:
+``test_a_CORRUPT_TAG_prompts_for_a_scale_and_does_NOT_block_the_load``.)*
+
+### BioIO is innocent
+The reader comparison found **zero differences** in ``physical_pixel_sizes`` across all 31 files —
+**including this one.** Both libraries read the corrupt tag identically. **This bug predates the
+migration.**
 
 **443/443 core tests passing.**
 

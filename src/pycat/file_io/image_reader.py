@@ -276,3 +276,58 @@ def compare_readers(path, verbose=True) -> dict:
             print("  IDENTICAL on every axis checked, including the pixels.")
 
     return report
+
+def read_plane(image, *, scene=None, t=0, c=0, z=0, dtype=None):
+    """**Read exactly ONE YX plane. Never the whole scene.**
+
+    ── ``get_image_data()`` LOADS THE ENTIRE SCENE ────────────────────────────
+
+    This is not a subtlety — **both libraries document it in the same words**:
+
+        *"The ``.get_image_data`` function will **load the whole scene into memory** and then
+        retrieve the specified chunk."*
+        — BioIO docs, and aicsimageio's before them
+
+    ``get_image_dask_data()`` is the lazy one: *"will not load any piece of the imaging data into
+    memory until you specifically call ``.compute()``."*
+
+    **PyCAT was calling the eager one in eight places in the loading path** — including to read a
+    *single plane* in order to *classify* a file. On a large 4-D acquisition that reads the entire
+    scene **to look at one frame**, and it can happen **more than once per file** because the
+    reader is constructed several times before anything is displayed.
+
+    *That is the freeze.*
+
+    ── This is NOT a BioIO regression, and the distinction matters ────────────
+
+    **aicsimageio documented the same eager semantics.** The calls were wrong in 1.5.x too. What
+    the migration did was **expose** them — a different CZI backend (``pylibczirw`` rather than
+    ``aicspylibczi``) and a different TIFF reader can make the same mistake cost very differently.
+
+    *Chasing "what did BioIO break?" would have been chasing a phantom. The loader was always
+    eager here.*
+
+    ── Why one function rather than eight fixes ───────────────────────────────
+
+    Eight call sites, each free to reach for the eager API again. **A single reader means the ban
+    can be enforced**: ``test_the_loader_NEVER_uses_the_eager_API`` fails the build if
+    ``get_image_data(`` appears anywhere in ``file_io``.
+    """
+    import numpy as np
+
+    if scene is not None:
+        image.set_scene(scene)
+
+    lazy = image.get_image_dask_data("YX", T=int(t), C=int(c), Z=int(z))
+
+    # A dask array computes on demand; a numpy one is already here. Both libraries return dask
+    # from `get_image_dask_data`, but a reader plugin is free not to — so ask, do not assume.
+    if hasattr(lazy, 'compute'):
+        lazy = lazy.compute()
+
+    plane = np.asarray(lazy)
+
+    if dtype is not None:
+        plane = plane.astype(dtype, copy=False)
+
+    return plane

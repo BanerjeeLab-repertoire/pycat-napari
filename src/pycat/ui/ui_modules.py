@@ -1688,8 +1688,16 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 import numpy as _np
                 arr = None
                 try:
+                    # ── `get_image_data` LOADS THE WHOLE SCENE ──────────────────────
+                    #
+                    # Both libraries document it in the same words. This read a ZYX volume with the
+                    # eager API, which on a 4-D file pulls the entire scene into memory.
                     from pycat.file_io.image_reader import open_image
-                    arr = _np.asarray(open_image(p).get_image_data("ZYX", C=0, T=0)).astype(_np.float32)
+                    _img = open_image(p)
+                    _lazy = _img.get_image_dask_data("ZYX", C=0, T=0)
+                    arr = _np.asarray(
+                        _lazy.compute() if hasattr(_lazy, 'compute') else _lazy
+                    ).astype(_np.float32)
                     arr = _np.squeeze(arr)
                 except Exception:
                     import tifffile

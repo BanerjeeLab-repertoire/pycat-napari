@@ -34,7 +34,11 @@ requirements:
     - wheel
   run:
     - python >=3.12,<3.14
-    - aicsimageio
+    # BioIO replaced aicsimageio in 1.6.0 (it is frozen and its pins held numpy<2/zarr<3).
+    - bioio
+    - bioio-ome-tiff
+    - bioio-tifffile
+    - bioio-czi
     - cellpose
     - matplotlib
     - napari

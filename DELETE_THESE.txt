@@ -1,0 +1,19 @@
+These four files are DELETED in 1.6.3. Remove them from the repo:
+
+  config/pycat-napari-env-arm-mac.yaml
+  config/pycat-devbio-napari-env-arm-mac.yaml
+  config/pycat-napari-env-x86-windows.yaml
+  config/pycat-devbio-napari-env-x86-windows.yaml
+
+They are exported conda lockfiles pinned to PYTHON 3.9 -- and PyCAT requires >=3.12.
+They could never have worked. They also pin aicsimageio=4.10.0, numpy=1.23.5 and
+tifffile=2023.2.28 -- the exact frozen 2023 stack that 1.6.0 exists to escape.
+
+The README told developers to build from them.
+
+  git rm config/pycat-napari-env-arm-mac.yaml
+  git rm config/pycat-devbio-napari-env-arm-mac.yaml
+  git rm config/pycat-napari-env-x86-windows.yaml
+  git rm config/pycat-devbio-napari-env-x86-windows.yaml
+
+config/README.md (included) records what went and why.

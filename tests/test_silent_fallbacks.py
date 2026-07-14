@@ -178,6 +178,7 @@ def test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero():
     Any module that consumes a stack must call ``stack_access.materialize_stack`` (or
     ``iter_frames``). The modules listed in ``_LAZY_STACK_ALLOWED`` are genuinely 2D.
     """
+    import ast
     import re
 
     source_root = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
@@ -190,9 +191,34 @@ def test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero():
 
         source = path.read_text(encoding='utf-8', errors='ignore')
 
-        for match in re.finditer(r'np\.(?:asarray|array)\s*\(\s*(\w*layer\w*)\.data', source):
-            line_number = source[:match.start()].count('\n') + 1
-            offenders.append(f"{relative}:{line_number}")
+        # ── AST, not a regex over the raw text ───────────────────────────────────
+        #
+        # The regex that stood here matched **the prose as well as the code.** A docstring
+        # explaining *why* ``np.asarray(layer.data)`` is dangerous was itself flagged as an
+        # instance of it — the same failure `test_ci_dependencies` documents: *"the guard was
+        # checking a comment."*
+        #
+        # **A guard that cannot tell code from prose will eventually flag its own explanation**,
+        # and the fix for that is not to stop explaining.
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            function = node.func
+            if not (isinstance(function, ast.Attribute)
+                    and function.attr in ('asarray', 'array')
+                    and getattr(function.value, 'id', None) in ('np', 'numpy', '_np')):
+                continue
+            if not node.args:
+                continue
+            argument = node.args[0]
+            if (isinstance(argument, ast.Attribute) and argument.attr == 'data'
+                    and 'layer' in str(getattr(argument.value, 'id', '')).lower()):
+                offenders.append(f"{relative}:{node.lineno}")
 
     assert not offenders, (
         f"these sites call np.asarray on a layer's data: {offenders}\n\n"
