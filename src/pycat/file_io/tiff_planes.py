@@ -105,12 +105,32 @@ def read_tiff_plane(path, *, t=0, c=0, z=0, n_channels=1, n_z=1, dtype=None):
 
     try:
         with tifffile.TiffFile(str(path)) as handle:
-            if _is_multifile_ome(handle):
-                # A multi-file OME set. `_TiffPageStack` maps pages across companions; this
-                # single-file reader does not, and a guess would be silently wrong.
-                return None
+            # ── DECLINING ON A MULTI-FILE OME SET WAS A DEAD END ──────────────────
+            #
+            # The first version returned ``None`` here, on the reasoning that *"the caller falls
+            # back to BioIO."*
+            #
+            # ***But for TIFF, BioIO is exactly what is broken.*** ``bioio-tifffile`` reads pixels
+            # through ``tif.aszarr()``, and that is incompatible with zarr 3.2. **The decline handed
+            # the file to a path that cannot work** — and Gable's 1200-frame MMStack came back as::
+            #
+            #     read_plane failed: ValueError: zarr 3.2.1 < 3 is not supported
+            #
+            # *A fallback that does not exist is not a fallback. It is a dead end with a comment
+            # explaining why it is safe.*
+            #
+            # **tifffile resolves the multi-file set itself.** ``series`` walks the OME-XML, finds
+            # the companion files, and exposes **one page list spanning them** — and it handles
+            # *absent* companions too (it zero-fills and says so), which is exactly what
+            # ``_TiffPageStack`` was written to do by hand.
+            #
+            # So: use the series' page list, and multi-file comes for free.
+            try:
+                series = handle.series[0] if handle.series else None
+            except Exception:
+                series = None
 
-            pages = handle.pages
+            pages = series.pages if series is not None else handle.pages
             n_pages = len(pages)
             if n_pages == 0:
                 return None

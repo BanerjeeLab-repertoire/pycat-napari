@@ -162,10 +162,10 @@ def _ims_pixel_size_um(reader, width_px):
 def _tiff_pixel_size_um(file_path):
     """Read physical pixel size (µm/px) from baseline TIFF resolution tags.
 
-    AICSImage's physical_pixel_sizes only reads OME-XML and ImageJ metadata; it
+    The structured reader's physical_pixel_sizes only reads OME-XML and ImageJ metadata; it
     does not fall back to the standard TIFF XResolution/YResolution/ResolutionUnit
     tags. Many microscope-exported TIFFs (and channel-split exports) store pixel
-    size ONLY in those baseline tags, so AICSImage reports None and PyCAT wrongly
+    size ONLY in those baseline tags, so the reader reports None and PyCAT wrongly
     falls back to 1.0 µm/px. This helper reads the tags directly.
 
     XResolution/YResolution are RATIONAL (numerator, denominator) = pixels per
@@ -841,7 +841,7 @@ class _TiffPageStack:
     """Lazy (T, Y, X) wrapper that reads ONE frame at a time straight from a
     multipage TIFF via tifffile's page reader.
 
-    This is the fast path for Micro-Manager / OME-TIFF time-series. AICSImage's
+    This is the fast path for Micro-Manager / OME-TIFF time-series. The structured reader'sImage's
     dask reader consults the OME plane-map on every frame read, so scrubbing a
     large MMStack lags badly; a plain `TiffFile.pages[t].asarray()` is a direct
     seek+read of a single page (no dask graph, no OME-map walk, no copy of the
@@ -1073,37 +1073,19 @@ class _LazyArraySource:
         refuse_implicit_full_read(self)
 
 
-class _ZarrTYX_generic:
-    """
-    Lightweight napari-compatible wrapper around a plain zarr Array
-    for TIFF/CZI stacks (no IMS chunk-print suppression needed).
-    """
-    def __init__(self, z):
-        self._z    = z
-        self.shape = z.shape
-        self.dtype = np.dtype('float32')
-        self.ndim  = 3
-
-    def __getitem__(self, idx):
-        if isinstance(idx, tuple):
-            t_idx, spatial = idx[0], idx[1:]
-        else:
-            t_idx, spatial = idx, (slice(None), slice(None))
-        arr = np.asarray(self._z[t_idx]).astype(np.float32)
-        if arr.ndim == 2:
-            return arr[spatial]
-        return arr[(slice(None),) + spatial]
-
-    def __array__(self, dtype=None):
-        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
-        from pycat.file_io.lazy_guard import refuse_implicit_full_read
-        refuse_implicit_full_read(self)
-
-    def __len__(self):
-        return self.shape[0]
-
-    def transpose(self, *axes):
-        return np.asarray(self._z[0]).astype(np.float32)[np.newaxis]
+# ── `_ZarrTYX_generic` was DELETED in 1.6.9 ──────────────────────────────────────────────
+#
+# **It was named after the wrong thing.** It is not zarr-specific — it received **zarr arrays,
+# numpy arrays, and BioIO dask arrays** — and the name told every reader it could rely on zarr
+# semantics it does not have.
+#
+# Worse, the TZYX branch **transcoded the entire file into a temporary zarr** before showing
+# anything, *purely so it would have a zarr to wrap.* **The dask array was already lazy.** The copy
+# bought nothing and cost the whole file. *(Removed in 1.6.4.)*
+#
+# ``_LazyArraySource`` wraps whatever it is given, and was verified to behave **identically** on
+# every indexing pattern napari uses on a (T, Y, X) layer — ``stack[t]``, ``stack[t, :, :]``,
+# ``stack[t, y0:y1, :]``, ``stack[t0:t1]``.
 
 
 # When True, the 'Object Diameter' / 'Cell Diameter' annotation layers are created
@@ -1305,7 +1287,7 @@ class FileIOClass:
             except Exception:
                 pass
 
-            # Open the image using AICSImage.
+            # Open the image through the reader seam.
             # We detect NumPy 2.0 newbyteorder errors lazily — only reading
             # the minimal metadata needed (xarray_dask_data uses dask so no
             # full read happens).  Avoid calling image.dims or image.data
@@ -1358,7 +1340,7 @@ class FileIOClass:
                         "or downgrade NumPy: pip install 'numpy<2.0'"
                     )
                     print(f"[PyCAT] PIL fallback also failed: {_pil_e}")
-                continue  # skip the AICSImage path below
+                continue  # skip the structured-reader path below
 
             image = open_image(file_path)
             self.central_manager.active_data_class.update_metadata(image)
@@ -1658,7 +1640,7 @@ class FileIOClass:
         # It was NOT restored, because the job it described ("decide whether we
         # must ask the user what they loaded") is already done, and done better,
         # by `_tiff_multipage_undeclared` (1.5.351): that checks the actual axis
-        # LABEL rather than merely whether AICSImage can read some dims, which is
+        # LABEL rather than merely whether the reader can read some dims, which is
         # the distinction that matters (a plain multipage TIFF has dims but no
         # declared T/Z axis). Reinstating the weaker check would add a redundant
         # code path that nothing calls.
@@ -2181,7 +2163,7 @@ class FileIOClass:
                       memmap, then wrapped in the same _ZarrTYX interface so
                       napari reads one frame at a time from the memory-mapped
                       file rather than holding the whole stack in RAM.
-        .czi          Zeiss CZI — opened via AICSImage; frames loaded one at a
+        .czi          Zeiss CZI — opened via the reader seam; frames loaded one at a
                       time into a temporary zarr store on disk (same pattern as
                       the preprocessing pipeline).
 
@@ -2275,7 +2257,7 @@ class FileIOClass:
 
         # Extract and store the full normalised metadata record (IMS metadata
         # was previously discarded entirely — update_metadata is only called on
-        # the AICSImage path).
+        # the structured-reader path).
         try:
             from pycat.file_io.metadata_extract import extract_metadata
             md = extract_metadata(file_path, reader=reader, width_px=W)
@@ -2472,7 +2454,7 @@ class FileIOClass:
 
     def _open_stack_generic(self, file_path: str, ext: str):
         """
-        Generic stack loader for TIFF, OME-TIFF, and CZI files via AICSImage.
+        Generic stack loader for TIFF, OME-TIFF, and CZI files via the reader seamImage.
 
         Reads the full T, C, Z dimensions from file metadata (OME-XML,
         ImageJ hyperstack description, or format-native equivalent) rather
@@ -2481,7 +2463,7 @@ class FileIOClass:
         lazy 4D (T, Z, Y, X) per-channel arrays, matching the IMS loader.
 
         Multi-position acquisitions (OME-XML scenes / Bio-Formats series)
-        are detected via AICSImage's `.scenes` and offered through the
+        are detected via the reader's `.scenes` and offered through the
         same position-selection dialog used for IMS sibling files.
         """
         import tempfile, zarr as _zarr
@@ -2500,7 +2482,11 @@ class FileIOClass:
             # ImageReaderUnavailable with the exact `pip install` line when neither is
             # present. The hand-rolled ImportError that used to live here said less.
             image = open_image(file_path)
-            use_aicsimage = True
+            # **This flag never meant "is it aicsimageio?"** — it meant *"did the structured
+            # reader give us dimensions, scenes and channel metadata, or are we falling back to
+            # reading raw pages?"* The old name described the **implementation** rather than the
+            # **question**, and it went stale the moment BioIO replaced aicsimageio in 1.6.0.
+            reader_has_structure = True
 
             # ── Multi-position (scene) detection ───────────────────────
             scenes = list(getattr(image, 'scenes', []) or [])
@@ -2529,7 +2515,7 @@ class FileIOClass:
                           "1.0 µm/px — micron measurements may be wrong)", _e)
                 pass
 
-            # Fallback: AICSImage's physical_pixel_sizes only reads OME-XML and
+            # Fallback: the reader's physical_pixel_sizes only reads OME-XML and
             # ImageJ metadata, not the baseline TIFF resolution tags. If it came
             # back empty (== 1.0), try reading XResolution/ResolutionUnit directly.
             if abs(microns_per_pixel - 1.0) < 1e-9:
@@ -2537,7 +2523,7 @@ class FileIOClass:
                 if _tag_px is not None:
                     microns_per_pixel = _tag_px
                     debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
-                              "from TIFF resolution tags (AICSImage missed it)")
+                              "from TIFF resolution tags (the reader missed it)")
 
             self.central_manager.active_data_class.update_metadata(image)
             # Also store the normalised metadata record for the metadata widget
@@ -2550,9 +2536,9 @@ class FileIOClass:
                 debug_log("file_io: metadata extraction failed", _mde)
 
         except Exception as _e:
-            debug_log("file_io: AICSImage load failed, falling back to direct "
+            debug_log("file_io: the structured reader failed, falling back to direct "
                       "tifffile read (scene/T/Z metadata unavailable)", _e)
-            use_aicsimage = False
+            reader_has_structure = False
             scenes_to_load = [None]
             # ── A METADATA defect must not trigger a full EAGER read ────────────
             #
@@ -2615,21 +2601,21 @@ class FileIOClass:
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
-        # Keep lazy sources (AICSImage readers + dask arrays) alive for as long
+        # Keep lazy sources (readers + dask arrays) alive for as long
         # as the layers exist, so on-demand frame reads keep working without an
         # eager copy to disk.
         if not hasattr(self, '_stack_lazy_refs'):
             self._stack_lazy_refs = []
-        channels_to_load = list(range(n_c)) if not use_aicsimage else None
+        channels_to_load = list(range(n_c)) if not reader_has_structure else None
         H = W = n_t = n_z = None
 
         for scene in scenes_to_load:
             scene_suffix = ''
-            if use_aicsimage and len(scenes_to_load) > 1:
+            if reader_has_structure and len(scenes_to_load) > 1:
                 image.set_scene(scene)
                 scene_suffix = f" [{scene}]"
 
-            if use_aicsimage:
+            if reader_has_structure:
                 n_t = getattr(image.dims, 'T', 1)
                 n_c = getattr(image.dims, 'C', 1)
                 n_z = getattr(image.dims, 'Z', 1)
@@ -2638,7 +2624,7 @@ class FileIOClass:
                 channels_to_load = list(range(n_c))
 
             for channel_idx in channels_to_load:
-                if use_aicsimage:
+                if reader_has_structure:
                     _ch_info = extract_channel_info_from_aicsimage(image, channel_idx)
                 else:
                     _ch_info = {'layer_name': f'C{channel_idx}',
@@ -2650,12 +2636,12 @@ class FileIOClass:
 
                 import os as _os
 
-                if not use_aicsimage:
+                if not reader_has_structure:
                     # tifffile fallback — single (T,H,W), no Z/scene metadata
                     arr_ch = arr.astype(np.float32)
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
                     # Data is already in memory — wrap it directly (no disk copy).
-                    wrapper = _ZarrTYX_generic(arr_ch)
+                    wrapper = _LazyArraySource(arr_ch)
                     self._stack_lazy_refs.append(arr_ch)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
@@ -2700,7 +2686,7 @@ class FileIOClass:
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
 
                 elif n_z == 1:
-                    # Pure time series (T, Y, X). AICSImage's dask array is lazy
+                    # Pure time series (T, Y, X). the structured reader's dask array is lazy
                     # but SLOW to scrub: indexing it per slider-move re-executes
                     # the dask/reader graph for that frame, re-decoding through
                     # the TIFF/CZI backend every time — so scrubbing a modest
@@ -2733,7 +2719,7 @@ class FileIOClass:
                     # no eager copy. For TIFF/OME-TIFF (incl. Micro-Manager
                     # MMStack) read frames straight from the multipage TIFF via
                     # tifffile, which is a direct per-page seek and far faster to
-                    # scrub than AICSImage's dask reader (which walks the OME
+                    # scrub than the structured reader's dask path (which walks the OME
                     # plane-map on every frame). CZI has no tifffile path, so it
                     # keeps the dask wrapper.
                     wrapper = None
@@ -2774,7 +2760,7 @@ class FileIOClass:
                                     wrapper = None
                         except Exception as _te:
                             debug_log("file_io: tifffile page reader failed, "
-                                      "using AICSImage dask wrapper", _te)
+                                      "using the structured reader's dask wrapper", _te)
                             wrapper = None
                     if wrapper is None:
                         # The tifffile page reader declined or failed. Fall back to BioIO's dask
@@ -2798,7 +2784,7 @@ class FileIOClass:
                                     f"from a newer zarr, not a version that is too old."
                                 ) from _dask_exc
 
-                        wrapper = _ZarrTYX_generic(dask_arr)
+                        wrapper = _LazyArraySource(dask_arr)
                         self._stack_lazy_refs.append((image, dask_arr))
                     else:
                         self._stack_lazy_refs.append(wrapper)  # keep handle open
@@ -2859,7 +2845,7 @@ class FileIOClass:
                                 f"TIFF Z stack, which still depends on that path."
                             ) from _dask_exc
                         raise
-                    wrapper = _ZarrTYX_generic(dask_arr)
+                    wrapper = _LazyArraySource(dask_arr)
                     self._stack_lazy_refs.append((image, dask_arr))
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
@@ -3002,8 +2988,8 @@ class FileIOClass:
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),
-                                  n_t if use_aicsimage else n_frames,
-                                  n_z if use_aicsimage else 1,
+                                  n_t if reader_has_structure else n_frames,
+                                  n_z if reader_has_structure else 1,
                                   file_path, source='generic')
 
 
@@ -3237,7 +3223,7 @@ class FileIOClass:
             except Exception:
                 pass 
 
-            # Open the mask using AICSImage package
+            # Open the mask through the reader seam.
             mask = open_image(file_path)
 
             # Get the number of pages and channels in the mask

@@ -82,6 +82,20 @@ _DELIBERATE = {
     # which is where napari SOURCES the string — one writer, one string, no order to depend on.
     # `_on_mouse_move` is gone because the approach it embodied was wrong.
     'coordinate_readout.py::_on_mouse_move',
+
+    # 1.6.9 — `_ZarrTYX_generic` was DELETED, and its `__getitem__(self, idx)` went with it.
+    #
+    # **It was named after the wrong thing.** It is not zarr-specific: it received zarr arrays,
+    # numpy arrays AND BioIO dask arrays — and the name told every reader it could rely on zarr
+    # semantics it does not have. *Worse, the TZYX branch transcoded the whole file into a
+    # temporary zarr before showing anything, purely so it would have a zarr to wrap.*
+    #
+    # `_LazyArraySource.__getitem__(self, index)` replaces it, and was verified to behave
+    # IDENTICALLY on every indexing pattern napari uses on a (T, Y, X) layer: stack[t],
+    # stack[t, :, :], stack[t, y0:y1, :], stack[t0:t1].
+    #
+    # The parameter is not lost — it is `index` rather than `idx`. **A rename, not a removal.**
+    'file_io.py::__getitem__',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

@@ -239,3 +239,46 @@ def test_every_TiffPageStack_CONSTRUCTION_has_enough_arguments():
           "through to the eager read it was written to avoid. That is exactly what shipped in "
           "1.6.4."
     )
+
+
+@pytest.mark.core
+def test_a_MULTIFILE_OME_set_is_READ_and_not_DECLINED():
+    """***A fallback that does not exist is not a fallback.***
+
+    The first version of ``read_tiff_plane`` **declined** on a multi-file OME set, on the reasoning
+    that *"the caller falls back to BioIO."*
+
+    **But for TIFF, BioIO is exactly what is broken.** ``bioio-tifffile`` reads pixels through
+    ``tif.aszarr()``, which is incompatible with zarr 3.2. So the decline **handed the file to a
+    path that cannot work** — and Gable's 1200-frame MMStack came back as::
+
+        read_plane failed: ValueError: zarr 3.2.1 < 3 is not supported
+
+    *It was a dead end with a comment explaining why it was safe.*
+
+    **tifffile resolves the multi-file set itself.** ``series`` walks the OME-XML, finds the
+    companion files, and exposes **one page list spanning them** — and it handles *absent*
+    companions too. Using the series' pages means multi-file comes for free.
+    """
+    import ast
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "file_io"
+              / "tiff_planes.py").read_text(encoding='utf-8', errors='ignore')
+
+    assert 'handle.series' in source, (
+        "`read_tiff_plane` does not use tifffile's `series`, which is what resolves a multi-file "
+        "OME set. Without it the reader declines — and the BioIO 'fallback' cannot read TIFF."
+    )
+
+    # And it must not bail out on the multi-file case any more.
+    tree = ast.parse(source)
+    reader = next((n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == 'read_tiff_plane'), None)
+    assert reader is not None
+
+    body = ast.get_source_segment(source, reader) or ''
+    assert '_is_multifile_ome(handle)' not in body, (
+        "`read_tiff_plane` still declines on a multi-file OME set. That hands the file to BioIO — "
+        "**which cannot read TIFF pixels at all on zarr 3.2.** It is a dead end."
+    )

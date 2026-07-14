@@ -4,6 +4,170 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.11] - 2026-07-13
+# The harness was badly posed — and it was hiding two real bugs
+
+Gable, on the first run: *"you sure you didn't just make another badly posed test?"* **He was
+right.**
+
+## 30 of 32 files COULD NOT FAIL
+**For a ``T=1 Z=1 C=1`` file, one plane IS the whole scene.** Amplification is **1.0× by
+construction** — it cannot be anything else, whatever the loader does.
+
+The run reported **1.01× on 30 of 32 files** and looked like a clean bill of health.
+
+> ***A test that cannot fail is worse than no test.*** It produces a green number that means
+> nothing — and it **hid the two files that were actually saying something.**
+
+Single-plane files are now reported as **NOT APPLICABLE**, explicitly, and do not count toward the
+pass. *If every file is single-plane, the script says **"NOTHING WAS ACTUALLY TESTED"** rather than
+"all clear".*
+
+## Bug 1: the TIFF/zarr fix had a DEAD END in it
+```
+polyA...MMStack_Pos0.ome.tif → read_plane failed: ValueError: zarr 3.2
+```
+
+``read_tiff_plane`` **declined** on a multi-file OME set, on the reasoning that *"the caller falls
+back to BioIO."*
+
+> ***But for TIFF, BioIO is exactly what is broken.***
+
+``bioio-tifffile`` reads pixels through ``tif.aszarr()``, which is incompatible with zarr 3.2. **The
+decline handed the file to a path that cannot work.** *A fallback that does not exist is not a
+fallback — it is a dead end with a comment explaining why it is safe.*
+
+**tifffile resolves the multi-file set itself.** ``series`` walks the OME-XML, finds the companions,
+and exposes **one page list spanning them** — *and handles absent companions too.* **Multi-file now
+comes for free**, and the pixels are still bit-identical.
+
+## Bug 2: the 3.7× flag was a FALSE ALARM — my threshold was wrong
+``post_1_0.5_1.tif`` was flagged at **3.7×**. ***It was fine.***
+
+That file is **600 frames of 177×162 — a 57 KB plane.** 3.7× is ~212 KB, against a **34 MB scene**:
+**0.6% of it.**
+
+**A fixed overhead — page tags for 600 pages, the OME-XML, a numpy temporary — reads as 3.7× on a
+57 KB plane and 0.01× on a 4 MB one.** And the data said exactly that: every 1024×1024 file reported
+1.01×, the 512×512 files 1.11×, the small one 3.7×. ***Consistent with constant overhead. Not with a
+scene read.***
+
+> **The real question is not "how many planes?" — it is "what fraction of the SCENE?"** A loader
+> that reads the whole scene allocates **~100% of it.**
+
+| | of scene | verdict |
+|---|---|---|
+| **lazy** | **2.1%** | one plane read one plane |
+| **eager** | **100.1%** | *caught, and the number says what happened* |
+
+Both the harness and the unit test now measure **fraction of the scene.**
+
+**467/467 core tests passing.**
+
+## [1.6.10] - 2026-07-13
+# The check that was missing: **does reading one plane read one plane?**
+
+The migration was validated on **shape, dtype, dimension order, pixel size, scenes, and a SHA-256 of
+the pixels** across 38 files. **31 identical, 0 different.**
+
+> ***That was true, and it was insufficient.***
+
+It measured **correctness** and **nothing about cost.** A loader that read the **entire scene** to
+fetch **one plane** passed every check while **freezing the application** — the freeze was
+***invisible to it by construction***, and it took Gable saying *"it lags"* to find it.
+
+**The audit named exactly this**, and it was right:
+
+> *"…did not compare bytes read, peak memory, time to first plane, **whether a one-plane request
+> materializes a scene.** That is exactly why the migration passed correctness testing while
+> regressing user experience."*
+
+## The metric — and the one I tried first that DOESN'T WORK
+**Bytes-read is unreliable, and I found that out by testing it rather than assuming it.**
+
+The OS **page cache** serves a warm file from RAM, and ``tifffile`` **memory-maps** — so pixels
+arrive by *page fault*, not by ``read()``. On a 13 MB, 50-frame TIFF:
+
+```
+lazy  read:  0 bytes
+EAGER read:  0 bytes      <- the WHOLE SCENE, and the counter saw NOTHING
+```
+
+***A metric that reports zero for the bug it exists to catch is worse than no metric.*** ``psutil``'s
+I/O counters are blind to it too.
+
+**Peak ALLOCATION is immune to all of it.** An eager read **must allocate the whole scene**, and
+*the cache cannot hide an allocation*:
+
+| | peak | **amplification** |
+|---|---|---|
+| **lazy** | **0.28 MB** | **1.1×** |
+| **eager** | **13.12 MB** | **50.1×** — *exactly the 50 frames* |
+
+## Why a RATIO
+```
+amplification = peak_allocated ÷ bytes_in_one_plane
+```
+
+***It needs no baseline and no "before" run.*** ~1× means it read the plane. ~N× means it read the
+whole N-frame scene to hand you one. **One number, one file, unambiguous.**
+
+## Shipped
+- **``tests/test_one_plane_reads_one_plane.py``** — the regression cannot come back silently.
+  **Includes a test that the metric CATCHES an eager read** *(a guard that cannot fail is not a
+  guard — and mine couldn't, until I checked)*. **47× margin.**
+- **``pycat_perf.py``** — the standalone harness, for real files on real disks.
+
+**466/466 core tests passing.**
+
+## [1.6.9] - 2026-07-13
+### Items 5b and 9 — the last of the audit
+
+## 5b. `_ZarrTYX_generic` was named after the wrong thing
+**It is not zarr-specific.** It received **zarr arrays, numpy arrays, and BioIO dask arrays** — and
+the name told every reader it could rely on zarr semantics it does not have.
+
+***Worse: the TZYX branch transcoded the entire file into a temporary zarr before showing anything,
+purely so it would have a zarr to wrap.*** **The dask array was already lazy.** *(Removed in
+1.6.4.)*
+
+**Deleted.** ``_LazyArraySource`` wraps whatever it is given, and was verified to behave
+**identically** on every indexing pattern napari uses on a (T, Y, X) layer — ``stack[t]``,
+``stack[t, :, :]``, ``stack[t, y0:y1, :]``, ``stack[t0:t1]``.
+
+*(``multidim_io``'s ``_ZarrTZYX_generic`` is kept and documented as currently unused. **It is
+correctly named** — it wraps a genuine zarr array, which ``_LazyArraySource`` does not claim to be —
+and a future "optimize for browsing" background cache would want exactly it.)*
+
+## 9. Comments that name the wrong library are a trap, not a cosmetic issue
+**9 references to ``use_aicsimage``.** That flag ***never meant "is it aicsimageio?"*** — it meant
+*"did the structured reader give us dimensions, scenes and channel metadata, or are we falling back
+to reading raw pages?"*
+
+> **The name described the IMPLEMENTATION rather than the QUESTION**, and it went stale the moment
+> BioIO replaced aicsimageio.
+
+**Renamed to ``reader_has_structure``** — which stays true whichever library is underneath.
+
+**And 15 comments describing current behaviour in terms of ``AICSImage``**: *"opened via
+AICSImage"*, *"AICSImage's dask reader"*, *"skip the AICSImage path"*. **None of it is true any
+more**, and a reader who trusts it looks in the wrong place.
+
+*It is the sort of thing waved through as "just comments" — right up until someone debugs against
+them.*
+
+**One mention remains, and it is the correct one:** the note recording that the dead ``AICSImage``
+import was removed. **That is history, and history is worth keeping.**
+
+**Guarded**: ``test_no_stale_reader_names`` fails the build if either comes back.
+
+## The drop-detector earned its keep again
+Deleting ``_ZarrTYX_generic`` took its ``__getitem__(self, idx)`` with it, and the guard flagged the
+lost parameter. **It is a rename, not a removal** — ``_LazyArraySource.__getitem__(self, index)`` —
+*and the guard was right to make me say so.*
+
+**466/466 core tests passing.**
+
 ## [1.6.8] - 2026-07-13
 # Item 8 was NOT fixed — and the reader cache had introduced a correctness bug
 

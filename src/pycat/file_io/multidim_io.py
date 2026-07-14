@@ -131,6 +131,13 @@ class _ZarrZYX:
         return self.shape[0]
 
 
+# NOTE: currently UNUSED. The TZYX branch used to transcode the whole file into a temporary zarr
+# before showing anything, purely so it would have a zarr to wrap — and 1.6.4 removed that (the dask
+# array was already lazy; the copy bought nothing and cost the whole file).
+#
+# It is kept because it is **correctly named and correctly implemented**: it wraps a genuine zarr
+# array, which `_LazyArraySource` does not claim to be. A future "optimize for browsing" background
+# cache would want exactly this.
 class _ZarrTZYX_generic:
     """
     Lazy (T, Z, Y, X) view over a plain zarr DirectoryStore array (used for
