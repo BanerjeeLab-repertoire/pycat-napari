@@ -105,7 +105,7 @@ def _load_image(image_path: Path, channel: int = 0):
         # pulls exactly one YX plane through the lazy API — which matters in batch, where this
         # runs once per file per step.
         from pycat.file_io.image_reader import read_plane
-        data = read_plane(img, scene=0, t=0, c=channel)
+        data = read_plane(img, path=str(image_path), scene=0, t=0, c=channel)
         try:
             px_size = img.physical_pixel_sizes
             microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0

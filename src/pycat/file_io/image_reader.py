@@ -340,7 +340,7 @@ def compare_readers(path, verbose=True) -> dict:
 
     return report
 
-def read_plane(image, *, scene=None, t=0, c=0, z=0, dtype=None):
+def read_plane(image, *, path=None, scene=None, t=0, c=0, z=0, dtype=None):
     """**Read exactly ONE YX plane. Never the whole scene.**
 
     ── ``get_image_data()`` LOADS THE ENTIRE SCENE ────────────────────────────
@@ -380,6 +380,47 @@ def read_plane(image, *, scene=None, t=0, c=0, z=0, dtype=None):
 
     if scene is not None:
         image.set_scene(scene)
+
+    # ── TIFF pixels do NOT go through BioIO ──────────────────────────────────────
+    #
+    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()`` — and **tifffile's zarr store
+    # is broken on zarr 3.2**::
+    #
+    #     ImportError: cannot import name 'RegularChunkGrid' from 'zarr.core.chunk_grids'
+    #     -> caught, and re-raised as: ValueError: zarr 3.2.1 < 3 is not supported
+    #
+    # ***That message is a lie.*** 3.2.1 is not less than 3. tifffile blames the version for **any**
+    # ImportError out of its zarr-3 module, and the real cause is one frame up, where nobody looks.
+    #
+    # **And the lazy-read fix is what walked into it.** The eager ``get_image_data()`` decoded the
+    # page directly and **never touched tifffile's zarr store**. *The old path worked precisely
+    # because it was doing the wrong thing.*
+    #
+    # ``tifffile`` can seek a single page **directly** — no zarr, no dask graph, no OME plane-map
+    # walk. It is **faster than the BioIO path even when BioIO works**, which is why
+    # ``_TiffPageStack`` exists.
+    #
+    # *(BioIO still supplies dimensions, scenes, channel names and pixel size for TIFF. It is good
+    # at that, and none of it goes near the zarr store.)*
+    #
+    # ``read_tiff_plane`` returns ``None`` when it cannot establish the page mapping with
+    # confidence — a multi-file OME set, an unexpected page count. ***A wrong page is worse than a
+    # slow one:*** it would show the wrong channel, and nothing would look broken.
+    # ``path`` is passed in by the caller, which always has it. **Digging into BioIO's internals
+    # for it would be a guess** — the public API does not expose the source path, and a private
+    # attribute that moves in a point release would break this silently.
+    if path is not None:
+        from pycat.file_io.tiff_planes import read_tiff_plane, is_tiff
+
+        if is_tiff(path):
+            _dims = getattr(image, 'dims', None)
+            _plane = read_tiff_plane(
+                path, t=t, c=c, z=z,
+                n_channels=int(getattr(_dims, 'C', 1) or 1),
+                n_z=int(getattr(_dims, 'Z', 1) or 1),
+                dtype=dtype)
+            if _plane is not None:
+                return _plane
 
     lazy = image.get_image_dask_data("YX", T=int(t), C=int(c), Z=int(z))
 

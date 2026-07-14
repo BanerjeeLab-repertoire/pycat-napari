@@ -4,6 +4,76 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.7] - 2026-07-13
+# TIFF pixels no longer go through BioIO — because BioIO's TIFF path is broken on zarr 3.2
+
+## The error message is a LIE
+```
+ValueError: zarr 3.2.1 < 3 is not supported
+```
+
+***3.2.1 is not less than 3.***
+
+The real failure is **one frame up, where nobody looks**:
+
+```
+ImportError: cannot import name 'RegularChunkGrid' from 'zarr.core.chunk_grids'
+```
+
+**zarr 3.2 renamed that class.** ``tifffile``'s zarr store catches **any** ImportError out of its
+zarr-3 module and **blames the version** — so a user chasing this goes looking for an old zarr that
+is not there.
+
+## And PyCAT's own lazy-read fix is what walked into it
+| | |
+|---|---|
+| **before 1.6.3** | ``get_image_data()`` → bioio-tifffile decodes the page **directly** → *tifffile's zarr store is never touched* |
+| **after 1.6.3** | ``get_image_dask_data()`` → ``tif.aszarr()`` → **boom** |
+
+> ***The old path worked precisely because it was doing the wrong thing.***
+
+## The fix: keep TIFF off BioIO's pixel path entirely
+``tifffile`` seeks a single page **directly** — **no zarr, no dask graph, no OME plane-map walk.**
+It is **faster than the BioIO path even when BioIO works**, which is why ``_TiffPageStack`` was
+written in the first place.
+
+**BioIO still supplies dimensions, scenes, channel names and pixel size for TIFF.** It is good at
+that, and *none of it goes near the zarr store.*
+
+*(Pinning zarr would re-pin the stack the 1.6.0 migration existed to free — and it would be a guess:
+nobody knows which zarr 3.x ``tifffile 2026.6.1`` was built against.)*
+
+**This is what the audit recommended, in a section I read and did not act on:** *"Keep TIFF on the
+native page-reader path… it does not need to be the pixel transport path when ``_TiffPageStack`` can
+directly seek individual pages."*
+
+## Verified against real data
+- **bit-identical** to a full ``tifffile`` read on Gable's MMStack substack
+- **24 interleaved planes** (4T × 2Z × 3C, each uniquely valued) — **all correct**
+- an **out-of-range page DECLINES** rather than returning page 0
+
+> ***A wrong page is worse than a slow one.*** It would show the **wrong channel** or the **wrong
+> timepoint** — and *nothing about the image would look broken.*
+
+Where the mapping cannot be established with confidence — a **multi-file OME set**, an unexpected
+page count — the reader **declines** and the caller falls back to BioIO.
+
+## And two bugs found while doing it
+**The TYX branch built the dask array BEFORE checking for TIFF** — so it crashed *before*
+``_TiffPageStack`` was ever reached, and the array was then used only for its ``dtype``. **For a
+TIFF it is now never built.**
+
+**The 1.6.4 ``tifffile.imread`` fallback was broken.** It called ``_TiffPageStack(file_path)`` with
+**one argument** where six are required — it would have raised ``TypeError``, been caught, and
+fallen through to the eager read anyway. ***Item 8 was never actually fixed.***
+
+## Z and T+Z TIFF stacks
+``_TiffPageStack`` handles **TYX** natively. It does **not** handle Z or T+Z, so those still go
+through BioIO — and **if that fails they now say what actually happened**, rather than letting
+tifffile's misleading message reach the user.
+
+**462/462 core tests passing.**
+
 ## [1.6.6] - 2026-07-13
 ### One reader per file, not four — the last item from the audit
 A single drag-and-drop **constructed the reader three to four times** before one pixel reached the

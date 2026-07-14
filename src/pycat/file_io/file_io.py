@@ -1385,12 +1385,12 @@ class FileIOClass:
                 for page_num in range(num_pages):
                     for channel_num in range(num_channels):
                         k += 1
-                        channel_data = read_plane(image, scene=page_num, c=channel_num, t=0)
+                        channel_data = read_plane(image, path=file_path, scene=page_num, c=channel_num, t=0)
                         all_channels.append((channel_data, file_path, k))
             # If only one page, iterate over channels
             else: 
                 for channel_num in range(num_channels):
-                    channel_data = read_plane(image, c=channel_num, t=0)
+                    channel_data = read_plane(image, path=file_path, c=channel_num, t=0)
                     all_channels.append((channel_data, file_path, channel_num))
 
             # Identify channel identity from OME/Bio-Formats metadata
@@ -1728,7 +1728,7 @@ class FileIOClass:
         try:
             import numpy as _np
             img = open_image(file_path)
-            plane = read_plane(img, c=0, t=0, z=0)
+            plane = read_plane(img, path=file_path, c=0, t=0, z=0)
             is_int = _np.issubdtype(plane.dtype, _np.integer)
             uniq = _np.unique(plane)
             n_unique = int(uniq.size)
@@ -2657,7 +2657,7 @@ class FileIOClass:
                     continue
 
                 if n_t == 1 and n_z == 1:
-                    frame = read_plane(image, c=channel_idx, t=0, z=0, dtype=np.float32)
+                    frame = read_plane(image, path=file_path, c=channel_idx, t=0, z=0, dtype=np.float32)
                     self.load_into_viewer(
                         frame,
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
@@ -2673,7 +2673,25 @@ class FileIOClass:
                     # the whole stack in RAM) so subsequent frame reads are fast
                     # zarr random access, matching the IMS path.
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
-                    dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
+
+                    # ── For a TIFF the dask array is never built ────────────────────
+                    #
+                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and
+                    # **tifffile's zarr store is broken on zarr 3.2**::
+                    #
+                    #     ImportError: cannot import name 'RegularChunkGrid'
+                    #     -> re-raised as: ValueError: zarr 3.2.1 < 3 is not supported
+                    #
+                    # *(That message is a lie — 3.2.1 is not less than 3. tifffile blames the
+                    # version for any ImportError out of its zarr-3 module.)*
+                    #
+                    # **And this line crashed before ``_TiffPageStack`` was ever reached** — the
+                    # dask array was built first, and then used only for its ``dtype``. For a TIFF
+                    # it is not needed at all: ``_TiffPageStack`` seeks pages directly, and
+                    # tifffile reports the dtype without touching zarr.
+                    dask_arr = None
+                    if ext not in ('.tif', '.tiff'):
+                        dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
                     # Lazy by design: pull exactly one frame per slider move —
                     # no eager copy. For TIFF/OME-TIFF (incl. Micro-Manager
                     # MMStack) read frames straight from the multipage TIFF via
@@ -2684,8 +2702,13 @@ class FileIOClass:
                     wrapper = None
                     if ext in ('.tif', '.tiff'):
                         try:
+                            # tifffile reports the dtype directly — no zarr store, no dask.
+                            import tifffile as _tf_probe
+                            with _tf_probe.TiffFile(file_path) as _probe:
+                                _tiff_dtype = _probe.pages[0].dtype
+
                             wrapper = _TiffPageStack(
-                                file_path, n_t, H, W, dask_arr.dtype,
+                                file_path, n_t, H, W, _tiff_dtype,
                                 channel_idx=channel_idx, n_channels=n_c)
                             # If this is a multi-file OME set with missing
                             # companions, tell the user we're using only the
@@ -2717,6 +2740,27 @@ class FileIOClass:
                                       "using AICSImage dask wrapper", _te)
                             wrapper = None
                     if wrapper is None:
+                        # The tifffile page reader declined or failed. Fall back to BioIO's dask
+                        # array — building it NOW, because for a TIFF it was deliberately not built
+                        # above (``tif.aszarr()`` is broken on zarr 3.2).
+                        #
+                        # **This can itself fail on a TIFF**, and if it does the file genuinely
+                        # cannot be read lazily — which is worth saying plainly rather than
+                        # crashing in tifffile's zarr store with a message that blames the wrong
+                        # thing.
+                        if dask_arr is None:
+                            try:
+                                dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
+                            except Exception as _dask_exc:
+                                raise RuntimeError(
+                                    f"Could not read {os.path.basename(file_path)} lazily.\n\n"
+                                    f"The tifffile page reader declined, and BioIO's dask path "
+                                    f"failed too: {_dask_exc}\n\n"
+                                    f"If this says 'zarr < 3 is not supported', that message is "
+                                    f"misleading — it is tifffile's zarr store failing to import "
+                                    f"from a newer zarr, not a version that is too old."
+                                ) from _dask_exc
+
                         wrapper = _ZarrTYX_generic(dask_arr)
                         self._stack_lazy_refs.append((image, dask_arr))
                     else:
@@ -2747,7 +2791,37 @@ class FileIOClass:
                 elif n_t == 1:
                     # Pure z-stack (Z, Y, X)
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{scene_suffix}"
-                    dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
+
+                    # ── BioIO's dask path is broken for TIFF on zarr 3.2 ────────────
+                    #
+                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and tifffile's
+                    # zarr store fails to import from zarr 3.2 — then **blames the version**::
+                    #
+                    #     ValueError: zarr 3.2.1 < 3 is not supported
+                    #
+                    # *3.2.1 is not less than 3.* The real error is ``cannot import name
+                    # 'RegularChunkGrid'``, one frame up, where nobody looks.
+                    #
+                    # ``_TiffPageStack`` handles the **TYX** case natively (direct page seeks, no
+                    # zarr). It does **not** handle Z or T+Z, so those still go through BioIO — and
+                    # if that fails, **say what actually happened** rather than let tifffile's
+                    # misleading message reach the user.
+                    try:
+                        dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
+                    except Exception as _dask_exc:
+                        if 'zarr' in str(_dask_exc).lower() and ext in ('.tif', '.tiff'):
+                            raise RuntimeError(
+                                f"Cannot read {os.path.basename(file_path)} lazily.\n\n"
+                                f"BioIO reads TIFF pixels through tifffile's zarr store, and that "
+                                f"store is incompatible with the installed zarr "
+                                f"({_dask_exc}).\n\n"
+                                f"**That message is misleading** — it is not that zarr is too old. "
+                                f"tifffile's zarr module fails to import a symbol that a newer "
+                                f"zarr renamed, and tifffile reports it as a version problem.\n\n"
+                                f"2-D time series are read natively and are unaffected. This is a "
+                                f"TIFF Z stack, which still depends on that path."
+                            ) from _dask_exc
+                        raise
                     wrapper = _ZarrTYX_generic(dask_arr)
                     self._stack_lazy_refs.append((image, dask_arr))
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
@@ -2820,7 +2894,37 @@ class FileIOClass:
                     # *(A zarr cache is still the right thing for repeated random access — but it
                     # belongs in the background, behind an "optimize for browsing" action, not on
                     # the critical path to first display.)*
-                    dask_arr = image.get_image_dask_data('TZYX', C=channel_idx)
+
+                    # ── BioIO's dask path is broken for TIFF on zarr 3.2 ────────────
+                    #
+                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and tifffile's
+                    # zarr store fails to import from zarr 3.2 — then **blames the version**::
+                    #
+                    #     ValueError: zarr 3.2.1 < 3 is not supported
+                    #
+                    # *3.2.1 is not less than 3.* The real error is ``cannot import name
+                    # 'RegularChunkGrid'``, one frame up, where nobody looks.
+                    #
+                    # ``_TiffPageStack`` handles the **TYX** case natively (direct page seeks, no
+                    # zarr). It does **not** handle Z or T+Z, so those still go through BioIO — and
+                    # if that fails, **say what actually happened** rather than let tifffile's
+                    # misleading message reach the user.
+                    try:
+                        dask_arr = image.get_image_dask_data('TZYX', C=channel_idx)
+                    except Exception as _dask_exc:
+                        if 'zarr' in str(_dask_exc).lower() and ext in ('.tif', '.tiff'):
+                            raise RuntimeError(
+                                f"Cannot read {os.path.basename(file_path)} lazily.\n\n"
+                                f"BioIO reads TIFF pixels through tifffile's zarr store, and that "
+                                f"store is incompatible with the installed zarr "
+                                f"({_dask_exc}).\n\n"
+                                f"**That message is misleading** — it is not that zarr is too old. "
+                                f"tifffile's zarr module fails to import a symbol that a newer "
+                                f"zarr renamed, and tifffile reports it as a version problem.\n\n"
+                                f"2-D time series are read natively and are unaffected. This is a "
+                                f"TIFF T+Z stack, which still depends on that path."
+                            ) from _dask_exc
+                        raise
                     wrapper = _LazyArraySource(dask_arr)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
@@ -3113,12 +3217,12 @@ class FileIOClass:
                 for page_num in range(num_pages):
                     for channel_num in range(num_channels):
                         k += 1
-                        channel_data = read_plane(mask, scene=page_num, c=channel_num, t=0)
+                        channel_data = read_plane(mask, path=file_path, scene=page_num, c=channel_num, t=0)
                         all_channels.append((channel_data, file_path, k))
             # If only one page, iterate over channels
             else: 
                 for channel_num in range(num_channels):
-                    channel_data = read_plane(mask, c=channel_num, t=0)
+                    channel_data = read_plane(mask, path=file_path, c=channel_num, t=0)
                     all_channels.append((channel_data, file_path, channel_num))
 
         # Check if there are multiple channels to assign names
