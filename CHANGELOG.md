@@ -4,6 +4,34 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.30] - 2026-07-14
+### Added — **The local cache now cleans itself up, visibly.**
+
+Closes the open leak from the 1.6.29 handoff (§3.3): `_LOCAL_CACHE_FILES` was written and never
+read, so a copied 1.5 GB acquisition stayed in `%TEMP%/pycat_local_cache` forever.
+
+- **`file_io/local_cache.py`** (new) — startup cleanup for the copy-to-local cache. Runs **at
+  launch**, before any file is opened this session, because that is the one moment the *previous*
+  session's cached copies are provably idle (session-end never runs on a crash/kill, and racing GC
+  during teardown is the worst time to delete a file a lazy reader may still hold).
+- **Nothing deletes silently.** The startup dialog lists every cached copy **grouped by the source
+  folder it came from**, with sizes and cache dates — the user sees *which acquisitions, from where*,
+  never an opaque "N files, M GB." If Qt is unavailable (headless), it prints a notice and deletes
+  **nothing**.
+- **"Keep" protects data; it does not mute the message.** A folder-level *"Keep all from here"* and
+  per-file checkboxes let the user exclude anything from the clear. Kept items are protected for
+  **7 days** (`KEEP_DAYS`), then re-proposed on a later startup — a one-time Keep never pins
+  gigabytes in TEMP forever; the expiry *is* the periodic reminder.
+- **Manifest at copy time.** `dialogs._copy_to_local_with_progress` now records each copy's origin
+  path into `_manifest.json` in the cache dir, because the cache is flat (basenames only) and the
+  source path is otherwise lost — without it the warning could only show basenames, not origins.
+- **Protected set persists** across sessions in a minimal per-user config file
+  (`PyCAT/protected.json`), keyed by original source path so protection survives the flat cache.
+
+*Rationale for the model (decided 2026-07-14): suppression protects the data, it does not silence
+the deletion. Deletion is always reported; the only thing a user turns off is whether a specific
+acquisition is cleared, and only for a week.*
+
 ## [1.6.29] - 2026-07-14
 ### Changed — **FileIOClass: 3,108 → 1,875. Forty percent is out.**
 

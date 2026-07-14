@@ -14,17 +14,18 @@ for the rest of this session"*) and ``self._local_cache_files``. **Neither was e
 method.** They were scratch variables that happened to be spelled as attributes of a 3,108-line
 class, and they are now module-level, which is what they always were.
 
-── A leak, recorded rather than silently fixed ──────────────────────────────────────────
+── A leak, now cleaned up at startup ────────────────────────────────────────────────────
 
-``_LOCAL_CACHE_FILES`` carries the comment *"Track for optional cleanup at session end."*
+``_LOCAL_CACHE_FILES`` used to carry the comment *"Track for optional cleanup at session
+end"* — and there was no cleanup, so a copied 1.5 GB acquisition stayed in TEMP forever.
 
-***There is no cleanup.*** Nothing reads this list. A user on a slow network share who accepts the
-copy-to-local prompt for a 1.5 GB acquisition leaves 1.5 GB in ``%TEMP%/pycat_local_cache``, and it
-stays there.
-
-*It is preserved here exactly as it was, because a cleanup that deletes a scientist's data is worse
-than a cache that grows — and choosing the right moment to purge it is a decision, not a
-refactor.*
+Cleanup now lives in ``local_cache.py`` and runs **at startup**, not session end (session
+end never runs on a crash or a kill, and racing GC during teardown is the worst possible
+time to delete a file a lazy reader might still hold). The copy step below records each
+copy's *origin* into a manifest so that later sweep can show the user which acquisition,
+from which folder, it is about to delete — and let them **Keep** any of it for a week.
+*Deleting a scientist's data silently is worse than a cache that grows; this deletes it
+visibly, and only what they didn't keep.*
 """
 
 from __future__ import annotations
@@ -167,6 +168,15 @@ def _copy_to_local_with_progress(file_path, verdict):
               f"({copied/(1024*1024):.0f} MB)")
         # Track for optional cleanup at session end.
         _LOCAL_CACHE_FILES.append(dst)
+        # Record the origin so a LATER session's startup sweep can show the user which
+        # acquisition (and from where) it is about to delete — the cache dir itself is flat
+        # (basenames only), so the source path has to be written down at copy time or it is lost.
+        try:
+            from pycat.file_io.local_cache import record_copy
+            record_copy(dst, file_path)
+        except Exception as _rc_exc:
+            from pycat.utils.general_utils import debug_log
+            debug_log('dialogs: could not record cache copy origin', _rc_exc)
         return dst
     except Exception as e:
         print(f"[PyCAT storage] copy-to-local failed: {e}")

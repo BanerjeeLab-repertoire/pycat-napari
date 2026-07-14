@@ -233,7 +233,15 @@ from pycat.utils.channel_naming import (
 )
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
 from PyQt5.QtGui import QFont
-from napari.utils.notifications import show_warning as napari_show_warning
+# NOTE: `napari.utils.notifications.show_warning` is NOT imported at module scope — it was,
+# as `napari_show_warning`, but it was DEAD (every one of its call sites re-imports it locally:
+# lines ~1887/1903/2143). Removing the module-scope copy trims one of this module's GUI import
+# routes. It is NOT enough to make file_io.py headless-importable on its own — the PyQt5 import
+# above (needed by the two QDialog subclasses defined below) and the module-scope `ui_utils`
+# import (which itself pulls napari + PyQt5) remain. Full headless import of this module is the
+# FileIOClass decomposition (external audit 2026-07-14 #9 / handoff §3.2), not a one-line fix.
+# The reusable stack helpers are already Qt-free in stack_access.py; import them from THERE,
+# not through this module.
 
 # Local application imports
 from pycat.ui.ui_utils import add_image_with_default_colormap
@@ -1945,6 +1953,17 @@ class FileIOClass:
         channel_data = None
         self._ims_zarr_refs = []
 
+        # ── ImageSource: explicit reader ownership, lifetime-tied to the layers ──────────
+        # Parallel to the legacy _ims_reader / _ims_zarr_refs retention during migration.
+        # This object is attached to each lazy layer's metadata below, so the readers it holds
+        # live exactly as long as the layers do (not as long as FileIOClass). The legacy
+        # retention is intentionally KEPT for this release so behaviour cannot regress; a later
+        # release removes it once both retention tests pass. See image_source.py and
+        # docs/audits/ims_zarr_refs_resolved_2026-07-14.md.
+        from pycat.file_io.image_source import ImageSource
+        _img_source = ImageSource(file_path=file_path)
+        self._ims_reader and _img_source.retain(self._ims_reader)
+
         # ── Multi-position detection ─────────────────────────────────────
         # A single IMS file never contains multiple stage positions —
         # Imaris ("File Series") multi-position acquisitions are always
@@ -1985,6 +2004,9 @@ class FileIOClass:
                 pos_reader = reader
             else:
                 pos_reader = ImsReader(pos_path, squeeze_output=False)
+            # Pin this position's reader lifetime to the ImageSource. retain() dedups by
+            # identity, so the primary reader (already retained above) is not held twice.
+            _img_source.retain(pos_reader)
 
             for channel_idx in channels_to_load:
                 with _suppress_ims_chunk_prints():
@@ -2046,7 +2068,11 @@ class FileIOClass:
                     _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
-                    self.viewer.add_image(lazy_tyx, **_add_kwargs)
+                    _layer = self.viewer.add_image(lazy_tyx, **_add_kwargs)
+                    try:
+                        _layer.metadata['pycat_image_source'] = _img_source
+                    except Exception as _e:
+                        debug_log("file_io: could not attach ImageSource to TYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS {_ch_label}{pos_suffix}: {n_t} frames "
                         f"{H}\u00d7{W}px (frames read on demand)"
@@ -2076,7 +2102,11 @@ class FileIOClass:
                     _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
-                    self.viewer.add_image(lazy_zyx, **_add_kwargs)
+                    _layer = self.viewer.add_image(lazy_zyx, **_add_kwargs)
+                    try:
+                        _layer.metadata['pycat_image_source'] = _img_source
+                    except Exception as _e:
+                        debug_log("file_io: could not attach ImageSource to ZYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS z-stack {_ch_label}{pos_suffix}: "
                         f"{n_z} slices {H}\u00d7{W}px (slices read on demand)"
@@ -2109,7 +2139,11 @@ class FileIOClass:
                     _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
-                    self.viewer.add_image(lazy_tzyx, **_add_kwargs)
+                    _layer = self.viewer.add_image(lazy_tzyx, **_add_kwargs)
+                    try:
+                        _layer.metadata['pycat_image_source'] = _img_source
+                    except Exception as _e:
+                        debug_log("file_io: could not attach ImageSource to TZYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS T-Z stack {_ch_label}{pos_suffix}: "
                         f"{n_t} timepoints \u00d7 {n_z} z-slices, "

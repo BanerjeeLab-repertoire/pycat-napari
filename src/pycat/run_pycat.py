@@ -460,6 +460,20 @@ def run_pycat_func():
     # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
     viewer = napari.Viewer(title="PyCAT")
 
+    # ── Clean up last session's local cache, visibly ────────────────────────────
+    #
+    # If a previous session copied slow-storage acquisitions into %TEMP%/pycat_local_cache,
+    # those copies are still there. NOW — before this session opens anything — is the one
+    # moment they are provably idle, so it is the safe moment to offer to clear them. The
+    # sweep lists them grouped by source folder and lets the user Keep any for a week; it
+    # never deletes silently. Best-effort: a cleanup that crashes launch is worse than the
+    # disk it reclaims.
+    try:
+        from pycat.file_io.local_cache import clear_cache_on_startup
+        clear_cache_on_startup()
+    except Exception as _cache_exc:
+        debug_log('run_pycat: local cache cleanup skipped', _cache_exc)
+
     # ── Every layer this viewer makes is tagged, and no call site can forget ────
     #
     # There are 116 ``viewer.add_*`` call sites in PyCAT, and 2 of them tagged anything. Editing
