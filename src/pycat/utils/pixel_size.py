@@ -55,6 +55,92 @@ def _warn_once(key, message):
         napari_show_warning(message)
 
 
+# ── Is this pixel size PHYSICALLY POSSIBLE? ──────────────────────────────────────────────
+#
+# **A file can carry a scale that is a lie**, and PyCAT was believing it.
+#
+# Gable exported a substack from ImageJ. The resulting TIFF carries::
+#
+#     XResolution    = 2147054150 / 4999   ->  429,496.7 pixels per unit
+#     ResolutionUnit = 1                   ->  "no absolute unit"
+#     ImageJ unit    = micron
+#
+# That works out to **2.3 picometres per pixel** — *four hundred times smaller than a hydrogen
+# atom.* And ``2147054150`` is a hair under **2³¹ = 2147483648**: a **signed-integer overflow** in
+# ImageJ's Substack export.
+#
+# **The pixel-size gate did not fire, and it was right not to** — it asked *"is there a number?"*,
+# and there was one. It was not ``None`` and not the ``1.0`` sentinel, so PyCAT concluded the file
+# carried a real scale and hid the prompt.
+#
+# ***It was doing what it was told. The file was lying.***
+#
+# ── The bounds come from OPTICS, not from taste ──────────────────────────────────────────
+#
+# **Lower — 0.001 µm/px (1 nm).** Abbe puts the best real resolution at
+# ``λ/(2·NA) = 400/(2×1.49) ≈ 134 nm``, and Nyquist wants ~2–3 samples across that, so the smallest
+# *sensible* pixel is ~40–65 nm. Super-resolution reconstructions go finer — an aggressive SMLM
+# render might be 5 nm/px. **1 nm is a 1000× margin below even that.**
+#
+# **Upper — 1000 µm/px (1 mm).** A 4× objective is ~1.6 µm/px; a slide scanner ~20 µm/px; a
+# photograph of a gel might be 100 µm/px. **1 mm per pixel is not a micrograph.**
+#
+# ***Both bounds are deliberately loose. A bound this wide can only catch garbage, never real
+# data.*** Every instrument in the lab passes — the 63×/1.4 confocal at 0.0264, the 100× bead data
+# at 0.067, the spinning disk at 0.108 — and the corrupt substack fails by a factor of 400.
+
+_PLAUSIBLE_MIN_UM_PER_PX = 1e-3      # 1 nm — below the finest SMLM render, by 1000x
+_PLAUSIBLE_MAX_UM_PER_PX = 1e3       # 1 mm — above any micrograph
+
+
+def is_physically_plausible(pixel_size_um_value):
+    """**Could a microscope have produced this pixel size?**
+
+    ``False`` for a scale no optical instrument can generate. See the bounds above — they are set
+    from Abbe and Nyquist, and they are **deliberately loose**: they exist to catch a **corrupt
+    metadata tag**, not to second-guess a real acquisition.
+    """
+    try:
+        value = float(pixel_size_um_value)
+    except (TypeError, ValueError):
+        return False
+
+    if not (value == value) or value <= 0:      # NaN or non-positive
+        return False
+
+    return _PLAUSIBLE_MIN_UM_PER_PX <= value <= _PLAUSIBLE_MAX_UM_PER_PX
+
+
+def implausible_reason(pixel_size_um_value):
+    """**Why** it is implausible — in the terms a microscopist thinks in. ``None`` if it is fine."""
+    if is_physically_plausible(pixel_size_um_value):
+        return None
+
+    try:
+        value = float(pixel_size_um_value)
+    except (TypeError, ValueError):
+        return "the pixel size in the file is not a number"
+
+    if not (value == value):
+        return "the file carries no pixel size"
+
+    if value <= 0:
+        return f"the file claims a pixel size of {value} µm — a pixel cannot be zero or negative"
+
+    if value < _PLAUSIBLE_MIN_UM_PER_PX:
+        nanometres = value * 1000.0
+        return (f"the file claims **{nanometres:.4g} nm per pixel**. No microscope can resolve "
+                f"that — the diffraction limit is ~130 nm, and even a super-resolution "
+                f"reconstruction rarely goes below 5 nm. **The resolution tag in this file is "
+                f"corrupt.** *(ImageJ's Substack export is a known cause: it can write an "
+                f"overflowed 32-bit resolution numerator.)*")
+
+    kilometres_per_pixel = value / 1e9
+    return (f"the file claims **{value:.4g} µm per pixel**"
+            + (f" ({kilometres_per_pixel:.3g} km!)" if value > 1e9 else "")
+            + ". That is not a micrograph — **the resolution tag in this file is corrupt.**")
+
+
 def pixel_size_um(data_repository, context=''):
     """The pixel size in µm, or ``NaN`` if it is not known.
 

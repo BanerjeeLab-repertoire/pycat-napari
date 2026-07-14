@@ -316,10 +316,43 @@ class BaseDataClass:
             x_resolution = getattr(physical_pixel_sizes, 'X', None)
             y_resolution = getattr(physical_pixel_sizes, 'Y', None)
 
+            # ── A file can carry a scale that is a LIE, and PyCAT was believing it ──
+            #
+            # An ImageJ **Substack** export writes ``XResolution = 2147054150/4999`` — which is
+            # **2.3 picometres per pixel**, *four hundred times smaller than a hydrogen atom.*
+            # (``2147054150`` is a hair under **2³¹**: a signed-integer overflow.)
+            #
+            # The old check asked *"is there a number?"* There was one. It was not ``None`` and not
+            # the ``1.0`` sentinel, so PyCAT concluded the file carried a real scale and **hid the
+            # pixel-size gate** — and every length, area and diffusion coefficient downstream was
+            # computed from a fabricated number.
+            #
+            # ***It was doing what it was told. The file was lying.***
+            #
+            # So the question is now *"could a microscope have produced this?"* — with bounds set
+            # from **Abbe and Nyquist** and left deliberately loose (1 nm to 1 mm per pixel). Every
+            # real instrument passes; only garbage fails.
+            _implausible = None
             if x_resolution is not None and y_resolution is not None:
+                from pycat.utils.pixel_size import (is_physically_plausible,
+                                                    implausible_reason)
+                _mean_um_per_px = ((float(x_resolution) + float(y_resolution)) / 2.0)
+                if not is_physically_plausible(_mean_um_per_px):
+                    _implausible = implausible_reason(_mean_um_per_px)
+
+            if (x_resolution is not None and y_resolution is not None
+                    and _implausible is None):
                 self.data_repository['microns_per_pixel_sq'] = x_resolution * y_resolution
                 # Provenance: a real physical pixel size came from the file.
                 self.data_repository['pixel_size_from_metadata'] = True
+            elif _implausible is not None:
+                # The tag is PRESENT and CORRUPT. Fall back to the sentinel so the gate fires —
+                # and say WHY, because "resolution data incomplete" would be a lie of its own.
+                napari_show_warning(
+                    f"The pixel size in this file is not physically possible: {_implausible}"
+                    "\n\nPyCAT will ask you to enter the correct scale.")
+                self.data_repository['microns_per_pixel_sq'] = 1
+                self.data_repository['pixel_size_from_metadata'] = False
             else:
                 napari_show_warning(
                     "Resolution data incomplete, using default value of 1 (um/px)^2."

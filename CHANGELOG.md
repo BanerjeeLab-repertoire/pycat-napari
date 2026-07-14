@@ -4,6 +4,70 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-07-13
+### The pixel-size gate stayed silent on a file whose scale is 2.3 PICOMETRES
+Gable loaded an ImageJ-exported substack and reported the gate did not fire. **It was right not to
+— and that was the bug.**
+
+```
+XResolution    = 2147054150 / 4999   ->  429,496.7 px per unit
+ResolutionUnit = 1                   ->  "no absolute unit"
+ImageJ unit    = µm
+```
+
+**That is 2.3 × 10⁻⁶ µm per pixel — 0.0023 nanometres.** *Smaller than a hydrogen atom.*
+
+``2147054150`` sits just under **2³¹ = 2,147,483,648**. It is a **signed-integer overflow** in
+ImageJ's **Substack export** — a known artefact, and Gable had just performed exactly that
+operation.
+
+### The gate was doing what it was told. The FILE was lying.
+PyCAT asked *"is there a pixel size?"* — and there **was** one. Not ``None``, not the ``1.0``
+sentinel. So it set ``pixel_size_from_metadata = True``, hid the gate, and **would have computed
+every length, area and diffusion coefficient from a fabricated number.**
+
+*(This is why the parent TIFF and the bead TIFF **did** prompt: they carry **no** resolution tag,
+so PyCAT correctly fell back to the sentinel. Only the ImageJ export carries a **poisoned** one.)*
+
+### The question is now "could a microscope have produced this?"
+Bounds from **Abbe and Nyquist**, and **deliberately loose** — they exist to catch a corrupt tag,
+not to second-guess a real acquisition:
+
+| | µm/px | |
+|---|---|---|
+| **the ImageJ substack** | **2.3e-06** | **REJECTED** |
+| SMLM render (1 nm) | 0.001 | ok |
+| STED (20 nm) | 0.02 | ok |
+| confocal 63× | 0.0264 | ok |
+| the VPT beads | 0.067 | ok |
+| 4× objective | 1.6 | ok |
+| slide scanner | 10.0 | ok |
+
+**Every real instrument passes. Gable's file misses by 400×.** *It is not a borderline call.*
+
+### It WARNS and PROMPTS — it does not block
+Gable asked directly, and it is the right question. A corrupt tag is **not** a reason to refuse the
+image. The user gets:
+
+1. **the image**, loaded normally
+2. **a warning** naming the cause — *including the ImageJ Substack overflow*
+3. **the gate**, prompting for the correct scale
+
+***A file with a corrupt tag and a file with no tag end up in the same place.*** The only difference
+is that the warning is honest about which one it was.
+
+### And the first guard I wrote for this was BLIND
+It read a **900-character window** after the ``elif`` and asserted the flag was set ``False`` in it.
+**It passed on deliberately regressed code** — the window **spilled past the branch into its
+neighbour**, which also sets the flag ``False``.
+
+> ***A guard with no power is worse than no guard: it certifies the damage.***
+
+**The AST knows where a branch ends. A character window does not.** Both guards now inspect the
+branch **node**, and both were verified by re-introducing the exact bug and watching them fire.
+
+**443/443 core tests passing.**
+
 ## [1.6.1] - 2026-07-13
 ### CI red — and the guard that should have caught it had a NARROWER SCOPE than the thing it guards
 ``test_smoke_the_real_code`` failed in CI:
