@@ -124,6 +124,22 @@ _DELIBERATE = {
     #     extract_channel_info_from_aicsimage → extract_channel_info
     #
     # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    # 1.6.25 — EXTRACTED to `file_io/routing.py`, not deleted.
+    #
+    # **Four methods that never touched `self`.** They took `(self, file_path)` and used the `self`
+    # for *nothing at all* — static functions wearing method clothes, wedged into a 3,108-line class
+    # between the loaders, the dialogs and the lazy wrappers.
+    #
+    # They answer a question about a **path**: does this file carry real imaging metadata? did PyCAT
+    # write it? does it carry an embedded tag store? is it an undeclared multipage TIFF? *No viewer,
+    # no repository, no reader.*
+    #
+    # (`FileIOClass` keeps a delegating stub for each, so every caller is untouched.)
+    'file_io.py::_file_has_imaging_metadata_safe',
+    'file_io.py::_read_pycat_signifier',
+    'file_io.py::_read_pycat_tags',
+    'file_io.py::_tiff_multipage_undeclared',
+
     # 1.6.24 — EXTRACTED to `file_io/writers.py`, not deleted.
     #
     # **Writing files is not reading them, routing them, or showing them.** `_save_layer` is 243

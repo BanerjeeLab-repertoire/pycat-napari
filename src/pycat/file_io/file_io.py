@@ -1588,104 +1588,16 @@ class FileIOClass:
             debug_log("file_io: reapplying saved tags failed", _e)
 
     def _file_has_imaging_metadata_safe(self, file_path):
-        """Best-effort check for whether a file carries real imaging-structure
-        metadata (pixel size, channels, dimensional axes). Used ONLY to choose the
-        wording of the image-vs-mask prompt, so it must never raise — any failure
-        returns True (softer 'looks like X, confirm' wording) rather than crashing
-        the load. (Replaces an earlier call to a method that was never defined,
-        which crashed every menu-Add / drop of a non-signifier file.)"""
-        try:
-            ext = os.path.splitext(file_path)[1].lower()
-            # Formats that inherently carry structured imaging metadata.
-            if ext in ('.ims', '.czi'):
-                return True
-            if ext in ('.tif', '.tiff'):
-                try:
-                    import tifffile
-                    with tifffile.TiffFile(file_path) as tf:
-                        # OME-XML, ImageJ metadata, or a resolution tag all count
-                        # as real imaging metadata.
-                        if getattr(tf, 'is_ome', False) or getattr(tf, 'is_imagej', False):
-                            return True
-                        p0 = tf.pages[0]
-                        for tag in ('XResolution', 'YResolution', 'ImageDescription'):
-                            try:
-                                if tag in p0.tags:
-                                    return True
-                            except Exception:
-                                pass
-                    return False
-                except Exception:
-                    return True  # can't tell -> assume metadata (softer prompt)
-            # PNG/JPG typically carry no imaging metadata.
-            if ext in ('.png', '.jpg', '.jpeg'):
-                return False
-            return True
-        except Exception:
-            return True
+        from pycat.file_io.routing import _file_has_imaging_metadata_safe
+        return _file_has_imaging_metadata_safe(file_path)
 
     def _read_pycat_signifier(self, file_path):
-        """Read PyCAT's saved-file signifier from a TIFF's ImageDescription, if
-        present. Returns 'image' / 'mask' / None. Lets a file PyCAT itself saved
-        be re-loaded with its type known exactly, without guessing."""
-        try:
-            import tifffile, json as _json
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext not in ('.tif', '.tiff'):
-                return None
-            with tifffile.TiffFile(file_path) as tf:
-                desc = None
-                try:
-                    desc = tf.pages[0].tags['ImageDescription'].value
-                except Exception:
-                    desc = getattr(tf, 'imagej_metadata', None)
-                if not desc:
-                    return None
-                if isinstance(desc, bytes):
-                    desc = desc.decode('utf-8', 'ignore')
-                # The description may be OME-XML or our JSON; only parse JSON.
-                desc = desc.strip()
-                if not desc.startswith('{'):
-                    return None
-                tag = _json.loads(desc)
-                if isinstance(tag, dict) and tag.get('pycat'):
-                    k = tag.get('kind')
-                    if k in ('image', 'mask'):
-                        return k
-        except Exception:
-            pass
-        return None
+        from pycat.file_io.routing import _read_pycat_signifier
+        return _read_pycat_signifier(file_path)
 
     def _read_pycat_tags(self, file_path):
-        """Read PyCAT's embedded tag store ({'tags':[...],'edges':[...]}) from a
-        saved TIFF's ImageDescription, if present. Returns the dict or None. This
-        is how layer tags (role/modality/lineage/etc.) survive save→reload —
-        they ride in the same JSON blob as the image/mask signifier."""
-        try:
-            import tifffile, json as _json
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext not in ('.tif', '.tiff'):
-                return None
-            with tifffile.TiffFile(file_path) as tf:
-                try:
-                    desc = tf.pages[0].tags['ImageDescription'].value
-                except Exception:
-                    desc = getattr(tf, 'imagej_metadata', None)
-                if not desc:
-                    return None
-                if isinstance(desc, bytes):
-                    desc = desc.decode('utf-8', 'ignore')
-                desc = desc.strip()
-                if not desc.startswith('{'):
-                    return None
-                tag = _json.loads(desc)
-                if isinstance(tag, dict) and tag.get('pycat'):
-                    ts = tag.get('pycat_tags')
-                    if isinstance(ts, dict):
-                        return ts
-        except Exception:
-            pass
-        return None
+        from pycat.file_io.routing import _read_pycat_tags
+        return _read_pycat_tags(file_path)
 
     def _apply_saved_tags_to_layer(self, layer, tag_store):
         from pycat.file_io.writers import _apply_saved_tags_to_layer
@@ -1955,26 +1867,8 @@ class FileIOClass:
         self.open_2d_image(file_paths=[file_path], clear_first=clear_first)
 
     def _tiff_multipage_undeclared(self, file_path):
-        """Return (n_pages, is_undeclared) for a TIFF: n_pages is the page count of
-        the first series; is_undeclared is True when the file carries no ImageJ/OME
-        axis metadata AND the series' leading axis is unlabelled ('Q'), i.e. a
-        plain multipage TIFF whose stack axis type is unknown. Safe: any failure
-        returns (1, False) so the caller falls back to the normal 2D path."""
-        try:
-            import tifffile
-            with tifffile.TiffFile(file_path) as t:
-                if t.is_imagej or t.is_ome:
-                    return (len(t.pages), False)  # metadata present → not our case
-                series = t.series[0]
-                axes = getattr(series, 'axes', '') or ''
-                n_pages = len(t.pages)
-                # Undeclared when the leading (non-YX) axis is 'Q' (unknown) or the
-                # shape has >1 in a leading position with no T/Z label.
-                lead = axes[:-2] if len(axes) >= 2 else axes
-                undeclared = n_pages > 1 and (('T' not in lead) and ('Z' not in lead))
-                return (n_pages, undeclared)
-        except Exception:
-            return (1, False)
+        from pycat.file_io.routing import _tiff_multipage_undeclared
+        return _tiff_multipage_undeclared(file_path)
 
     def _ask_multipage_axis(self, file_path, n_pages):
         """Prompt for how to interpret an undeclared multipage TIFF: time-series

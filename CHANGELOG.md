@@ -4,6 +4,37 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.25] - 2026-07-14
+### Changed — **FileIOClass: 3,108 → 2,514.** Third extraction.
+
+- **`file_io/routing.py`** (116 lines) — **four methods that never touched `self`.** They took
+  `(self, file_path)` and used the `self` for *nothing at all*: *static functions wearing method
+  clothes*, wedged into a 3,108-line class between the loaders, the dialogs and the lazy wrappers.
+
+  They answer a question about a **path** — does this file carry real imaging metadata? did PyCAT
+  write it? does it carry an embedded tag store? is it an undeclared multipage TIFF? **No viewer, no
+  repository, no reader.**
+
+  *The rule for this split: take what depends on nothing, first. Each move is then provably safe,
+  and what is left behind is smaller and no more tangled than it was.*
+
+### Not done — and the reason is the finding
+
+**`_open_stack_generic` is 538 lines**, and the obvious next cut is the 121-line block at its top
+that reads metadata, decides the pixel size and enumerates the scenes. On paper that is the audit's
+`DatasetDescriptor`, and it touches only `self.central_manager`.
+
+***It is not a metadata block.*** It **constructs a `_TiffPageStack`**, and on failure it falls
+through to `tifffile.imread()` — **a full eager read of the entire file.**
+
+That is the audit's finding 3 exactly — *"pixel transport and dimensional interpretation are
+conflated"* — and **extracting it as it stands would move the tangle, not fix it.** Untangling it
+means separating probe → reader selection → descriptor → pixel transport, which is a multi-session
+arc, not the tail of a long one.
+
+*Three extractions were taken because each was provably safe. The fourth is not, and stopping is
+the whole discipline of this refactor.*
+
 ## [1.6.24] - 2026-07-14
 ### Changed — **FileIOClass: 3,108 lines → 2,620.** The split has started.
 
