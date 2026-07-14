@@ -4,6 +4,55 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.17] - 2026-07-14
+### Fixed — the TIFF page map was a hardcoded guess, and it was wrong on the canonical layout
+
+- **`read_tiff_plane` asserted one interleaving rule for every TIFF:**
+
+      index = ((t * n_z) + z) * n_channels + c
+
+  It is wrong on **TCYX** — the order it was written for. Asked for `(t=0, c=1)` of a 3x2 file it
+  returned **`(t=1, c=0)`**; asked for `(t=1, c=1)` it **declined**. Measured across ten layouts,
+  it was wrong or declining on **every one** except plain single-channel.
+
+  *Two failure modes, and the quiet one is the dangerous one.* A **decline** falls back to BioIO —
+  which for TIFF is the broken `aszarr()` path — so it fails loudly. A **wrong page** puts a real
+  image on screen from the wrong timepoint, and ***nothing about it looks broken.***
+
+- **The cause: a "page" is not a "plane."** A plain 3x2 TCYX file reports `len(series.pages) == 3`
+  with `pages[0].shape == (2, 4, 4)` — **one page holds both channels.** An OME-TIFF of the same
+  data reports `len(pages) == 10` with `pages[0].shape == (8, 8)` — *one plane per page.* Neither
+  can be hardcoded. The map is now derived from **`series.axes`** — which tifffile reports
+  faithfully — split into the axes that select the *page* and the axes sliced *within* it.
+
+- **Why it survived:** for a single-channel time series (Micro-Manager bead stacks, the only TIFF
+  PyCAT is routinely pointed at) a page **is** a frame, the formula collapses to `page = t`, and the
+  old rule was **correct by coincidence.** ***A rule that is right on the only data anyone tested is
+  indistinguishable from a rule that is right.***
+
+  **The VPT path is byte-identical.** Verified frame-by-frame across a 20-frame TYX stack — the
+  eta ~ 8.325 baseline does not move.
+
+- **Two bugs in the fix itself, both caught by existing guards, both worth recording:**
+  - tifffile reads an *undeclared* 3-frame TIFF as **`SYX`** — three *samples* (an RGB image), not
+    three timepoints. The first fix passed `S` through whole, so `t=0` returned the entire
+    `(3, 8, 8)` stack and `t=99` returned **an array**. *The old code declined.*
+    `test_an_OUT_OF_RANGE_page_DECLINES` caught it.
+  - **A plain 2-D image is not a stack.** Slicing `plane[(0,)]` on a `(32, 48)` image returns
+    **row 0** — real pixels, right dtype, utterly wrong.
+    `test_a_plane_is_BIT_IDENTICAL_to_a_full_read` caught it.
+
+  *Both guards were right and both versions of my fix were wrong. This is what the guards are for.*
+
+### Added
+- `tests/test_tiff_page_map.py` — every plane of **ten** axis layouts (TCYX, CTYX, TZYX, ZTYX,
+  ZCYX, CZYX, TZCYX, TCZYX, ZYX, CYX) carries its own `(t,c,z)` as its pixel value, so a wrong page
+  is **detectable, not merely plausible**. Plus RGB (`S` must pass through whole), OME-TIFF, the
+  undeclared multipage case, and a frame-by-frame pin on the single-channel VPT path.
+- The new tests deliberately **do not use pytest's `tmp_path`**: the hand-rolled sandbox runner has
+  no fixture injection, so a test that needs one is *silently skipped locally and only ever runs in
+  CI* — which is precisely how a guard stops guarding.
+
 ## [1.6.16] - 2026-07-14
 ### Fixed — the voxel was assumed isotropic, and it almost never is
 
