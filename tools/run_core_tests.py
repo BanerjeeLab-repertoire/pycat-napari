@@ -35,9 +35,13 @@ import builtins
 import contextlib
 import importlib
 import inspect
+import io
+import os
 import pathlib
 import re
+import shutil
 import sys
+import tempfile
 import types
 
 
@@ -192,10 +196,190 @@ def _setup_environment(repo_root):
     stub.skip = lambda *a, **k: (_ for _ in ()).throw(_SkipTest())
     stub.importorskip = lambda name, **k: importlib.import_module(name)
     stub.mark = _MarkStub()
-    stub.fixture = lambda *a, **k: (lambda fn: fn)
+    # **Tag** what `@pytest.fixture` decorates, so the runner can find it after exec.
+    # The stub used to return the function unchanged, which made fixtures INVISIBLE — and a
+    # test needing one was reported PASS without ever running.
+    def _fixture(*args, **kwargs):
+        def tag(fn):
+            fn._pycat_fixture = True
+            return fn
+        # Bare `@pytest.fixture` (no parens) passes the function directly.
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return tag(args[0])
+        return tag
+
+    stub.fixture = _fixture
     stub.SkipTest = _SkipTest
     sys.modules['pytest'] = stub
     return stub
+
+
+# ── The runner reported PASS for tests it never ran ──────────────────────────────────────
+#
+# A test taking a parameter but carrying **no ``parametrize`` decorator** — i.e. a test asking for
+# a **fixture** — fell into the branch that builds its cases from ``SCIENTIFIC_MODULES``. For a
+# file that does not define that name, ``ns.get(...)`` returned ``[]``, so ``combinations`` was
+# **empty**, **the loop body never executed**, ``n_fail`` stayed ``0`` — and the runner printed::
+#
+#     test_a_CHANGED_file_gets_a_FRESH_reader   PASS
+#
+# ***A test whose body is `assert False` reported PASS.*** Verified with a canary.
+#
+# **23 tests were affected**, and they are not peripheral ones:
+#
+#   * ``test_reader_cache`` — **4 of 5**
+#   * ``test_one_plane_reads_one_plane`` — **3 of 5** *(the perf guard the whole 1.6 arc turns on)*
+#   * ``test_file_io`` — **5 of 5**, the entire file
+#
+# The guards protecting the BioIO migration have been reporting green **without executing a single
+# line.** *This is the same failure as a metric that cannot catch its own bug, one level up: the
+# thing that checks the checks was not being checked.*
+#
+# So: **inject the fixtures**, and where a fixture cannot be provided, **FAIL** — never pass.
+
+class _MonkeyPatch:
+    """The subset of ``pytest``'s monkeypatch the suite actually uses, with real undo."""
+
+    def __init__(self):
+        self._undo = []
+
+    def setattr(self, target, name, value=None, raising=True):
+        # Support both `setattr(obj, 'name', value)` and `setattr('mod.attr', value)`.
+        if isinstance(target, str):
+            module_name, _, attribute = target.rpartition('.')
+            target, name, value = importlib.import_module(module_name), attribute, name
+        self._undo.append((target, name, getattr(target, name, _MISSING)))
+        setattr(target, name, value)
+
+    def setitem(self, mapping, key, value):
+        self._undo.append((mapping, key, mapping.get(key, _MISSING), True))
+        mapping[key] = value
+
+    def delattr(self, target, name, raising=True):
+        self._undo.append((target, name, getattr(target, name, _MISSING)))
+        delattr(target, name)
+
+    def setenv(self, name, value):
+        self.setitem(os.environ, name, str(value))
+
+    def undo(self):
+        for entry in reversed(self._undo):
+            if len(entry) == 4:
+                mapping, key, old, _ = entry
+                if old is _MISSING:
+                    mapping.pop(key, None)
+                else:
+                    mapping[key] = old
+            else:
+                target, name, old = entry
+                if old is _MISSING:
+                    try:
+                        delattr(target, name)
+                    except AttributeError:
+                        pass
+                else:
+                    setattr(target, name, old)
+        self._undo.clear()
+
+
+class _MISSING:
+    pass
+
+
+class _CaptureFixture:
+    """``capsys``: capture stdout/stderr for the duration of the test."""
+
+    def __init__(self):
+        self._out, self._err = io.StringIO(), io.StringIO()
+        self._saved = (sys.stdout, sys.stderr)
+        sys.stdout, sys.stderr = self._out, self._err
+
+    def readouterr(self):
+        value = _Captured(self._out.getvalue(), self._err.getvalue())
+        self._out.truncate(0); self._out.seek(0)
+        self._err.truncate(0); self._err.seek(0)
+        return value
+
+    def close(self):
+        sys.stdout, sys.stderr = self._saved
+
+
+class _Captured:
+    def __init__(self, out, err):
+        self.out, self.err = out, err
+
+
+def _build_fixtures(parameters, namespace=None):
+    """Provide the fixtures this test asked for. ``None`` if any of them cannot be provided.
+
+    **Returning ``None`` must make the caller FAIL, not pass.** The whole reason this function
+    exists is that a test which could not be run was being counted as one that had.
+
+    Resolves, in order:
+
+    1. the **built-ins** the suite uses — ``tmp_path``, ``monkeypatch``, ``capsys``;
+    2. **custom fixtures defined in the test module** — ``@pytest.fixture def counting_reader():``.
+       These are the ones that actually guard the 1.6 work (``a_fifty_frame_tiff``,
+       ``counting_reader``, ``slow_storage``), and a runner that could not build them was reporting
+       their tests **green without executing them.**
+
+    A custom fixture may itself take ``tmp_path`` or another fixture; those are resolved
+    recursively. Generator fixtures (``yield``) get their teardown run.
+    """
+    provided, teardown = {}, []
+    namespace = namespace or {}
+
+    def _fail():
+        for undo in reversed(teardown):
+            undo()
+        return None, None
+
+    for parameter in parameters:
+        if parameter in ('tmp_path', 'tmpdir'):
+            path = pathlib.Path(tempfile.mkdtemp())
+            provided[parameter] = path
+            teardown.append(lambda p=path: shutil.rmtree(p, ignore_errors=True))
+
+        elif parameter == 'monkeypatch':
+            patcher = _MonkeyPatch()
+            provided[parameter] = patcher
+            teardown.append(patcher.undo)
+
+        elif parameter == 'capsys':
+            capture = _CaptureFixture()
+            provided[parameter] = capture
+            teardown.append(capture.close)
+
+        elif callable(namespace.get(parameter)) and getattr(
+                namespace[parameter], '_pycat_fixture', False):
+            # A `@pytest.fixture` defined in this test module. Looked up **in the namespace
+            # itself** — not in an `id()`-keyed global, which made the resolver depend on hidden
+            # state and untestable in isolation.
+            factory = namespace[parameter]
+            inner_names = [p for p in inspect.signature(factory).parameters]
+            inner, inner_teardown = _build_fixtures(inner_names, namespace) if inner_names \
+                else ({}, [])
+            if inner is None:
+                return _fail()
+            teardown.extend(inner_teardown)
+
+            try:
+                value = factory(**inner)
+            except Exception:                          # noqa: BLE001
+                return _fail()
+
+            if inspect.isgenerator(value):
+                generator = value
+                value = next(generator)
+                teardown.append(lambda g=generator: next(g, None))
+
+            provided[parameter] = value
+
+        else:
+            return _fail()
+
+    return provided, teardown
+
 
 
 def _parametrize_cases(function_node, source, namespace):
@@ -258,6 +442,50 @@ def _parametrize_cases(function_node, source, namespace):
     return cases
 
 
+def plan_test(parameters, is_parametrized, namespace):
+    """**How should this test be run — and CAN it be?** ``'parametrize' | 'fixtures' | None``.
+
+    ``None`` means *it cannot be run*, and the caller must report **FAIL**.
+
+    ── This decision is where the runner was lying ──────────────────────────────────────
+
+    The dispatch was: no parameters → run it; parameters → treat them as ``parametrize`` cases. But
+    **a test asking for a FIXTURE has parameters and no ``parametrize`` decorator**, so it fell into
+    the parametrize branch — which built its cases from ``SCIENTIFIC_MODULES``, a name most test
+    files do not define. ``ns.get(...)`` returned ``[]``, so ``combinations`` was **empty**, the
+    loop body never executed, ``n_fail`` stayed ``0``, and the runner printed::
+
+        test_a_CHANGED_file_gets_a_FRESH_reader   PASS
+
+    ***A test whose entire body was `assert False` reported PASS.***
+
+    **23 tests were in this state** — including **4 of 5** reader-cache guards, **3 of 5** one-plane
+    perf guards, and the whole of ``test_file_io``. The guards protecting the BioIO migration were
+    green **without executing a single line.**
+
+    *This is a metric that could not catch its own bug, one level up.*
+    """
+    if not parameters:
+        return 'run'
+
+    if is_parametrized:
+        return 'parametrize'
+
+    # Asking for fixtures. Can they be built?
+    fixtures, teardown = _build_fixtures(list(parameters), namespace)
+    if fixtures is not None:
+        for undo in reversed(teardown):
+            undo()
+        return 'fixtures'
+
+    # Legacy: a bare `mod` parameter driven by a module-level SCIENTIFIC_MODULES list.
+    if namespace.get('SCIENTIFIC_MODULES'):
+        return 'parametrize'
+
+    # **Cannot be run. That is a FAILURE, not a pass.** Saying PASS here is what hid 23 tests.
+    return None
+
+
 def _load(path, pytest_stub):
     """Execute the test module, and collect every parametrize case pytest would generate."""
     source = path.read_text(encoding='utf-8')
@@ -314,7 +542,19 @@ def main():
             fn = ns[name]
             sig = inspect.signature(fn)
 
-            if not sig.parameters:
+            # **The dispatch decision, in one place, so it can be tested.** See `plan_test` — this
+            # is where the runner was reporting PASS for tests it never ran.
+            plan = plan_test(list(sig.parameters), name in params, ns)
+
+            if plan is None:
+                # **A test that cannot be run is a FAILURE, not a pass.**
+                total += 1
+                failed += 1
+                unmet = ', '.join(sig.parameters)
+                print(f"    {name:36} FAIL: cannot inject fixture(s): {unmet}")
+                continue
+
+            if plan == 'run':
                 total += 1
                 try:
                     fn()
@@ -353,7 +593,30 @@ def main():
                             for parameter, item in zip(names, value):
                                 kwargs[parameter] = item
                     combinations.append(kwargs)
+            elif plan == 'fixtures':
+                # ── Asking for FIXTURES, and `plan_test` says they can be built ──
+                #
+                # This used to be the parametrize branch, which built cases from
+                # ``SCIENTIFIC_MODULES`` — an **empty list** for most files. The loop never ran,
+                # ``n_fail`` stayed 0, and the runner printed **PASS for a test it never executed.**
+                fixtures, teardown = _build_fixtures(list(sig.parameters), ns)
+                total += 1
+                try:
+                    fn(**fixtures)
+                    print(f"    {name:36} PASS")
+                except pytest_stub.SkipTest:
+                    total -= 1
+                    print(f"    {name:36} skip")
+                except Exception as exc:               # noqa: BLE001
+                    failed += 1
+                    print(f"    {name:36} FAIL: {type(exc).__name__}: {str(exc)[:60]}")
+                finally:
+                    for undo in reversed(teardown):
+                        undo()
+                continue
+
             else:
+                # Legacy: a bare `mod` parameter driven by module-level SCIENTIFIC_MODULES.
                 only = list(sig.parameters)[0]
                 combinations = [{only: value}
                                 for value in ns.get('SCIENTIFIC_MODULES', [])]
@@ -362,13 +625,28 @@ def main():
             first = ''
             for kwargs in combinations:
                 total += 1
+                # A parametrized test may ALSO ask for a fixture (`(self, axes, sizes, tmp_path)`).
+                # Build them per-case so each case gets a clean tmp dir, as pytest does.
+                extra = [p for p in sig.parameters if p not in kwargs]
+                fixtures, teardown = _build_fixtures(extra, ns) if extra else ({}, [])
+
+                if fixtures is None:
+                    n_fail += 1
+                    failed += 1
+                    if not first:
+                        first = f"cannot inject fixture(s): {', '.join(extra)}"
+                    continue
+
                 try:
-                    fn(**kwargs)
+                    fn(**kwargs, **fixtures)
                 except Exception as exc:               # noqa: BLE001
                     n_fail += 1
                     failed += 1
                     if not first:
                         first = f"{kwargs}: {type(exc).__name__}: {str(exc)[:40]}"
+                finally:
+                    for undo in reversed(teardown):
+                        undo()
             status = 'PASS' if n_fail == 0 else f'FAIL ({n_fail}/{len(combinations)})'
             print(f"    {name:36} {status}  {first}")
 

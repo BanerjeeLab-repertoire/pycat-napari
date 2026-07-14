@@ -4,6 +4,51 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.18] - 2026-07-14
+### Fixed — **the test runner reported PASS for 23 tests it never ran**
+
+- **A test whose entire body is `assert False` reported PASS.** Verified with a canary.
+
+  `tools/run_core_tests.py` dispatches on a test's signature: *no parameters → run it; parameters →
+  treat them as `parametrize` cases.* **But a test asking for a FIXTURE has parameters and no
+  `parametrize` decorator.** It fell into the parametrize branch, which built its cases from
+  `SCIENTIFIC_MODULES` — a name most test files do not define. `ns.get(...)` returned `[]`, so
+  `combinations` was **empty**, **the loop body never executed**, `n_fail` stayed `0`, and the
+  runner printed `PASS`. `total` was not incremented either, so they were invisible in the count.
+
+- **And these were not peripheral tests:**
+
+  | file | never running |
+  |---|---|
+  | `test_reader_cache` | **4 of 5** |
+  | `test_one_plane_reads_one_plane` | **3 of 5** — *the perf guard the whole 1.6 arc turns on* |
+  | `test_file_io` | **5 of 5** — the entire file |
+
+  The guards protecting the BioIO migration were reporting green **without executing a single
+  line**, for an entire release arc. ***This is the same failure as a metric that cannot catch its
+  own bug, one level up: the thing that checks the checks was not being checked.***
+
+  *When the runner was fixed and they finally ran, **they all passed** — so no product bug was
+  hiding behind this. **But nobody knew that, and that is the whole problem.*** Suite count went
+  **486 → 503**.
+
+- **The runner now injects fixtures.** `tmp_path`, `monkeypatch` (with real undo), `capsys`, and
+  **custom `@pytest.fixture` functions defined in the test module** — `counting_reader`,
+  `a_fifty_frame_tiff`, `slow_storage`, the fixtures that *build the conditions* the 1.6 guards
+  test. Nested fixtures (a fixture taking `tmp_path`) and generator fixtures resolve too.
+
+- **And where it cannot build one, it FAILS** — naming the fixture. ***A test that cannot be run is
+  a FAILURE, not a pass.*** Saying PASS there is what hid this for a release arc.
+
+### Added
+- `tests/test_the_runner_actually_runs.py` — pins the dispatch decision (`plan_test`) that was
+  lying. An unbuildable fixture must plan as **unrunnable**, not as "parametrize with zero cases".
+
+  *It does **not** spawn the runner in a subprocess.* That guard works — and costs **148 seconds**,
+  doubling a suite that already takes that long, because the inner run executes the whole suite
+  too. **A guard nobody can afford to run is a guard that gets deleted.** So the decision was
+  extracted into a pure function and is tested **in-process**.
+
 ## [1.6.17] - 2026-07-14
 ### Fixed — the TIFF page map was a hardcoded guess, and it was wrong on the canonical layout
 
