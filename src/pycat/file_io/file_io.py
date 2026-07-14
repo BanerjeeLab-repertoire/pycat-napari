@@ -1198,7 +1198,9 @@ class _LazyArraySource:
 # created ON DEMAND by the measure widget the first time the user measures, so a
 # session that never measures diameters isn't cluttered with them. Flip to True to
 # revert if the on-demand path ever misbehaves (e.g. the native Home button).
-EAGER_DIAMETER_LAYERS = False
+# Moved to `napari_adapter`, with the layers it toggles. Re-exported so the name still
+# resolves here — it was documented in this file as the one-line revert.
+from pycat.file_io.napari_adapter import EAGER_DIAMETER_LAYERS  # noqa: F401
 
 
 
@@ -3044,41 +3046,8 @@ class FileIOClass:
     
 
     def _add_diameter_annotation_layers(self):
-        """Add the 'Object Diameter'/'Cell Diameter' line-annotation layers,
-        seeded with one invisible near-zero-length line so the (otherwise empty)
-        Shapes layers report a FINITE extent. An empty Shapes layer reports a NaN
-        extent in this napari build, which makes reset_view (the Home button)
-        compute a NaN camera zoom and crash the scale-bar overlay. The seed is
-        ignored by calculate_length, which measures the last non-degenerate line.
-
-        As of the drawing-layer rework these layers are created ON DEMAND by the
-        measure widget (via pycat.toolbox.drawing_layers.add_drawing_layer) instead
-        of eagerly at every file load, so a session that never measures diameters
-        isn't cluttered with two annotation layers. The module flag
-        EAGER_DIAMETER_LAYERS restores the old eager behaviour if needed (a one-line
-        revert): when False (default) this method is a no-op at load time; the
-        measure widget creates the seeded, tagged layers when first used.
-
-        NOTE on the Home-button crash: the NaN-extent crash only occurs when an
-        EMPTY Shapes layer is present. With eager creation off, no diameter layer
-        exists until the user makes one (and the factory seeds it), so the interim
-        is safe — the absence of a layer cannot NaN the extent.
-        """
-        if not EAGER_DIAMETER_LAYERS:
-            return
-        import numpy as _np
-        for _nm, _ec, _ew in (('Object Diameter', 'red', 2),
-                              ('Cell Diameter', 'white', 5)):
-            if _nm in [l.name for l in self.viewer.layers]:
-                continue
-            lyr = self.viewer.add_shapes(name=_nm, shape_type='line',
-                                         edge_color=_ec, edge_width=_ew)
-            try:
-                lyr.add(_np.array([[0.0, 0.0], [0.0, 1e-4]]),
-                        shape_type='line', edge_width=0.0)
-                lyr.current_edge_width = _ew
-            except Exception:
-                pass
+        from pycat.file_io.napari_adapter import _add_diameter_annotation_layers
+        return _add_diameter_annotation_layers(self.viewer)
 
     def _enable_auto_scale_bar(self, image_layer=None):
         from pycat.file_io.napari_adapter import _enable_auto_scale_bar
@@ -3238,105 +3207,8 @@ class FileIOClass:
         return True
 
     def _clear_everything(self, viewer):
-        """
-        Reset the napari space to the workflow start state: remove all layers,
-        reset the data repository/dataframes, and reset the workflow checklist
-        progress bar. Saves nothing. Shared by Save & Clear's discard option and
-        the top-bar Clear button.
-        """
-        # Drop the cached readers. They hold open file handles, and after a Clear the user is
-        # done with those files. *(The cache exists because one drag-and-drop used to construct
-        # the reader three to four times — see `image_reader._READER_CACHE`.)*
-        try:
-            from pycat.file_io.image_reader import clear_reader_cache
-            clear_reader_cache()
-        except Exception:
-            pass
-
-        self.viewer = viewer
-        try:
-            df_names = list(self.central_manager.active_data_class.get_dataframes().keys())
-        except Exception:
-            df_names = []
-        _persist = getattr(self.central_manager, 'persist_measurements', False)
-        _dr = self.central_manager.active_data_class.data_repository
-        _saved = {}
-        if _persist:
-            _saved = {k: _dr.get(k) for k in
-                      ('ball_radius', 'object_size', 'cell_diameter')
-                      if _dr.get(k) is not None}
-        viewer.layers.select_all()
-        viewer.layers.remove_selected()
-        self.central_manager.active_data_class.reset_values(
-            clear_all=True, df_names_to_reset=df_names)
-        # Dismiss any lingering napari notifications from the previous session.
-        try:
-            from napari.utils.notifications import notification_manager
-            notification_manager.records.clear()
-        except Exception:
-            pass
-        if _persist and _saved:
-            _dr2 = self.central_manager.active_data_class.data_repository
-            for k, v in _saved.items():
-                try:
-                    _dr2[k] = v
-                except Exception:
-                    pass
-        # Reset the workflow checklist so the next dataset starts from step 1.
-        try:
-            wc = getattr(self.central_manager, 'workflow_checklist', None)
-            if wc is not None:
-                wc.reset()
-        except Exception:
-            pass
-
-        # Reset the batch recording so the recorded-steps list starts empty for
-        # the next dataset. The plain Clear button previously left the recording
-        # intact (only Save & Clear reset it via terminate_recording); both paths
-        # now reset it here. clear_recording() also flips the record toggle back
-        # to OFF and resyncs the toolbar button.
-        try:
-            bp = getattr(self.central_manager, '_pycat_batch_processor', None)
-            if bp is not None:
-                bp.clear_recording()
-        except Exception:
-            pass
-
-        # Reset the "Measure Line(s)" status circle back to red on clear, UNLESS
-        # the user asked to remember measurements across clears (then the
-        # measurement — and its done state — carries over).
-        try:
-            if not _persist:
-                tb = getattr(self.central_manager, 'toolbox_functions_ui', None)
-                mls = getattr(tb, '_measure_line_status', None)
-                if mls is not None and hasattr(mls, 'reset'):
-                    mls.reset()
-        except Exception:
-            pass
-
-        # Reset the optional "Run Upscaling" status circle on clear (its upscaled
-        # output layers are removed, so the step is no longer "done").
-        try:
-            tb = getattr(self.central_manager, 'toolbox_functions_ui', None)
-            ups = getattr(tb, '_upscaling_status', None)
-            if ups is not None and hasattr(ups, 'reset'):
-                ups.reset()
-        except Exception:
-            pass
-
-        # Re-show the pixel-size gate for the next dataset. Clearing wipes the
-        # scale from the data repository, but the gate only re-evaluates on its
-        # own triggers — call its reset so it reappears (honoring the persist /
-        # "keep for session" checkbox, which retains the remembered value).
-        try:
-            pxr = getattr(self.central_manager, '_pixel_gate_refresh', None)
-            if pxr is not None and hasattr(pxr, '_reset_gate'):
-                pxr._reset_gate()
-        except Exception as _reset_exc:
-            # Without this reset the gate **never reappears for the next dataset** — so the second
-            # file of a session is loaded with no calibration check at all, and nothing says so.
-            from pycat.utils.general_utils import report_guarantee_failure
-            report_guarantee_failure("file_io: pixel-size gate reset after clear", _reset_exc)
+        from pycat.file_io.session import _clear_everything
+        return _clear_everything(viewer, self.central_manager)
 
     def clear_all_without_saving(self, viewer, confirm=True):
         """

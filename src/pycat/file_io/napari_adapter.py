@@ -28,6 +28,18 @@ from __future__ import annotations
 
 import os
 
+# ── The toggle lives HERE, with the layers it toggles ────────────────────────────────────
+#
+# It was a module-level constant in `file_io.py`, and importing it back from there would make this
+# module import its former host — **a cycle.** *(And an unverifiable one: the sandbox has no Qt, so
+# `import napari_adapter` dies on PyQt5 before it ever reaches the circular import. A cycle I cannot
+# test is a cycle I will not ship.)*
+#
+# The diameter-annotation layers are created **on demand** by the measure widget the first time the
+# user measures, so a session that never measures diameters is not cluttered with them. Flip this to
+# True to revert to the eager behaviour if the on-demand path ever misbehaves.
+EAGER_DIAMETER_LAYERS = False
+
 def _is_calibrated(central_manager, px):
     """**Is this pixel size a real calibration, or the 1.0 fallback?**
 
@@ -295,3 +307,41 @@ def _fit_view_to_layer(viewer, central_manager, layer=None, margin=0.9, attempt=
             pass
         if os.environ.get('PYCAT_DEBUG'):
             print(f"[PyCAT] fit view skipped: {e}")
+
+
+def _add_diameter_annotation_layers(viewer):
+    """Add the 'Object Diameter'/'Cell Diameter' line-annotation layers,
+    seeded with one invisible near-zero-length line so the (otherwise empty)
+    Shapes layers report a FINITE extent. An empty Shapes layer reports a NaN
+    extent in this napari build, which makes reset_view (the Home button)
+    compute a NaN camera zoom and crash the scale-bar overlay. The seed is
+    ignored by calculate_length, which measures the last non-degenerate line.
+
+    As of the drawing-layer rework these layers are created ON DEMAND by the
+    measure widget (via pycat.toolbox.drawing_layers.add_drawing_layer) instead
+    of eagerly at every file load, so a session that never measures diameters
+    isn't cluttered with two annotation layers. The module flag
+    EAGER_DIAMETER_LAYERS restores the old eager behaviour if needed (a one-line
+    revert): when False (default) this method is a no-op at load time; the
+    measure widget creates the seeded, tagged layers when first used.
+
+    NOTE on the Home-button crash: the NaN-extent crash only occurs when an
+    EMPTY Shapes layer is present. With eager creation off, no diameter layer
+    exists until the user makes one (and the factory seeds it), so the interim
+    is safe — the absence of a layer cannot NaN the extent.
+    """
+    if not EAGER_DIAMETER_LAYERS:
+        return
+    import numpy as _np
+    for _nm, _ec, _ew in (('Object Diameter', 'red', 2),
+                          ('Cell Diameter', 'white', 5)):
+        if _nm in [l.name for l in viewer.layers]:
+            continue
+        lyr = viewer.add_shapes(name=_nm, shape_type='line',
+                                     edge_color=_ec, edge_width=_ew)
+        try:
+            lyr.add(_np.array([[0.0, 0.0], [0.0, 1e-4]]),
+                    shape_type='line', edge_width=0.0)
+            lyr.current_edge_width = _ew
+        except Exception:
+            pass

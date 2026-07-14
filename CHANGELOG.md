@@ -4,6 +4,38 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.27] - 2026-07-14
+### Changed — **FileIOClass: 3,108 → 2,223.** Fifth extraction. 885 lines out.
+
+- **`file_io/session.py`** (99 lines) — `_clear_everything`. **It is not doing I/O, it is UNDOING
+  it**: removing layers, emptying the data repository, resetting the batch recorder, dropping the
+  cached readers and their open file handles. Depends on `viewer` and `central_manager` and nothing
+  else.
+- **`_add_diameter_annotation_layers`** → `napari_adapter.py`. It takes **only `viewer`** and
+  creates napari layers. It was never file I/O.
+
+| module | lines |
+|---|---|
+| `writers.py` | 461 |
+| `napari_adapter.py` | 272 |
+| `dialogs.py` | 161 |
+| `routing.py` | 116 |
+| `session.py` | 99 |
+
+### Caught by the guards — a NameError and a circular import
+
+- **`test_no_undefined_names` caught a real `NameError`, for the second time in this refactor.**
+  `_add_diameter_annotation_layers` reads `EAGER_DIAMETER_LAYERS`, a module-level constant that
+  lived in `file_io.py`. *My own free-name check missed it — it looked at function CALLS, and this is
+  a bare name load.*
+- **And the obvious fix was a circular import.** Importing the constant back from `file_io` would
+  make `napari_adapter` import its former host. ***And I could not test it:*** the sandbox has no
+  Qt, so `import napari_adapter` dies on PyQt5 **before it ever reaches the cycle**.
+
+  **A cycle I cannot test is a cycle I will not ship.** The constant moved to `napari_adapter`,
+  where it belongs — it is a *display* toggle — and `file_io` re-exports it so the name still
+  resolves there, one direction only.
+
 ## [1.6.26] - 2026-07-14
 ### Changed — **FileIOClass: 3,108 → 2,353.** Fourth extraction.
 

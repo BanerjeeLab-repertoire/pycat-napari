@@ -124,6 +124,19 @@ _DELIBERATE = {
     #     extract_channel_info_from_aicsimage → extract_channel_info
     #
     # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    # 1.6.27 — EXTRACTED, not deleted.
+    #
+    # `_clear_everything` -> `file_io/session.py`. **It is not doing I/O, it is UNDOING it** —
+    # removing layers, emptying the repository, dropping cached readers and their open handles. It
+    # depends on `viewer` and `central_manager` and nothing else.
+    #
+    # `_add_diameter_annotation_layers` -> `file_io/napari_adapter.py`. It takes **only `viewer`**
+    # and creates napari layers. It was never file I/O.
+    #
+    # (`FileIOClass` keeps a delegating stub for each, so every caller is untouched.)
+    'file_io.py::_clear_everything',
+    'file_io.py::_add_diameter_annotation_layers',
+
     # 1.6.26 — EXTRACTED to `file_io/dialogs.py`, not deleted.
     #
     # **Asking the user is not reading the file.** Two of these kept their memory on `self` —
