@@ -4,6 +4,45 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.19] - 2026-07-14
+### Fixed — opening a plain TIFF printed a parse error naming the user's own file
+
+**Reported by Meet Raval against 1.6.17.** Opening `In Cell 8-DAPI.tif`:
+
+    Attempted file (In Cell 8-DAPI.tif) load with reader:
+    <class 'bioio_ome_tiff.reader.Reader'> failed with error:
+    bioio-ome-tiff does not support the image ... Failed to parse XML for the
+    provided file. Error: syntax error: line 1, column 0
+
+**And then the file opened fine.** `P=1 T=1 C=1 Z=1 → 2D`.
+
+`BioImage(path)` with no `reader=` runs BioIO's **plugin auto-selection**: it tries
+`bioio-ome-tiff` first, that plugin goes looking for OME-XML, **a plain microscope TIFF has none**,
+and it raises. BioIO catches it, prints the attempt, and falls through to `bioio-tifffile`, which
+works.
+
+*The error is BioIO's, it is not fatal, and the load succeeds.* **But the user cannot know that.**
+It reads exactly like a corrupt file and it names their image. ***A scientist seeing that goes
+looking at their microscope, or at their data.*** Same cost as the
+`'_TIFF' object has no attribute 'RESUNIT'` message this codebase already carries a startup check
+for — a message that sends people to debug the wrong thing entirely.
+
+- **TIFF is now pinned to `bioio-tifffile`.** It wraps `tifffile`, which reads **plain and OME TIFF
+  alike** — and **PyCAT does not take TIFF pixels from BioIO at all**: `read_tiff_plane` seeks the
+  page directly, precisely because `bioio-ome-tiff` reads through `tif.aszarr()`, broken on
+  zarr 3.2. *BioIO only supplies dimensions, scenes, channel names and pixel size for TIFF, and
+  `bioio-tifffile` supplies all of them. The OME plugin was never on the pixel path — it was only
+  ever a noisy first guess.*
+- A caller passing its own `reader=` **wins**; a genuinely missing plugin falls back to BioIO's
+  probe rather than raising (*a noisy load beats no load*).
+- The pin is added **at construction**, after the cache key is built from the caller's kwargs — so
+  it does not look like a caller option and switch the reader cache off for every TIFF. **Pinned by
+  a test**, because that would have been a quiet 3–4x slowdown on every drag-and-drop.
+
+### Added
+- `tests/test_tiff_reader_selection.py` — the pin, the non-TIFF passthrough, the caller override,
+  the missing-plugin fallback, and the cache interaction.
+
 ## [1.6.18] - 2026-07-14
 ### Fixed — **the test runner reported PASS for 23 tests it never ran**
 

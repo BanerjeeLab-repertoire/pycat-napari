@@ -151,6 +151,72 @@ def clear_reader_cache():
     _READER_CACHE.clear()
 
 
+def _reader_kwargs_for(path, kwargs):
+    """**Tell BioIO which TIFF reader to use. Do not let it guess.**
+
+    ── The bug a user reported (1.6.17) ──────────────────────────────────────────────────
+
+    Opening an ordinary microscope TIFF printed, twice, in red::
+
+        Attempted file (In Cell 8-DAPI.tif) load with reader:
+        <class 'bioio_ome_tiff.reader.Reader'> failed with error:
+        bioio-ome-tiff does not support the image ... Failed to parse XML for the
+        provided file. Error: syntax error: line 1, column 0
+
+    **And then the file opened fine.** ``P=1 T=1 C=1 Z=1 → 2D``.
+
+    ``BioImage(path)`` with no reader runs BioIO's **plugin auto-selection**: it tries
+    ``bioio-ome-tiff`` first, that plugin looks for OME-XML, a plain TIFF has none, and it raises.
+    BioIO catches it, prints the attempt, and falls through to ``bioio-tifffile``, which works.
+
+    *The error is BioIO's, it is not fatal, and the load succeeds — but the user has no way to know
+    any of that.* **It reads exactly like a corrupt file, and it names their own image.** A
+    scientist seeing that goes looking at their microscope, or at their data. That is the same cost
+    as the ``'_TIFF' object has no attribute 'RESUNIT'`` message this codebase already has a
+    startup check for.
+
+    ── Why bioio-tifffile is the right reader for BOTH ───────────────────────────────────
+
+    It wraps ``tifffile``, which reads **plain and OME TIFF alike**. And PyCAT does not take TIFF
+    pixels from BioIO at all — ``tiff_planes.read_tiff_plane`` seeks the page directly, precisely
+    because ``bioio-ome-tiff`` reads through ``tif.aszarr()``, which is broken on zarr 3.2. **BioIO
+    is only supplying dimensions, scenes, channel names and pixel size for TIFF**, and
+    ``bioio-tifffile`` supplies all of them.
+
+    *So the OME plugin was never on the pixel path. It was only ever a noisy first guess.*
+
+    **A caller passing its own ``reader=`` wins** — an explicit request is not overridden.
+    """
+    if kwargs.get('reader') is not None:
+        return kwargs
+
+    from pathlib import Path
+    if Path(str(path)).suffix.lower() not in ('.tif', '.tiff'):
+        return kwargs
+
+    # BioIO's own error names the OME plugin's class as ``bioio_ome_tiff.reader.Reader``, so the
+    # sibling is ``bioio_tifffile.reader.Reader``. Try the package's top-level export too — a
+    # plugin is free to re-export, and a hard-coded submodule path that moves in a point release
+    # would silently put us back on the noisy auto-probe.
+    reader_class = None
+    for module_name, attribute in (('bioio_tifffile.reader', 'Reader'),
+                                   ('bioio_tifffile', 'Reader')):
+        try:
+            import importlib
+            reader_class = getattr(importlib.import_module(module_name), attribute, None)
+        except ImportError:
+            continue
+        if reader_class is not None:
+            break
+
+    if reader_class is None:
+        # The plugin is a declared dependency, but if it is genuinely absent or has moved, let
+        # BioIO probe as before rather than fail. **A noisy load beats no load.**
+        return kwargs
+
+    return {**kwargs, 'reader': reader_class}
+
+
 def open_image(path, **kwargs):
     """Open ``path`` and return a reader.
 
@@ -216,7 +282,7 @@ def open_image(path, **kwargs):
             ) from exc
 
         try:
-            _reader = BioImage(path, **kwargs)
+            _reader = BioImage(path, **_reader_kwargs_for(path, kwargs))
             if _key is not None:
                 if len(_READER_CACHE) >= _READER_CACHE_LIMIT:
                     _READER_CACHE.pop(next(iter(_READER_CACHE)))
