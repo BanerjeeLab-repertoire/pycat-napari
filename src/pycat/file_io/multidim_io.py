@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from pycat.file_io.stack_access import to_unit_float32
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,8 @@ class _ZarrTZYX:
             t_idx, z_idx, spatial = idx, slice(None), ()
         with self._ctx():
             raw = self._z[t_idx, self._c, z_idx]
-        arr = np.asarray(raw).astype(np.float32)
+        # `[0, 1]` from the SOURCE dtype, not raw counts. See file_io.to_unit_float32.
+        arr = to_unit_float32(raw, getattr(self._z, 'dtype', None))
         if spatial:
             arr = arr[(Ellipsis,) + spatial] if arr.ndim > 2 else arr[spatial]
         return arr
@@ -117,7 +119,8 @@ class _ZarrZYX:
             z_idx, spatial = idx, ()
         with self._ctx():
             raw = self._z[self._t, self._c, z_idx]
-        arr = np.asarray(raw).astype(np.float32)
+        # `[0, 1]` from the SOURCE dtype, not raw counts. See file_io.to_unit_float32.
+        arr = to_unit_float32(raw, getattr(self._z, 'dtype', None))
         if spatial:
             arr = arr[spatial]
         return arr
@@ -153,7 +156,8 @@ class _ZarrTZYX_generic:
         self.ndim  = 4
 
     def __getitem__(self, idx):
-        arr = np.asarray(self._z[idx]).astype(np.float32)
+        # `[0, 1]` from the SOURCE dtype, not raw counts. See file_io.to_unit_float32.
+        arr = to_unit_float32(self._z[idx], getattr(self._z, 'dtype', None))
         return arr
 
     def __array__(self, dtype=None):

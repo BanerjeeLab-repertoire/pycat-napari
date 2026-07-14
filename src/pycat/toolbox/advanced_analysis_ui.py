@@ -12,7 +12,7 @@ import numpy as np
 
 
 from pycat.utils.pixel_size import pixel_size_um_or_default
-from pycat.utils.general_utils import debug_log
+from pycat.utils.general_utils import debug_log, report_guarantee_failure
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -72,7 +72,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             lambda: ui_instance.central_manager.active_data_class.data_repository,
             central_manager=ui_instance.central_manager)
     except Exception as _exc:
-        debug_log('advanced_analysis_ui: the pixel-size gate could not be added', _exc)
+        report_guarantee_failure('advanced_analysis_ui: add_pixel_size_gate', _exc)
 
     # Fully-optional block: hidden by default behind an off-by-default checkbox.
     from PyQt5.QtWidgets import QCheckBox as _QCheckBox
@@ -286,7 +286,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
             frame_dt, ui_instance.central_manager.active_data_class.data_repository,
             context='advanced_analysis_ui')
     except Exception as _exc:
-        debug_log('advanced_analysis_ui: could not sync the frame interval', _exc)
+        report_guarantee_failure('advanced_analysis_ui: sync_spinbox_from_metadata', _exc)
     frame_dt.setToolTip("Time between frames (seconds) — sets the physical time axis for dynamics.")
     prox_um  = QDoubleSpinBox(); prox_um.setRange(0.1, 10);  prox_um.setValue(1.0)
     prox_um.setToolTip("Centroid proximity (µm) for calling two objects a merge or fission event.")
@@ -475,7 +475,7 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
                     from pycat.file_io.stack_access import warn_if_assumed_axis
                     warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Growth/shrinkage kinetics (treats frames as time)')
                 except Exception as _exc:
-                    debug_log('advanced_analysis_ui: could not check the stack axis', _exc)
+                    report_guarantee_failure('advanced_analysis_ui: warn_if_assumed_axis', _exc)
                 res['growth_kinetics'] = growth_shrinkage_kinetics(
                     tracks, frame_dt.value())
                 progress_emit and progress_emit(5, 5)

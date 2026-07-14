@@ -106,6 +106,24 @@ def sync_spinbox_from_metadata(spinbox, data_repository, *, context='',
     if owner is not None and touched_flag and getattr(owner, touched_flag, False):
         return False        # the user set it. Their value wins, always.
 
+    # ── Do not warn about a time axis the image does not HAVE ───────────────────────
+    #
+    # A user opened a plain 2-D DAPI image and PyCAT shouted, twice, that the frame interval
+    # was unknown and that **every time-dependent result depends on it.**
+    #
+    # *It does — on a movie.* **This was a single 2-D image.** No time axis, no diffusion
+    # coefficient, no recovery half-time: **there is nothing for a frame interval to be wrong
+    # about.** The panel seeds its spinbox at BUILD time, so the warning fired simply because
+    # the panel existed.
+    #
+    # ***A warning that fires where it cannot apply is how real warnings get trained away.***
+    # The next one — on an actual time series, where a wrong interval is a factor-of-two error
+    # in every dynamics result — is the one that gets scrolled past.
+    #
+    # *Unknown counts as a time series: `has_time_axis` fails toward the loud side.*
+    if not has_time_axis(data_repository):
+        return False
+
     value = frame_interval_s(data_repository, context=context)
 
     if value != value:      # NaN — the warning has already been shown
@@ -119,3 +137,53 @@ def sync_spinbox_from_metadata(spinbox, data_repository, *, context='',
     except Exception as exc:
         debug_log('frame_interval: could not set the spinbox', exc)
         return False
+
+
+def record_time_axis(data_repository, n_t):
+    """**Record how many frames this image has — so nothing warns about a time axis it lacks.**
+
+    A user opened a plain 2-D DAPI image and PyCAT printed, twice::
+
+        WARNING: Frame interval unknown (advanced_analysis_ui) — this file's metadata does not
+        carry one. **Every time-dependent result depends on it.** ...
+
+    *The warning is true, and it is correct to shout about a missing frame interval on a movie.*
+    **But this file was a single 2-D image.** It has no time axis, no diffusion coefficient, no
+    recovery half-time — *there is nothing for a frame interval to be wrong about.*
+
+    ***A warning that fires where it cannot apply is how real warnings get trained away.*** The next
+    one — on an actual time series, where the factor-of-two error is real — is the one that gets
+    scrolled past.
+
+    So the panels that seed a frame-interval field ask this first, and stay quiet at ``n_t <= 1``.
+
+    **Written unconditionally, and never inside the metadata ``try``.** Every loader wraps its
+    ``extract_metadata`` call in ``try/except`` — so a metadata failure would leave this unset, and
+    ***the previous file's frame count would still be sitting in the repository.*** A stale time
+    axis is worse than an absent one: it is confidently wrong.
+    """
+    if not isinstance(data_repository, dict):
+        return
+    try:
+        data_repository['n_t'] = max(1, int(n_t or 1))
+    except (TypeError, ValueError):
+        data_repository['n_t'] = 1
+
+
+def has_time_axis(data_repository) -> bool:
+    """Does the loaded image have more than one frame?
+
+    **Unknown counts as YES.** If ``n_t`` was never recorded — an older session, a loader that has
+    not been taught to set it — *warn rather than stay silent.* A missing frame interval on a movie
+    is a factor-of-two error in every dynamics result; a spurious warning on a still image is
+    merely noise. **Fail toward the loud side.**
+    """
+    if not isinstance(data_repository, dict):
+        return True
+    n_t = data_repository.get('n_t')
+    if n_t is None:
+        return True
+    try:
+        return int(n_t) > 1
+    except (TypeError, ValueError):
+        return True

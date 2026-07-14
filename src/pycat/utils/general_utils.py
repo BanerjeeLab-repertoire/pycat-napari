@@ -31,6 +31,67 @@ def _pycat_debug_enabled():
     return _os.environ.get('PYCAT_DEBUG', '') not in ('', '0', 'false', 'False')
 
 
+def report_guarantee_failure(context, exc=None):
+    """**A scientific guarantee that failed to install must SAY SO. Unconditionally.**
+
+    Call from an ``except`` block that would otherwise ``pass``, around the things that keep a
+    number honest — the pixel-size gate, the T-vs-Z axis warning, the frame-interval sync.
+
+    ── Why this is not ``debug_log`` ────────────────────────────────────────────────────
+
+    ``debug_log`` prints **only when ``PYCAT_DEBUG=1``**. For an optional colormap or a tooltip that
+    is exactly right — nobody needs to hear about it.
+
+    **But the pixel-size gate is not optional.** It exists to catch an image with no physical scale,
+    and it was installed like this, in **seven** separate panels::
+
+        try:
+            self._pixel_gate_refresh = add_pixel_size_gate(layout, ...)
+        except Exception:
+            pass
+
+    ***If that throws, the gate never installs, `_pixel_gate_refresh` is never set, the reset hook
+    finds `None` and does nothing — and the panel builds perfectly.*** The image then loads at
+    1.0 µm/px, and **every length, area and diffusion coefficient is silently in pixels while the
+    column header says microns.** Nothing is printed. Nothing looks wrong.
+
+    *That is the pixel-size gate regression that cost a night to find. It was unfindable by
+    construction.* The same shape silences ``warn_if_assumed_axis`` — the T-vs-Z prompt — in four
+    more panels.
+
+    ── What it does ─────────────────────────────────────────────────────────────────────
+
+    Prints **unconditionally**, and raises a napari warning if a viewer is reachable — because a
+    message only in the terminal is a message most users of a GUI never see.
+
+    **It does not change control flow.** The caller still swallows: *a broken gate must not take the
+    whole panel down with it.* The panel still builds; the failure is simply no longer invisible.
+
+    *This does not make the gate work. It makes its absence impossible to miss.*
+    """
+    print(
+        f"[PyCAT] A SCIENTIFIC CHECK FAILED TO INSTALL: {context}\n"
+        f"        {type(exc).__name__ if exc is not None else 'error'}: {exc}\n"
+        f"        This is not cosmetic. The check that would have caught a missing or wrong\n"
+        f"        value is NOT RUNNING — so a number that looks fine may be silently wrong.\n"
+        f"        Please report this, with the file you were opening."
+    )
+
+    if _pycat_debug_enabled():
+        try:
+            _traceback.print_exc()
+        except Exception:
+            pass
+
+    try:
+        from napari.utils.notifications import show_warning
+        show_warning(f"A PyCAT check failed to install: {context}. "
+                     f"Values that depend on it may be wrong — see the terminal.")
+    except Exception:
+        # No viewer (headless, tests). The print above is still unconditional, which is the point.
+        pass
+
+
 def debug_log(context, exc=None):
     """Surface an otherwise-silent swallowed exception.
 

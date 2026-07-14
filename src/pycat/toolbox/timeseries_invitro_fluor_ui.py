@@ -125,8 +125,18 @@ class TimeSeriesInVitroFluorUI:
                 layout,
                 lambda: self.central_manager.active_data_class.data_repository,
                 central_manager=self.central_manager)
-        except Exception:
-            pass
+        except Exception as _gate_exc:
+            # **The pixel-size gate is not optional.** It is the check that catches an image
+            # with no physical scale — and it was installed inside `except Exception: pass`,
+            # in SEVEN panels. If it threw, `_pixel_gate_refresh` was never set, the reset
+            # hook found `None` and did nothing, and **the panel built perfectly.** The image
+            # then loaded at 1.0 µm/px and *every length, area and diffusion coefficient was
+            # silently in pixels while the column header said microns.*
+            #
+            # *That is the pixel-size gate regression that cost a night to find. It was
+            # unfindable by construction.* See `utils.general_utils.guarantee`.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure("timeseries_invitro_fluor_ui: pixel-size gate", _gate_exc)
 
         _tsivf_preprocessing(self, layout)
         _tsivf_segmentation(self, layout)
@@ -570,7 +580,12 @@ def _tsivf_field_trajectories(ui, layout):
                 from pycat.file_io.stack_access import warn_if_assumed_axis
                 warn_if_assumed_axis(ui._dr(), 'Object trajectories (treats frames as time)')
             except Exception as _exc:
-                debug_log('timeseries_invitro_fluor_ui: could not check the stack axis', _exc)
+                # NOT cosmetic: this installs the T-vs-Z check. If this stack is really a Z-series, 'time' is depth and the dynamics
+                    # being reported are not dynamics at all.
+                # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+                # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+                from pycat.utils.general_utils import report_guarantee_failure
+                report_guarantee_failure('timeseries_invitro_fluor_ui: warn_if_assumed_axis', _exc)
             return field_trajectories(
                 label_stack, intensity, microns_per_pixel=mpx,
                 frame_interval_s=dt, progress_callback=progress)

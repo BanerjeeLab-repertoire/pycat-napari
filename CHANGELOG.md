@@ -4,6 +4,153 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.22] - 2026-07-14
+### Fixed — **the same pixels, through two loaders, were 65535x apart**
+
+The 2-D loader called `dtype_conversion_func(data, 'float32')` → `skimage.img_as_float32`, which
+**divides by the dtype max** and yields **[0, 1]**.
+
+The lazy stack wrappers did a bare `arr.astype(np.float32)` — **raw counts, 0–65535.**
+
+`_TiffPageStack` even *took the source dtype as a constructor argument and threw it away on the next
+line* (`self.dtype = np.dtype('float32')`), so it **could not** have normalised correctly even if it
+had wanted to.
+
+- **[0, 1] is the contract, not a preference.** **17 toolbox functions declare it** in their
+  docstrings — including `partition_coefficient_field` and `fit_bimodal_intensity`, which are
+  *condensate measurements*, not helpers. `skimage.exposure.equalize_adapthist` **raises** on
+  anything else (*"Images of type float must be between -1 and 1"*), and the preprocessing path
+  depends on it. `img_as_uint`, the save converter, **raises** on it too.
+
+- **All nine lazy wrappers now honour it**, via `stack_access.to_unit_float32()` — which **calls
+  `img_as_float32`** rather than reimplementing the divide. *The obvious reimplementation
+  (`arr.astype(np.float32) / np.iinfo(dt).max`) is wrong by one ULP on ~1% of pixels — measured, 9
+  of 1024, by 6e-08. Not a scientific problem — **but a second implementation of the same convention
+  is**, and "close enough" is how two conventions become three.*
+
+- **The IMS cast was hiding in a helper.** `_ims_frame_2d` is module-level, and all three
+  `_ImsReader*` wrappers read through it — so the cast feeding the 600-plane IMS file raw counts was
+  **invisible to a scan of the wrapper classes.**
+
+### Nothing broke, and that was luck
+
+Every stack consumer happens to be immune — each for a *different* reason, all verified numerically:
+
+| consumer | why it survived |
+|---|---|
+| **VPT** | normalises per-frame immediately before `blob_log` — coordinates **and bead classes identical**. *η ≈ 8.325 does not move.* |
+| **optical density** | `-log10(I / I0)` is a **ratio**; the 65535 cancels. Verified identical. |
+| **`analyse_frame_quality`** | normalises internally — Brenner/Tenengrad/variance **bit-identical**. |
+| **time-series** | goes through `_read_source_frame`, normalising against a *fixed global range*. |
+
+***That is luck, not design.*** The next function written against the documented contract would not
+have been immune — and it would have failed **silently**, because a number that is 65535x wrong
+still looks like a number.
+
+*VPT's reported `amplitude` and `integrated_intensity` now come back in the [0, 1] convention like
+every other intensity in PyCAT. `r_squared`, the coordinates, and the classifications are unchanged.*
+
+### Added
+- `tests/test_loaders_agree_on_scale.py` — the two loaders must be **bit-identical** on the same
+  pixels; the divisor must be the **dtype** max, not the frame's (*"a growing focus must not appear
+  to plateau"*); and no wrapper may hand out raw counts.
+- *The wrapper check walks the **AST**, not the text.* A grep-based version reported `_TiffPageStack`
+  as broken **after it was fixed** — it had matched the comment *quoting* the old code.
+  ***"A guard that cannot tell code from prose will eventually flag its own explanation."***
+
+## [1.6.21] - 2026-07-14
+### Fixed — **the pixel-size gate was installed inside `except Exception: pass`. In ten panels.**
+
+    try:
+        self._pixel_gate_refresh = add_pixel_size_gate(layout, ...)
+    except Exception:
+        pass
+
+***If that throws, the gate never installs.*** `_pixel_gate_refresh` is never set, the reset hook
+finds `None` and does nothing, and **the panel builds perfectly.** The image then loads at
+1.0 µm/px, and **every length, every area, every diffusion coefficient is silently in pixels while
+the column header says microns.**
+
+Nothing is printed. Nothing looks wrong.
+
+***That is the pixel-size gate regression that cost a night to find. It was unfindable by
+construction.***
+
+- **30 scientific gates were failing silently.** Not the 122 broad excepts the audit counted —
+  most of those wrap a colormap or a tooltip, where a failure costs nothing and should stay quiet.
+  **A scientific gate is different: it is the thing standing between a number and a wrong number,
+  and when it fails to install the analysis does not stop — it proceeds without the check.**
+
+  | gate | silent in |
+  |---|---|
+  | `add_pixel_size_gate` | **10 panels** — is this image calibrated at all? |
+  | `warn_if_assumed_axis` | **9 panels** — is this stack really TIME, or is it Z? |
+  | `sync_spinbox_from_metadata` | **8 panels** — every dynamics result scales with the frame interval |
+  | `prompt_pixel_size_on_load` | the modal prompt — *the last line of defence* |
+  | `_pixel_gate_refresh._reset_gate` | without it the gate **never reappears for the second file of a session** |
+
+- **`debug_log` was the disguise.** It prints **only under `PYCAT_DEBUG=1`** — which is exactly
+  right for an optional colormap and exactly wrong for the gate that decides whether your microns
+  are microns. *A grep for `except: pass` finds seven of these. It misses the other twenty-three.*
+- New `report_guarantee_failure()` in `utils/general_utils.py`: prints **unconditionally** and
+  raises a napari warning, because a message only in the terminal is a message most users of a GUI
+  never see. **Control flow is unchanged** — the panel still builds. *This does not make the gate
+  work. It makes its absence impossible to miss.*
+
+### Added
+- `tests/test_no_silent_scientific_gates.py` — walks the AST for any `try` that installs a
+  guarantee and ends in a silent swallow. **`debug_log` counts as silent, deliberately.**
+- *And it tests the metric against the bug:* one test proves `report_guarantee_failure` is loud
+  **without** `PYCAT_DEBUG`, another proves `debug_log` stays quiet — because a reporter quietly
+  wired to `debug_log` would let every gate fail invisibly while the guard reported green.
+
+### Note
+- `_add_advanced_analysis` sat 2 lines over the absolute function-length ceiling after this work.
+  **The ceiling was not raised.** Its own message argues the case: *"Nobody reads a function this
+  long. They skim it, and a `try/except: pass` around the one thing that mattered goes unnoticed —
+  which is exactly what happened to the pixel-size gate."*
+
+## [1.6.20] - 2026-07-14
+### Fixed — PyCAT shouted about a missing frame interval at a user who had opened a still image
+
+**Second half of Meet Raval's 1.6.17 report.** Opening a plain 2-D DAPI/GFP pair printed, twice:
+
+    WARNING: Frame interval unknown (advanced_analysis_ui) — this file's metadata does not
+    carry one. **Every time-dependent result depends on it.** A diffusion coefficient, an MSD
+    exponent, a recovery half-time and a coarsening rate all scale with it directly...
+
+*Every word of that is true — **of a movie**.*
+
+**His file was a single 2-D image.** No time axis. No diffusion coefficient, no recovery half-time,
+no coarsening rate. ***There is nothing for a frame interval to be wrong about.*** The panels seed
+their frame-interval spinbox at **build** time, so the warning fired simply because the panel
+existed.
+
+***A warning that fires where it cannot apply is how real warnings get trained away.*** The next one
+— on an actual time series, where a wrong interval **is** a factor-of-two error in every dynamics
+result — is the one that gets scrolled past.
+
+- **The warning is not softened, only aimed.** A movie with no frame interval still warns, exactly
+  as loudly. Pinned by a test, because suppressing noise must not suppress the signal.
+- `record_time_axis()` / `has_time_axis()` in `utils/frame_interval.py`. `n_t` is now recorded on
+  every load: `1` for `open_2d_image`, and the real count in `_finalise_stack_load` — **the single
+  funnel both stack loaders already pass through, which already took `n_t` as a parameter.**
+- **Recorded OUTSIDE the metadata `try`.** Every loader wraps `extract_metadata` in `try/except`;
+  recording `n_t` inside it would mean a metadata failure leaves the value unset — and ***the
+  previous file's frame count still sitting in the repository.*** **A stale time axis is worse than
+  an absent one: it is confidently wrong.**
+- **Unknown counts as a movie.** An older session, or a loader not yet taught to set `n_t`, warns.
+  *A spurious warning on a still image is noise; a missing one on a movie is a wrong number in a
+  paper.* **Fail toward the loud side.**
+- The helpers live in `utils/`, not `file_io` — `file_io` imports from `pycat.utils` (a cycle) and
+  **imports PyQt5 at module scope**, which would have dragged Qt into a pure-utils module and put
+  it out of reach of headless tests. *The `try/except` around the import would have swallowed both
+  failures silently and left the warning firing exactly as before.*
+
+### Added
+- `tests/test_no_time_axis_no_warning.py` — the still image stays quiet, **the movie still shouts**,
+  an unknown axis fails loud, and a stale frame count from the previous file is overwritten.
+
 ## [1.6.19] - 2026-07-14
 ### Fixed — opening a plain TIFF printed a parse error naming the user's own file
 

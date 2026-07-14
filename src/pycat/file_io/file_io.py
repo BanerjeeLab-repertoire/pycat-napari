@@ -170,7 +170,10 @@ def _ims_frame_2d(raw):
     (T, Y, X) layer, so leaving those singleton axes in place causes
     ValueError: axes don't match array during napari transpose.
     """
-    arr = np.asarray(raw).astype(np.float32, copy=False)
+    # `[0, 1]` from the SOURCE dtype, not raw counts — the same contract the 2-D loader has always
+    # honoured. **This cast lives in a HELPER, so a scan of the wrapper classes missed it entirely**
+    # while `_ImsReaderTYX`/`ZYX`/`TZYX` all read through it. See `stack_access.to_unit_float32`.
+    arr = to_unit_float32(raw, getattr(raw, 'dtype', None))
     arr = np.squeeze(arr)
     if arr.ndim != 2:
         raise ValueError(f"Expected IMS plane to reduce to 2-D (Y, X), got shape {arr.shape}")
@@ -333,7 +336,9 @@ from napari.utils.notifications import show_warning as napari_show_warning
 # Local application imports
 from pycat.ui.ui_utils import add_image_with_default_colormap
 from pycat.utils.general_utils import dtype_conversion_func, debug_log
+from pycat.utils.frame_interval import record_time_axis
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
+from pycat.file_io.stack_access import to_unit_float32
 from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
 
@@ -686,7 +691,8 @@ class _ZarrTYX:
             t_idx, spatial = idx, (slice(None), slice(None))
         with self._ctx():
             raw = self._z[t_idx, self._c, 0]
-        arr = np.asarray(raw).astype(np.float32)
+        # `[0, 1]` from the SOURCE dtype (`self._z.dtype`) — not raw counts. See `to_unit_float32`.
+        arr = to_unit_float32(raw, getattr(self._z, 'dtype', None))
         if arr.ndim == 2:
             return arr[spatial]
         return arr[(slice(None),) + spatial]
@@ -956,6 +962,37 @@ class _TiffPageStack:
         self._path   = tiff_path
         self._nc     = max(1, int(n_channels))
         self._ci     = int(channel_idx)
+
+        # ── The SOURCE dtype was accepted and thrown away ────────────────────────────────
+        #
+        # ``dtype`` was a parameter, and the next line was ``self.dtype = np.dtype('float32')``.
+        # **The source dtype was never stored** — so the wrapper could not have normalised even if
+        # it had wanted to, and ``__getitem__`` did a bare ``arr.astype(np.float32)``: *a uint16
+        # frame arrived as float32 holding **raw counts**, 0–65535.*
+        #
+        # **The 2-D loader does something else entirely.** It calls
+        # ``dtype_conversion_func(data, 'float32')`` → ``skimage.img_as_float32``, which **divides
+        # by the dtype max** and yields **[0, 1]**.
+        #
+        # ***Same pixels. Same file. Two loaders. A factor of 65535 apart.***
+        #
+        # And **[0, 1] is the real contract** — not a preference:
+        #
+        # * **17 toolbox functions declare it** in their signature docstrings, including
+        #   ``partition_coefficient_field`` and ``fit_bimodal_intensity``;
+        # * ``skimage.exposure.equalize_adapthist`` **raises** on anything else
+        #   (*"Images of type float must be between -1 and 1"*), and preprocessing depends on it;
+        # * ``img_as_uint`` — the save path's converter — **raises** on it too.
+        #
+        # Nothing has broken yet only because every current stack consumer happens to be immune: a
+        # ratio (optical density: the 65535 cancels), a per-frame normalisation
+        # (``analyse_frame_quality``), or a gradient. ***That is luck, not design.*** The next
+        # function written against the documented contract will not be immune.
+        #
+        # So: keep the source dtype, and normalise by **its** max — exactly what ``img_as_float32``
+        # does for the 2-D path.
+        self._src_dtype = np.dtype(dtype) if dtype is not None else None
+
         self.dtype   = np.dtype('float32')
         self.ndim    = 3
 
@@ -1014,10 +1051,12 @@ class _TiffPageStack:
             path, page_idx = self._page_map[gi]
             handle = self._get_handle(path)
             arr = np.asarray(handle.pages[page_idx].asarray())
-            return arr.astype(np.float32)
+            # `[0, 1]`, not raw counts — the range the analysis stack is written for, and the range
+            # the 2-D loader has always produced. See `to_unit_float32`.
+            return to_unit_float32(arr, self._src_dtype or arr.dtype)
         # Single-file fast path.
         arr = np.asarray(self._pages[self._page_index(t)].asarray())
-        return arr.astype(np.float32)
+        return to_unit_float32(arr, self._src_dtype or arr.dtype)
 
     def __getitem__(self, idx):
         if isinstance(idx, tuple):
@@ -1174,7 +1213,11 @@ class _LazyArraySource:
     def __init__(self, source):
         self._source = source
         self.shape = tuple(int(v) for v in source.shape)
-        self.dtype = np.dtype(getattr(source, 'dtype', np.float32))
+        # The SOURCE's dtype — what to divide by. Kept apart from `self.dtype`, which is what the
+        # wrapper HANDS OUT (float32, by the [0, 1] contract). Conflating them is what let this
+        # class advertise uint16 while returning float32 raw counts.
+        self._src_dtype = np.dtype(getattr(source, 'dtype', np.float32))
+        self.dtype = np.dtype('float32')
         self.ndim = len(self.shape)
 
     def __getitem__(self, index):
@@ -1183,7 +1226,10 @@ class _LazyArraySource:
         # plugin is free to return either.
         if hasattr(value, 'compute'):
             value = value.compute()
-        return np.asarray(value).astype(np.float32)
+        # `[0, 1]` from the SOURCE dtype, not raw counts. This wrapper already kept the source
+        # dtype in `self.dtype` — it just never USED it, so it advertised uint16 and handed back
+        # float32 raw counts. See `stack_access.to_unit_float32`.
+        return to_unit_float32(value, self._src_dtype)
 
     def __len__(self):
         return self.shape[0]
@@ -1465,6 +1511,12 @@ class FileIOClass:
 
             image = open_image(file_path)
             self.central_manager.active_data_class.update_metadata(image)
+            # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction
+            # fails, the PREVIOUS file's frame count would otherwise still be sitting in the
+            # repository, and a stale time axis is worse than an absent one.
+            record_time_axis(
+                self.central_manager.active_data_class.data_repository, 1)
+
             # Also store the normalised metadata record for the metadata widget
             # and results export.
             try:
@@ -3196,6 +3248,12 @@ class FileIOClass:
                               n_t, n_z, file_path, source='generic'):
         """Update data repository and record batch step after any stack load."""
         dr = self.central_manager.active_data_class.data_repository
+
+        # Both stack loaders funnel through here, and `n_t` is already a parameter — so this is the
+        # one place that sees every stack, IMS and generic alike. See `record_time_axis`: the
+        # frame-interval warning must not fire on an image that has no time axis.
+        record_time_axis(dr, n_t)
+
         dr['object_size']       = H // 20
         dr['cell_diameter']     = H // 8
         dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
@@ -3670,8 +3728,15 @@ class FileIOClass:
             prompt_pixel_size_on_load(
                 lambda: self.central_manager.active_data_class.data_repository,
                 central_manager=self.central_manager)
-        except Exception:
-            pass
+        except Exception as _prompt_exc:
+            # **This is the last line of defence for an uncalibrated image.** If the prompt does not
+            # appear, the image keeps its 1.0 µm/px default and *every length, area and diffusion
+            # coefficient is silently in pixels while the column header says microns.*
+            #
+            # It was wrapped in `except Exception: pass`. **A failure here produced no dialog, no
+            # message, and a perfectly normal-looking load.**
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure("file_io: pixel-size prompt on load", _prompt_exc)
 
     def _auto_clear_before_load(self):
         """Reset to the workflow start state before loading a new dataset.
@@ -3813,8 +3878,11 @@ class FileIOClass:
             pxr = getattr(self.central_manager, '_pixel_gate_refresh', None)
             if pxr is not None and hasattr(pxr, '_reset_gate'):
                 pxr._reset_gate()
-        except Exception:
-            pass
+        except Exception as _reset_exc:
+            # Without this reset the gate **never reappears for the next dataset** — so the second
+            # file of a session is loaded with no calibration check at all, and nothing says so.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure("file_io: pixel-size gate reset after clear", _reset_exc)
 
     def clear_all_without_saving(self, viewer, confirm=True):
         """

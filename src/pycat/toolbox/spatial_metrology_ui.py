@@ -461,7 +461,13 @@ def _add_spatial_metrology(ui_instance, layout=None, separate_widget=False):
             lambda: ui_instance.central_manager.active_data_class.data_repository,
             central_manager=ui_instance.central_manager)
     except Exception as _exc:
-        debug_log('spatial_metrology_ui: the pixel-size gate could not be added', _exc)
+        # NOT cosmetic: this installs the calibration gate. Without it an uncalibrated image keeps 1.0 um/px and every
+                    # length, area and diffusion coefficient is silently in PIXELS while the column
+                    # header says microns.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('spatial_metrology_ui: add_pixel_size_gate', _exc)
     if _step_hdr is not None:
         outer.addWidget(_step_hdr)
     # Optional block: reveal checkbox (off by default) shows/hides the analysis box.

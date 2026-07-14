@@ -378,8 +378,18 @@ class VideoParticleTrackingUI:
                 layout,
                 lambda: self.central_manager.active_data_class.data_repository,
                 central_manager=self.central_manager)
-        except Exception:
-            pass
+        except Exception as _gate_exc:
+            # **The pixel-size gate is not optional.** It is the check that catches an image
+            # with no physical scale — and it was installed inside `except Exception: pass`,
+            # in SEVEN panels. If it threw, `_pixel_gate_refresh` was never set, the reset
+            # hook found `None` and did nothing, and **the panel built perfectly.** The image
+            # then loaded at 1.0 µm/px and *every length, area and diffusion coefficient was
+            # silently in pixels while the column header said microns.*
+            #
+            # *That is the pixel-size gate regression that cost a night to find. It was
+            # unfindable by construction.* See `utils.general_utils.guarantee`.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure("vpt_ui: pixel-size gate", _gate_exc)
 
         self._add_host_segmentation(layout)
         self._add_bead_detection(layout)
@@ -1824,8 +1834,12 @@ class VideoParticleTrackingUI:
             from pycat.file_io.file_io import warn_if_assumed_axis
             warn_if_assumed_axis(self._dr(),
                                  "Video particle tracking (treats frames as time)")
-        except Exception:
-            pass
+        except Exception as _axis_exc:
+            # NOT cosmetic: this is the T-vs-Z check. If this stack is really a Z-series,
+            # 'time' is depth and the dynamics being reported are not dynamics at all.
+            # It was swallowed in COMPLETE SILENCE.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure('vpt_ui: warn_if_assumed_axis', _axis_exc)
         # Pull the frame interval from the file's captured metadata if available.
         self._sync_frame_interval_from_metadata()
         tracks = self._dr().get('vpt_tracks')

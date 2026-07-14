@@ -71,7 +71,13 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             lambda: ui_instance.central_manager.active_data_class.data_repository,
             central_manager=ui_instance.central_manager)
     except Exception as _exc:
-        debug_log('condensate_physics_ui: the pixel-size gate could not be added', _exc)
+        # NOT cosmetic: this installs the calibration gate. Without it an uncalibrated image keeps 1.0 um/px and every
+                    # length, area and diffusion coefficient is silently in PIXELS while the column
+                    # header says microns.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('condensate_physics_ui: add_pixel_size_gate', _exc)
 
     outer.setSpacing(6)
     outer.setContentsMargins(2, 2, 2, 2)
@@ -128,7 +134,12 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             dt_spin, ui_instance.central_manager.active_data_class.data_repository,
             context='condensate_physics_ui')
     except Exception as _exc:
-        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
+        # NOT cosmetic: this installs the frame interval. Every dynamics result scales with it directly: assume 1.0 s when the
+                    # truth is 0.5 s and D, alpha, t-half and the coarsening rate are ALL out by 2x.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('condensate_physics_ui: sync_spinbox_from_metadata', _exc)
     lag_spin = QSpinBox();       lag_spin.setRange(2, 500);    lag_spin.setValue(0)
     lag_spin.setToolTip("Max lag frames (0 = auto: n_frames/4)")
     min_len  = QSpinBox();       min_len.setRange(3, 50);      min_len.setValue(5)
@@ -175,7 +186,12 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
                 from pycat.file_io.stack_access import warn_if_assumed_axis
                 warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Condensate MSD / viscosity (treats frames as time)')
             except Exception as _exc:
-                debug_log('condensate_physics_ui: could not check the stack axis', _exc)
+                # NOT cosmetic: this installs the T-vs-Z check. If this stack is really a Z-series, 'time' is depth and the dynamics
+                    # being reported are not dynamics at all.
+                # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+                # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+                from pycat.utils.general_utils import report_guarantee_failure
+                report_guarantee_failure('condensate_physics_ui: warn_if_assumed_axis', _exc)
             msd_df = compute_msd(tracks, max_lag=max_l,
                                   frame_interval_s=dt_spin.value(),
                                   min_track_length=min_len.value())
@@ -296,7 +312,12 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             dt_kin, ui_instance.central_manager.active_data_class.data_repository,
             context='condensate_physics_ui')
     except Exception as _exc:
-        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
+        # NOT cosmetic: this installs the frame interval. Every dynamics result scales with it directly: assume 1.0 s when the
+                    # truth is 0.5 s and D, alpha, t-half and the coarsening rate are ALL out by 2x.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('condensate_physics_ui: sync_spinbox_from_metadata', _exc)
     kf.addRow("Frame interval (s):", dt_kin)
     run_coarse = QPushButton("▶  Fit Coarsening Kinetics")
     run_coarse.setToolTip("Fit mean radius vs time to t^⅓ (Ostwald) and t^½ (coalescence); reports the preferred mechanism and confidence.")
@@ -411,7 +432,12 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             dt_qc, ui_instance.central_manager.active_data_class.data_repository,
             context='condensate_physics_ui')
     except Exception as _exc:
-        debug_log('condensate_physics_ui: could not sync the frame interval', _exc)
+        # NOT cosmetic: this installs the frame interval. Every dynamics result scales with it directly: assume 1.0 s when the
+                    # truth is 0.5 s and D, alpha, t-half and the coarsening rate are ALL out by 2x.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('condensate_physics_ui: sync_spinbox_from_metadata', _exc)
     thr_qc = QDoubleSpinBox(); thr_qc.setRange(0.01, 0.9);  thr_qc.setValue(0.3)
     thr_qc.setToolTip(
         "Frames with Laplacian variance AND entropy below this fraction\n"

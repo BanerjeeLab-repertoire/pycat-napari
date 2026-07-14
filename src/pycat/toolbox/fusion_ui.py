@@ -232,7 +232,12 @@ class DropletFusionUI:
                 self._frame_dt, self.central_manager.active_data_class.data_repository,
                 context='fusion_ui')
         except Exception as _exc:
-            debug_log('fusion_ui: could not sync the frame interval', _exc)
+            # NOT cosmetic: this installs the frame interval. Every dynamics result scales with it directly: assume 1.0 s when the
+                    # truth is 0.5 s and D, alpha, t-half and the coarsening rate are ALL out by 2x.
+            # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+            # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure('fusion_ui: sync_spinbox_from_metadata', _exc)
         self._frame_dt.setDecimals(4)
         self._frame_dt.setToolTip("Image mode only: time per frame (s).")
         form.addRow("Frame interval (s):", self._frame_dt)
@@ -269,8 +274,12 @@ class DropletFusionUI:
                 from pycat.file_io.file_io import warn_if_assumed_axis
                 warn_if_assumed_axis(self._dr(),
                                      "Droplet fusion (treats frames as time)")
-            except Exception:
-                pass
+            except Exception as _axis_exc:
+                # Fusion treats every frame as a TIMEPOINT. If the stack is really a Z-series, the
+                # aspect-ratio relaxation it measures is not a relaxation at all — it is depth.
+                # **Swallowing the warning silently means nothing ever says so.**
+                from pycat.utils.general_utils import report_guarantee_failure
+                report_guarantee_failure("fusion_ui: T-vs-Z axis warning", _axis_exc)
             try:
                 time, sig = aspect_ratio_signal(
                     stack, frame_interval_s=self._frame_dt.value())
