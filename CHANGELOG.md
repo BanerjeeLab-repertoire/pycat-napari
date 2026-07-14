@@ -4,6 +4,90 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.29] - 2026-07-14
+### Changed — **FileIOClass: 3,108 → 1,875. Forty percent is out.**
+
+- **`file_io/viewer_load.py`** (93 lines) — `load_into_viewer`, what the 2-D loader, the mask loader
+  and **both** stack loaders call once they have an array. It is a dependency of **five** other
+  methods and depended on **two** — both extracted in the previous two releases. ***Taking it now
+  unblocks the tier above it.***
+- **`file_io/session.py`** grows `_auto_clear_before_load` and `clear_all_without_saving`, beside the
+  `_clear_everything` they both call.
+
+| module | lines |
+|---|---|
+| `writers.py` | 461 |
+| `napari_adapter.py` | 272 |
+| `session.py` | 218 |
+| `dialogs.py` | 161 |
+| `routing.py` | 116 |
+| `tagging.py` | 114 |
+| `stack_load.py` | 108 |
+| `viewer_load.py` | 93 |
+
+### **The guard caught a NameError that would have crashed the Clear button**
+
+`clear_all_without_saving` calls `QMessageBox.warning(...)` and **has no import for it** — it relied
+on `file_io.py`'s module-scope Qt import, which does not follow it out of the file.
+
+`py_compile` passes. **The first time a user clicked Clear, it would have raised `NameError`.**
+`test_no_undefined_names` caught it — *the third real `NameError` this guard has caught in this
+refactor, and my own free-name check missed all three.*
+
+*(And the fix nearly introduced a second bug: the file already imports `QMessageBox` from **qtpy**,
+and I reached for **PyQt5**. Two Qt bindings in one module is a failure waiting for a machine that
+has only one of them.)*
+
+## [1.6.28] - 2026-07-14
+### Changed — **FileIOClass: 3,108 → 2,016. A third of it is out.**
+
+- **`file_io/tagging.py`** (114 lines) — `_tag_loaded_layer` and `_prompt_pixel_size_if_needed`.
+  *What do we know about this layer, and how do we know it?* Role, dimensionality, calibration,
+  provenance — plus the tags a PyCAT-saved TIFF carries **inside** it, which must override a fresh
+  inference, because ***a user's answer outranks the loader's guess.***
+
+  `_calibration_is_from_metadata` went with them: **calibration provenance is a fact about the
+  layer**, and nothing else called it.
+
+- **`file_io/stack_load.py`** (108 lines) — `_finalise_stack_load`, the last step of every stack
+  load, whichever loader produced the pixels.
+
+### **This is the cascade, and it is the point of the method**
+
+`_finalise_stack_load` **could not have come out before this release.** It depended on *five* methods
+of its 3,108-line host — and all five had been extracted by the previous moves:
+
+    _enable_auto_scale_bar / _fit_view_to_layer / _add_diameter_annotation_layers  -> napari_adapter
+    _tag_loaded_layer / _prompt_pixel_size_if_needed                               -> tagging
+
+*Nothing about this move was clever. **The previous five simply removed every reason for it to
+stay.*** Take what depends on nothing; the next layer then depends on nothing, and comes out free.
+
+| module | lines |
+|---|---|
+| `writers.py` | 461 |
+| `napari_adapter.py` | 272 |
+| `dialogs.py` | 161 |
+| `routing.py` | 116 |
+| `tagging.py` | 114 |
+| `stack_load.py` | 108 |
+| `session.py` | 99 |
+
+**No cycles.** The graph is a DAG: `stack_load → tagging → routing/writers → utils`.
+
+### Found — dead state, and one that only LOOKS dead
+
+`_open_stack_ims` stashes **nine `_ims_*` attributes** on `self`. **Six are written and never read.**
+`_ims_zarr_refs` and `_ims_reader_array` are written repeatedly and read nowhere. Only
+`_ims_file_path` is ever consumed — by `timeseries_condensate_tools`.
+
+**They were not removed.** `_ims_zarr_refs` holds `(pos_reader, None, lazy_wrapper)` and reads like a
+**keep-alive** — and while the wrapper does hold its own reader (so the list *appears* redundant),
+***dead-looking state next to lazy loading is exactly how the 1.6 arc started.*** Deleting it on the
+strength of a code read, in a refactor, is how a lazy stack quietly stops scrubbing.
+
+*Recorded, not touched.*
+
 ## [1.6.27] - 2026-07-14
 ### Changed — **FileIOClass: 3,108 → 2,223.** Fifth extraction. 885 lines out.
 

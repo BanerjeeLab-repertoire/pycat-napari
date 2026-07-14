@@ -117,3 +117,71 @@ def _clear_everything(viewer, central_manager):
         # file of a session is loaded with no calibration check at all, and nothing says so.
         from pycat.utils.general_utils import report_guarantee_failure
         report_guarantee_failure("file_io: pixel-size gate reset after clear", _reset_exc)
+
+
+def _auto_clear_before_load(viewer, central_manager):
+    """Reset to the workflow start state before loading a new dataset.
+
+    Returns True if it is safe to proceed with the load, False if the user
+    declined to discard existing work.
+
+    If no image layers are present, there is nothing to clear and we proceed
+    immediately. If layers exist, we treat that as potentially-unsaved work
+    and ask for confirmation (mirroring the Clear button's safety prompt)
+    before wiping — so a new load never silently discards analysis. On
+    confirmation we reuse _clear_everything, the same full reset the Clear
+    button uses (layers, data repository, dataframes, workflow checklist,
+    and batch recording), so the new dataset starts from a clean state.
+    """
+    from qtpy.QtWidgets import QMessageBox
+    try:
+        has_layers = len(viewer.layers) > 0
+    except Exception:
+        has_layers = False
+    if not has_layers:
+        return True  # nothing to clear
+
+    # There is existing work — confirm before discarding it.
+    try:
+        from qtpy.QtWidgets import QMessageBox
+        resp = QMessageBox.question(
+            None, "Load new image?",
+            "Loading a new image will clear the current layers and reset the "
+            "workflow.\n\nAny unsaved analysis will be lost. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if resp != QMessageBox.Yes:
+            return False
+    except Exception:
+        # If the dialog can't be shown, err on the side of NOT destroying
+        # work silently — proceed only if there were no layers (handled
+        # above). Here layers exist, so bail out safely.
+        return False
+
+    try:
+        _clear_everything(viewer, central_manager)
+    except Exception:
+        # If the reset fails, still allow the load to proceed (napari will
+        # add the new layers alongside; not ideal but not destructive).
+        pass
+    return True
+
+
+def clear_all_without_saving(viewer, central_manager, confirm=True):
+    """
+    Clear all layers and data without saving, resetting the workspace to the
+    beginning-of-workflow (startup) state. If `confirm` is True, asks for
+    explicit confirmation first and warns that all unsaved data will be lost.
+    """
+    from qtpy.QtWidgets import QMessageBox
+
+    if confirm:
+        reply = QMessageBox.warning(
+            None, "Clear everything without saving?",
+            "This resets the workspace to the start of a workflow.\n\n"
+            "All layers and analysis data will be permanently cleared and "
+            "NOTHING will be saved. All unsaved data will be lost.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+    _clear_everything(viewer, central_manager)
+    print("[PyCAT] Workspace cleared without saving.")

@@ -46,41 +46,6 @@ def _suppress_ims_chunk_prints():
         sys.stdout = old_stdout
 
 
-def _calibration_is_from_metadata(dr, microns_per_pixel) -> bool:
-    """**Provenance comes from WHERE the number came from, not WHAT it is.**
-
-    The stack loader used to decide this from the value::
-
-        dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
-
-    with the comment *"a real microscope pixel size is essentially never exactly 1.0 µm/px, so
-    treat 1.0 as the no-metadata fallback."*
-
-    ***"Essentially never" is not never.*** A downsampled, low-magnification, derived, or synthetic
-    image can have a **genuine** 1.0 µm/px — and PyCAT would throw that calibration away and prompt
-    for a scale it had already been told. **1.0 was doing two jobs — a real value and a
-    missing-value sentinel — and no code downstream could tell which one it was holding.**
-
-    **The honest answer already exists.** ``metadata_extract`` records ``pixel_size_source``
-    (``'ims_extents'``, ``'tiff_tags'``, ``'ome_metadata'``, or ``None`` when nothing was found),
-    it is populated on every load, and it was **only ever displayed.** Read it.
-
-    *(The 2-D path in ``data_modules`` was already doing this correctly — it sets the flag from
-    whether the tag was PRESENT. Only the stack path guessed from the value.)*
-    """
-    try:
-        source = ((dr.get('file_metadata') or {}).get('common') or {}).get('pixel_size_source')
-    except Exception:
-        source = None
-
-    if source:
-        return True
-
-    # No source recorded — either the extractor found nothing, or this load path did not run it.
-    # Fall back to the old value-based guess rather than silently declaring the image uncalibrated:
-    # a wrong `True` suppresses the gate, but a wrong `False` only asks a question that can be
-    # answered.
-    return abs(float(microns_per_pixel) - 1.0) > 1e-9
 
 
 
@@ -1495,99 +1460,10 @@ class FileIOClass:
     def _tag_loaded_layer(self, layer, role=None, n_t=1, n_z=1, n_p=1,
                           microns_per_pixel=None, file_path=None,
                           modality=None, channel=None, provenance='raw'):
-        """Populate tags on a freshly-loaded layer from what the load path already
-        knows — dimensionality, scale calibration, role, provenance, and (when
-        available) modality/channel. Also re-applies any tags saved inside the
-        file (PyCAT-saved TIFFs embed their tag store), with saved user overrides
-        taking precedence over freshly-inferred tags.
-
-        This is the single load-time tagging entry point; call it once per layer
-        after it is added to the viewer. No new detection is performed — it
-        captures inferences the loaders already made into the structured tag store
-        so autopopulation can query typed facts instead of matching names.
-        """
-        if layer is None:
-            return
-        try:
-            from pycat.utils import layer_tags as _LT
-        except Exception:
-            return
-
-        # 1. Inferred tags from load context.
-        try:
-            if role:
-                _LT.tag_layer(layer, 'role', role, source='inferred')
-
-            # Dimensionality from the axis sizes the loader parsed.
-            if n_p and n_p > 1:
-                dim = 'multi-position'
-            elif n_t and n_t > 1:
-                dim = '2d+t'
-            elif n_z and n_z > 1:
-                dim = 'z-stack'
-            else:
-                dim = '2d'
-            _LT.tag_layer(layer, 'dimensionality', dim, source='inferred')
-
-            # Scale calibration: a real pixel size is essentially never exactly
-            # 1.0 µm/px, so 1.0 means "no metadata / uncalibrated". Viscosity and
-            # any physical measurement depend on this, so it is a first-class tag.
-            if microns_per_pixel is not None:
-                # Provenance from WHERE the number came from, not WHAT it is. The old test was
-                # `abs(mpp - 1.0) > 1e-9`, on the reasoning that a real pixel size is essentially
-                # never exactly 1.0 — but **"essentially never" is not never**, and a downsampled or
-                # synthetic image with a genuine 1.0 µm/px had its calibration thrown away.
-                # (Same sentinel fixed in `_finalise_stack_load`; this copy was still live.)
-                _dr_now = self.central_manager.active_data_class.data_repository
-                calibrated = _calibration_is_from_metadata(_dr_now, microns_per_pixel)
-                _LT.tag_layer(layer, 'scale',
-                              'calibrated' if calibrated else 'uncalibrated',
-                              source=('from_metadata' if calibrated else 'inferred'))
-
-            # ── The stack axis belongs to the LAYER, not to the session ─────────────────
-            #
-            # `stack_axis_label` lives in `data_repository`, which is **one dict shared by every
-            # layer**. PyCAT can add a second file without clearing — "Open Image (Add)", and
-            # multi-select in the file dialog, which *"loads each subsequent file with
-            # clear_first=False"*.
-            #
-            # So: open an undeclared movie, label it **T**. Add an undeclared z-stack, label it
-            # **Z**. ***The second load overwrites the first's label.*** An MSD on the movie now
-            # reads "Z" — and `warn_if_assumed_axis` warns about the wrong thing, on the layer the
-            # user labelled correctly.
-            #
-            # **T and Z load identically**, so there is nothing on screen to reveal it.
-            #
-            # The tag is per-layer and travels with it. `source='user_set'` because the user was
-            # *asked* — this is not an inference, it is an answer, and it must not be silently
-            # overwritten by the next file's answer.
-            try:
-                _dr_axis = self.central_manager.active_data_class.data_repository
-                if _dr_axis.get('stack_axis_assumed') and (n_t > 1 or n_z > 1):
-                    _LT.tag_layer(layer, 'stack_axis',
-                                  str(_dr_axis.get('stack_axis_label') or '?').upper(),
-                                  source='user_set')
-            except Exception as _axis_e:
-                debug_log("file_io: could not tag the stack axis", _axis_e)
-
-            _LT.tag_layer(layer, 'provenance', provenance, source='inferred')
-
-            if modality:
-                _LT.tag_layer(layer, 'modality', modality, source='inferred')
-            if channel:
-                _LT.tag_layer(layer, 'channel', channel, source='from_metadata')
-        except Exception as _e:
-            debug_log("file_io: load-time tagging failed", _e)
-
-        # 2. Re-apply any tags saved inside the file (overrides win). Applied
-        #    AFTER inference so a saved user_set tag locks over a fresh inference.
-        try:
-            if file_path:
-                saved = self._read_pycat_tags(file_path)
-                if saved:
-                    self._apply_saved_tags_to_layer(layer, saved)
-        except Exception as _e:
-            debug_log("file_io: reapplying saved tags failed", _e)
+        from pycat.file_io.tagging import _tag_loaded_layer
+        return _tag_loaded_layer(self.central_manager, layer, role, n_t, n_z, n_p,
+                                 microns_per_pixel, file_path, modality, channel,
+                                 provenance)
 
     def _file_has_imaging_metadata_safe(self, file_path):
         from pycat.file_io.routing import _file_has_imaging_metadata_safe
@@ -2796,113 +2672,10 @@ class FileIOClass:
 
     def _finalise_stack_load(self, H, W, microns_per_pixel, channels_to_load,
                               n_t, n_z, file_path, source='generic'):
-        """Update data repository and record batch step after any stack load."""
-        dr = self.central_manager.active_data_class.data_repository
-
-        # Both stack loaders funnel through here, and `n_t` is already a parameter — so this is the
-        # one place that sees every stack, IMS and generic alike. See `record_time_axis`: the
-        # frame-interval warning must not fire on an image that has no time axis.
-        record_time_axis(dr, n_t)
-
-        dr['object_size']       = H // 20
-        dr['cell_diameter']     = H // 8
-        dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
-        # Provenance for the Set-Scale overwrite warning and the pixel-size gate. Derived from
-        # `pixel_size_source`, NOT from whether the value happens to be 1.0 — see the helper.
-        dr['pixel_size_from_metadata'] = _calibration_is_from_metadata(dr, microns_per_pixel)
-
-        # The pixel size has just been set from this file's metadata (or fallen
-        # back to 1.0). A plain load does not switch the data class, so notify
-        # any registered gates (e.g. the pixel-size gate) to re-evaluate now,
-        # otherwise the gate would keep its pre-load state and never appear.
-        try:
-            self.central_manager.notify_data_changed()
-        except Exception:
-            pass
-        self._prompt_pixel_size_if_needed()
-
-        self._add_diameter_annotation_layers()
-
-        # Label the non-spatial slider axes so they read "T"/"Z" instead of the
-        # default "0"/"1". napari shows one slider per axis beyond the displayed
-        # two (Y, X); giving them names makes multi-dimensional browsing legible.
-        try:
-            ndim = 2
-            if n_t and n_t > 1:
-                ndim += 1
-            if n_z and n_z > 1:
-                ndim += 1
-            if ndim > 2:
-                # Axis order for the loaded stacks is (T, Z, Y, X) with whichever
-                # of T/Z are present; build labels to match.
-                labels = []
-                if n_t and n_t > 1:
-                    labels.append('T')
-                if n_z and n_z > 1:
-                    labels.append('Z')
-                labels += ['Y', 'X']
-                if len(labels) == self.viewer.dims.ndim:
-                    self.viewer.dims.axis_labels = labels
-        except Exception:
-            pass
-
-        # Open on the FIRST frame/slice, not napari's default centre. Most image
-        # viewers open a stack on index 0; napari initialises each slider to the
-        # middle of its axis, so a freshly-loaded time series or z-stack would
-        # otherwise start mid-movie. Set every non-displayed (slider) axis to 0.
-        # The last two axes are the displayed Y,X plane and are left untouched.
-        try:
-            if self.viewer.dims.ndim > 2:
-                step = list(self.viewer.dims.current_step)
-                for ax in range(self.viewer.dims.ndim - 2):
-                    step[ax] = 0
-                self.viewer.dims.current_step = tuple(step)
-        except Exception:
-            pass
-
-        # Auto scale bar for the freshly-loaded stack.
-        self._enable_auto_scale_bar()
-
-        # ── Tag the freshly-loaded stack layers ──────────────────────────────
-        # Populate the structured tag store from the load context (role, the
-        # dimensionality just parsed, scale calibration, provenance) so downstream
-        # autopopulation can query typed facts rather than matching names. Tag
-        # only Image layers that are not yet tagged (i.e. the ones just added);
-        # channel identity is left to metadata-driven naming already applied.
-        try:
-            import napari as _np_napari
-            from pycat.utils import layer_tags as _LT
-            for _lyr in self.viewer.layers:
-                if _lyr.__class__.__name__ != 'Image':
-                    continue
-                if _LT.get_tag(_lyr, 'role') is not None:
-                    continue  # already tagged (not freshly added)
-                self._tag_loaded_layer(
-                    _lyr, role='image', n_t=n_t, n_z=n_z,
-                    microns_per_pixel=microns_per_pixel, file_path=file_path,
-                    channel=getattr(_lyr, 'name', None), provenance='raw')
-        except Exception as _e:
-            debug_log("file_io: stack layer tagging failed", _e)
-
-        # Fit the canvas to the newly-loaded image. Deferred long enough that the
-        # scale bar has been applied and all layer-insert scale-alignment events
-        # have flushed — otherwise the fit reads a stale extent and the image
-        # opens tiny (whereas pressing Home later, once settled, fits correctly).
-        try:
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(400, lambda: self._fit_view_to_layer())
-        except Exception:
-            self._fit_view_to_layer()
-
-        bp = getattr(self.central_manager, '_pycat_batch_processor', None)
-        if bp:
-            bp.record('open_stack', {
-                'file_path': file_path,
-                'source': source,
-                'channels': channels_to_load,
-                'n_timepoints': n_t,
-                'n_z': n_z,
-            })
+        from pycat.file_io.stack_load import _finalise_stack_load
+        return _finalise_stack_load(self.viewer, self.central_manager, H, W,
+                                    microns_per_pixel, channels_to_load, n_t, n_z,
+                                    file_path, source)
 
     def open_2d_mask(self, file_paths=None, clear_first=False):
         """
@@ -3058,175 +2831,26 @@ class FileIOClass:
         return _update_scale_bar_for_active_layer(self.viewer, self.central_manager)
 
     def load_into_viewer(self, data, name, is_mask=False):
-        """
-        Loads the given data into the Napari viewer, distinguishing between image and mask data, and applies appropriate 
-        visual representations.
-
-        Parameters
-        ----------
-        data : array-like
-            The image or mask data to be loaded into the viewer.
-        name : str
-            The name to assign to the layer in the viewer.
-        is_mask : bool, optional
-            A flag indicating whether the data is a mask, defaults to False.
-
-        Notes
-        -----
-        This method ensures that mask data is loaded as label layers and image data as image layers. It handles data type 
-        conversions and scaling to optimize visualization within the Napari environment.
-        """
-        if is_mask:
-            # If it's a mask, skip conversion to float and ensure it's int type
-            if np.issubdtype(data.dtype, np.integer):
-                data = data.astype(int) if not np.issubdtype(data.dtype, int) else data
-            # Add the mask to the viewer
-            self.viewer.add_labels(data, name=name)
-            # Tag: this is a mask (role/provenance), 2D dimensionality.
-            try:
-                if len(self.viewer.layers):
-                    _mpp = None
-                    try:
-                        _mps = self.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-                        _mpp = (float(_mps) ** 0.5) if _mps else None
-                    except Exception:
-                        _mpp = None
-                    self._tag_loaded_layer(
-                        self.viewer.layers[-1], role='mask', n_t=1, n_z=1,
-                        microns_per_pixel=_mpp, provenance='segmentation')
-            except Exception as _e:
-                debug_log("file_io: 2D mask tagging failed", _e)
-        else:
-            # Handle as before for images
-            if np.issubdtype(data.dtype, np.integer):
-                if np.issubdtype(data.dtype, np.signedinteger):
-                    data = data.astype(np.uint16)
-            elif np.issubdtype(data.dtype, np.floating):
-                if np.max(data) > 1 or np.min(data) < 0:             
-                    # For floating-point types, ensure values are between 0-1 and convert to float32
-                    data = apply_rescale_intensity(data, out_min=0.0, out_max=1.0).astype(np.float32)
-                else: 
-                    data = data.astype(np.float32)
-            data = dtype_conversion_func(data, 'float32')  # Ensure image data is correct float32 dtype
-            # Add the image to the viewer
-            add_image_with_default_colormap(data, self.viewer, name=name)
-            # Stash the current file's metadata on the layer so a later
-            # multi-image comparison can diff acquisition settings per-layer even
-            # though data_repository['file_metadata'] is overwritten on each load.
-            try:
-                _md = self.central_manager.active_data_class.data_repository.get('file_metadata')
-                if _md is not None and len(self.viewer.layers):
-                    self.viewer.layers[-1].metadata['pycat_file_metadata'] = _md
-            except Exception:
-                pass
-            # Tag: this is a 2D image (role/dimensionality/scale/provenance);
-            # channel identity from the layer name (metadata-driven naming already
-            # applied it upstream).
-            try:
-                if len(self.viewer.layers):
-                    _mpp = None
-                    try:
-                        _mps = self.central_manager.active_data_class.data_repository.get('microns_per_pixel_sq')
-                        _mpp = (float(_mps) ** 0.5) if _mps else None
-                    except Exception:
-                        _mpp = None
-                    self._tag_loaded_layer(
-                        self.viewer.layers[-1], role='image', n_t=1, n_z=1,
-                        microns_per_pixel=_mpp,
-                        channel=getattr(self.viewer.layers[-1], 'name', None),
-                        provenance='raw')
-            except Exception as _e:
-                debug_log("file_io: 2D image tagging failed", _e)
-            # Auto scale bar for the freshly-loaded 2D image.
-            self._enable_auto_scale_bar()
+        from pycat.file_io.viewer_load import load_into_viewer
+        return load_into_viewer(self.viewer, self.central_manager, data, name, is_mask)
 
 
 
     def _prompt_pixel_size_if_needed(self):
-        """After a load, show the modal pixel-size dialog if the freshly-loaded
-        image has no valid physical scale. Separate from the in-dock gate; both
-        read/write the same data_repository scale so they stay consistent."""
-        try:
-            from pycat.ui.field_status import prompt_pixel_size_on_load
-            prompt_pixel_size_on_load(
-                lambda: self.central_manager.active_data_class.data_repository,
-                central_manager=self.central_manager)
-        except Exception as _prompt_exc:
-            # **This is the last line of defence for an uncalibrated image.** If the prompt does not
-            # appear, the image keeps its 1.0 µm/px default and *every length, area and diffusion
-            # coefficient is silently in pixels while the column header says microns.*
-            #
-            # It was wrapped in `except Exception: pass`. **A failure here produced no dialog, no
-            # message, and a perfectly normal-looking load.**
-            from pycat.utils.general_utils import report_guarantee_failure
-            report_guarantee_failure("file_io: pixel-size prompt on load", _prompt_exc)
+        from pycat.file_io.tagging import _prompt_pixel_size_if_needed
+        return _prompt_pixel_size_if_needed(self.central_manager)
 
     def _auto_clear_before_load(self):
-        """Reset to the workflow start state before loading a new dataset.
-
-        Returns True if it is safe to proceed with the load, False if the user
-        declined to discard existing work.
-
-        If no image layers are present, there is nothing to clear and we proceed
-        immediately. If layers exist, we treat that as potentially-unsaved work
-        and ask for confirmation (mirroring the Clear button's safety prompt)
-        before wiping — so a new load never silently discards analysis. On
-        confirmation we reuse _clear_everything, the same full reset the Clear
-        button uses (layers, data repository, dataframes, workflow checklist,
-        and batch recording), so the new dataset starts from a clean state.
-        """
-        try:
-            has_layers = len(self.viewer.layers) > 0
-        except Exception:
-            has_layers = False
-        if not has_layers:
-            return True  # nothing to clear
-
-        # There is existing work — confirm before discarding it.
-        try:
-            from qtpy.QtWidgets import QMessageBox
-            resp = QMessageBox.question(
-                None, "Load new image?",
-                "Loading a new image will clear the current layers and reset the "
-                "workflow.\n\nAny unsaved analysis will be lost. Continue?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if resp != QMessageBox.Yes:
-                return False
-        except Exception:
-            # If the dialog can't be shown, err on the side of NOT destroying
-            # work silently — proceed only if there were no layers (handled
-            # above). Here layers exist, so bail out safely.
-            return False
-
-        try:
-            self._clear_everything(self.viewer)
-        except Exception:
-            # If the reset fails, still allow the load to proceed (napari will
-            # add the new layers alongside; not ideal but not destructive).
-            pass
-        return True
+        from pycat.file_io.session import _auto_clear_before_load
+        return _auto_clear_before_load(self.viewer, self.central_manager)
 
     def _clear_everything(self, viewer):
         from pycat.file_io.session import _clear_everything
         return _clear_everything(viewer, self.central_manager)
 
     def clear_all_without_saving(self, viewer, confirm=True):
-        """
-        Clear all layers and data without saving, resetting the workspace to the
-        beginning-of-workflow (startup) state. If `confirm` is True, asks for
-        explicit confirmation first and warns that all unsaved data will be lost.
-        """
-        if confirm:
-            reply = QMessageBox.warning(
-                None, "Clear everything without saving?",
-                "This resets the workspace to the start of a workflow.\n\n"
-                "All layers and analysis data will be permanently cleared and "
-                "NOTHING will be saved. All unsaved data will be lost.\n\nContinue?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply != QMessageBox.Yes:
-                return
-        self._clear_everything(viewer)
-        print("[PyCAT] Workspace cleared without saving.")
+        from pycat.file_io.session import clear_all_without_saving
+        return clear_all_without_saving(viewer, self.central_manager, confirm)
 
     def save_and_clear_all(self, viewer):
         """
@@ -3419,14 +3043,7 @@ class FileIOClass:
                            tag_store)
 
     def determine_file_format_and_process_data(self, layer_type, data):
-        """Legacy helper kept for compatibility; new code uses _save_layer."""
-        if layer_type in ['Labels', 'Shapes']:
-            return ".png", dtype_conversion_func(data, 'uint16')
-        elif layer_type == 'Image':
-            if data.ndim == 3:
-                return ".png", dtype_conversion_func(data, 'uint8')
-            else:
-                return ".tiff", dtype_conversion_func(data, 'uint16')
-        else:
-            return ".dat", data
+        from pycat.file_io.viewer_load import determine_file_format_and_process_data
+        return determine_file_format_and_process_data(self.viewer, self.central_manager,
+                                                      layer_type, data)
         

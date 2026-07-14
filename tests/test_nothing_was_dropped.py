@@ -124,6 +124,48 @@ _DELIBERATE = {
     #     extract_channel_info_from_aicsimage → extract_channel_info
     #
     # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    # 1.6.29 — EXTRACTED, not deleted. **The cascade, again.**
+    #
+    # `load_into_viewer` -> `file_io/viewer_load.py`. It is what the 2-D loader, the mask loader and
+    # BOTH stack loaders call once they have an array. It is a dependency of FIVE other methods, and
+    # it depended on two — `_enable_auto_scale_bar` and `_tag_loaded_layer`, both extracted in the
+    # previous two releases. **Taking it now unblocks the tier above it.**
+    #
+    # `_auto_clear_before_load` + `clear_all_without_saving` -> `file_io/session.py`, with the
+    # `_clear_everything` they both call.
+    #
+    # `determine_file_format_and_process_data` -> `viewer_load.py`: a ten-line legacy shim that
+    # touched `self` for nothing at all.
+    #
+    # (`FileIOClass` keeps a delegating stub for each, so every caller is untouched — including
+    # `batch_processor`, which calls `clear_all_without_saving(viewer, confirm=True)` with a
+    # POSITIONAL viewer.)
+    'file_io.py::load_into_viewer',
+    'file_io.py::_auto_clear_before_load',
+    'file_io.py::clear_all_without_saving',
+    'file_io.py::determine_file_format_and_process_data',
+
+    # 1.6.28 — EXTRACTED, not deleted. **The cascade.**
+    #
+    # `_tag_loaded_layer` + `_prompt_pixel_size_if_needed` -> `file_io/tagging.py`
+    # (`_calibration_is_from_metadata` went with them — calibration provenance is a fact about the
+    # LAYER, and nothing else called it).
+    #
+    # `_finalise_stack_load` -> `file_io/stack_load.py`. **It could not have come out before this
+    # release.** It depended on FIVE methods of its host — and all five had been extracted by the
+    # previous moves:
+    #
+    #     _enable_auto_scale_bar / _fit_view_to_layer / _add_diameter_annotation_layers -> napari_adapter
+    #     _tag_loaded_layer / _prompt_pixel_size_if_needed                              -> tagging
+    #
+    # *Take what depends on nothing; the next layer then depends on nothing, and comes out free.*
+    #
+    # (`FileIOClass` keeps a delegating stub for each, so every caller is untouched.)
+    'file_io.py::_tag_loaded_layer',
+    'file_io.py::_prompt_pixel_size_if_needed',
+    'file_io.py::_finalise_stack_load',
+    'file_io.py::_calibration_is_from_metadata',
+
     # 1.6.27 — EXTRACTED, not deleted.
     #
     # `_clear_everything` -> `file_io/session.py`. **It is not doing I/O, it is UNDOING it** —
