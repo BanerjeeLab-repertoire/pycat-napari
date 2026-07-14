@@ -73,6 +73,15 @@ _DELIBERATE = {
     'file_io.py::layer_is_stack',
     'file_io.py::extract_2d_plane',
     'file_io.py::warn_if_assumed_axis',
+
+    # 1.6.5 — the status-bar flicker. `_on_mouse_move` appended a `mouse_move_callbacks` handler
+    # that wrote `viewer.status`. **But napari writes `viewer.status` on the same event**, so both
+    # fired and whichever ran last won — the bar alternated between two strings as the mouse moved.
+    #
+    # **Racing napari's writer cannot be won.** The readout now wraps the layer's `get_status()`,
+    # which is where napari SOURCES the string — one writer, one string, no order to depend on.
+    # `_on_mouse_move` is gone because the approach it embodied was wrong.
+    'coordinate_readout.py::_on_mouse_move',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

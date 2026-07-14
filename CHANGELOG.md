@@ -4,6 +4,55 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.5] - 2026-07-13
+### The layer-tagging system was SILENTLY DEAD — and the status bar was racing napari
+
+## 1. `ValidationError: Object has no attribute 'add_image'`
+The traceback Gable saw at startup, and asked about.
+
+**napari's ``Viewer`` is a pydantic model.** The tag hook patched it with::
+
+    setattr(viewer, 'add_image', _wrap(...))
+
+**Pydantic's ``__setattr__`` permits only DECLARED FIELDS.** ``add_image`` is a *method on the
+class*, not a field on the instance — so the assignment was **rejected**.
+
+> ***And the whole layer-tagging system was silently dead.***
+
+``run_pycat`` wraps the install in ``except Exception: debug_log(...)``, so PyCAT started with **no
+tag hook at all.** Every layer went **untagged**. The tag registry, the resolver, the binding table,
+the Tag Inspector, the autopopulation groundwork — ***all of it inert***, and the only sign was a
+traceback that read like a napari bug.
+
+**``object.__setattr__``** bypasses pydantic's validation and writes straight to the instance
+``__dict__``. Python then finds the **instance** attribute before the class method — exactly the
+interception the hook needs.
+
+*(The ``_pycat_tag_hook_installed`` flag is not a declared field either — which is why a retry could
+never have helped.)*
+
+**Guarded** against a Viewer that rejects ``setattr`` the way the real one does. *A hook that fails
+to install and is swallowed by a bare ``except`` is indistinguishable from a hook that works — the
+system it feeds degrades to "nothing happens", which is what an unused feature looks like.*
+
+## 2. The status-bar flicker: TWO WRITERS, ONE WIDGET
+PyCAT appended a ``mouse_move_callbacks`` handler that wrote ``viewer.status``. **But napari writes
+``viewer.status`` on the same event** — so both fired, and **whichever ran last won.**
+
+The order is not guaranteed. **The bar alternated between two strings as the mouse moved** — the
+flicker, and the overlap.
+
+> ***Racing napari's writer cannot be won.***
+
+napari **sources** the status string from the active layer's ``get_status()``. The readout now wraps
+**that** — **one writer, one string, no order to depend on** — and falls back to napari's own string
+on any failure.
+
+*(And it uses ``object.__setattr__``, because a napari Layer has the same pydantic trap that killed
+the tag hook. **The same bug, twice, in two subsystems.**)*
+
+**455/455 core tests passing.**
+
 ## [1.6.4] - 2026-07-13
 # The full lazy-loading pass — and the IMS lag was in the SIX wrappers 1.6.3 missed
 

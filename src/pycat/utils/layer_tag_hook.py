@@ -149,15 +149,35 @@ def install(viewer):
     if getattr(viewer, '_pycat_tag_hook_installed', False):
         return viewer
 
+    # ── napari's Viewer is a PYDANTIC MODEL. `setattr` on it is REJECTED. ────────
+    #
+    # This used ``setattr(viewer, 'add_image', ...)`` — and pydantic's ``__setattr__`` permits only
+    # **declared fields.** ``add_image`` is a *method on the class*, not a field on the instance, so
+    # the assignment raised::
+    #
+    #     ValidationError: 1 validation error for Viewer
+    #     add_image
+    #       Object has no attribute 'add_image'
+    #
+    # ***And the whole layer-tagging system was silently dead.*** ``run_pycat`` wraps this install
+    # in ``except Exception: debug_log(...)``, so PyCAT started with **no tag hook at all** — and
+    # the only sign was a traceback in the terminal that read like a napari bug.
+    #
+    # ``object.__setattr__`` bypasses pydantic's validation and writes straight to the instance
+    # ``__dict__``. Python then finds the **instance** attribute before the class method — which is
+    # exactly the interception this hook needs.
+    #
+    # *(The ``_pycat_tag_hook_installed`` flag is not a declared field either — so it had the same
+    # problem, and it is why a retry could never have helped.)*
     for layer_type in ('image', 'labels', 'points', 'shapes', 'tracks', 'vectors', 'surface'):
         method_name = f'add_{layer_type}'
         original = getattr(viewer, method_name, None)
         if original is None:
             continue
 
-        setattr(viewer, method_name, _wrap(viewer, original, layer_type))
+        object.__setattr__(viewer, method_name, _wrap(viewer, original, layer_type))
 
-    viewer._pycat_tag_hook_installed = True
+    object.__setattr__(viewer, '_pycat_tag_hook_installed', True)
     return viewer
 
 

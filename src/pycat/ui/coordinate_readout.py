@@ -114,21 +114,54 @@ def install_coordinate_readout(viewer):
     Safe to call once at startup. Never raises into the caller — a failure just
     leaves napari's default status behaviour untouched.
     """
-    def _on_mouse_move(v, event):
+    # ── TWO WRITERS, ONE STATUS BAR — and that is the flicker ───────────────────
+    #
+    # This appended a ``mouse_move_callbacks`` handler that wrote ``v.status``. **But napari writes
+    # ``v.status`` on the same event**, from its own handler — so both fire, and **whichever runs
+    # last wins.** The order is not guaranteed, so the bar alternates between the two strings as
+    # the mouse moves.
+    #
+    # *That is the flicker Gable reported, and the overlap: two different strings rendered into the
+    # same widget, neither of them cleanly.*
+    #
+    # **Racing napari's writer cannot be won.** The fix is to be the *only* writer: napari SOURCES
+    # the status string from the active layer's ``get_status()``. Wrapping that means there is one
+    # writer, one string, and no order to depend on.
+    #
+    # ``object.__setattr__`` because a napari Layer is a pydantic-adjacent object and a plain
+    # ``setattr`` on a method is rejected — *the same trap that silently killed the layer-tag hook.*
+    def _wrap_get_status(layer):
+        original = getattr(layer, 'get_status', None)
+        if original is None or getattr(layer, '_pycat_status_wrapped', False):
+            return
+
+        def _get_status(position=None, *, view_direction=None, dims_displayed=None, world=False):
+            try:
+                dual = _coordinate_status(viewer)
+                if dual:
+                    return dual
+            except Exception:
+                pass
+            # Any failure falls back to napari's own string — the readout is a convenience, and it
+            # must never be the reason the status bar stops working.
+            return original(position, view_direction=view_direction,
+                            dims_displayed=dims_displayed, world=world)
+
+        object.__setattr__(layer, 'get_status', _get_status)
+        object.__setattr__(layer, '_pycat_status_wrapped', True)
+
+    def _on_layer_added(event):
         try:
-            s = _coordinate_status(v)
-            if s:
-                v.status = s
+            _wrap_get_status(event.value)
         except Exception:
-            # Never let the readout break interaction; fall back to default.
             pass
 
     try:
-        # Avoid double-installing if called twice.
-        for cb in list(getattr(viewer, "mouse_move_callbacks", [])):
-            if getattr(cb, "__name__", "") == "_on_mouse_move" \
-                    and getattr(cb, "__module__", "") == __name__:
-                return
-        viewer.mouse_move_callbacks.append(_on_mouse_move)
+        # Wrap every layer that is already here, and every one added later.
+        for existing in list(getattr(viewer, 'layers', [])):
+            _wrap_get_status(existing)
+
+        viewer.layers.events.inserted.connect(_on_layer_added)
     except Exception:
+        # Never let the readout break interaction; napari's default status stays in place.
         pass
