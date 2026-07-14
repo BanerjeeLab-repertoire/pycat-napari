@@ -4,6 +4,72 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.4] - 2026-07-13
+# The full lazy-loading pass — and the IMS lag was in the SIX wrappers 1.6.3 missed
+
+Gable: *"ims still lags out compared to before"* — and *"I've wanted you to do a full pass the whole
+time."* **Both fair. This is the pass.**
+
+## The IMS lag: 1.6.3 fixed THREE of NINE `__array__` methods
+There are **nine** lazy wrappers. Three are in ``multidim_io``. **Six are in ``file_io`` — including
+all three IMS wrappers.** 1.6.3 fixed the three, and **the guard only looked at ``multidim_io``**,
+so it passed while six identical landmines sat untouched.
+
+***A guard whose scope is narrower than the bug will certify the half that was fixed.***
+
+And PyCAT's own source had already named the cause — **months ago**:
+
+> *"napari auto-estimates contrast (and builds the thumbnail) by calling ``np.asarray()`` on the
+> layer — which for a lazy (T,Y,X) wrapper triggers ``__array__`` and **loads EVERY frame from
+> disk**. On a USB-HDD IMS stack **that is the real cause of the multi-second stalls**."*
+
+*I read that comment, quoted it, and then fixed the wrong file.*
+
+**All ten now refuse**, through one shared ``lazy_guard.refuse_implicit_full_read()``. *A fix applied
+to some instances of a bug is a fix that will be undone by the ones it missed.*
+
+## Every remaining item from the audit
+
+| | |
+|---|---|
+| **8 eager ``get_image_data()``** | **0** — all through ``read_plane()`` *(1.6.3)* |
+| **10 self-materialising ``__array__``** | **0** — all refuse |
+| **3 lazy layers with no contrast limits** | **0** — pinning is what stops napari calling ``__array__`` at all |
+| **the TZYX full transcode** | **gone** |
+| **``tifffile.imread`` on any metadata error** | **lazy first**, eager only as an honest last resort |
+
+### The TZYX transcode wrote the ENTIRE FILE before showing anything
+```python
+for t in range(n_t):
+    for zi in range(n_z):
+        z[t, zi] = np.asarray(dask_arr[t, zi])
+```
+
+**Every (t, z) plane, decoded and written to a temporary zarr, on the synchronous path, before the
+first pixel reached the screen.** *It was not accidentally eager — it was a deliberate full-file
+copy, and the note beside it said "nothing pre-loaded beyond this write pass", which was true and
+which was the whole problem.*
+
+**The dask array is already lazy.** ``_LazyArraySource`` wraps it directly: the window opens
+immediately and reads one plane per slider move.
+
+*(A zarr cache is still right for repeated random access — but it belongs in the background, behind
+an explicit action, not on the critical path to first display.)*
+
+### A metadata defect used to cost a gigabyte
+``except Exception`` caught **everything** — a channel name, a pixel size, a scene entry — and
+dropped PyCAT into ``tifffile.imread(file_path)``, **reading the whole file into memory.**
+
+***A cosmetic metadata problem should not cost a gigabyte.*** It now uses the lazy page reader
+first.
+
+### `_ZarrTZYX_generic` was named after the wrong thing
+It is not zarr-specific — it receives **zarr arrays, numpy arrays, and dask arrays**. And the TZYX
+branch transcoded the entire file into a zarr *purely so it would have a zarr to wrap.*
+``_LazyArraySource`` wraps whatever it is given.
+
+**451/451 core tests passing.**
+
 ## [1.6.3] - 2026-07-13
 ### P0 — the freeze: eight EAGER reads, three self-materialising wrappers, and six install routes still shipping aicsimageio
 *(From an external audit Gable commissioned. Its findings check out; its headline does not — see

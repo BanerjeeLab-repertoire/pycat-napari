@@ -87,35 +87,9 @@ class _ZarrTZYX:
         return arr
 
     def __array__(self, dtype=None):
-        """**Refuse.** An implicit full-stack read is never what the caller meant.
-
-        ── The frame-zero landmine, wearing a different hat ───────────────────────
-
-        ``np.asarray(layer.data)`` on a lazy stack has already cost this project **two bugs** —
-        N&B told users their movie was 2-D, and SpIDA silently analysed frame 0 while they were
-        looking at frame 40. The fix there was ``materialize_stack()``: **an explicit, named,
-        deliberate full read.**
-
-        **This ``__array__`` did the opposite.** It quietly stacked *every frame* — so any
-        thumbnail, plugin, layer refresh, contrast estimate, or stray numpy operation could pull
-        an entire acquisition into memory **without anyone asking, and without anything saying
-        so.**
-
-        A comment used to claim that pinned contrast limits stop napari calling it. **That is a
-        hope, not a guarantee** — it depends on the napari version, the dtype, and every plugin in
-        the environment.
-
-        So it **raises**, and names the two things the caller might actually have meant.
-        """
-        raise RuntimeError(
-            "An implicit full-stack read was attempted on a lazy stack of shape "
-            "{}. This pulls the ENTIRE acquisition into memory, and is almost "
-            "never intended.\n\n"
-            "For a deliberate full read:\n"
-            "    from pycat.file_io.stack_access import materialize_stack\n"
-            "    array = materialize_stack(layer)\n\n"
-            "For one frame, index it:  stack[t]".format(self.shape)
-        )
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -149,35 +123,9 @@ class _ZarrZYX:
         return arr
 
     def __array__(self, dtype=None):
-        """**Refuse.** An implicit full-stack read is never what the caller meant.
-
-        ── The frame-zero landmine, wearing a different hat ───────────────────────
-
-        ``np.asarray(layer.data)`` on a lazy stack has already cost this project **two bugs** —
-        N&B told users their movie was 2-D, and SpIDA silently analysed frame 0 while they were
-        looking at frame 40. The fix there was ``materialize_stack()``: **an explicit, named,
-        deliberate full read.**
-
-        **This ``__array__`` did the opposite.** It quietly stacked *every frame* — so any
-        thumbnail, plugin, layer refresh, contrast estimate, or stray numpy operation could pull
-        an entire acquisition into memory **without anyone asking, and without anything saying
-        so.**
-
-        A comment used to claim that pinned contrast limits stop napari calling it. **That is a
-        hope, not a guarantee** — it depends on the napari version, the dtype, and every plugin in
-        the environment.
-
-        So it **raises**, and names the two things the caller might actually have meant.
-        """
-        raise RuntimeError(
-            "An implicit full-stack read was attempted on a lazy stack of shape "
-            "{}. This pulls the ENTIRE acquisition into memory, and is almost "
-            "never intended.\n\n"
-            "For a deliberate full read:\n"
-            "    from pycat.file_io.stack_access import materialize_stack\n"
-            "    array = materialize_stack(layer)\n\n"
-            "For one frame, index it:  stack[t]".format(self.shape)
-        )
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -202,35 +150,9 @@ class _ZarrTZYX_generic:
         return arr
 
     def __array__(self, dtype=None):
-        """**Refuse.** An implicit full-stack read is never what the caller meant.
-
-        ── The frame-zero landmine, wearing a different hat ───────────────────────
-
-        ``np.asarray(layer.data)`` on a lazy stack has already cost this project **two bugs** —
-        N&B told users their movie was 2-D, and SpIDA silently analysed frame 0 while they were
-        looking at frame 40. The fix there was ``materialize_stack()``: **an explicit, named,
-        deliberate full read.**
-
-        **This ``__array__`` did the opposite.** It quietly stacked *every frame* — so any
-        thumbnail, plugin, layer refresh, contrast estimate, or stray numpy operation could pull
-        an entire acquisition into memory **without anyone asking, and without anything saying
-        so.**
-
-        A comment used to claim that pinned contrast limits stop napari calling it. **That is a
-        hope, not a guarantee** — it depends on the napari version, the dtype, and every plugin in
-        the environment.
-
-        So it **raises**, and names the two things the caller might actually have meant.
-        """
-        raise RuntimeError(
-            "An implicit full-stack read was attempted on a lazy stack of shape "
-            "{}. This pulls the ENTIRE acquisition into memory, and is almost "
-            "never intended.\n\n"
-            "For a deliberate full read:\n"
-            "    from pycat.file_io.stack_access import materialize_stack\n"
-            "    array = materialize_stack(layer)\n\n"
-            "For one frame, index it:  stack[t]".format(self.shape)
-        )
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]

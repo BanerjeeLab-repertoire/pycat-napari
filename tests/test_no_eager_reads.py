@@ -87,42 +87,95 @@ def test_the_LOADER_never_calls_the_EAGER_api():
 
 
 @pytest.mark.core
-def test_no_LAZY_WRAPPER_materialises_itself_on_np_asarray():
+def test_NO_lazy_wrapper_ANYWHERE_materialises_itself():
     """**An implicit full-stack read is never what the caller meant.**
 
-    ``__array__`` is called by *anything* that treats the layer as an array — a thumbnail, a
-    plugin, a contrast estimate. **If it stacks every frame, an entire acquisition comes into
-    memory with nothing to show for it and nothing saying so.**
-    """
-    multidim = _SOURCE / "file_io" / "multidim_io.py"
-    source = multidim.read_text(encoding='utf-8', errors='ignore')
-    tree = ast.parse(source)
+    ── 1.6.3 fixed THREE of NINE, and the guard said it was done ────────────────
 
-    eager = []
+    There are **nine** lazy wrappers. Three live in ``multidim_io``; **six live in ``file_io``** —
+    *including all three IMS wrappers.* 1.6.3 fixed the three, and **this guard only looked at
+    ``multidim_io``**, so it passed while six identical landmines sat untouched.
+
+    **And the IMS ones are the ones that lag.** PyCAT's own source has said so for months::
+
+        "napari auto-estimates contrast (and builds the thumbnail) by calling np.asarray() on
+         the layer — which for a lazy (T,Y,X) wrapper triggers __array__ and loads EVERY frame
+         from disk. On a USB-HDD IMS stack that is the real cause of the multi-second stalls."
+
+    ***A guard whose scope is narrower than the bug will certify the half that was fixed.*** It now
+    walks **every** module in ``file_io``.
+    """
+    offenders = []
     refusing = 0
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != '__array__':
+    for path in sorted((_SOURCE / "file_io").glob("*.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
             continue
 
-        body = ast.get_source_segment(source, node) or ''
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name != '__array__':
+                continue
 
-        # It must RAISE, and it must not stack.
-        raises = any(isinstance(inner, ast.Raise) for inner in ast.walk(node))
-        stacks = 'np.stack' in body
+            body = ast.get_source_segment(source, node) or ''
 
-        if stacks or not raises:
-            eager.append(f"multidim_io.py:{node.lineno}")
-        else:
-            refusing += 1
+            # It must refuse — either by raising directly, or through the shared guard.
+            refuses = ('refuse_implicit_full_read' in body
+                       or any(isinstance(inner, ast.Raise) for inner in ast.walk(node)))
+            materialises = 'np.stack' in body or 'np.asarray(self._z)' in body
 
-    assert not eager, (
-        "these `__array__` methods still materialise the full stack:\n  " + "\n  ".join(eager)
-        + "\n\nThey must RAISE. `materialize_stack()` remains available for a full read that "
-          "someone actually meant."
+            if materialises or not refuses:
+                offenders.append(f"{path.name}:{node.lineno}")
+            else:
+                refusing += 1
+
+    assert not offenders, (
+        "these `__array__` methods still materialise the full stack:\n  " + "\n  ".join(offenders)
+        + "\n\n**Every frame comes off disk** the moment anything calls `np.asarray()` on the "
+          "layer — a thumbnail, a contrast estimate, a plugin, a layer-list refresh. "
+          "Use `pycat.file_io.lazy_guard.refuse_implicit_full_read(self)`."
     )
-    assert refusing >= 3, (
-        f"only {refusing} `__array__` methods refuse — there were 3. Has one been removed?"
+    assert refusing >= 9, (
+        f"only {refusing} `__array__` methods refuse — there are 9 lazy wrappers "
+        f"(6 in file_io, 3 in multidim_io). Has one been added without a refusal?"
+    )
+
+
+@pytest.mark.core
+def test_EVERY_lazy_layer_pins_its_CONTRAST_LIMITS():
+    """**Pinning the limits is what stops napari calling ``__array__`` at all.**
+
+    Without explicit ``contrast_limits``, napari auto-estimates contrast **and builds the
+    thumbnail** by calling ``np.asarray()`` on the layer. On a lazy wrapper that reads the entire
+    acquisition off disk, one frame at a time.
+
+    The IMS branches pinned them. **Three TIFF/CZI branches did not.**
+
+    *(``__array__`` now raises rather than materialising — so an unpinned layer fails loudly
+    instead of hanging. That is the right trade, but pinning is what stops it happening.)*
+    """
+    source = (_SOURCE / "file_io" / "file_io.py").read_text(encoding='utf-8', errors='ignore')
+    lines = source.split('\n')
+
+    unpinned = []
+    for number, line in enumerate(lines, 1):
+        if 'add_image(' not in line:
+            continue
+        if not any(name in line for name in ('wrapper', 'lazy_')):
+            continue
+
+        # The limits are computed just above the call, and may be passed via **kwargs.
+        window = '\n'.join(lines[max(0, number - 16):number])
+        if 'contrast_limits' not in window and '_lazy_contrast_limits' not in window:
+            unpinned.append(f"file_io.py:{number}")
+
+    assert not unpinned, (
+        "these lazy layers are added WITHOUT explicit contrast limits:\n  "
+        + "\n  ".join(unpinned)
+        + "\n\nnapari will call `np.asarray()` on them to estimate contrast — which reads every "
+          "frame off disk. Compute the limits from ONE frame with `_lazy_contrast_limits(wrapper)`."
     )
 
 

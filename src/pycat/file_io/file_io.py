@@ -590,11 +590,9 @@ class _ZarrTYX:
         return arr[(slice(None),) + spatial]
 
     def __array__(self, dtype=None):
-        with self._ctx():
-            arr = np.stack(
-                [np.asarray(self._z[t, self._c, 0]).astype(np.float32)
-                 for t in range(self.shape[0])], axis=0)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -633,8 +631,9 @@ class _ImsReaderTYX:
         return np.stack(frames, axis=0)
 
     def __array__(self, dtype=None):
-        arr = np.stack([self._read_frame(t) for t in range(self.shape[0])], axis=0)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -671,8 +670,9 @@ class _ImsReaderZYX:
         return np.stack(planes, axis=0)
 
     def __array__(self, dtype=None):
-        arr = np.stack([self._read_plane(z) for z in range(self.shape[0])], axis=0)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -716,8 +716,9 @@ class _ImsReaderTZYX:
         return arr
 
     def __array__(self, dtype=None):
-        arr = self[:, :, :, :]
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -946,13 +947,9 @@ class _TiffPageStack:
         return arr
 
     def __array__(self, dtype=None):
-        # Deliberately read only the FIRST frame if napari asks for an array
-        # (e.g. thumbnail) — never materialise the whole stack. Analysis code
-        # that needs every frame must call as_full_array() (or index frames),
-        # NOT np.asarray(), which would otherwise silently get a 2D single
-        # frame and mis-detect the stack as non-3D.
-        arr = np.asarray(self._pages[self._page_index(0)].asarray()).astype(np.float32)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def as_full_array(self, dtype=np.float32, progress_callback=None):
         """Materialise the whole stack as a real (T, H, W) numpy array, read
@@ -1032,6 +1029,50 @@ from pycat.file_io.stack_access import (       # noqa: F401  (re-exported for ca
 
 
 
+class _LazyArraySource:
+    """**A napari-facing view over ANY lazy source — dask, zarr, or numpy.**
+
+    ── The wrapper it replaces was named after the wrong thing ──────────────────
+
+    ``_ZarrTZYX_generic`` is not zarr-specific. It receives **zarr arrays, numpy arrays, and BioIO
+    dask arrays** — and the name told a reader it could rely on zarr semantics it does not have.
+
+    More importantly, the TZYX branch used to **transcode the entire file into a temporary zarr**
+    before showing anything, *purely so it would have a zarr to wrap.* **The dask array was already
+    lazy.** The copy bought nothing and cost the whole file.
+
+    This wraps whatever it is given:
+
+    * ``__getitem__`` computes **only the requested slice** — one plane per slider move
+    * ``__array__`` **refuses**, because an implicit full read is never what the caller meant
+
+    *(A zarr cache remains the right thing for repeated random access. But it belongs in the
+    background, behind an explicit action — not on the critical path to first display.)*
+    """
+
+    def __init__(self, source):
+        self._source = source
+        self.shape = tuple(int(v) for v in source.shape)
+        self.dtype = np.dtype(getattr(source, 'dtype', np.float32))
+        self.ndim = len(self.shape)
+
+    def __getitem__(self, index):
+        value = self._source[index]
+        # dask computes on demand; zarr and numpy are already here. Ask, do not assume — a reader
+        # plugin is free to return either.
+        if hasattr(value, 'compute'):
+            value = value.compute()
+        return np.asarray(value).astype(np.float32)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __array__(self, dtype=None):
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
+
+
 class _ZarrTYX_generic:
     """
     Lightweight napari-compatible wrapper around a plain zarr Array
@@ -1054,8 +1095,9 @@ class _ZarrTYX_generic:
         return arr[(slice(None),) + spatial]
 
     def __array__(self, dtype=None):
-        arr = np.asarray(self._z).astype(np.float32)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
@@ -2498,9 +2540,27 @@ class FileIOClass:
                       "tifffile read (scene/T/Z metadata unavailable)", _e)
             use_aicsimage = False
             scenes_to_load = [None]
-            # Fallback: tifffile direct read (no scene/T/Z metadata available)
+            # ── A METADATA defect must not trigger a full EAGER read ────────────
+            #
+            # The ``except Exception`` above catches **everything** — including a failure to parse
+            # something entirely optional: a channel name, a physical pixel size, a scene entry, a
+            # plugin property. Any of those used to drop PyCAT into ``tifffile.imread(file_path)``,
+            # which **reads the whole file into memory.**
+            #
+            # ***A cosmetic metadata problem should not cost a gigabyte.***
+            #
+            # ``_TiffPageStack`` does per-page seeks — the same lazy contract as the primary path.
+            # If it cannot be built either, THEN the file is genuinely unreadable and the eager
+            # read is the honest last resort.
             import tifffile
-            arr = tifffile.imread(file_path)
+            try:
+                arr = _TiffPageStack(file_path)
+                debug_log("file_io: metadata unavailable — using the LAZY tifffile page "
+                          "reader, not a full eager read", _e)
+            except Exception as _lazy_exc:
+                debug_log("file_io: the lazy TIFF page reader failed too — falling back to a "
+                          "full read, which is the honest last resort", _lazy_exc)
+                arr = tifffile.imread(file_path)
             while arr.ndim > 3 and arr.shape[0] == 1:
                 arr = arr[0]
             if arr.ndim == 2:
@@ -2560,8 +2620,29 @@ class FileIOClass:
                     # Data is already in memory — wrap it directly (no disk copy).
                     wrapper = _ZarrTYX_generic(arr_ch)
                     self._stack_lazy_refs.append(arr_ch)
-                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
-                                          colormap=_ch_colormap)
+                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
+                    #
+                    # Without explicit limits, napari auto-estimates contrast **and builds the
+                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
+                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
+                    # disk one frame at a time.**
+                    #
+                    # PyCAT's own source has documented this for months, on the IMS path::
+                    #
+                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
+                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
+                    #
+                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
+                    # user can still adjust the contrast afterwards.
+                    #
+                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
+                    # reaches this path without limits now fails loudly instead of hanging. That is
+                    # the right trade, but pinning the limits is what stops it happening at all.)
+                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
+                    _clim = _lazy_contrast_limits(wrapper)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2669,8 +2750,29 @@ class FileIOClass:
                     dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
                     wrapper = _ZarrTYX_generic(dask_arr)
                     self._stack_lazy_refs.append((image, dask_arr))
-                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
-                                          colormap=_ch_colormap)
+                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
+                    #
+                    # Without explicit limits, napari auto-estimates contrast **and builds the
+                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
+                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
+                    # disk one frame at a time.**
+                    #
+                    # PyCAT's own source has documented this for months, on the IMS path::
+                    #
+                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
+                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
+                    #
+                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
+                    # user can still adjust the contrast afterwards.
+                    #
+                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
+                    # reaches this path without limits now fails loudly instead of hanging. That is
+                    # the right trade, but pinning the limits is what stops it happening at all.)
+                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
+                    _clim = _lazy_contrast_limits(wrapper)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2693,16 +2795,56 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{scene_suffix}"
                     zarr_path = _os.path.join(
                         zarr_dir, f'ch{channel_idx}_tz{scene_suffix or "0"}')
+                    # ── This TRANSCODED THE WHOLE FILE before showing anything ─────
+                    #
+                    # It was::
+                    #
+                    #     z = _zarr.open(zarr_path, mode='w', ...)
+                    #     for t in range(n_t):
+                    #         for zi in range(n_z):
+                    #             z[t, zi] = np.asarray(dask_arr[t, zi])
+                    #
+                    # **Every (t, z) plane, decoded and written to a temporary zarr, on the
+                    # synchronous path, before the first pixel reaches the screen.** On a 4-D
+                    # acquisition that is the entire selected channel — and the user is looking at
+                    # a frozen window while it happens.
+                    #
+                    # *It was not accidentally eager. It was a deliberate full-file copy, and the
+                    # note beside it said "nothing pre-loaded beyond this write pass" — which is
+                    # true, and which was the whole problem.*
+                    #
+                    # **The dask array is ALREADY lazy.** Wrapping it directly gives napari a
+                    # 4-D source that reads one plane per slider move, and the window opens
+                    # immediately.
+                    #
+                    # *(A zarr cache is still the right thing for repeated random access — but it
+                    # belongs in the background, behind an "optimize for browsing" action, not on
+                    # the critical path to first display.)*
                     dask_arr = image.get_image_dask_data('TZYX', C=channel_idx)
-                    z = _zarr.open(zarr_path, mode='w', shape=dask_arr.shape,
-                                   chunks=(1, 1, H, W), dtype=np.float32)
-                    for t in range(n_t):
-                        for zi in range(n_z):
-                            z[t, zi] = np.asarray(dask_arr[t, zi]).astype(np.float32)
-                    self._stack_zarr_paths.append(zarr_path)
-                    wrapper = _ZarrTZYX_generic(_zarr.open(zarr_path, mode='r'))
-                    _stack_layer = self.viewer.add_image(wrapper, name=layer_name,
-                                          colormap=_ch_colormap)
+                    wrapper = _LazyArraySource(dask_arr)
+                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
+                    #
+                    # Without explicit limits, napari auto-estimates contrast **and builds the
+                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
+                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
+                    # disk one frame at a time.**
+                    #
+                    # PyCAT's own source has documented this for months, on the IMS path::
+                    #
+                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
+                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
+                    #
+                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
+                    # user can still adjust the contrast afterwards.
+                    #
+                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
+                    # reaches this path without limits now fails loudly instead of hanging. That is
+                    # the right trade, but pinning the limits is what stops it happening at all.)
+                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
+                    _clim = _lazy_contrast_limits(wrapper)
+                    if _clim is not None:
+                        _add_kwargs['contrast_limits'] = _clim
+                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
