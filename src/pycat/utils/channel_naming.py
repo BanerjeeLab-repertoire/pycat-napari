@@ -225,7 +225,7 @@ def suggest_colormap(bucket: str) -> str:
 # Metadata extraction helpers for specific sources
 # ---------------------------------------------------------------------------
 
-def extract_channel_info_from_aicsimage(image, channel_index: int) -> dict:
+def extract_channel_info(image, channel_index: int) -> dict:
     """
     Extract whatever channel metadata AICSImage exposes (works for OME-TIFF,
     CZI, and other Bio-Formats-compatible formats) and run it through

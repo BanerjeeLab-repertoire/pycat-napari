@@ -4,6 +4,91 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.15] - 2026-07-14
+### Fixed — the `__array__` guard was too narrow, for the second time
+
+- **`transpose()` was the same lie as `__array__`, and the guard never looked at it.** Three lazy
+  wrappers — `_ZarrTYX`, `_TiffPageStack` (`file_io.py`) and `_ZarrStack`
+  (`timeseries_condensate_tools.py`) — implemented:
+
+      def transpose(self, *axes):
+          return self.__getitem__(0)[np.newaxis]
+
+  **Whatever axes you asked for, you got frame 0**, shaped `(1, Y, X)`, and nothing about the
+  result looked wrong. This is precisely the bug `__array__` was fixed for in 1.6.3. It survived
+  that fix because **the guard checked `__array__` and nothing else.**
+
+  All three are **deleted**. Absence is the honest implementation and it is *proven*: the three
+  `_ImsReader*` wrappers have never defined `transpose`, and one of them carries the 600-plane IMS
+  file that scrubs at 0.5% of scene. napari duck-types for the method. A caller that genuinely
+  needs a transposed stack must ask for the read: `materialize_stack(layer).transpose(...)`.
+
+- **Two more wrappers were materialising the whole stack, outside the guard's scope.** The guard
+  globbed `file_io/*.py`. `toolbox/timeseries_condensate_tools.py::_ZarrStack.__array__` called
+  `np.asarray(self._z)` — *the entire zarr, off disk, from any thumbnail or contrast estimate* —
+  and was invisible to it. It now refuses, via the shared `lazy_guard`.
+
+  ***A guard whose scope is the file where the bug was found will certify every instance somewhere
+  else.*** The guard now walks the **whole package**, and decides what a lazy wrapper is by
+  **structure** — anything with `shape` and `__getitem__` — rather than by which directory it is in.
+
+- **`_KeyframeMaskStack` is exempt, named, and justified.** It is not file-backed: a dict of ~30
+  Cellpose keyframe masks already in RAM, whose `__array__` expands them RAM→RAM and returns the
+  **full advertised array**. It does not answer for a stack it never read. *Honest null result
+  worth recording:* all three of its call sites `np.asarray()` it immediately after construction,
+  so the 20× memory saving in its docstring is **discarded one line later, every time.** The
+  wrapper is a lazy view nobody consumes lazily. Documented rather than "fixed" — teaching the
+  consumers to index it is a change to the time-series segmentation pipeline, not to file I/O.
+
+### Fixed — `1.0 µm/px` was doing two jobs
+
+- **A real pixel size and a missing-value sentinel.** `_finalise_stack_load` decided calibration
+  provenance from the *value*: `abs(microns_per_pixel - 1.0) > 1e-9`, on the reasoning that *"a
+  real microscope pixel size is essentially never exactly 1.0."* ***"Essentially never" is not
+  never*** — a downsampled, low-magnification, derived or synthetic image can have a genuine
+  1.0 µm/px, and PyCAT would discard that calibration and prompt for a scale it had been given.
+
+  **The honest answer already existed.** `metadata_extract` records `pixel_size_source`
+  (`'ims_extents'` / `'tiff_tags'` / `'ome_metadata'` / `None`), populates it on every load — and
+  it was **only ever displayed.** The new `_calibration_is_from_metadata()` reads it. Falls back to
+  the old value-based guess only when no source was recorded, because a wrong `True` suppresses the
+  gate whereas a wrong `False` merely asks a question that can be answered.
+
+  *(The 2-D path in `data_modules` was already correct — it sets the flag from whether the tag was
+  PRESENT. Only the stack path guessed.)*
+
+### Added — writes are atomic
+
+- **A half-written file that opens is worse than no file at all.** Every save wrote straight to the
+  destination. Interrupt it — a crash, a full disk, a user closing the app during a 600-frame
+  export — and what is left is a **truncated TIFF that opens perfectly**, showing however many
+  frames got written, with nothing anywhere saying so. *A file that fails to open announces itself.
+  A file that opens short does not.*
+
+  New `atomic_write()` context manager: write to a sibling temp, `os.replace()` on success (atomic
+  on Windows and POSIX). All eight write sites go through it — image stacks, label stacks, 2-D
+  images, RGB, shapes, `.npz`, **and the results CSV**, where a short table is the most dangerous
+  output of all. An interrupted save now leaves the destination *untouched*, so a failed save no
+  longer destroys the previous good one.
+
+- **The obvious implementation corrupts the output, and it was caught by checking the bytes.**
+  Naming the temp `result.png.partial` makes `skimage.io.imsave` — which picks its format **from
+  the extension** — fall back to **TIFF**, write `II*\x00`, and return cleanly. Renamed to `.png`,
+  the file on disk is *a TIFF called `.png`*: it round-trips through skimage (which sniffs content
+  on read) so it looks fine from inside PyCAT, while every other tool and every collaborator gets a
+  mislabelled file. The suffix goes **before** the extension — `result.partial-a3f1.png`.
+
+### Changed — names that lie about which layer owns the behaviour
+
+- `extract_aicsimage_metadata` → **`extract_reader_metadata`**;
+  `extract_channel_info_from_aicsimage` → **`extract_channel_info`**. Both were named after a
+  library that is no longer used, which obscures which behaviour belongs to the shared
+  structured-reader interface and which is genuinely backend-specific — *the exact question the
+  whole 1.6 migration turned on.* All call sites updated.
+- `test_no_stale_reader_names` checked **only** `use_aicsimage`, so both survived it in plain sight.
+  It now matches the family. **`import aicsimageio` is deliberately still allowed** — it is the
+  conflict probe, and detecting the package by name is the entire point of that line.
+
 ## [1.6.14] - 2026-07-13
 ### Documentation — the whole 1.6 arc, written to be reviewed and revisited
 

@@ -96,6 +96,36 @@ _DELIBERATE = {
     #
     # The parameter is not lost — it is `index` rather than `idx`. **A rename, not a removal.**
     'file_io.py::__getitem__',
+
+    # 1.6.15 — `transpose()` DELETED from `_ZarrTYX`, `_TiffPageStack` (file_io.py) and
+    # `_ZarrStack` (timeseries_condensate_tools.py). All three read::
+    #
+    #     def transpose(self, *axes):
+    #         return self.__getitem__(0)[np.newaxis]
+    #
+    # **Whatever axes you asked for, you got frame 0**, shaped (1, Y, X), and nothing about the
+    # result looked wrong. It is the same lie `__array__` was fixed for in 1.6.3 — and it survived
+    # that fix because the guard checked `__array__` and nothing else.
+    #
+    # **Absence is the honest implementation, and it is proven.** The three `_ImsReader*` wrappers
+    # have never defined `transpose`, and one of them carries the 600-plane IMS file that scrubs at
+    # 0.5% of scene. napari duck-types for the method; not having it is a path napari already takes
+    # every time it touches an IMS layer.
+    #
+    # A caller that genuinely needs a transposed stack must say so: `materialize_stack(...)`.
+    'file_io.py::transpose',
+    'timeseries_condensate_tools.py::transpose',
+
+    # 1.6.15 — RENAMED, not removed. Both were named after a LIBRARY that is no longer used, which
+    # obscures which behaviour belongs to the shared structured-reader interface and which is
+    # genuinely backend-specific — the exact question the whole 1.6 migration turned on.
+    #
+    #     extract_aicsimage_metadata        → extract_reader_metadata
+    #     extract_channel_info_from_aicsimage → extract_channel_info
+    #
+    # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    'metadata_extract.py::extract_aicsimage_metadata',
+    'channel_naming.py::extract_channel_info_from_aicsimage',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

@@ -29,20 +29,42 @@ _SOURCE = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 
 @pytest.mark.core
 def test_no_flag_is_named_after_a_LIBRARY_that_is_no_longer_used():
-    """``use_aicsimage`` described the **implementation**, not the **question** it answered."""
+    """``use_aicsimage`` described the **implementation**, not the **question** it answered.
+
+    ── And it was not the only one ─────────────────────────────────────────────────────
+
+    This guard was written for ``use_aicsimage`` and checked **only** ``use_aicsimage``. Two more
+    survived it in plain sight — ``extract_aicsimage_metadata`` and
+    ``extract_channel_info_from_aicsimage`` — because a guard that names one instance of a class of
+    bug finds one instance of a class of bug.
+
+    *The names are not cosmetic.* They say the behaviour belongs to a **library**, when it belongs
+    to the **structured-reader interface** — so the next person cannot tell which parts are
+    backend-specific and which are not, which is the question the whole 1.6 migration turned on.
+
+    **``import aicsimageio`` is NOT stale and is deliberately allowed.** It is the conflict probe:
+    aicsimageio and BioIO cannot coexist, and the failure is disguised as
+    ``'_TIFF' object has no attribute 'RESUNIT'`` — *which sends a scientist looking at their
+    microscope.* Detecting the package by name is the entire point of that line.
+    """
     offenders = []
+
+    # Identifiers named for the library rather than the job. NOT a substring match on "aics" —
+    # that would flag the conflict probe, which must keep the library's real name.
+    stale = re.compile(r'\b(use_aicsimage|extract_aicsimage_metadata|'
+                       r'extract_channel_info_from_aicsimage|aicsimage_\w+|\w+_from_aicsimage)\b')
 
     for path in sorted(_SOURCE.rglob("*.py")):
         source = path.read_text(encoding='utf-8', errors='ignore')
 
-        for match in re.finditer(r'\buse_aicsimage\b', source):
+        for match in stale.finditer(source):
             line = source[:match.start()].count('\n') + 1
-            offenders.append(f"{path.relative_to(_SOURCE)}:{line}")
+            offenders.append(f"{path.relative_to(_SOURCE)}:{line}  ({match.group(0)})")
 
     assert not offenders, (
-        "`use_aicsimage` is back:\n  " + "\n  ".join(offenders)
-        + "\n\nIt never meant 'is it aicsimageio?'. It meant 'did the structured reader give us "
-          "dimensions and scenes, or are we reading raw pages?'. Name it for the question."
+        "these names are still spelled after the library:\n  " + "\n  ".join(offenders)
+        + "\n\nThey never meant 'is it aicsimageio?'. They meant 'did the structured reader give us "
+          "dimensions and scenes, or are we reading raw pages?'. Name them for the question."
     )
 
 

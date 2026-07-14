@@ -86,50 +86,93 @@ def test_the_LOADER_never_calls_the_EAGER_api():
     )
 
 
+def _refuses(node) -> bool:
+    """Does this method refuse, rather than answer? Structure, not spelling.
+
+    Either it raises, or it delegates to the shared guard (which raises). Matched on the AST so a
+    *docstring* mentioning ``refuse_implicit_full_read`` cannot pass for a call to it.
+    """
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Raise):
+            return True
+        if isinstance(inner, ast.Call):
+            called = getattr(inner.func, 'id', None) or getattr(inner.func, 'attr', None)
+            if called == 'refuse_implicit_full_read':
+                return True
+    return False
+
+
+def _lazy_wrappers(tree):
+    """Classes that present themselves to napari as an array: ``shape`` + ``__getitem__``.
+
+    Deliberately structural. A wrapper is *whatever quacks like an array to napari* — naming it by
+    hand is how the last two got missed.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        methods = {n.name for n in node.body if isinstance(n, ast.FunctionDef)}
+        if '__getitem__' not in methods:
+            continue
+        assigns_shape = any(
+            isinstance(n, ast.Attribute) and n.attr == 'shape'
+            for inner in node.body for n in ast.walk(inner)
+        )
+        if assigns_shape:
+            yield node, methods
+
+
 @pytest.mark.core
 def test_NO_lazy_wrapper_ANYWHERE_materialises_itself():
     """**An implicit full-stack read is never what the caller meant.**
 
-    ── 1.6.3 fixed THREE of NINE, and the guard said it was done ────────────────
+    ── The guard has now been too narrow TWICE ──────────────────────────────────
 
-    There are **nine** lazy wrappers. Three live in ``multidim_io``; **six live in ``file_io``** —
-    *including all three IMS wrappers.* 1.6.3 fixed the three, and **this guard only looked at
-    ``multidim_io``**, so it passed while six identical landmines sat untouched.
+    1.6.3 fixed **three of nine** ``__array__`` methods, and the guard passed — because it looked
+    only at ``multidim_io``, the file containing the three. It was widened to ``file_io``.
 
-    **And the IMS ones are the ones that lag.** PyCAT's own source has said so for months::
+    **It was still too narrow.** ``file_io/*.py`` is not where the lazy wrappers live; it is where
+    *most* of them live. ``toolbox/timeseries_condensate_tools.py`` and
+    ``toolbox/ts_cellpose_tools.py`` each hold one, and both were **still materialising the whole
+    stack** while this guard reported nine refusals and green.
 
-        "napari auto-estimates contrast (and builds the thumbnail) by calling np.asarray() on
-         the layer — which for a lazy (T,Y,X) wrapper triggers __array__ and loads EVERY frame
-         from disk. On a USB-HDD IMS stack that is the real cause of the multi-second stalls."
-
-    ***A guard whose scope is narrower than the bug will certify the half that was fixed.*** It now
-    walks **every** module in ``file_io``.
+    ***A guard whose scope is the file where the bug was found will certify every instance
+    somewhere else.*** So the scope is now **the package**, and membership is decided by
+    **structure** — anything with ``shape`` and ``__getitem__`` is a wrapper, whatever it is called
+    and wherever it lives.
     """
     offenders = []
     refusing = 0
 
-    for path in sorted((_SOURCE / "file_io").glob("*.py")):
+    # ── The ONE exemption, named and justified ──────────────────────────────────────────
+    #
+    # `_KeyframeMaskStack` is **not file-backed.** It is a dict of ~30 Cellpose keyframe masks
+    # already in RAM, and its `__array__` expands them RAM→RAM, returning the **full advertised
+    # array**. It does not answer for a stack it never read, and it cannot pull an acquisition off
+    # disk — which is the entire bug this guard exists to stop.
+    #
+    # *It is exempt because it is a different thing, not because it is inconvenient.* Anything
+    # added here needs the same argument in writing.
+    _IN_MEMORY = {'_KeyframeMaskStack'}
+
+    for path in sorted(_SOURCE.rglob("*.py")):
         source = path.read_text(encoding='utf-8', errors='ignore')
         try:
             tree = ast.parse(source)
         except SyntaxError:
             continue
 
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef) or node.name != '__array__':
+        for klass, methods in _lazy_wrappers(tree):
+            if klass.name in _IN_MEMORY:
                 continue
-
-            body = ast.get_source_segment(source, node) or ''
-
-            # It must refuse — either by raising directly, or through the shared guard.
-            refuses = ('refuse_implicit_full_read' in body
-                       or any(isinstance(inner, ast.Raise) for inner in ast.walk(node)))
-            materialises = 'np.stack' in body or 'np.asarray(self._z)' in body
-
-            if materialises or not refuses:
-                offenders.append(f"{path.name}:{node.lineno}")
-            else:
-                refusing += 1
+            for node in klass.body:
+                if not isinstance(node, ast.FunctionDef) or node.name != '__array__':
+                    continue
+                if _refuses(node):
+                    refusing += 1
+                else:
+                    offenders.append(
+                        f"{path.relative_to(_SOURCE)}:{node.lineno} ({klass.name}.__array__)")
 
     assert not offenders, (
         "these `__array__` methods still materialise the full stack:\n  " + "\n  ".join(offenders)
@@ -138,8 +181,55 @@ def test_NO_lazy_wrapper_ANYWHERE_materialises_itself():
           "Use `pycat.file_io.lazy_guard.refuse_implicit_full_read(self)`."
     )
     assert refusing >= 9, (
-        f"only {refusing} `__array__` methods refuse — there are 9 lazy wrappers "
-        f"(6 in file_io, 3 in multidim_io). Has one been added without a refusal?"
+        f"only {refusing} `__array__` methods refuse. Has a lazy wrapper been added without one?"
+    )
+
+
+@pytest.mark.core
+def test_NO_lazy_wrapper_LIES_about_its_own_shape():
+    """**A method that answers with frame 0 while advertising (T, Y, X) is the original bug.**
+
+    ``__array__`` was fixed. **``transpose()`` was not, and it is the same lie**::
+
+        def transpose(self, *axes):
+            return np.asarray(self.__getitem__(0))[np.newaxis]
+
+    Whatever axes you ask for, you get **frame 0**, shaped ``(1, Y, X)``, and nothing says so. Three
+    wrappers carried this — including ``_TiffPageStack``, *which is the one under the validated VPT
+    baseline.*
+
+    **It is vestigial.** The three ``_ImsReader*`` wrappers ship with **no ``transpose`` at all** and
+    napari loads them fine — the 600-plane IMS file scrubs at 0.5% of scene through one of them. So
+    the honest implementation is **absence**: if napari duck-types for the method, not having it is
+    a path napari already handles. *Raising would be honest too, but absence is proven.*
+
+    ***The guard that checked `__array__` and not `transpose` was checking the bug it had already
+    found, not the bug.***
+    """
+    liars = []
+
+    for path in sorted(_SOURCE.rglob("*.py")):
+        source = path.read_text(encoding='utf-8', errors='ignore')
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+
+        for klass, methods in _lazy_wrappers(tree):
+            for node in klass.body:
+                if not isinstance(node, ast.FunctionDef) or node.name != 'transpose':
+                    continue
+                if _refuses(node):
+                    continue
+                liars.append(f"{path.relative_to(_SOURCE)}:{node.lineno} ({klass.name}.transpose)")
+
+    assert not liars, (
+        "these `transpose()` methods answer for a stack they never read:\n  " + "\n  ".join(liars)
+        + "\n\nThey return **frame 0**, shaped (1, Y, X), for **any** requested axes — and nothing "
+          "about the result looks wrong.\n\n"
+          "**Delete the method.** The `_ImsReader*` wrappers have no `transpose` and napari loads "
+          "them without complaint. If a caller genuinely needs a transposed stack, it must say so: "
+          "`materialize_stack(layer).transpose(...)`."
     )
 
 

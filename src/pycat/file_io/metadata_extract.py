@@ -491,7 +491,7 @@ def _extract_frame_interval_s(image):
     return None, None
 
 
-def extract_aicsimage_metadata(file_path, image=None):
+def extract_reader_metadata(file_path, image=None):
     """Extract normalised metadata from an AICSImage object (CZI/OME-TIFF).
 
     Falls back to opening the file if no image is supplied. The OME model
@@ -608,22 +608,22 @@ def extract_metadata(file_path, reader=None, image=None, width_px=None):
     if ext == '.ims':
         return extract_ims_metadata(file_path, reader=reader, width_px=width_px)
     if image is not None:
-        return extract_aicsimage_metadata(file_path, image=image)
+        return extract_reader_metadata(file_path, image=image)
     if ext in ('.tif', '.tiff'):
-        # Prefer tifffile for plain TIFFs (reads baseline tags AICSImage skips).
+        # Prefer tifffile for plain TIFFs (reads baseline tags the structured reader skips).
         result = extract_tiff_metadata(file_path)
-        # If pixel size still missing, try AICSImage as a secondary source.
+        # If pixel size still missing, try the structured reader as a secondary source.
         if result['common'].get('pixel_size_um') is None:
             try:
-                aics = extract_aicsimage_metadata(file_path)
-                if aics['common'].get('pixel_size_um') is not None:
-                    result['common']['pixel_size_um'] = aics['common']['pixel_size_um']
-                    result['common']['pixel_size_source'] = aics['common']['pixel_size_source']
+                from_reader = extract_reader_metadata(file_path)
+                if from_reader['common'].get('pixel_size_um') is not None:
+                    result['common']['pixel_size_um'] = from_reader['common']['pixel_size_um']
+                    result['common']['pixel_size_source'] = from_reader['common']['pixel_size_source']
             except Exception:
                 pass
         return result
-    # Fallback: try AICSImage for anything else (czi, lif, nd2, ...).
-    return extract_aicsimage_metadata(file_path, image=image)
+    # Fallback: try the structured reader for anything else (czi, lif, nd2, ...).
+    return extract_reader_metadata(file_path, image=image)
 
 
 # ---------------------------------------------------------------------------

@@ -301,6 +301,13 @@ class _ZarrStack:
     Lightweight napari-compatible wrapper around a zarr Array.
     Presents shape/dtype/ndim and reads frames on demand without dask.
     Zarr reads only the chunk(s) needed for the current slider position.
+
+    **The array protocol is refused, not faked.** ``__array__`` used to call
+    ``np.asarray(self._z)`` — the whole zarr, off disk, from any thumbnail or contrast
+    estimate — and ``transpose()`` used to return **frame 0** for whatever axes you asked
+    for. Both were the bug that ``lazy_guard`` exists to stop; both were outside the guard's
+    scope because the guard walked ``file_io/`` and this class lives in ``toolbox/``.
+    See ``pycat.file_io.lazy_guard``.
     """
     def __init__(self, z):
         self._z    = z
@@ -312,14 +319,18 @@ class _ZarrStack:
         return np.asarray(self._z[idx])
 
     def __array__(self, dtype=None):
-        arr = np.asarray(self._z)
-        return arr if dtype is None else arr.astype(dtype)
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
 
     def __len__(self):
         return self.shape[0]
 
-    def transpose(self, *axes):
-        return np.asarray(self._z[0])[np.newaxis]
+    # `transpose()` is deliberately ABSENT. It used to return frame 0 broadcast to (1, Y, X)
+    # for any requested axes. The three `_ImsReader*` wrappers have never had one and napari
+    # loads them without complaint — absence is a path napari already handles, and it is the
+    # only honest answer a lazy stack can give. A caller that genuinely needs a transposed
+    # stack must ask for the read: `materialize_stack(layer).transpose(...)`.
 
 
 # ---------------------------------------------------------------------------

@@ -133,6 +133,24 @@ class _KeyframeMaskStack:
         raise IndexError(f"Unsupported index for _KeyframeMaskStack: {idx!r}")
 
     def __array__(self, dtype=None):
+        # ── This one materialises DELIBERATELY, and it is not the `lazy_guard` bug ──────
+        #
+        # Every other lazy wrapper in PyCAT is **file-backed**: `np.asarray()` on it pulls an
+        # entire acquisition **off disk**, one frame at a time, because a thumbnail asked. Those
+        # refuse (see `pycat.file_io.lazy_guard`).
+        #
+        # **This is not one of those.** It is a dict of ~30 keyframe masks already in RAM; the
+        # expansion is RAM→RAM, and it returns the **full advertised array** — it does not answer
+        # for a stack it never read.
+        #
+        # *But be honest about what it buys:* **nothing, today.** All three call sites
+        # (`_summarise`, the RF branch, the Cellpose branch) call `np.asarray()` on it immediately
+        # after construction, so the 20× memory saving in the docstring above is **discarded one
+        # line later, every time.** The wrapper is a lazy view that nobody consumes lazily.
+        #
+        # Left as-is rather than "fixed": making it refuse would break all three call sites to no
+        # benefit. The real fix is to teach the consumers to index it — which is a change to the
+        # time-series segmentation pipeline, not to file I/O, and belongs with that work.
         arr = np.stack([self[t] for t in range(self._n_t)], axis=0)
         return arr if dtype is None else arr.astype(dtype)
 

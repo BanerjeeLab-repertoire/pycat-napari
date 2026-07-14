@@ -45,6 +45,108 @@ def _suppress_ims_chunk_prints():
     finally:
         sys.stdout = old_stdout
 
+
+def _calibration_is_from_metadata(dr, microns_per_pixel) -> bool:
+    """**Provenance comes from WHERE the number came from, not WHAT it is.**
+
+    The stack loader used to decide this from the value::
+
+        dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
+
+    with the comment *"a real microscope pixel size is essentially never exactly 1.0 µm/px, so
+    treat 1.0 as the no-metadata fallback."*
+
+    ***"Essentially never" is not never.*** A downsampled, low-magnification, derived, or synthetic
+    image can have a **genuine** 1.0 µm/px — and PyCAT would throw that calibration away and prompt
+    for a scale it had already been told. **1.0 was doing two jobs — a real value and a
+    missing-value sentinel — and no code downstream could tell which one it was holding.**
+
+    **The honest answer already exists.** ``metadata_extract`` records ``pixel_size_source``
+    (``'ims_extents'``, ``'tiff_tags'``, ``'ome_metadata'``, or ``None`` when nothing was found),
+    it is populated on every load, and it was **only ever displayed.** Read it.
+
+    *(The 2-D path in ``data_modules`` was already doing this correctly — it sets the flag from
+    whether the tag was PRESENT. Only the stack path guessed from the value.)*
+    """
+    try:
+        source = ((dr.get('file_metadata') or {}).get('common') or {}).get('pixel_size_source')
+    except Exception:
+        source = None
+
+    if source:
+        return True
+
+    # No source recorded — either the extractor found nothing, or this load path did not run it.
+    # Fall back to the old value-based guess rather than silently declaring the image uncalibrated:
+    # a wrong `True` suppresses the gate, but a wrong `False` only asks a question that can be
+    # answered.
+    return abs(float(microns_per_pixel) - 1.0) > 1e-9
+
+
+@contextlib.contextmanager
+def atomic_write(final_path):
+    """**A half-written file that opens is worse than no file at all.**
+
+    Every save in PyCAT wrote **straight to the destination.** Interrupt it — a crash, a full disk,
+    a network share that blinks, a user closing the app on a 600-frame export — and what is left on
+    disk is a **truncated TIFF that opens perfectly**, showing however many frames got written,
+    with no indication that the rest are missing.
+
+    *A file that fails to open announces itself. A file that opens short does not.* The scientist
+    analyses 340 frames of a 600-frame acquisition and nothing anywhere says so.
+
+    So: write to a sibling temp file, and **rename only on success.** ``os.replace`` is atomic on
+    both Windows and POSIX — the destination either holds the old file or the complete new one, and
+    never a partial one. If the write raises, the temp file is removed and **the destination is
+    left untouched**, which is the other half of the guarantee: a failed save does not destroy the
+    previous good save.
+
+    Usage::
+
+        with atomic_write(out_path) as tmp:
+            tifffile.imwrite(tmp, frames, ...)
+    """
+    final_path = str(final_path)
+
+    # ── The temp name MUST keep the real extension ──────────────────────────────────────
+    #
+    # The obvious name is ``result.png.partial``. **It silently corrupts the output.**
+    #
+    # ``skimage.io.imsave`` picks its format **from the extension**. Hand it ``.partial`` and it
+    # does not fail — it falls back to **TIFF**, writes ``II*\x00``, and returns cleanly. Rename
+    # that to ``.png`` and the file on disk is *a TIFF called .png*. It round-trips through skimage
+    # (which sniffs content on read) and so looks fine from inside PyCAT — while **every other
+    # tool**, and every collaborator, gets a mislabelled file.
+    #
+    # *This was caught by checking the magic bytes, not by checking that the save "worked".*
+    #
+    # So the suffix goes **before** the extension: ``result.partial-a3f1.png``. The writer sees
+    # ``.png`` and writes a PNG.
+    root, ext = os.path.splitext(final_path)
+    tmp_path = f"{root}.partial-{os.getpid():x}{ext}"
+
+    # A leftover temp from a previous crash is worthless by definition — nothing ever reads one.
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    except OSError:
+        pass
+
+    try:
+        yield tmp_path
+    except BaseException:
+        # Includes KeyboardInterrupt and SystemExit — an interrupted save is exactly the case this
+        # exists for, and it must not leave the temp file behind either.
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    # Atomic on Windows and POSIX. The destination is the old file or the new one, never a mix.
+    os.replace(tmp_path, final_path)
+
 # Third party imports
 import numpy as np
 
@@ -220,7 +322,7 @@ import skimage as sk
 # AST walk confirms `AICSImage` is referenced nowhere in this file's code.
 from pycat.file_io.image_reader import open_image, read_plane
 from pycat.utils.channel_naming import (
-    extract_channel_info_from_aicsimage,
+    extract_channel_info,
     extract_channel_info_from_ims,
     suggest_colormap,
 )
@@ -597,8 +699,8 @@ class _ZarrTYX:
     def __len__(self):
         return self.shape[0]
 
-    def transpose(self, *axes):
-        return np.asarray(self.__getitem__(0))[np.newaxis]
+    # `transpose()` is deliberately ABSENT — it used to return frame 0 as (1, Y, X) for any
+    # requested axes. See `_TiffPageStack` for the full reasoning.
 
 
 class _ImsReaderTYX:
@@ -979,8 +1081,27 @@ class _TiffPageStack:
     def __len__(self):
         return self.shape[0]
 
-    def transpose(self, *axes):
-        return self.__getitem__(0)[np.newaxis]
+    # ── `transpose()` was DELETED ────────────────────────────────────────────────────────
+    #
+    # It read::
+    #
+    #     def transpose(self, *axes):
+    #         return self.__getitem__(0)[np.newaxis]
+    #
+    # **Whatever axes you asked for, you got frame 0**, shaped (1, Y, X) — and nothing about the
+    # result looked wrong. It is precisely the bug `__array__` was fixed for in 1.6.3, wearing a
+    # different name, and it **survived that fix because the guard only checked `__array__`.**
+    #
+    # *A guard that checks the bug it already found is not checking the bug.*
+    #
+    # **Absence is the honest implementation, and it is proven.** The three `_ImsReader*` wrappers
+    # have never defined `transpose` — and one of them carries the 600-plane IMS file that scrubs
+    # at 0.5% of scene. napari duck-types for the method; not having it is a path napari already
+    # takes every time it touches an IMS layer.
+    #
+    # A caller that genuinely needs a transposed stack must **say so**, and pay for it:
+    #
+    #     materialize_stack(layer).transpose(...)
 
     def close(self):
         # Single-file mode keeps one handle in self._tif; multi-file mode keeps
@@ -1381,7 +1502,7 @@ class FileIOClass:
                 try:
                     self._last_channel_info = getattr(self, '_last_channel_info', [])
                     self._last_channel_info.append(
-                        extract_channel_info_from_aicsimage(image, ch_num)
+                        extract_channel_info(image, ch_num)
                     )
                 except Exception:
                     pass
@@ -2625,7 +2746,7 @@ class FileIOClass:
 
             for channel_idx in channels_to_load:
                 if reader_has_structure:
-                    _ch_info = extract_channel_info_from_aicsimage(image, channel_idx)
+                    _ch_info = extract_channel_info(image, channel_idx)
                 else:
                     _ch_info = {'layer_name': f'C{channel_idx}',
                                  'bucket': 'unknown', 'label': f'C{channel_idx}',
@@ -3078,10 +3199,9 @@ class FileIOClass:
         dr['object_size']       = H // 20
         dr['cell_diameter']     = H // 8
         dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
-        # Provenance for the Set-Scale overwrite warning: a real microscope
-        # pixel size is essentially never exactly 1.0 µm/px, so treat 1.0 as the
-        # "no metadata" fallback and anything else as metadata-derived.
-        dr['pixel_size_from_metadata'] = (abs(float(microns_per_pixel) - 1.0) > 1e-9)
+        # Provenance for the Set-Scale overwrite warning and the pixel-size gate. Derived from
+        # `pixel_size_source`, NOT from whether the value happens to be 1.0 — see the helper.
+        dr['pixel_size_from_metadata'] = _calibration_is_from_metadata(dr, microns_per_pixel)
 
         # The pixel size has just been set from this file's metadata (or fallen
         # back to 1.0). A plain load does not switch the data class, so notify
@@ -3810,7 +3930,10 @@ class FileIOClass:
             for df_name, df_value in dataframes_to_save.items():
                 clear_dfs_list.append(df_name)
                 if df_name in selected_dataframes:
-                    df_value.to_csv(save_name + f'_{df_name}.csv', index=True)
+                    # A truncated CSV is the worst of all: it opens, it parses, and it is short.
+                    # Nothing about 340 rows of an 800-row results table looks wrong.
+                    with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
+                        df_value.to_csv(_tmp, index=True)
 
             # Export the file's normalised acquisition metadata alongside the
             # results, for provenance/reproducibility. Written once per save.
@@ -4050,13 +4173,14 @@ class FileIOClass:
                     for t in range(_n):
                         yield np.asarray(data[t]).astype(_dt)
 
-                tifffile.imwrite(
-                    out_path, _mask_frames(),
-                    shape=(_n, _h, _w), dtype=_dt,
-                    compression='zlib',
-                    metadata={'axes': _axes},
-                    description=_pycat_tag('mask'),
-                    bigtiff=True)
+                with atomic_write(out_path) as _tmp:
+                    tifffile.imwrite(
+                        _tmp, _mask_frames(),
+                        shape=(_n, _h, _w), dtype=_dt,
+                        compression='zlib',
+                        metadata={'axes': _axes},
+                        description=_pycat_tag('mask'),
+                        bigtiff=True)
                 print(f"[PyCAT] Saved 3D label stack → {out_path} "
                       f"(compressed, axes={_axes}, {np.dtype(_dt).name}, "
                       f"max label {_gmax})")
@@ -4065,11 +4189,13 @@ class FileIOClass:
                 # mask or a <256-object label image is uint8, not uint16.
                 arr = _to_label_array(data)
                 out_path = f"{save_name}_{safe_name}.png"
-                sk.io.imsave(out_path, arr)
+                with atomic_write(out_path) as _tmp:
+                    sk.io.imsave(_tmp, arr)
 
         elif layer_type == 'Shapes':
             arr = dtype_conversion_func(np.asarray(data), 'uint16')
-            sk.io.imsave(f"{save_name}_{safe_name}.png", arr)
+            with atomic_write(f"{save_name}_{safe_name}.png") as _tmp:
+                sk.io.imsave(_tmp, arr)
 
         elif layer_type == 'Image':
             ndim = data.shape[0] if hasattr(data, 'shape') else len(data)
@@ -4109,13 +4235,14 @@ class FileIOClass:
                     for t in range(1, n_t):
                         yield _to_uint16(_frame(t)).astype(_dt, copy=False)
 
-                tifffile.imwrite(
-                    out_path, _frames(),
-                    shape=(n_t, _h, _w), dtype=_dt,
-                    compression='zlib',
-                    metadata={'axes': _axes},
-                    description=_pycat_tag('image'),
-                    bigtiff=True)
+                with atomic_write(out_path) as _tmp:
+                    tifffile.imwrite(
+                        _tmp, _frames(),
+                        shape=(n_t, _h, _w), dtype=_dt,
+                        compression='zlib',
+                        metadata={'axes': _axes},
+                        description=_pycat_tag('image'),
+                        bigtiff=True)
                 print(f"[PyCAT] Saved stack → {out_path} "
                       f"(compressed, axes={_axes}, {_dt})")
             else:
@@ -4123,16 +4250,18 @@ class FileIOClass:
                 arr = np.asarray(data)
                 if arr.ndim == 2:
                     out_path = f"{save_name}_{safe_name}.tiff"
-                    tifffile.imwrite(out_path, _to_uint16(arr),
-                                     compression='zlib',
-                                     description=_pycat_tag('image'))
+                    with atomic_write(out_path) as _tmp:
+                        tifffile.imwrite(_tmp, _to_uint16(arr),
+                                         compression='zlib',
+                                         description=_pycat_tag('image'))
                 else:
                     out_path = f"{save_name}_{safe_name}.png"
-                    sk.io.imsave(out_path, dtype_conversion_func(arr, 'uint8'))
+                    with atomic_write(out_path) as _tmp:
+                        sk.io.imsave(_tmp, dtype_conversion_func(arr, 'uint8'))
         else:
             # Unknown — save raw (compressed: .npz costs nothing vs .npy)
-            np.savez_compressed(f"{save_name}_{safe_name}.npz",
-                                data=np.asarray(data))
+            with atomic_write(f"{save_name}_{safe_name}.npz") as _tmp:
+                np.savez_compressed(_tmp, data=np.asarray(data))
 
     def determine_file_format_and_process_data(self, layer_type, data):
         """Legacy helper kept for compatibility; new code uses _save_layer."""
