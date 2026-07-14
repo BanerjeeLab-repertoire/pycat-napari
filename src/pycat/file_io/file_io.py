@@ -1945,24 +1945,24 @@ class FileIOClass:
             debug_log("file_io: IMS metadata extraction failed", _e)
 
         channels_to_load = list(range(n_c))
-        self._ims_reader    = reader
-        self._ims_channels  = channels_to_load
-        self._ims_n_frames  = n_t
-        self._ims_n_z       = n_z
+        # NOTE: `_ims_file_path` is kept because timeseries_condensate_tools reads it via getattr
+        # to locate the on-disk source. That cross-file reach-in is a separate, clearly-scoped
+        # migration (→ read ImageSource.file_path from the layer instead); it is intentionally NOT
+        # bundled into this retention change. The other legacy `_ims_*` attributes were removed in
+        # this release: reader retention is now owned solely by ImageSource (below), proven by
+        # tests/test_ims_reader_retention.py. See docs/audits/ims_zarr_refs_resolved_2026-07-14.md.
         self._ims_file_path = file_path
         channel_data = None
-        self._ims_zarr_refs = []
 
         # ── ImageSource: explicit reader ownership, lifetime-tied to the layers ──────────
-        # Parallel to the legacy _ims_reader / _ims_zarr_refs retention during migration.
-        # This object is attached to each lazy layer's metadata below, so the readers it holds
-        # live exactly as long as the layers do (not as long as FileIOClass). The legacy
-        # retention is intentionally KEPT for this release so behaviour cannot regress; a later
-        # release removes it once both retention tests pass. See image_source.py and
-        # docs/audits/ims_zarr_refs_resolved_2026-07-14.md.
+        # The SOLE owner of the IMS readers now. It is attached to each lazy layer's metadata
+        # below, so the readers it holds live exactly as long as the layers do — not as long as
+        # FileIOClass. This replaces the old _ims_reader (primary) + _ims_zarr_refs (siblings)
+        # retention, which kept readers alive only incidentally by living on the session-scoped
+        # FileIOClass instance.
         from pycat.file_io.image_source import ImageSource
         _img_source = ImageSource(file_path=file_path)
-        self._ims_reader and _img_source.retain(self._ims_reader)
+        _img_source.retain(reader)
 
         # ── Multi-position detection ─────────────────────────────────────
         # A single IMS file never contains multiple stage positions —
@@ -2031,7 +2031,6 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{pos_suffix}"
                     lazy_tyx = _ImsReaderTYX(pos_reader, channel_idx,
                                              suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((pos_reader, None, lazy_tyx))
                     if channel_idx == 0 and pos_path == file_path:
                         # Probe-read the first frame to populate channel_data (used
                         # only for default object/cell diameter estimates). Wrapped
@@ -2053,8 +2052,6 @@ class FileIOClass:
                                 "Also check that Imaris is not holding the file open."
                             )
                             channel_data = np.zeros((H, W), dtype=np.float32)
-                        self._ims_reader_array = pos_reader
-                        self._ims_lazy_tyx   = lazy_tyx
                     # Compute contrast limits from the FIRST frame only and pass
                     # them explicitly. Without this, napari auto-estimates contrast
                     # (and builds the thumbnail) by calling np.asarray() on the
@@ -2083,7 +2080,6 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{pos_suffix}"
                     lazy_zyx = _ImsReaderZYX(pos_reader, channel_idx, t=0,
                                              suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((pos_reader, None, lazy_zyx))
                     if channel_idx == 0 and pos_path == file_path:
                         try:
                             channel_data = lazy_zyx[0]
@@ -2123,11 +2119,8 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{pos_suffix}"
                     lazy_tzyx = _ImsReaderTZYX(pos_reader, channel_idx,
                                                suppress_ctx=_suppress_ims_chunk_prints)
-                    self._ims_zarr_refs.append((pos_reader, None, lazy_tzyx))
                     if channel_idx == 0 and pos_path == file_path:
                         channel_data = lazy_tzyx[0, 0]
-                        self._ims_reader_array = pos_reader
-                        self._ims_lazy_tzyx  = lazy_tzyx
                     # First (t=0, z=0) plane for contrast — reuse the prefetched
                     # one for channel 0, else read a single plane.
                     try:

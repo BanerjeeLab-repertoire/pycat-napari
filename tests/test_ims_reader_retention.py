@@ -52,73 +52,18 @@ needs_ims = pytest.mark.skipif(
 
 
 @needs_ims
-def test_multiposition_ims_readers_survive_gc_when_only_wrappers_held():
-    """After load, holding ONLY the lazy wrappers (as napari does) must keep every IMS
-    file open through a GC — including sibling-position readers owned only by _ims_zarr_refs."""
-    from unittest.mock import Mock
-    from pycat.file_io.file_io import FileIOClass
-    from pycat.data.data_modules import BaseDataClass
+def _OBSOLETE_wrapper_only_test_removed():
+    """REMOVED. This test asserted that holding only the lazy wrappers keeps readers alive — which
+    was true ONLY because the legacy `_ims_zarr_refs` lived on the session-scoped FileIOClass. Once
+    ImageSource became the sole, layer-scoped owner (retention now travels with
+    layer.metadata['pycat_image_source']), that premise is deliberately false: a wrapper with no
+    surviving layer/ImageSource is correctly collectable. The authoritative retention guard is now
+    `test_multiposition_ims_readers_survive_gc_via_layer_imagesource` below.
 
-    # A mock viewer that captures every lazy object handed to add_image — these are the
-    # wrappers napari would retain as layer.data.
-    captured_wrappers = []
-
-    viewer = Mock()
-
-    def _capture_add_image(data, *args, **kwargs):
-        captured_wrappers.append(data)
-        return Mock()  # a stand-in layer
-
-    viewer.add_image.side_effect = _capture_add_image
-
-    cm = Mock()
-    cm.active_data_class = BaseDataClass()
-
-    fio = FileIOClass(viewer, cm)
-
-    # load_into_viewer also delivers frames for some branches; capture those wrappers too.
-    _orig_load = fio.load_into_viewer
-
-    def _capturing_load(data, *a, **k):
-        captured_wrappers.append(data)
-        # do not actually touch napari internals; the retention question is about `data`
-        return None
-
-    fio.load_into_viewer = _capturing_load
-
-    # Run the REAL loader.
-    fio._open_stack_ims(_ims_path)
-
-    assert captured_wrappers, (
-        "no lazy wrappers were captured — the loader delivered no layers, so this test cannot "
-        "exercise retention. Check the file is genuinely multi-position and loads."
-    )
-
-    # Snapshot how many sibling readers the current code retained, for the failure message.
-    n_refs = len(getattr(fio, "_ims_zarr_refs", []) or [])
-
-    # THE GUARD: simulate a world where FileIOClass is gone and ONLY the layers survive.
-    # Keep the wrappers; drop everything else; force collection.
-    wrappers = list(captured_wrappers)
-    del fio
-    del captured_wrappers
-    gc.collect()
-
-    # Every wrapper must still read frame 0. A closed sibling reader raises OSError here.
-    failures = []
-    for i, w in enumerate(wrappers):
-        try:
-            frame = np.asarray(w[0])
-            assert frame is not None and getattr(frame, "size", 0) > 0
-        except Exception as e:  # noqa: BLE001 - we want to report ANY failure with context
-            failures.append(f"wrapper[{i}] ({type(w).__name__}): {type(e).__name__}: {e}")
-
-    assert not failures, (
-        "IMS reader retention BROKE after GC — a wrapper's underlying file closed when only the "
-        f"layers were held. This is the multi-position sibling-reader orphaning bug.\n"
-        f"  sibling readers retained by _ims_zarr_refs at load: {n_refs}\n"
-        f"  failing reads:\n    " + "\n    ".join(failures)
-    )
+    A GC-based *negative* assertion ('the reader IS collected when the layer is gone') would be
+    flaky — GC timing is not deterministic — so it is intentionally not added here.
+    """
+    pass
 
 
 @needs_ims
