@@ -110,6 +110,47 @@ def available_backends() -> dict:
     return found
 
 
+# ── One reader per file, not four ────────────────────────────────────────────────────────
+#
+# A single drag-and-drop used to construct the reader **three to four times** before one pixel
+# reached the screen::
+#
+#     _add_image_or_mask_single   -> open_image()    "is this an image or a mask?"
+#     _open_image_auto_single     -> open_image()    "is this 2D or a stack?"
+#       -> _open_stack_generic    -> open_image()
+#          OR open_2d_image       -> open_image() x3  (probe, fallback check, reload)
+#
+# **Reader construction is not free.** Depending on the plugin it parses OME-XML, walks the TIFF
+# series, reads the **CZI subblock directory**, and enumerates scenes — *every time*. For a large
+# CZI that is the same expensive directory walk, four times over, before anything is displayed.
+#
+# So the seam caches. **Keyed on the resolved path AND the file's mtime+size**, because a reader
+# holds an open handle and a stale one after the file changes would be worse than slow — it would
+# be wrong.
+#
+# **Deliberately small (4).** This is a "the same file, several times, within one load" cache, not
+# a session cache: holding readers for every file a user has ever opened would pin file handles and
+# memory for no benefit.
+_READER_CACHE = {}
+_READER_CACHE_LIMIT = 4
+
+
+def _cache_key(path):
+    """Path, size and mtime. **A reader for a file that has changed is worse than no cache.**"""
+    import os
+    try:
+        resolved = os.path.realpath(str(path))
+        stat = os.stat(resolved)
+        return (resolved, stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return None
+
+
+def clear_reader_cache():
+    """Drop every cached reader. Called when the viewer is cleared, and available for tests."""
+    _READER_CACHE.clear()
+
+
 def open_image(path, **kwargs):
     """Open ``path`` and return a reader.
 
@@ -122,6 +163,18 @@ def open_image(path, **kwargs):
     no longer has to carry a CZI dependency — but it also means **a missing plugin is a missing
     format**, and the error must say so plainly rather than surfacing as "cannot read file".
     """
+    # ── Cache: the same file is opened three to four times per drag-and-drop ──
+    #
+    # Keyed on path + size + mtime, so a file that CHANGED gets a fresh reader. **A stale reader
+    # would be worse than a slow one** — it would be wrong.
+    #
+    # `kwargs` bypasses the cache: a caller passing options wants a reader built THEIR way, and
+    # silently handing them a differently-configured one is exactly the kind of quiet wrongness
+    # this project keeps finding.
+    _key = _cache_key(path) if not kwargs else None
+    if _key is not None and _key in _READER_CACHE:
+        return _READER_CACHE[_key]
+
     if _BACKEND == 'bioio':
         try:
             from bioio import BioImage
@@ -133,7 +186,12 @@ def open_image(path, **kwargs):
             ) from exc
 
         try:
-            return BioImage(path, **kwargs)
+            _reader = BioImage(path, **kwargs)
+            if _key is not None:
+                if len(_READER_CACHE) >= _READER_CACHE_LIMIT:
+                    _READER_CACHE.pop(next(iter(_READER_CACHE)))
+                _READER_CACHE[_key] = _reader
+            return _reader
         except Exception as exc:
             # BioIO's readers are separate packages. "No reader found" means a MISSING PLUGIN,
             # not a broken file — and a user staring at "cannot read" would go looking in the
@@ -165,7 +223,12 @@ def open_image(path, **kwargs):
             "Or set PYCAT_IMAGE_READER=bioio to use the successor library."
         ) from exc
 
-    return AICSImage(path, **kwargs)
+    _reader = AICSImage(path, **kwargs)
+    if _key is not None:
+        if len(_READER_CACHE) >= _READER_CACHE_LIMIT:
+            _READER_CACHE.pop(next(iter(_READER_CACHE)))
+        _READER_CACHE[_key] = _reader
+    return _reader
 
 
 def compare_readers(path, verbose=True) -> dict:

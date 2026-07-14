@@ -3478,6 +3478,15 @@ class FileIOClass:
         progress bar. Saves nothing. Shared by Save & Clear's discard option and
         the top-bar Clear button.
         """
+        # Drop the cached readers. They hold open file handles, and after a Clear the user is
+        # done with those files. *(The cache exists because one drag-and-drop used to construct
+        # the reader three to four times — see `image_reader._READER_CACHE`.)*
+        try:
+            from pycat.file_io.image_reader import clear_reader_cache
+            clear_reader_cache()
+        except Exception:
+            pass
+
         self.viewer = viewer
         try:
             df_names = list(self.central_manager.active_data_class.get_dataframes().keys())

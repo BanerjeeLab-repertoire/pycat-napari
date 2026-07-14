@@ -4,6 +4,57 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.6] - 2026-07-13
+### One reader per file, not four — the last item from the audit
+A single drag-and-drop **constructed the reader three to four times** before one pixel reached the
+screen:
+
+```
+_add_image_or_mask_single   -> open_image()    "is this an image or a mask?"
+_open_image_auto_single     -> open_image()    "is this 2D or a stack?"
+  -> _open_stack_generic    -> open_image()
+     OR open_2d_image       -> open_image() x3  (probe, fallback check, reload)
+```
+
+**Reader construction is not free.** Depending on the plugin it parses OME-XML, walks the TIFF
+series, reads the **CZI subblock directory**, and enumerates scenes — ***every time.*** For a large
+CZI that is the same expensive directory walk, **four times over**, before anything is displayed.
+
+**The cache lives in the seam**, so **all seven call sites benefit and none had to change.**
+
+**Measured: 4 opens → 1 construction.**
+
+### Two things it has to get right
+**A stale reader is worse than a slow one.** It holds an open handle to a file that may have changed
+on disk, and would serve the **old pixels** while the user looks at a **new file** — *quiet
+wrongness of exactly the kind this project keeps finding.*
+
+So the key is **path + size + mtime**, not path alone. **Verified: a changed file gets a fresh
+reader.**
+
+**``kwargs`` bypass the cache.** A caller passing options wants a reader built *their* way. Handing
+them a differently-configured one from the cache is the same wrongness in a different hat.
+**Verified.**
+
+**Bounded at 4**, and cleared on Clear — it holds open file handles, and this is a *"same file,
+several times, within one load"* cache, **not a session cache.**
+
+---
+
+### The audit is now fully addressed
+| | |
+|---|---|
+| **1–3.** eager ``get_image_data()`` | **0** *(1.6.3)* |
+| **4.** file opened 3–4× | **1×** *(this release)* |
+| **5.** ``__array__`` materialises | **all 10 refuse** *(1.6.4)* |
+| **6.** lazy layers without contrast limits | **0** *(1.6.4)* |
+| **7.** TZYX full transcode | **gone** *(1.6.4)* |
+| **8.** ``tifffile.imread`` on any metadata error | **lazy first** *(1.6.4)* |
+| **9.** stale comments | *rewritten as they were touched* |
+| packaging | **consolidated** *(1.6.3)* |
+
+**456/456 core tests passing.**
+
 ## [1.6.5] - 2026-07-13
 ### The layer-tagging system was SILENTLY DEAD — and the status bar was racing napari
 
