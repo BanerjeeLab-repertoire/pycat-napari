@@ -55,10 +55,25 @@ import os
 
 # ── Which library? ───────────────────────────────────────────────────────────────────────
 #
-# **Default: aicsimageio.** The incumbent stays the default until the comparison has been run on
-# real CZI, OME-TIFF and Micro-Manager data. *Flipping a default is a decision to make with evidence
-# in hand, not with a passing import.*
-_DEFAULT_BACKEND = 'aicsimageio'
+# **Default: bioio.** The switch was made in **1.6.0**, and it was made **with evidence in hand.**
+#
+# BioIO and aicsimageio were run against **38 real files** in separate environments — they cannot
+# coexist, because aicsimageio is frozen in 2023 and pins ``zarr<2.16``, ``tifffile<2023.3``,
+# ``fsspec<2023.9``, ``lxml<5`` — and the results were compared offline:
+#
+#     **identical  31**   including the Zeiss CZI, ``3.30 hr_1_MMStack_Pos0``, every OME-TIFF,
+#                         every in-vitro TIFF, and every batch output
+#     **different   0**   shape, dtype, **dimension order**, **pixel size**, scenes, **and the
+#                         SHA-256 of the pixels**
+#     not comparable 6    all ``.ims`` — and **neither library reads them**
+#
+# The ``.ims`` result is **not a gap**: PyCAT intercepts ``.ims`` and routes it to
+# ``imaris_ims_file_reader``, its own HDF5 reader. *The comparison tested a path PyCAT does not
+# take.*
+#
+# ``PYCAT_IMAGE_READER=aicsimageio`` still selects the old path **if it is installed** — but it is
+# no longer a dependency, and installing it would break the modern stack it forbids.
+_DEFAULT_BACKEND = 'bioio'
 
 _BACKEND = os.environ.get('PYCAT_IMAGE_READER', _DEFAULT_BACKEND).strip().lower()
 

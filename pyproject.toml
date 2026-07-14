@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.5.533"
+version = "1.6.0"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -39,12 +39,36 @@ classifiers = [
 ]
 
 dependencies = [
-    "aicsimageio>=4.14.0",
-    "aicspylibczi>=3.0.5",
+    # ── BioIO replaced aicsimageio in 1.6.0 ─────────────────────────────────────────
+    #
+    # ``aicsimageio`` is in **maintenance mode** and its maintainers name ``bioio`` as the
+    # *compatible successor.* It is **frozen in 2023**, and its pins — ``zarr<2.16``,
+    # ``tifffile<2023.3.15``, ``fsspec<2023.9``, ``lxml<5`` — are what held **numpy<2** and
+    # **zarr<3** in place. ***Removing it FREES the pins rather than fighting them.***
+    #
+    # BioIO's readers are **separate packages.** That is a genuine improvement — a user who only
+    # opens TIFFs no longer carries a CZI dependency — but it means **a missing plugin is a missing
+    # FORMAT**, so the ones PyCAT actually opens are listed here, not left to chance.
+    #
+    # ``bioio-czi`` is **not optional**: Zeiss market share makes CZI non-negotiable.
+    "bioio>=1.0",
+    "bioio-ome-tiff",
+    "bioio-tifffile",
+    "bioio-czi",
     "cellpose<4",
     "matplotlib",
     "napari",
-    "numpy>=1.22,<2.0",
+    # ── numpy is UNPINNED at the top ────────────────────────────────────────────────
+    #
+    # ``numpy<2.0`` existed to satisfy **aicsimageio**, which is now gone. PyCAT's own code was
+    # audited for numpy-2 removals (``np.float_``, ``np.NaN``, ``np.alltrue``, ...) and **is
+    # clean** — zero occurrences.
+    #
+    # The remaining ceiling comes from **cellpose**, and that is a deliberate scientific choice,
+    # not a technical one: PyCAT pins ``cellpose<4`` because Cellpose 4 **removed the cyto2 CNN**
+    # and replaces it with a ViT-L transformer that is *very slow on CPU* — which matters for the
+    # lab machines that do not have a GPU.
+    "numpy>=1.22",
     "opencv-python-headless",
     "pandas",
     "pydantic",
@@ -67,32 +91,20 @@ dependencies = [
     "numba",
     "seaborn",
     "simpleitk",
-    "zarr>=2.12,<3.0",
+    # ── zarr is UNPINNED ────────────────────────────────────────────────────────────
+    #
+    # ``zarr<3.0`` existed to satisfy **aicsimageio** (which pinned ``<2.16``). The one class PyCAT
+    # depended on — ``DirectoryStore`` — was renamed to ``LocalStore`` in zarr 3, and its path
+    # moved from ``.path`` to ``.root``. Both are now handled by ``pycat.file_io.zarr_compat``,
+    # which asks the **capability** question rather than the class one, and works on either.
+    #
+    # Every ``zarr.open`` call was AST-walked: only ``mode``, ``shape``, ``chunks`` and ``dtype``
+    # are ever passed, and **all four survive in zarr 3.**
+    "zarr>=2.12",
 ]
 
 [project.optional-dependencies]
 
-# ── BioIO: the maintained successor to aicsimageio ──────────────────────────────
-# `aicsimageio` is in MAINTENANCE MODE. Its maintainers name `bioio` as the compatible
-# successor, and the compatibility is real: BioImage exposes the same names, the same
-# semantics and the same TCZYX ordering.
-#
-# BioIO's readers are SEPARATE PACKAGES. That is a genuine improvement -- a user who only
-# opens TIFFs no longer carries a CZI dependency -- but it means a missing plugin is a
-# missing FORMAT, so the ones PyCAT actually opens are listed together.
-#
-#     pip install pycat-napari[bioio]
-#     PYCAT_IMAGE_READER=bioio run-pycat
-#
-# It is OPT-IN. `aicsimageio` remains the default until `compare_readers()` has shown
-# identical pixels, dimension order and pixel size on real CZI / OME-TIFF / Micro-Manager
-# files -- the formats that have actually exposed loader bugs in this project.
-bioio = [
-    "bioio>=1.0",
-    "bioio-ome-tiff",
-    "bioio-tifffile",
-    "bioio-czi",
-]
 gpu = [
     "cupy-cuda11x",
 ]

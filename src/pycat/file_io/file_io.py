@@ -214,7 +214,10 @@ def _tiff_pixel_size_um(file_path):
         return None
 
 import skimage as sk
-from aicsimageio import AICSImage
+# ── aicsimageio is GONE. Every reader construction goes through the seam. ────
+#
+# This import was already DEAD — `open_image()` replaced every use of it in 1.5.529, and an
+# AST walk confirms `AICSImage` is referenced nowhere in this file's code.
 from pycat.file_io.image_reader import open_image
 from pycat.utils.channel_naming import (
     extract_channel_info_from_aicsimage,

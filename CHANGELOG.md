@@ -4,6 +4,82 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-13
+# ⚑ BioIO replaces aicsimageio. The pins are free.
+
+**This is the first release with BioIO and no aicsimageio.** ``v1.5.532`` is the last wholly
+BioIO-free version — **revert there if this goes wrong.**
+
+---
+
+## It is a REMOVAL, not an addition — and that is the whole point
+``aicsimageio`` is in **maintenance mode**, **frozen in 2023**, and pins:
+
+```
+zarr<2.16   tifffile<2023.3.15   fsspec<2023.9   lxml<5
+```
+
+***Those pins are what held ``numpy<2`` and ``zarr<3`` in place.*** They are not an obstacle to the
+migration — **they are the reason for it.** Removing aicsimageio **frees** them rather than fighting
+them.
+
+This was discovered the hard way: installing ``bioio`` alongside it pulled in numpy 2.5.1, zarr
+3.2.1 and tifffile 2026.6.1, **uninstalled the pinned ones**, and broke **cellpose, numba and the
+image loader in one command.** The two libraries **cannot coexist.**
+
+## The evidence, gathered before the switch
+BioIO and aicsimageio each read **38 real files** in **separate environments**, and the results were
+compared offline:
+
+| | |
+|---|---|
+| **identical** | **31** — the Zeiss CZI, ``3.30 hr_1_MMStack_Pos0``, every OME-TIFF, every in-vitro TIFF, every batch output |
+| **different** | **0** — shape, dtype, **dimension order**, **pixel size**, scenes, **and the SHA-256 of the pixels** |
+| not comparable | 6 — all ``.ims``, and ***neither library reads them*** |
+
+**The ``.ims`` result is not a gap.** PyCAT intercepts ``.ims`` and routes it to
+``imaris_ims_file_reader``, its own HDF5 reader. ***The comparison tested a path PyCAT does not
+take.*** Confirmed working in the app.
+
+*A dimension-order difference **would not crash** — it would return the **wrong channel**. A pixel-size
+difference changes **every length, area and diffusion coefficient** PyCAT reports. Both were checked.
+So were the pixels.*
+
+## What changed
+
+**Dependencies**
+- **removed:** ``aicsimageio``, ``aicspylibczi``
+- **added:** ``bioio``, ``bioio-ome-tiff``, ``bioio-tifffile``, **``bioio-czi``** — *not optional;
+  Zeiss market share makes CZI non-negotiable*
+- **freed:** ``numpy>=1.22`` *(was ``<2.0``)*, ``zarr>=2.12`` *(was ``<3.0``)*
+
+**Code** — and it is small, because the seam landed in 1.5.529:
+- ``file_io.py``'s ``aicsimageio`` import was **already dead** — an AST walk confirms ``AICSImage``
+  was referenced nowhere. Every construction goes through ``open_image()``.
+- the seam's default flipped to ``bioio``
+- ``pycat.file_io.zarr_compat`` (1.5.533) handles ``DirectoryStore`` **and** ``LocalStore``, and the
+  path on ``.path`` **and** ``.root``
+
+## Verified, not assumed
+- **numpy 2**: all 122 modules scanned for every removed API — ``np.float_``, ``np.NaN``,
+  ``np.alltrue``, ``np.product``, ``np.in1d``, ``np.trapz`` … — **zero occurrences.** *These break
+  at RUNTIME, in whichever analysis touches them, so a green import proves nothing.*
+- **zarr 3**: every ``zarr.open`` call AST-walked. Four kwargs ever passed — ``mode``, ``shape``,
+  ``chunks``, ``dtype`` — **all survive.**
+- **the drop-detector** reports **no new losses** against the high-water mark of nine snapshots.
+
+## The remaining pin is a SCIENTIFIC choice
+``cellpose<4`` stays. **Not a technical constraint** — Cellpose declares only ``numpy>=1.20``.
+Cellpose 4 **removed the cyto2 CNN** and replaces it with a ViT-L transformer that is *very slow on
+CPU*, which matters for the lab machines without a GPU.
+
+## If a reader plugin is missing
+BioIO's readers are **separate packages** — a genuine improvement, and a trap. **A missing plugin is
+a missing FORMAT**, and PyCAT says so by name rather than reporting *"cannot read file"*, which
+would send a scientist looking at their microscope.
+
+**423/423 core tests passing.**
+
 ## [1.5.533] - 2026-07-13
 ### BioIO stage 1 of 3 — the zarr surface is now version-agnostic
 **Stage 2 passed first:** BioIO and aicsimageio were run against **38 real files** in separate

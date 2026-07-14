@@ -53,7 +53,10 @@ _LOAD_BEARING = {
     'cellpose': "cell segmentation",
     'numba': "the JIT kernels",
     'napari': "the viewer",
-    'aicsimageio': "the image reader",
+    'bioio': "the image reader",
+    # Kept deliberately: if aicsimageio is STILL installed after the 1.6.0 migration, its
+    # 2023-era pins are silently holding the whole stack back, and the user needs to know.
+    'aicsimageio': "the OLD image reader — it should NOT be installed after 1.6.0",
 }
 
 
@@ -198,7 +201,11 @@ def _all_constraints():
     # `aicsimageio` is the important one and the reason this list exists: it is FROZEN in
     # maintenance mode, and it pins tifffile, fsspec, lxml and zarr to 2023-era versions. Anything
     # that upgrades those breaks the image loader, and the traceback never says why.
-    sources = ('pycat-napari', 'aicsimageio', 'cellpose', 'numba', 'napari', 'bioio')
+    # `aicsimageio` is GONE as of 1.6.0 — but it is kept in this list, because a user whose
+    # environment still HAS it (from an old install, or dragged in by a plugin) is in exactly the
+    # broken state this check exists to name. Its pins would silently hold the stack at
+    # zarr<2.16 / tifffile<2023.3 while BioIO needs the modern one.
+    sources = ('pycat-napari', 'bioio', 'cellpose', 'numba', 'napari', 'aicsimageio')
 
     merged = {}
 
