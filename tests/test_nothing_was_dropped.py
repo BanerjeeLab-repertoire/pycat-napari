@@ -124,6 +124,52 @@ _DELIBERATE = {
     #     extract_channel_info_from_aicsimage → extract_channel_info
     #
     # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    # 1.6.24 — EXTRACTED to `file_io/writers.py`, not deleted.
+    #
+    # **Writing files is not reading them, routing them, or showing them.** `_save_layer` is 243
+    # lines and depended on exactly ONE thing from its 3,108-line host: `self.central_manager`.
+    # `_apply_saved_tags_to_layer` depended on **nothing at all**.
+    #
+    # `atomic_write` moved with them — it *is* a writer concern, and leaving it behind would make
+    # `writers.py` import its former host, which is a cycle. **`file_io` imports it back**, because
+    # the other save paths still use it.
+    #
+    # (`FileIOClass` keeps a delegating stub for each method, so every caller is untouched.)
+    # ...and the seven helpers NESTED INSIDE `_save_layer`, which moved with it. They are defined
+    # inside the function body, so the guard tracks them as `file_io.py::<name>` — but they now
+    # live in `writers.py::_save_layer`, unchanged.
+    'file_io.py::_frame',
+    'file_io.py::_frames',
+    'file_io.py::_mask_frames',
+    'file_io.py::_minimal_label_dtype',
+    'file_io.py::_pycat_tag',
+    'file_io.py::_to_label_array',
+    'file_io.py::_to_uint16',
+
+    'file_io.py::_save_layer',
+    'file_io.py::_apply_saved_tags_to_layer',
+    'file_io.py::atomic_write',
+
+    # 1.6.24 — EXTRACTED to `file_io/napari_adapter.py`, not deleted.
+    #
+    # **The camera, the scale bar, and the layer-scale alignment are napari DISPLAY. They are not
+    # file I/O** — they read the viewer and write the viewer, and they touch **no file, no reader,
+    # no path.** They were sitting in the middle of a 3,108-line `FileIOClass` whose other 31
+    # methods open, route, tag and save images.
+    #
+    # These four were the cleanest cut in the class: they depend on `viewer` and `central_manager`
+    # and *nothing else*. They come out as plain functions with no loss, and what is left behind is
+    # 237 lines smaller and one responsibility lighter.
+    #
+    # *The bodies did not shrink. They MOVED — and the guard's real question, "did the rationale in
+    # the deleted lines survive somewhere?", is answered: `napari_adapter.py`.*
+    #
+    # (`FileIOClass` keeps a 3-line delegating stub for each, so every caller is untouched.)
+    'file_io.py::_align_layer_scales',
+    'file_io.py::_enable_auto_scale_bar',
+    'file_io.py::_update_scale_bar_for_active_layer',
+    'file_io.py::_fit_view_to_layer',
+
     'metadata_extract.py::extract_aicsimage_metadata',
     'channel_naming.py::extract_channel_info_from_aicsimage',
 }

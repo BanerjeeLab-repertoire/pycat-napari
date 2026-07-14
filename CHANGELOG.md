@@ -4,6 +4,52 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.24] - 2026-07-14
+### Changed — **FileIOClass: 3,108 lines → 2,620.** The split has started.
+
+The audit's complaint is that `FileIOClass` does **eighteen things**: dialogs, storage diagnostics,
+reader selection, metadata parsing, image-vs-mask classification, TIFF internals, lazy wrappers,
+layer naming, channel colours, napari camera fitting, scale bars, data-repository updates, batch
+recording, tag restoration, stack materialisation, save/export, session clearing.
+
+*"This makes unit testing difficult and increases the chance that UI edits affect scientific reading
+behaviour."*
+
+**A 3,108-line class is not split in one move.** It is split in a sequence of moves each of which is
+*provably safe* — and each of these two was chosen because it depends on **almost nothing** from its
+host.
+
+- **`file_io/napari_adapter.py`** (237 lines) — the camera, the scale bar, the layer-scale
+  alignment. **None of it touches a file.** These four functions depend on `viewer` and
+  `central_manager` and *nothing else* — no reader, no path, no handle.
+- **`file_io/writers.py`** (461 lines) — `_save_layer` is **243 lines** and depended on exactly ONE
+  thing from its host: `self.central_manager`. `_apply_saved_tags_to_layer` depended on **nothing at
+  all**. `atomic_write` moved with them, because it *is* a writer concern — and leaving it behind
+  would make `writers.py` import its former host, which is a cycle.
+
+`FileIOClass` keeps a **3-line delegating stub** for each, so **every caller is untouched.**
+
+### Fixed — the 1.0 µm/px sentinel, third and fourth copies
+
+Both scale-bar functions decided **µm-versus-px** with `abs(px - 1.0) > 1e-9`. So an image with a
+*genuine* 1.0 µm/px calibration — downsampled, low-magnification, synthetic — shows a **"px" bar**,
+and the scale bar silently lies about what it is measuring.
+
+*Same sentinel fixed in `_finalise_stack_load` (1.6.15) and `_tag_loaded_layer` (1.6.23).* They now
+ask the repository **where the number came from** rather than guessing from its value.
+
+### Caught by the guards, and worth recording
+
+- **`test_no_undefined_names` caught a real bug**: `_fit_view_to_layer` uses `os`, imported at
+  `file_io.py` module scope and **not** in the new module. It would have raised `NameError` at
+  runtime — on the debug path, so it might have sat there for months.
+- **The stub's signature was wrong.** I wrote `dataframes=None`; the real parameter is `tag_store`,
+  **and the caller passes it as a keyword.** It compiled fine. It would have raised `TypeError` on
+  every save.
+- `test_no_FUNCTION_has_vanished` also caught the **seven helpers nested inside `_save_layer`** that
+  moved with it. Recorded in `_DELIBERATE` with the reason — *the bodies did not shrink, they moved,
+  and the guard's real question ("did the rationale survive somewhere?") is answered.*
+
 ## [1.6.23] - 2026-07-14
 ### Fixed — **open a movie and label it T; add a z-stack and label it Z; the movie is now labelled Z**
 
