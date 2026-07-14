@@ -61,6 +61,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy scipy scikit-image pandas matplotlib
           pip install opencv-python-headless pywavelets simpleitk
+          # seaborn: data_viz_tools imports it at module scope (one of three plotting
+          # backends). networkx: fibril_tools imports it at module scope for the fibre
+          # graph. NEITHER was caught by test_ci_dependencies, because that guard only
+          # checked the modules listed in SCIENTIFIC_MODULES -- and neither is on it.
+          # The smoke test (which imports EVERY toolbox module) is what found them.
+          pip install seaborn networkx
           # scikit-learn: `segmentation_tools` imports RandomForestClassifier at module
           # scope, and `two_channel_coloc_tools` / `timeseries_condensate_tools` import
           # segmentation_tools, so all three inherit it. It was invisible until 1.5.439

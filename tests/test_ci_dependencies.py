@@ -81,6 +81,18 @@ def _guarded_modules():
     return re.findall(r'"([\w_]+)"', match.group(1))
 
 
+def _every_toolbox_module():
+    """**Every module the smoke test imports** — which is every toolbox module.
+
+    *Not* ``SCIENTIFIC_MODULES``: that is a hand-curated list of 24, and the two modules whose
+    dependencies CI was missing (``data_viz_tools`` → ``seaborn``, ``fibril_tools`` → ``networkx``)
+    **were not on it.**
+    """
+    toolbox = _ROOT / "src" / "pycat" / "toolbox"
+    return sorted(path.stem for path in toolbox.glob("*.py")
+                  if not path.stem.startswith('_'))
+
+
 def _module_scope_dependencies(module, seen=None):
     """Third-party packages imported at MODULE SCOPE, following pycat.toolbox transitively."""
     if seen is None:
@@ -137,8 +149,20 @@ def test_ci_installs_every_module_scope_dependency():
         if "pip install" in line.split("#", 1)[0]   # and skip fully-commented lines
     )
 
+    # ── EVERY toolbox module, not a hand-curated list ───────────────────────────
+    #
+    # This guard used to walk only ``SCIENTIFIC_MODULES`` — a hand-maintained list of 24 names in
+    # ``test_headless_science``. **``data_viz_tools`` and ``fibril_tools`` are not on it**, so their
+    # module-scope imports of ``seaborn`` and ``networkx`` were **never checked**, and CI never
+    # installed them.
+    #
+    # ***Two lists, drifting apart.*** The smoke test — which imports **every** toolbox module —
+    # is what found it, and it found it in CI, *after the release was cut.*
+    #
+    # A guard whose scope is narrower than the thing it guards will eventually miss something. So
+    # the scope is now **derived**: every module the smoke test actually imports.
     required = set()
-    for module in _guarded_modules():
+    for module in _every_toolbox_module():
         required |= _module_scope_dependencies(module)
 
     missing = []

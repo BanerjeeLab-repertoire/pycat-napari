@@ -4,6 +4,45 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-07-13
+### CI red — and the guard that should have caught it had a NARROWER SCOPE than the thing it guards
+``test_smoke_the_real_code`` failed in CI:
+
+```
+data_viz_tools: No module named 'seaborn'
+```
+
+**``seaborn`` is a declared PyCAT dependency** — but the CI job installs an **explicit list**, and
+seaborn is not on it.
+
+### Why `test_ci_dependencies` did not catch it
+That guard walks **``SCIENTIFIC_MODULES``** — a **hand-maintained list of 24 names** in
+``test_headless_science``.
+
+***``data_viz_tools`` is not on it.*** So its module-scope ``import seaborn`` was **never checked**,
+and CI never installed it.
+
+> ***Two lists, drifting apart.*** The smoke test — which imports **every** toolbox module — is what
+> found it, and it found it **in CI, after the release was cut.**
+
+### And there was a SECOND one, hiding behind the first
+Auditing every toolbox module against the CI install list found **``fibril_tools`` imports
+``networkx``**, which CI also does not install. **Nothing caught it** — for the same reason — and it
+had not surfaced only because the smoke test hit ``data_viz_tools`` first *(alphabetically)* and
+stopped at the assert.
+
+### The fix is the SCOPE, not the two packages
+CI now installs ``seaborn`` and ``networkx``. **But that is the symptom.**
+
+``test_ci_dependencies`` now **derives** its scope — **every toolbox module**, the same set the
+smoke test imports — instead of reading a hand-curated list.
+
+> ***A guard whose scope is narrower than the thing it guards will eventually miss something.***
+
+**Verified**: remove the CI install line and the guard now **fires**. Before this change, it did not.
+
+**423/423 core tests passing.**
+
 ## [1.6.0] - 2026-07-13
 # ⚑ BioIO replaces aicsimageio. The pins are free.
 
