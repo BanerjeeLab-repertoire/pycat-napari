@@ -157,9 +157,17 @@ def _get_zarr_dir_path(stack_like) -> Optional[str]:
     if z is None and hasattr(stack_like, 'store'):
         z = stack_like  # already a raw zarr Array
     if z is not None:
-        store = getattr(z, 'store', None)
-        if isinstance(store, _zarr.storage.DirectoryStore):
-            return store.path
+        # ── A CAPABILITY question, not a CLASS check ────────────────────────────
+        #
+        # This was ``isinstance(store, _zarr.storage.DirectoryStore)`` — and **zarr 3 renamed that
+        # class to ``LocalStore``.** A class check breaks the day the class is renamed, which is
+        # the day the BioIO migration needs it.
+        #
+        # Worse: zarr 3's ``LocalStore`` exposes its path as ``.root``, not ``.path``. So even
+        # after fixing the name, a bare ``store.path`` would return ``None`` on zarr 3 —
+        # **silently** — and PyCAT would copy a stack it did not need to copy.
+        from pycat.file_io.zarr_compat import store_path
+        return store_path(z)
     return None
 
 
@@ -540,9 +548,11 @@ def _make__stackprocessworker():
             src_zarr_path = None
             if isinstance(src, str) and os.path.isdir(src):
                 src_zarr_path = src
-            elif hasattr(src, 'store') and isinstance(
-                    getattr(src, 'store', None), _zarr.storage.DirectoryStore):
-                src_zarr_path = src.store.path
+            else:
+                # Same capability question as above — see `zarr_compat.store_path`. `DirectoryStore`
+                # is `LocalStore` in zarr 3, and its path lives on `.root`, not `.path`.
+                from pycat.file_io.zarr_compat import store_path
+                src_zarr_path = store_path(src)
             if src_zarr_path and os.path.isdir(src_zarr_path):
                 # A raw filesystem zarr is NOT guaranteed [0,1]-normalised, so the
                 # workers still apply the global range (cheap; preserves the trend).
@@ -575,9 +585,11 @@ def _make__stackprocessworker():
             # Check if source is already a filesystem zarr DirectoryStore
             if isinstance(src, str) and os.path.isdir(src):
                 src_zarr_path = src
-            elif hasattr(src, 'store') and isinstance(getattr(src, 'store', None),
-                                                        _zarr.storage.DirectoryStore):
-                src_zarr_path = src.store.path
+            else:
+                # Same capability question — see `zarr_compat.store_path`. `DirectoryStore` is
+                # `LocalStore` in zarr 3, and its path lives on `.root`, not `.path`.
+                from pycat.file_io.zarr_compat import store_path
+                src_zarr_path = store_path(src)
 
             if src_zarr_path and os.path.isdir(src_zarr_path):
                 return src_zarr_path   # already a filesystem zarr — use directly

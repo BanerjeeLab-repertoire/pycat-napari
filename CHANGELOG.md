@@ -4,6 +4,60 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.533] - 2026-07-13
+### BioIO stage 1 of 3 — the zarr surface is now version-agnostic
+**Stage 2 passed first:** BioIO and aicsimageio were run against **38 real files** in separate
+environments and compared offline.
+
+| | |
+|---|---|
+| **identical** | **31** — *including the Zeiss CZI, ``3.30 hr_1_MMStack_Pos0``, every OME-TIFF, every in-vitro TIFF, every batch output* |
+| **different** | **0** — shape, dtype, **dimension order**, **pixel size**, scenes, **and the SHA-256 of the pixels** |
+| not comparable | 6 — all ``.ims``, and **neither library reads them** |
+
+The ``.ims`` gap is **not a gap**: PyCAT intercepts ``.ims`` at ``_open_image_auto_single`` and
+routes it to ``open_stack`` → ``imaris_ims_file_reader``, its own HDF5 reader. ***The probe tested a
+path PyCAT does not take.*** Confirmed working in the app.
+
+### The zarr rename is what makes this a chain rather than a swap
+From zarr's migration guide:
+
+```
+- from zarr import MemoryStore, DirectoryStore
++ from zarr.storage import MemoryStore, LocalStore   # LocalStore replaces DirectoryStore
+```
+
+- ``aicsimageio`` is **frozen in maintenance mode** and pins ``zarr<2.16``
+- BioIO's plugins want **zarr 3**
+- PyCAT's lazy loaders were written against **zarr 2**
+
+***So the reader cannot be replaced until the store class is version-agnostic.***
+
+### A CAPABILITY question, not a CLASS check
+PyCAT asks ``DirectoryStore`` exactly one thing, in **three** places: *"is this zarr backed by a
+directory on disk, and if so, where?"*
+
+**That is a capability, not a class.** ``pycat.file_io.zarr_compat.store_path`` answers it, and works
+on zarr 2 **and** zarr 3.
+
+### The second trap, which would have been much harder to find
+zarr 3's ``LocalStore`` exposes the path as **``.root``** (a ``Path``), not **``.path``** (a ``str``).
+
+**So even after fixing the class name, a bare ``store.path`` would return ``None`` on zarr 3 —
+silently** — and PyCAT would copy a stack it did not need to copy. *A silent fallback that merely
+wastes time is still a silent fallback.*
+
+### The rest of the surface needs nothing — checked, not assumed
+An AST walk of **every** ``zarr.open`` call (25 of them) found only four kwargs: ``mode``, ``shape``,
+``chunks``, ``dtype``. **All four survive in zarr 3.** No zarr-2-only argument appears anywhere.
+
+### Shipping while `zarr<3` is still pinned
+Nothing changes today. The compat layer works on the zarr that is installed **now**, and it is ready
+for the pin to move. *(A guard fails the build if any line names ``DirectoryStore`` directly — and
+it immediately caught a **third** call site that a hand-search had missed.)*
+
+**420/420 core tests passing.**
+
 ## [1.5.532] - 2026-07-13
 ### ⚑ THE LAST WHOLLY BioIO-FREE VERSION — the revert point for the 1.6.0 migration
 **1.5.532 is the last release with no BioIO code path at all.** Everything from here stages toward
