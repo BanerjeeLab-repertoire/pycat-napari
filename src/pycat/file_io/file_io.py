@@ -1652,10 +1652,42 @@ class FileIOClass:
             # 1.0 µm/px, so 1.0 means "no metadata / uncalibrated". Viscosity and
             # any physical measurement depend on this, so it is a first-class tag.
             if microns_per_pixel is not None:
-                calibrated = abs(float(microns_per_pixel) - 1.0) > 1e-9
+                # Provenance from WHERE the number came from, not WHAT it is. The old test was
+                # `abs(mpp - 1.0) > 1e-9`, on the reasoning that a real pixel size is essentially
+                # never exactly 1.0 — but **"essentially never" is not never**, and a downsampled or
+                # synthetic image with a genuine 1.0 µm/px had its calibration thrown away.
+                # (Same sentinel fixed in `_finalise_stack_load`; this copy was still live.)
+                _dr_now = self.central_manager.active_data_class.data_repository
+                calibrated = _calibration_is_from_metadata(_dr_now, microns_per_pixel)
                 _LT.tag_layer(layer, 'scale',
                               'calibrated' if calibrated else 'uncalibrated',
                               source=('from_metadata' if calibrated else 'inferred'))
+
+            # ── The stack axis belongs to the LAYER, not to the session ─────────────────
+            #
+            # `stack_axis_label` lives in `data_repository`, which is **one dict shared by every
+            # layer**. PyCAT can add a second file without clearing — "Open Image (Add)", and
+            # multi-select in the file dialog, which *"loads each subsequent file with
+            # clear_first=False"*.
+            #
+            # So: open an undeclared movie, label it **T**. Add an undeclared z-stack, label it
+            # **Z**. ***The second load overwrites the first's label.*** An MSD on the movie now
+            # reads "Z" — and `warn_if_assumed_axis` warns about the wrong thing, on the layer the
+            # user labelled correctly.
+            #
+            # **T and Z load identically**, so there is nothing on screen to reveal it.
+            #
+            # The tag is per-layer and travels with it. `source='user_set'` because the user was
+            # *asked* — this is not an inference, it is an answer, and it must not be silently
+            # overwritten by the next file's answer.
+            try:
+                _dr_axis = self.central_manager.active_data_class.data_repository
+                if _dr_axis.get('stack_axis_assumed') and (n_t > 1 or n_z > 1):
+                    _LT.tag_layer(layer, 'stack_axis',
+                                  str(_dr_axis.get('stack_axis_label') or '?').upper(),
+                                  source='user_set')
+            except Exception as _axis_e:
+                debug_log("file_io: could not tag the stack axis", _axis_e)
 
             _LT.tag_layer(layer, 'provenance', provenance, source='inferred')
 

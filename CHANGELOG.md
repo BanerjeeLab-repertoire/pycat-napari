@@ -4,6 +4,55 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.23] - 2026-07-14
+### Fixed — **open a movie and label it T; add a z-stack and label it Z; the movie is now labelled Z**
+
+`stack_axis_label` lives in `data_repository` — **one dict shared by every layer.** And PyCAT can
+add a file *without* clearing:
+
+- **"Open Image (Add)"** — an explicit menu action, *"for side-by-side comparison"*;
+- **multi-select in the file dialog** — which loads *"each subsequent file with `clear_first=False`"*.
+
+So the second load **overwrites the first's axis label.** An MSD on the movie then reads `'Z'`, and
+`warn_if_assumed_axis` warns about the wrong thing — *on the layer the user labelled correctly.*
+
+***T and Z load identically.*** Nothing on screen reveals it, and every rate that comes out — a
+diffusion coefficient, a coarsening rate, a recovery half-time — is a rate **per frame**. If those
+frames are Z-slices, the rate is a fiction.
+
+- **The axis is now tagged on the LAYER**, through the tag store that already existed
+  (`_tag_loaded_layer`), with `source='user_set'` — because the user was *asked*. **That is an
+  answer, not an inference, and it must not be silently overwritten by the next file's answer.**
+- **`warn_if_assumed_axis(..., layer=...)`** reads the layer's own tag when given one. The argument
+  is **optional**, so every existing call site keeps working — *the store is fixed without
+  rewriting nine analysis handlers in the same change.*
+
+### Fixed — the warning only ever fired ONCE, and never for the stack that needed it
+
+The once-per-session flag was `dr['_axis_warned'] = True`, set on the **shared** repository. The
+first stack spent the session's single warning, so ***the second stack never warned at all*** — and
+with the label overwritten by that second load, **the second stack is exactly the one at risk.**
+
+The flag is now a **set, keyed by layer**.
+
+### Fixed — the 1.0 µm/px sentinel had a second copy
+
+`_tag_loaded_layer` still decided calibration from `abs(mpp - 1.0) > 1e-9` — the same *"a real pixel
+size is essentially never exactly 1.0"* reasoning fixed in `_finalise_stack_load` in 1.6.15.
+***"Essentially never" is not never.*** It now reads `pixel_size_source`, like the other copy.
+
+### Added
+- `tests/test_axis_is_per_layer.py` — each layer warns about **its own** axis; the **second** stack
+  warns at all; the same layer warns only once; a **declared** axis is never warned about; and a
+  caller passing no layer still behaves exactly as before.
+
+### Not done, and worth saying plainly
+**The nine analysis handlers still call `warn_if_assumed_axis` without a layer**, so they fall back
+to the shared repository — *the old behaviour.* The store is correct and per-layer; **the consumers
+are not yet reading it.** Threading the analysed layer through each handler is a real change (the
+layer differs per call site — `img_dd`, `mask_dd`, `stack_dd` — and the MSD path is computed from
+*tracks*, not from a layer), and it belongs in its own release rather than bundled here.
+
 ## [1.6.22] - 2026-07-14
 ### Fixed — **the same pixels, through two loaders, were 65535x apart**
 

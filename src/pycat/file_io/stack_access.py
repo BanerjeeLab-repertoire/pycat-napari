@@ -178,7 +178,7 @@ def iter_frames(stack_like, dtype=np.float32, indices=None):
         if 0 <= t < arr.shape[0]:
             yield int(t), arr[t]
 
-def warn_if_assumed_axis(data_repository, operation="this analysis"):
+def warn_if_assumed_axis(data_repository, operation="this analysis", layer=None):
     """**A wrong axis label makes every RATE meaningless, and nothing about the number looks wrong.**
 
     An undeclared multipage TIFF has no axis metadata, so the user labels it **T or Z at load**.
@@ -206,9 +206,45 @@ def warn_if_assumed_axis(data_repository, operation="this analysis"):
     reaching back into the file-IO instance.)"""
     try:
         dr = data_repository
-        if not dr or not dr.get('stack_axis_assumed') or dr.get('_axis_warned'):
+
+        # ── The axis belongs to the LAYER, not to the session ───────────────────────────
+        #
+        # `stack_axis_label` lives in `data_repository` — **one dict shared by every layer.** PyCAT
+        # can add a file without clearing ("Open Image (Add)"; multi-select in the dialog, which
+        # loads *"each subsequent file with clear_first=False"*).
+        #
+        # Open an undeclared movie, label it **T**. Add an undeclared z-stack, label it **Z**.
+        # ***The second load overwrites the first's label.*** An MSD on the movie then reads "Z",
+        # and this function warns about the wrong thing on the layer the user labelled *correctly*.
+        #
+        # **T and Z load identically**, so nothing on screen reveals it.
+        #
+        # When the caller passes the layer it is about to analyse, its own `stack_axis` tag wins.
+        label = None
+        if layer is not None:
+            try:
+                from pycat.utils.layer_tags import get_tags
+                label = (get_tags(layer) or {}).get('stack_axis', {}).get('value')
+            except Exception:
+                label = None
+
+        if label is None:
+            if not dr or not dr.get('stack_axis_assumed'):
+                return
+            label = dr.get('stack_axis_label', '?')
+
+        # ── Once per LAYER, not once per session ───────────────────────────────────────
+        #
+        # The flag was `dr['_axis_warned']`, set on the shared repository — so **the second stack
+        # never warned at all.** The first one had already spent the session's single warning.
+        warned = dr.setdefault('_axis_warned', set()) if isinstance(dr, dict) else set()
+        if not isinstance(warned, set):        # migrate the old boolean
+            warned = set()
+            dr['_axis_warned'] = warned
+        key = getattr(layer, 'name', None) or '__session__'
+        if key in warned:
             return
-        label = dr.get('stack_axis_label', '?')
+
         try:
             from napari.utils.notifications import show_warning
             show_warning(
@@ -217,7 +253,7 @@ def warn_if_assumed_axis(data_repository, operation="this analysis"):
                 f"if it's actually the other kind, reopen and relabel.")
         except Exception:
             pass
-        dr['_axis_warned'] = True
+        warned.add(key)
     except Exception:
         pass
 
