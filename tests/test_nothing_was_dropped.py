@@ -124,6 +124,19 @@ _DELIBERATE = {
     #     extract_channel_info_from_aicsimage → extract_channel_info
     #
     # Every call site was updated in the same change (4 and 4 respectively, all internal).
+    # 1.6.26 — EXTRACTED to `file_io/dialogs.py`, not deleted.
+    #
+    # **Asking the user is not reading the file.** Two of these kept their memory on `self` —
+    # `self._multipage_axis_choice` ("remember my answer this session") and `self._local_cache_files`
+    # — and **neither was ever read by another method.** They were scratch variables that happened to
+    # be spelled as attributes of a 3,108-line class; they are now module-level, which is what they
+    # always were.
+    #
+    # (`FileIOClass` keeps a delegating stub for each, so every caller is untouched.)
+    'file_io.py::_ask_copy_to_local',
+    'file_io.py::_copy_to_local_with_progress',
+    'file_io.py::_ask_multipage_axis',
+
     # 1.6.25 — EXTRACTED to `file_io/routing.py`, not deleted.
     #
     # **Four methods that never touched `self`.** They took `(self, file_path)` and used the `self`

@@ -4,6 +4,43 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.26] - 2026-07-14
+### Changed — **FileIOClass: 3,108 → 2,353.** Fourth extraction.
+
+- **`file_io/dialogs.py`** (161 lines) — **asking the user is not reading the file.** Three dialogs
+  that interrupt a load to ask a question only a human can answer: *copy this file locally?* (it is
+  on slow storage) and *are these pages T or Z?* (an undeclared multipage TIFF says nothing about
+  its own axis, and ***T and Z load identically***, so **nothing downstream can discover the answer
+  for itself**).
+
+- **Two of them kept their memory on `self` — and nothing ever read it.**
+  `self._multipage_axis_choice` ("remember my answer this session") and `self._local_cache_files`
+  were **scratch variables that happened to be spelled as attributes** of a 3,108-line class. They
+  are now module-level, which is what they always were.
+
+  *Side effect, and an improvement:* the T/Z answer is now genuinely **session**-scoped rather than
+  instance-scoped — which is what "remember for the rest of this session" always meant.
+
+### Found, and deliberately NOT fixed
+
+`_local_cache_files` carries the comment *"Track for optional cleanup at session end."*
+
+***There is no cleanup.*** Nothing reads the list. A user on a slow network share who accepts the
+copy-to-local prompt for a 1.5 GB acquisition leaves **1.5 GB in `%TEMP%/pycat_local_cache`**, and
+it stays there.
+
+It is preserved exactly as it was, and the leak is now **written down in the module** rather than
+implied by a comment nobody reads. *A cleanup that deletes a scientist's data is worse than a cache
+that grows, and choosing the moment to purge it is a decision — not a refactor.*
+
+### Caught while extracting
+
+`QProgressDialog` and `QButtonGroup` were imported **locally**, and `QProgressDialog` inside a
+`try/except` that sets it to `None` on failure — *a deliberate graceful-degradation path for a
+headless or minimal Qt install.* Hoisting them to module scope would have turned a **soft dependency
+into a hard one**, and the copy-to-local path would have stopped working entirely rather than
+working without a progress bar. **`dialogs.py` has no module-level Qt import at all.**
+
 ## [1.6.25] - 2026-07-14
 ### Changed — **FileIOClass: 3,108 → 2,514.** Third extraction.
 
