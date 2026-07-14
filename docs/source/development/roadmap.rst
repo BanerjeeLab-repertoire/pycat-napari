@@ -44,6 +44,69 @@ open sections stay accurate:
   and a global bleaching detrend. Toolbox → Advanced Analysis → Molecular Counting.
 
 
+Loader & I/O — open after the BioIO migration (1.6.0–1.6.13)
+------------------------------------------------------------
+
+Full record: ``docs/audits/bioio_migration_2026-07-13.md``. These are the items that were
+**deliberately not closed**, with what each would actually cost.
+
+.. rubric:: Z-stack and T+Z TIFF still go through BioIO's broken zarr path
+
+``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and **tifffile's zarr store is
+incompatible with zarr 3.2** (it fails to import ``RegularChunkGrid``, which zarr renamed, and then
+**blames the version**: ``zarr 3.2.1 < 3 is not supported``, which is not true).
+
+``_TiffPageStack`` handles the **TYX** case natively — direct page seeks, no zarr. **It does not
+handle Z or T+Z.** Those paths now *report the real cause* instead of tifffile's misleading message,
+but **they do not work**.
+
+Two routes, and the choice is not obvious:
+
+* **Extend the native page reader to Z and T+Z.** The page-index arithmetic is already there
+  (``page = ((t * n_z) + z) * n_channels + c``); what is missing is the wrapper shape and the napari
+  dims. *Self-contained. Does not depend on anyone else fixing anything.*
+* **Wait for tifffile or bioio-tifffile to fix the zarr-3 incompatibility.** *Free, but it is
+  someone else's timeline, and the tifffile issue for this has been open a while.*
+
+Nobody has hit this yet because the lab's TIFF stacks are time series. **A z-stack TIFF would fail
+today.**
+
+.. rubric:: The reader is CACHED, not passed through the dispatch
+
+The external audit asked for the reader to be **opened once and passed down the dispatch chain**.
+What shipped is a **cache in the seam** (4 constructions → 1) plus an ``ImageStructure`` record that
+carries the inspection forward.
+
+**That is cheap, not clean.** Seven call sites still independently reach for a reader, and each still
+decides for itself what it needs. The cache makes that free; it does not make it *right*.
+
+*Worth revisiting only if the dispatch grows another branch — at which point the cost of the current
+shape starts to show. Not urgent.*
+
+.. rubric:: `pycat_perf.py` cannot build a wrapper for multichannel IMS
+
+The performance harness fails on the four ``optofuspld`` multichannel ``.ims`` files with
+``OSError: Can't synchronously read data (can't open directory)`` — an HDF5 error.
+
+**Those files open and scrub correctly in PyCAT**, so this is a bug in the *diagnostic script's*
+reader construction, **not in the product.**
+
+*Recorded rather than dismissed:* it means the harness is **not exercising the multichannel IMS
+wrapper**, and that is a real gap in coverage even though it is not a product bug. The single-channel
+IMS path is measured and clean (600 planes, 0.5% of scene per frame).
+
+.. rubric:: The lazy wrappers live behind a Qt import
+
+``_TiffPageStack``, ``_ImsReaderTYX`` and ``_LazyArraySource`` all live in ``file_io.py``, which
+imports the GUI stack at module scope. **Reaching a lazy wrapper therefore drags in PyQt5.**
+
+This is the same class of problem ``test_headless_science`` guards against elsewhere. It does not
+break anything today — every environment that runs PyCAT has Qt — but it means the wrappers **cannot
+be exercised headlessly**, which is exactly what a performance harness or a CI perf gate wants to do.
+
+*A GUI-free ``lazy_sources.py`` would fix it. Small, mechanical, and it unblocks measuring the
+wrappers in CI.*
+
 Outstanding & Noted (near-term, worth tackling)
 ------------------------------------------------
 

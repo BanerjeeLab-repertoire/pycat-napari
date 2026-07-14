@@ -4,6 +4,148 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.14] - 2026-07-13
+### Documentation — the whole 1.6 arc, written to be reviewed and revisited
+
+**`docs/audits/bioio_migration_2026-07-13.md`** — the full record of 1.6.0 → 1.6.13. **Where a
+decision was wrong, it says so and says what it cost:**
+
+- the probe passed 31/31 on **correctness** and **could not see the freeze** — *by construction*
+- 1.6.3 fixed **three of nine** ``__array__`` methods, and **the guard only looked at the file
+  containing those three**
+- the item-8 fix **never once ran** — a malformed call inside a ``try/except`` is **invisible**
+- **three badly-posed thresholds** in the performance metric, and what each taught
+- the harness measured **one of four lazy paths** — *and not the one that bit*
+- **the reader cache introduced a correctness bug** while fixing something else
+
+### README — upgrading from 1.5.x
+**An in-place upgrade will not work, and the failure is disguised.** ``aicsimageio`` and BioIO
+**cannot coexist**; installing 1.6 into a 1.5 environment leaves both broken, and the error
+(``'_TIFF' object has no attribute 'RESUNIT'``) ***sends a scientist looking at their microscope.***
+
+The new section says **why**, gives the five-minute fresh-environment path, **keeps the old
+environment as a fallback**, covers the GPU torch replacement, and explains what a healthy startup
+looks like.
+
+### Roadmap — what was deliberately NOT closed
+- **Z and T+Z TIFF still go through BioIO's broken zarr path.** ``_TiffPageStack`` handles TYX
+  natively; it does not handle Z or T+Z. **A z-stack TIFF would fail today.**
+- **Item 4 was cached, not restructured.** *Cheap, not clean — and worth saying so.*
+- **The harness cannot build a wrapper for multichannel IMS.** The files work in PyCAT; **the
+  diagnostic script is what is broken** — *recorded rather than dismissed, because it means the
+  multichannel IMS wrapper is not being exercised.*
+- **The lazy wrappers live behind a Qt import**, so they cannot be measured headlessly.
+
+### DEV_NOTES — the parts that will bite someone
+The two disguised failures (``RESUNIT``; ``zarr 3.2.1 < 3 is not supported``, ***which is a lie***),
+why the conda lockfiles were deleted and must not return, and **why a user can break PyCAT by
+installing a napari plugin and there is no way to stop them** — *which is a design position, not a
+missing feature.*
+
+**469/469 core tests passing.**
+
+## [1.6.13] - 2026-07-13
+# The harness tested ONE of FOUR lazy paths — and not the one that bit
+
+Gable: *"since we have ims loading lazily why are we not trying to time them in the same way? the
+issues with lazy not being so lazy were there for everything."*
+
+**He is right, and skipping ``.ims`` was lazy reasoning on my part.**
+
+| format | load path | lazy wrapper | tested? |
+|---|---|---|---|
+| **.ims** | ``_open_stack_ims`` | ``_ImsReaderTYX/ZYX/TZYX`` | **NO — skipped entirely** |
+| **.tif** | ``_open_stack_generic`` | ``_TiffPageStack`` | **NO** |
+| **.czi** | ``_open_stack_generic`` | ``_LazyArraySource`` | **NO** |
+| any | ``read_plane`` | *(no wrapper)* | **YES** — *only this* |
+
+> ***And the bug Gable actually FELT — the IMS scrubbing lag — lived in
+> ``_ImsReaderTYX.__array__``, which none of that ever touched.***
+
+**``read_plane`` is the CLASSIFICATION path.** What the user does is:
+
+```
+drag the slider    ->  wrapper[t]         ->  __getitem__  ->  ONE frame
+napari thumbnail   ->  np.asarray(layer)  ->  __array__    ->  ALL frames   <- THE BUG
+```
+
+*I measured the path I had fixed, not the path that broke.*
+
+## Now measured where the finger is
+The harness builds **the wrapper PyCAT would build, per format** — including ``.ims``, which is no
+longer skipped — and **indexes one frame, as scrubbing does.**
+
+Two new tests, both verified:
+
+| | |
+|---|---|
+| **scrubbing one frame** | **0.4%** of the way from *one frame* to *the whole stack* |
+| **``np.asarray(wrapper)``** | **REFUSES** — *the ``__array__`` guard holds* |
+
+**Both halves of the same bug.** ``wrapper[t]`` being cheap is not enough: *anything* that treats
+the layer as an array calls ``__array__`` — a thumbnail, a contrast estimate, a plugin, a layer-list
+refresh. **That is what made the IMS stack lag**, and PyCAT's own source had said so for months.
+
+**469/469 core tests passing** *(2 skip in a headless sandbox without Qt; both verified by direct
+execution).*
+
+## [1.6.12] - 2026-07-13
+# Three badly-posed thresholds, and what each one taught
+
+The harness crashed on ``KeyError: 'n/a'`` — I added a verdict and forgot the label for it. *A
+reporting bug that destroys the report is worse than an ugly label*; it now uses ``.get``.
+
+**But the crash was the small problem.** Above it, three OME-TIFFs had started reporting **``high``**
+— and *they were fine.*
+
+## The three thresholds, in order
+**1. "amplification < 3x"** — ***vacuous.*** For a ``T=1 Z=1 C=1`` file, **one plane IS the whole
+scene**, so the ratio is **1.0× by construction.** **30 of Gable's 32 files could not fail**, and
+the green result hid the two that were talking.
+
+**2. "fraction of the scene < 15%"** — flagged a **57 KB plane in a 600-frame file at 3.7×**, which
+is ~212 KB against a **34 MB scene: 0.6% of it.** *Fixed overhead — page tags, OME-XML, a numpy
+temporary — reads as 3.7× on a small plane and 0.01× on a big one.*
+
+**3. …and that same fix then flagged the 3-CHANNEL files.** **Reading one plane out of a 3-plane
+scene necessarily allocates 33% of it.**
+
+> ***A correct loader MUST hit the floor, and I was calling the floor a failure.***
+
+## The framing that doesn't need an invented constant
+The **file** sets both bounds:
+
+```
+floor   = one plane        (what a CORRECT loader allocates)
+ceiling = the whole scene  (what a BROKEN one allocates)
+```
+
+**Where peak sits between them** is scale-free, plane-count-free, and needs no threshold I made up.
+
+| | position |
+|---|---|
+| **lazy** | **0.1%** |
+| **eager** | **100.1%** |
+
+## And the metric only has POWER when the bounds are far apart
+**With N planes, a correct read allocates 1/N of the scene.** At N=1 that is **100%**. At N=3 it is
+**33%** — *and the entire window between correct and broken is 3×, which fixed overhead can cross on
+its own.*
+
+**Below 10 planes the metric cannot tell right from wrong, and it now says so** rather than grading
+anyway. ***Pretending otherwise is exactly how the last two thresholds went wrong.***
+
+Verified against Gable's real files:
+
+| file | verdict |
+|---|---|
+| Image 3/5/7-OME *(3 planes)* | **n/a** — no room to tell |
+| In Cell *(1 plane)* | **n/a** |
+| **post_1_0.5_1** *(600 planes, 3.7×)* | **ok** — *0.6% of the scene* |
+| *a broken loader (600 planes)* | **SCENE** — *100%* |
+
+**467/467 core tests passing.**
+
 ## [1.6.11] - 2026-07-13
 # The harness was badly posed — and it was hiding two real bugs
 

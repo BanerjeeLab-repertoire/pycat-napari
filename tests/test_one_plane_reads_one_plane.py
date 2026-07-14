@@ -101,19 +101,35 @@ def test_reading_ONE_PLANE_does_not_allocate_the_WHOLE_SCENE(a_fifty_frame_tiff)
     scene_bytes = plane_bytes * n_frames
     scene_fraction = peak / scene_bytes
 
-    # ── FRACTION OF THE SCENE, not a multiple of the plane ──────────────────────
+    # ── WHERE DOES PEAK SIT BETWEEN THE FLOOR AND THE CEILING? ──────────────────
     #
-    # **A raw ratio is scale-dependent, and my first threshold was wrong because of it.**
+    # **Three thresholds went wrong before this one, and each taught something:**
     #
-    # The harness flagged one of Gable's files at **3.7x** and called it a problem. *It was not.*
-    # That file is 600 frames of 177x162 — **a 57 KB plane** — so 3.7x is ~212 KB against a **34 MB
-    # scene: 0.6% of it.** The same fixed overhead (page tags, metadata, a numpy temporary) reads as
-    # 3.7x on a small plane and 0.01x on a 4 MB one.
+    # 1. *"amplification < 3x"* — **vacuous**. For a single-plane file, one plane IS the whole
+    #    scene, so the ratio is 1.0x by construction. **30 of 32 real files could not fail.**
     #
-    # **A loader that reads the whole scene allocates ~100% of it.** That is the thing to test.
-    assert scene_fraction < 0.15, (
-        f"reading ONE plane allocated {peak / 1e6:.2f} MB — **{scene_fraction:.0%} of the whole "
-        f"{n_frames}-frame scene** ({peak / plane_bytes:.1f}x one plane).\n\n"
+    # 2. *"fraction of scene < 15%"* — flagged a 57 KB plane in a 600-frame file at 3.7x, which is
+    #    **0.6% of a 34 MB scene.** *Fixed overhead reads as 3.7x on a small plane and 0.01x on a
+    #    big one.*
+    #
+    # 3. …and the same fix then flagged the **3-channel** files. **Reading one plane out of a
+    #    3-plane scene necessarily allocates 33% of it.** ***A correct loader MUST hit the floor,
+    #    and I was calling the floor a failure.***
+    #
+    # The file itself sets both bounds:
+    #
+    #     floor   = one plane        (what a correct loader allocates)
+    #     ceiling = the whole scene  (what a broken one allocates)
+    #
+    # **Where peak sits between them** is scale-free, plane-count-free, and needs no invented
+    # constant. *(And it only has power when there are enough planes for the two to be far apart —
+    # which is why this fixture uses 50.)*
+    position = (peak - plane_bytes) / max(scene_bytes - plane_bytes, 1)
+
+    assert position < 0.1, (
+        f"reading ONE plane allocated {peak / 1e6:.2f} MB — **{position:.0%} of the way from "
+        f"'one plane' to 'the whole {n_frames}-frame scene'** ({scene_fraction:.0%} of it, "
+        f"{peak / plane_bytes:.1f}x one plane).\n\n"
         f"On a large acquisition that is a freeze, and **no correctness test can see it**: the "
         f"pixels that come back are perfectly right."
     )
@@ -156,3 +172,97 @@ def test_the_LAZY_and_EAGER_paths_are_SEPARATED_by_an_order_of_magnitude(a_fifty
         f"lazy peaked at {lazy / 1e6:.2f} MB and eager at {eager / 1e6:.2f} MB — only "
         f"{eager / max(lazy, 1):.1f}x apart. The threshold in the test above has no margin."
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#  THE WRAPPER — the path the user's finger is actually on
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# ── The harness tested ONE of FOUR lazy paths, and NOT the one that bit ────────────────────
+#
+#     FORMAT   LOAD PATH                LAZY WRAPPER              tested?
+#     ------------------------------------------------------------------------
+#     .ims  -> _open_stack_ims       -> _ImsReaderTYX/ZYX/TZYX      NO   <- SKIPPED
+#     .tif  -> _open_stack_generic   -> _TiffPageStack              NO
+#     .czi  -> _open_stack_generic   -> _LazyArraySource            NO
+#     any   -> read_plane            -> (no wrapper)                YES  <- only this
+#
+# ***And the bug Gable actually FELT — the IMS scrubbing lag — lived in
+# ``_ImsReaderTYX.__array__``, which none of that ever touched.***
+#
+# Gable: *"since we have ims loading lazily why are we not trying to time them in the same way?
+# the issues with lazy not being so lazy were there for everything."* **He was right.**
+#
+# ``read_plane`` is the **classification** path. What the user does is::
+#
+#     drag the slider    ->  wrapper[t]         ->  __getitem__  ->  ONE frame
+#     napari thumbnail   ->  np.asarray(layer)  ->  __array__    ->  ALL frames   <- THE BUG
+
+
+@pytest.mark.core
+def test_SCRUBBING_one_frame_allocates_one_frame():
+    """**The path the user feels.** ``read_plane`` is not it.
+
+    Dragging the time slider calls ``wrapper[t]``. If that allocates the whole stack, the
+    application freezes — *and every correctness test still passes, because the frame that comes
+    back is perfectly right.*
+    """
+    file_io = pytest.importorskip("pycat.file_io.file_io")
+
+    handle, path = tempfile.mkstemp(suffix='.tif')
+    os.close(handle)
+
+    n_frames, size = 60, 512
+    try:
+        tifffile.imwrite(
+            path,
+            np.random.default_rng(0).integers(0, 255, (n_frames, size, size), dtype=np.uint8))
+        tifffile.imread(path)                     # warm the cache — the hard case
+
+        wrapper = file_io._TiffPageStack(path, n_frames, size, size, np.dtype('float32'),
+                                         channel_idx=0, n_channels=1)
+
+        # The wrapper returns float32, so one frame costs 4 bytes/px whatever the file holds.
+        plane_bytes = size * size * 4
+        scene_bytes = plane_bytes * n_frames
+
+        peak = _peak_allocation(lambda: wrapper[n_frames // 2])
+
+        position = (peak - plane_bytes) / max(scene_bytes - plane_bytes, 1)
+
+        assert position < 0.1, (
+            f"scrubbing to ONE frame allocated {peak / 1e6:.2f} MB — **{position:.0%} of the way "
+            f"from 'one frame' to 'the whole {n_frames}-frame stack'**.\n\n"
+            f"This is what the user does when they drag the slider. **It is the freeze**, and no "
+            f"correctness test can see it."
+        )
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.core
+def test_np_asarray_on_a_WRAPPER_still_REFUSES():
+    """**The other half of the same bug.**
+
+    ``wrapper[t]`` being cheap is not enough — *anything* that treats the layer as an array calls
+    ``__array__``: a thumbnail, a contrast estimate, a plugin, a layer-list refresh.
+
+    **That is what made the IMS stack lag**, and PyCAT's own source had said so for months.
+    """
+    file_io = pytest.importorskip("pycat.file_io.file_io")
+
+    handle, path = tempfile.mkstemp(suffix='.tif')
+    os.close(handle)
+
+    try:
+        tifffile.imwrite(path, np.random.default_rng(0).integers(
+            0, 255, (20, 128, 128), dtype=np.uint8))
+
+        wrapper = file_io._TiffPageStack(path, 20, 128, 128, np.dtype('float32'),
+                                         channel_idx=0, n_channels=1)
+
+        with pytest.raises(RuntimeError, match="implicit full-stack read"):
+            np.asarray(wrapper)
+
+    finally:
+        os.unlink(path)

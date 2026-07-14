@@ -1282,3 +1282,78 @@ no macOS API).
 * ``KMP_DUPLICATE_LIB_OK`` is **kept** — useless for the numba/torch pair, but the only mitigation
   available for the **other** pair: MKL's libiomp5 against torch's libomp, which is the documented
   **Intel-Mac "PyTorch segfaults Cellpose"** bug. *Same mechanism, different colliders.*
+
+## 8. Environment fragility after the BioIO migration (2026-07-13)
+
+Full record: `bioio_migration_2026-07-13.md`. **This section is the part that will bite someone, not
+the part that is interesting.**
+
+### aicsimageio and BioIO cannot coexist, and the failure is disguised
+
+`aicsimageio` is frozen in 2023 and pins `zarr<2.16`, `tifffile<2023.3.15`, `fsspec<2023.9`,
+`lxml<5`. BioIO needs the modern stack. **Installing one alongside the other leaves both broken.**
+
+The observed failure is:
+
+```
+AttributeError: '_TIFF' object has no attribute 'RESUNIT'
+```
+
+***Which sends a scientist looking at their microscope.*** It is `aicsimageio` reading a `tifffile`
+three years newer than it supports, and **nothing in that traceback says so.**
+
+**The startup environment check now names the package, the version, the requirement, and the fix.**
+It reads the pins **from the installed metadata**, walking the dependency tree — *not from a
+hardcoded list, which would go stale the moment the pins move.*
+
+### tifffile's zarr error message is a lie
+
+```
+ValueError: zarr 3.2.1 < 3 is not supported
+```
+
+***3.2.1 is not less than 3.*** The real error is one frame up: `cannot import name
+'RegularChunkGrid'` — **zarr 3.2 renamed it.** `tifffile` catches **any** ImportError out of its
+zarr-3 module and blames the version.
+
+**If anyone reports this, do not go looking for an old zarr.** TIFF pixels now bypass BioIO entirely
+(`tiff_planes.read_tiff_plane`), so it should only surface on **Z or T+Z TIFF stacks**, which still
+go through BioIO. *(See the roadmap.)*
+
+### A user can break PyCAT by installing a napari plugin, and there is no way to stop them
+
+`pip` has no *"conflicts-with"* field. napari discovers plugins from whatever is installed, and its
+plugin manager makes installing one a single click.
+
+**PyCAT cannot prevent the damage — it can only refuse to pretend nothing happened.** That is what
+the startup check is for, and it is worth understanding as a *design position* rather than a feature.
+
+### The conda lockfiles were deleted, and should not come back
+
+`config/pycat-napari-env-*.yaml` were **exported conda lockfiles pinned to Python 3.9** — and PyCAT
+requires `>=3.12`. **They could not have worked.** They also pinned `aicsimageio=4.10.0`,
+`numpy=1.23.5`, `tifffile=2023.2.28`, and **the README told developers to build from them.**
+
+***An exported lockfile is a second source of truth by construction.*** If a conda environment is
+genuinely needed, generate it from `pyproject.toml`. **`test_install_routes_agree` fails the build if
+they return.**
+
+### Lessons worth keeping
+
+**A guard whose scope is narrower than the bug will certify the half that was fixed.** 1.6.3 fixed
+three of nine `__array__` methods, and the guard only looked at the file containing those three.
+
+**A malformed call inside a `try/except` is invisible.** `_TiffPageStack(file_path)` — one argument
+where five are required — raised `TypeError`, was caught, and **fell through to the eager read
+anyway.** It compiled, tests were green, and the fix never once ran.
+
+**A guard that cannot tell code from prose will eventually flag its own explanation.** Three times in
+this arc a guard matched a *comment* rather than the code — and once it flagged the docstring
+explaining why the bug was dangerous. **The fix is not to stop explaining.** All of them now walk the
+AST.
+
+**Correctness testing cannot see a performance regression.** The migration was validated on shape,
+dtype, dimension order, pixel size, scenes, and a **checksum of the pixels** — 31 files identical,
+0 different — while a loader read the *entire scene* to fetch *one plane*. ***The freeze was invisible
+to it by construction.*** `test_one_plane_reads_one_plane` is the answer, and it measures **peak
+allocation**, because bytes-read is blind to the page cache and to memory-mapping.

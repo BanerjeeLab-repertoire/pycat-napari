@@ -74,6 +74,77 @@ PyCAT needs two things: **Python 3.12** and a tool to manage it. If you don't ha
 
 ---
 
+## Already running PyCAT 1.5.x? Read this first.
+
+**1.6 changed the image reader, and an in-place upgrade will not work.** You need a **fresh
+environment**. It takes about five minutes and you can keep your old one as a fallback.
+
+### Why you cannot just `pip install --upgrade`
+
+PyCAT 1.6 replaced `aicsimageio` (which its own maintainers retired) with **BioIO**, its supported
+successor. **The two libraries cannot coexist.** `aicsimageio` is frozen in 2023 and pins old
+versions of `zarr`, `tifffile`, `fsspec` and `lxml`; BioIO needs the modern ones. Installing 1.6
+into a 1.5 environment leaves both behind, and **the result is an environment where neither works.**
+
+*(If you try it anyway, you will most likely see `AttributeError: '_TIFF' object has no attribute
+'RESUNIT'`, which looks like a problem with your file and is not.)*
+
+### Do this instead
+
+**1. Make the new environment.** *(Your existing one is untouched — if anything goes wrong you can
+go straight back to it.)*
+
+```bash
+conda create -n pycat-16 python=3.12 -y
+conda activate pycat-16
+pip install pycat-napari
+```
+
+**2. If you use the GPU for Cellpose**, replace the CPU build of PyTorch. `pip` installs the CPU one
+by default and it is **much** slower:
+
+```bash
+pip uninstall torch torchvision -y
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+**3. Launch it.**
+
+```bash
+run-pycat
+```
+
+**A healthy startup is quiet.** If PyCAT prints a block beginning
+`THIS ENVIRONMENT DOES NOT MATCH WHAT PyCAT REQUIRES`, **read it** — it names the exact package, the
+version you have, the version needed, **and the command to fix it.** *(That check exists because a
+broken environment used to fail with a message that sent people looking at their microscope.)*
+
+### Going back
+
+Your 1.5 environment still works. To use it:
+
+```bash
+conda activate <your-old-env-name>
+run-pycat
+```
+
+**Nothing about your data or your saved sessions changes between versions.**
+
+### What you get
+
+- **Zeiss CZI, OME-TIFF, Micro-Manager stacks and Imaris files all read identically** — verified
+  against the old reader on 38 real files, **down to a checksum of the pixels**
+- **Large stacks scrub without stalling.** Several loading paths were reading an *entire*
+  acquisition to display *one frame*; they now read one frame.
+- **A corrupt pixel size is caught rather than trusted.** *(ImageJ's Substack export can write a
+  physically impossible scale — smaller than an atom. PyCAT now asks you for the real one instead of
+  silently computing every length from it.)*
+
+**If something behaves differently from 1.5, that is worth reporting** — please open a GitHub issue
+and say which file and which version.
+
+---
+
 ### Step 1 — Install Miniforge (gets you Python + a package manager)
 
 Miniforge is a small, free installer that gives you Python **and** the `mamba` command PyCAT uses to stay organized. It's the easiest starting point on every system.
