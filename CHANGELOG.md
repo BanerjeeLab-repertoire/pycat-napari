@@ -4,6 +4,68 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.16] - 2026-07-14
+### Fixed — the voxel was assumed isotropic, and it almost never is
+
+- **Every 3-D volume PyCAT reported was computed with `z_step_um = 1.0`.** The parameter had a
+  default of 1.0 and **nothing ever passed a value.** The UI's Z-step spinbox was hardcoded to
+  1.0, and its tooltip said *"Z-step size in µm from the acquisition metadata"* — **it was not.**
+
+  A typical confocal pairs a **0.108 µm** lateral pixel with a **0.300 µm** Z step, because the
+  axial PSF is three times worse and nobody oversamples a dimension they cannot resolve. So:
+
+      voxel_volume_um3 = (microns_per_pixel ** 2) * z_step_um
+
+  was out by **3.33×** on every condensate volume, every volume fraction and every 3-D density.
+  The same number feeds the marching-cubes `spacing=` and the 3-D centroids, so **surface areas and
+  axial distances were wrong in the same breath** — and on a true sphere it drags *sphericity* from
+  0.87 to 0.74. ***All of it reported as numbers that look entirely normal.***
+
+  **The true value was already in the repository.** `metadata_extract` reads
+  `physical_pixel_sizes.Z` and stores it as `z_step_um`, where it was **displayed in the metadata
+  panel and read by nothing.** *This is the same disease as the 1.0 µm/px sentinel fixed in 1.6.15:
+  the honest number exists, nobody consults it, and the fallback is a plausible-looking lie.*
+
+- New `z_step_um()` / `z_step_um_or_default()` in `utils/pixel_size.py`, alongside the lateral
+  accessors and holding the same contract: **NaN when it does not know**, a warning when it
+  proceeds anyway, and the same physical-plausibility bounds (a corrupt tag is not a measurement).
+- The Z-step spinbox is now **seeded from the file**, and when the file carries no Z step the
+  tooltip says so — *in the place the guess is made*, because a user who does not know the value
+  was assumed cannot know the volume is unreliable.
+- `condensate_metrics_3d` / `cell_metrics_3d` now default `z_step_um` to **NaN, not 1.0**. NaN
+  propagates: a NaN volume is visibly wrong, a 3.3× overestimate is not.
+
+### Fixed — the storage probe was the stall it warned about
+
+- **It read a flat 8 MB before the reader opened the file.** 8 MB is not a bounded cost — it is
+  8 MB *at whatever speed the medium runs*, and the medium is the unknown being measured. On the
+  2 MB/s network share the probe exists to detect, **the probe alone spent ~3.5 seconds** before
+  anything reached the screen, to establish a fact the first fraction of a second had proved.
+
+  ***A diagnostic that reproduces the symptom it diagnoses is not free.***
+
+  The read is now bounded by **time** (`PROBE_DEADLINE_S = 0.75`), not bytes. Measured: **3500 ms →
+  815 ms**, with the slow-storage verdict unchanged and fast disks unaffected (~2 ms).
+
+- **The chunk had to shrink for the deadline to bite.** The first attempt bounded a 3500 ms probe
+  to *1500 ms* against a 750 ms deadline — because at 1 MB per chunk, a 2 MB/s share spends
+  **500 ms inside a single `read()`**, so a deadline checked between chunks cannot be honoured to
+  better than half a second. **A bound that a coarse chunk overshoots by 2× is a coincidence, not a
+  bound.** Chunk is now 128 KB (~64 ms at 2 MB/s).
+
+- **The verdict is cached per directory.** Storage speed does not vary between two files in one
+  folder, but the probe ran **once per file** — so opening a 200-image acquisition folder paid for
+  it 200 times. Only the *throughput* is cached; **size and message stay per-file**, because
+  caching the whole verdict would report whichever file was probed first — exactly the class of
+  quietly-wrong output this work keeps digging out.
+
+### Added
+- `tests/test_anisotropic_voxel.py` — pins the 3.33× error, the NaN propagation, and that the Z
+  step is *read from the file* rather than guessed.
+- `tests/test_storage_probe_deadline.py` — a throttled 2 MB/s file proves the probe stays inside
+  its deadline **and still reaches the right verdict**. *(Fixture-based; runs under CI pytest, not
+  under the hand-rolled sandbox runner.)*
+
 ## [1.6.15] - 2026-07-14
 ### Fixed — the `__array__` guard was too narrow, for the second time
 

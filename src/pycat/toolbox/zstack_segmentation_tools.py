@@ -340,7 +340,7 @@ def condensate_metrics_3d(
     labeled_3d: np.ndarray,
     intensity_volume: np.ndarray,
     microns_per_pixel: float,
-    z_step_um: float = 1.0,
+    z_step_um: float = float('nan'),   # NOT 1.0 — see note below
 ) -> pd.DataFrame:
     """
     Per-condensate 3D morphological and intensity metrics.
@@ -354,9 +354,22 @@ def condensate_metrics_3d(
     intensity_volume : (Z, H, W) float32 — raw or preprocessed intensity
         for measuring mean/max/integrated signal per condensate
     microns_per_pixel : XY pixel size in µm
-    z_step_um : Z-step size in µm (may differ substantially from XY pixel
-        size — always check the acquisition metadata; anisotropic voxels
-        are the norm, not the exception, in Z-stack microscopy)
+    z_step_um : Z-step size in µm. **Defaults to NaN, not 1.0** — see the note below.
+        May differ substantially from the XY pixel size; anisotropic voxels are the norm,
+        not the exception, in Z-stack microscopy. Get it from
+        ``pycat.utils.pixel_size.z_step_um(data_repository)``, which reads the value the
+        file actually carries.
+
+        ---- Why the default is NaN ----
+
+        It was ``1.0``, and **nothing ever passed a value**, so every 3-D volume this
+        function produced assumed an isotropic voxel. A typical confocal pairs a 0.108 µm
+        lateral pixel with a **0.300 µm** Z step — so ``voxel_volume_um3`` was out by
+        **3.3x**, and the same number feeds the marching-cubes ``spacing=`` and the 3-D
+        centroids, making the surface areas and the axial distances wrong in the same
+        breath. *All of it reported as numbers that look entirely normal.*
+
+        NaN propagates. A NaN volume is visibly wrong; a 3.3x overestimate is not.
 
     Returns
     -------
@@ -479,7 +492,7 @@ def condensate_metrics_3d(
 def cell_metrics_3d(
     labeled_cells_3d: np.ndarray,
     microns_per_pixel: float,
-    z_step_um: float = 1.0,
+    z_step_um: float = float('nan'),   # NOT 1.0 — see note below
 ) -> pd.DataFrame:
     """
     Per-cell 3D volume and morphology, mirroring 2D cell_analysis_func's

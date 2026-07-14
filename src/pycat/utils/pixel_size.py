@@ -244,3 +244,122 @@ def pixel_size_um_or_default(data_repository, default=1.0, context=''):
         f"therefore in PIXEL units, not microns**, unless the true pixel size happens to be "
         f"{default}. Do not report these lengths or areas as physical values.")
     return float(default)
+
+
+# ── Z is NOT the same number as XY, and assuming it is corrupts every volume ─────────────
+#
+# **Microscopy is anisotropic and confocal Z-stacks are the extreme case.** A typical acquisition::
+#
+#     X = 0.108 µm      Y = 0.108 µm      Z = 0.300 µm
+#
+# The Z step is nearly **three times** the lateral pixel — because the axial PSF is that much
+# worse, and nobody oversamples a dimension they cannot resolve.
+#
+# ``zstack_segmentation_tools`` computes::
+#
+#     voxel_volume_um3 = (microns_per_pixel ** 2) * z_step_um
+#
+# and ``z_step_um`` was a **function default of 1.0** that **nothing ever passed**. So on the
+# acquisition above, every 3-D volume PyCAT reported was out by::
+#
+#     assumed 1.0 / true 0.300  =  3.33x
+#
+# ***A 3.3× error in every condensate volume, every volume fraction, and every 3-D density —
+# reported as a number that looks entirely normal.*** And it feeds the marching-cubes ``spacing=``
+# and the 3-D centroid coordinates too, so the surface areas and the distances are wrong in the
+# same breath.
+#
+# **The true value was already in the repository.** ``metadata_extract`` reads
+# ``physical_pixel_sizes.Z`` from the OME metadata and stores it as ``z_step_um`` — where it was
+# **displayed in the metadata panel and read by nothing.**
+#
+# *This is the same disease as the 1.0 µm/px sentinel: the honest number exists, nobody consults
+# it, and the fallback is a plausible-looking lie.*
+
+
+def z_step_um(data_repository, context=''):
+    """The Z step in µm, or ``NaN`` if it is not known.
+
+    **Do not substitute the XY pixel size.** They are different numbers on essentially every
+    confocal — a 0.108 µm lateral pixel commonly pairs with a 0.300 µm Z step — and a volume
+    computed from the wrong one is wrong by their ratio, silently.
+
+    Returns ``NaN`` rather than guessing, for the same reason ``pixel_size_um`` does: a ``NaN``
+    volume is visibly wrong, and a 3.3× overestimate is not.
+    """
+    where = f" ({context})" if context else ""
+
+    if not isinstance(data_repository, dict):
+        _warn_once(
+            f'z_no_repo{where}',
+            f"Z step unknown{where}: no data repository was available. 3-D volumes, surface "
+            f"areas and axial distances cannot be converted to microns and are returned as NaN.")
+        return float('nan')
+
+    # Written by `metadata_extract` from the OME `physical_pixel_sizes.Z`.
+    raw = ((data_repository.get('file_metadata') or {}).get('common') or {}).get('z_step_um')
+
+    # A value set directly on the repository (by a UI field, or a batch step) wins over the file:
+    # the user correcting the metadata is the whole point of being able to.
+    if data_repository.get('z_step_um') is not None:
+        raw = data_repository.get('z_step_um')
+
+    if raw is None:
+        _warn_once(
+            f'z_missing{where}',
+            f"Z step unknown{where}: the file carries no axial spacing, so 3-D volumes and "
+            f"surface areas cannot be computed in microns and are returned as NaN.\n\n"
+            f"This used to default SILENTLY to 1.0 µm. On a typical confocal Z step of 0.3 µm "
+            f"that is a **3.3x overestimate of every 3-D volume** — reported as a number that "
+            f"looks entirely normal.\n\n"
+            f"Set the Z step in the metadata panel, or pass it explicitly.")
+        return float('nan')
+
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        _warn_once(
+            f'z_unparseable{where}',
+            f"Z step unknown{where}: `z_step_um` is {raw!r}, which is not a number. 3-D "
+            f"volumes are returned as NaN.")
+        return float('nan')
+
+    if not np.isfinite(value) or value <= 0:
+        _warn_once(
+            f'z_nonpositive{where}',
+            f"Z step unknown{where}: `z_step_um` is {value}, which is not a positive number. "
+            f"3-D volumes are returned as NaN.")
+        return float('nan')
+
+    # The same plausibility bounds as the lateral pixel: a Z step is a physical distance produced
+    # by the same instrument, and the bounds are loose enough that any real one passes.
+    if not is_physically_plausible(value):
+        _warn_once(
+            f'z_implausible{where}',
+            f"Z step unknown{where}: the file claims {value:g} µm per slice, which no microscope "
+            f"can have produced. 3-D volumes are returned as NaN. "
+            f"{implausible_reason(value)}")
+        return float('nan')
+
+    return value
+
+
+def z_step_um_or_default(data_repository, default=1.0, context=''):
+    """The Z step in µm, falling back to ``default`` — **and saying so.**
+
+    For the places that must produce a number. The fallback is the same one that used to happen
+    silently; the difference is that the assumption is now **on the record**, so a volume computed
+    with an assumed isotropic voxel is not mistaken for a measured one.
+    """
+    value = z_step_um(data_repository, context=context)
+    if np.isfinite(value):
+        return value
+
+    where = f" ({context})" if context else ""
+    _warn_once(
+        f'z_defaulted{where}',
+        f"Z step unknown{where} — proceeding with {default} µm per slice. **The voxel is "
+        f"therefore assumed ISOTROPIC**, which it almost never is: a typical confocal pairs a "
+        f"~0.1 µm lateral pixel with a ~0.3 µm Z step. Do not report these volumes or surface "
+        f"areas as physical values.")
+    return float(default)

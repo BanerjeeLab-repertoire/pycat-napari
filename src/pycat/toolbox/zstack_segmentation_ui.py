@@ -18,7 +18,7 @@ Pipeline
 from __future__ import annotations
 import numpy as np
 
-from pycat.utils.pixel_size import pixel_size_um_or_default
+from pycat.utils.pixel_size import pixel_size_um_or_default, z_step_um
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -415,12 +415,38 @@ def _add_zstack_metrics(ui, layout):
     form.addRow("3D condensate mask:", mask_dd)
     form.addRow("Intensity volume:", int_dd)
 
-    z_step_sp = QDoubleSpinBox(); z_step_sp.setRange(0.01, 50); z_step_sp.setValue(1.0)
-    z_step_sp.setToolTip(
-        "Z-step size in \u00b5m from the acquisition metadata. Voxels are "
-        "almost always anisotropic (Z-step \u2260 XY pixel size) \u2014 check "
-        "your acquisition settings rather than assuming isotropy."
-    )
+    # ── The Z step comes from the FILE, not from 1.0 ────────────────────────────────────
+    #
+    # This spinbox was hardcoded to **1.0** and the tooltip said *"from the acquisition
+    # metadata."* **It was not.** `metadata_extract` reads `physical_pixel_sizes.Z` and stores it
+    # as `z_step_um` — where it was displayed in the metadata panel and **read by nothing.**
+    #
+    # A typical confocal pairs a 0.108 µm lateral pixel with a **0.300 µm** Z step. Left at 1.0,
+    # `voxel_volume_um3 = mpp² × z_step` overstates **every 3-D volume by 3.3×**, and the same
+    # number feeds the marching-cubes `spacing=` and the 3-D centroids — so the surface areas and
+    # the axial distances are wrong in the same breath. *Reported as numbers that look normal.*
+    _z_known = z_step_um(ui._dr(), context='zstack_3d_metrics')
+    _z_seed = _z_known if np.isfinite(_z_known) else 1.0
+
+    z_step_sp = QDoubleSpinBox(); z_step_sp.setRange(0.01, 50); z_step_sp.setValue(_z_seed)
+    z_step_sp.setDecimals(4)
+    if np.isfinite(_z_known):
+        z_step_sp.setToolTip(
+            f"Z-step = {_z_known:g} \u00b5m, read from this file's acquisition metadata.\n\n"
+            "Voxels are almost always anisotropic (Z-step \u2260 XY pixel size). Override only "
+            "if you know the metadata is wrong."
+        )
+    else:
+        # Say that it is a GUESS, in the place the guess is made. A user who does not know the
+        # value was assumed cannot know the volume is unreliable.
+        z_step_sp.setToolTip(
+            "\u26a0 This file carries NO Z-step in its metadata \u2014 1.0 \u00b5m is an "
+            "ASSUMPTION, not a measurement.\n\n"
+            "Voxels are almost always anisotropic: a typical confocal pairs a ~0.1 \u00b5m "
+            "lateral pixel with a ~0.3 \u00b5m Z step. If that is your case, leaving this at 1.0 "
+            "overstates every 3-D volume by ~3x.\n\n"
+            "Enter the true Z-step from your acquisition settings."
+        )
     form.addRow("Z-step (\u00b5m):", z_step_sp)
 
     run = QPushButton("\u25b6  Compute 3D Metrics")

@@ -38,6 +38,30 @@ SLOW_MBPS_THRESHOLD = 30.0
 # caching of tiny files, small enough to stay quick even on slow media.
 PROBE_BYTES = 8 * 1024 * 1024  # 8 MB
 
+# ── And how long we are willing to SPEND finding out ─────────────────────────────────────
+#
+# 8 MB is not a bounded cost — it is 8 MB *at whatever speed the medium runs*, and the medium is
+# the unknown we are measuring. On a 2 MB/s network share the probe alone takes **four seconds**,
+# before the reader has opened the file, to establish a fact the first second already proved.
+#
+# **The probe must not be the stall it is warning about.** The read stops at whichever comes
+# first — the byte budget, or this deadline. A source too slow to deliver 8 MB in 0.75 s has
+# *answered the question*; the remaining bytes only refine a number that is used for one
+# comparison against a threshold.
+PROBE_DEADLINE_S = 0.75
+
+# ── The verdict is a property of the DIRECTORY, not of the file ──────────────────────────
+#
+# Storage speed does not vary between two files in the same folder — but the probe ran **once per
+# file**, so opening a 200-image acquisition folder paid the probe 200 times. The verdict is
+# cached per directory for the session; the *message* still names the individual file's size.
+_VERDICT_CACHE = {}
+
+
+def clear_probe_cache():
+    """Forget cached storage verdicts. For tests, and for a user who has moved a drive."""
+    _VERDICT_CACHE.clear()
+
 
 class StorageVerdict:
     """Result of probing a file's storage. Attributes:
@@ -126,9 +150,9 @@ def classify_location(path):
 
 
 # ── Throughput probe (the reliable "is it slow" signal) ──────────────────────
-def measure_throughput(path, nbytes=PROBE_BYTES):
-    """Time a sequential read of up to ``nbytes`` from the start of the file and
-    return the SUSTAINED throughput in MB/s (or None if unmeasurable).
+def measure_throughput(path, nbytes=PROBE_BYTES, deadline_s=PROBE_DEADLINE_S):
+    """Time a sequential read from the start of the file and return the SUSTAINED
+    throughput in MB/s (or None if unmeasurable).
 
     Measures steady-state rate, not first-read latency. The first read chunk
     carries file-open + seek + cache-miss cost that has nothing to do with the
@@ -137,13 +161,40 @@ def measure_throughput(path, nbytes=PROBE_BYTES):
     (untimed), then time the remaining reads — that reflects how fast the bulk of
     a large microscopy file will actually stream. For a cloud placeholder this
     read is what triggers the download, so callers should probe off the UI thread.
+
+    ── The probe is bounded by TIME, not by bytes ────────────────────────────────────────
+
+    It used to read a flat **8 MB** before the reader opened the file. **On the exact storage it
+    exists to detect, that is the stall it is warning about.** A 2 MB/s network share spends
+    **four seconds** in the probe before anything reaches the screen — and on a cloud placeholder
+    the read is what *triggers the download*, so the probe can block for as long as the file takes
+    to arrive.
+
+    ***A diagnostic that reproduces the symptom it diagnoses is not free.***
+
+    So it stops at whichever comes first: ``nbytes``, or ``deadline_s`` of wall clock. Stopping
+    early **does not weaken the verdict** — the question is "is this fast or slow?", and a source
+    that has not delivered the budget within the deadline has answered it. Reading the remaining
+    megabytes only sharpens a number nobody looks at, at the cost of the delay the probe exists to
+    prevent.
     """
     try:
         size = os.path.getsize(path)
         to_read = min(nbytes, size)
         if to_read <= 0:
             return None
-        chunk_sz = 1024 * 1024
+
+        # ── The chunk must be small enough for the deadline to BITE ──────────────────────
+        #
+        # At 1 MB per chunk, a 2 MB/s share takes **500 ms inside a single `f.read()`** — so a
+        # deadline checked between chunks cannot be honoured to better than half a second, and the
+        # untimed warm-up chunk costs another 500 ms on top. *The first attempt at this bounded the
+        # probe to 1500 ms against a 750 ms deadline, which is not a bound, it is a coincidence.*
+        #
+        # 128 KB is ~64 ms per chunk at 2 MB/s: fine enough that the deadline lands where it is
+        # set, and still far above the point where per-read syscall overhead would distort the
+        # measured rate on a fast disk.
+        chunk_sz = 128 * 1024
         with open(path, 'rb') as f:
             # Untimed warm-up chunk: absorbs open/seek/first-access latency.
             warm = f.read(min(chunk_sz, to_read))
@@ -164,6 +215,10 @@ def measure_throughput(path, nbytes=PROBE_BYTES):
                 if not chunk:
                     break
                 got += len(chunk)
+                # The deadline. A slow source stops here having ALREADY proved it is slow —
+                # which is the entire finding. A fast one reaches `remaining` long before this.
+                if (time.perf_counter() - t0) >= deadline_s:
+                    break
             dt = time.perf_counter() - t0
         if dt <= 0 or got <= 0:
             return None
@@ -193,7 +248,26 @@ def probe_path(path, measure=True):
     # Don't run the timed read on a cloud placeholder unless explicitly asked —
     # the read itself would force the download we're trying to warn about.
     if measure and not needs_download:
-        throughput = measure_throughput(path)
+        # ── Cache the SPEED per directory. Not the whole verdict. ────────────────────────
+        #
+        # Throughput is a property of the *medium*, so every file in a folder shares it — and
+        # re-probing each one made opening a 200-image acquisition folder pay the probe 200 times.
+        #
+        # **But the size and the message are per-FILE.** Caching the whole `StorageVerdict` would
+        # tell the user the size of whichever file happened to be probed first, which is exactly
+        # the kind of quietly-wrong output this codebase keeps having to dig out. So only the
+        # measured number is reused; everything else is recomputed for this file.
+        try:
+            key = os.path.dirname(os.path.abspath(path)) or path
+        except Exception:
+            key = None
+
+        if key is not None and key in _VERDICT_CACHE:
+            throughput = _VERDICT_CACHE[key]
+        else:
+            throughput = measure_throughput(path)
+            if key is not None:
+                _VERDICT_CACHE[key] = throughput
 
     slow = needs_download or (throughput is not None
                               and throughput < SLOW_MBPS_THRESHOLD)
