@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.55] - 2026-07-15
+### Fixed — **OME-TIFF pixel size recovered from OME-XML (no more spurious Set-Scale dialog / "division by zero").**
+- An OME-TIFF whose baseline TIFF XResolution is zeroed (`0/1`) made the reader's physical_pixel_sizes
+  raise "Could not parse tiff pixel size: division by zero" and fall back to 1.0 µm/px — popping the
+  Set-Scale dialog even though the OME-XML carried the true `PhysicalSizeX` (e.g. 0.0264 µm/px). Added
+  `_ome_pixel_size_um` (reads OME-XML PhysicalSizeX, honours the unit) and wired pixel-size recovery
+  into the 2D image path: when update_metadata lands on the 1.0 sentinel, recover from OME-XML first
+  (authoritative for OME-TIFF), then baseline TIFF tags. The 2D path previously had no recovery at all.
+### Added — **Channel modality inferred from pixels when metadata is silent.**
+- Camera-only acquisitions (MicroManager, exported OME-TIFF) carry no fluorophore/emission/name, so
+  channel identification fell straight to a meaningless position guess ("C0-Blue"). New
+  `channel_modality.classify_channel_from_pixels` measures a frame and names the modality —
+  fluorescence vs transmitted, with a finer brightfield/DIC/phase split when the optical signature is
+  clear (directional shadow-cast for DIC, edge halos for phase, plain absorption for brightfield),
+  degrading honestly to the generic "transmitted" when uncertain (a wrong "DIC" is worse than an honest
+  "transmitted"). Wired as a new tier in `identify_channel` between wavelength and the position
+  fallback; metadata (fluorophore name / emission) still takes precedence over pixel inference. Guard
+  test tests/test_channel_modality.py.
+
 ## [1.6.54] - 2026-07-15
 ### Changed — **File-I/O god-class decomposition #2: `open_2d_image` reader extracted to `readers/image_reader_2d.py`.**
 - Lifted the pure file-path → channel-arrays logic out of `FileIOClass.open_2d_image` into a free

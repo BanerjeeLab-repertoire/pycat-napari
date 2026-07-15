@@ -220,6 +220,51 @@ def _tiff_pixel_size_um(file_path):
     except Exception:
         return None
 
+
+def _ome_pixel_size_um(file_path):
+    """Read physical pixel size (µm/px) from OME-XML PhysicalSizeX.
+
+    For an OME-TIFF the OME-XML is the AUTHORITATIVE pixel-size source — the
+    baseline TIFF XResolution/YResolution tags are often zeroed on OME exports
+    (which makes the reader's own physical_pixel_sizes raise "division by zero"),
+    while the OME-XML carries the real value. This reads it directly.
+
+    Returns µm/px as a float, or None if not an OME file / no usable value.
+    """
+    try:
+        import tifffile
+        import re as _re
+    except Exception:
+        return None
+    try:
+        with tifffile.TiffFile(file_path) as t:
+            ome = getattr(t, 'ome_metadata', None)
+            if not ome:
+                return None
+            m = _re.search(r'PhysicalSizeX="([^"]+)"', ome)
+            if not m:
+                return None
+            val = float(m.group(1))
+            if val <= 0:
+                return None
+            # OME PhysicalSizeXUnit defaults to µm; honour an explicit unit if given.
+            um = val
+            um_match = _re.search(r'PhysicalSizeXUnit="([^"]+)"', ome)
+            unit = (um_match.group(1).strip().lower() if um_match else '')
+            if unit in ('nm', 'nanometer', 'nanometre'):
+                um = val / 1000.0
+            elif unit in ('mm', 'millimeter', 'millimetre'):
+                um = val * 1000.0
+            elif unit in ('cm', 'centimeter', 'centimetre'):
+                um = val * 10000.0
+            # µm (default) or 'µm'/'um'/'micron' → as-is
+            if not (1e-4 < um < 1e4):
+                return None
+            return um
+    except Exception:
+        return None
+
+
 import skimage as sk
 # ── aicsimageio is GONE. Every reader construction goes through the seam. ────
 #
@@ -1453,6 +1498,29 @@ class FileIOClass:
                 continue  # skip the structured-reader path below
 
             self.central_manager.active_data_class.update_metadata(image)
+
+            # Pixel-size recovery. The structured reader's physical_pixel_sizes
+            # can miss or choke on a file's real scale — an OME-TIFF whose baseline
+            # XResolution is zeroed (0/1) makes the reader raise "division by zero"
+            # and fall back to 1.0, even though the OME-XML carries the true value.
+            # If update_metadata landed on the 1.0 sentinel, recover it: OME-XML
+            # first (authoritative for OME-TIFF), then baseline TIFF tags.
+            try:
+                _dr = self.central_manager.active_data_class.data_repository
+                _cur = _dr.get('microns_per_pixel_sq', 1)
+                if abs(float(_cur) - 1.0) < 1e-9:
+                    _rec = _ome_pixel_size_um(file_path)
+                    _src = 'OME-XML'
+                    if _rec is None:
+                        _rec = _tiff_pixel_size_um(file_path); _src = 'TIFF tags'
+                    if _rec is not None:
+                        _dr['microns_per_pixel_sq'] = _rec * _rec
+                        _dr['pixel_size_from_metadata'] = True
+                        debug_log(f"file_io: pixel size {_rec:.6f} µm/px recovered "
+                                  f"from {_src} (reader missed it)")
+            except Exception as _pxe:
+                debug_log("file_io: 2D pixel-size recovery failed", _pxe)
+
             # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction
             # fails, the PREVIOUS file's frame count would otherwise still be sitting in the
             # repository, and a stale time axis is worse than an absent one.

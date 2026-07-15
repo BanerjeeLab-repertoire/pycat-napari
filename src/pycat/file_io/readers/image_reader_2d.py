@@ -105,9 +105,17 @@ def read_2d_image_channels(file_path):
             channels.append((channel_data, file_path, channel_num))
 
     channel_info = []
+    single_page = (num_pages <= 1)
     for ch_num in range(num_channels):
         try:
-            channel_info.append(extract_channel_info(image, ch_num))
+            # Give the identifier this channel's pixels so, when metadata is
+            # silent, it can classify the modality (fluorescence / brightfield /
+            # DIC / phase) instead of falling to a meaningless position guess.
+            # Only the single-page path maps channel index → channels[ch_num]
+            # positionally; on the multi-page path the mapping is ambiguous, so
+            # pass no frame there (metadata/position tiers still apply).
+            _frame = channels[ch_num][0] if (single_page and ch_num < len(channels)) else None
+            channel_info.append(extract_channel_info(image, ch_num, pixel_frame=_frame))
         except Exception:
             pass
 
