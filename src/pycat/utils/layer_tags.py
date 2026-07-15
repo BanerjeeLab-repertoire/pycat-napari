@@ -112,13 +112,20 @@ SUGGESTED_VALUES = {
     },
 }
 
-VALID_SOURCES = {'from_metadata', 'inferred', 'derived', 'user_set'}
+# 'pipeline' is a first-class source: a tag written by the pipeline auto-tagger
+# (tag_registry.py) records the ACTUAL operation that produced the layer — it is definitional, not a
+# guess. It was previously absent here, so tag_layer() silently rewrote it to 'inferred' and dropped
+# its confidence to 0.6, mislabelling every pipeline-produced tag as a low-confidence inference. It
+# is distinguished from 'derived' on purpose: 'pipeline' means "a recorded PyCAT pipeline step made
+# this" (stronger provenance) vs "some derivation made this". See docs/audits/codebase_audit_2026-07-15.md (A1).
+VALID_SOURCES = {'from_metadata', 'inferred', 'derived', 'user_set', 'pipeline'}
 VALID_RELATIONS = {'belongs_to', 'derived_from', 'supersedes', 'pairs_with'}
 
 # Confidence defaults by source (callers may override per tag).
 DEFAULT_CONFIDENCE = {
     'from_metadata': 1.0,
     'user_set': 1.0,
+    'pipeline': 0.95,   # definitional (the operation is known), on par with 'derived'
     'derived': 0.95,
     'inferred': 0.6,
 }

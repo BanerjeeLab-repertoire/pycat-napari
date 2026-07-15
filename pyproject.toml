@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.30"
+version = "1.6.35"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -107,6 +107,18 @@ dependencies = [
 
 gpu = [
     "cupy-cuda11x",
+]
+# BioFormats-backed reader for Zeiss CZI files that libCZI (bioio-czi) CANNOT decode -- notably
+# fast streaming/timelapse acquisitions, where every libCZI read raises "not implemented" even
+# though ZEN opens the file. bioio-bioformats reads them lazily (~0.03 s/plane after a one-time
+# ~30 s open). It is OPT-IN because it pulls a JVM (scyjava/jgo/cjdk download a JRE on first use) --
+# far heavier than the rest of the stack -- and its own metadata omits a numpy upper bound, so the
+# numpy pin is repeated here to stop `pip install ...[bioformats]` from pulling numpy>=2.1 and
+# breaking cellpose (needs <2.1) and numba (needs <2.5). See
+# docs/audits/czi_streaming_unreadable_2026-07-15.md.
+bioformats = [
+    "bioio-bioformats",
+    "numpy<2.1",
 ]
 # Plotly is OPTIONAL, and deliberately so.
 #
