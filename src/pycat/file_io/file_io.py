@@ -27,6 +27,19 @@ import warnings
 import contextlib
 import io
 
+# tifffile ↔ zarr 3.2 compatibility: tifffile's zarr store (used by bioio-tifffile /
+# bioio-ome-tiff / bioio-czi for lazy reads) imports a class that zarr 3.2 restructured away,
+# and fails with a misleading "zarr < 3 is not supported". Install the missing symbol NOW —
+# before any TIFF/CZI load triggers ``tifffile.zarr`` — so multi-channel TIFF and CZI lazy
+# loading work without bumping tifffile (which would force numpy>=2.1 across the whole stack).
+# No-op on zarr/tifffile versions that don't need it. See tifffile_zarr_shim.py.
+try:
+    from pycat.file_io.tifffile_zarr_shim import install_tifffile_zarr_shim as _install_tz_shim
+    _install_tz_shim()
+except Exception:
+    # Never let the shim break import; if it can't run, tifffile's own error surfaces later.
+    pass
+
 
 @contextlib.contextmanager
 def _suppress_ims_chunk_prints():
