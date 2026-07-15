@@ -65,31 +65,57 @@ class VideoParticleTrackingUI:
     def _select_track(self, track_id, source=None):
         """Select a track everywhere. source is the view that initiated it
         ('plot'|'image'|'table') and is skipped when propagating, so a view never
-        re-highlights from its own action."""
+        re-highlights from its own action.
+
+        Re-entrancy: propagating a selection makes programmatic changes to the
+        other views (table.selectRow, viewer.dims.current_step, camera.center,
+        points selection). Several of those emit Qt/napari signals ASYNCHRONOUSLY
+        — they fire after this method has already returned — so a synchronous
+        busy-flag that resets in `finally` does NOT cover them, and the queued
+        signals re-enter here and cascade (the "jumps all over the place" loop).
+        Two guards fix it: (1) if the requested track is already the selected one,
+        do nothing (kills the common echo), and (2) the busy flag is cleared on a
+        zero-delay timer, AFTER the event queue drains, so any queued re-entrant
+        signal from this propagation is still suppressed."""
         if track_id is None:
+            return
+        tid = int(track_id)
+        # Echo guard: a programmatic selection that lands back here for the SAME
+        # track is a loop, not a user action — ignore it.
+        if getattr(self, '_selected_track_id', None) == tid and getattr(self, '_sel_busy', False):
             return
         if getattr(self, '_sel_busy', False):
             return
         self._sel_busy = True
         try:
-            self._selected_track_id = int(track_id)
+            self._selected_track_id = tid
             if source != 'image':
                 try:
-                    self._reveal_track_in_viewer(int(track_id))
+                    self._reveal_track_in_viewer(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→image failed: {e}")
             if source != 'plot':
                 try:
-                    self._highlight_track_in_plot(int(track_id))
+                    self._highlight_track_in_plot(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→plot failed: {e}")
             if source != 'table':
                 try:
-                    self._highlight_track_in_table(int(track_id))
+                    self._highlight_track_in_table(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→table failed: {e}")
         finally:
-            self._sel_busy = False
+            # Clear the guard only AFTER the Qt event queue drains, so async
+            # signals emitted by the propagation above (selectRow, dims/camera
+            # changes) are still seen as "busy" and don't re-enter. Fall back to a
+            # synchronous reset if no Qt timer is available.
+            def _release():
+                self._sel_busy = False
+            try:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(0, _release)
+            except Exception:
+                self._sel_busy = False
 
     def _highlight_track_in_plot(self, track_id):
         """Emphasise a track's MSD curve in the live plot (if one is open and its
@@ -1581,20 +1607,41 @@ class VideoParticleTrackingUI:
             except Exception:
                 pass
 
-            # Transient highlight marker at the bead (whole trajectory as faint
-            # points + a bright marker at the first frame). Reuse one layer.
+            # Transient highlight: draw the picked track as a connected LINE that
+            # TRACES the trajectory (a Shapes 'path'), not a column of filled
+            # circles that sit on top of and obscure the track already plotted in
+            # the Bead Trajectories layer. A single small marker at the first
+            # frame shows where it starts. Reuse one Shapes + one Points layer.
             try:
-                hl_name = "Picked track"
-                pts = _np.column_stack([ys, xs])  # y, x in pixel coords
-                if hl_name in self.viewer.layers:
-                    self.viewer.layers.remove(hl_name)
-                # Use the SAME scale as the camera/image (sc_y, sc_x resolved
-                # above) so the points overlay the bead 1:1 regardless of whether
-                # the image layer carries the pixel size or scale 1.0.
-                _kw = dict(name=hl_name, size=max(6, 0.6 / mpp),
-                           face_color='#ff8c00', border_color='white',
-                           opacity=0.9, scale=[sc_y, sc_x])
-                self.viewer.add_points(pts, **_kw)
+                hl_line = "Picked track"
+                hl_start = "Picked track start"
+                path = _np.column_stack([ys, xs])       # (N, 2) y,x pixel coords
+                for _n in (hl_line, hl_start):
+                    if _n in self.viewer.layers:
+                        self.viewer.layers.remove(_n)
+                if path.shape[0] >= 2:
+                    # A bright, thin, slightly-transparent line ON TOP of the
+                    # trajectory — visible as a highlight without hiding the
+                    # underlying track. edge_width is in data (pixel) units.
+                    _sh_kw = dict(name=hl_line, shape_type='path',
+                                  edge_color='#ff8c00', face_color='transparent',
+                                  edge_width=max(1.0, 0.25 / mpp),
+                                  opacity=0.85, scale=[sc_y, sc_x])
+                    try:
+                        self.viewer.add_shapes([path], **_sh_kw)
+                    except Exception:
+                        # Older napari: edge_width may need to be a scalar list.
+                        _sh_kw['edge_width'] = float(max(1.0, 0.25 / mpp))
+                        self.viewer.add_shapes([path], **_sh_kw)
+                # small start marker (one point), offset visually by being a ring
+                _pt_kw = dict(name=hl_start, size=max(6, 0.5 / mpp),
+                              face_color='transparent', border_color='#ff8c00',
+                              opacity=0.95, scale=[sc_y, sc_x])
+                try:
+                    self.viewer.add_points(path[:1], **_pt_kw)
+                except Exception:
+                    _pt_kw.pop('border_color', None); _pt_kw['edge_color'] = '#ff8c00'
+                    self.viewer.add_points(path[:1], **_pt_kw)
             except Exception:
                 pass
 

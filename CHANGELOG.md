@@ -4,6 +4,21 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.50] - 2026-07-15
+### Fixed — **VPT brushing selection feedback loop ("jumps all over the place" on one click) + line trajectory highlight.**
+- A single click on a track cascaded into the view rapidly cycling through many tracks. Cause: the
+  linked-selection re-entrancy guard (`_sel_busy`) was cleared SYNCHRONOUSLY in `finally`, but
+  propagating a selection makes programmatic changes (table.selectRow, viewer.dims.current_step,
+  camera.center, points selection) that emit Qt/napari signals ASYNCHRONOUSLY — those fire after the
+  guard was already cleared and re-enter `_select_track`, looping. Fixes: (1) an echo guard that ignores
+  a re-selection of the already-selected track, and (2) the busy flag is now cleared on a zero-delay
+  `QTimer.singleShot` (after the event queue drains) so queued re-entrant signals from the propagation
+  are still suppressed. A single click now selects exactly one track.
+- The image highlight is now a connected trajectory LINE (a Shapes 'path') that traces the picked track,
+  plus a small ring at its start frame — instead of a column of filled orange circles that sat on top of
+  and OBSCURED the trajectory already drawn in the Bead Trajectories layer. The line is bright but thin
+  and slightly transparent, so it highlights without hiding the underlying track.
+
 ## [1.6.49] - 2026-07-15
 ### Changed — **MSD spaghetti plot draws a fidelity-targeted representative sample by default (supersedes 1.6.48's fixed cap).**
 - A spaghetti plot exists to show the SPREAD of MSD curves (the 10–90% percentile band), not each
