@@ -1808,6 +1808,21 @@ class VideoParticleTrackingUI:
             "click-a-track-to-reveal-it-in-the-viewer.")
         form.addRow(self._plots_consolidated)
 
+        # Fidelity-based render opt-out. By default the MSD spaghetti plot draws
+        # the smallest representative sample that reproduces the full percentile
+        # band (~95% fidelity) — fast and faithful, since extra lines just
+        # overplot. This checkbox forces drawing EVERY track for anyone who wants
+        # the literal full spaghetti (streams in progressively so it stays live).
+        self._plots_draw_all = QCheckBox("Draw every track (slower; default shows a representative sample)")
+        self._plots_draw_all.setChecked(False)
+        self._plots_draw_all.setToolTip(
+            "OFF (default): the MSD plot draws the smallest random sample of "
+            "tracks that reproduces the full 10–90% spread to ~95% (labelled with "
+            "the measured fidelity). The ensemble mean and fit always use ALL "
+            "tracks regardless — this only affects how many faint lines are drawn. "
+            "ON: draw every track (streamed in progressively).")
+        form.addRow(self._plots_draw_all)
+
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -2013,12 +2028,16 @@ class VideoParticleTrackingUI:
                 # linked-selection dispatcher and register the line map so
                 # image/table selections can highlight the curve too.
                 self._msd_line_registry = {}
+                _render_mode = ('all' if (hasattr(self, '_plots_draw_all')
+                                          and self._plots_draw_all.isChecked())
+                                else 'auto')
                 plot_msd_trajectories(
                     ptc, msd_df, fit,
                     title="VPT MSD (per-track + ensemble)",
                     interactive=True,
                     on_pick_track=lambda tid: self._select_track(tid, source='plot'),
-                    line_registry=self._msd_line_registry)
+                    line_registry=self._msd_line_registry,
+                    render_mode=_render_mode)
                 plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
                                frame_interval_s=self._frame_dt.value(),
                                van_hove_lag=1, consolidated=False,

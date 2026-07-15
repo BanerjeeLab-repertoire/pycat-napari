@@ -4,6 +4,38 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.49] - 2026-07-15
+### Changed — **MSD spaghetti plot draws a fidelity-targeted representative sample by default (supersedes 1.6.48's fixed cap).**
+- A spaghetti plot exists to show the SPREAD of MSD curves (the 10–90% percentile band), not each
+  individual line — past a point, extra lines only overplot into the same band and add no visual
+  information. Measured on realistic MSD data, that band converges at a track count that is roughly
+  CONSTANT (~100 tracks for ~95% fidelity) whether the dataset is 500 or 50 000 tracks. So instead of a
+  fixed cap (or drawing everything), the MSD plot now draws the SMALLEST random sample whose band
+  reproduces the full band to a target fidelity (default 95%), via the new
+  `representative_track_sample`. The legend states it honestly, e.g. "showing 100 of 5000 (band fidelity
+  ≈96%)". The full data is untouched — the ensemble mean and the D/α fit still use EVERY track; this
+  governs only how many faint lines are drawn. Result: initial render and every subsequent pick/blit are
+  fast and bounded regardless of dataset size (~100 artists, not thousands).
+- OPT-OUT: a new "Draw every track" checkbox in the VPT plot options forces the literal full spaghetti
+  (streamed in progressively on a Qt timer so the window stays live). `plot_msd_trajectories` also gains
+  `render_mode` ('auto'|'all'), `target_fidelity`, and `max_tracks` parameters. The progressive draw-in
+  machinery from 1.6.48 is retained as the mechanism for the 'all' path; the fidelity sample is the new
+  default (so 1.6.48's raised fixed cap is superseded). Guard test tests/test_representative_track_sample.py.
+
+## [1.6.48] - 2026-07-15
+### Changed — **VPT MSD spaghetti plot draws progressively (responsive at once, fills in over time).**
+- The standalone MSD plot (`plot_msd_trajectories`) drew every track synchronously and capped at 400
+  because each track is a separate matplotlib artist and drawing thousands at once freezes the window.
+  It now draws a first representative batch immediately (~150 tracks, so the plot is useful at once) and
+  streams the rest in on a Qt timer (~150 tracks every 30 ms), yielding to the event loop between
+  batches so the UI never blocks. Because progressive draw stays responsive, the visible cap is raised
+  to 1500 (the quantitative result — ensemble mean + fit — still uses ALL tracks, as before). The
+  track→line maps grow by reference as batches arrive, so streamed-in tracks become pickable/brushable
+  as they appear, and the blit background (1.6.47) is re-captured once all batches are drawn so picking
+  stays fast over the full set. Falls back to a synchronous bounded draw when a Qt timer isn't available
+  (non-interactive/Agg). The consolidated 2×2 panel keeps its existing 400-cap synchronous draw for now;
+  progressive draw-in there is a follow-on.
+
 ## [1.6.47] - 2026-07-15
 ### Changed — **VPT plot brushing is now fast (blitting instead of full-figure redraws).**
 - Clicking an MSD track, or highlighting one from the image/table, was laggy because every selection

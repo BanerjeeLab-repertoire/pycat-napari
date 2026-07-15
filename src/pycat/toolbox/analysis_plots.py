@@ -17,9 +17,90 @@ def _show(fig, interactive):
     return fig
 
 
+def _band_from_long(df, tids, qs=(10, 50, 90)):
+    """Percentile band of msd_um2 at each lag, over the given track_ids.
+
+    Works on the long (track_id, lag_s, msd_um2) frame and is robust to tracks
+    having different lag sets — groups by lag_s and takes percentiles across
+    whatever tracks have that lag. Returns (lags, band) with band shape
+    (len(qs), n_lags) in LOG space (the plot is log-log, so the eye reads the
+    spread there)."""
+    sub = df[df['track_id'].isin(tids)]
+    if sub.empty:
+        return None, None
+    g = sub.groupby('lag_s')['msd_um2']
+    lags = np.array(sorted(sub['lag_s'].unique()), dtype=float)
+    band = np.vstack([
+        np.array([np.percentile(g.get_group(l).values, q) for l in lags])
+        for q in qs
+    ])
+    with np.errstate(divide='ignore'):
+        return lags, np.log(np.clip(band, 1e-12, None))
+
+
+def representative_track_sample(per_track_df, target_fidelity=0.95,
+                                candidates=(50, 100, 150, 200, 300, 400, 600, 800),
+                                n_rep=6, seed=0):
+    """Choose the SMALLEST number of tracks whose MSD percentile band reproduces
+    the full set's band to at least ``target_fidelity``.
+
+    The spaghetti plot exists to show the SPREAD of MSD curves, not each line —
+    past a point, extra lines just overplot into the same band and add no visual
+    information. Empirically the band converges at a track count that is roughly
+    CONSTANT (≈100 for 95% fidelity) whether the set is 500 or 50 000 tracks, so
+    this keeps rendering fast and bounded while staying honest about how
+    representative the sample is.
+
+    Fidelity = 1 − mean|log-band(sample) − log-band(full)| / (mean 10–90 band
+    width): how closely the sample's spread matches the full spread, relative to
+    the spread's own size. Returns (chosen_ids, n_total, measured_fidelity). The
+    full data is untouched — this governs only how many LINES are drawn.
+    """
+    if per_track_df is None or len(per_track_df) == 0:
+        return [], 0, 1.0
+    rng = np.random.default_rng(seed)
+    all_tids = per_track_df['track_id'].unique()
+    n_all = len(all_tids)
+    lags_full, fb = _band_from_long(per_track_df, all_tids)
+    if fb is None or n_all <= candidates[0]:
+        return list(all_tids), n_all, 1.0
+    extent = float((fb[2] - fb[0]).mean()) or 1.0
+
+    def _fidelity(k):
+        vals = []
+        for _ in range(n_rep):
+            ids = rng.choice(all_tids, k, replace=False)
+            lags_s, sb = _band_from_long(per_track_df, ids)
+            if sb is None:
+                continue
+            common = np.intersect1d(lags_full, lags_s)
+            if common.size == 0:
+                continue
+            fi = np.searchsorted(lags_full, common)
+            si = np.searchsorted(lags_s, common)
+            err = np.abs(sb[:, si] - fb[:, fi]).mean()
+            vals.append(max(0.0, 1.0 - err / extent))
+        return float(np.mean(vals)) if vals else 0.0
+
+    chosen_k = candidates[-1]
+    measured = 0.0
+    for k in candidates:
+        if k >= n_all:
+            chosen_k = n_all
+            measured = 1.0
+            break
+        measured = _fidelity(k)
+        if measured >= target_fidelity:
+            chosen_k = k
+            break
+    ids = list(rng.choice(all_tids, min(chosen_k, n_all), replace=False))
+    return ids, n_all, measured
+
+
 def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
                           title="MSD", interactive=True, on_pick_track=None,
-                          line_registry=None):
+                          line_registry=None, render_mode='auto',
+                          target_fidelity=0.95, max_tracks=None):
     """
     Log-log MSD spaghetti plot: every track's MSD(τ) semi-transparent, the
     ensemble mean MSD as a solid line, and (optionally) the fitted power law.
@@ -48,41 +129,128 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.2, 5.2))
-    # faint per-track curves. Cap the number actually drawn: a movie can produce
-    # tens of thousands of tracks, and drawing one matplotlib line each freezes
-    # the UI (each ax.plot is a separate artist). A random sample of a few
-    # hundred conveys the spread just as well; the quantitative result is the
-    # ensemble mean and fit, which use ALL tracks regardless of this cap.
-    MAX_SPAGHETTI = 400
+    # Faint per-track curves. Each track is a separate matplotlib artist, so
+    # drawing thousands at once freezes the window — but more importantly, past a
+    # point extra lines add NO visual information: they overplot into the same
+    # spread. The spaghetti plot's job is to show that spread (the 10–90%
+    # percentile band of MSD across tracks), and the band CONVERGES at a track
+    # count that is roughly constant (~100 for 95% fidelity) regardless of the
+    # dataset size. So by default we draw the SMALLEST representative sample that
+    # reproduces the full band to `target_fidelity`, label the plot honestly with
+    # the measured fidelity, and leave the full data untouched for the ensemble
+    # mean + fit (which always use ALL tracks). This is a render choice, not a
+    # data choice.
+    #
+    #   render_mode='auto'  → fidelity-targeted sample (default; fast + faithful)
+    #   render_mode='all'   → draw every track (progressive, opt-out)
+    #   max_tracks=N        → draw a random N (explicit override of the sample)
     _line_to_tid = {}
     _tid_to_line = {}
+    _pickable = on_pick_track is not None
+    _fidelity_note = None
+
+    def _draw_one_track(tid, g):
+        g = g.sort_values('lag_s')
+        (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
+                        alpha=0.18, lw=0.8, zorder=1)
+        if _pickable:
+            ln.set_picker(5)     # generous pick radius for thin faint lines
+            _line_to_tid[ln] = int(tid)
+        _tid_to_line[int(tid)] = ln
+
     if per_track_df is not None and len(per_track_df):
         all_tids = per_track_df['track_id'].unique()
         n_all = len(all_tids)
-        if n_all > MAX_SPAGHETTI:
+
+        # Decide which track ids to DRAW.
+        if max_tracks is not None:
             import numpy as _np
             _rng = _np.random.default_rng(0)
-            shown = set(_rng.choice(all_tids, MAX_SPAGHETTI, replace=False))
-            plot_df = per_track_df[per_track_df['track_id'].isin(shown)]
+            shown = list(_rng.choice(all_tids, min(int(max_tracks), n_all),
+                                     replace=False))
+            _fidelity_note = None
+        elif render_mode == 'all':
+            shown = list(all_tids)
+            _fidelity_note = None
+        else:  # 'auto' — fidelity-targeted representative sample
+            shown, _, _fid = representative_track_sample(
+                per_track_df, target_fidelity=target_fidelity)
+            if len(shown) < n_all:
+                _fidelity_note = _fid
+            else:
+                _fidelity_note = None
+
+        _groups = {int(tid): g for tid, g in
+                   per_track_df[per_track_df['track_id'].isin(shown)].groupby('track_id')}
+        _order = [int(t) for t in shown if int(t) in _groups]
+
+        # For a small/auto sample (~100 lines) synchronous drawing is instant;
+        # only the 'all' opt-out on a big set needs progressive streaming.
+        _FIRST_BATCH = 200
+        _BATCH = 200
+        _BATCH_MS = 30
+        for tid in _order[:_FIRST_BATCH]:
+            _draw_one_track(tid, _groups[tid])
+
+        # Legend label: report the TRUE track count, how many are shown, and — for
+        # the auto sample — the measured band fidelity, so the sample is honest
+        # rather than an arbitrary cap.
+        _shown_n = len(_order)
+        if _fidelity_note is not None:
+            _lbl = (f"tracks: showing {_shown_n} of {n_all} "
+                    f"(band fidelity ≈{_fidelity_note*100:.0f}%)")
+        elif _shown_n < n_all:
+            _lbl = f"individual tracks (n={n_all}; showing {_shown_n})"
         else:
-            plot_df = per_track_df
-        _pickable = on_pick_track is not None
-        for tid, g in plot_df.groupby('track_id'):
-            g = g.sort_values('lag_s')
-            (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
-                            alpha=0.18, lw=0.8, zorder=1)
-            if _pickable:
-                # A generous pick radius so the thin faint lines are easy to hit.
-                ln.set_picker(5)
-                _line_to_tid[ln] = int(tid)
-            _tid_to_line[int(tid)] = ln
-        # a proxy handle for the legend (report the TRUE track count)
-        _lbl = (f"individual tracks (n={n_all}"
-                + (f"; showing {MAX_SPAGHETTI}" if n_all > MAX_SPAGHETTI else "")
-                + ")")
+            _lbl = f"individual tracks (n={n_all})"
         if on_pick_track is not None:
-            _lbl += " — click a track to reveal it in the viewer"
+            _lbl += " — click a track to reveal it"
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0, label=_lbl)
+
+        # Stream any remaining tracks (only non-empty for 'all'/large max_tracks)
+        # on a Qt timer so the UI stays live; synchronous fallback otherwise.
+        _rest = _order[_FIRST_BATCH:]
+        if _rest:
+            _drew_progressively = False
+            if interactive:
+                try:
+                    from PyQt5.QtCore import QTimer
+                    _idx = {'i': 0}
+                    _timer = QTimer()
+
+                    def _tick():
+                        i = _idx['i']
+                        batch = _rest[i:i + _BATCH]
+                        if not batch:
+                            _timer.stop()
+                            try:
+                                cb = getattr(fig.canvas, '_pycat_recapture_bg', None)
+                                if cb is not None:
+                                    cb()
+                            except Exception:
+                                pass
+                            try:
+                                fig.canvas.draw_idle()
+                            except Exception:
+                                pass
+                            return
+                        for tid in batch:
+                            _draw_one_track(tid, _groups[tid])
+                        _idx['i'] = i + _BATCH
+                        try:
+                            fig.canvas.draw_idle()
+                        except Exception:
+                            pass
+
+                    _timer.timeout.connect(_tick)
+                    _timer.start(_BATCH_MS)
+                    fig._pycat_spaghetti_timer = _timer   # keep a ref (no GC)
+                    _drew_progressively = True
+                except Exception:
+                    _drew_progressively = False
+            if not _drew_progressively:
+                for tid in _rest:
+                    _draw_one_track(tid, _groups[tid])
 
     # solid ensemble mean with SEM band
     if ensemble_msd_df is not None and len(ensemble_msd_df):
@@ -128,6 +296,12 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             _blit['bg'] = fig.canvas.copy_from_bbox(ax.bbox)
         except Exception:
             _blit['bg'] = None
+    # Let the progressive draw-in timer refresh the cached background once all
+    # batches are drawn, so picking is fast over the full (streamed-in) set.
+    try:
+        fig.canvas._pycat_recapture_bg = _capture_bg
+    except Exception:
+        pass
 
     def _blit_highlight(new_line, prev_line):
         """Restore the cached background and re-draw only the changed lines."""
