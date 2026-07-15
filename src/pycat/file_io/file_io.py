@@ -299,43 +299,100 @@ from pycat.file_io.stack_access import to_unit_float32
 from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
 
+def _clean_filename_token(stem):
+    """Reduce a raw acquisition filename to a short, meaningful layer token.
+
+    Microscope filenames range from useless ('Image 3-OME TIFF-Export-01.ome') to
+    information-rich-but-wrong-scope ('polyA 3 mgpmL - 1000 mM LiCl - 50mM HEPES
+    pH 7p5_3_MMStack_Pos0.ome'). The layer name wants the sample IDENTITY, not the
+    full acquisition string — the rich fields (concentrations, buffer, pH) belong
+    in the provenance JSON, and the full filename goes in the layer tooltip.
+
+    Cleaning:
+      * strip the OME/MicroManager tail: '.ome', '_MMStack_Pos<N>', trailing '_<N>'
+        run indices MicroManager appends (a user rarely opens Pos0 and Pos1 at once);
+      * strip a generic export prefix like 'Image 3-OME TIFF-Export-01' → nothing
+        useful, so fall through to a positional name;
+      * take the leading sample token before the first concentration/parameter
+        block (the part before ' - ' or a run of numbers+units), so
+        'polyA 3 mgpmL - 1000 mM LiCl ...' → 'polyA'.
+
+    Returns a cleaned token, or None if nothing meaningful survives.
+    """
+    import re as _re
+    if not stem:
+        return None
+    s = str(stem).strip()
+
+    # Drop a trailing '.ome' (case-insensitive) if it survived the extension split.
+    s = _re.sub(r'\.ome$', '', s, flags=_re.IGNORECASE)
+    # Strip MicroManager's _MMStack_PosN (and any trailing _N run index).
+    s = _re.sub(r'_MMStack_Pos\d+.*$', '', s, flags=_re.IGNORECASE)
+    s = _re.sub(r'_MMStack.*$', '', s, flags=_re.IGNORECASE)
+
+    # Generic export names carry no sample identity → treat as empty.
+    if _re.match(r'^\s*image[\s_-]*\d*[\s_-]*ome', s, flags=_re.IGNORECASE) or \
+       _re.match(r'^\s*(export|snap|img|image|untitled)[\s_\-]*\d*\s*$', s, flags=_re.IGNORECASE):
+        return None
+
+    # Take the sample token before the first ' - ' parameter block (concentrations,
+    # salts, buffers), which belong in provenance, not the layer name.
+    head = _re.split(r'\s*-\s*', s)[0].strip()
+    # If the head still starts with a clear sample word followed by a number+unit
+    # (e.g. 'polyA 3 mgpmL'), keep only the leading word(s) before the first
+    # numeric-with-unit token.
+    m = _re.match(r'^([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*)*?)\s+\d', head)
+    if m:
+        head = m.group(1).strip()
+
+    # Trim any trailing run index the user didn't intend ('sample_3' → 'sample').
+    head = _re.sub(r'[_\s]+\d+$', '', head).strip()
+    # Collapse whitespace/underscores to a single separator.
+    head = _re.sub(r'[\s_]+', '_', head).strip('_')
+
+    return head or None
+
+
 def derive_layer_name(base_file_name, file_path=None, channel_infos=None,
                       is_mask=False):
-    """Build a meaningful layer name from the FILENAME (and any in-file channel
-    identity), instead of a generic 'Fluorescence Image' / 'Mask Layer'.
+    """Build a meaningful layer name from channel IDENTITY and a cleaned filename.
 
-    The single-channel and mask default paths used to hardcode a modality/role
-    word, discarding the filename — so two separate '..._DAPI.tif' and
-    '..._GFP.tif' both loaded as 'Fluorescence Image'. This restores the
-    information the user expects to see.
+    Precedence (highest first):
+      1. Channel identity — a fluorophore/modality label from metadata OR from
+         pixel-measured modality (fluorescence/brightfield/DIC/phase). This is what
+         the channel actually IS, and it takes precedence over the filename.
+      2. A cleaned filename token (sample identity, with MicroManager/OME cruft and
+         acquisition parameters stripped — those go to the provenance JSON).
+      3. The generic role word as a last resort.
 
-    Priority: the filename stem (which itself usually carries the fluorophore
-    token, e.g. '..._DAPI.tif' -> 'cells_DAPI'), optionally suffixed with an
-    in-file channel label from metadata when that label adds information the stem
-    doesn't already contain. If there is no filename at all, fall back to an
-    in-file channel label, then to the generic word as a last resort.
+    A single-channel result reads like 'polyA-Brightfield' (sample + modality). The
+    full original filename is attached to the layer as a tooltip by the caller.
     """
     import os as _os
-    stem = base_file_name or (
+    raw_stem = base_file_name or (
         _os.path.splitext(_os.path.basename(file_path))[0] if file_path else None)
+    stem = _clean_filename_token(raw_stem)
 
-    # An in-file channel label, only when it was matched by NAME (a positional
-    # fallback like 'C0-DAPI' is a guess, not identity, and must not be appended).
+    # A confident channel label: from metadata NAME/WAVELENGTH, or from the
+    # pixel-measured modality. A positional guess ('C0-Blue') is NOT identity.
     label = None
     infos = channel_infos or []
     if infos:
         ci = infos[0] if isinstance(infos, (list, tuple)) else infos
         try:
-            if ci.get('source') == 'name' and ci.get('label'):
+            if ci.get('source') in ('name', 'wavelength', 'pixels') and ci.get('label'):
                 label = ci['label']
         except AttributeError:
             pass
 
     suffix = ' Mask' if is_mask else ''
+    if stem and label:
+        # sample + identity, e.g. 'polyA-Brightfield' — unless the stem already
+        # names the modality/fluorophore.
+        if label.lower() not in stem.lower():
+            return f"{stem}-{label}{suffix}"
+        return f"{stem}{suffix}"
     if stem:
-        # append the metadata label only if the stem doesn't already say it
-        if label and label.lower() not in stem.lower():
-            return f"{stem} · {label}{suffix}"
         return f"{stem}{suffix}"
     if label:
         return f"{label}{suffix}"
@@ -1557,6 +1614,16 @@ class FileIOClass:
                 getattr(self, 'base_file_name', None), file_path,
                 getattr(self, '_last_channel_info', None))
             self.load_into_viewer(fluorescence_image, name=_name)
+
+        # Attach the FULL original filename to every layer we just loaded, as a
+        # tooltip/metadata. The layer NAME is the short cleaned identity
+        # (e.g. 'polyA-Brightfield'); the full acquisition filename lives here so
+        # it stays discoverable (the rich concentration/buffer/pH fields go to the
+        # provenance JSON, not the visible name).
+        try:
+            self._attach_source_filename_tooltip(file_paths)
+        except Exception as _te:
+            debug_log("file_io: source-filename tooltip attach failed", _te)
 
         # Add layers for measuring object and cell diameters to the viewer based on the image size
         self._add_diameter_annotation_layers()
@@ -2905,45 +2972,78 @@ class FileIOClass:
             self.load_into_viewer(mask_image, name=_mask_name, is_mask=True)
 
         
+    def _channels_all_confident(self, channel_info):
+        """True when every channel has a confident identity (metadata name /
+        wavelength, or a pixel-measured modality) — i.e. no channel is a bare
+        positional guess. Used to skip the naming dialog when it would only be
+        confirming names PyCAT is already sure of."""
+        if not channel_info:
+            return False
+        try:
+            for ci in channel_info:
+                if not ci or ci.get('source') not in ('name', 'wavelength', 'pixels'):
+                    return False
+            return True
+        except Exception:
+            return False
+
     def assign_channels_in_dialog(self, all_channels, is_mask=False, channel_info=None):
         """
-        Displays a dialog for the user to assign names to each channel of an opened image or mask. This method aids in 
-        organizing and identifying channels, especially when dealing with multichannel data.
+        Assign names to each channel of an opened image or mask.
+
+        When every channel already has a CONFIDENT identity (a fluorophore/emission
+        label from metadata, or a modality measured from the pixels), the naming
+        dialog is SKIPPED and those names are applied directly — the dialog would
+        only be asking the user to confirm names PyCAT is already sure of. The
+        dialog still appears when at least one channel is ambiguous (a bare
+        positional guess), so the user can disambiguate.
 
         Parameters
         ----------
         all_channels : list
-            A list of tuples, each containing channel data, the file path of the image or mask, and the channel number.
+            Tuples of (channel data, file path, channel number).
         is_mask : bool, optional
-            Indicates whether the channels belong to a mask or an image, default is False (image).
-
-        Notes
-        -----
-        This method facilitates better data management within the Napari viewer by allowing users to assign meaningful 
-        names to various channels, enhancing the interpretability of multichannel datasets.
+            Whether the channels belong to a mask (default False).
+        channel_info : list, optional
+            Per-channel identity dicts from identify_channel (carries 'source').
         """
-        dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
-        result = dialog.exec_()
+        # Confidence gate: skip the dialog when nothing is ambiguous (images only;
+        # masks keep the dialog since they have no measurable modality identity).
+        _auto = (not is_mask) and self._channels_all_confident(channel_info)
 
-        if result == QDialog.Accepted:
-            # Get the names assigned by the user
-            channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
-        elif result == QDialog.Rejected:
-            return # If the user cancels the dialog do nothing
+        if _auto:
+            # Derive each channel's name from its confident identity — no dialog.
+            channel_names = []
+            for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
+                info = channel_info[channel_num] if channel_info and channel_num < len(channel_info) else None
+                channel_names.append(
+                    derive_layer_name(
+                        getattr(self, 'base_file_name', None), file_path,
+                        channel_infos=[info] if info else None, is_mask=is_mask))
+            _designated_condensate = None
+        else:
+            dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
+            result = dialog.exec_()
 
-        # Read the opt-in condensate-channel designation (if the dialog offered it) and
-        # PERSIST it for this acquisition layout, so future same-layout files recall it.
-        _designated_condensate = None
-        try:
-            dd = getattr(dialog, '_condensate_dd', None)
-            if dd is not None:
-                chosen = dd.currentData()
-                if isinstance(chosen, int) and chosen >= 0:
-                    _designated_condensate = chosen
-                    from pycat.utils.channel_designations import remember_designation
-                    remember_designation(channel_info, chosen)
-        except Exception:
-            pass
+            if result == QDialog.Accepted:
+                # Get the names assigned by the user
+                channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
+            elif result == QDialog.Rejected:
+                return # If the user cancels the dialog do nothing
+
+            # Read the opt-in condensate-channel designation (if the dialog offered it) and
+            # PERSIST it for this acquisition layout, so future same-layout files recall it.
+            _designated_condensate = None
+            try:
+                dd = getattr(dialog, '_condensate_dd', None)
+                if dd is not None:
+                    chosen = dd.currentData()
+                    if isinstance(chosen, int) and chosen >= 0:
+                        _designated_condensate = chosen
+                        from pycat.utils.channel_designations import remember_designation
+                        remember_designation(channel_info, chosen)
+            except Exception:
+                pass
 
         # Record the final channel_num -> layer_name assignment so batch
         # replay can recreate the exact same image-type-to-channel mapping.
@@ -3055,6 +3155,40 @@ class FileIOClass:
     def load_into_viewer(self, data, name, is_mask=False):
         from pycat.file_io.viewer_load import load_into_viewer
         return load_into_viewer(self.viewer, self.central_manager, data, name, is_mask)
+
+    def _attach_source_filename_tooltip(self, file_paths):
+        """Stamp the full original filename onto layers loaded from this open, so
+        the rich acquisition name (which the short layer name deliberately drops)
+        stays discoverable. Stored in layer.metadata['source_filename'] and, where
+        the napari build supports it, as a layer tooltip. Only stamps layers that
+        don't already carry a source_filename (so re-opens don't clobber)."""
+        import os as _os
+        names = [_os.path.basename(p) for p in (file_paths or []) if p]
+        full = names[-1] if names else None
+        if not full:
+            return
+        try:
+            import napari.layers as _nl
+        except Exception:
+            _nl = None
+        for _l in list(self.viewer.layers):
+            try:
+                if _nl is not None and not isinstance(_l, (_nl.Image, _nl.Labels)):
+                    continue
+                md = getattr(_l, 'metadata', None)
+                if not isinstance(md, dict):
+                    continue
+                if md.get('source_filename'):
+                    continue
+                md['source_filename'] = full
+                # napari layers expose no universal tooltip, but many builds
+                # honour a 'help' string; set it best-effort so hovering shows it.
+                try:
+                    _l.help = full
+                except Exception:
+                    pass
+            except Exception:
+                continue
 
 
 

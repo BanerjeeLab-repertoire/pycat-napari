@@ -71,3 +71,53 @@ def test_metadata_still_wins_over_pixels():
                             pixel_frame=_transmitted())
     assert info['source'] == 'name'
     assert 'DAPI' in info['label']
+
+
+# ── Filename cleaning + confident naming (1.6.56) ────────────────────────────
+
+def _load_helpers():
+    """Pull the two pure helpers out of file_io without importing its heavy deps."""
+    import ast
+    src = open('src/pycat/file_io/file_io.py').read()
+    tree = ast.parse(src)
+    ns = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in (
+                '_clean_filename_token', 'derive_layer_name'):
+            exec(compile(ast.Module([node], []), '<x>', 'exec'), ns)
+    return ns['_clean_filename_token'], ns['derive_layer_name']
+
+
+def test_filename_cleaning_strips_micromanager_and_ome():
+    clean, _ = _load_helpers()
+    assert clean("3.30 hr_1_MMStack_Pos0.ome") == "3.30_hr"
+    assert clean("polyA 3 mgpmL - 1000 mM LiCl - 50mM HEPES pH 7p5_3_MMStack_Pos0.ome") == "polyA"
+    # a useless generic export name cleans to nothing
+    assert clean("Image 3-OME TIFF-Export-01.ome") is None
+
+
+def test_derive_name_prefers_modality_and_builds_sample_modality():
+    _, derive = _load_helpers()
+    info = [{'source': 'pixels', 'label': 'Brightfield'}]
+    # sample + modality
+    assert derive("polyA 3 mgpmL - 1000 mM LiCl_3_MMStack_Pos0.ome",
+                  channel_infos=info) == "polyA-Brightfield"
+    # useless filename → modality identity alone
+    assert derive("Image 3-OME TIFF-Export-01.ome", channel_infos=info) == "Brightfield"
+
+
+def test_positional_guess_is_not_treated_as_identity():
+    _, derive = _load_helpers()
+    # a positional guess must NOT be appended as identity
+    info = [{'source': 'position', 'label': 'C0-Blue'}]
+    assert derive("3.30 hr_1_MMStack_Pos0.ome", channel_infos=info) == "3.30_hr"
+
+
+def test_confidence_gate_logic():
+    def gate(ci):
+        if not ci:
+            return False
+        return all(c and c.get('source') in ('name', 'wavelength', 'pixels') for c in ci)
+    assert gate([{'source': 'pixels'}, {'source': 'pixels'}]) is True
+    assert gate([{'source': 'name'}, {'source': 'position'}]) is False
+    assert gate([]) is False

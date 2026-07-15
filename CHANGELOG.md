@@ -4,6 +4,27 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.56] - 2026-07-15
+### Changed — **Smart channel naming: cleaned filenames, identity-first names, full-name tooltip, and the naming dialog skipped when confident.**
+- **Filename cleaning.** A new `_clean_filename_token` strips MicroManager/OME cruft and acquisition
+  parameters from the layer name: `3.30 hr_1_MMStack_Pos0.ome` → `3.30_hr` (keeps the user's timepoint,
+  drops the `_MMStack_Pos0` MicroManager appends); `polyA 3 mgpmL - 1000 mM LiCl - 50mM HEPES pH
+  7p5_3_MMStack_Pos0.ome` → `polyA` (the concentrations/buffer/pH belong in provenance, not the name); a
+  useless export name like `Image 3-OME TIFF-Export-01.ome` cleans to nothing and falls through to the
+  channel identity.
+- **Identity-first naming.** `derive_layer_name` now prefers channel IDENTITY (a fluorophore/emission
+  label from metadata OR a pixel-measured modality) over the filename, and combines them as
+  sample-modality — e.g. `polyA-Brightfield`. A positional guess (`C0-Blue`) is still never treated as
+  identity.
+- **Full-filename tooltip.** The full original filename is stamped onto each loaded layer
+  (`metadata['source_filename']` + a best-effort layer tooltip), so the rich acquisition name stays
+  discoverable even though the visible layer name is the short cleaned identity. The full name is also
+  already preserved in the provenance metadata JSON.
+- **Dialog skipped when confident.** The multichannel Channel-Name-Assignment dialog is now skipped
+  when every channel has a confident identity (metadata name/wavelength or pixel-measured modality) —
+  it was only confirming names PyCAT was already sure of. It still appears when ≥1 channel is a bare
+  positional guess, so the user can disambiguate. Guard tests in tests/test_channel_modality.py.
+
 ## [1.6.55] - 2026-07-15
 ### Fixed — **OME-TIFF pixel size recovered from OME-XML (no more spurious Set-Scale dialog / "division by zero").**
 - An OME-TIFF whose baseline TIFF XResolution is zeroed (`0/1`) made the reader's physical_pixel_sizes
