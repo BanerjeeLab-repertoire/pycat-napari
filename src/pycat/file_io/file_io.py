@@ -565,6 +565,39 @@ class ChannelAssignmentDialog(QDialog):
             layout.addWidget(label)
             layout.addWidget(input_field)
 
+        # ── Opt-in: which channel contains the condensates? ────────────────────────
+        # Metadata can't recover this per-experiment fact, and when two fluorescence channels
+        # get the same generic name the only thing telling them apart is load order — which
+        # silently drove the wrong channel (e.g. DAPI) into condensate segmentation. So let the
+        # user state it ONCE, opt-in, and remember it per acquisition layout. "Don't set" leaves
+        # it undecided (the honest default — we never guess).
+        self.condensate_choice = None
+        if not self.is_mask and len(self.channels) > 1:
+            from PyQt5.QtWidgets import QComboBox
+            layout.addWidget(QLabel("Which channel contains the condensates? "
+                                    "(optional — remembered for files acquired this way)"))
+            self._condensate_dd = QComboBox()
+            self._condensate_dd.addItem("Don't set (I'll choose per run)", -1)
+            for cn, (_, fp, _) in enumerate(self.channels):
+                info = self.channel_info[cn] if cn < len(self.channel_info) else None
+                lbl = (info or {}).get('label')
+                bucket = (info or {}).get('bucket')
+                desc = f"Channel {cn + 1}"
+                if lbl:
+                    desc += f" — {lbl}" + (f" ({bucket})" if bucket else "")
+                self._condensate_dd.addItem(desc, cn)
+            # Pre-select a remembered designation for this layout, if any.
+            try:
+                from pycat.utils.channel_designations import recall_designation
+                remembered = recall_designation(self.channel_info)
+                if remembered is not None:
+                    ix = self._condensate_dd.findData(remembered)
+                    if ix >= 0:
+                        self._condensate_dd.setCurrentIndex(ix)
+            except Exception:
+                pass
+            layout.addWidget(self._condensate_dd)
+
         # Add the OK button to confirm the channel names
         ok_button = QPushButton("OK")
         ok_button.clicked.connect(self.accept)
@@ -2791,12 +2824,37 @@ class FileIOClass:
         elif result == QDialog.Rejected:
             return # If the user cancels the dialog do nothing
 
+        # Read the opt-in condensate-channel designation (if the dialog offered it) and
+        # PERSIST it for this acquisition layout, so future same-layout files recall it.
+        _designated_condensate = None
+        try:
+            dd = getattr(dialog, '_condensate_dd', None)
+            if dd is not None:
+                chosen = dd.currentData()
+                if isinstance(chosen, int) and chosen >= 0:
+                    _designated_condensate = chosen
+                    from pycat.utils.channel_designations import remember_designation
+                    remember_designation(channel_info, chosen)
+        except Exception:
+            pass
+
         # Record the final channel_num -> layer_name assignment so batch
         # replay can recreate the exact same image-type-to-channel mapping.
         # Stored on self so open_image()'s bp.record call can include it.
         self._last_channel_assignment = []
 
         # Load each channel into the viewer with the assigned name
+        # Recall any persisted "which channel is the condensate" designation for THIS
+        # acquisition layout (opt-in memory; None when nothing is remembered — we never guess).
+        # A designation the user made in THIS dialog wins over the recalled one.
+        try:
+            from pycat.utils.channel_designations import recall_designation
+            _condensate_idx = recall_designation(channel_info) if (channel_info and not is_mask) else None
+        except Exception:
+            _condensate_idx = None
+        if _designated_condensate is not None:
+            _condensate_idx = _designated_condensate
+
         for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
             name = channel_names[i]
             if not name:  # Use default naming if input is empty
@@ -2823,6 +2881,56 @@ class FileIOClass:
             })
 
             self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
+
+            # Tag the channel's IDENTITY on the layer so downstream selection can query tags
+            # instead of relying on load order (which is what made DAPI and the condensate
+            # channel indistinguishable when both were named "Fluorescence Image"). This is the
+            # keystone of the tag migration for the fluorescence pipeline.
+            if not is_mask:
+                try:
+                    self._tag_channel_identity(info, channel_num,
+                                               is_condensate=(_condensate_idx == channel_num))
+                except Exception:
+                    pass
+
+    def _tag_channel_identity(self, info, channel_num, is_condensate=False):
+        """Attach channel-identity tags to the just-loaded layer (the last-added image layer).
+
+        Tags written:
+          * ``channel``          -- the detected fluorophore/label (DAPI, EGFP, Ch0, ...)
+          * ``spectral_bucket``  -- blue/green/red/far_red/unknown, the honest DAPI-vs-GFP discriminator
+          * ``target=condensate`` -- ONLY when a persisted designation says this channel index is the
+            condensate one (opt-in memory). Never inferred otherwise.
+
+        Identity tags use source='metadata' when the info came from real metadata, else 'inferred'.
+        The condensate designation is source='user_set' (it originated from an explicit user choice),
+        so it LOCKS the key and won't be clobbered by later inference.
+        """
+        try:
+            from pycat.utils.layer_tags import tag_layer
+        except Exception:
+            return
+        # The channel just loaded is the most-recently-added image layer.
+        layer = None
+        try:
+            for lyr in reversed(list(self.viewer.layers)):
+                if lyr.__class__.__name__ == 'Image':
+                    layer = lyr
+                    break
+        except Exception:
+            layer = None
+        if layer is None:
+            return
+
+        label = (info or {}).get('label')
+        bucket = (info or {}).get('bucket')
+        src = 'metadata' if (info or {}).get('source') not in (None, 'position') else 'inferred'
+        if label:
+            tag_layer(layer, 'channel', str(label), source=src)
+        if bucket:
+            tag_layer(layer, 'spectral_bucket', str(bucket), source=src)
+        if is_condensate:
+            tag_layer(layer, 'target', 'condensate', source='user_set', overwrite=True)
     
 
     def _add_diameter_annotation_layers(self):

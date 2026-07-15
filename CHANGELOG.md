@@ -4,6 +4,34 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.39] - 2026-07-15
+### Fixed — **Fluorescence-pipeline layer selection no longer depends on load order (finishes the tag migration for condensate seg).**
+- When two fluorescence channels got the same generic name ("Fluorescence Image" / "Fluorescence
+  Image (1)"), the ONLY thing distinguishing them was load order — so whichever loaded first drove
+  condensate segmentation, silently feeding e.g. the DAPI channel instead of the condensate channel.
+  Fixed by tagging channel IDENTITY at load and selecting by tags, not order:
+  - Each loaded channel is now tagged `channel=<label>` and `spectral_bucket=<blue/green/...>` from
+    metadata (`identify_channel`). New `spectral_bucket` tag key/vocabulary.
+  - New **opt-in, persistent condensate-channel designation** (`utils/channel_designations.py`):
+    the channel-assignment dialog offers "Which channel contains the condensates?" — set once, it's
+    remembered per ACQUISITION LAYOUT (spectral-bucket signature, not file path) and recalled for
+    future same-layout files. A designated channel is tagged `target=condensate`. Persisted to the
+    per-user PyCAT config dir. Never guesses: nothing designated → returns None → the dropdown stays
+    for the user (an empty dropdown beats a silent wrong pick).
+  - New binding `invitro_fluor.input_image` (queries `role=image, target=condensate`); the invitro
+    preprocess input dropdown is now resolver-bound, so it auto-selects the designated condensate
+    channel regardless of load order.
+  Core tests: test_channel_designations.py. GUI-verify: load a 2-channel fluor file, designate the
+  condensate channel, confirm the invitro input dropdown selects it (not DAPI) on this and the next
+  same-layout file.
+
+### Changed — **Scientific Navigator engine vendored in (`pycat.navigator`).**
+- The pure-Python question->intent->planner->gates->resolver engine (framework-agnostic, no napari)
+  is vendored at `src/pycat/navigator/` with its data workbooks and tests (`tests/navigator/`). It is
+  the design reference for the tag resolver (which already exists as `utils/tag_resolver.py`); this
+  vendors the engine so the two can be connected incrementally. No app behaviour change from vendoring
+  alone. Imports verified, 79-op catalog loads, resolver discriminates condensate-vs-DAPI correctly.
+
 ### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
 - The bioio backend reads each format via a separate plugin package. PyCAT declared the microscopy
   plugins (bioio-ome-tiff/tifffile/czi) but NOT ``bioio-imageio``, which reads PNG/JPG/BMP. Since

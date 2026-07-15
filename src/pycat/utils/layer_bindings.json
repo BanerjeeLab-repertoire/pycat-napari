@@ -89,6 +89,13 @@
     "why": "A brightfield image -- DARK objects on a bright field. The tag matters: running the brightfield path on a fluorescence image gives plausible-looking nonsense."
   },
 
+  "invitro_fluor.input_image": {
+    "role": "image",
+    "target": "condensate",
+    "prefer": "newest",
+    "why": "The fluorescence channel that CONTAINS the condensates. Only a channel the user has designated (opt-in, remembered per acquisition layout) carries target=condensate -- so this matches the right channel regardless of load order. If NOTHING is designated there is deliberately no match: the dropdown stays for the user rather than silently defaulting to whichever channel (e.g. DAPI) loaded first, which is the bug this fixes."
+  },
+
   "colocalization.channel_a": {
     "role": "mask",
     "why": "The first channel's mask. NO preference: with two channels present, choosing one would be a coin flip -- and a colocalization run on the wrong pairing gives a number that looks fine."
