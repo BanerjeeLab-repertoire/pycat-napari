@@ -302,6 +302,10 @@ def open_image(path, **kwargs):
                     '.tiff': 'bioio-ome-tiff',
                     '.nd2': 'bioio-nd2',
                     '.lif': 'bioio-lif',
+                    '.png': 'bioio-imageio',
+                    '.jpg': 'bioio-imageio',
+                    '.jpeg': 'bioio-imageio',
+                    '.bmp': 'bioio-imageio',
                 }.get(suffix)
                 raise ImageReaderUnavailable(
                     f"bioio has no reader installed for {suffix} files."

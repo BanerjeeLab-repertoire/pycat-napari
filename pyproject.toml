@@ -55,6 +55,12 @@ dependencies = [
     "bioio-ome-tiff",
     "bioio-tifffile",
     "bioio-czi",
+    # ``bioio-imageio`` reads PNG/JPG/BMP. **Not optional**: PyCAT's OWN save path writes PNGs
+    # (Cellpose masks, overlay exports), so reopening what PyCAT saved REQUIRES this reader. The
+    # bioio migration silently dropped PNG support that aicsimageio had natively — without this
+    # declared, a fresh install cannot reopen a saved mask ("bioio has no reader installed for
+    # .png files"). See the bioio plugin registry: bioio-imageio → .jpg, .png.
+    "bioio-imageio",
     "cellpose<4",
     "matplotlib",
     "napari",
