@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.54] - 2026-07-15
+### Changed — **File-I/O god-class decomposition #2: `open_2d_image` reader extracted to `readers/image_reader_2d.py`.**
+- Lifted the pure file-path → channel-arrays logic out of `FileIOClass.open_2d_image` into a free
+  function `read_2d_image_channels(file_path)` (mirrors the piece-#1 `mask_reader` extraction). It
+  returns `(channels, channel_info, image, used_pil_fallback)`: the `(data, path, key)` channel tuples
+  in the original load order (page-major then channel for multi-page, 1-based running key; else channel
+  index), the per-channel identity from `extract_channel_info`, the reader object (so the controller
+  still runs `update_metadata`/`extract_metadata`), and whether the NumPy-2.0 PIL fallback was taken.
+  The controller keeps dialog, filePath bookkeeping, metadata-repository updates, the user-facing
+  fallback warning, and napari-layer construction. Behaviour-preserving: a headless byte-identity test
+  (tests/test_image_reader_2d_extraction.py) reimplements the original inline loop as the oracle and
+  asserts the extracted reader matches it across page/channel shapes (1×1, 1×3, 2×1, 3×2, 4×4).
+- Also fixed a latent post-loop reference: object_size/cell_diameter were derived from a loop-leaked
+  `channel_data` local; now taken explicitly from the last loaded channel (`all_channels[-1][0]`),
+  preserving the prior value exactly.
+### Docs
+- Added docs/audits/session_architecture_2026-07-15.md documenting the general session save/load
+  infrastructure and the recipe for extending interop to other methods (FCS/RICS/etc.).
+
 ## [1.6.53] - 2026-07-15
 ### Added — **Load Session fallback recognises loose VPT (and other) dataframes from older saves.**
 - The manifest-based session load (1.6.52) restores VPT, but files saved BEFORE that (loose

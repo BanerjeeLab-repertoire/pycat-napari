@@ -1425,62 +1425,33 @@ class FileIOClass:
             except Exception:
                 pass
 
-            # Open the image through the reader seam.
-            # We detect NumPy 2.0 newbyteorder errors lazily — only reading
-            # the minimal metadata needed (xarray_dask_data uses dask so no
-            # full read happens).  Avoid calling image.dims or image.data
-            # eagerly as these trigger full image reads on large files.
-            _use_fallback = False
-            try:
-                image = open_image(file_path)
-                # Access only the dask-backed metadata — does not read pixel data
-                _ = image.xarray_dask_data.dims
-            except AttributeError as _e:
-                if "newbyteorder" not in str(_e):
-                    raise
-                _use_fallback = True
-                print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
-            except Exception:
-                # Any other error on metadata access — try normal path anyway
-                image = open_image(file_path)
+            # Read the image's channels through the extracted reader (god-class
+            # decomposition #2). The reader returns the channel tuples + per-channel
+            # identity + the reader object; the metadata-repository updates, the
+            # user-facing fallback warning, and napari construction stay here.
+            from pycat.file_io.readers.image_reader_2d import read_2d_image_channels
+            _channels, _channel_info, image, _used_pil = read_2d_image_channels(file_path)
 
-            if _use_fallback:
-                # skimage also uses tifffile internally so hits the same NumPy 2.0
-                # bug. PIL/Pillow has its own independent TIFF reader that avoids
-                # tifffile entirely and works correctly with NumPy 2.0.
-                try:
-                    from PIL import Image as _PILImage
-                    import numpy as _np
-                    _pil_img = _PILImage.open(file_path)
-                    # PIL loads one frame at a time; iterate frames for stacks
-                    _frames = []
-                    try:
-                        while True:
-                            _frames.append(_np.array(_pil_img).astype('float32'))
-                            _pil_img.seek(_pil_img.tell() + 1)
-                    except EOFError:
-                        pass
-                    if len(_frames) == 1:
-                        all_channels.append((_frames[0], file_path, 0))
-                    else:
-                        for _ci, _frame in enumerate(_frames):
-                            all_channels.append((_frame, file_path, _ci))
+            if _used_pil:
+                # PIL NumPy-2.0 fallback path: reader already produced the channel
+                # tuples; emit the same user-facing warning and skip the structured
+                # metadata path (no reader object available).
+                if _channels:
+                    all_channels.extend(_channels)
                     from napari.utils.notifications import show_warning as _warn
                     _warn(
                         f"{os.path.basename(file_path)} loaded via PIL fallback (NumPy 2.0 / tifffile conflict). "
                         "Run 'python fix_tifffile.py' to permanently fix this."
                     )
-                except Exception as _pil_e:
+                else:
                     from napari.utils.notifications import show_warning as _warn
                     _warn(
                         f"Could not load {os.path.basename(file_path)}: NumPy 2.0 is incompatible with "
                         "the installed tifffile version. Run 'python fix_tifffile.py' to fix this permanently, "
                         "or downgrade NumPy: pip install 'numpy<2.0'"
                     )
-                    print(f"[PyCAT] PIL fallback also failed: {_pil_e}")
                 continue  # skip the structured-reader path below
 
-            image = open_image(file_path)
             self.central_manager.active_data_class.update_metadata(image)
             # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction
             # fails, the PREVIOUS file's frame count would otherwise still be sitting in the
@@ -1496,39 +1467,12 @@ class FileIOClass:
                 self.central_manager.active_data_class.data_repository['file_metadata'] = _md
             except Exception as _mde:
                 debug_log("file_io: metadata extraction failed", _mde)
-            
-            # Get the number of pages and channels in the image
-            num_pages = getattr(image.dims, 'S', 1)
-            num_channels = getattr(image.dims, 'C', 1)
 
-            # Check if the image has channels or pages
-            if not hasattr(image.dims, 'S') and not hasattr(image.dims, 'C'):
-                raise ValueError("Image does not have any channels or pages. Check file format.")
+            all_channels.extend(_channels)
 
-            # If there are multiple pages, iterate over pages and channels
-            if num_pages > 1: 
-                k = 0
-                for page_num in range(num_pages):
-                    for channel_num in range(num_channels):
-                        k += 1
-                        channel_data = read_plane(image, path=file_path, scene=page_num, c=channel_num, t=0)
-                        all_channels.append((channel_data, file_path, k))
-            # If only one page, iterate over channels
-            else: 
-                for channel_num in range(num_channels):
-                    channel_data = read_plane(image, path=file_path, c=channel_num, t=0)
-                    all_channels.append((channel_data, file_path, channel_num))
-
-            # Identify channel identity from OME/Bio-Formats metadata
-            # (fluorophore name, emission wavelength, or position fallback)
-            for ch_num in range(num_channels):
-                try:
-                    self._last_channel_info = getattr(self, '_last_channel_info', [])
-                    self._last_channel_info.append(
-                        extract_channel_info(image, ch_num)
-                    )
-                except Exception:
-                    pass
+            # Store the per-channel identity the reader extracted.
+            self._last_channel_info = getattr(self, '_last_channel_info', [])
+            self._last_channel_info.extend(_channel_info)
 
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
@@ -1549,9 +1493,13 @@ class FileIOClass:
         # Add layers for measuring object and cell diameters to the viewer based on the image size
         self._add_diameter_annotation_layers()
 
-        # Update the data instance with default sizes for object and cell diameters
-        self.central_manager.active_data_class.data_repository['object_size'] = channel_data.shape[0] // 20
-        self.central_manager.active_data_class.data_repository['cell_diameter'] = channel_data.shape[0] // 8
+        # Update the data instance with default sizes for object and cell
+        # diameters. The original code used the last `channel_data` left by the
+        # per-file read loop; that is the last channel across all loaded files,
+        # i.e. all_channels[-1][0]. Preserve that exactly.
+        _last_channel = all_channels[-1][0]
+        self.central_manager.active_data_class.data_repository['object_size'] = _last_channel.shape[0] // 20
+        self.central_manager.active_data_class.data_repository['cell_diameter'] = _last_channel.shape[0] // 8
 
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
