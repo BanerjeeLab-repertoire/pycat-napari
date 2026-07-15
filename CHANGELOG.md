@@ -4,6 +4,29 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.60] - 2026-07-15
+### Changed — **File-I/O decomposition #3: the lazy IMS reader classes + helpers move into a pure, Qt/napari-free `readers/ims_reader.py`.**
+- **The lazy IMS wrappers no longer live in the god-class.** `_open_stack_ims` interleaves reader
+  setup, metadata, ImageSource retention, a multi-position dialog, and napari `add_image` — but the
+  three lazy adapter classes it constructs (`_ImsReaderTYX` / `_ImsReaderZYX` / `_ImsReaderTZYX`) and
+  their helpers (`_suppress_ims_chunk_prints`, `_ims_indices`, `_ims_frame_2d`, `_ims_pixel_size_um`)
+  are pure and Qt/napari-free. All seven move **verbatim** into the new `readers/ims_reader.py`
+  (mirroring decomposition #1/#2). Because these are lazy WRAPPERS consumed during layer construction
+  (not a separable read-then-construct flow), the controller keeps `_open_stack_ims` unchanged and now
+  IMPORTS the classes plus `_suppress_ims_chunk_prints` / `_ims_pixel_size_um` back from the reader
+  module.
+- **Behaviour-preserving.** The wrappers carry subtle correctness moved intact: `__array__` calls the
+  lazy-guard (`refuse_implicit_full_read`) to block accidental full-stack materialization, and every
+  plane is normalised from the SOURCE dtype into `[0, 1]` float32 via `to_unit_float32` (through the
+  shared `_ims_frame_2d`). `_ims_frame_2d` moved with the classes (its only callers) rather than being
+  left behind — leaving it in `file_io.py` would have created an import cycle.
+- **New byte-identity test** `tests/test_ims_reader_extraction.py`: a fake `reader` (no real IMS lib)
+  wrapped in each `_ImsReader*`, asserting `wrapper[idx]` / `.shape` / `.dtype` / `len()` match a
+  reimplemented-inline oracle across index forms (int, slice, list, full, y/x sub-slice) and all three
+  axis orders, plus that `__array__` refuses. Existing `tests/test_ims_reader_retention.py` and
+  `test_file_io.py` still pass. Also removed the now-unused `sys` / `io` / `contextlib` imports the
+  moved helper left behind in `file_io.py`.
+
 ## [1.6.59] - 2026-07-15
 ### Changed — **File-I/O decomposition #4: the Save & Clear output-writing loop moves into a pure, Qt-free `writers.write_session_outputs`.**
 - **The write path is now separable from the dialogs.** `save_and_clear_all` mixed three Qt dialogs,
