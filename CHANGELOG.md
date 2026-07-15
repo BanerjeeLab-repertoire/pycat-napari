@@ -4,6 +4,36 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
+- The bioio backend reads each format via a separate plugin package. PyCAT declared the microscopy
+  plugins (bioio-ome-tiff/tifffile/czi) but NOT ``bioio-imageio``, which reads PNG/JPG/BMP. Since
+  PyCAT's own save path writes PNGs (Cellpose masks, overlay exports), a fresh install could not
+  reopen what it had saved — ``UnsupportedFileFormatError`` / "bioio has no reader installed for
+  .png files". The aicsimageio backend handled PNG natively, so the bioio migration silently dropped
+  it. Fix: (1) ``bioio-imageio`` is now a core dependency; (2) the missing-plugin error now names
+  bioio-imageio for .png/.jpg/.jpeg/.bmp so the message tells the user exactly what to install.
+  Existing installs unblock immediately with ``pip install bioio-imageio`` (keep numpy<2.1).
+
+## [1.6.38] - 2026-07-15
+### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
+- The bioio backend reads each format via a separate plugin package. PyCAT declared the microscopy
+  plugins (bioio-ome-tiff/tifffile/czi) but NOT `bioio-imageio`, which reads PNG/JPG/BMP. Since
+  PyCAT's own save path writes PNGs (Cellpose masks, overlay exports), a fresh install could not
+  reopen what it had saved — `UnsupportedFileFormatError` / "bioio has no reader installed for .png
+  files". The aicsimageio backend handled PNG natively, so the bioio migration silently dropped it.
+  Fix: (1) `bioio-imageio` is now a core dependency; (2) the missing-plugin error now names
+  bioio-imageio for .png/.jpg/.jpeg/.bmp so the message tells the user exactly what to install.
+  Existing installs unblock immediately with `pip install bioio-imageio` (keep numpy<2.1).
+
+### Changed — **god-class decomposition, piece #1: extract the 2-D mask reader (file-I/O audit #21).**
+- `FileIOClass.open_2d_mask`'s channel-reading loop moved to a pure free function
+  `file_io/readers/mask_reader.py::read_2d_mask_channels(file_path)` (new `file_io/readers/` package).
+  The controller now calls it and keeps only the dialog / bookkeeping / napari-layer construction.
+  Behaviour is preserved exactly — byte-identical channel tuples in the same order across all
+  page/channel shapes (guarded by tests/test_mask_reader_extraction.py, which reimplements the
+  original loop as an oracle). First step of the FileIOClass breakup; see
+  docs/audits/fileio_godclass_roadmap_2026-07-15.md for the full 5-piece sequence.
+
 ## [1.6.37] - 2026-07-15
 ### Fixed — **A genuine 1.0 um/px pixel size is no longer treated as "missing" (file-I/O audit #9).**
 - The in-dock pixel-size gate and the µm-vs-px scale-bar check decided "does this image have a real

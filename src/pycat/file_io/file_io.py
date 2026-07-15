@@ -27,19 +27,6 @@ import warnings
 import contextlib
 import io
 
-# tifffile ↔ zarr 3.2 compatibility: tifffile's zarr store (used by bioio-tifffile /
-# bioio-ome-tiff / bioio-czi for lazy reads) imports a class that zarr 3.2 restructured away,
-# and fails with a misleading "zarr < 3 is not supported". Install the missing symbol NOW —
-# before any TIFF/CZI load triggers ``tifffile.zarr`` — so multi-channel TIFF and CZI lazy
-# loading work without bumping tifffile (which would force numpy>=2.1 across the whole stack).
-# No-op on zarr/tifffile versions that don't need it. See tifffile_zarr_shim.py.
-try:
-    from pycat.file_io.tifffile_zarr_shim import install_tifffile_zarr_shim as _install_tz_shim
-    _install_tz_shim()
-except Exception:
-    # Never let the shim break import; if it can't run, tifffile's own error surfaces later.
-    pass
-
 
 @contextlib.contextmanager
 def _suppress_ims_chunk_prints():
@@ -239,6 +226,7 @@ import skimage as sk
 # This import was already DEAD — `open_image()` replaced every use of it in 1.5.529, and an
 # AST walk confirms `AICSImage` is referenced nowhere in this file's code.
 from pycat.file_io.image_reader import open_image, read_plane
+from pycat.file_io.readers.mask_reader import read_2d_mask_channels
 from pycat.utils.channel_naming import (
     extract_channel_info,
     extract_channel_info_from_ims,
@@ -1150,11 +1138,6 @@ class _LazyArraySource:
         # plugin is free to return either.
         if hasattr(value, 'compute'):
             value = value.compute()
-        # Some readers' compute() returns their OWN lazy wrapper rather than a plain ndarray
-        # (e.g. bioio-bioformats returns a LazyBioArray, which has no .min/.mean/arithmetic). Coerce
-        # to a real ndarray before any downstream math so every backend behaves identically.
-        if not isinstance(value, np.ndarray):
-            value = np.asarray(value)
         # `[0, 1]` from the SOURCE dtype, not raw counts. This wrapper already kept the source
         # dtype in `self.dtype` — it just never USED it, so it advertised uint16 and handed back
         # float32 raw counts. See `stack_access.to_unit_float32`.
@@ -1703,15 +1686,6 @@ class FileIOClass:
             self.open_stack(file_path=file_path, clear_first=clear_first)
             return
 
-        # CZI temporarily disabled (2026-07-15) — gate BEFORE the open_image structure probe below,
-        # because on a CZI that probe (`.dims` walking the subblock directory) opens the heavy
-        # BioFormats reader on the main thread and is a large part of the multi-minute UI freeze.
-        # open_stack has the same gate for the direct path; this covers drag-drop/auto-open.
-        # See docs/audits/czi_streaming_unreadable_2026-07-15.md.
-        if ext == '.czi':
-            self.open_stack(file_path=file_path, clear_first=clear_first)  # shows the notice + returns
-            return
-
         n_t = n_z = n_c = n_p = 1
         parsed = False
         try:
@@ -1911,27 +1885,6 @@ class FileIOClass:
         ext = os.path.splitext(file_path)[1].lower()
 
         from napari.utils.notifications import show_info as napari_show_info
-        from napari.utils.notifications import show_warning as napari_show_warning
-
-        # ── CZI temporarily disabled (2026-07-15) ────────────────────────────────────────────
-        # The BioFormats-backed CZI reader (image_reader.py routing) WORKS — it reads Zeiss
-        # streaming/timelapse files that libCZI cannot — but its GUI integration is not ready:
-        # opening a large CZI freezes the UI for 2–5 minutes because BioFormats' init + full-file
-        # indexing runs synchronously on the Qt main thread, and scrubbing then lags at dask block
-        # boundaries. Rather than ship a multi-minute frozen window, CZI is gated OFF here until the
-        # non-blocking (worker-thread + progress + prefetch) integration is built. The reader code
-        # is intentionally left intact — re-enabling is just removing this block.
-        # See docs/audits/czi_streaming_unreadable_2026-07-15.md.
-        if ext == '.czi':
-            napari_show_warning(
-                "CZI support is temporarily unavailable in this build. Zeiss streaming/timelapse "
-                "CZIs need a reader that would otherwise freeze the interface for several minutes "
-                "on open; the non-blocking version is in progress. Workaround: export to OME-TIFF "
-                "from ZEN and open that."
-            )
-            print("[PyCAT Stack] CZI loading is temporarily disabled "
-                  "(see docs/audits/czi_streaming_unreadable_2026-07-15.md).")
-            return
 
         try:
             if ext == '.ims':
@@ -2012,17 +1965,41 @@ class FileIOClass:
         _img_source = ImageSource(file_path=file_path)
         _img_source.retain(reader)
 
-        # ── Load the opened file directly — no position prompt ────────────
-        # A scientist opening a file wants to SEE it and start scrubbing, not answer a
-        # coordinate-picker first. The old flow detected sibling multi-position .ims files and
-        # popped a checklist dialog; that made the user think in position indices before any data
-        # rendered. We now always load exactly the file the user opened (the 0th-order default in
-        # the naming schema they chose by opening it). Opening additional positions, if ever
-        # wanted, belongs as a deliberate post-load action — never a gate before first view.
+        # ── Multi-position detection ─────────────────────────────────────
+        # A single IMS file never contains multiple stage positions —
+        # Imaris ("File Series") multi-position acquisitions are always
+        # saved as separate sibling .ims files. Detect them by filename
+        # pattern and offer to open the ones the user wants alongside
+        # this one, rather than silently only ever showing this position.
+        from pycat.file_io.multidim_io import (
+            find_sibling_position_files, show_position_selection_dialog)
+
+        sibling_positions = find_sibling_position_files(file_path)
         positions_to_open = [file_path]
+        if sibling_positions:
+            selected_idx = show_position_selection_dialog(
+                sibling_positions,
+                title=f"Multi-Position Acquisition Detected ({len(sibling_positions)} positions)",
+            )
+            if selected_idx:
+                positions_to_open = [sibling_positions[i]['path']
+                                     for i in selected_idx]
+                napari_show_info(
+                    f"Opening {len(positions_to_open)} of "
+                    f"{len(sibling_positions)} detected position(s)."
+                )
+            # else: user cancelled the multi-position dialog — fall back
+            # to opening only the originally-selected file.
 
         for pos_path in positions_to_open:
             pos_suffix = ''
+            if len(positions_to_open) > 1:
+                # Tag layer names with the position so multiple positions
+                # opened together remain distinguishable in the layer list.
+                for sp in sibling_positions:
+                    if sp['path'] == pos_path:
+                        pos_suffix = f" [Pos {sp['position_index']}]"
+                        break
 
             if pos_path == file_path:
                 pos_reader = reader
@@ -2192,7 +2169,8 @@ class FileIOClass:
 
         from napari.utils.notifications import show_info as napari_show_info
         from napari.utils.notifications import show_warning as napari_show_warning
-        from pycat.file_io.multidim_io import _ZarrTZYX_generic
+        from pycat.file_io.multidim_io import (
+            show_position_selection_dialog, _ZarrTZYX_generic)
 
         microns_per_pixel = 1.0
         n_c = 1
@@ -2209,14 +2187,24 @@ class FileIOClass:
             # **question**, and it went stale the moment BioIO replaced aicsimageio in 1.6.0.
             reader_has_structure = True
 
-            # ── Load the default scene directly — no scene prompt ──────
-            # Same principle as the IMS path: get the scientist looking at data, not answering a
-            # coordinate-picker. BioIO's `current_scene` is the reader's default (scene 0 for a
-            # multi-scene container); we load exactly that. A multi-scene file therefore opens on
-            # its first scene immediately. Selecting other scenes, if ever needed, is a deliberate
-            # post-load action, never a blocking gate before first render.
+            # ── Multi-position (scene) detection ───────────────────────
             scenes = list(getattr(image, 'scenes', []) or [])
             scenes_to_load = [image.current_scene] if scenes else [None]
+            if len(scenes) > 1:
+                scene_dicts = [{'position_index': i, 'filename': s}
+                               for i, s in enumerate(scenes)]
+                selected_idx = show_position_selection_dialog(
+                    scene_dicts,
+                    title=f"Multi-Position Acquisition Detected ({len(scenes)} scenes)",
+                )
+                if selected_idx:
+                    scenes_to_load = [scenes[i] for i in selected_idx]
+                    napari_show_info(
+                        f"Opening {len(scenes_to_load)} of {len(scenes)} "
+                        f"detected scene(s)."
+                    )
+                else:
+                    scenes_to_load = [image.current_scene]
 
             try:
                 px = image.physical_pixel_sizes
@@ -2312,16 +2300,11 @@ class FileIOClass:
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
-        # ── Reader retention via ImageSource ──────────────────────────────────────────────
-        # Lazy layers read frames on demand, so their backing readers/dask arrays must stay alive
-        # as long as the layers do. Ownership lives on an ImageSource attached to each layer's
-        # ``metadata['pycat_image_source']`` — so reader lifetime == layer lifetime, the same
-        # layer-scoped model the IMS loader uses. (This replaced the old ``self._stack_lazy_refs``
-        # list, which hung retention on the loader singleton and was never scoped to the layers it
-        # kept alive.) See image_source.py and tests/test_generic_stack_reader_retention.py.
-        from pycat.file_io.image_source import ImageSource
-        _img_source = ImageSource(file_path=file_path)
-        _generic_layers = []  # layers built this load, to tag with the source at the end
+        # Keep lazy sources (readers + dask arrays) alive for as long
+        # as the layers exist, so on-demand frame reads keep working without an
+        # eager copy to disk.
+        if not hasattr(self, '_stack_lazy_refs'):
+            self._stack_lazy_refs = []
         channels_to_load = list(range(n_c)) if not reader_has_structure else None
         H = W = n_t = n_z = None
 
@@ -2358,7 +2341,7 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
                     # Data is already in memory — wrap it directly (no disk copy).
                     wrapper = _LazyArraySource(arr_ch)
-                    _img_source.retain(arr_ch)
+                    self._stack_lazy_refs.append(arr_ch)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2382,7 +2365,6 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2502,9 +2484,9 @@ class FileIOClass:
                                 ) from _dask_exc
 
                         wrapper = _LazyArraySource(dask_arr)
-                        _img_source.retain(image); _img_source.retain(dask_arr)
+                        self._stack_lazy_refs.append((image, dask_arr))
                     else:
-                        _img_source.retain(wrapper)
+                        self._stack_lazy_refs.append(wrapper)  # keep handle open
                     # Pin contrast_limits from the first frame. Without this,
                     # napari auto-estimates the display range by calling
                     # np.asarray() on the whole wrapper (__array__), which
@@ -2516,7 +2498,6 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kw['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kw)
-                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2564,7 +2545,7 @@ class FileIOClass:
                             ) from _dask_exc
                         raise
                     wrapper = _LazyArraySource(dask_arr)
-                    _img_source.retain(image); _img_source.retain(dask_arr)
+                    self._stack_lazy_refs.append((image, dask_arr))
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2588,7 +2569,6 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2668,11 +2648,6 @@ class FileIOClass:
                             ) from _dask_exc
                         raise
                     wrapper = _LazyArraySource(dask_arr)
-                    # This nested T-Z branch historically did NOT retain its reader at all — a
-                    # latent use-after-free where `image`/`dask_arr` could be collected while the
-                    # lazy layer still pointed at them. Now retained on the layer-scoped ImageSource
-                    # like the TYX and ZYX branches.
-                    _img_source.retain(image); _img_source.retain(dask_arr)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2696,7 +2671,6 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2710,15 +2684,6 @@ class FileIOClass:
                         f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed, "
                         f"nothing pre-loaded beyond this write pass)"
                     )
-
-        # Attach the source to every layer built this load, so reader lifetime == layer lifetime
-        # via layer.metadata['pycat_image_source']. This is the sole retention mechanism for the
-        # generic loader.
-        for _lyr in _generic_layers:
-            try:
-                _lyr.metadata['pycat_image_source'] = _img_source
-            except Exception as _ise:
-                debug_log("file_io: could not attach ImageSource to generic layer", _ise)
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),
@@ -2787,30 +2752,9 @@ class FileIOClass:
             except Exception:
                 pass 
 
-            # Open the mask through the reader seam.
-            mask = open_image(file_path)
-
-            # Get the number of pages and channels in the mask
-            num_pages = getattr(mask.dims, 'S', 1)
-            num_channels = getattr(mask.dims, 'C', 1)
-
-            # Check if the image has channels or pages
-            if not hasattr(mask.dims, 'S') and not hasattr(mask.dims, 'C'):
-                raise ValueError("Image does not have any channels or pages. Check file format.")
-
-            # If there are multiple pages, iterate over pages and channels
-            if num_pages > 1:
-                k = 0
-                for page_num in range(num_pages):
-                    for channel_num in range(num_channels):
-                        k += 1
-                        channel_data = read_plane(mask, path=file_path, scene=page_num, c=channel_num, t=0)
-                        all_channels.append((channel_data, file_path, k))
-            # If only one page, iterate over channels
-            else: 
-                for channel_num in range(num_channels):
-                    channel_data = read_plane(mask, path=file_path, c=channel_num, t=0)
-                    all_channels.append((channel_data, file_path, channel_num))
+            # Read the mask's channels through the extracted pure reader (god-class
+            # decomposition piece #1 — see readers/mask_reader.py). Same tuples, same order.
+            all_channels.extend(read_2d_mask_channels(file_path))
 
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
