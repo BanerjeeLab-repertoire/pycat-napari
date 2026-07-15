@@ -4,6 +4,19 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.40] - 2026-07-15
+### Fixed — **Frame-interval "unknown" warning no longer fires with no image loaded.**
+- The dynamics panels (advanced_analysis_ui, condensate_physics_ui) seed their frame-interval
+  spinbox at BUILD time, before any file is opened. `has_time_axis()` returned True whenever the
+  frame count `n_t` was unrecorded — which is the case in an empty session — so the scary "every
+  time-dependent result is out by a factor of two" warning fired with nothing loaded. That trains
+  the user to scroll past it, so the one that matters (on a real movie) gets ignored too. Fixed:
+  `has_time_axis()` now returns False when NO image is loaded (detected via absence of both
+  `file_metadata` and a recorded `n_t`), while still failing loud when an image IS loaded but its
+  frame count is unknown, and staying silent on a still 2-D image. Guard test
+  test_frame_interval_no_image.py. (Same bug class as the pixel-size sentinel: warn on a real
+  problem, not on absence-of-state.)
+
 ## [1.6.39] - 2026-07-15
 ### Fixed — **Fluorescence-pipeline layer selection no longer depends on load order (finishes the tag migration for condensate seg).**
 - When two fluorescence channels got the same generic name ("Fluorescence Image" / "Fluorescence
@@ -31,16 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the design reference for the tag resolver (which already exists as `utils/tag_resolver.py`); this
   vendors the engine so the two can be connected incrementally. No app behaviour change from vendoring
   alone. Imports verified, 79-op catalog loads, resolver discriminates condensate-vs-DAPI correctly.
-
-### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
-- The bioio backend reads each format via a separate plugin package. PyCAT declared the microscopy
-  plugins (bioio-ome-tiff/tifffile/czi) but NOT ``bioio-imageio``, which reads PNG/JPG/BMP. Since
-  PyCAT's own save path writes PNGs (Cellpose masks, overlay exports), a fresh install could not
-  reopen what it had saved — ``UnsupportedFileFormatError`` / "bioio has no reader installed for
-  .png files". The aicsimageio backend handled PNG natively, so the bioio migration silently dropped
-  it. Fix: (1) ``bioio-imageio`` is now a core dependency; (2) the missing-plugin error now names
-  bioio-imageio for .png/.jpg/.jpeg/.bmp so the message tells the user exactly what to install.
-  Existing installs unblock immediately with ``pip install bioio-imageio`` (keep numpy<2.1).
 
 ## [1.6.38] - 2026-07-15
 ### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
