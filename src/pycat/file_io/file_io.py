@@ -1964,41 +1964,17 @@ class FileIOClass:
         _img_source = ImageSource(file_path=file_path)
         _img_source.retain(reader)
 
-        # ── Multi-position detection ─────────────────────────────────────
-        # A single IMS file never contains multiple stage positions —
-        # Imaris ("File Series") multi-position acquisitions are always
-        # saved as separate sibling .ims files. Detect them by filename
-        # pattern and offer to open the ones the user wants alongside
-        # this one, rather than silently only ever showing this position.
-        from pycat.file_io.multidim_io import (
-            find_sibling_position_files, show_position_selection_dialog)
-
-        sibling_positions = find_sibling_position_files(file_path)
+        # ── Load the opened file directly — no position prompt ────────────
+        # A scientist opening a file wants to SEE it and start scrubbing, not answer a
+        # coordinate-picker first. The old flow detected sibling multi-position .ims files and
+        # popped a checklist dialog; that made the user think in position indices before any data
+        # rendered. We now always load exactly the file the user opened (the 0th-order default in
+        # the naming schema they chose by opening it). Opening additional positions, if ever
+        # wanted, belongs as a deliberate post-load action — never a gate before first view.
         positions_to_open = [file_path]
-        if sibling_positions:
-            selected_idx = show_position_selection_dialog(
-                sibling_positions,
-                title=f"Multi-Position Acquisition Detected ({len(sibling_positions)} positions)",
-            )
-            if selected_idx:
-                positions_to_open = [sibling_positions[i]['path']
-                                     for i in selected_idx]
-                napari_show_info(
-                    f"Opening {len(positions_to_open)} of "
-                    f"{len(sibling_positions)} detected position(s)."
-                )
-            # else: user cancelled the multi-position dialog — fall back
-            # to opening only the originally-selected file.
 
         for pos_path in positions_to_open:
             pos_suffix = ''
-            if len(positions_to_open) > 1:
-                # Tag layer names with the position so multiple positions
-                # opened together remain distinguishable in the layer list.
-                for sp in sibling_positions:
-                    if sp['path'] == pos_path:
-                        pos_suffix = f" [Pos {sp['position_index']}]"
-                        break
 
             if pos_path == file_path:
                 pos_reader = reader
@@ -2168,8 +2144,7 @@ class FileIOClass:
 
         from napari.utils.notifications import show_info as napari_show_info
         from napari.utils.notifications import show_warning as napari_show_warning
-        from pycat.file_io.multidim_io import (
-            show_position_selection_dialog, _ZarrTZYX_generic)
+        from pycat.file_io.multidim_io import _ZarrTZYX_generic
 
         microns_per_pixel = 1.0
         n_c = 1
@@ -2186,24 +2161,14 @@ class FileIOClass:
             # **question**, and it went stale the moment BioIO replaced aicsimageio in 1.6.0.
             reader_has_structure = True
 
-            # ── Multi-position (scene) detection ───────────────────────
+            # ── Load the default scene directly — no scene prompt ──────
+            # Same principle as the IMS path: get the scientist looking at data, not answering a
+            # coordinate-picker. BioIO's `current_scene` is the reader's default (scene 0 for a
+            # multi-scene container); we load exactly that. A multi-scene file therefore opens on
+            # its first scene immediately. Selecting other scenes, if ever needed, is a deliberate
+            # post-load action, never a blocking gate before first render.
             scenes = list(getattr(image, 'scenes', []) or [])
             scenes_to_load = [image.current_scene] if scenes else [None]
-            if len(scenes) > 1:
-                scene_dicts = [{'position_index': i, 'filename': s}
-                               for i, s in enumerate(scenes)]
-                selected_idx = show_position_selection_dialog(
-                    scene_dicts,
-                    title=f"Multi-Position Acquisition Detected ({len(scenes)} scenes)",
-                )
-                if selected_idx:
-                    scenes_to_load = [scenes[i] for i in selected_idx]
-                    napari_show_info(
-                        f"Opening {len(scenes_to_load)} of {len(scenes)} "
-                        f"detected scene(s)."
-                    )
-                else:
-                    scenes_to_load = [image.current_scene]
 
             try:
                 px = image.physical_pixel_sizes
