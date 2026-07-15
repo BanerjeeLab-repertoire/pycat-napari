@@ -27,6 +27,7 @@ import numpy as np
 from pycat.utils.object_ref import normalise_bbox_columns
 from pycat.utils.tag_registry import tags_layer
 import skimage as sk
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 import cv2
 import scipy.ndimage as ndi
 import scipy.stats as stats
@@ -1132,7 +1133,7 @@ def train_and_apply_rf_classifier(image, training_labels, object_diameter):
     labeled_mask = sk.measure.label(binary_mask)
     # Remove small objects from the labeled mask
     min_area = (np.pi * (object_diameter / 2) ** 2) // 10
-    labeled_mask = sk.morphology.remove_small_objects(labeled_mask, min_size=min_area)
+    labeled_mask = _remove_small_objects_compat(labeled_mask, min_area)
     binary_mask = labeled_mask > 0 
     # Use the binary mask to remove the small objects from the refined labels
     refined_labels *= binary_mask

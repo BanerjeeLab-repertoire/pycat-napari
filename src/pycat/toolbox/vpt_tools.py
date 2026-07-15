@@ -41,6 +41,7 @@ from pycat.utils.tag_registry import tags_layer
 import pandas as pd
 
 import skimage as sk
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 import scipy.ndimage as ndi
 
 # Notifications go through the shim so this module's PHYSICS (detection, MSD,
@@ -113,7 +114,7 @@ def segment_host_condensate(
 
     labeled = sk.measure.label(binary)
     if min_area_px > 0:
-        labeled = sk.morphology.remove_small_objects(labeled, min_size=min_area_px)
+        labeled = _remove_small_objects_compat(labeled, min_area_px)
         labeled = sk.measure.label(labeled > 0)  # relabel contiguous
 
     return labeled.astype(np.int32)
@@ -251,7 +252,7 @@ def infer_host_from_beads(
         return np.zeros((H, W), dtype=np.int32)
     thr = float(np.percentile(nz, density_percentile))
     mask = density > thr
-    mask = sk.morphology.remove_small_objects(mask, 5)
+    mask = _remove_small_objects_compat(mask, 5)
     mask = ndi.binary_fill_holes(mask)
     if not mask.any():
         return np.zeros((H, W), dtype=np.int32)

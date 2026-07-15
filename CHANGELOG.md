@@ -4,6 +4,20 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.45] - 2026-07-15
+### Fixed — **skimage 0.26 `remove_small_objects` deprecation (FutureWarning) unified across the codebase.**
+- scikit-image 0.26 deprecated `min_size` in favour of `max_size`, and it is NOT a rename: `min_size=N`
+  removed objects with area < N, while `max_size=N` removes area <= N. Seven call sites had drifted into
+  a mix of positional `min_size`, keyword `min_size=`, and even `max_size=min_size` (which had silently
+  shifted the threshold by one and flipped the comparison to <=). All are now routed through a single
+  version-safe helper `general_utils.remove_small_objects_compat`, which uses `max_size = min_area - 1`
+  on new skimage (reproducing the old "area < min_area" removal exactly) and falls back to `min_size` on
+  old skimage — so the FutureWarning no longer fires and the threshold semantics are identical everywhere.
+  Sites fixed: vpt_tools (×2, incl. the Mode-C host inference that surfaced the warning), brightfield_tools
+  (its own correct wrapper now delegates), invitro_fluor_ui, timeseries_invitro_fluor_ui, batch_roi_tools
+  (×2 — one of which had the latent off-by-one), segmentation_tools. Guard test
+  tests/test_remove_small_objects_compat.py (asserts strict-less-than removal AND no FutureWarning).
+
 ## [1.6.44] - 2026-07-15
 ### Fixed — **Setting the pixel size now calibrates the image (µm readout appeared missing).**
 - After the Set-Scale dialog (or the in-dock pixel-size gate) confirmed a value, PyCAT wrote

@@ -32,6 +32,7 @@ try:
 except Exception:
     label_with_circle = lambda t, **k: t
 import numpy as np
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 
 
 from pycat.utils.general_utils import debug_log
@@ -525,7 +526,7 @@ def _ivf_segmentation(ui, layout):
             def _postfilter(binary):
                 b = np.asarray(binary) > 0
                 if p_minarea > 0:
-                    b = morphology.remove_small_objects(b, int(p_minarea))
+                    b = _remove_small_objects_compat(b, int(p_minarea))
                 lab = measure.label(b)
                 if p_round:
                     keep = np.zeros_like(lab)
