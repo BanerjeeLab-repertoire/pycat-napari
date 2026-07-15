@@ -4,6 +4,33 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.58] - 2026-07-15
+### Added — **GPU VPT bead detection validated on real CUDA; CuPy bridged to PyTorch's bundled CUDA runtime so the `gpu` extra works without a standalone toolkit.**
+- **CuPy could not find its CUDA runtime.** `cupy-cuda11x` needs the CUDA 11.x libraries
+  (`cudart`, `nvrtc` + its `nvrtc-builtins` companion, `cublas` ...) at first kernel launch. On a
+  Windows/conda machine with no standalone CUDA toolkit, `import cupy` succeeded but the first real op
+  died with `Could not find nvrtc64_112_0.dll`. The only consistent copy of those libraries on such a
+  machine is the one **PyTorch** — already a hard PyCAT dependency, built against cu118 — ships in
+  `torch/lib`. `gpu_utils._register_bundled_cuda_libs()` now locates that directory (via `find_spec`,
+  without importing torch) and adds it to both `os.add_dll_directory` (for CuPy's `LoadLibraryEx`) and
+  `PATH` (for nvrtc's internal load of `nvrtc-builtins`) before `import cupy`. Windows-only,
+  best-effort, a no-op elsewhere or with a CPU-only torch. Result: `gpu_available()` is `True` out of
+  the box on the Quadro P2200 (CuPy 13.6.0, CUDA runtime 11.8).
+- **The GPU smoke test now proves the GPU is *functional*, not merely importable.** The old
+  `cp.zeros((4,4))` check is only a memset and would pass off a stale kernel cache even when `nvrtc`
+  is broken; it now forces an elementwise-kernel compile + reduction, so `GPU_AVAILABLE` reflects true
+  capability.
+- **Validated GPU ≡ CPU-parallel ≡ serial on real CUDA.** New `tests/test_vpt_gpu_equivalence.py`
+  (skip-if-no-GPU, `integration`) asserts `blob_log_gpu` reproduces `skimage.blob_log` exactly, and
+  that GPU and the ProcessPool worker path both match serial CPU blob sets across the fixture stack.
+  Confirmed on the real 1080×1440 bead movie (first 40 frames, ~795 detections/frame): **0 mismatches**
+  on all three tiers — so the `detect_beads_stack` tier selector never changes results.
+- **Measured speedup** (Quadro P2200, warm, 40 dense frames): serial 1.70 fps → CPU-parallel 3.06 fps
+  (1.80×) → **GPU 3.50 fps (2.06×)**. **Viscosity unchanged:** GPU detection is bit-identical to CPU,
+  so the downstream link→MSD→Stokes-Einstein chain is untouched; the pipeline's η on the 1000-frame
+  bead file is 8.52 Pa·s, matching the validated ~8.325 Pa·s baseline (v1.5.329) within ~2%. The GPU
+  tier remains fully revertible via `PYCAT_FORCE_CPU=1` / `use_gpu=False`.
+
 ## [1.6.57] - 2026-07-15
 ### Fixed — **Restore VPT `_rebuild_track_layers` (lost from the tree), so loading a VPT session rebuilds its tracks again.**
 - The `_rebuild_track_layers` method — which the session loader calls to reconstruct the VPT trajectory

@@ -56,12 +56,56 @@ _warnings.filterwarnings(
     module="cupy",
 )
 
+
+def _register_bundled_cuda_libs() -> None:
+    """Make CuPy find the CUDA 11.x runtime DLLs that PyTorch bundles.
+
+    ``cupy-cuda11x`` needs the CUDA 11.x runtime at first kernel launch
+    (``cudart``, ``nvrtc`` + its ``nvrtc-builtins`` companion, ``cublas`` ...).
+    On Windows machines without a standalone CUDA toolkit, the only consistent
+    copy of those libraries is the one PyTorch — a hard PyCAT dependency, built
+    against cu118 — ships in ``torch/lib``. CuPy cannot see that directory, so
+    ``import cupy`` succeeds but the first real op dies with
+    ``Could not find nvrtc64_112_0.dll`` (or nvrtc then fails to open its
+    ``nvrtc-builtins`` companion, which it loads via ``PATH`` rather than the
+    Python DLL-directory list).
+
+    We locate ``torch/lib`` WITHOUT importing torch (``find_spec`` only — torch
+    import is heavy and this module is re-imported in every pool worker), then
+    add it to both ``os.add_dll_directory`` (for CuPy's own ``LoadLibraryEx``)
+    and ``PATH`` (for nvrtc's internal load of ``nvrtc-builtins``). Best-effort
+    and Windows-only: a no-op elsewhere, or if torch / its lib dir is absent
+    (e.g. a CPU-only torch build, where GPU would be unavailable anyway).
+    """
+    if os.name != "nt":
+        return
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("torch")
+        if spec is None or not spec.origin:
+            return
+        lib_dir = os.path.join(os.path.dirname(spec.origin), "lib")
+        if not os.path.isdir(lib_dir):
+            return
+        os.environ["PATH"] = lib_dir + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(lib_dir)
+    except Exception:
+        # A DLL-path tweak must never break import of this module.
+        pass
+
+
 if os.environ.get("PYCAT_FORCE_CPU", "0") != "1":
     try:
+        _register_bundled_cuda_libs()
         import cupy as _cp
         import cupyx.scipy.ndimage as _cpnd
-        # Quick smoke-test: allocate a tiny array to confirm CUDA is functional
-        _test = _cp.zeros((4, 4), dtype=_cp.float32)
+        # Smoke-test that CUDA is *functional*, not merely importable: force an
+        # elementwise kernel compile (nvrtc) and a reduction, so GPU_AVAILABLE
+        # reflects true capability. A bare ``cp.zeros`` is only a memset and
+        # would not surface a missing/broken nvrtc runtime.
+        _test = _cp.zeros((4, 4), dtype=_cp.float32) + 1
+        float(_test.sum())
         del _test
         cp   = _cp
         cpnd = _cpnd
