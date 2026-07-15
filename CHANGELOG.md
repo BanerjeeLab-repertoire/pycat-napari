@@ -4,6 +4,16 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.57] - 2026-07-15
+### Fixed — **Restore VPT `_rebuild_track_layers` (lost from the tree), so loading a VPT session rebuilds its tracks again.**
+- The `_rebuild_track_layers` method — which the session loader calls to reconstruct the VPT trajectory
+  + pickable-points layers when a session with `vpt_tracks` is loaded — was absent from `vpt_ui.py` in
+  the shipped tree (it was introduced alongside a load-CSV widget button that was dropped, and the whole
+  change was skipped, taking the shared method with it). `ui_modules._open_session_loader` guards the
+  call with `hasattr`, so loading a VPT session did not crash but SILENTLY skipped the track rebuild —
+  defeating the session-restore feature (1.6.52/1.6.53). Restored `_rebuild_track_layers`; the load-CSV
+  widget button is intentionally NOT restored (top-level Load Session is the single path). The 1.6.50
+  brushing loop fix and line-trajectory highlight are unaffected.
 ## [1.6.56] - 2026-07-15
 ### Changed — **Smart channel naming: cleaned filenames, identity-first names, full-name tooltip, and the naming dialog skipped when confident.**
 - **Filename cleaning.** A new `_clean_filename_token` strips MicroManager/OME cruft and acquisition

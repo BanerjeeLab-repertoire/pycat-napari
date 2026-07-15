@@ -1496,6 +1496,52 @@ class VideoParticleTrackingUI:
         w.progress.connect(lambda i, n: self._track_prog.setValue(i))
         self._track_worker = w; w.start()
 
+    def _rebuild_track_layers(self, tracks, name="Bead Trajectories"):
+        """(Re)build the napari Tracks layer + the pickable Points layer from a
+        tracks DataFrame. Shared by the linker and by session load, so a loaded
+        session gets exactly the same brushable layers a fresh link produces.
+
+        tracks needs at least: track_id, frame, and y_um/x_um (or y_um_raw/
+        x_um_raw). Scale is matched to the bead image layer so the tracks overlay
+        the image 1:1."""
+        import numpy as _np
+        if tracks is None or 'track_id' not in tracks or tracks.empty:
+            return
+        mpp = self._mpx()
+        _bead_name = self._bead_dd.currentText() if hasattr(self, '_bead_dd') else ''
+        _img_layer = None
+        try:
+            import napari.layers as _nl
+            for _l in self.viewer.layers:
+                if isinstance(_l, _nl.Image):
+                    if _bead_name and _l.name == _bead_name:
+                        _img_layer = _l; break
+                    if _img_layer is None:
+                        _img_layer = _l
+        except Exception:
+            _img_layer = None
+
+        tl = tracks[['track_id', 'frame']].copy()
+        tl['y'] = tracks['y_um_raw'] / mpp if 'y_um_raw' in tracks else tracks['y_um'] / mpp
+        tl['x'] = tracks['x_um_raw'] / mpp if 'x_um_raw' in tracks else tracks['x_um'] / mpp
+        if name in self.viewer.layers:
+            self.viewer.layers.remove(name)
+        add_kwargs = {}
+        if _img_layer is not None:
+            try:
+                isc = _np.asarray(_img_layer.scale, float)
+                if isc.size >= 2:
+                    yx = isc[-2:]
+                    add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
+            except Exception:
+                pass
+        self.viewer.add_tracks(
+            tl[['track_id', 'frame', 'y', 'x']].values, name=name, **add_kwargs)
+        try:
+            self._add_pickable_bead_points(tracks, _img_layer, mpp)
+        except Exception as _e:
+            print(f"[PyCAT VPT] pickable bead layer failed: {_e}")
+
     def _update_tracklen_hist(self, tracks):
         """Draw the track-length (frames-per-track) histogram in a popped-out
         dock widget. A healthy link has many long tracks; a fragmentation-prone
