@@ -215,6 +215,39 @@ def scan_output_folder(folder: Path) -> dict[str, list[dict]]:
     return groups
 
 
+def _os_exists(p):
+    try:
+        import os
+        return bool(p) and os.path.exists(str(p))
+    except Exception:
+        return False
+
+
+def _load_source_image_into_viewer(src_path, viewer, data_instance):
+    """Load the session's source image through PyCAT's OWN loader so it lands as
+    the correct (lazy) layer type with proper scale/metadata — exactly as if the
+    user had opened it. Falls back to a plain add_image only if the file_io
+    loader is unavailable."""
+    try:
+        cm = getattr(data_instance, 'central_manager', None)
+        fio = getattr(cm, 'file_io', None) if cm is not None else None
+        if fio is not None and hasattr(fio, 'open_image_auto'):
+            # open_image_auto picks stack vs 2D and applies scale/metadata.
+            fio.open_image_auto(file_path=src_path, clear_first=False)
+            return True
+    except Exception as e:
+        print(f"[PyCAT Session] source image via file_io failed, falling back: {e}")
+    # Fallback: plain read
+    try:
+        import tifffile, numpy as _np, os
+        arr = tifffile.imread(str(src_path))
+        viewer.add_image(arr, name=os.path.basename(str(src_path)))
+        return True
+    except Exception as e:
+        print(f"[PyCAT Session] source image fallback failed: {e}")
+        return False
+
+
 def load_session(
     folder: Path,
     viewer,
@@ -248,6 +281,61 @@ def load_session(
     import tifffile
     import skimage as sk
 
+    loaded_layers = []
+    loaded_dfs    = {}
+    skipped       = []
+
+    # ── Manifest-first: a session folder carries pycat_session.json describing
+    # how to restore the whole working state — including the SOURCE IMAGE (which
+    # is referenced by path, not copied) and VPT tracks (which the suffix scan
+    # alone cannot rebuild). If a manifest is present, use it; the suffix scan
+    # then still runs to pick up any derived layer files in the folder.
+    _manifest = None
+    try:
+        from pycat.file_io import session_manifest as _sm
+        _manifest = _sm.read_manifest(folder)
+    except Exception:
+        _manifest = None
+
+    if _manifest is not None:
+        # 1) Load the source image from its recorded path (a reference, not a copy).
+        try:
+            src = (_manifest.get('source_image') or {}).get('path')
+            if src and _os_exists(src):
+                _load_source_image_into_viewer(src, viewer, data_instance)
+                loaded_layers.append(f"[source] {src}")
+                print(f"[PyCAT Session] Loaded source image: {src}")
+            elif src:
+                skipped.append((src, "source image not found at recorded path"))
+                print(f"[PyCAT Session] Source image missing: {src}")
+        except Exception as e:
+            skipped.append((str((_manifest.get('source_image') or {}).get('path')), str(e)))
+
+        # 2) Restore acquisition state (pixel size, frame interval) so downstream
+        #    analysis is calibrated exactly as it was.
+        try:
+            if data_instance is not None:
+                acq = _manifest.get('acquisition') or {}
+                dr = data_instance.data_repository
+                if acq.get('microns_per_pixel_sq') is not None:
+                    dr['microns_per_pixel_sq'] = acq['microns_per_pixel_sq']
+                    dr['pixel_size_from_metadata'] = acq.get('pixel_size_from_metadata', False)
+                    dr['pixel_size_confirmed'] = acq.get('pixel_size_confirmed', True)
+        except Exception:
+            pass
+
+        # 3) Restore dataframes recorded in the manifest (incl. vpt_tracks).
+        try:
+            from pycat.file_io import session_manifest as _sm
+            if data_instance is not None:
+                restored = _sm.restore_dataframes_from_manifest(
+                    _manifest, folder, data_instance.data_repository)
+                loaded_dfs.update(restored)
+                for k in restored:
+                    print(f"[PyCAT Session] Restored dataframe '{k}'")
+        except Exception as e:
+            skipped.append((str(folder), f"manifest dataframes: {e}"))
+
     groups = scan_output_folder(folder)
 
     if stem_filter:
@@ -257,10 +345,6 @@ def load_session(
     # Flatten to ordered list for progress tracking
     all_files = [info for files in groups.values() for info in files]
     n_total   = len(all_files)
-
-    loaded_layers = []
-    loaded_dfs    = {}
-    skipped       = []
 
     for i, info in enumerate(all_files):
         path  = info['path']

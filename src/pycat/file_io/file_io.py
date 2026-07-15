@@ -414,16 +414,51 @@ class LayerDataframeSelectionDialog(QDialog):
             "Pre-Processed Fluorescence Image",
         ]
 
+        # Smart session default: tick every DERIVED layer (masks, tracks,
+        # processed images), and never the SOURCE IMAGE (it is on disk — a session
+        # references it, and copying it just wastes space) or a reconstructable
+        # upscale. This removes the ticking burden — the user only unticks/adds if
+        # they want to override.
+        try:
+            from pycat.file_io.session_manifest import (
+                _is_source_image_layer as _sess_is_source)
+            _src_stem = getattr(
+                getattr(self, '_central_manager', None), 'active_data_class', None)
+        except Exception:
+            _sess_is_source = None
+        # Best-effort source stem for identifying the original image layer.
+        _src_stem_name = ''
+        try:
+            _src_stem_name = (self.layers and
+                              max((str(l.name) for l in self.layers), key=len)) or ''
+        except Exception:
+            _src_stem_name = ''
+
         _total_all = 0.0
         for layer in self.layers:
             mb = _est_size_mb(layer)
             _total_all += mb
             recon = _is_reconstructable(layer)
+            _is_source = False
+            try:
+                if _sess_is_source is not None:
+                    # Identify the source by the loaded-image heuristic/tags.
+                    _is_source = _sess_is_source(layer, '')
+            except Exception:
+                _is_source = False
             label = f"{layer.name}   ({mb:.1f} MB)"
-            if recon:
+            if _is_source:
+                label += "   — source image (already on disk; referenced, not copied)"
+            elif recon:
                 label += "   — reconstructable (upscale of another layer)"
             checkbox = QCheckBox(label)
-            if recon:
+            if _is_source:
+                checkbox.setStyleSheet("color: #7fa7d4;")
+                checkbox.setToolTip(
+                    "This is the originally-loaded image. A session references it "
+                    "by path rather than copying it (it is already on disk and is "
+                    "the largest file), so it is unticked by default.")
+            elif recon:
                 checkbox.setStyleSheet("color: #e8a33d;")
                 checkbox.setToolTip(
                     "This layer is an upscaled copy of another layer. Upscaling "
@@ -433,8 +468,9 @@ class LayerDataframeSelectionDialog(QDialog):
             self.layer_checkboxes[layer.name] = checkbox
             layout.addWidget(checkbox)
 
-            # Default on for the usual results; never default-on a reconstructable.
-            if layer.name in default_checked_layers and not recon:
+            # Smart default: tick every derived layer; never the source or an
+            # upscale.
+            if not recon and not _is_source:
                 checkbox.setChecked(True)
 
 
@@ -446,17 +482,8 @@ class LayerDataframeSelectionDialog(QDialog):
             checkbox = QCheckBox(df_name)
             self.df_checkboxes[df_name] = checkbox
             layout.addWidget(checkbox)
-
-
-            # List of default checked dataframe names
-            default_checked_dfs = [
-                "cell_df", 
-                "puncta_df"
-            ]
-
-            # Set the default state of some checkboxes
-            if df_name in default_checked_dfs:
-                checkbox.setChecked(True)
+            # Smart default: every analysis dataframe is part of the session.
+            checkbox.setChecked(True)
 
         # Radio buttons for Clearing option
         self.clear_all_radio = QRadioButton("Clear All")
@@ -3096,6 +3123,30 @@ class FileIOClass:
                 'clear_all': clear_all,
             })
 
+        # ── Consolidate into ONE session folder (not scattered loose files) ──
+        #
+        # Files used to be written with a flat `save_name` prefix straight into
+        # the chosen directory, so a session's artifacts scattered among the
+        # user's data files. Instead, gather them into a dedicated session folder
+        # and record a manifest, so the top-level "Load Session" can restore the
+        # whole working state (source image referenced by path, derived layers +
+        # dataframes reloaded). The user's chosen name/location is honoured as the
+        # PARENT; the session folder is created inside it.
+        from pycat.file_io import session_manifest as _sm
+        _parent_dir = os.path.dirname(save_name)
+        _stem = os.path.basename(save_name)
+        try:
+            _session_dir = _sm.default_session_dir(_parent_dir, self.base_file_name or _stem)
+            _session_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            _session_dir = None
+        # Inside the session folder, keep the stem-based naming the loader expects.
+        _base_in_session = (str(_session_dir / (self.base_file_name or _stem))
+                            if _session_dir is not None else save_name)
+        save_name = _base_in_session
+        _manifest_layers = []
+        _manifest_dfs = []
+
         # Get the names of all layers in the viewer
         layer_names = [layer.name for layer in self.viewer.layers]
 
@@ -3120,6 +3171,9 @@ class FileIOClass:
                         _tag_store = None
                     self._save_layer(layer_data, layer_type,
                                      save_name, safe_name, tag_store=_tag_store)
+                    _manifest_layers.append({
+                        'name': layer_name, 'layer_type': layer_type,
+                        'safe_name': safe_name})
             
             # Save only the selected dataframes
             dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
@@ -3131,6 +3185,9 @@ class FileIOClass:
                     # Nothing about 340 rows of an 800-row results table looks wrong.
                     with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
                         df_value.to_csv(_tmp, index=True)
+                    _manifest_dfs.append({
+                        'key': df_name,
+                        'file': os.path.basename(save_name + f'_{df_name}.csv')})
 
             # Export the file's normalised acquisition metadata alongside the
             # results, for provenance/reproducibility. Written once per save.
@@ -3142,6 +3199,21 @@ class FileIOClass:
                         _json.dump(_md, _mf, indent=2, default=str)
             except Exception as _mde:
                 debug_log("file_io: metadata JSON export failed", _mde)
+
+            # Write the session manifest so Load Session can restore this state.
+            # The source image is REFERENCED by path, never copied.
+            try:
+                if _session_dir is not None:
+                    _sm.write_manifest(
+                        _session_dir,
+                        source_path=getattr(self, 'filePath', None),
+                        data_repository=self.central_manager.active_data_class.data_repository,
+                        layer_entries=_manifest_layers,
+                        dataframe_entries=_manifest_dfs,
+                        extra={'stem': self.base_file_name or _stem})
+                    print(f"[PyCAT] Session saved to {_session_dir}")
+            except Exception as _me:
+                debug_log("file_io: session manifest write failed", _me)
 
         # Clear all layers and dataframes from the viewer and data instance.
         # If "Remember measurements across clears" is on, preserve the measured

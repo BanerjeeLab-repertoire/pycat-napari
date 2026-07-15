@@ -4,6 +4,40 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.52] - 2026-07-15
+### Changed — **Save & Clear is now a real SESSION save: one folder, a manifest, the source image referenced (not copied), and Load Session restores the whole state (incl. VPT).**
+- Save & Clear used to be a per-layer/per-dataframe EXPORT: it listed everything as checkboxes for the
+  user to curate, wrote files with a flat prefix so they SCATTERED loose among the user's data, offered
+  the SOURCE IMAGE as a save target (wasteful — it is already on disk and is the largest file), and the
+  top-level Load Session could not reconstruct a VPT session from the result. Redesigned:
+  - **Consolidated folder.** A save now creates one `session_<image>_<timestamp>/` folder and puts all
+    artifacts inside it, instead of scattering them.
+  - **Manifest.** `pycat_session.json` records the source-image PATH (a reference, not a copy), the
+    acquisition state (pixel size, frame interval), and the layer/dataframe → file mapping.
+  - **Source image referenced, never copied.** It is excluded from the save by default; the manifest
+    points at it on disk.
+  - **Smart defaults.** The save dialog now pre-ticks every DERIVED layer and ALL analysis dataframes,
+    and unticks the source image and pure-interpolation upscales — so the user no longer has to curate
+    what a session needs (they can still override any tick).
+  - **Load Session restores the whole state.** `load_session` is now manifest-first: it opens the
+    referenced source image through PyCAT's own loader (correct lazy type + scale), restores acquisition
+    state and every recorded dataframe, and — when `vpt_tracks` is present — rebuilds the VPT trajectory
+    layers via the shared `_rebuild_track_layers`, so a VPT session comes back clickable/brushable. The
+    old suffix scan remains as a fallback for older folders.
+  Guard test tests/test_session_manifest.py.
+
+## [1.6.51] - 2026-07-15
+### Added — **Load a saved VPT tracks session (iterate on the plots without re-running detection + linking).**
+- Save & Clear already writes the `vpt_tracks` DataFrame as `*_vpt_tracks.csv`, but there was no way to
+  load it back — so troubleshooting the MSD plots/table/brushing meant re-running detection and linking
+  every time. A new "Load saved tracks (CSV)…" button in the VPT microrheology step reads that CSV back
+  into the session: it validates the schema (needs track_id, frame, and y_um/x_um or y_um_raw/x_um_raw),
+  stores it as `vpt_tracks`, and rebuilds the trajectory + pickable-points layers via a new shared
+  `_rebuild_track_layers` (the same layer-build the linker uses, so a loaded session gets identical
+  brushable layers). The user then clicks "Compute MSD & Viscosity" to regenerate the plots and per-track
+  table from the loaded tracks. Non-tracks CSVs are rejected with a clear message. Guard test
+  tests/test_vpt_load_tracks_session.py.
+
 ## [1.6.50] - 2026-07-15
 ### Fixed — **VPT brushing selection feedback loop ("jumps all over the place" on one click) + line trajectory highlight.**
 - A single click on a track cascaded into the view rapidly cycling through many tracks. Cause: the

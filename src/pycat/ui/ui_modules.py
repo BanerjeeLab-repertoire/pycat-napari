@@ -4408,6 +4408,24 @@ class MenuManager:
             for p, reason in result["skipped"]:
                 print(f"[PyCAT Session] Skipped {p.name}: {reason}")
 
+            # If a VPT tracks table was restored, rebuild its trajectory layers so
+            # the session comes back to a clickable/brushable state (the VPT panel
+            # must be open — that is where the rebuild helper lives).
+            try:
+                if 'vpt_tracks' in result["loaded_dfs"]:
+                    _vpt = getattr(self, 'current_analysis_ui', None)
+                    if _vpt is not None and hasattr(_vpt, '_rebuild_track_layers'):
+                        _vpt._rebuild_track_layers(result["loaded_dfs"]['vpt_tracks'])
+                        napari_show_info(
+                            "VPT tracks restored — click 'Compute MSD & "
+                            "Viscosity' in the VPT panel to regenerate the plots.")
+                    else:
+                        napari_show_info(
+                            "VPT tracks restored to the session. Open the Video "
+                            "Particle Tracking method to rebuild and view them.")
+            except Exception as _ve:
+                print(f"[PyCAT Session] VPT layer rebuild skipped: {_ve}")
+
         load_btn.clicked.connect(_on_load)
         dlg.exec_()
 
