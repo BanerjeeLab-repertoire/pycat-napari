@@ -254,6 +254,48 @@ from pycat.file_io.stack_access import to_unit_float32
 from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
 
+def derive_layer_name(base_file_name, file_path=None, channel_infos=None,
+                      is_mask=False):
+    """Build a meaningful layer name from the FILENAME (and any in-file channel
+    identity), instead of a generic 'Fluorescence Image' / 'Mask Layer'.
+
+    The single-channel and mask default paths used to hardcode a modality/role
+    word, discarding the filename — so two separate '..._DAPI.tif' and
+    '..._GFP.tif' both loaded as 'Fluorescence Image'. This restores the
+    information the user expects to see.
+
+    Priority: the filename stem (which itself usually carries the fluorophore
+    token, e.g. '..._DAPI.tif' -> 'cells_DAPI'), optionally suffixed with an
+    in-file channel label from metadata when that label adds information the stem
+    doesn't already contain. If there is no filename at all, fall back to an
+    in-file channel label, then to the generic word as a last resort.
+    """
+    import os as _os
+    stem = base_file_name or (
+        _os.path.splitext(_os.path.basename(file_path))[0] if file_path else None)
+
+    # An in-file channel label, only when it was matched by NAME (a positional
+    # fallback like 'C0-DAPI' is a guess, not identity, and must not be appended).
+    label = None
+    infos = channel_infos or []
+    if infos:
+        ci = infos[0] if isinstance(infos, (list, tuple)) else infos
+        try:
+            if ci.get('source') == 'name' and ci.get('label'):
+                label = ci['label']
+        except AttributeError:
+            pass
+
+    suffix = ' Mask' if is_mask else ''
+    if stem:
+        # append the metadata label only if the stem doesn't already say it
+        if label and label.lower() not in stem.lower():
+            return f"{stem} · {label}{suffix}"
+        return f"{stem}{suffix}"
+    if label:
+        return f"{label}{suffix}"
+    return ("Mask Layer" if is_mask else "Fluorescence Image")
+
 
 class LayerDataframeSelectionDialog(QDialog):
     """
@@ -527,21 +569,35 @@ class ChannelAssignmentDialog(QDialog):
         layout = QVBoxLayout()
         self.channel_name_inputs = [] # Create a list to store the textbox name inputs
 
+        # Are these entries separate FILES (a multi-select) or channels of one
+        # multichannel image? Distinct file paths mean the user opened several
+        # files at once — each should be named from its own filename, NOT from
+        # the positional "Segmentation Image"/"Fluorescence Image" convention
+        # (which belongs to the single-file two-channel cell-analysis workflow).
+        _distinct_files = len({fp for (_d, fp, _k) in self.channels}) > 1
+
         # Add labels and input fields for each channel
         for channel_num, (channel_data, file_path, _) in enumerate(self.channels):
             label = QLabel(f"Channel {channel_num + 1} ({os.path.basename(file_path)}):")
             input_field = QLineEdit()
 
-            # Set the default name — prefer metadata-derived channel identity
-            # (e.g. "DAPI", "EGFP") when available; fall back to the original
-            # position-based convention otherwise so existing workflows that
-            # rely on "Segmentation Image"/"Fluorescence Image" still work.
             info = self.channel_info[channel_num] if channel_num < len(self.channel_info) else None
-            if not self.is_mask:
+            if self.is_mask and _distinct_files:
+                default_name = derive_layer_name(
+                    os.path.splitext(os.path.basename(file_path))[0], file_path,
+                    [info] if info else None, is_mask=True)
+            elif _distinct_files:
+                # Separate files → filename-derived name (e.g. '..._DAPI.tif' →
+                # 'cells_DAPI'), so two DAPI/GFP files are distinguishable and
+                # neither is mislabelled "Segmentation Image".
+                default_name = derive_layer_name(
+                    os.path.splitext(os.path.basename(file_path))[0], file_path,
+                    [info] if info else None)
+            elif not self.is_mask:
+                # Channels of ONE multichannel image: keep the positional
+                # convention (the two-channel cell workflow relies on it), but
+                # enrich with metadata identity when the file provides it.
                 if info is not None and info.get('source') != 'position':
-                    # Metadata gave us a real identity — use it, but keep the
-                    # familiar suffix for the first two channels so downstream
-                    # dropdowns that default to these names still find them.
                     if channel_num == 0:
                         default_name = f"Segmentation Image ({info['label']})"
                     elif channel_num == 1:
@@ -1453,10 +1509,15 @@ class FileIOClass:
                 all_channels,
                 channel_info=getattr(self, '_last_channel_info', None)
             )
-        # If only one channel, default to 'Fluorescence Image'
+        # If only one channel, name it from the file (filename token / stem)
+        # rather than a generic 'Fluorescence Image', so e.g. '..._DAPI.tif'
+        # loads as 'DAPI' and two separate DAPI/GFP files are distinguishable.
         else:
             fluorescence_image = all_channels[0][0]
-            self.load_into_viewer(fluorescence_image, name="Fluorescence Image")
+            _name = derive_layer_name(
+                getattr(self, 'base_file_name', None), file_path,
+                getattr(self, '_last_channel_info', None))
+            self.load_into_viewer(fluorescence_image, name=_name)
 
         # Add layers for measuring object and cell diameters to the viewer based on the image size
         self._add_diameter_annotation_layers()
@@ -2792,10 +2853,13 @@ class FileIOClass:
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
             self.assign_channels_in_dialog(all_channels, is_mask=True)
-        # If only one channel, default to 'Mask Layer'
+        # If only one channel, name the mask from the file rather than a bare
+        # 'Mask Layer', so a mask keeps the identity of the file it came from.
         else:
             mask_image = all_channels[0][0]
-            self.load_into_viewer(mask_image, name="Mask Layer", is_mask=True)
+            _mask_name = derive_layer_name(
+                getattr(self, 'base_file_name', None), file_path, is_mask=True)
+            self.load_into_viewer(mask_image, name=_mask_name, is_mask=True)
 
         
     def assign_channels_in_dialog(self, all_channels, is_mask=False, channel_info=None):

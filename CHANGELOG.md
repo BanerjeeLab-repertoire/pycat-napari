@@ -4,6 +4,29 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.41] - 2026-07-15
+### Added — **Smarter metadata: frame-interval reconciliation, filename-based layer names, structured description parsing (three auto-loader patches).**
+- **Frame interval prefers per-frame timestamps over declared values, and flags conflicts**
+  (`metadata_extract.reconcile_frame_interval` + reworked `_extract_frame_interval_s`). A declared
+  OME `TimeIncrement` / MicroManager `Interval_ms` is a *claim*; per-plane `DeltaT` timestamps are
+  what the microscope actually did, so timestamps now win. When a declared value and the measured
+  cadence disagree beyond tolerance (e.g. a 0.5 s claim over a real 0.1 s cadence — a 5x error in
+  every diffusion coefficient), it is kept as `frame_interval_nominal_s`, `frame_interval_inconsistent`
+  is set, and the user is warned once (reusing the frame_interval de-duped channel). Directly targets
+  the VPT viscosity root-cause where a wrong nominal interval silently scaled every dynamics result.
+- **Single-channel / mask layers are named from the FILENAME** (`file_io.derive_layer_name`) instead
+  of a generic "Fluorescence Image" / "Mask Layer", so `..._DAPI.tif` and `..._GFP.tif` load as
+  distinguishable names (complements the load-order fix in 1.6.39). Multi-channel loads from SEPARATE
+  files also get filename-derived names; channels of one multichannel image keep the positional
+  convention the two-channel workflow relies on.
+- **Metadata description blobs are parsed into structured fields** (`metadata_extract.parse_description_blob`)
+  — MicroManager summary JSON, ImageJ key=value, and OME-XML — so a wall of opaque text becomes
+  queryable acquisition metadata (`raw['acquisition']`), and exposure is recovered when present. The
+  `modality` field no longer gets a whole JSON/XML blob dumped into it.
+  Pure functions, tested via tests/navigator/test_loader_fixes.py (6 tests, AST-extracted from the
+  actual patched source; gated on PYCAT_SRC). Also folds in the IMS→ImageSource cleanup for
+  timeseries_condensate_tools.py and the tifffile_zarr_shim (already in the repo).
+
 ## [1.6.40] - 2026-07-15
 ### Fixed — **Frame-interval "unknown" warning no longer fires with no image loaded.**
 - The dynamics panels (advanced_analysis_ui, condensate_physics_ui) seed their frame-interval
