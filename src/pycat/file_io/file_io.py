@@ -23,7 +23,6 @@ Date
 # Standard library imports
 import os
 import sys
-import warnings
 import contextlib
 import io
 
@@ -292,7 +291,6 @@ from PyQt5.QtGui import QFont
 # Local application imports
 from pycat.ui.ui_utils import add_image_with_default_colormap
 from pycat.utils.general_utils import dtype_conversion_func, debug_log
-from pycat.file_io.writers import atomic_write
 from pycat.utils.frame_interval import record_time_axis
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 from pycat.file_io.stack_access import to_unit_float32
@@ -3294,76 +3292,30 @@ class FileIOClass:
         _base_in_session = (str(_session_dir / (self.base_file_name or _stem))
                             if _session_dir is not None else save_name)
         save_name = _base_in_session
-        _manifest_layers = []
-        _manifest_dfs = []
 
-        # Get the names of all layers in the viewer
+        # Get the names of all layers in the viewer (needed by the clear logic
+        # below, whichever branch runs).
         layer_names = [layer.name for layer in self.viewer.layers]
 
-        # Suppress specific skimage warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
-            
-            # Save only the selected layers based on their names
-            for layer_name in selected_layers:
-                if layer_name in layer_names:
-                    layer = self.viewer.layers[layer_name]
-                    layer_data = layer.data
-                    layer_type = type(layer).__name__
-                    safe_name  = layer_name.replace(' ', '_').lower()
-                    # Pull the layer's tag store so tags persist through the save.
-                    _tag_store = None
-                    try:
-                        _md = getattr(layer, 'metadata', None)
-                        if isinstance(_md, dict):
-                            _tag_store = _md.get('pycat_tags')
-                    except Exception:
-                        _tag_store = None
-                    self._save_layer(layer_data, layer_type,
-                                     save_name, safe_name, tag_store=_tag_store)
-                    _manifest_layers.append({
-                        'name': layer_name, 'layer_type': layer_type,
-                        'safe_name': safe_name})
-            
-            # Save only the selected dataframes
-            dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
-            clear_dfs_list = []
-            for df_name, df_value in dataframes_to_save.items():
-                clear_dfs_list.append(df_name)
-                if df_name in selected_dataframes:
-                    # A truncated CSV is the worst of all: it opens, it parses, and it is short.
-                    # Nothing about 340 rows of an 800-row results table looks wrong.
-                    with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
-                        df_value.to_csv(_tmp, index=True)
-                    _manifest_dfs.append({
-                        'key': df_name,
-                        'file': os.path.basename(save_name + f'_{df_name}.csv')})
-
-            # Export the file's normalised acquisition metadata alongside the
-            # results, for provenance/reproducibility. Written once per save.
-            try:
-                _md = self.central_manager.active_data_class.data_repository.get('file_metadata')
-                if _md:
-                    import json as _json
-                    with open(save_name + '_metadata.json', 'w', encoding='utf-8') as _mf:
-                        _json.dump(_md, _mf, indent=2, default=str)
-            except Exception as _mde:
-                debug_log("file_io: metadata JSON export failed", _mde)
-
-            # Write the session manifest so Load Session can restore this state.
-            # The source image is REFERENCED by path, never copied.
-            try:
-                if _session_dir is not None:
-                    _sm.write_manifest(
-                        _session_dir,
-                        source_path=getattr(self, 'filePath', None),
-                        data_repository=self.central_manager.active_data_class.data_repository,
-                        layer_entries=_manifest_layers,
-                        dataframe_entries=_manifest_dfs,
-                        extra={'stem': self.base_file_name or _stem})
-                    print(f"[PyCAT] Session saved to {_session_dir}")
-            except Exception as _me:
-                debug_log("file_io: session manifest write failed", _me)
+        # Do the actual file writes in the pure, Qt-free writer. It takes the
+        # already-decided inputs (which layers/dataframes, the final in-session
+        # save_name, the created session dir) and writes the layer files, the
+        # dataframe CSVs, the metadata JSON, and the session manifest.
+        _dataframes = self.central_manager.active_data_class.get_dataframes()
+        clear_dfs_list = list(_dataframes.keys())
+        _file_metadata = self.central_manager.active_data_class.data_repository.get('file_metadata')
+        from pycat.file_io.writers import write_session_outputs
+        write_session_outputs(
+            self.central_manager,
+            {layer.name: layer for layer in self.viewer.layers},
+            selected_layers,
+            selected_dataframes,
+            _dataframes,
+            _file_metadata,
+            save_name,
+            _session_dir,
+            getattr(self, 'filePath', None),
+            self.base_file_name or _stem)
 
         # Clear all layers and dataframes from the viewer and data instance.
         # If "Remember measurements across clears" is on, preserve the measured

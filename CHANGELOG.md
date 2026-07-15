@@ -4,6 +4,30 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.59] - 2026-07-15
+### Changed — **File-I/O decomposition #4: the Save & Clear output-writing loop moves into a pure, Qt-free `writers.write_session_outputs`.**
+- **The write path is now separable from the dialogs.** `save_and_clear_all` mixed three Qt dialogs,
+  the batch recorder, viewer clearing, and the actual file writes in one 183-line method. The
+  output-writing loop — the per-layer save (`writers._save_layer`), the per-dataframe atomic CSV
+  write, the `_metadata.json` export, and the session-manifest write — is lifted **verbatim** into a
+  new pure function `writers.write_session_outputs(central_manager, layers_by_name, selected_layers,
+  selected_dataframes, dataframes, file_metadata, save_name, session_dir, source_path, stem)`. It takes
+  already-decided inputs, touches no viewer/dialog/clearing, and returns
+  `{'manifest_layers': [...], 'manifest_dfs': [...]}` for logging and tests. `save_and_clear_all` keeps
+  ALL the orchestration (dialogs, session-folder creation, batch `record()`, clear/reset, the
+  batch-export prompt) and now calls the writer with the final in-session `save_name` and the created
+  session dir.
+- **Behaviour-preserving.** The `warnings.catch_warnings()` skimage-warning suppression, the atomic CSV
+  write (a truncated CSV is the worst failure — it opens, parses, and is silently short), the metadata
+  JSON, and the manifest schema are unchanged — so **Load Session still restores exactly what Save &
+  Clear writes** (the 1.6.52 session round-trip). Verified headlessly: a session folder produced by
+  `write_session_outputs` is fully restored by `session_loader.load_session` (source image referenced
+  not copied, dataframes restored with correct row counts, layer files re-added).
+- **New pure test** `tests/test_writers_session_outputs.py` (no Qt, no viewer): fake layers + small
+  DataFrames + a temp dir → asserts the layer files, `_<df>.csv` (correct row counts), `_metadata.json`,
+  and the manifest all land, that selection is honoured, and that a missing session dir skips only the
+  manifest. Existing `test_file_io.py` / `test_session_manifest.py` still pass.
+
 ## [1.6.58] - 2026-07-15
 ### Added — **GPU VPT bead detection validated on real CUDA; CuPy bridged to PyTorch's bundled CUDA runtime so the `gpu` extra works without a standalone toolkit.**
 - **CuPy could not find its CUDA runtime.** `cupy-cuda11x` needs the CUDA 11.x libraries

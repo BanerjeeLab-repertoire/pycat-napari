@@ -342,6 +342,124 @@ def _save_layer(central_manager, data, layer_type: str, save_name: str, safe_nam
         with atomic_write(f"{save_name}_{safe_name}.npz") as _tmp:
             np.savez_compressed(_tmp, data=np.asarray(data))
 
+def write_session_outputs(central_manager, layers_by_name, selected_layers,
+                          selected_dataframes, dataframes, file_metadata,
+                          save_name, session_dir, source_path, stem):
+    """Write a session's output files — the pure, Qt-free half of Save & Clear.
+
+    Takes already-decided inputs (which layers/dataframes, the final in-session
+    ``save_name``, the created ``session_dir``) and does the actual disk writes:
+
+    * each selected layer → :func:`_save_layer` (right-sized, atomic),
+    * each selected dataframe → an ``_<key>.csv`` via :func:`atomic_write`
+      (a truncated CSV is the worst failure — it opens, parses, and is short),
+    * the acquisition ``file_metadata`` → ``_metadata.json`` (provenance),
+    * the session manifest → ``pycat_session.json`` (what makes Load Session work;
+      the source image is REFERENCED by path, never copied).
+
+    It does NOT touch the viewer, dialogs, clearing, or the batch recorder — that
+    orchestration stays in the controller (``save_and_clear_all``).
+
+    Parameters
+    ----------
+    central_manager
+        The controller's central manager (used only to resolve the stack axis
+        label inside ``_save_layer`` and the data repository for the manifest).
+    layers_by_name : dict
+        ``{layer.name: layer}`` for every layer currently in the viewer.
+    selected_layers, selected_dataframes : iterable of str
+        The names the user chose to save.
+    dataframes : dict
+        ``{key: DataFrame}`` of all available dataframes (order preserved).
+    file_metadata : dict or None
+        Normalised acquisition metadata to export alongside the results.
+    save_name : str
+        The FINAL in-session path stem (already inside ``session_dir``).
+    session_dir : pathlib.Path or None
+        The created session folder; if ``None`` the manifest is skipped.
+    source_path : str or None
+        Path to the source image (referenced by the manifest, never copied).
+    stem : str
+        Base filename stem recorded in the manifest ``extra``.
+
+    Returns
+    -------
+    dict
+        ``{'manifest_layers': [...], 'manifest_dfs': [...]}`` — the manifest
+        entries written, for logging and tests.
+    """
+    import json as _json
+    import warnings
+
+    from pycat.file_io import session_manifest as _sm
+
+    manifest_layers = []
+    manifest_dfs = []
+
+    # Suppress specific skimage warnings (wraps the skimage save warnings).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+
+        # Save only the selected layers based on their names
+        for layer_name in selected_layers:
+            if layer_name in layers_by_name:
+                layer = layers_by_name[layer_name]
+                layer_data = layer.data
+                layer_type = type(layer).__name__
+                safe_name = layer_name.replace(' ', '_').lower()
+                # Pull the layer's tag store so tags persist through the save.
+                _tag_store = None
+                try:
+                    _md = getattr(layer, 'metadata', None)
+                    if isinstance(_md, dict):
+                        _tag_store = _md.get('pycat_tags')
+                except Exception:
+                    _tag_store = None
+                _save_layer(central_manager, layer_data, layer_type,
+                            save_name, safe_name, tag_store=_tag_store)
+                manifest_layers.append({
+                    'name': layer_name, 'layer_type': layer_type,
+                    'safe_name': safe_name})
+
+        # Save only the selected dataframes
+        for df_name, df_value in dataframes.items():
+            if df_name in selected_dataframes:
+                # A truncated CSV is the worst of all: it opens, it parses, and it is short.
+                # Nothing about 340 rows of an 800-row results table looks wrong.
+                with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
+                    df_value.to_csv(_tmp, index=True)
+                manifest_dfs.append({
+                    'key': df_name,
+                    'file': os.path.basename(save_name + f'_{df_name}.csv')})
+
+        # Export the file's normalised acquisition metadata alongside the
+        # results, for provenance/reproducibility. Written once per save.
+        try:
+            if file_metadata:
+                with open(save_name + '_metadata.json', 'w', encoding='utf-8') as _mf:
+                    _json.dump(file_metadata, _mf, indent=2, default=str)
+        except Exception as _mde:
+            debug_log("file_io: metadata JSON export failed", _mde)
+
+        # Write the session manifest so Load Session can restore this state.
+        # The source image is REFERENCED by path, never copied.
+        try:
+            if session_dir is not None:
+                _dr = central_manager.active_data_class.data_repository
+                _sm.write_manifest(
+                    session_dir,
+                    source_path=source_path,
+                    data_repository=_dr,
+                    layer_entries=manifest_layers,
+                    dataframe_entries=manifest_dfs,
+                    extra={'stem': stem})
+                print(f"[PyCAT] Session saved to {session_dir}")
+        except Exception as _me:
+            debug_log("file_io: session manifest write failed", _me)
+
+    return {'manifest_layers': manifest_layers, 'manifest_dfs': manifest_dfs}
+
+
 def _apply_saved_tags_to_layer(layer, tag_store):
     """Re-apply a saved tag store to a freshly-loaded layer via the tag
     engine, preserving each tag's original source/confidence. Edges are
