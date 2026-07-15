@@ -4,6 +4,19 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.46] - 2026-07-15
+### Fixed — **Results DataFrame windows are no longer modal (they blocked all interaction).**
+- `show_dataframes_dialog` (the shared results-table window used across VPT and other analyses) called
+  `dialog.exec_()`, which is MODAL: after a run, the results table froze every other interaction —
+  scrubbing the movie, clicking a bead, panning the canvas — until the user hit OK. A results table is
+  reference material, not a blocking decision, so it should never seize the UI. It is now shown
+  NON-MODALLY: parented to the napari main window, kept alive by a module-level reference (a parentless
+  QDialog under `.show()` would be garbage-collected instantly), and raised to the front with
+  `raise_()`/`activateWindow()` (results windows had been appearing behind the main window). No caller
+  relied on the old blocking return, so this is safe app-wide. Follow-ups still to come for the VPT
+  plots (bring-to-front + click-brushing lag) and the post-100% results-materialization phase in the
+  progress bars.
+
 ## [1.6.45] - 2026-07-15
 ### Fixed — **skimage 0.26 `remove_small_objects` deprecation (FutureWarning) unified across the codebase.**
 - scikit-image 0.26 deprecated `min_size` in favour of `max_size`, and it is NOT a rename: `min_size=N`

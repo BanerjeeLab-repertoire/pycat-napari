@@ -232,6 +232,47 @@ def save_table_as_csv(dataframe):
     if path:
         dataframe.to_csv(path, index=True)
 
+_LIVE_DIALOGS = []   # module-level refs so non-modal dialogs aren't GC'd
+
+
+def _napari_main_window():
+    """The Qt main window of the current napari viewer, or None.
+
+    Used to parent non-modal result dialogs so they stack with the app and get
+    cleaned up with it, without seizing the UI the way a modal dialog does.
+    """
+    try:
+        v = napari.current_viewer()
+        if v is not None:
+            return v.window._qt_window
+    except Exception:
+        pass
+    return None
+
+
+def _keep_dialog_alive(dialog):
+    """Hold a reference to a parentless non-modal dialog so Python doesn't GC it
+    the instant ``show()`` returns, and drop the reference when it closes so the
+    list doesn't grow without bound."""
+    try:
+        _LIVE_DIALOGS.append(dialog)
+        _orig_close = dialog.closeEvent
+
+        def _close(ev):
+            try:
+                if dialog in _LIVE_DIALOGS:
+                    _LIVE_DIALOGS.remove(dialog)
+            except Exception:
+                pass
+            try:
+                _orig_close(ev)
+            except Exception:
+                ev.accept()
+        dialog.closeEvent = _close
+    except Exception:
+        pass
+
+
 def show_dataframes_dialog(window_title, tables_info):
     """
     Displays a dialog window with a scrollable area that contains multiple dataframes shown as table views.
@@ -277,7 +318,30 @@ def show_dataframes_dialog(window_title, tables_info):
     button.clicked.connect(dialog.accept)
     layout.addWidget(button)
     dialog.setLayout(layout)
-    dialog.exec_()
+
+    # ── Non-modal, so it does NOT freeze the rest of the app ──────────────────
+    #
+    # This was ``dialog.exec_()`` — MODAL: every other interaction (scrubbing the
+    # movie, clicking a bead, panning the canvas) was blocked until the user hit
+    # OK. A results table is reference material, not a decision the user must make
+    # before doing anything else, so it should not seize the whole UI. Show it
+    # non-modally, keep a reference so Python doesn't garbage-collect it (a parent-
+    # less QDialog with no ref vanishes instantly under .show()), and raise it to
+    # the front (results windows were appearing behind the main window / behind
+    # each other).
+    try:
+        _mw = _napari_main_window()
+        if _mw is not None:
+            dialog.setParent(_mw)
+            dialog.setWindowFlags(Qt.Window)   # keep it a top-level window despite the parent
+    except Exception:
+        pass
+    dialog.setModal(False)
+    _keep_dialog_alive(dialog)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
+    return dialog
 
 
 
