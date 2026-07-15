@@ -78,6 +78,16 @@ _BATCH_RULES: list[tuple[str, str, str]] = [
     ('_cell_df',                     'dataframe', 'cell_df'),
     ('_sacf_results',                'dataframe', 'sacf_results_df'),
     ('_timeseries_condensate_df',    'dataframe', 'timeseries_condensate_df'),
+    # VPT (video particle tracking) dataframes. vpt_tracks is the source of truth
+    # for a VPT session — when it loads, the caller rebuilds the trajectory layers
+    # (see _open_session_loader). List the more specific suffixes first so e.g.
+    # `_vpt_aggregate_tracks` is not shadowed by `_vpt_tracks`.
+    ('_vpt_aggregate_tracks',        'dataframe', 'vpt_aggregate_tracks'),
+    ('_vpt_aggregate_stats',         'dataframe', 'vpt_aggregate_stats'),
+    ('_vpt_moduli_df',               'dataframe', 'vpt_moduli_df'),
+    ('_vpt_msd_df',                  'dataframe', 'vpt_msd_df'),
+    ('_vpt_detections',              'dataframe', 'vpt_detections'),
+    ('_vpt_tracks',                  'dataframe', 'vpt_tracks'),
 ]
 
 # Patterns for GUI Save & Clear outputs
@@ -121,7 +131,7 @@ def classify_file(path: Path) -> Optional[dict]:
     for suffix, ltype, display in _BATCH_RULES:
         if name.endswith(suffix):
             stem = name[:-len(suffix)]
-            return dict(
+            entry = dict(
                 stem=stem,
                 layer_type=ltype,
                 display_name=f"{display} [{stem}]",
@@ -129,6 +139,13 @@ def classify_file(path: Path) -> Optional[dict]:
                 is_3d=False,
                 source='batch',
             )
+            # For dataframes, the rule's `display` IS the repository key (e.g.
+            # 'vpt_tracks') — carry it as df_key so the loader stores it under the
+            # right key (and the VPT rebuild hook, which looks for 'vpt_tracks',
+            # fires for loose files too).
+            if ltype == 'dataframe':
+                entry['df_key'] = display
+            return entry
 
     # ── GUI Save & Clear outputs ─────────────────────────────────────────
     if ext in ('.tiff', '.tif'):

@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.53] - 2026-07-15
+### Added — **Load Session fallback recognises loose VPT (and other) dataframes from older saves.**
+- The manifest-based session load (1.6.52) restores VPT, but files saved BEFORE that (loose
+  *_vpt_tracks.csv etc. scattered in a folder with no manifest) went through the suffix-scan fallback,
+  which did not know VPT suffixes. Added `_vpt_tracks`, `_vpt_aggregate_tracks`, `_vpt_aggregate_stats`,
+  `_vpt_msd_df`, `_vpt_moduli_df`, and `_vpt_detections` to the scanner's dataframe rules (ordered so
+  the more specific suffixes are not shadowed). Also fixed the batch-rule path to carry `df_key` for
+  dataframe matches, so a restored table is stored under its true repository key (e.g. `vpt_tracks`) —
+  which is what the VPT layer-rebuild hook looks for, so pointing Load Session at an old folder now
+  rebuilds the trajectory layers from the loose CSV too. The stem picker in the load dialog still lets
+  the user choose which image's files to load when a folder holds several.
+
 ## [1.6.52] - 2026-07-15
 ### Changed — **Save & Clear is now a real SESSION save: one folder, a manifest, the source image referenced (not copied), and Load Session restores the whole state (incl. VPT).**
 - Save & Clear used to be a per-layer/per-dataframe EXPORT: it listed everything as checkboxes for the
