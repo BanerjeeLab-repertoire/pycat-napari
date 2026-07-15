@@ -93,28 +93,38 @@ class VideoParticleTrackingUI:
 
     def _highlight_track_in_plot(self, track_id):
         """Emphasise a track's MSD curve in the live plot (if one is open and its
-        line map was registered). No-op if the plot isn't showing."""
+        line map was registered). No-op if the plot isn't showing.
+
+        Uses the plot's blit path (redraw only the changed lines) rather than a
+        full-figure redraw, so image/table -> plot highlighting is as fast as a
+        direct plot click."""
         reg = getattr(self, '_msd_line_registry', None)
         if not reg:
             return
         lines = reg.get('lines'); canvas = reg.get('canvas')
         state = reg.setdefault('state', {'prev': None})
+        blit = reg.get('blit_highlight')
         if not lines:
             return
         prev = state.get('prev')
+        ln = lines.get(int(track_id))
+        if ln is prev:
+            return   # already highlighted — nothing to redraw
         if prev is not None and prev in lines.values():
             try:
                 prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                prev.set_zorder(1)
             except Exception:
                 pass
-        ln = lines.get(int(track_id))
         if ln is not None:
             try:
                 ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
                 ln.set_zorder(5)
                 state['prev'] = ln
-                if canvas is not None:
-                    canvas.draw_idle()
+                if blit is not None:
+                    blit(ln, prev)          # fast: only the two changed lines
+                elif canvas is not None:
+                    canvas.draw_idle()      # fallback
             except Exception:
                 pass
 

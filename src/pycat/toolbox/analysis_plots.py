@@ -115,6 +115,50 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     # track_id (the VPT UI uses this to highlight the track in napari and centre
     # the viewer). The last-picked line is emphasised so the selection is visible
     # on the plot too.
+    #
+    # SPEED: a spaghetti plot has hundreds of lines, so a full-figure redraw on
+    # every pick (canvas.draw_idle) is what made selection lag. Instead we BLIT:
+    # capture the axes background once, and on each selection restore that
+    # background and redraw ONLY the two lines that changed (the previously- and
+    # newly-highlighted track). That is O(1) in the number of tracks.
+    _blit = {'bg': None, 'canvas': fig.canvas, 'ax': ax}
+
+    def _capture_bg(*_a):
+        try:
+            _blit['bg'] = fig.canvas.copy_from_bbox(ax.bbox)
+        except Exception:
+            _blit['bg'] = None
+
+    def _blit_highlight(new_line, prev_line):
+        """Restore the cached background and re-draw only the changed lines."""
+        canvas = _blit['canvas']
+        bg = _blit['bg']
+        try:
+            if bg is None:
+                _capture_bg()
+                bg = _blit['bg']
+            if bg is not None:
+                canvas.restore_region(bg)
+                for _ln in (prev_line, new_line):
+                    if _ln is not None:
+                        ax.draw_artist(_ln)
+                canvas.blit(ax.bbox)
+                canvas.flush_events()
+            else:
+                canvas.draw_idle()   # fallback if background capture failed
+        except Exception:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
+
+    # Re-capture the background whenever the figure is redrawn (resize, pan, zoom,
+    # first draw) so the cached bitmap stays valid.
+    try:
+        fig.canvas.mpl_connect('draw_event', _capture_bg)
+    except Exception:
+        pass
+
     if on_pick_track is not None and _line_to_tid:
         _state = {'prev': None}
 
@@ -124,15 +168,20 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             if tid is None:
                 return
             prev = _state['prev']
+            if prev is ln:
+                # same line re-picked — still fire the callback, no redraw needed
+                try:
+                    on_pick_track(tid)
+                except Exception:
+                    pass
+                return
             if prev is not None and prev in _line_to_tid:
                 prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                prev.set_zorder(1)
             ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
             ln.set_zorder(5)
             _state['prev'] = ln
-            try:
-                event.canvas.draw_idle()
-            except Exception:
-                pass
+            _blit_highlight(ln, prev)
             try:
                 on_pick_track(tid)
             except Exception as _e:
@@ -145,11 +194,16 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
 
     # Expose the track_id -> Line2D map + canvas so a linked-selection dispatcher
     # can highlight a curve when the selection comes from another view.
+    # `blit_highlight` lets the dispatcher redraw only the changed lines too,
+    # instead of a second full-figure redraw. `state` is SHARED with the pick
+    # handler's `_state` so a plot-pick and a dispatcher-driven highlight track
+    # the same "previously highlighted line" (no stale double-highlight).
     if line_registry is not None:
         try:
             line_registry['lines'] = _tid_to_line
             line_registry['canvas'] = fig.canvas
-            line_registry['state'] = {'prev': None}
+            line_registry['state'] = _state if (on_pick_track is not None and _line_to_tid) else {'prev': None}
+            line_registry['blit_highlight'] = _blit_highlight
         except Exception:
             pass
 
@@ -408,21 +462,69 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
             _lines = _reg.get('lines', {})
             _line_to_tid = {ln: tid for tid, ln in _lines.items()}
             _pstate = {'prev': None}
+            _msd_ax = axes[0, 0]
+            # BLIT: the panel is a 2×2 grid, so a full-figure redraw on each pick
+            # is even more expensive than the single-plot case. Cache the MSD
+            # subplot's background and redraw only the changed lines within it.
+            _pblit = {'bg': None}
+
+            def _pcapture(*_a):
+                try:
+                    _pblit['bg'] = fig.canvas.copy_from_bbox(_msd_ax.bbox)
+                except Exception:
+                    _pblit['bg'] = None
+
+            def _pblit_highlight(new_line, prev_line):
+                try:
+                    if _pblit['bg'] is None:
+                        _pcapture()
+                    bg = _pblit['bg']
+                    if bg is not None:
+                        fig.canvas.restore_region(bg)
+                        for _ln in (prev_line, new_line):
+                            if _ln is not None:
+                                _msd_ax.draw_artist(_ln)
+                        fig.canvas.blit(_msd_ax.bbox)
+                        fig.canvas.flush_events()
+                    else:
+                        fig.canvas.draw_idle()
+                except Exception:
+                    try:
+                        fig.canvas.draw_idle()
+                    except Exception:
+                        pass
+
+            try:
+                fig.canvas.mpl_connect('draw_event', _pcapture)
+            except Exception:
+                pass
+            # Share state + blit with the dispatcher so image/table→plot is fast too.
+            if line_registry is not None:
+                line_registry['state'] = _pstate
+                line_registry['blit_highlight'] = _pblit_highlight
+
             def _on_pick(event):
                 tid = _line_to_tid.get(event.artist)
                 if tid is None:
                     return
                 prev = _pstate['prev']
+                if prev is event.artist:
+                    try:
+                        on_pick_track(tid)
+                    except Exception:
+                        pass
+                    return
                 if prev is not None and prev in _line_to_tid:
                     try:
-                        prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                        prev.set_color('#4c72b0'); prev.set_alpha(0.18)
+                        prev.set_linewidth(0.8); prev.set_zorder(1)
                     except Exception:
                         pass
                 try:
                     event.artist.set_color('#ff8c00'); event.artist.set_alpha(1.0)
                     event.artist.set_linewidth(2.2); event.artist.set_zorder(5)
                     _pstate['prev'] = event.artist
-                    event.canvas.draw_idle()
+                    _pblit_highlight(event.artist, prev)
                 except Exception:
                     pass
                 try:

@@ -4,6 +4,21 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.47] - 2026-07-15
+### Changed — **VPT plot brushing is now fast (blitting instead of full-figure redraws).**
+- Clicking an MSD track, or highlighting one from the image/table, was laggy because every selection
+  triggered a full matplotlib `canvas.draw_idle()` — and a plot click actually triggered TWO (the pick
+  handler's own redraw plus the dispatcher's). On a spaghetti plot with hundreds of lines that is tens
+  of milliseconds per redraw. Both the standalone MSD plot (`plot_msd_trajectories`) and the
+  consolidated 2×2 panel (`plot_vpt_panel`) now BLIT: the axes background is cached (and re-cached on
+  draw/resize/zoom via a `draw_event` hook) and each selection restores that background and redraws
+  ONLY the two changed lines (previously- and newly-highlighted). Headless benchmark on a 300-line
+  plot: ~0.2 ms per highlight vs ~47 ms for a full redraw (~230×). The dispatcher's
+  `_highlight_track_in_plot` shares the pick handler's highlight state and uses the same blit path, so
+  image/table → plot highlighting is just as fast and never double-redraws. Re-picking the already-
+  selected track is now a no-op redraw. Behaviour (which line is emphasised, the pick callback) is
+  unchanged — only the render path is faster.
+
 ## [1.6.46] - 2026-07-15
 ### Fixed — **Results DataFrame windows are no longer modal (they blocked all interaction).**
 - `show_dataframes_dialog` (the shared results-table window used across VPT and other analyses) called
