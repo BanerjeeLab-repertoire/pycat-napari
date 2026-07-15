@@ -60,6 +60,14 @@ METADATA_KEY = 'pycat_tags'
 # exists. Free tags are allowed under a 'user:' key prefix (permissive extras).
 CORE_KEYS = {
     'role',          # what the layer IS in the workflow
+    'representation',# HOW the data is represented -- intensity_field / binary_mask /
+                     # instance_labels / coordinates / trajectories / probability_map /
+                     # measurement_table / model_fit / geometry (distinct from 'role', which is the
+                     # layer's job in the workflow; a resolver needs "instance labels, not a binary
+                     # mask" and that is a representation question, not a role question)
+    'state',         # WHERE the data is in the workflow -- raw / corrected / enhanced / segmented /
+                     # refined / tracked / measured / fitted / validated. Ordered: a resolver uses
+                     # the order to prefer the most-processed version (hand-refined over raw labels)
     'op',            # WHICH OPERATION produced it -- see pycat.utils.tag_registry
     'target',        # what the layer is OF: condensate / cell / nucleus / punctum / bead...
     'layer_type',    # the napari type it was added as (image/labels/points/shapes/tracks)
@@ -69,6 +77,8 @@ CORE_KEYS = {
     'scale',         # calibrated / uncalibrated
     'provenance',    # raw / derived / segmentation / pycat-generated
     'purpose',       # what an annotation/drawing layer is FOR (open vocabulary)
+    'quality_status',    # QC verdict written ONTO the assessed layer: pass / warn / fail
+    'analysis_ready_for',# open vocab: what analysis this layer is fit for after QC (e.g. tracking)
 }
 
 CORE_VALUES = {
@@ -87,6 +97,18 @@ CORE_VALUES = {
     'target': {'condensate', 'cell', 'nucleus', 'punctum', 'bead', 'fibril',
                'chromatin', 'droplet', 'aggregate', 'background', 'field'},
     'layer_type': {'image', 'labels', 'points', 'shapes', 'tracks', 'vectors', 'surface'},
+    # 'representation' — HOW the data is encoded. Separate from 'role' on purpose: a resolver that
+    # needs instance labels (not a binary mask) asks a representation question. A small compatibility
+    # lattice lives in representation_satisfies() below.
+    'representation': {'intensity_field', 'binary_mask', 'instance_labels', 'coordinates',
+                       'trajectories', 'probability_map', 'measurement_table', 'model_fit',
+                       'geometry'},
+    # 'state' — WHERE in the workflow. ORDERED (see STATE_ORDER below); the order is what lets a
+    # resolver prefer the most-processed candidate.
+    'state': {'raw', 'corrected', 'enhanced', 'segmented', 'refined', 'tracked', 'measured',
+              'fitted', 'validated'},
+    # 'quality_status' — the QC verdict, written onto the assessed layer by the QC step.
+    'quality_status': {'pass', 'warn', 'fail'},
     # 'op' has its values validated against the OPERATION REGISTRY, not a set here -- see
     # tag_registry.get_operation(). A tag that is not a registered operation is REFUSED.
     'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
@@ -110,6 +132,12 @@ SUGGESTED_VALUES = {
         'line_profile',                        # intensity line-scan
         'scratch',                             # freeform / exploratory
     },
+    # 'analysis_ready_for' — what a QC-passed layer is fit to feed. Open vocabulary: workflows coin
+    # their own downstream names; these are the common ones for discovery/UI.
+    'analysis_ready_for': {
+        'segmentation', 'tracking', 'colocalization', 'intensity_measurement',
+        'partition_coefficient', 'msd_viscosity', 'frap', 'quantification',
+    },
 }
 
 # 'pipeline' is a first-class source: a tag written by the pipeline auto-tagger
@@ -119,7 +147,12 @@ SUGGESTED_VALUES = {
 # is distinguished from 'derived' on purpose: 'pipeline' means "a recorded PyCAT pipeline step made
 # this" (stronger provenance) vs "some derivation made this". See docs/audits/codebase_audit_2026-07-15.md (A1).
 VALID_SOURCES = {'from_metadata', 'inferred', 'derived', 'user_set', 'pipeline'}
-VALID_RELATIONS = {'belongs_to', 'derived_from', 'supersedes', 'pairs_with'}
+VALID_RELATIONS = {'belongs_to', 'derived_from', 'supersedes', 'pairs_with',
+                   # measurement / tracking / registration lineage (audit A5): a tracks layer
+                   # `tracks` its detections; a table is `measured_from` a labels layer; a channel
+                   # is `registered_to` another; a dark/flat frame is a `reference_for` a raw image.
+                   # These specifically enable the VPT/MSD plot<->layer brushing and coloc linking.
+                   'registered_to', 'measured_from', 'tracks', 'reference_for'}
 
 # Confidence defaults by source (callers may override per tag).
 DEFAULT_CONFIDENCE = {
@@ -129,6 +162,44 @@ DEFAULT_CONFIDENCE = {
     'derived': 0.95,
     'inferred': 0.6,
 }
+
+# ── Processing-state ordering (audit A4) ──────────────────────────────────────────────────────
+# The 'state' tag is ordered: a resolver asked for "the labels for this cell" should prefer a
+# hand-refined layer (state='refined') over the raw Cellpose output (state='segmented'). This maps
+# each state value to a rank so "most-processed wins" is a comparison, not a special case.
+STATE_ORDER = {
+    'raw': 0, 'corrected': 1, 'enhanced': 2, 'segmented': 3, 'refined': 4,
+    'tracked': 5, 'measured': 6, 'fitted': 7, 'validated': 8,
+}
+
+
+def state_rank(value) -> int:
+    """Rank of a 'state' value for most-processed-wins resolution; -1 if unknown."""
+    return STATE_ORDER.get(value, -1)
+
+
+# ── Representation compatibility lattice (audit A3) ───────────────────────────────────────────
+# A requirement for a coarse representation is satisfied by a more specific one, but not vice versa.
+# This is what stops a naive string match from silently connecting the wrong layer (e.g. handing a
+# binary mask to a step that needs instance labels).
+_REPRESENTATION_SATISFIES = {
+    # provided → set of requirements it can satisfy (besides itself)
+    'instance_labels': {'binary_mask'},   # instance labels can stand in for a mask
+    'trajectories': {'coordinates'},      # trajectories are coordinates over time
+    'probability_map': {'intensity_field'},  # a prob map is a scalar field
+}
+
+
+def representation_satisfies(provided, required) -> bool:
+    """Does a layer whose representation is ``provided`` satisfy a step needing ``required``?
+
+    Exact match always satisfies; otherwise the lattice above decides. Unknown values only satisfy
+    themselves. This is intentionally conservative — a false 'no' makes the planner ask for a
+    conversion step; a false 'yes' silently feeds the wrong data.
+    """
+    if provided == required:
+        return True
+    return required in _REPRESENTATION_SATISFIES.get(provided, ())
 
 
 def layer_tag_id(layer) -> str:

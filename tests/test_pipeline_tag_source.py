@@ -72,3 +72,63 @@ def test_genuinely_invalid_source_still_downgrades():
         "an unrecognised source must still fall back to 'inferred' — only 'pipeline' was added to "
         "the valid set, not a general bypass of validation."
     )
+
+
+# ── Vocabulary additions from the 2026-07-15 audit (A3 representation, A4 state, A5 lineage) ──
+
+def test_representation_tag_accepted():
+    lt = _tags()
+    layer = _FakeLayer()
+    assert lt.tag_layer(layer, 'representation', 'instance_labels', source='pipeline')
+    rec = next(t for t in lt.get_tags(layer) if t['key'] == 'representation')
+    assert rec['value'] == 'instance_labels'
+
+
+def test_representation_rejects_unknown_value():
+    lt = _tags()
+    layer = _FakeLayer()
+    # controlled vocabulary — a bogus representation must be refused, not silently stored
+    assert not lt.tag_layer(layer, 'representation', 'not_a_representation', source='pipeline')
+
+
+def test_representation_lattice():
+    lt = _tags()
+    # instance labels can stand in for a mask; a mask cannot stand in for instance labels
+    assert lt.representation_satisfies('instance_labels', 'binary_mask')
+    assert not lt.representation_satisfies('binary_mask', 'instance_labels')
+    # trajectories are coordinates; exact match always holds
+    assert lt.representation_satisfies('trajectories', 'coordinates')
+    assert lt.representation_satisfies('coordinates', 'coordinates')
+    # unknown values only satisfy themselves
+    assert not lt.representation_satisfies('coordinates', 'trajectories')
+
+
+def test_state_is_ordered_for_most_refined_resolution():
+    lt = _tags()
+    # the whole point of 'state' is that a resolver can prefer the more-processed layer
+    assert lt.state_rank('refined') > lt.state_rank('segmented')
+    assert lt.state_rank('validated') > lt.state_rank('raw')
+    assert lt.state_rank('unknown_state') == -1
+
+
+def test_state_tag_accepted_and_validated():
+    lt = _tags()
+    layer = _FakeLayer()
+    assert lt.tag_layer(layer, 'state', 'refined', source='pipeline')
+    assert not lt.tag_layer(layer, 'state', 'not_a_state', source='pipeline')
+
+
+def test_quality_status_tag_and_open_vocab_ready_for():
+    lt = _tags()
+    layer = _FakeLayer()
+    # quality_status is controlled
+    assert lt.tag_layer(layer, 'quality_status', 'pass', source='pipeline')
+    assert not lt.tag_layer(layer, 'quality_status', 'maybe', source='pipeline')
+    # analysis_ready_for is OPEN vocab — an unusual value is allowed (workflows coin their own)
+    assert lt.tag_layer(layer, 'analysis_ready_for', 'some_bespoke_analysis', source='pipeline')
+
+
+def test_new_lineage_relations_valid():
+    lt = _tags()
+    for rel in ('registered_to', 'measured_from', 'tracks', 'reference_for'):
+        assert rel in lt.VALID_RELATIONS, f"{rel} should be a valid lineage relation (audit A5)"

@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.36] - 2026-07-15
+### Added — **Tag vocabulary extended (audit A3/A4/A5) + QC verdict now attaches to the layer (A6).**
+- **`representation` tag** (intensity_field / binary_mask / instance_labels / coordinates /
+  trajectories / probability_map / measurement_table / model_fit / geometry) — separate from `role`,
+  with a `representation_satisfies()` compatibility lattice (instance_labels satisfies a request for
+  binary_mask, not vice versa). Lets a resolver ask for "instance labels, not a mask".
+- **`state` tag** (raw → corrected → enhanced → segmented → refined → tracked → measured → fitted →
+  validated), ORDERED via `state_rank()`/`STATE_ORDER` so a resolver can prefer the most-processed
+  version (hand-refined labels over raw Cellpose output).
+- **Four new lineage relations** — `registered_to`, `measured_from`, `tracks`, `reference_for` —
+  enabling VPT/MSD plot<->layer brushing and colocalization linking.
+- **QC writes its verdict onto the assessed layer:** the Quality Report now tags the layer with
+  `quality_status` (pass/warn/fail, derived from the per-metric statuses) instead of leaving the
+  judgement stranded in a disconnected result table. A downstream step can now resolve "a layer that
+  passed QC". Added `quality_status` (controlled) and `analysis_ready_for` (open vocab) tag keys.
+- All additive; existing tags unaffected. Verified by headless core tests
+  (tests/test_pipeline_tag_source.py, now 12 assertions). See docs/audits/codebase_audit_2026-07-15.md
+  (items A3–A6).
+
 ## [1.6.35] - 2026-07-15
 ### Fixed — **Pipeline-produced layer tags are no longer silently downgraded to low-confidence inferences.**
 - `source='pipeline'` was written by the pipeline auto-tagger (tag_registry.py) but was absent from
