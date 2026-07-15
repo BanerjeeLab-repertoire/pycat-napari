@@ -226,6 +226,7 @@ import skimage as sk
 # This import was already DEAD — `open_image()` replaced every use of it in 1.5.529, and an
 # AST walk confirms `AICSImage` is referenced nowhere in this file's code.
 from pycat.file_io.image_reader import open_image, read_plane
+from pycat.file_io.readers.mask_reader import read_2d_mask_channels
 from pycat.utils.channel_naming import (
     extract_channel_info,
     extract_channel_info_from_ims,
@@ -2751,30 +2752,9 @@ class FileIOClass:
             except Exception:
                 pass 
 
-            # Open the mask through the reader seam.
-            mask = open_image(file_path)
-
-            # Get the number of pages and channels in the mask
-            num_pages = getattr(mask.dims, 'S', 1)
-            num_channels = getattr(mask.dims, 'C', 1)
-
-            # Check if the image has channels or pages
-            if not hasattr(mask.dims, 'S') and not hasattr(mask.dims, 'C'):
-                raise ValueError("Image does not have any channels or pages. Check file format.")
-
-            # If there are multiple pages, iterate over pages and channels
-            if num_pages > 1:
-                k = 0
-                for page_num in range(num_pages):
-                    for channel_num in range(num_channels):
-                        k += 1
-                        channel_data = read_plane(mask, path=file_path, scene=page_num, c=channel_num, t=0)
-                        all_channels.append((channel_data, file_path, k))
-            # If only one page, iterate over channels
-            else: 
-                for channel_num in range(num_channels):
-                    channel_data = read_plane(mask, path=file_path, c=channel_num, t=0)
-                    all_channels.append((channel_data, file_path, channel_num))
+            # Read the mask's channels through the extracted pure reader (god-class
+            # decomposition piece #1 — see readers/mask_reader.py). Same tuples, same order.
+            all_channels.extend(read_2d_mask_channels(file_path))
 
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:

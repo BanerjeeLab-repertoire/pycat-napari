@@ -4,6 +4,16 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.38] - 2026-07-15
+### Changed — **god-class decomposition, piece #1: extract the 2-D mask reader (file-I/O audit #21).**
+- `FileIOClass.open_2d_mask`'s channel-reading loop moved to a pure free function
+  `file_io/readers/mask_reader.py::read_2d_mask_channels(file_path)` (new `file_io/readers/` package).
+  The controller now calls it and keeps only the dialog / bookkeeping / napari-layer construction.
+  Behaviour is preserved exactly — byte-identical channel tuples in the same order across all
+  page/channel shapes (guarded by tests/test_mask_reader_extraction.py, which reimplements the
+  original loop as an oracle). First step of the FileIOClass breakup; see
+  docs/audits/fileio_godclass_roadmap_2026-07-15.md for the full 5-piece sequence.
+
 ## [1.6.37] - 2026-07-15
 ### Fixed — **A genuine 1.0 um/px pixel size is no longer treated as "missing" (file-I/O audit #9).**
 - The in-dock pixel-size gate and the µm-vs-px scale-bar check decided "does this image have a real
