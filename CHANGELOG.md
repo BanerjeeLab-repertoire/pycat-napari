@@ -4,6 +4,24 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.43] - 2026-07-15
+### Fixed — **VPT linking no longer allocates a terabyte-scale dense matrix (gap-closing crash).**
+- `dynamic_spatial_tools._close_gaps_bayesian` built a full `(n_ends + n_starts)²` dense cost matrix.
+  On a run that fragmented into ~286k tracks that is a 572k×572k float64 array = **2.39 TiB**, and
+  linking crashed with a MemoryError. The matrix is ~99.9% INF — an end at frame `ef` can only close
+  to a start in frames `(ef, ef+max_gap+1]` and within `max_displacement×gap` — so it is now built
+  as a SPARSE candidate-edge list (a per-gap-frame KD-tree spatial query enumerates only the
+  physically-plausible links) and solved with sparse bipartite matching, with a greedy
+  cheapest-edge fallback. Linear in the number of real candidate links; a 50k-fragment case that
+  would have needed ~80 GB now runs in seconds. Merges are unchanged (near fragments join, far ones
+  stay separate). Guard test tests/test_gap_closing_sparse.py.
+- NOTE: this fixes the CRASH, not the upstream cause. The run that triggered it had (a) a corrupt
+  pixel size still active at detection (auto linking distance came out 377 µm — set the real scale
+  in the panel BEFORE detecting, now that 1.6.42 makes the gate fire), and (b) ~381k detections /
+  ~286k fragments, ~100× the validated ~800-beads/frame baseline — the known VPT detection-quality /
+  classifier issue, still to be addressed. Good viscosity needs those fixed too; this just stops the
+  hard crash so linking can complete.
+
 ## [1.6.42] - 2026-07-15
 ### Fixed — **A corrupt (physically-impossible) pixel size no longer satisfies the gate on STACK loads.**
 - An ImageJ Substack export can write a 32-bit-overflow resolution tag (~2.3e-10 um/px, picometres).
