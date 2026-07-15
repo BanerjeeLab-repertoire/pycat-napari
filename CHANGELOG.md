@@ -4,6 +4,22 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.44] - 2026-07-15
+### Fixed — **Setting the pixel size now calibrates the image (µm readout appeared missing).**
+- After the Set-Scale dialog (or the in-dock pixel-size gate) confirmed a value, PyCAT wrote
+  `microns_per_pixel_sq` to the data repository but never set the napari image layer's `.scale`. The
+  cursor readout showed pixels only (no µm), the scale bar stayed in pixels, and — critically — every
+  layer-scale consumer, including VPT's auto linking distance, ran UNCALIBRATED even though the user
+  had entered a scale. Root cause: `_align_layer_scales` can only PROPAGATE a scale from an
+  already-scaled reference layer; with nothing scaled yet it finds no reference and does nothing, so
+  the repo value never reached the layer. Fix: both set-scale paths (`prompt_pixel_size_on_load` and
+  the `add_pixel_size_gate` in-dock gate) now route through `file_io._enable_auto_scale_bar()`, which
+  reads the repo value and sets `layer.scale = sqrt(microns_per_pixel_sq)` — exactly as a real-metadata
+  load does — so the µm readout/scale bar appear and downstream analysis is calibrated. Both paths
+  also now set `pixel_size_confirmed=True`. Guard test tests/test_setscale_applies_to_layer.py.
+  (Follow-on to the 1.6.42 corrupt-scale gate fix: 1.6.42 made the dialog APPEAR; this makes the
+  value it collects actually take effect.)
+
 ## [1.6.43] - 2026-07-15
 ### Fixed — **VPT linking no longer allocates a terabyte-scale dense matrix (gap-closing crash).**
 - `dynamic_spatial_tools._close_gaps_bayesian` built a full `(n_ends + n_starts)²` dense cost matrix.
