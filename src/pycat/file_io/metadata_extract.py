@@ -41,6 +41,25 @@ except Exception:  # pragma: no cover - fallback if utils unavailable
         return
 
 
+def _warn_frame_interval(message):
+    """Surface a frame-interval inconsistency to the user, once. Reuses the
+    frame_interval module's de-duped warning channel when available so a
+    conflicting time axis is as loud as a missing one."""
+    if not message:
+        return
+    try:
+        from pycat.utils.frame_interval import _warn_once
+        _warn_once(f"inconsistent:{message[:40]}", message)
+        return
+    except Exception:
+        pass
+    try:
+        from napari.utils.notifications import show_warning
+        show_warning(message)
+    except Exception:
+        print(f"[PyCAT] {message}")
+
+
 def _safe_float(x):
     try:
         if x is None:
@@ -71,6 +90,62 @@ def _safe_str(x):
         return None
 
 
+def parse_description_blob(text):
+    """Turn a metadata 'description' blob into a flat dict of fields, so a wall
+    of unparsed text becomes queryable structured metadata.
+
+    Handles the three dialects PyCAT actually meets, which otherwise sit in a
+    single opaque `raw` entry: MicroManager summary JSON, ImageJ `key=value`
+    ImageDescription, and (shallowly) OME-XML. Returns {} when nothing parses.
+    Pure function — unit tested in the navigator package.
+    """
+    if not text or not isinstance(text, str):
+        return {}
+    s = text.strip()
+    out = {}
+
+    # MicroManager / JSON summary — flatten scalar top-level entries.
+    if s[:1] in '{[':
+        import json as _json
+        try:
+            data = _json.loads(s)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(v, (dict, list)):
+                        continue   # skip nested containers in the flat view
+                    if v is not None and str(v) != '':
+                        out[str(k)] = v
+                if out:
+                    return out
+        except Exception:
+            pass
+
+    # ImageJ key=value block (one per line).
+    if '=' in s and ('ImageJ' in s or '\n' in s):
+        for line in s.splitlines():
+            line = line.strip()
+            if line.startswith('<') or '=' not in line:
+                continue
+            k, _, v = line.partition('=')
+            k, v = k.strip(), v.strip()
+            if k and v and len(k) < 64:
+                out[k] = v
+        if out:
+            return out
+
+    # OME-XML — pull a handful of useful attributes without a full parse.
+    if s[:5].lower().startswith('<?xml') or '<ome' in s.lower() or '<image' in s.lower():
+        import re as _re
+        for attr in ('PhysicalSizeX', 'PhysicalSizeY', 'PhysicalSizeZ',
+                     'TimeIncrement', 'SizeT', 'SizeC', 'SizeZ', 'Type',
+                     'ExposureTime', 'AcquisitionDate'):
+            m = _re.search(rf'{attr}="([^"]+)"', s)
+            if m:
+                out[attr] = m.group(1)
+
+    return out
+
+
 def _empty_common(file_path):
     return {
         'file_name': os.path.basename(file_path) if file_path else None,
@@ -99,6 +174,16 @@ def _empty_common(file_path):
         'frame_interval_s': None,
         'frame_interval_source': None,
         'frame_interval_iqr_s': None,
+        # The NOMINAL declared interval (OME TimeIncrement / MicroManager
+        # Interval_ms), kept alongside the measured cadence so the two can be
+        # compared. When per-frame timestamps exist, THEY win — a declared value
+        # is a claim, not a measurement (see reconcile_frame_interval).
+        'frame_interval_nominal_s': None,
+        # True when a nominal interval and the timestamp-derived cadence disagree
+        # beyond tolerance. Surfaced to the user because a wrong time axis scales
+        # every dynamics result (a 0.5 s claim over a 0.1 s real cadence is a 5x
+        # error in every diffusion coefficient) and nothing else looks wrong.
+        'frame_interval_inconsistent': False,
         # Full per-frame inter-frame deltas (seconds), when the file records
         # per-frame acquisition times (e.g. MicroManager ElapsedTime-ms). Kept
         # so a consumer (VPT MSD fitting) can use the true, possibly non-uniform
@@ -267,7 +352,19 @@ def extract_tiff_metadata(file_path):
             common['acquisition_date'] = _tagval('DateTime')
             desc = _tagval('ImageDescription')
             if desc:
-                common['modality'] = desc
+                # Parse the description into structured fields instead of
+                # dropping the whole blob into one place.
+                _parsed = parse_description_blob(desc)
+                if _parsed:
+                    raw['acquisition'] = _parsed
+                    if common.get('exposure_s') is None:
+                        _e = _safe_float(_parsed.get('Exposure-ms') or _parsed.get('ExposureTime'))
+                        if _e is not None:
+                            common['exposure_s'] = _e / 1e3 if _e > 5 else _e
+                # modality should be a short descriptor — not a JSON/XML/ImageJ
+                # blob. Only accept a short, plain token here.
+                if len(desc) <= 40 and '=' not in desc and '{' not in desc and '<' not in desc:
+                    common['modality'] = desc
 
             # Dimensions (single-page TIFF is 2D; series may add T/C/Z).
             n_pages = len(t.pages)
@@ -401,13 +498,76 @@ def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
     return out
 
 
-def _extract_frame_interval_s(image):
-    """Best-effort frame interval (seconds) from an AICSImage's OME model.
+def reconcile_frame_interval(nominal_s, nominal_source, derived_s, derived_source,
+                             derived_iqr_s=None, rel_tol=0.15):
+    """Decide the frame interval from a NOMINAL declared value and a DERIVED
+    (per-frame-timestamp) cadence, preferring the measurement and flagging a
+    conflict. Pure function — unit tested in the navigator package.
 
-    Tries several sources and returns (interval_s, source_str) or (None, None):
-      1. OME Pixels TimeIncrement (with TimeIncrementUnit) — the nominal interval.
-      2. Median of consecutive per-plane DeltaT values — the actual cadence.
-      3. MicroManager 'Interval_ms' in the raw metadata string (only if > 0).
+    Rules (the module's own stated principle, made operational):
+      * Per-frame timestamps win whenever present. A declared interval is a
+        claim; the timestamps are what the microscope actually did.
+      * If both exist and disagree by more than ``rel_tol`` (relative to the
+        derived value), or the nominal lies outside the derived value's IQR band,
+        mark it inconsistent and keep the derived value.
+      * If only one exists, use it.
+
+    Returns a dict with frame_interval_s, frame_interval_source,
+    frame_interval_nominal_s, frame_interval_inconsistent, and a message
+    (non-empty only when inconsistent).
+    """
+    def _pos(x):
+        try:
+            x = float(x)
+            return x if (x > 0 and x == x) else None
+        except (TypeError, ValueError):
+            return None
+
+    nominal_s = _pos(nominal_s)
+    derived_s = _pos(derived_s)
+    derived_iqr_s = _pos(derived_iqr_s)
+
+    result = dict(frame_interval_s=None, frame_interval_source=None,
+                  frame_interval_nominal_s=nominal_s,
+                  frame_interval_inconsistent=False, message='')
+
+    if derived_s is not None:
+        result['frame_interval_s'] = derived_s
+        result['frame_interval_source'] = derived_source
+        if nominal_s is not None:
+            # Relative disagreement is the criterion. (IQR is retained for
+            # provenance but deliberately NOT used as a second trigger: a very
+            # regular cadence has a tiny IQR, which would fire on a harmless
+            # rounding-level nominal mismatch and train the warning away.)
+            rel = abs(derived_s - nominal_s) / derived_s
+            if rel > rel_tol:
+                result['frame_interval_inconsistent'] = True
+                result['message'] = (
+                    f"Frame-interval mismatch: the file declares "
+                    f"{nominal_s:g} s/frame ({nominal_source or 'nominal'}), but the "
+                    f"per-frame timestamps imply {derived_s:g} s/frame "
+                    f"({derived_source or 'measured'}). Using the measured "
+                    f"{derived_s:g} s. Every dynamics result scales with this — "
+                    f"set it manually in the panel to override.")
+    elif nominal_s is not None:
+        result['frame_interval_s'] = nominal_s
+        result['frame_interval_source'] = nominal_source
+    return result
+
+
+def _extract_frame_interval_s(image):
+    """Best-effort frame interval from an AICSImage's OME model.
+
+    Returns a dict separating the NOMINAL declared interval from the DERIVED
+    per-frame cadence, so the caller can reconcile them:
+      nominal_s / nominal_source : OME Pixels TimeIncrement, or MicroManager
+        Interval_ms (>0) — a declared claim.
+      derived_s / derived_source / derived_iqr_s : median of consecutive
+        per-plane DeltaT values — the actual cadence, which is authoritative.
+
+    Historically this returned TimeIncrement FIRST and only fell back to DeltaT,
+    which contradicted the rule below and reported a nominal 0.5 s over a real
+    0.1 s cadence. Both are now extracted and the caller prefers the timestamps.
 
     **Only PER-FRAME TIMESTAMPS can be trusted. Everything else can lie, and on real files
     it does.**
@@ -450,45 +610,56 @@ def _extract_frame_interval_s(image):
             return v * 60.0
         return v  # seconds (default)
 
-    # 1 & 2: structured OME model via the ome-types object, if present.
+    out = dict(nominal_s=None, nominal_source=None,
+               derived_s=None, derived_source=None, derived_iqr_s=None)
+
+    # Structured OME model via the ome-types object, if present.
     try:
         ome = getattr(image, 'ome_metadata', None)
         if ome is not None and hasattr(ome, 'images') and ome.images:
             px = ome.images[0].pixels
+            # NOMINAL: declared TimeIncrement.
             ti = getattr(px, 'time_increment', None)
             tiu = getattr(px, 'time_increment_unit', None)
             s = _to_seconds(ti, getattr(tiu, 'value', tiu) if tiu else None)
             if s and s > 0:
-                return s, 'ome_time_increment'
-            # per-plane DeltaT
+                out['nominal_s'] = s
+                out['nominal_source'] = 'ome_time_increment'
+            # DERIVED: actual cadence from per-plane DeltaT timestamps.
             planes = getattr(px, 'planes', None) or []
             deltas = [getattr(p, 'delta_t', None) for p in planes]
             deltas = [float(d) for d in deltas if d is not None]
             if len(deltas) >= 2:
                 import numpy as _np
-                diffs = _np.diff(_np.sort(_np.asarray(deltas)))
+                arr = _np.sort(_np.asarray(deltas, dtype=float))
+                diffs = _np.diff(arr)
                 diffs = diffs[diffs > 0]
                 if diffs.size:
-                    # DeltaT unit is usually seconds in OME; assume s.
-                    return float(_np.median(diffs)), 'ome_delta_t'
+                    out['derived_s'] = float(_np.median(diffs))
+                    out['derived_source'] = 'ome_delta_t'
+                    if diffs.size >= 4:
+                        q1, q3 = _np.percentile(diffs, [25, 75])
+                        out['derived_iqr_s'] = float(q3 - q1)
     except Exception:
         pass
 
-    # 3: MicroManager Interval_ms in the raw metadata string.
-    try:
-        md = image.metadata
-        s = str(md) if md is not None else ''
-        m = _re.search(r'"?Interval_ms"?\s*[:=]\s*([0-9.]+)', s)
-        if m:
-            _iv = float(m.group(1)) / 1e3
-            # Interval_ms is often 0 / unset in MicroManager summaries; a zero
-            # interval is meaningless and must not be reported as a real cadence.
-            if _iv > 0:
-                return _iv, 'micromanager_interval_ms'
-    except Exception:
-        pass
+    # MicroManager Interval_ms in the raw metadata string — a declared value, so
+    # it is treated as NOMINAL (only used if no OME nominal was found).
+    if out['nominal_s'] is None:
+        try:
+            md = image.metadata
+            s = str(md) if md is not None else ''
+            m = _re.search(r'"?Interval_ms"?\s*[:=]\s*([0-9.]+)', s)
+            if m:
+                _iv = float(m.group(1)) / 1e3
+                # Interval_ms is often 0 / unset; a zero interval is meaningless.
+                if _iv > 0:
+                    out['nominal_s'] = _iv
+                    out['nominal_source'] = 'micromanager_interval_ms'
+        except Exception:
+            pass
 
-    return None, None
+    return out
 
 
 def extract_reader_metadata(file_path, image=None):
@@ -542,29 +713,47 @@ def extract_reader_metadata(file_path, image=None):
         # Free-text OME <Description> is never parsed for timing. The measured
         # deltas, IQR, exposure, camera, start time and frame count are all kept
         # for provenance and for MSD fitting against the true (non-uniform) cadence.
+        # Gather BOTH a measured cadence (from per-frame timestamps) and any
+        # nominal declared interval, then reconcile — timestamps win, and a
+        # disagreement is flagged rather than silently resolved.
+        _derived_s = _derived_src = _derived_iqr = None
+        _nominal_s = _nominal_src = None
         try:
             _mm = _extract_mm_frame_times_from_tiff(file_path)
+            if _mm and _mm.get('frame_interval_s'):
+                _derived_s = float(_mm['frame_interval_s'])
+                _derived_src = _mm.get('source')
+                _derived_iqr = _mm.get('frame_interval_iqr_s')
+                common['frame_interval_iqr_s'] = _mm.get('frame_interval_iqr_s')
+                common['frame_deltas_s'] = _mm.get('frame_deltas_s')
             if _mm:
-                if _mm.get('frame_interval_s'):
-                    common['frame_interval_s'] = float(_mm['frame_interval_s'])
-                    common['frame_interval_source'] = _mm.get('source')
-                    common['frame_interval_iqr_s'] = _mm.get('frame_interval_iqr_s')
-                    common['frame_deltas_s'] = _mm.get('frame_deltas_s')
                 for _k in ('exposure_s', 'camera_name',
                            'acquisition_start_time', 'n_frames'):
                     if _mm.get(_k) is not None and common.get(_k) is None:
                         common[_k] = _mm[_k]
         except Exception:
             debug_log("metadata_extract: MicroManager frame-times read failed")
-        # If the measured cadence was unavailable, fall back to the OME model.
-        if common.get('frame_interval_s') is None:
-            try:
-                _fi, _src = _extract_frame_interval_s(image)
-                if _fi and _fi > 0:
-                    common['frame_interval_s'] = float(_fi)
-                    common['frame_interval_source'] = _src
-            except Exception:
-                debug_log("metadata_extract: OME frame-interval fallback failed")
+        try:
+            _ome = _extract_frame_interval_s(image)
+            _nominal_s, _nominal_src = _ome.get('nominal_s'), _ome.get('nominal_source')
+            # If no per-frame timestamps came from the TIFF pages, use the OME
+            # DeltaT cadence as the measured value.
+            if _derived_s is None and _ome.get('derived_s'):
+                _derived_s = _ome['derived_s']
+                _derived_src = _ome.get('derived_source')
+                _derived_iqr = _ome.get('derived_iqr_s')
+        except Exception:
+            debug_log("metadata_extract: OME frame-interval read failed")
+
+        _rec = reconcile_frame_interval(_nominal_s, _nominal_src,
+                                        _derived_s, _derived_src, _derived_iqr)
+        if _rec['frame_interval_s'] is not None:
+            common['frame_interval_s'] = _rec['frame_interval_s']
+            common['frame_interval_source'] = _rec['frame_interval_source']
+        common['frame_interval_nominal_s'] = _rec['frame_interval_nominal_s']
+        common['frame_interval_inconsistent'] = _rec['frame_interval_inconsistent']
+        if _rec['frame_interval_inconsistent']:
+            _warn_frame_interval(_rec['message'])
 
         # Channel names.
         try:
@@ -581,11 +770,21 @@ def extract_reader_metadata(file_path, image=None):
         except Exception:
             pass
 
-        # Raw OME metadata as a string (best-effort).
+        # Raw OME metadata as a string (best-effort) — AND a structured parse of
+        # it, so the panel/export get queryable fields instead of one text blob.
         try:
             md = image.metadata
             if md is not None:
-                raw['ome_metadata'] = str(md)[:20000]
+                _blob = str(md)
+                raw['ome_metadata'] = _blob[:20000]
+                _parsed = parse_description_blob(_blob)
+                if _parsed:
+                    raw['acquisition'] = _parsed
+                    if common.get('exposure_s') is None:
+                        _exp = _parsed.get('ExposureTime') or _parsed.get('Exposure-ms')
+                        _e = _safe_float(_exp)
+                        if _e is not None:
+                            common['exposure_s'] = _e / 1e3 if _e > 5 else _e
         except Exception:
             pass
     except Exception:

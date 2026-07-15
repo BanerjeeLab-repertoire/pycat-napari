@@ -32,6 +32,7 @@ try:
 except Exception:
     label_with_circle = lambda t, **k: t
 import numpy as np
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 
 
 from pycat.utils.general_utils import debug_log
@@ -136,9 +137,9 @@ class InVitroFluorUI:
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp: bp.record(step, params)
 
-    def create_layer_dropdown(self, layer_type):
+    def create_layer_dropdown(self, layer_type, binding: str = ''):
         return self.central_manager.toolbox_functions_ui.create_layer_dropdown(
-            layer_type)
+            layer_type, binding=binding)
 
     def _img(self, dd):
         arr = np.asarray(self.viewer.layers[dd.currentText()].data).astype(np.float32)
@@ -271,7 +272,7 @@ def _ivf_preprocessing(ui, layout):
         "clean field usually segment fine on the raw image — you can skip this "
         "step. Rolling-ball can hollow out large droplets; a gentle Gaussian blur "
         "or LoG edge-enhancement is usually a better choice if you preprocess.</span>"))
-    img_dd = ui.create_layer_dropdown(napari.layers.Image)
+    img_dd = ui.create_layer_dropdown(napari.layers.Image, binding='invitro_fluor.input_image')
     form.addRow(label_with_circle("Fluorescence image:", dropdown=img_dd), img_dd)
 
     method_dd = QComboBox()
@@ -525,7 +526,7 @@ def _ivf_segmentation(ui, layout):
             def _postfilter(binary):
                 b = np.asarray(binary) > 0
                 if p_minarea > 0:
-                    b = morphology.remove_small_objects(b, int(p_minarea))
+                    b = _remove_small_objects_compat(b, int(p_minarea))
                 lab = measure.label(b)
                 if p_round:
                     keep = np.zeros_like(lab)

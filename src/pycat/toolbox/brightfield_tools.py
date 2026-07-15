@@ -291,21 +291,9 @@ def preprocess_brightfield(
 # ---------------------------------------------------------------------------
 
 def _remove_small(binary, min_area):
-    """Version-compatible remove_small_objects.
-
-    scikit-image 0.26 deprecated ``min_size`` in favour of ``max_size`` (which
-    removes objects whose size is <= the value). Older versions only accept
-    ``min_size``. Try the new signature first, fall back to the old one, so the
-    deprecation warning doesn't fire on new skimage while old skimage still works.
-    """
-    if int(min_area) <= 0:
-        return binary
-    try:
-        # New API (skimage >= 0.26): removes objects with size <= max_size,
-        # so pass max_size = min_area - 1 to match the old "< min_area" removal.
-        return sk.morphology.remove_small_objects(binary, max_size=int(min_area) - 1)
-    except TypeError:
-        return sk.morphology.remove_small_objects(binary, min_size=int(min_area))
+    """Version-compatible remove_small_objects (delegates to the shared helper)."""
+    from pycat.utils.general_utils import remove_small_objects_compat
+    return remove_small_objects_compat(binary, min_area)
 
 
 def _watershed_split(binary, min_diameter_px, split_touching, _skfeat, _skseg):

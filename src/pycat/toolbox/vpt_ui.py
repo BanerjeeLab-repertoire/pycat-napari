@@ -65,56 +65,92 @@ class VideoParticleTrackingUI:
     def _select_track(self, track_id, source=None):
         """Select a track everywhere. source is the view that initiated it
         ('plot'|'image'|'table') and is skipped when propagating, so a view never
-        re-highlights from its own action."""
+        re-highlights from its own action.
+
+        Re-entrancy: propagating a selection makes programmatic changes to the
+        other views (table.selectRow, viewer.dims.current_step, camera.center,
+        points selection). Several of those emit Qt/napari signals ASYNCHRONOUSLY
+        — they fire after this method has already returned — so a synchronous
+        busy-flag that resets in `finally` does NOT cover them, and the queued
+        signals re-enter here and cascade (the "jumps all over the place" loop).
+        Two guards fix it: (1) if the requested track is already the selected one,
+        do nothing (kills the common echo), and (2) the busy flag is cleared on a
+        zero-delay timer, AFTER the event queue drains, so any queued re-entrant
+        signal from this propagation is still suppressed."""
         if track_id is None:
+            return
+        tid = int(track_id)
+        # Echo guard: a programmatic selection that lands back here for the SAME
+        # track is a loop, not a user action — ignore it.
+        if getattr(self, '_selected_track_id', None) == tid and getattr(self, '_sel_busy', False):
             return
         if getattr(self, '_sel_busy', False):
             return
         self._sel_busy = True
         try:
-            self._selected_track_id = int(track_id)
+            self._selected_track_id = tid
             if source != 'image':
                 try:
-                    self._reveal_track_in_viewer(int(track_id))
+                    self._reveal_track_in_viewer(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→image failed: {e}")
             if source != 'plot':
                 try:
-                    self._highlight_track_in_plot(int(track_id))
+                    self._highlight_track_in_plot(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→plot failed: {e}")
             if source != 'table':
                 try:
-                    self._highlight_track_in_table(int(track_id))
+                    self._highlight_track_in_table(tid)
                 except Exception as e:
                     print(f"[PyCAT VPT] link→table failed: {e}")
         finally:
-            self._sel_busy = False
+            # Clear the guard only AFTER the Qt event queue drains, so async
+            # signals emitted by the propagation above (selectRow, dims/camera
+            # changes) are still seen as "busy" and don't re-enter. Fall back to a
+            # synchronous reset if no Qt timer is available.
+            def _release():
+                self._sel_busy = False
+            try:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(0, _release)
+            except Exception:
+                self._sel_busy = False
 
     def _highlight_track_in_plot(self, track_id):
         """Emphasise a track's MSD curve in the live plot (if one is open and its
-        line map was registered). No-op if the plot isn't showing."""
+        line map was registered). No-op if the plot isn't showing.
+
+        Uses the plot's blit path (redraw only the changed lines) rather than a
+        full-figure redraw, so image/table -> plot highlighting is as fast as a
+        direct plot click."""
         reg = getattr(self, '_msd_line_registry', None)
         if not reg:
             return
         lines = reg.get('lines'); canvas = reg.get('canvas')
         state = reg.setdefault('state', {'prev': None})
+        blit = reg.get('blit_highlight')
         if not lines:
             return
         prev = state.get('prev')
+        ln = lines.get(int(track_id))
+        if ln is prev:
+            return   # already highlighted — nothing to redraw
         if prev is not None and prev in lines.values():
             try:
                 prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                prev.set_zorder(1)
             except Exception:
                 pass
-        ln = lines.get(int(track_id))
         if ln is not None:
             try:
                 ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
                 ln.set_zorder(5)
                 state['prev'] = ln
-                if canvas is not None:
-                    canvas.draw_idle()
+                if blit is not None:
+                    blit(ln, prev)          # fast: only the two changed lines
+                elif canvas is not None:
+                    canvas.draw_idle()      # fallback
             except Exception:
                 pass
 
@@ -1460,6 +1496,52 @@ class VideoParticleTrackingUI:
         w.progress.connect(lambda i, n: self._track_prog.setValue(i))
         self._track_worker = w; w.start()
 
+    def _rebuild_track_layers(self, tracks, name="Bead Trajectories"):
+        """(Re)build the napari Tracks layer + the pickable Points layer from a
+        tracks DataFrame. Shared by the linker and by session load, so a loaded
+        session gets exactly the same brushable layers a fresh link produces.
+
+        tracks needs at least: track_id, frame, and y_um/x_um (or y_um_raw/
+        x_um_raw). Scale is matched to the bead image layer so the tracks overlay
+        the image 1:1."""
+        import numpy as _np
+        if tracks is None or 'track_id' not in tracks or tracks.empty:
+            return
+        mpp = self._mpx()
+        _bead_name = self._bead_dd.currentText() if hasattr(self, '_bead_dd') else ''
+        _img_layer = None
+        try:
+            import napari.layers as _nl
+            for _l in self.viewer.layers:
+                if isinstance(_l, _nl.Image):
+                    if _bead_name and _l.name == _bead_name:
+                        _img_layer = _l; break
+                    if _img_layer is None:
+                        _img_layer = _l
+        except Exception:
+            _img_layer = None
+
+        tl = tracks[['track_id', 'frame']].copy()
+        tl['y'] = tracks['y_um_raw'] / mpp if 'y_um_raw' in tracks else tracks['y_um'] / mpp
+        tl['x'] = tracks['x_um_raw'] / mpp if 'x_um_raw' in tracks else tracks['x_um'] / mpp
+        if name in self.viewer.layers:
+            self.viewer.layers.remove(name)
+        add_kwargs = {}
+        if _img_layer is not None:
+            try:
+                isc = _np.asarray(_img_layer.scale, float)
+                if isc.size >= 2:
+                    yx = isc[-2:]
+                    add_kwargs['scale'] = [1.0, float(yx[0]), float(yx[1])]
+            except Exception:
+                pass
+        self.viewer.add_tracks(
+            tl[['track_id', 'frame', 'y', 'x']].values, name=name, **add_kwargs)
+        try:
+            self._add_pickable_bead_points(tracks, _img_layer, mpp)
+        except Exception as _e:
+            print(f"[PyCAT VPT] pickable bead layer failed: {_e}")
+
     def _update_tracklen_hist(self, tracks):
         """Draw the track-length (frames-per-track) histogram in a popped-out
         dock widget. A healthy link has many long tracks; a fragmentation-prone
@@ -1571,20 +1653,41 @@ class VideoParticleTrackingUI:
             except Exception:
                 pass
 
-            # Transient highlight marker at the bead (whole trajectory as faint
-            # points + a bright marker at the first frame). Reuse one layer.
+            # Transient highlight: draw the picked track as a connected LINE that
+            # TRACES the trajectory (a Shapes 'path'), not a column of filled
+            # circles that sit on top of and obscure the track already plotted in
+            # the Bead Trajectories layer. A single small marker at the first
+            # frame shows where it starts. Reuse one Shapes + one Points layer.
             try:
-                hl_name = "Picked track"
-                pts = _np.column_stack([ys, xs])  # y, x in pixel coords
-                if hl_name in self.viewer.layers:
-                    self.viewer.layers.remove(hl_name)
-                # Use the SAME scale as the camera/image (sc_y, sc_x resolved
-                # above) so the points overlay the bead 1:1 regardless of whether
-                # the image layer carries the pixel size or scale 1.0.
-                _kw = dict(name=hl_name, size=max(6, 0.6 / mpp),
-                           face_color='#ff8c00', border_color='white',
-                           opacity=0.9, scale=[sc_y, sc_x])
-                self.viewer.add_points(pts, **_kw)
+                hl_line = "Picked track"
+                hl_start = "Picked track start"
+                path = _np.column_stack([ys, xs])       # (N, 2) y,x pixel coords
+                for _n in (hl_line, hl_start):
+                    if _n in self.viewer.layers:
+                        self.viewer.layers.remove(_n)
+                if path.shape[0] >= 2:
+                    # A bright, thin, slightly-transparent line ON TOP of the
+                    # trajectory — visible as a highlight without hiding the
+                    # underlying track. edge_width is in data (pixel) units.
+                    _sh_kw = dict(name=hl_line, shape_type='path',
+                                  edge_color='#ff8c00', face_color='transparent',
+                                  edge_width=max(1.0, 0.25 / mpp),
+                                  opacity=0.85, scale=[sc_y, sc_x])
+                    try:
+                        self.viewer.add_shapes([path], **_sh_kw)
+                    except Exception:
+                        # Older napari: edge_width may need to be a scalar list.
+                        _sh_kw['edge_width'] = float(max(1.0, 0.25 / mpp))
+                        self.viewer.add_shapes([path], **_sh_kw)
+                # small start marker (one point), offset visually by being a ring
+                _pt_kw = dict(name=hl_start, size=max(6, 0.5 / mpp),
+                              face_color='transparent', border_color='#ff8c00',
+                              opacity=0.95, scale=[sc_y, sc_x])
+                try:
+                    self.viewer.add_points(path[:1], **_pt_kw)
+                except Exception:
+                    _pt_kw.pop('border_color', None); _pt_kw['edge_color'] = '#ff8c00'
+                    self.viewer.add_points(path[:1], **_pt_kw)
             except Exception:
                 pass
 
@@ -1798,6 +1901,21 @@ class VideoParticleTrackingUI:
             "click-a-track-to-reveal-it-in-the-viewer.")
         form.addRow(self._plots_consolidated)
 
+        # Fidelity-based render opt-out. By default the MSD spaghetti plot draws
+        # the smallest representative sample that reproduces the full percentile
+        # band (~95% fidelity) — fast and faithful, since extra lines just
+        # overplot. This checkbox forces drawing EVERY track for anyone who wants
+        # the literal full spaghetti (streams in progressively so it stays live).
+        self._plots_draw_all = QCheckBox("Draw every track (slower; default shows a representative sample)")
+        self._plots_draw_all.setChecked(False)
+        self._plots_draw_all.setToolTip(
+            "OFF (default): the MSD plot draws the smallest random sample of "
+            "tracks that reproduces the full 10–90% spread to ~95% (labelled with "
+            "the measured fidelity). The ensemble mean and fit always use ALL "
+            "tracks regardless — this only affects how many faint lines are drawn. "
+            "ON: draw every track (streamed in progressively).")
+        form.addRow(self._plots_draw_all)
+
         self._rheo_prog = QProgressBar(); self._rheo_prog.setVisible(False)
         btn = QPushButton("▶  Compute MSD & Viscosity")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -2003,12 +2121,16 @@ class VideoParticleTrackingUI:
                 # linked-selection dispatcher and register the line map so
                 # image/table selections can highlight the curve too.
                 self._msd_line_registry = {}
+                _render_mode = ('all' if (hasattr(self, '_plots_draw_all')
+                                          and self._plots_draw_all.isChecked())
+                                else 'auto')
                 plot_msd_trajectories(
                     ptc, msd_df, fit,
                     title="VPT MSD (per-track + ensemble)",
                     interactive=True,
                     on_pick_track=lambda tid: self._select_track(tid, source='plot'),
-                    line_registry=self._msd_line_registry)
+                    line_registry=self._msd_line_registry,
+                    render_mode=_render_mode)
                 plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
                                frame_interval_s=self._frame_dt.value(),
                                van_hove_lag=1, consolidated=False,

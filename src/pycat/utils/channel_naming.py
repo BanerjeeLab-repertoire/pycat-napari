@@ -136,6 +136,7 @@ def identify_channel(
     channel_name: Optional[str] = None,
     emission_wavelength: Optional[float] = None,
     excitation_wavelength: Optional[float] = None,
+    pixel_frame=None,
 ) -> dict:
     """
     Identify a channel's display label using a three-tier strategy.
@@ -186,6 +187,28 @@ def identify_channel(
             result = ("Transmitted", "transmitted")
             source = "name"
 
+    # Tier 2c: measure the PIXELS when metadata is silent. Camera-only
+    # acquisitions carry no fluor/emission/name, so rather than fall straight to
+    # a meaningless position guess, classify the modality from a frame
+    # (fluorescence vs brightfield/DIC/phase). Only used when we have pixels and
+    # nothing better matched.
+    if result is None and pixel_frame is not None:
+        try:
+            from pycat.utils.channel_modality import classify_channel_from_pixels
+            modality, conf = classify_channel_from_pixels(pixel_frame)
+            if modality is not None and conf >= 0.5:
+                _MODALITY_LABEL = {
+                    'fluorescence': ('Fluorescence', 'unknown'),
+                    'brightfield':  ('Brightfield', 'transmitted'),
+                    'dic':          ('DIC', 'transmitted'),
+                    'phase':        ('Phase', 'transmitted'),
+                    'transmitted':  ('Transmitted', 'transmitted'),
+                }
+                result = _MODALITY_LABEL.get(modality)
+                source = "pixels"
+        except Exception:
+            pass
+
     # Tier 3: position-based fallback
     if result is None:
         source = "position"
@@ -225,7 +248,7 @@ def suggest_colormap(bucket: str) -> str:
 # Metadata extraction helpers for specific sources
 # ---------------------------------------------------------------------------
 
-def extract_channel_info(image, channel_index: int) -> dict:
+def extract_channel_info(image, channel_index: int, pixel_frame=None) -> dict:
     """
     Extract whatever channel metadata AICSImage exposes (works for OME-TIFF,
     CZI, and other Bio-Formats-compatible formats) and run it through
@@ -274,6 +297,7 @@ def extract_channel_info(image, channel_index: int) -> dict:
         channel_name=chan_name,
         emission_wavelength=emission,
         excitation_wavelength=excitation,
+        pixel_frame=pixel_frame,
     )
 
 

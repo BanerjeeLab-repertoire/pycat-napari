@@ -397,8 +397,28 @@ def prompt_pixel_size_on_load(get_dr, parent=None, central_manager=None):
             if d is not None:
                 d['microns_per_pixel_sq'] = float(val) ** 2
                 d['pixel_size_from_metadata'] = False
+                # Explicit user entry — mark it confirmed so the sentinel-based
+                # gate treats this as a real, trusted scale (not "missing").
+                d['pixel_size_confirmed'] = True
                 result['set'] = True
             dlg.accept()
+            # ── Apply the new scale to the actual napari layers ──────────────
+            #
+            # Writing microns_per_pixel_sq to the data repository is NOT enough:
+            # the napari image layer's `.scale` stays at 1.0, so the µm cursor
+            # readout never appears and every layer-scale consumer runs
+            # uncalibrated. `_align_layer_scales` can only PROPAGATE a scale from
+            # an already-scaled reference layer — with nothing scaled yet it finds
+            # no reference and does nothing. So push the pixel size onto the image
+            # layer here (which also enables the µm scale bar and then aligns the
+            # rest), exactly as a real-metadata load would.
+            if central_manager is not None:
+                try:
+                    _fio = getattr(central_manager, 'file_io', None)
+                    if _fio is not None and hasattr(_fio, '_enable_auto_scale_bar'):
+                        _fio._enable_auto_scale_bar()
+                except Exception:
+                    pass
             # The scale just changed — tell any registered gates (e.g. an open
             # method panel's in-dock pixel-size gate) to re-evaluate, so a gate
             # that was showing now hides instead of contradicting the popup.
@@ -515,6 +535,15 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
             # a genuine 1.0 um/px the user typed, instead of re-prompting forever
             # because the value equals the old sentinel. (#9)
             dr['pixel_size_confirmed'] = True
+            # Push the scale onto the napari image layer so the µm cursor readout
+            # and scale bar appear (writing the repo value alone leaves layer.scale
+            # at 1.0 — see prompt_pixel_size_on_load for the same fix).
+            try:
+                _fio = getattr(central_manager, 'file_io', None)
+                if _fio is not None and hasattr(_fio, '_enable_auto_scale_bar'):
+                    _fio._enable_auto_scale_bar()
+            except Exception:
+                pass
             if on_set:
                 try:
                     on_set(v)

@@ -173,16 +173,24 @@ def record_time_axis(data_repository, n_t):
 def has_time_axis(data_repository) -> bool:
     """Does the loaded image have more than one frame?
 
-    **Unknown counts as YES.** If ``n_t`` was never recorded — an older session, a loader that has
-    not been taught to set it — *warn rather than stay silent.* A missing frame interval on a movie
-    is a factor-of-two error in every dynamics result; a spurious warning on a still image is
-    merely noise. **Fail toward the loud side.**
+    **Unknown counts as YES — but only once an image is actually loaded.** If ``n_t`` was never
+    recorded on a movie (an older session, a loader not yet taught to set it), *warn rather than stay
+    silent* — a missing frame interval there is a factor-of-two error in every dynamics result.
+
+    **No image loaded at all → NO.** An empty session has nothing to analyse, so a frame-interval
+    warning cannot apply. *A warning that fires where it cannot apply is how real warnings get
+    trained away* — the panel builds its spinbox before any file is opened, and firing then taught
+    the user to scroll past the one that matters. We detect "an image is loaded" by the presence of
+    ``file_metadata`` (set on every load) or a recorded ``n_t``; with neither, stay silent.
     """
     if not isinstance(data_repository, dict):
-        return True
+        return False
     n_t = data_repository.get('n_t')
+    image_loaded = ('file_metadata' in data_repository) or (n_t is not None)
+    if not image_loaded:
+        return False        # nothing loaded — nothing for a frame interval to be wrong about
     if n_t is None:
-        return True
+        return True         # image loaded, frame count unknown — fail toward the loud side
     try:
         return int(n_t) > 1
     except (TypeError, ValueError):

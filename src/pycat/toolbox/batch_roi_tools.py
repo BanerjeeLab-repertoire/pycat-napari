@@ -34,6 +34,7 @@ Date: 2025
 
 from __future__ import annotations
 import numpy as np
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 
 from pycat.utils.tag_registry import tags_layer
 from typing import Optional
@@ -129,7 +130,7 @@ def multi_otsu_foreground_bbox(
     # Remove small noise specks — require connected regions larger than 0.1%
     # of the image area to be counted as foreground
     min_size = max(4, int(H * W * 0.001))
-    foreground = sk.morphology.remove_small_objects(foreground, min_size=min_size)
+    foreground = _remove_small_objects_compat(foreground, min_size)
 
     # Fill holes within cells so the bounding box captures the full cell interior
     foreground = ndimage.binary_fill_holes(foreground)
@@ -209,7 +210,7 @@ def multi_otsu_cell_mask(
 
     # Remove objects smaller than a quarter of one cell area
     min_size = max(16, int((cell_diameter / 2) ** 2))
-    mask = sk.morphology.remove_small_objects(mask, max_size=min_size)
+    mask = _remove_small_objects_compat(mask, min_size)
     mask = _ndi.binary_fill_holes(mask)
 
     if not mask.any():

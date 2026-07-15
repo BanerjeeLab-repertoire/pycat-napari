@@ -74,6 +74,8 @@ CORE_KEYS = {
     'dimensionality',# 2d / 2d+t / z-stack / multi-position
     'modality',      # fluorescence / brightfield
     'channel',       # fluorophore / stain identity (free value from metadata)
+    'spectral_bucket',   # coarse emission band: blue/green/red/far_red/unknown. The honest
+                         # DAPI-vs-GFP discriminator when channel names collide (both "Fluorescence").
     'scale',         # calibrated / uncalibrated
     'provenance',    # raw / derived / segmentation / pycat-generated
     'purpose',       # what an annotation/drawing layer is FOR (open vocabulary)
@@ -113,6 +115,7 @@ CORE_VALUES = {
     # tag_registry.get_operation(). A tag that is not a registered operation is REFUSED.
     'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
     'modality': {'fluorescence', 'brightfield'},
+    'spectral_bucket': {'blue', 'green', 'red', 'far_red', 'transmitted', 'unknown'},
     'scale': {'calibrated', 'uncalibrated'},
     'provenance': {'raw', 'derived', 'segmentation', 'pycat-generated',
                    'user-created'},

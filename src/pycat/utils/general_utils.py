@@ -397,3 +397,38 @@ def create_overlay_image(green_channel, overlay_mask, alpha=0.65):
     return side_by_side_image
 
 
+def remove_small_objects_compat(binary, min_area, connectivity=1):
+    """Version-compatible ``skimage.morphology.remove_small_objects``.
+
+    scikit-image 0.26 DEPRECATED ``min_size`` in favour of ``max_size`` — and the
+    two are NOT a simple rename: the old ``min_size=N`` removed objects *smaller
+    than* N (size < N), while the new ``max_size=N`` removes objects *smaller than
+    OR EQUAL TO* N (size <= N). To preserve the original "remove anything below
+    ``min_area``" behaviour on new skimage, pass ``max_size = min_area - 1``.
+
+    This is the single correct place for that logic — several call sites had
+    drifted into a mix of positional ``min_size``, keyword ``min_size`` and even
+    ``max_size=min_area`` (which silently changed the threshold by one and the
+    comparison to ``<=``). Route them all here.
+
+    Parameters
+    ----------
+    binary : ndarray
+        Boolean mask or label image.
+    min_area : int
+        Objects with area STRICTLY LESS THAN this are removed (the historical
+        ``min_size`` semantics). ``<= 0`` is a no-op.
+    connectivity : int
+        Passed through to ``remove_small_objects``.
+    """
+    if int(min_area) <= 0:
+        return binary
+    try:
+        # New API (skimage >= 0.26): removes size <= max_size, so max_size =
+        # min_area - 1 reproduces the old "size < min_area" removal exactly.
+        return sk.morphology.remove_small_objects(
+            binary, max_size=int(min_area) - 1, connectivity=connectivity)
+    except TypeError:
+        # Old API (skimage < 0.26): only min_size exists.
+        return sk.morphology.remove_small_objects(
+            binary, min_size=int(min_area), connectivity=connectivity)

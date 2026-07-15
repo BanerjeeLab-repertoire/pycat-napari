@@ -4,15 +4,350 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**
-- The bioio backend reads each format via a separate plugin package. PyCAT declared the microscopy
-  plugins (bioio-ome-tiff/tifffile/czi) but NOT ``bioio-imageio``, which reads PNG/JPG/BMP. Since
-  PyCAT's own save path writes PNGs (Cellpose masks, overlay exports), a fresh install could not
-  reopen what it had saved — ``UnsupportedFileFormatError`` / "bioio has no reader installed for
-  .png files". The aicsimageio backend handled PNG natively, so the bioio migration silently dropped
-  it. Fix: (1) ``bioio-imageio`` is now a core dependency; (2) the missing-plugin error now names
-  bioio-imageio for .png/.jpg/.jpeg/.bmp so the message tells the user exactly what to install.
-  Existing installs unblock immediately with ``pip install bioio-imageio`` (keep numpy<2.1).
+## [1.6.58] - 2026-07-15
+### Added — **GPU VPT bead detection validated on real CUDA; CuPy bridged to PyTorch's bundled CUDA runtime so the `gpu` extra works without a standalone toolkit.**
+- **CuPy could not find its CUDA runtime.** `cupy-cuda11x` needs the CUDA 11.x libraries
+  (`cudart`, `nvrtc` + its `nvrtc-builtins` companion, `cublas` ...) at first kernel launch. On a
+  Windows/conda machine with no standalone CUDA toolkit, `import cupy` succeeded but the first real op
+  died with `Could not find nvrtc64_112_0.dll`. The only consistent copy of those libraries on such a
+  machine is the one **PyTorch** — already a hard PyCAT dependency, built against cu118 — ships in
+  `torch/lib`. `gpu_utils._register_bundled_cuda_libs()` now locates that directory (via `find_spec`,
+  without importing torch) and adds it to both `os.add_dll_directory` (for CuPy's `LoadLibraryEx`) and
+  `PATH` (for nvrtc's internal load of `nvrtc-builtins`) before `import cupy`. Windows-only,
+  best-effort, a no-op elsewhere or with a CPU-only torch. Result: `gpu_available()` is `True` out of
+  the box on the Quadro P2200 (CuPy 13.6.0, CUDA runtime 11.8).
+- **The GPU smoke test now proves the GPU is *functional*, not merely importable.** The old
+  `cp.zeros((4,4))` check is only a memset and would pass off a stale kernel cache even when `nvrtc`
+  is broken; it now forces an elementwise-kernel compile + reduction, so `GPU_AVAILABLE` reflects true
+  capability.
+- **Validated GPU ≡ CPU-parallel ≡ serial on real CUDA.** New `tests/test_vpt_gpu_equivalence.py`
+  (skip-if-no-GPU, `integration`) asserts `blob_log_gpu` reproduces `skimage.blob_log` exactly, and
+  that GPU and the ProcessPool worker path both match serial CPU blob sets across the fixture stack.
+  Confirmed on the real 1080×1440 bead movie (first 40 frames, ~795 detections/frame): **0 mismatches**
+  on all three tiers — so the `detect_beads_stack` tier selector never changes results.
+- **Measured speedup** (Quadro P2200, warm, 40 dense frames): serial 1.70 fps → CPU-parallel 3.06 fps
+  (1.80×) → **GPU 3.50 fps (2.06×)**. **Viscosity unchanged:** GPU detection is bit-identical to CPU,
+  so the downstream link→MSD→Stokes-Einstein chain is untouched; the pipeline's η on the 1000-frame
+  bead file is 8.52 Pa·s, matching the validated ~8.325 Pa·s baseline (v1.5.329) within ~2%. The GPU
+  tier remains fully revertible via `PYCAT_FORCE_CPU=1` / `use_gpu=False`.
+
+## [1.6.57] - 2026-07-15
+### Fixed — **Restore VPT `_rebuild_track_layers` (lost from the tree), so loading a VPT session rebuilds its tracks again.**
+- The `_rebuild_track_layers` method — which the session loader calls to reconstruct the VPT trajectory
+  + pickable-points layers when a session with `vpt_tracks` is loaded — was absent from `vpt_ui.py` in
+  the shipped tree (it was introduced alongside a load-CSV widget button that was dropped, and the whole
+  change was skipped, taking the shared method with it). `ui_modules._open_session_loader` guards the
+  call with `hasattr`, so loading a VPT session did not crash but SILENTLY skipped the track rebuild —
+  defeating the session-restore feature (1.6.52/1.6.53). Restored `_rebuild_track_layers`; the load-CSV
+  widget button is intentionally NOT restored (top-level Load Session is the single path). The 1.6.50
+  brushing loop fix and line-trajectory highlight are unaffected.
+## [1.6.56] - 2026-07-15
+### Changed — **Smart channel naming: cleaned filenames, identity-first names, full-name tooltip, and the naming dialog skipped when confident.**
+- **Filename cleaning.** A new `_clean_filename_token` strips MicroManager/OME cruft and acquisition
+  parameters from the layer name: `3.30 hr_1_MMStack_Pos0.ome` → `3.30_hr` (keeps the user's timepoint,
+  drops the `_MMStack_Pos0` MicroManager appends); `polyA 3 mgpmL - 1000 mM LiCl - 50mM HEPES pH
+  7p5_3_MMStack_Pos0.ome` → `polyA` (the concentrations/buffer/pH belong in provenance, not the name); a
+  useless export name like `Image 3-OME TIFF-Export-01.ome` cleans to nothing and falls through to the
+  channel identity.
+- **Identity-first naming.** `derive_layer_name` now prefers channel IDENTITY (a fluorophore/emission
+  label from metadata OR a pixel-measured modality) over the filename, and combines them as
+  sample-modality — e.g. `polyA-Brightfield`. A positional guess (`C0-Blue`) is still never treated as
+  identity.
+- **Full-filename tooltip.** The full original filename is stamped onto each loaded layer
+  (`metadata['source_filename']` + a best-effort layer tooltip), so the rich acquisition name stays
+  discoverable even though the visible layer name is the short cleaned identity. The full name is also
+  already preserved in the provenance metadata JSON.
+- **Dialog skipped when confident.** The multichannel Channel-Name-Assignment dialog is now skipped
+  when every channel has a confident identity (metadata name/wavelength or pixel-measured modality) —
+  it was only confirming names PyCAT was already sure of. It still appears when ≥1 channel is a bare
+  positional guess, so the user can disambiguate. Guard tests in tests/test_channel_modality.py.
+
+## [1.6.55] - 2026-07-15
+### Fixed — **OME-TIFF pixel size recovered from OME-XML (no more spurious Set-Scale dialog / "division by zero").**
+- An OME-TIFF whose baseline TIFF XResolution is zeroed (`0/1`) made the reader's physical_pixel_sizes
+  raise "Could not parse tiff pixel size: division by zero" and fall back to 1.0 µm/px — popping the
+  Set-Scale dialog even though the OME-XML carried the true `PhysicalSizeX` (e.g. 0.0264 µm/px). Added
+  `_ome_pixel_size_um` (reads OME-XML PhysicalSizeX, honours the unit) and wired pixel-size recovery
+  into the 2D image path: when update_metadata lands on the 1.0 sentinel, recover from OME-XML first
+  (authoritative for OME-TIFF), then baseline TIFF tags. The 2D path previously had no recovery at all.
+### Added — **Channel modality inferred from pixels when metadata is silent.**
+- Camera-only acquisitions (MicroManager, exported OME-TIFF) carry no fluorophore/emission/name, so
+  channel identification fell straight to a meaningless position guess ("C0-Blue"). New
+  `channel_modality.classify_channel_from_pixels` measures a frame and names the modality —
+  fluorescence vs transmitted, with a finer brightfield/DIC/phase split when the optical signature is
+  clear (directional shadow-cast for DIC, edge halos for phase, plain absorption for brightfield),
+  degrading honestly to the generic "transmitted" when uncertain (a wrong "DIC" is worse than an honest
+  "transmitted"). Wired as a new tier in `identify_channel` between wavelength and the position
+  fallback; metadata (fluorophore name / emission) still takes precedence over pixel inference. Guard
+  test tests/test_channel_modality.py.
+
+## [1.6.54] - 2026-07-15
+### Changed — **File-I/O god-class decomposition #2: `open_2d_image` reader extracted to `readers/image_reader_2d.py`.**
+- Lifted the pure file-path → channel-arrays logic out of `FileIOClass.open_2d_image` into a free
+  function `read_2d_image_channels(file_path)` (mirrors the piece-#1 `mask_reader` extraction). It
+  returns `(channels, channel_info, image, used_pil_fallback)`: the `(data, path, key)` channel tuples
+  in the original load order (page-major then channel for multi-page, 1-based running key; else channel
+  index), the per-channel identity from `extract_channel_info`, the reader object (so the controller
+  still runs `update_metadata`/`extract_metadata`), and whether the NumPy-2.0 PIL fallback was taken.
+  The controller keeps dialog, filePath bookkeeping, metadata-repository updates, the user-facing
+  fallback warning, and napari-layer construction. Behaviour-preserving: a headless byte-identity test
+  (tests/test_image_reader_2d_extraction.py) reimplements the original inline loop as the oracle and
+  asserts the extracted reader matches it across page/channel shapes (1×1, 1×3, 2×1, 3×2, 4×4).
+- Also fixed a latent post-loop reference: object_size/cell_diameter were derived from a loop-leaked
+  `channel_data` local; now taken explicitly from the last loaded channel (`all_channels[-1][0]`),
+  preserving the prior value exactly.
+### Docs
+- Added docs/audits/session_architecture_2026-07-15.md documenting the general session save/load
+  infrastructure and the recipe for extending interop to other methods (FCS/RICS/etc.).
+
+## [1.6.53] - 2026-07-15
+### Added — **Load Session fallback recognises loose VPT (and other) dataframes from older saves.**
+- The manifest-based session load (1.6.52) restores VPT, but files saved BEFORE that (loose
+  *_vpt_tracks.csv etc. scattered in a folder with no manifest) went through the suffix-scan fallback,
+  which did not know VPT suffixes. Added `_vpt_tracks`, `_vpt_aggregate_tracks`, `_vpt_aggregate_stats`,
+  `_vpt_msd_df`, `_vpt_moduli_df`, and `_vpt_detections` to the scanner's dataframe rules (ordered so
+  the more specific suffixes are not shadowed). Also fixed the batch-rule path to carry `df_key` for
+  dataframe matches, so a restored table is stored under its true repository key (e.g. `vpt_tracks`) —
+  which is what the VPT layer-rebuild hook looks for, so pointing Load Session at an old folder now
+  rebuilds the trajectory layers from the loose CSV too. The stem picker in the load dialog still lets
+  the user choose which image's files to load when a folder holds several.
+
+## [1.6.52] - 2026-07-15
+### Changed — **Save & Clear is now a real SESSION save: one folder, a manifest, the source image referenced (not copied), and Load Session restores the whole state (incl. VPT).**
+- Save & Clear used to be a per-layer/per-dataframe EXPORT: it listed everything as checkboxes for the
+  user to curate, wrote files with a flat prefix so they SCATTERED loose among the user's data, offered
+  the SOURCE IMAGE as a save target (wasteful — it is already on disk and is the largest file), and the
+  top-level Load Session could not reconstruct a VPT session from the result. Redesigned:
+  - **Consolidated folder.** A save now creates one `session_<image>_<timestamp>/` folder and puts all
+    artifacts inside it, instead of scattering them.
+  - **Manifest.** `pycat_session.json` records the source-image PATH (a reference, not a copy), the
+    acquisition state (pixel size, frame interval), and the layer/dataframe → file mapping.
+  - **Source image referenced, never copied.** It is excluded from the save by default; the manifest
+    points at it on disk.
+  - **Smart defaults.** The save dialog now pre-ticks every DERIVED layer and ALL analysis dataframes,
+    and unticks the source image and pure-interpolation upscales — so the user no longer has to curate
+    what a session needs (they can still override any tick).
+  - **Load Session restores the whole state.** `load_session` is now manifest-first: it opens the
+    referenced source image through PyCAT's own loader (correct lazy type + scale), restores acquisition
+    state and every recorded dataframe, and — when `vpt_tracks` is present — rebuilds the VPT trajectory
+    layers via the shared `_rebuild_track_layers`, so a VPT session comes back clickable/brushable. The
+    old suffix scan remains as a fallback for older folders.
+  Guard test tests/test_session_manifest.py.
+
+## [1.6.51] - 2026-07-15
+### Added — **Load a saved VPT tracks session (iterate on the plots without re-running detection + linking).**
+- Save & Clear already writes the `vpt_tracks` DataFrame as `*_vpt_tracks.csv`, but there was no way to
+  load it back — so troubleshooting the MSD plots/table/brushing meant re-running detection and linking
+  every time. A new "Load saved tracks (CSV)…" button in the VPT microrheology step reads that CSV back
+  into the session: it validates the schema (needs track_id, frame, and y_um/x_um or y_um_raw/x_um_raw),
+  stores it as `vpt_tracks`, and rebuilds the trajectory + pickable-points layers via a new shared
+  `_rebuild_track_layers` (the same layer-build the linker uses, so a loaded session gets identical
+  brushable layers). The user then clicks "Compute MSD & Viscosity" to regenerate the plots and per-track
+  table from the loaded tracks. Non-tracks CSVs are rejected with a clear message. Guard test
+  tests/test_vpt_load_tracks_session.py.
+
+## [1.6.50] - 2026-07-15
+### Fixed — **VPT brushing selection feedback loop ("jumps all over the place" on one click) + line trajectory highlight.**
+- A single click on a track cascaded into the view rapidly cycling through many tracks. Cause: the
+  linked-selection re-entrancy guard (`_sel_busy`) was cleared SYNCHRONOUSLY in `finally`, but
+  propagating a selection makes programmatic changes (table.selectRow, viewer.dims.current_step,
+  camera.center, points selection) that emit Qt/napari signals ASYNCHRONOUSLY — those fire after the
+  guard was already cleared and re-enter `_select_track`, looping. Fixes: (1) an echo guard that ignores
+  a re-selection of the already-selected track, and (2) the busy flag is now cleared on a zero-delay
+  `QTimer.singleShot` (after the event queue drains) so queued re-entrant signals from the propagation
+  are still suppressed. A single click now selects exactly one track.
+- The image highlight is now a connected trajectory LINE (a Shapes 'path') that traces the picked track,
+  plus a small ring at its start frame — instead of a column of filled orange circles that sat on top of
+  and OBSCURED the trajectory already drawn in the Bead Trajectories layer. The line is bright but thin
+  and slightly transparent, so it highlights without hiding the underlying track.
+
+## [1.6.49] - 2026-07-15
+### Changed — **MSD spaghetti plot draws a fidelity-targeted representative sample by default (supersedes 1.6.48's fixed cap).**
+- A spaghetti plot exists to show the SPREAD of MSD curves (the 10–90% percentile band), not each
+  individual line — past a point, extra lines only overplot into the same band and add no visual
+  information. Measured on realistic MSD data, that band converges at a track count that is roughly
+  CONSTANT (~100 tracks for ~95% fidelity) whether the dataset is 500 or 50 000 tracks. So instead of a
+  fixed cap (or drawing everything), the MSD plot now draws the SMALLEST random sample whose band
+  reproduces the full band to a target fidelity (default 95%), via the new
+  `representative_track_sample`. The legend states it honestly, e.g. "showing 100 of 5000 (band fidelity
+  ≈96%)". The full data is untouched — the ensemble mean and the D/α fit still use EVERY track; this
+  governs only how many faint lines are drawn. Result: initial render and every subsequent pick/blit are
+  fast and bounded regardless of dataset size (~100 artists, not thousands).
+- OPT-OUT: a new "Draw every track" checkbox in the VPT plot options forces the literal full spaghetti
+  (streamed in progressively on a Qt timer so the window stays live). `plot_msd_trajectories` also gains
+  `render_mode` ('auto'|'all'), `target_fidelity`, and `max_tracks` parameters. The progressive draw-in
+  machinery from 1.6.48 is retained as the mechanism for the 'all' path; the fidelity sample is the new
+  default (so 1.6.48's raised fixed cap is superseded). Guard test tests/test_representative_track_sample.py.
+
+## [1.6.48] - 2026-07-15
+### Changed — **VPT MSD spaghetti plot draws progressively (responsive at once, fills in over time).**
+- The standalone MSD plot (`plot_msd_trajectories`) drew every track synchronously and capped at 400
+  because each track is a separate matplotlib artist and drawing thousands at once freezes the window.
+  It now draws a first representative batch immediately (~150 tracks, so the plot is useful at once) and
+  streams the rest in on a Qt timer (~150 tracks every 30 ms), yielding to the event loop between
+  batches so the UI never blocks. Because progressive draw stays responsive, the visible cap is raised
+  to 1500 (the quantitative result — ensemble mean + fit — still uses ALL tracks, as before). The
+  track→line maps grow by reference as batches arrive, so streamed-in tracks become pickable/brushable
+  as they appear, and the blit background (1.6.47) is re-captured once all batches are drawn so picking
+  stays fast over the full set. Falls back to a synchronous bounded draw when a Qt timer isn't available
+  (non-interactive/Agg). The consolidated 2×2 panel keeps its existing 400-cap synchronous draw for now;
+  progressive draw-in there is a follow-on.
+
+## [1.6.47] - 2026-07-15
+### Changed — **VPT plot brushing is now fast (blitting instead of full-figure redraws).**
+- Clicking an MSD track, or highlighting one from the image/table, was laggy because every selection
+  triggered a full matplotlib `canvas.draw_idle()` — and a plot click actually triggered TWO (the pick
+  handler's own redraw plus the dispatcher's). On a spaghetti plot with hundreds of lines that is tens
+  of milliseconds per redraw. Both the standalone MSD plot (`plot_msd_trajectories`) and the
+  consolidated 2×2 panel (`plot_vpt_panel`) now BLIT: the axes background is cached (and re-cached on
+  draw/resize/zoom via a `draw_event` hook) and each selection restores that background and redraws
+  ONLY the two changed lines (previously- and newly-highlighted). Headless benchmark on a 300-line
+  plot: ~0.2 ms per highlight vs ~47 ms for a full redraw (~230×). The dispatcher's
+  `_highlight_track_in_plot` shares the pick handler's highlight state and uses the same blit path, so
+  image/table → plot highlighting is just as fast and never double-redraws. Re-picking the already-
+  selected track is now a no-op redraw. Behaviour (which line is emphasised, the pick callback) is
+  unchanged — only the render path is faster.
+
+## [1.6.46] - 2026-07-15
+### Fixed — **Results DataFrame windows are no longer modal (they blocked all interaction).**
+- `show_dataframes_dialog` (the shared results-table window used across VPT and other analyses) called
+  `dialog.exec_()`, which is MODAL: after a run, the results table froze every other interaction —
+  scrubbing the movie, clicking a bead, panning the canvas — until the user hit OK. A results table is
+  reference material, not a blocking decision, so it should never seize the UI. It is now shown
+  NON-MODALLY: parented to the napari main window, kept alive by a module-level reference (a parentless
+  QDialog under `.show()` would be garbage-collected instantly), and raised to the front with
+  `raise_()`/`activateWindow()` (results windows had been appearing behind the main window). No caller
+  relied on the old blocking return, so this is safe app-wide. Follow-ups still to come for the VPT
+  plots (bring-to-front + click-brushing lag) and the post-100% results-materialization phase in the
+  progress bars.
+
+## [1.6.45] - 2026-07-15
+### Fixed — **skimage 0.26 `remove_small_objects` deprecation (FutureWarning) unified across the codebase.**
+- scikit-image 0.26 deprecated `min_size` in favour of `max_size`, and it is NOT a rename: `min_size=N`
+  removed objects with area < N, while `max_size=N` removes area <= N. Seven call sites had drifted into
+  a mix of positional `min_size`, keyword `min_size=`, and even `max_size=min_size` (which had silently
+  shifted the threshold by one and flipped the comparison to <=). All are now routed through a single
+  version-safe helper `general_utils.remove_small_objects_compat`, which uses `max_size = min_area - 1`
+  on new skimage (reproducing the old "area < min_area" removal exactly) and falls back to `min_size` on
+  old skimage — so the FutureWarning no longer fires and the threshold semantics are identical everywhere.
+  Sites fixed: vpt_tools (×2, incl. the Mode-C host inference that surfaced the warning), brightfield_tools
+  (its own correct wrapper now delegates), invitro_fluor_ui, timeseries_invitro_fluor_ui, batch_roi_tools
+  (×2 — one of which had the latent off-by-one), segmentation_tools. Guard test
+  tests/test_remove_small_objects_compat.py (asserts strict-less-than removal AND no FutureWarning).
+
+## [1.6.44] - 2026-07-15
+### Fixed — **Setting the pixel size now calibrates the image (µm readout appeared missing).**
+- After the Set-Scale dialog (or the in-dock pixel-size gate) confirmed a value, PyCAT wrote
+  `microns_per_pixel_sq` to the data repository but never set the napari image layer's `.scale`. The
+  cursor readout showed pixels only (no µm), the scale bar stayed in pixels, and — critically — every
+  layer-scale consumer, including VPT's auto linking distance, ran UNCALIBRATED even though the user
+  had entered a scale. Root cause: `_align_layer_scales` can only PROPAGATE a scale from an
+  already-scaled reference layer; with nothing scaled yet it finds no reference and does nothing, so
+  the repo value never reached the layer. Fix: both set-scale paths (`prompt_pixel_size_on_load` and
+  the `add_pixel_size_gate` in-dock gate) now route through `file_io._enable_auto_scale_bar()`, which
+  reads the repo value and sets `layer.scale = sqrt(microns_per_pixel_sq)` — exactly as a real-metadata
+  load does — so the µm readout/scale bar appear and downstream analysis is calibrated. Both paths
+  also now set `pixel_size_confirmed=True`. Guard test tests/test_setscale_applies_to_layer.py.
+  (Follow-on to the 1.6.42 corrupt-scale gate fix: 1.6.42 made the dialog APPEAR; this makes the
+  value it collects actually take effect.)
+
+## [1.6.43] - 2026-07-15
+### Fixed — **VPT linking no longer allocates a terabyte-scale dense matrix (gap-closing crash).**
+- `dynamic_spatial_tools._close_gaps_bayesian` built a full `(n_ends + n_starts)²` dense cost matrix.
+  On a run that fragmented into ~286k tracks that is a 572k×572k float64 array = **2.39 TiB**, and
+  linking crashed with a MemoryError. The matrix is ~99.9% INF — an end at frame `ef` can only close
+  to a start in frames `(ef, ef+max_gap+1]` and within `max_displacement×gap` — so it is now built
+  as a SPARSE candidate-edge list (a per-gap-frame KD-tree spatial query enumerates only the
+  physically-plausible links) and solved with sparse bipartite matching, with a greedy
+  cheapest-edge fallback. Linear in the number of real candidate links; a 50k-fragment case that
+  would have needed ~80 GB now runs in seconds. Merges are unchanged (near fragments join, far ones
+  stay separate). Guard test tests/test_gap_closing_sparse.py.
+- NOTE: this fixes the CRASH, not the upstream cause. The run that triggered it had (a) a corrupt
+  pixel size still active at detection (auto linking distance came out 377 µm — set the real scale
+  in the panel BEFORE detecting, now that 1.6.42 makes the gate fire), and (b) ~381k detections /
+  ~286k fragments, ~100× the validated ~800-beads/frame baseline — the known VPT detection-quality /
+  classifier issue, still to be addressed. Good viscosity needs those fixed too; this just stops the
+  hard crash so linking can complete.
+
+## [1.6.42] - 2026-07-15
+### Fixed — **A corrupt (physically-impossible) pixel size no longer satisfies the gate on STACK loads.**
+- An ImageJ Substack export can write a 32-bit-overflow resolution tag (~2.3e-10 um/px, picometres).
+  The 2D loader already screened this, but the STACK loaders (IMS + generic + tifffile fallback) all
+  funnel through `stack_load._finalise_stack_load`, which committed the corrupt value to
+  `microns_per_pixel_sq` with `pixel_size_from_metadata=True` — which SATISFIED the pixel-size gate:
+  the warning printed but the Set-Scale dialog never appeared and the field stayed hidden, so every
+  downstream length/area/diffusion result was computed from a fabricated scale. (`update_metadata`
+  detected and rejected it correctly, then `_finalise_stack_load` overwrote that rejection with the
+  corrupt value read separately from the baseline TIFF tags.) Fix: `_finalise_stack_load` now runs
+  the same optics-based `is_physically_plausible` screen — implausible → fall back to the 1.0
+  sentinel with `pixel_size_from_metadata=False` and `pixel_size_confirmed` cleared, which is exactly
+  the state the gate fires on. Deduped so it does not warn twice when the 2D path already rejected
+  the same tag. Every real lab scale (0.0264 / 0.067 / 0.108 um/px, and a genuine 1.0) passes; only
+  garbage fails. Guard test tests/test_corrupt_pixel_size_gate.py.
+
+## [1.6.41] - 2026-07-15
+### Added — **Smarter metadata: frame-interval reconciliation, filename-based layer names, structured description parsing (three auto-loader patches).**
+- **Frame interval prefers per-frame timestamps over declared values, and flags conflicts**
+  (`metadata_extract.reconcile_frame_interval` + reworked `_extract_frame_interval_s`). A declared
+  OME `TimeIncrement` / MicroManager `Interval_ms` is a *claim*; per-plane `DeltaT` timestamps are
+  what the microscope actually did, so timestamps now win. When a declared value and the measured
+  cadence disagree beyond tolerance (e.g. a 0.5 s claim over a real 0.1 s cadence — a 5x error in
+  every diffusion coefficient), it is kept as `frame_interval_nominal_s`, `frame_interval_inconsistent`
+  is set, and the user is warned once (reusing the frame_interval de-duped channel). Directly targets
+  the VPT viscosity root-cause where a wrong nominal interval silently scaled every dynamics result.
+- **Single-channel / mask layers are named from the FILENAME** (`file_io.derive_layer_name`) instead
+  of a generic "Fluorescence Image" / "Mask Layer", so `..._DAPI.tif` and `..._GFP.tif` load as
+  distinguishable names (complements the load-order fix in 1.6.39). Multi-channel loads from SEPARATE
+  files also get filename-derived names; channels of one multichannel image keep the positional
+  convention the two-channel workflow relies on.
+- **Metadata description blobs are parsed into structured fields** (`metadata_extract.parse_description_blob`)
+  — MicroManager summary JSON, ImageJ key=value, and OME-XML — so a wall of opaque text becomes
+  queryable acquisition metadata (`raw['acquisition']`), and exposure is recovered when present. The
+  `modality` field no longer gets a whole JSON/XML blob dumped into it.
+  Pure functions, tested via tests/navigator/test_loader_fixes.py (6 tests, AST-extracted from the
+  actual patched source; gated on PYCAT_SRC). Also folds in the IMS→ImageSource cleanup for
+  timeseries_condensate_tools.py and the tifffile_zarr_shim (already in the repo).
+
+## [1.6.40] - 2026-07-15
+### Fixed — **Frame-interval "unknown" warning no longer fires with no image loaded.**
+- The dynamics panels (advanced_analysis_ui, condensate_physics_ui) seed their frame-interval
+  spinbox at BUILD time, before any file is opened. `has_time_axis()` returned True whenever the
+  frame count `n_t` was unrecorded — which is the case in an empty session — so the scary "every
+  time-dependent result is out by a factor of two" warning fired with nothing loaded. That trains
+  the user to scroll past it, so the one that matters (on a real movie) gets ignored too. Fixed:
+  `has_time_axis()` now returns False when NO image is loaded (detected via absence of both
+  `file_metadata` and a recorded `n_t`), while still failing loud when an image IS loaded but its
+  frame count is unknown, and staying silent on a still 2-D image. Guard test
+  test_frame_interval_no_image.py. (Same bug class as the pixel-size sentinel: warn on a real
+  problem, not on absence-of-state.)
+
+## [1.6.39] - 2026-07-15
+### Fixed — **Fluorescence-pipeline layer selection no longer depends on load order (finishes the tag migration for condensate seg).**
+- When two fluorescence channels got the same generic name ("Fluorescence Image" / "Fluorescence
+  Image (1)"), the ONLY thing distinguishing them was load order — so whichever loaded first drove
+  condensate segmentation, silently feeding e.g. the DAPI channel instead of the condensate channel.
+  Fixed by tagging channel IDENTITY at load and selecting by tags, not order:
+  - Each loaded channel is now tagged `channel=<label>` and `spectral_bucket=<blue/green/...>` from
+    metadata (`identify_channel`). New `spectral_bucket` tag key/vocabulary.
+  - New **opt-in, persistent condensate-channel designation** (`utils/channel_designations.py`):
+    the channel-assignment dialog offers "Which channel contains the condensates?" — set once, it's
+    remembered per ACQUISITION LAYOUT (spectral-bucket signature, not file path) and recalled for
+    future same-layout files. A designated channel is tagged `target=condensate`. Persisted to the
+    per-user PyCAT config dir. Never guesses: nothing designated → returns None → the dropdown stays
+    for the user (an empty dropdown beats a silent wrong pick).
+  - New binding `invitro_fluor.input_image` (queries `role=image, target=condensate`); the invitro
+    preprocess input dropdown is now resolver-bound, so it auto-selects the designated condensate
+    channel regardless of load order.
+  Core tests: test_channel_designations.py. GUI-verify: load a 2-channel fluor file, designate the
+  condensate channel, confirm the invitro input dropdown selects it (not DAPI) on this and the next
+  same-layout file.
+
+### Changed — **Scientific Navigator engine vendored in (`pycat.navigator`).**
+- The pure-Python question->intent->planner->gates->resolver engine (framework-agnostic, no napari)
+  is vendored at `src/pycat/navigator/` with its data workbooks and tests (`tests/navigator/`). It is
+  the design reference for the tag resolver (which already exists as `utils/tag_resolver.py`); this
+  vendors the engine so the two can be connected incrementally. No app behaviour change from vendoring
+  alone. Imports verified, 79-op catalog loads, resolver discriminates condensate-vs-DAPI correctly.
 
 ## [1.6.38] - 2026-07-15
 ### Fixed — **Saved PNG/JPG masks and images could not be reopened (missing bioio PNG reader).**

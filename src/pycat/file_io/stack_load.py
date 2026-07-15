@@ -47,10 +47,45 @@ def _finalise_stack_load(viewer, central_manager, H, W, microns_per_pixel,
 
     dr['object_size']       = H // 20
     dr['cell_diameter']     = H // 8
-    dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
-    # Provenance for the Set-Scale overwrite warning and the pixel-size gate. Derived from
-    # `pixel_size_source`, NOT from whether the value happens to be 1.0 — see the helper.
-    dr['pixel_size_from_metadata'] = _calibration_is_from_metadata(dr, microns_per_pixel)
+
+    # ── A corrupt resolution tag must NOT silently satisfy the pixel-size gate ──
+    #
+    # An ImageJ Substack export can write a physically-impossible pixel size (a 32-bit resolution
+    # overflow → e.g. 2.3e-7 µm/px, ~picometres). The 2D loader already screens this, but the STACK
+    # loaders (IMS + generic + the tifffile fallback) all funnel through here and did NOT — so the
+    # corrupt value flowed straight into `microns_per_pixel_sq` with `pixel_size_from_metadata=True`,
+    # which SATISFIED the gate: the warning printed but the Set-Scale dialog never appeared and the
+    # field stayed hidden. A wrong scale that looks resolved is worse than a missing one — every
+    # length, area and diffusion coefficient downstream is then computed from a fabricated number.
+    #
+    # So the same optics-based plausibility screen runs here: implausible → fall back to the 1.0
+    # sentinel with `pixel_size_from_metadata=False` (and confirmed cleared), which is exactly the
+    # state the gate fires on. Say WHY, in microscopist terms.
+    from pycat.utils.pixel_size import is_physically_plausible, implausible_reason
+    if is_physically_plausible(microns_per_pixel):
+        dr['microns_per_pixel_sq'] = microns_per_pixel ** 2
+        # Provenance for the Set-Scale overwrite warning and the pixel-size gate. Derived from
+        # `pixel_size_source`, NOT from whether the value happens to be 1.0 — see the helper.
+        dr['pixel_size_from_metadata'] = _calibration_is_from_metadata(dr, microns_per_pixel)
+    else:
+        # `update_metadata` (the OME/ImageJ path) may have ALREADY detected and rejected this same
+        # corrupt tag, setting the sentinel + from_metadata=False and warning once. Only warn here if
+        # that has not happened — the invalidation below is idempotent and always runs, so the gate
+        # ends up in the firing state either way; this just avoids a duplicate warning.
+        _already_rejected = (dr.get('microns_per_pixel_sq') in (1, 1.0)
+                             and dr.get('pixel_size_from_metadata') is False)
+        if not _already_rejected:
+            try:
+                _reason = implausible_reason(microns_per_pixel)
+                from napari.utils.notifications import show_warning as _sw
+                _sw("The pixel size in this file is not physically possible: "
+                    f"{_reason}\n\nPyCAT will ask you to enter the correct scale.")
+            except Exception:
+                pass
+        dr['microns_per_pixel_sq'] = 1
+        dr['pixel_size_from_metadata'] = False
+        # Clear any stale explicit-confirmation so the gate is not held shut by a prior file.
+        dr['pixel_size_confirmed'] = False
 
     # The pixel size has just been set from this file's metadata (or fallen
     # back to 1.0). A plain load does not switch the data class, so notify

@@ -369,14 +369,21 @@ def _close_gaps_bayesian(
     already handles gaps ≤ max_gap_frames, but this catches cases where
     a track died in pass 1 because no detection was available and a new
     track started later.
+
+    Scalability
+    -----------
+    The candidate cost matrix is almost entirely INF: an end at frame ``ef`` can
+    only close to a start in frames ``(ef, ef + max_gap_frames + 1]`` and within
+    ``max_displacement_um × gap`` in space. The old implementation still
+    ALLOCATED the full ``(n_e + n_s)²`` dense matrix and filled it, which is
+    ``dim² × 8`` bytes — with ~286k fragmented tracks that is ``572k² ≈ 2.4 TiB``
+    and the load crashes. We instead enumerate ONLY the finite edges (via a
+    per-gap KD-tree spatial query) and solve a SPARSE bipartite matching, which
+    is linear in the number of physically-plausible candidate links.
     """
-    from scipy.optimize import linear_sum_assignment
-
-    INF = 1e9
-
     # Find track ends and starts
-    track_ends   = {}  # track_id → last (frame, y, x, area)
-    track_starts = {}  # track_id → first (frame, y, x, area)
+    track_ends   = {}  # track_id → (frame, y, x, area)
+    track_starts = {}
 
     for tid, grp in df.groupby('track_id'):
         if tid < 0:
@@ -393,43 +400,96 @@ def _close_gaps_bayesian(
 
     end_ids   = list(track_ends.keys())
     start_ids = list(track_starts.keys())
-
     if not end_ids or not start_ids:
         return df
 
     n_e, n_s = len(end_ids), len(start_ids)
-    dim = n_e + n_s
-    C   = np.full((dim, dim), INF)
+    end_index   = {eid: i for i, eid in enumerate(end_ids)}
+    start_index = {sid: j for j, sid in enumerate(start_ids)}
 
-    for i, eid in enumerate(end_ids):
+    # Bucket starts by their first frame, and hold a KD-tree of start positions
+    # per frame so each end only queries the spatially-plausible starts in each
+    # eligible gap frame — never all starts.
+    from collections import defaultdict
+    from scipy.spatial import cKDTree
+    starts_by_frame = defaultdict(list)   # frame → list of (sid, y, x, area)
+    for sid, (sf, sy, sx, sa) in track_starts.items():
+        starts_by_frame[sf].append((sid, sy, sx, sa))
+    trees = {}   # frame → (cKDTree, [sid...], [ (y,x,area)... ])
+    for fr, items in starts_by_frame.items():
+        pts = np.array([[it[1], it[2]] for it in items], dtype=float)
+        trees[fr] = (cKDTree(pts), [it[0] for it in items], items)
+
+    # Enumerate finite candidate edges (row=end, col=start, cost).
+    rows = []
+    cols = []
+    costs = []
+    for eid in end_ids:
         ef, ey, ex, ea = track_ends[eid]
-        for j, sid in enumerate(start_ids):
-            if sid == eid:
-                C[i, j] = INF; continue
-            sf, sy, sx, sa = track_starts[sid]
-            gap = sf - ef
-            if gap <= 0 or gap > max_gap_frames + 1:
-                C[i, j] = INF; continue
-            d = float(np.sqrt((sy - ey)**2 + (sx - ex)**2))
-            if d > max_displacement_um * gap:
-                C[i, j] = INF; continue
-            cost = _gaussian_cost(d, sigma_um * gap)
-            if area_weight > 0 and ea > 0 and sa > 0:
-                cost += area_weight * abs(np.log(sa / ea))
-            C[i, j] = cost
+        i = end_index[eid]
+        for gap in range(1, max_gap_frames + 2):     # gap in (0, max_gap+1]
+            fr = ef + gap
+            tree_entry = trees.get(fr)
+            if tree_entry is None:
+                continue
+            tree, sids, items = tree_entry
+            radius = max_displacement_um * gap
+            for k in tree.query_ball_point([ey, ex], r=radius):
+                sid = sids[k]
+                if sid == eid:
+                    continue
+                _, sy, sx, sa = items[k]
+                d = float(np.hypot(sy - ey, sx - ex))
+                cost = _gaussian_cost(d, sigma_um * gap)
+                if area_weight > 0 and ea > 0 and sa > 0:
+                    cost += area_weight * abs(np.log(sa / ea))
+                rows.append(i)
+                cols.append(start_index[sid])
+                # matching MINIMISES weight; shift so all weights are > 0 and
+                # finite (min_weight_full_bipartite_matching needs positive).
+                costs.append(cost + 1.0)
 
-    # Diagonal blocks: allow unmatched ends/starts at zero cost
-    C[n_e:, n_s:] = 0.0
+    if not rows:
+        return df
 
-    row_ind, col_ind = linear_sum_assignment(C)
+    # Sparse bipartite matching over only the finite edges.
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import min_weight_full_bipartite_matching
 
-    for r, c in zip(row_ind, col_ind):
-        if r >= n_e or c >= n_s:
-            continue
-        if C[r, c] >= INF:
-            continue
-        eid = end_ids[r]
-        sid = start_ids[c]
+    # A full matching requires each chosen row/col to have an edge; build the
+    # bipartite graph on the induced sub-vertices (ends and starts that appear
+    # in at least one candidate edge), then map back.
+    used_rows = sorted(set(rows))
+    used_cols = sorted(set(cols))
+    r_remap = {r: a for a, r in enumerate(used_rows)}
+    c_remap = {c: b for b, c in enumerate(used_cols)}
+    rr = np.fromiter((r_remap[r] for r in rows), dtype=int)
+    cc = np.fromiter((c_remap[c] for c in cols), dtype=int)
+    data = np.asarray(costs, dtype=float)
+    M = csr_matrix((data, (rr, cc)),
+                   shape=(len(used_rows), len(used_cols)))
+    try:
+        m_rows, m_cols = min_weight_full_bipartite_matching(M)
+    except (ValueError, Exception):
+        # No perfect matching exists on the induced graph; fall back to a greedy
+        # cheapest-edge-first assignment, which is fine for gap closing (each end
+        # takes its cheapest still-free start).
+        order = np.argsort(data)
+        taken_r, taken_c = set(), set()
+        m_rows, m_cols = [], []
+        for idx in order:
+            a, b = rr[idx], cc[idx]
+            if a in taken_r or b in taken_c:
+                continue
+            taken_r.add(a); taken_c.add(b)
+            m_rows.append(a); m_cols.append(b)
+        m_rows = np.asarray(m_rows); m_cols = np.asarray(m_cols)
+
+    inv_rows = used_rows
+    inv_cols = used_cols
+    for a, b in zip(np.atleast_1d(m_rows), np.atleast_1d(m_cols)):
+        eid = end_ids[inv_rows[a]]
+        sid = start_ids[inv_cols[b]]
         if eid == sid:
             continue
         # Merge track sid into track eid

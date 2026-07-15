@@ -220,6 +220,51 @@ def _tiff_pixel_size_um(file_path):
     except Exception:
         return None
 
+
+def _ome_pixel_size_um(file_path):
+    """Read physical pixel size (µm/px) from OME-XML PhysicalSizeX.
+
+    For an OME-TIFF the OME-XML is the AUTHORITATIVE pixel-size source — the
+    baseline TIFF XResolution/YResolution tags are often zeroed on OME exports
+    (which makes the reader's own physical_pixel_sizes raise "division by zero"),
+    while the OME-XML carries the real value. This reads it directly.
+
+    Returns µm/px as a float, or None if not an OME file / no usable value.
+    """
+    try:
+        import tifffile
+        import re as _re
+    except Exception:
+        return None
+    try:
+        with tifffile.TiffFile(file_path) as t:
+            ome = getattr(t, 'ome_metadata', None)
+            if not ome:
+                return None
+            m = _re.search(r'PhysicalSizeX="([^"]+)"', ome)
+            if not m:
+                return None
+            val = float(m.group(1))
+            if val <= 0:
+                return None
+            # OME PhysicalSizeXUnit defaults to µm; honour an explicit unit if given.
+            um = val
+            um_match = _re.search(r'PhysicalSizeXUnit="([^"]+)"', ome)
+            unit = (um_match.group(1).strip().lower() if um_match else '')
+            if unit in ('nm', 'nanometer', 'nanometre'):
+                um = val / 1000.0
+            elif unit in ('mm', 'millimeter', 'millimetre'):
+                um = val * 1000.0
+            elif unit in ('cm', 'centimeter', 'centimetre'):
+                um = val * 10000.0
+            # µm (default) or 'µm'/'um'/'micron' → as-is
+            if not (1e-4 < um < 1e4):
+                return None
+            return um
+    except Exception:
+        return None
+
+
 import skimage as sk
 # ── aicsimageio is GONE. Every reader construction goes through the seam. ────
 #
@@ -253,6 +298,105 @@ from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 from pycat.file_io.stack_access import to_unit_float32
 from pycat.file_io.multidim_io import _ZarrTZYX, _ZarrZYX
 
+
+def _clean_filename_token(stem):
+    """Reduce a raw acquisition filename to a short, meaningful layer token.
+
+    Microscope filenames range from useless ('Image 3-OME TIFF-Export-01.ome') to
+    information-rich-but-wrong-scope ('polyA 3 mgpmL - 1000 mM LiCl - 50mM HEPES
+    pH 7p5_3_MMStack_Pos0.ome'). The layer name wants the sample IDENTITY, not the
+    full acquisition string — the rich fields (concentrations, buffer, pH) belong
+    in the provenance JSON, and the full filename goes in the layer tooltip.
+
+    Cleaning:
+      * strip the OME/MicroManager tail: '.ome', '_MMStack_Pos<N>', trailing '_<N>'
+        run indices MicroManager appends (a user rarely opens Pos0 and Pos1 at once);
+      * strip a generic export prefix like 'Image 3-OME TIFF-Export-01' → nothing
+        useful, so fall through to a positional name;
+      * take the leading sample token before the first concentration/parameter
+        block (the part before ' - ' or a run of numbers+units), so
+        'polyA 3 mgpmL - 1000 mM LiCl ...' → 'polyA'.
+
+    Returns a cleaned token, or None if nothing meaningful survives.
+    """
+    import re as _re
+    if not stem:
+        return None
+    s = str(stem).strip()
+
+    # Drop a trailing '.ome' (case-insensitive) if it survived the extension split.
+    s = _re.sub(r'\.ome$', '', s, flags=_re.IGNORECASE)
+    # Strip MicroManager's _MMStack_PosN (and any trailing _N run index).
+    s = _re.sub(r'_MMStack_Pos\d+.*$', '', s, flags=_re.IGNORECASE)
+    s = _re.sub(r'_MMStack.*$', '', s, flags=_re.IGNORECASE)
+
+    # Generic export names carry no sample identity → treat as empty.
+    if _re.match(r'^\s*image[\s_-]*\d*[\s_-]*ome', s, flags=_re.IGNORECASE) or \
+       _re.match(r'^\s*(export|snap|img|image|untitled)[\s_\-]*\d*\s*$', s, flags=_re.IGNORECASE):
+        return None
+
+    # Take the sample token before the first ' - ' parameter block (concentrations,
+    # salts, buffers), which belong in provenance, not the layer name.
+    head = _re.split(r'\s*-\s*', s)[0].strip()
+    # If the head still starts with a clear sample word followed by a number+unit
+    # (e.g. 'polyA 3 mgpmL'), keep only the leading word(s) before the first
+    # numeric-with-unit token.
+    m = _re.match(r'^([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*)*?)\s+\d', head)
+    if m:
+        head = m.group(1).strip()
+
+    # Trim any trailing run index the user didn't intend ('sample_3' → 'sample').
+    head = _re.sub(r'[_\s]+\d+$', '', head).strip()
+    # Collapse whitespace/underscores to a single separator.
+    head = _re.sub(r'[\s_]+', '_', head).strip('_')
+
+    return head or None
+
+
+def derive_layer_name(base_file_name, file_path=None, channel_infos=None,
+                      is_mask=False):
+    """Build a meaningful layer name from channel IDENTITY and a cleaned filename.
+
+    Precedence (highest first):
+      1. Channel identity — a fluorophore/modality label from metadata OR from
+         pixel-measured modality (fluorescence/brightfield/DIC/phase). This is what
+         the channel actually IS, and it takes precedence over the filename.
+      2. A cleaned filename token (sample identity, with MicroManager/OME cruft and
+         acquisition parameters stripped — those go to the provenance JSON).
+      3. The generic role word as a last resort.
+
+    A single-channel result reads like 'polyA-Brightfield' (sample + modality). The
+    full original filename is attached to the layer as a tooltip by the caller.
+    """
+    import os as _os
+    raw_stem = base_file_name or (
+        _os.path.splitext(_os.path.basename(file_path))[0] if file_path else None)
+    stem = _clean_filename_token(raw_stem)
+
+    # A confident channel label: from metadata NAME/WAVELENGTH, or from the
+    # pixel-measured modality. A positional guess ('C0-Blue') is NOT identity.
+    label = None
+    infos = channel_infos or []
+    if infos:
+        ci = infos[0] if isinstance(infos, (list, tuple)) else infos
+        try:
+            if ci.get('source') in ('name', 'wavelength', 'pixels') and ci.get('label'):
+                label = ci['label']
+        except AttributeError:
+            pass
+
+    suffix = ' Mask' if is_mask else ''
+    if stem and label:
+        # sample + identity, e.g. 'polyA-Brightfield' — unless the stem already
+        # names the modality/fluorophore.
+        if label.lower() not in stem.lower():
+            return f"{stem}-{label}{suffix}"
+        return f"{stem}{suffix}"
+    if stem:
+        return f"{stem}{suffix}"
+    if label:
+        return f"{label}{suffix}"
+    return ("Mask Layer" if is_mask else "Fluorescence Image")
 
 
 class LayerDataframeSelectionDialog(QDialog):
@@ -372,16 +516,51 @@ class LayerDataframeSelectionDialog(QDialog):
             "Pre-Processed Fluorescence Image",
         ]
 
+        # Smart session default: tick every DERIVED layer (masks, tracks,
+        # processed images), and never the SOURCE IMAGE (it is on disk — a session
+        # references it, and copying it just wastes space) or a reconstructable
+        # upscale. This removes the ticking burden — the user only unticks/adds if
+        # they want to override.
+        try:
+            from pycat.file_io.session_manifest import (
+                _is_source_image_layer as _sess_is_source)
+            _src_stem = getattr(
+                getattr(self, '_central_manager', None), 'active_data_class', None)
+        except Exception:
+            _sess_is_source = None
+        # Best-effort source stem for identifying the original image layer.
+        _src_stem_name = ''
+        try:
+            _src_stem_name = (self.layers and
+                              max((str(l.name) for l in self.layers), key=len)) or ''
+        except Exception:
+            _src_stem_name = ''
+
         _total_all = 0.0
         for layer in self.layers:
             mb = _est_size_mb(layer)
             _total_all += mb
             recon = _is_reconstructable(layer)
+            _is_source = False
+            try:
+                if _sess_is_source is not None:
+                    # Identify the source by the loaded-image heuristic/tags.
+                    _is_source = _sess_is_source(layer, '')
+            except Exception:
+                _is_source = False
             label = f"{layer.name}   ({mb:.1f} MB)"
-            if recon:
+            if _is_source:
+                label += "   — source image (already on disk; referenced, not copied)"
+            elif recon:
                 label += "   — reconstructable (upscale of another layer)"
             checkbox = QCheckBox(label)
-            if recon:
+            if _is_source:
+                checkbox.setStyleSheet("color: #7fa7d4;")
+                checkbox.setToolTip(
+                    "This is the originally-loaded image. A session references it "
+                    "by path rather than copying it (it is already on disk and is "
+                    "the largest file), so it is unticked by default.")
+            elif recon:
                 checkbox.setStyleSheet("color: #e8a33d;")
                 checkbox.setToolTip(
                     "This layer is an upscaled copy of another layer. Upscaling "
@@ -391,8 +570,9 @@ class LayerDataframeSelectionDialog(QDialog):
             self.layer_checkboxes[layer.name] = checkbox
             layout.addWidget(checkbox)
 
-            # Default on for the usual results; never default-on a reconstructable.
-            if layer.name in default_checked_layers and not recon:
+            # Smart default: tick every derived layer; never the source or an
+            # upscale.
+            if not recon and not _is_source:
                 checkbox.setChecked(True)
 
 
@@ -404,17 +584,8 @@ class LayerDataframeSelectionDialog(QDialog):
             checkbox = QCheckBox(df_name)
             self.df_checkboxes[df_name] = checkbox
             layout.addWidget(checkbox)
-
-
-            # List of default checked dataframe names
-            default_checked_dfs = [
-                "cell_df", 
-                "puncta_df"
-            ]
-
-            # Set the default state of some checkboxes
-            if df_name in default_checked_dfs:
-                checkbox.setChecked(True)
+            # Smart default: every analysis dataframe is part of the session.
+            checkbox.setChecked(True)
 
         # Radio buttons for Clearing option
         self.clear_all_radio = QRadioButton("Clear All")
@@ -527,21 +698,35 @@ class ChannelAssignmentDialog(QDialog):
         layout = QVBoxLayout()
         self.channel_name_inputs = [] # Create a list to store the textbox name inputs
 
+        # Are these entries separate FILES (a multi-select) or channels of one
+        # multichannel image? Distinct file paths mean the user opened several
+        # files at once — each should be named from its own filename, NOT from
+        # the positional "Segmentation Image"/"Fluorescence Image" convention
+        # (which belongs to the single-file two-channel cell-analysis workflow).
+        _distinct_files = len({fp for (_d, fp, _k) in self.channels}) > 1
+
         # Add labels and input fields for each channel
         for channel_num, (channel_data, file_path, _) in enumerate(self.channels):
             label = QLabel(f"Channel {channel_num + 1} ({os.path.basename(file_path)}):")
             input_field = QLineEdit()
 
-            # Set the default name — prefer metadata-derived channel identity
-            # (e.g. "DAPI", "EGFP") when available; fall back to the original
-            # position-based convention otherwise so existing workflows that
-            # rely on "Segmentation Image"/"Fluorescence Image" still work.
             info = self.channel_info[channel_num] if channel_num < len(self.channel_info) else None
-            if not self.is_mask:
+            if self.is_mask and _distinct_files:
+                default_name = derive_layer_name(
+                    os.path.splitext(os.path.basename(file_path))[0], file_path,
+                    [info] if info else None, is_mask=True)
+            elif _distinct_files:
+                # Separate files → filename-derived name (e.g. '..._DAPI.tif' →
+                # 'cells_DAPI'), so two DAPI/GFP files are distinguishable and
+                # neither is mislabelled "Segmentation Image".
+                default_name = derive_layer_name(
+                    os.path.splitext(os.path.basename(file_path))[0], file_path,
+                    [info] if info else None)
+            elif not self.is_mask:
+                # Channels of ONE multichannel image: keep the positional
+                # convention (the two-channel cell workflow relies on it), but
+                # enrich with metadata identity when the file provides it.
                 if info is not None and info.get('source') != 'position':
-                    # Metadata gave us a real identity — use it, but keep the
-                    # familiar suffix for the first two channels so downstream
-                    # dropdowns that default to these names still find them.
                     if channel_num == 0:
                         default_name = f"Segmentation Image ({info['label']})"
                     elif channel_num == 1:
@@ -564,6 +749,39 @@ class ChannelAssignmentDialog(QDialog):
             # Add the label and input field to the layout
             layout.addWidget(label)
             layout.addWidget(input_field)
+
+        # ── Opt-in: which channel contains the condensates? ────────────────────────
+        # Metadata can't recover this per-experiment fact, and when two fluorescence channels
+        # get the same generic name the only thing telling them apart is load order — which
+        # silently drove the wrong channel (e.g. DAPI) into condensate segmentation. So let the
+        # user state it ONCE, opt-in, and remember it per acquisition layout. "Don't set" leaves
+        # it undecided (the honest default — we never guess).
+        self.condensate_choice = None
+        if not self.is_mask and len(self.channels) > 1:
+            from PyQt5.QtWidgets import QComboBox
+            layout.addWidget(QLabel("Which channel contains the condensates? "
+                                    "(optional — remembered for files acquired this way)"))
+            self._condensate_dd = QComboBox()
+            self._condensate_dd.addItem("Don't set (I'll choose per run)", -1)
+            for cn, (_, fp, _) in enumerate(self.channels):
+                info = self.channel_info[cn] if cn < len(self.channel_info) else None
+                lbl = (info or {}).get('label')
+                bucket = (info or {}).get('bucket')
+                desc = f"Channel {cn + 1}"
+                if lbl:
+                    desc += f" — {lbl}" + (f" ({bucket})" if bucket else "")
+                self._condensate_dd.addItem(desc, cn)
+            # Pre-select a remembered designation for this layout, if any.
+            try:
+                from pycat.utils.channel_designations import recall_designation
+                remembered = recall_designation(self.channel_info)
+                if remembered is not None:
+                    ix = self._condensate_dd.findData(remembered)
+                    if ix >= 0:
+                        self._condensate_dd.setCurrentIndex(ix)
+            except Exception:
+                pass
+            layout.addWidget(self._condensate_dd)
 
         # Add the OK button to confirm the channel names
         ok_button = QPushButton("OK")
@@ -1309,63 +1527,57 @@ class FileIOClass:
             except Exception:
                 pass
 
-            # Open the image through the reader seam.
-            # We detect NumPy 2.0 newbyteorder errors lazily — only reading
-            # the minimal metadata needed (xarray_dask_data uses dask so no
-            # full read happens).  Avoid calling image.dims or image.data
-            # eagerly as these trigger full image reads on large files.
-            _use_fallback = False
-            try:
-                image = open_image(file_path)
-                # Access only the dask-backed metadata — does not read pixel data
-                _ = image.xarray_dask_data.dims
-            except AttributeError as _e:
-                if "newbyteorder" not in str(_e):
-                    raise
-                _use_fallback = True
-                print(f"[PyCAT] NumPy 2.0 tifffile fallback for {os.path.basename(file_path)}")
-            except Exception:
-                # Any other error on metadata access — try normal path anyway
-                image = open_image(file_path)
+            # Read the image's channels through the extracted reader (god-class
+            # decomposition #2). The reader returns the channel tuples + per-channel
+            # identity + the reader object; the metadata-repository updates, the
+            # user-facing fallback warning, and napari construction stay here.
+            from pycat.file_io.readers.image_reader_2d import read_2d_image_channels
+            _channels, _channel_info, image, _used_pil = read_2d_image_channels(file_path)
 
-            if _use_fallback:
-                # skimage also uses tifffile internally so hits the same NumPy 2.0
-                # bug. PIL/Pillow has its own independent TIFF reader that avoids
-                # tifffile entirely and works correctly with NumPy 2.0.
-                try:
-                    from PIL import Image as _PILImage
-                    import numpy as _np
-                    _pil_img = _PILImage.open(file_path)
-                    # PIL loads one frame at a time; iterate frames for stacks
-                    _frames = []
-                    try:
-                        while True:
-                            _frames.append(_np.array(_pil_img).astype('float32'))
-                            _pil_img.seek(_pil_img.tell() + 1)
-                    except EOFError:
-                        pass
-                    if len(_frames) == 1:
-                        all_channels.append((_frames[0], file_path, 0))
-                    else:
-                        for _ci, _frame in enumerate(_frames):
-                            all_channels.append((_frame, file_path, _ci))
+            if _used_pil:
+                # PIL NumPy-2.0 fallback path: reader already produced the channel
+                # tuples; emit the same user-facing warning and skip the structured
+                # metadata path (no reader object available).
+                if _channels:
+                    all_channels.extend(_channels)
                     from napari.utils.notifications import show_warning as _warn
                     _warn(
                         f"{os.path.basename(file_path)} loaded via PIL fallback (NumPy 2.0 / tifffile conflict). "
                         "Run 'python fix_tifffile.py' to permanently fix this."
                     )
-                except Exception as _pil_e:
+                else:
                     from napari.utils.notifications import show_warning as _warn
                     _warn(
                         f"Could not load {os.path.basename(file_path)}: NumPy 2.0 is incompatible with "
                         "the installed tifffile version. Run 'python fix_tifffile.py' to fix this permanently, "
                         "or downgrade NumPy: pip install 'numpy<2.0'"
                     )
-                    print(f"[PyCAT] PIL fallback also failed: {_pil_e}")
                 continue  # skip the structured-reader path below
 
-            image = open_image(file_path)
             self.central_manager.active_data_class.update_metadata(image)
+
+            # Pixel-size recovery. The structured reader's physical_pixel_sizes
+            # can miss or choke on a file's real scale — an OME-TIFF whose baseline
+            # XResolution is zeroed (0/1) makes the reader raise "division by zero"
+            # and fall back to 1.0, even though the OME-XML carries the true value.
+            # If update_metadata landed on the 1.0 sentinel, recover it: OME-XML
+            # first (authoritative for OME-TIFF), then baseline TIFF tags.
+            try:
+                _dr = self.central_manager.active_data_class.data_repository
+                _cur = _dr.get('microns_per_pixel_sq', 1)
+                if abs(float(_cur) - 1.0) < 1e-9:
+                    _rec = _ome_pixel_size_um(file_path)
+                    _src = 'OME-XML'
+                    if _rec is None:
+                        _rec = _tiff_pixel_size_um(file_path); _src = 'TIFF tags'
+                    if _rec is not None:
+                        _dr['microns_per_pixel_sq'] = _rec * _rec
+                        _dr['pixel_size_from_metadata'] = True
+                        debug_log(f"file_io: pixel size {_rec:.6f} µm/px recovered "
+                                  f"from {_src} (reader missed it)")
+            except Exception as _pxe:
+                debug_log("file_io: 2D pixel-size recovery failed", _pxe)
+
             # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction
             # fails, the PREVIOUS file's frame count would otherwise still be sitting in the
             # repository, and a stale time axis is worse than an absent one.
@@ -1380,39 +1592,12 @@ class FileIOClass:
                 self.central_manager.active_data_class.data_repository['file_metadata'] = _md
             except Exception as _mde:
                 debug_log("file_io: metadata extraction failed", _mde)
-            
-            # Get the number of pages and channels in the image
-            num_pages = getattr(image.dims, 'S', 1)
-            num_channels = getattr(image.dims, 'C', 1)
 
-            # Check if the image has channels or pages
-            if not hasattr(image.dims, 'S') and not hasattr(image.dims, 'C'):
-                raise ValueError("Image does not have any channels or pages. Check file format.")
+            all_channels.extend(_channels)
 
-            # If there are multiple pages, iterate over pages and channels
-            if num_pages > 1: 
-                k = 0
-                for page_num in range(num_pages):
-                    for channel_num in range(num_channels):
-                        k += 1
-                        channel_data = read_plane(image, path=file_path, scene=page_num, c=channel_num, t=0)
-                        all_channels.append((channel_data, file_path, k))
-            # If only one page, iterate over channels
-            else: 
-                for channel_num in range(num_channels):
-                    channel_data = read_plane(image, path=file_path, c=channel_num, t=0)
-                    all_channels.append((channel_data, file_path, channel_num))
-
-            # Identify channel identity from OME/Bio-Formats metadata
-            # (fluorophore name, emission wavelength, or position fallback)
-            for ch_num in range(num_channels):
-                try:
-                    self._last_channel_info = getattr(self, '_last_channel_info', [])
-                    self._last_channel_info.append(
-                        extract_channel_info(image, ch_num)
-                    )
-                except Exception:
-                    pass
+            # Store the per-channel identity the reader extracted.
+            self._last_channel_info = getattr(self, '_last_channel_info', [])
+            self._last_channel_info.extend(_channel_info)
 
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
@@ -1420,17 +1605,36 @@ class FileIOClass:
                 all_channels,
                 channel_info=getattr(self, '_last_channel_info', None)
             )
-        # If only one channel, default to 'Fluorescence Image'
+        # If only one channel, name it from the file (filename token / stem)
+        # rather than a generic 'Fluorescence Image', so e.g. '..._DAPI.tif'
+        # loads as 'DAPI' and two separate DAPI/GFP files are distinguishable.
         else:
             fluorescence_image = all_channels[0][0]
-            self.load_into_viewer(fluorescence_image, name="Fluorescence Image")
+            _name = derive_layer_name(
+                getattr(self, 'base_file_name', None), file_path,
+                getattr(self, '_last_channel_info', None))
+            self.load_into_viewer(fluorescence_image, name=_name)
+
+        # Attach the FULL original filename to every layer we just loaded, as a
+        # tooltip/metadata. The layer NAME is the short cleaned identity
+        # (e.g. 'polyA-Brightfield'); the full acquisition filename lives here so
+        # it stays discoverable (the rich concentration/buffer/pH fields go to the
+        # provenance JSON, not the visible name).
+        try:
+            self._attach_source_filename_tooltip(file_paths)
+        except Exception as _te:
+            debug_log("file_io: source-filename tooltip attach failed", _te)
 
         # Add layers for measuring object and cell diameters to the viewer based on the image size
         self._add_diameter_annotation_layers()
 
-        # Update the data instance with default sizes for object and cell diameters
-        self.central_manager.active_data_class.data_repository['object_size'] = channel_data.shape[0] // 20
-        self.central_manager.active_data_class.data_repository['cell_diameter'] = channel_data.shape[0] // 8
+        # Update the data instance with default sizes for object and cell
+        # diameters. The original code used the last `channel_data` left by the
+        # per-file read loop; that is the last channel across all loaded files,
+        # i.e. all_channels[-1][0]. Preserve that exactly.
+        _last_channel = all_channels[-1][0]
+        self.central_manager.active_data_class.data_repository['object_size'] = _last_channel.shape[0] // 20
+        self.central_manager.active_data_class.data_repository['cell_diameter'] = _last_channel.shape[0] // 8
 
         bp = getattr(self.central_manager, '_pycat_batch_processor', None)
         if bp:
@@ -2759,37 +2963,87 @@ class FileIOClass:
         # Check if there are multiple channels to assign names
         if len(all_channels) > 1:
             self.assign_channels_in_dialog(all_channels, is_mask=True)
-        # If only one channel, default to 'Mask Layer'
+        # If only one channel, name the mask from the file rather than a bare
+        # 'Mask Layer', so a mask keeps the identity of the file it came from.
         else:
             mask_image = all_channels[0][0]
-            self.load_into_viewer(mask_image, name="Mask Layer", is_mask=True)
+            _mask_name = derive_layer_name(
+                getattr(self, 'base_file_name', None), file_path, is_mask=True)
+            self.load_into_viewer(mask_image, name=_mask_name, is_mask=True)
 
         
+    def _channels_all_confident(self, channel_info):
+        """True when every channel has a confident identity (metadata name /
+        wavelength, or a pixel-measured modality) — i.e. no channel is a bare
+        positional guess. Used to skip the naming dialog when it would only be
+        confirming names PyCAT is already sure of."""
+        if not channel_info:
+            return False
+        try:
+            for ci in channel_info:
+                if not ci or ci.get('source') not in ('name', 'wavelength', 'pixels'):
+                    return False
+            return True
+        except Exception:
+            return False
+
     def assign_channels_in_dialog(self, all_channels, is_mask=False, channel_info=None):
         """
-        Displays a dialog for the user to assign names to each channel of an opened image or mask. This method aids in 
-        organizing and identifying channels, especially when dealing with multichannel data.
+        Assign names to each channel of an opened image or mask.
+
+        When every channel already has a CONFIDENT identity (a fluorophore/emission
+        label from metadata, or a modality measured from the pixels), the naming
+        dialog is SKIPPED and those names are applied directly — the dialog would
+        only be asking the user to confirm names PyCAT is already sure of. The
+        dialog still appears when at least one channel is ambiguous (a bare
+        positional guess), so the user can disambiguate.
 
         Parameters
         ----------
         all_channels : list
-            A list of tuples, each containing channel data, the file path of the image or mask, and the channel number.
+            Tuples of (channel data, file path, channel number).
         is_mask : bool, optional
-            Indicates whether the channels belong to a mask or an image, default is False (image).
-
-        Notes
-        -----
-        This method facilitates better data management within the Napari viewer by allowing users to assign meaningful 
-        names to various channels, enhancing the interpretability of multichannel datasets.
+            Whether the channels belong to a mask (default False).
+        channel_info : list, optional
+            Per-channel identity dicts from identify_channel (carries 'source').
         """
-        dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
-        result = dialog.exec_()
+        # Confidence gate: skip the dialog when nothing is ambiguous (images only;
+        # masks keep the dialog since they have no measurable modality identity).
+        _auto = (not is_mask) and self._channels_all_confident(channel_info)
 
-        if result == QDialog.Accepted:
-            # Get the names assigned by the user
-            channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
-        elif result == QDialog.Rejected:
-            return # If the user cancels the dialog do nothing
+        if _auto:
+            # Derive each channel's name from its confident identity — no dialog.
+            channel_names = []
+            for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
+                info = channel_info[channel_num] if channel_info and channel_num < len(channel_info) else None
+                channel_names.append(
+                    derive_layer_name(
+                        getattr(self, 'base_file_name', None), file_path,
+                        channel_infos=[info] if info else None, is_mask=is_mask))
+            _designated_condensate = None
+        else:
+            dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
+            result = dialog.exec_()
+
+            if result == QDialog.Accepted:
+                # Get the names assigned by the user
+                channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
+            elif result == QDialog.Rejected:
+                return # If the user cancels the dialog do nothing
+
+            # Read the opt-in condensate-channel designation (if the dialog offered it) and
+            # PERSIST it for this acquisition layout, so future same-layout files recall it.
+            _designated_condensate = None
+            try:
+                dd = getattr(dialog, '_condensate_dd', None)
+                if dd is not None:
+                    chosen = dd.currentData()
+                    if isinstance(chosen, int) and chosen >= 0:
+                        _designated_condensate = chosen
+                        from pycat.utils.channel_designations import remember_designation
+                        remember_designation(channel_info, chosen)
+            except Exception:
+                pass
 
         # Record the final channel_num -> layer_name assignment so batch
         # replay can recreate the exact same image-type-to-channel mapping.
@@ -2797,6 +3051,17 @@ class FileIOClass:
         self._last_channel_assignment = []
 
         # Load each channel into the viewer with the assigned name
+        # Recall any persisted "which channel is the condensate" designation for THIS
+        # acquisition layout (opt-in memory; None when nothing is remembered — we never guess).
+        # A designation the user made in THIS dialog wins over the recalled one.
+        try:
+            from pycat.utils.channel_designations import recall_designation
+            _condensate_idx = recall_designation(channel_info) if (channel_info and not is_mask) else None
+        except Exception:
+            _condensate_idx = None
+        if _designated_condensate is not None:
+            _condensate_idx = _designated_condensate
+
         for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
             name = channel_names[i]
             if not name:  # Use default naming if input is empty
@@ -2823,6 +3088,56 @@ class FileIOClass:
             })
 
             self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
+
+            # Tag the channel's IDENTITY on the layer so downstream selection can query tags
+            # instead of relying on load order (which is what made DAPI and the condensate
+            # channel indistinguishable when both were named "Fluorescence Image"). This is the
+            # keystone of the tag migration for the fluorescence pipeline.
+            if not is_mask:
+                try:
+                    self._tag_channel_identity(info, channel_num,
+                                               is_condensate=(_condensate_idx == channel_num))
+                except Exception:
+                    pass
+
+    def _tag_channel_identity(self, info, channel_num, is_condensate=False):
+        """Attach channel-identity tags to the just-loaded layer (the last-added image layer).
+
+        Tags written:
+          * ``channel``          -- the detected fluorophore/label (DAPI, EGFP, Ch0, ...)
+          * ``spectral_bucket``  -- blue/green/red/far_red/unknown, the honest DAPI-vs-GFP discriminator
+          * ``target=condensate`` -- ONLY when a persisted designation says this channel index is the
+            condensate one (opt-in memory). Never inferred otherwise.
+
+        Identity tags use source='metadata' when the info came from real metadata, else 'inferred'.
+        The condensate designation is source='user_set' (it originated from an explicit user choice),
+        so it LOCKS the key and won't be clobbered by later inference.
+        """
+        try:
+            from pycat.utils.layer_tags import tag_layer
+        except Exception:
+            return
+        # The channel just loaded is the most-recently-added image layer.
+        layer = None
+        try:
+            for lyr in reversed(list(self.viewer.layers)):
+                if lyr.__class__.__name__ == 'Image':
+                    layer = lyr
+                    break
+        except Exception:
+            layer = None
+        if layer is None:
+            return
+
+        label = (info or {}).get('label')
+        bucket = (info or {}).get('bucket')
+        src = 'metadata' if (info or {}).get('source') not in (None, 'position') else 'inferred'
+        if label:
+            tag_layer(layer, 'channel', str(label), source=src)
+        if bucket:
+            tag_layer(layer, 'spectral_bucket', str(bucket), source=src)
+        if is_condensate:
+            tag_layer(layer, 'target', 'condensate', source='user_set', overwrite=True)
     
 
     def _add_diameter_annotation_layers(self):
@@ -2840,6 +3155,40 @@ class FileIOClass:
     def load_into_viewer(self, data, name, is_mask=False):
         from pycat.file_io.viewer_load import load_into_viewer
         return load_into_viewer(self.viewer, self.central_manager, data, name, is_mask)
+
+    def _attach_source_filename_tooltip(self, file_paths):
+        """Stamp the full original filename onto layers loaded from this open, so
+        the rich acquisition name (which the short layer name deliberately drops)
+        stays discoverable. Stored in layer.metadata['source_filename'] and, where
+        the napari build supports it, as a layer tooltip. Only stamps layers that
+        don't already carry a source_filename (so re-opens don't clobber)."""
+        import os as _os
+        names = [_os.path.basename(p) for p in (file_paths or []) if p]
+        full = names[-1] if names else None
+        if not full:
+            return
+        try:
+            import napari.layers as _nl
+        except Exception:
+            _nl = None
+        for _l in list(self.viewer.layers):
+            try:
+                if _nl is not None and not isinstance(_l, (_nl.Image, _nl.Labels)):
+                    continue
+                md = getattr(_l, 'metadata', None)
+                if not isinstance(md, dict):
+                    continue
+                if md.get('source_filename'):
+                    continue
+                md['source_filename'] = full
+                # napari layers expose no universal tooltip, but many builds
+                # honour a 'help' string; set it best-effort so hovering shows it.
+                try:
+                    _l.help = full
+                except Exception:
+                    pass
+            except Exception:
+                continue
 
 
 
@@ -2924,6 +3273,30 @@ class FileIOClass:
                 'clear_all': clear_all,
             })
 
+        # ── Consolidate into ONE session folder (not scattered loose files) ──
+        #
+        # Files used to be written with a flat `save_name` prefix straight into
+        # the chosen directory, so a session's artifacts scattered among the
+        # user's data files. Instead, gather them into a dedicated session folder
+        # and record a manifest, so the top-level "Load Session" can restore the
+        # whole working state (source image referenced by path, derived layers +
+        # dataframes reloaded). The user's chosen name/location is honoured as the
+        # PARENT; the session folder is created inside it.
+        from pycat.file_io import session_manifest as _sm
+        _parent_dir = os.path.dirname(save_name)
+        _stem = os.path.basename(save_name)
+        try:
+            _session_dir = _sm.default_session_dir(_parent_dir, self.base_file_name or _stem)
+            _session_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            _session_dir = None
+        # Inside the session folder, keep the stem-based naming the loader expects.
+        _base_in_session = (str(_session_dir / (self.base_file_name or _stem))
+                            if _session_dir is not None else save_name)
+        save_name = _base_in_session
+        _manifest_layers = []
+        _manifest_dfs = []
+
         # Get the names of all layers in the viewer
         layer_names = [layer.name for layer in self.viewer.layers]
 
@@ -2948,6 +3321,9 @@ class FileIOClass:
                         _tag_store = None
                     self._save_layer(layer_data, layer_type,
                                      save_name, safe_name, tag_store=_tag_store)
+                    _manifest_layers.append({
+                        'name': layer_name, 'layer_type': layer_type,
+                        'safe_name': safe_name})
             
             # Save only the selected dataframes
             dataframes_to_save = self.central_manager.active_data_class.get_dataframes()
@@ -2959,6 +3335,9 @@ class FileIOClass:
                     # Nothing about 340 rows of an 800-row results table looks wrong.
                     with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
                         df_value.to_csv(_tmp, index=True)
+                    _manifest_dfs.append({
+                        'key': df_name,
+                        'file': os.path.basename(save_name + f'_{df_name}.csv')})
 
             # Export the file's normalised acquisition metadata alongside the
             # results, for provenance/reproducibility. Written once per save.
@@ -2970,6 +3349,21 @@ class FileIOClass:
                         _json.dump(_md, _mf, indent=2, default=str)
             except Exception as _mde:
                 debug_log("file_io: metadata JSON export failed", _mde)
+
+            # Write the session manifest so Load Session can restore this state.
+            # The source image is REFERENCED by path, never copied.
+            try:
+                if _session_dir is not None:
+                    _sm.write_manifest(
+                        _session_dir,
+                        source_path=getattr(self, 'filePath', None),
+                        data_repository=self.central_manager.active_data_class.data_repository,
+                        layer_entries=_manifest_layers,
+                        dataframe_entries=_manifest_dfs,
+                        extra={'stem': self.base_file_name or _stem})
+                    print(f"[PyCAT] Session saved to {_session_dir}")
+            except Exception as _me:
+                debug_log("file_io: session manifest write failed", _me)
 
         # Clear all layers and dataframes from the viewer and data instance.
         # If "Remember measurements across clears" is on, preserve the measured

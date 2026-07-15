@@ -21,6 +21,7 @@ records built here.
 """
 
 import numpy as np
+from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 
 
 from pycat.utils.general_utils import debug_log
@@ -294,13 +295,13 @@ def _tsivf_segmentation(ui, layout):
                 return lab
             b = np.asarray(binary) > 0
             if min_area > 0:
-                b = morphology.remove_small_objects(b, int(min_area))
+                b = _remove_small_objects_compat(b, int(min_area))
             return measure.label(b).astype(np.int32)
         return _seg
 
     def _drop_small(lab, min_area):
         from skimage import measure, morphology
-        keep = morphology.remove_small_objects(lab > 0, int(min_area))
+        keep = _remove_small_objects_compat(lab > 0, int(min_area))
         return measure.label(keep).astype(np.int32)
 
     def _on_run():
