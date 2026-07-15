@@ -4,6 +4,100 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.37] - 2026-07-15
+### Fixed — **A genuine 1.0 um/px pixel size is no longer treated as "missing" (file-I/O audit #9).**
+- The in-dock pixel-size gate and the µm-vs-px scale-bar check decided "does this image have a real
+  scale?" from ``abs(mpp - 1.0) > 1e-9`` — using 1.0 um/px as a missing-value sentinel. Downsampled,
+  low-magnification, derived, and synthetic images legitimately have a 1.0 um/px scale, and those had
+  their calibration thrown away (endless re-prompting; a "px" scale bar on a calibrated image). The
+  checks now decide from PROVENANCE — ``pixel_size_from_metadata`` (already set correctly by
+  file_io/tagging.py) or a new ``pixel_size_confirmed`` flag set when the user explicitly enters a
+  value — falling back to the old value guess only when no provenance is recorded. Behaviour for every
+  scale != 1.0 is byte-identical to before (verified). Fixed in field_status.py (gate + prompt-skip)
+  and napari_adapter.py (scale-bar). New core test tests/test_pixel_size_sentinel.py.
+
+## [1.6.36] - 2026-07-15
+### Added — **Tag vocabulary extended (audit A3/A4/A5) + QC verdict now attaches to the layer (A6).**
+- **`representation` tag** (intensity_field / binary_mask / instance_labels / coordinates /
+  trajectories / probability_map / measurement_table / model_fit / geometry) — separate from `role`,
+  with a `representation_satisfies()` compatibility lattice (instance_labels satisfies a request for
+  binary_mask, not vice versa). Lets a resolver ask for "instance labels, not a mask".
+- **`state` tag** (raw → corrected → enhanced → segmented → refined → tracked → measured → fitted →
+  validated), ORDERED via `state_rank()`/`STATE_ORDER` so a resolver can prefer the most-processed
+  version (hand-refined labels over raw Cellpose output).
+- **Four new lineage relations** — `registered_to`, `measured_from`, `tracks`, `reference_for` —
+  enabling VPT/MSD plot<->layer brushing and colocalization linking.
+- **QC writes its verdict onto the assessed layer:** the Quality Report now tags the layer with
+  `quality_status` (pass/warn/fail, derived from the per-metric statuses) instead of leaving the
+  judgement stranded in a disconnected result table. A downstream step can now resolve "a layer that
+  passed QC". Added `quality_status` (controlled) and `analysis_ready_for` (open vocab) tag keys.
+- All additive; existing tags unaffected. Verified by headless core tests
+  (tests/test_pipeline_tag_source.py, now 12 assertions). See docs/audits/codebase_audit_2026-07-15.md
+  (items A3–A6).
+
+## [1.6.35] - 2026-07-15
+### Fixed — **Pipeline-produced layer tags are no longer silently downgraded to low-confidence inferences.**
+- `source='pipeline'` was written by the pipeline auto-tagger (tag_registry.py) but was absent from
+  `VALID_SOURCES` in layer_tags.py, so every such tag was silently rewritten to `'inferred'` and its
+  confidence dropped from ~0.95 to 0.6 — mislabelling every pipeline-produced tag as a low-confidence
+  guess. A tag written by a known operation is definitional, not an inference. Added `'pipeline'` as a
+  valid source with confidence 0.95 (distinct from `'derived'`: it means "a recorded PyCAT pipeline
+  step made this"). Unrecognised sources still correctly downgrade to `'inferred'` — validation is not
+  weakened. New headless core test tests/test_pipeline_tag_source.py (4 assertions). Found in the
+  2026-07-15 codebase audit (docs/audits/codebase_audit_2026-07-15.md, item A1).
+
+## [1.6.34] - 2026-07-15
+### Removed — **Last `_ims_file_path` vestige eliminated; reader-retention migration fully closed.**
+- `timeseries_condensate_tools.py` read the IMS source path from `file_io._ims_file_path`, but that
+  attribute was removed when IMS reader retention moved to the layer-scoped ImageSource — so the
+  lookup always fell through to `file_io.filePath`. The two cache-path sites now read `filePath`
+  directly (identical value, no behaviour change), removing the dead reference. This closes the
+  reader-retention arc: IMS and generic loaders both own readers via layer-scoped ImageSource, and
+  no `_ims_*` retention attributes remain.
+
+## [1.6.33] - 2026-07-15
+### Changed — **Generic stack loader retention fully migrated to layer-scoped ImageSource.**
+- Removed `self._stack_lazy_refs` from `_open_stack_generic` entirely. Reader/dask-array retention is
+  now owned solely by an `ImageSource` attached to each layer's `metadata['pycat_image_source']`, so
+  reader lifetime == layer lifetime — completing the migration begun in 1.6.32 (parallel step) and
+  matching the IMS loader's ownership model. Replacing or closing a layer now releases its reader,
+  instead of readers accumulating on a loader-singleton list.
+- tests/test_generic_stack_reader_retention.py now asserts the ImageSource is attached and non-empty,
+  then holds ONLY the layers (dropping the loader) and confirms frame reads still succeed — the guard
+  that proves the layer-scoped retention is what keeps the handle open.
+
+## [1.6.32] - 2026-07-15
+### Changed — **Generic stack loader retains readers on a layer-scoped ImageSource (parallel step).**
+- `_open_stack_generic` now retains its backing readers/dask arrays on an `ImageSource` attached to
+  each layer's `metadata['pycat_image_source']`, so reader lifetime == layer lifetime — the same
+  layer-scoped ownership the IMS loader already migrated to. This runs IN PARALLEL with the legacy
+  `self._stack_lazy_refs` list (unchanged); a follow-up step removes the list once the layer-scoped
+  path is confirmed on real files.
+- Fixed a latent retention gap: the nested T+Z (TZYX) branch never retained its reader at all, so
+  `image`/`dask_arr` could be garbage-collected while a lazy layer still pointed at them. It now
+  retains like the TYX and ZYX branches.
+- Guarded by tests/test_generic_stack_reader_retention.py.
+
+## [1.6.31] - 2026-07-15
+### Added (behind an opt-in extra) — **BioFormats-backed CZI reader; CZI loading temporarily disabled.**
+- Built a BioFormats-backed reader path for Zeiss CZI files that libCZI (bioio-czi) cannot decode —
+  notably fast streaming/timelapse acquisitions, where every libCZI read raised "not implemented"
+  though ZEN opens them. `image_reader.py` routes `.czi` through `bioio-bioformats` when the opt-in
+  extra is installed (`pip install pycat-napari[bioformats]`), and the reader reads the pixels
+  correctly.
+- **CZI loading is TEMPORARILY DISABLED in the UI.** The reader works, but opening a large CZI
+  currently freezes the interface for several minutes because BioFormats' init + full-file indexing
+  runs synchronously on the Qt main thread, and scrubbing then lags at dask block boundaries.
+  Rather than ship a multi-minute frozen window, `.czi` opens now show a clear "temporarily
+  unavailable — export to OME-TIFF from ZEN" notice. The reader code is left intact; a follow-up
+  will run the open on a worker thread with progress + scrubbing prefetch and re-enable it.
+- The `[bioformats]` extra pins `numpy<2.1` so installing it cannot pull numpy>=2.1 and break
+  cellpose (needs <2.1) or numba (needs <2.5).
+- Lazy readers that return their own wrapper type (BioFormats' LazyBioArray) are coerced to a real
+  ndarray before downstream math, so every reader backend behaves identically.
+- See docs/audits/czi_streaming_unreadable_2026-07-15.md for the full investigation and the
+  re-enable plan.
+
 ## [1.6.30] - 2026-07-14
 ### Added — **The local cache now cleans itself up, visibly.**
 

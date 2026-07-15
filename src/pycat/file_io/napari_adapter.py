@@ -60,6 +60,8 @@ def _is_calibrated(central_manager, px):
     """
     try:
         dr = central_manager.active_data_class.data_repository
+        if bool(dr.get('pixel_size_from_metadata')) or bool(dr.get('pixel_size_confirmed')):
+            return True
         if 'pixel_size_from_metadata' in dr:
             return bool(dr['pixel_size_from_metadata'])
     except Exception:

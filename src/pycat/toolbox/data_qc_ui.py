@@ -162,6 +162,21 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
             ui_instance.central_manager.active_data_class.data_repository['data_qc_results'] = results
         except Exception:
             pass
+        # ── Write the QC verdict ONTO the assessed layer (audit A6) ──────────────────────────
+        # QC used to leave its judgement in a disconnected result table; nothing marked the layer it
+        # judged, so a later step could not ask for "a layer that passed QC". Attach an overall
+        # quality_status tag (fail if any metric is bad, warn if any warns, else pass) so the verdict
+        # travels with the data and a resolver can honour it. source='pipeline' — this is a known
+        # operation's output, not an inference.
+        try:
+            from pycat.utils.layer_tags import tag_layer as _tag_layer
+            _assessed = ui_instance.viewer.layers[name]
+            _statuses = {r.get('status') for r in results}
+            _verdict = 'fail' if 'bad' in _statuses else ('warn' if 'warn' in _statuses else 'pass')
+            _tag_layer(_assessed, 'quality_status', _verdict, source='pipeline')
+        except Exception as _qe:
+            # Tagging is best-effort — a failure here must never block showing the QC report.
+            print(f"[PyCAT QC] could not tag quality_status onto layer: {_qe}")
         # concise in-app summary
         bad = [r['name'] for r in results if r['status'] == 'bad']
         warn = [r['name'] for r in results if r['status'] == 'warn']
