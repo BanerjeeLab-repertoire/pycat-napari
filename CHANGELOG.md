@@ -4,6 +4,22 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.42] - 2026-07-15
+### Fixed — **A corrupt (physically-impossible) pixel size no longer satisfies the gate on STACK loads.**
+- An ImageJ Substack export can write a 32-bit-overflow resolution tag (~2.3e-10 um/px, picometres).
+  The 2D loader already screened this, but the STACK loaders (IMS + generic + tifffile fallback) all
+  funnel through `stack_load._finalise_stack_load`, which committed the corrupt value to
+  `microns_per_pixel_sq` with `pixel_size_from_metadata=True` — which SATISFIED the pixel-size gate:
+  the warning printed but the Set-Scale dialog never appeared and the field stayed hidden, so every
+  downstream length/area/diffusion result was computed from a fabricated scale. (`update_metadata`
+  detected and rejected it correctly, then `_finalise_stack_load` overwrote that rejection with the
+  corrupt value read separately from the baseline TIFF tags.) Fix: `_finalise_stack_load` now runs
+  the same optics-based `is_physically_plausible` screen — implausible → fall back to the 1.0
+  sentinel with `pixel_size_from_metadata=False` and `pixel_size_confirmed` cleared, which is exactly
+  the state the gate fires on. Deduped so it does not warn twice when the 2D path already rejected
+  the same tag. Every real lab scale (0.0264 / 0.067 / 0.108 um/px, and a genuine 1.0) passes; only
+  garbage fails. Guard test tests/test_corrupt_pixel_size_gate.py.
+
 ## [1.6.41] - 2026-07-15
 ### Added — **Smarter metadata: frame-interval reconciliation, filename-based layer names, structured description parsing (three auto-loader patches).**
 - **Frame interval prefers per-frame timestamps over declared values, and flags conflicts**
