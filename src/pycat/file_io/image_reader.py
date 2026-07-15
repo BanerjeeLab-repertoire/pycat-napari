@@ -191,7 +191,33 @@ def _reader_kwargs_for(path, kwargs):
         return kwargs
 
     from pathlib import Path
-    if Path(str(path)).suffix.lower() not in ('.tif', '.tiff'):
+    _suffix = Path(str(path)).suffix.lower()
+
+    # ── CZI: prefer BioFormats when the optional extra is installed ───────────────────────
+    # libCZI (pylibczirw / aicspylibczi, which bioio-czi wraps) CANNOT decode some Zeiss CZI
+    # layouts — notably fast streaming/timelapse acquisitions (12-bit widefield). On those files
+    # every libCZI read raises "The method or operation is not implemented" even though metadata
+    # reads fine and ZEN opens them. BioFormats (the reference Java decoder, shipped as the opt-in
+    # ``pycat-napari[bioformats]`` extra via bioio-bioformats) reads them correctly and lazily
+    # (~0.03 s/plane once open). See docs/audits/czi_streaming_unreadable_2026-07-15.md.
+    #
+    # When bioio-bioformats is present, route CZI through it. When it is absent, fall through to
+    # BioIO's default (bioio-czi) — which works for ordinary non-streaming CZIs and, on the ones it
+    # can't read, surfaces a clear error pointing at the extra (handled in open_image).
+    if _suffix == '.czi':
+        for module_name, attribute in (('bioio_bioformats.reader', 'Reader'),
+                                       ('bioio_bioformats', 'Reader')):
+            try:
+                import importlib
+                _bf = getattr(importlib.import_module(module_name), attribute, None)
+            except ImportError:
+                continue
+            if _bf is not None:
+                return {**kwargs, 'reader': _bf}
+        # bioio-bioformats not installed → let BioIO use bioio-czi as before.
+        return kwargs
+
+    if _suffix not in ('.tif', '.tiff'):
         return kwargs
 
     # BioIO's own error names the OME plugin's class as ``bioio_ome_tiff.reader.Reader``, so the
@@ -306,6 +332,9 @@ def open_image(path, **kwargs):
                 raise ImageReaderUnavailable(
                     f"bioio has no reader installed for {suffix} files."
                     + (f"\n  pip install {plugin}" if plugin else "")
+                    + ("\n  For Zeiss streaming/timelapse CZIs that bioio-czi cannot decode, "
+                       "install the BioFormats extra:\n  pip install pycat-napari[bioformats]"
+                       if suffix == '.czi' else "")
                     + "\nThis is a MISSING PLUGIN, not a corrupt file."
                 ) from exc
             raise

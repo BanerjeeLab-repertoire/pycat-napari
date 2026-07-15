@@ -4,6 +4,18 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.37] - 2026-07-15
+### Fixed — **A genuine 1.0 um/px pixel size is no longer treated as "missing" (file-I/O audit #9).**
+- The in-dock pixel-size gate and the µm-vs-px scale-bar check decided "does this image have a real
+  scale?" from ``abs(mpp - 1.0) > 1e-9`` — using 1.0 um/px as a missing-value sentinel. Downsampled,
+  low-magnification, derived, and synthetic images legitimately have a 1.0 um/px scale, and those had
+  their calibration thrown away (endless re-prompting; a "px" scale bar on a calibrated image). The
+  checks now decide from PROVENANCE — ``pixel_size_from_metadata`` (already set correctly by
+  file_io/tagging.py) or a new ``pixel_size_confirmed`` flag set when the user explicitly enters a
+  value — falling back to the old value guess only when no provenance is recorded. Behaviour for every
+  scale != 1.0 is byte-identical to before (verified). Fixed in field_status.py (gate + prompt-skip)
+  and napari_adapter.py (scale-bar). New core test tests/test_pixel_size_sentinel.py.
+
 ## [1.6.36] - 2026-07-15
 ### Added — **Tag vocabulary extended (audit A3/A4/A5) + QC verdict now attaches to the layer (A6).**
 - **`representation` tag** (intensity_field / binary_mask / instance_labels / coordinates /

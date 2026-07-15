@@ -1150,6 +1150,11 @@ class _LazyArraySource:
         # plugin is free to return either.
         if hasattr(value, 'compute'):
             value = value.compute()
+        # Some readers' compute() returns their OWN lazy wrapper rather than a plain ndarray
+        # (e.g. bioio-bioformats returns a LazyBioArray, which has no .min/.mean/arithmetic). Coerce
+        # to a real ndarray before any downstream math so every backend behaves identically.
+        if not isinstance(value, np.ndarray):
+            value = np.asarray(value)
         # `[0, 1]` from the SOURCE dtype, not raw counts. This wrapper already kept the source
         # dtype in `self.dtype` — it just never USED it, so it advertised uint16 and handed back
         # float32 raw counts. See `stack_access.to_unit_float32`.
@@ -1698,6 +1703,15 @@ class FileIOClass:
             self.open_stack(file_path=file_path, clear_first=clear_first)
             return
 
+        # CZI temporarily disabled (2026-07-15) — gate BEFORE the open_image structure probe below,
+        # because on a CZI that probe (`.dims` walking the subblock directory) opens the heavy
+        # BioFormats reader on the main thread and is a large part of the multi-minute UI freeze.
+        # open_stack has the same gate for the direct path; this covers drag-drop/auto-open.
+        # See docs/audits/czi_streaming_unreadable_2026-07-15.md.
+        if ext == '.czi':
+            self.open_stack(file_path=file_path, clear_first=clear_first)  # shows the notice + returns
+            return
+
         n_t = n_z = n_c = n_p = 1
         parsed = False
         try:
@@ -1897,6 +1911,27 @@ class FileIOClass:
         ext = os.path.splitext(file_path)[1].lower()
 
         from napari.utils.notifications import show_info as napari_show_info
+        from napari.utils.notifications import show_warning as napari_show_warning
+
+        # ── CZI temporarily disabled (2026-07-15) ────────────────────────────────────────────
+        # The BioFormats-backed CZI reader (image_reader.py routing) WORKS — it reads Zeiss
+        # streaming/timelapse files that libCZI cannot — but its GUI integration is not ready:
+        # opening a large CZI freezes the UI for 2–5 minutes because BioFormats' init + full-file
+        # indexing runs synchronously on the Qt main thread, and scrubbing then lags at dask block
+        # boundaries. Rather than ship a multi-minute frozen window, CZI is gated OFF here until the
+        # non-blocking (worker-thread + progress + prefetch) integration is built. The reader code
+        # is intentionally left intact — re-enabling is just removing this block.
+        # See docs/audits/czi_streaming_unreadable_2026-07-15.md.
+        if ext == '.czi':
+            napari_show_warning(
+                "CZI support is temporarily unavailable in this build. Zeiss streaming/timelapse "
+                "CZIs need a reader that would otherwise freeze the interface for several minutes "
+                "on open; the non-blocking version is in progress. Workaround: export to OME-TIFF "
+                "from ZEN and open that."
+            )
+            print("[PyCAT Stack] CZI loading is temporarily disabled "
+                  "(see docs/audits/czi_streaming_unreadable_2026-07-15.md).")
+            return
 
         try:
             if ext == '.ims':
@@ -2277,11 +2312,16 @@ class FileIOClass:
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
-        # Keep lazy sources (readers + dask arrays) alive for as long
-        # as the layers exist, so on-demand frame reads keep working without an
-        # eager copy to disk.
-        if not hasattr(self, '_stack_lazy_refs'):
-            self._stack_lazy_refs = []
+        # ── Reader retention via ImageSource ──────────────────────────────────────────────
+        # Lazy layers read frames on demand, so their backing readers/dask arrays must stay alive
+        # as long as the layers do. Ownership lives on an ImageSource attached to each layer's
+        # ``metadata['pycat_image_source']`` — so reader lifetime == layer lifetime, the same
+        # layer-scoped model the IMS loader uses. (This replaced the old ``self._stack_lazy_refs``
+        # list, which hung retention on the loader singleton and was never scoped to the layers it
+        # kept alive.) See image_source.py and tests/test_generic_stack_reader_retention.py.
+        from pycat.file_io.image_source import ImageSource
+        _img_source = ImageSource(file_path=file_path)
+        _generic_layers = []  # layers built this load, to tag with the source at the end
         channels_to_load = list(range(n_c)) if not reader_has_structure else None
         H = W = n_t = n_z = None
 
@@ -2318,7 +2358,7 @@ class FileIOClass:
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
                     # Data is already in memory — wrap it directly (no disk copy).
                     wrapper = _LazyArraySource(arr_ch)
-                    self._stack_lazy_refs.append(arr_ch)
+                    _img_source.retain(arr_ch)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2342,6 +2382,7 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
+                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2461,9 +2502,9 @@ class FileIOClass:
                                 ) from _dask_exc
 
                         wrapper = _LazyArraySource(dask_arr)
-                        self._stack_lazy_refs.append((image, dask_arr))
+                        _img_source.retain(image); _img_source.retain(dask_arr)
                     else:
-                        self._stack_lazy_refs.append(wrapper)  # keep handle open
+                        _img_source.retain(wrapper)
                     # Pin contrast_limits from the first frame. Without this,
                     # napari auto-estimates the display range by calling
                     # np.asarray() on the whole wrapper (__array__), which
@@ -2475,6 +2516,7 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kw['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kw)
+                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2522,7 +2564,7 @@ class FileIOClass:
                             ) from _dask_exc
                         raise
                     wrapper = _LazyArraySource(dask_arr)
-                    self._stack_lazy_refs.append((image, dask_arr))
+                    _img_source.retain(image); _img_source.retain(dask_arr)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2546,6 +2588,7 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
+                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2625,6 +2668,11 @@ class FileIOClass:
                             ) from _dask_exc
                         raise
                     wrapper = _LazyArraySource(dask_arr)
+                    # This nested T-Z branch historically did NOT retain its reader at all — a
+                    # latent use-after-free where `image`/`dask_arr` could be collected while the
+                    # lazy layer still pointed at them. Now retained on the layer-scoped ImageSource
+                    # like the TYX and ZYX branches.
+                    _img_source.retain(image); _img_source.retain(dask_arr)
                     # ── Pin the contrast limits, or napari reads EVERY frame ────────
                     #
                     # Without explicit limits, napari auto-estimates contrast **and builds the
@@ -2648,6 +2696,7 @@ class FileIOClass:
                     if _clim is not None:
                         _add_kwargs['contrast_limits'] = _clim
                     _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
+                    _generic_layers.append(_stack_layer)
                     # Show the current frame, not a projection — a stray
                     # 'mean' projection mode averages the whole time-series
                     # into a flat/black display.
@@ -2661,6 +2710,15 @@ class FileIOClass:
                         f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed, "
                         f"nothing pre-loaded beyond this write pass)"
                     )
+
+        # Attach the source to every layer built this load, so reader lifetime == layer lifetime
+        # via layer.metadata['pycat_image_source']. This is the sole retention mechanism for the
+        # generic loader.
+        for _lyr in _generic_layers:
+            try:
+                _lyr.metadata['pycat_image_source'] = _img_source
+            except Exception as _ise:
+                debug_log("file_io: could not attach ImageSource to generic layer", _ise)
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),

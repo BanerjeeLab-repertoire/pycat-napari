@@ -3,7 +3,7 @@ Generic-stack (TIFF/CZI) reader-retention guard.
 
 WHY THIS EXISTS
 ---------------
-`_open_stack_generic` keeps its backing readers alive via `self._stack_lazy_refs` — the same
+`_open_stack_generic` keeps its backing readers alive via a layer-scoped ImageSource attached to
 keepalive pattern that `_open_stack_ims` used for `_ims_zarr_refs` (one of its append sites is
 even commented ``# keep handle open``). For a lazily-loaded multi-frame TIFF/CZI, the BioIO
 reader (`image`) and/or the tifffile page wrapper must stay alive for as long as the napari layer
@@ -14,7 +14,7 @@ docs/audits/ims_zarr_refs_resolved_2026-07-14.md).
 WHAT THIS GUARDS
 ----------------
 This is the BASELINE guard for the generic loader, to be captured green on the CURRENT code
-BEFORE `_stack_lazy_refs` retention is migrated onto the layer-scoped ImageSource (the way IMS
+each layer's metadata['pycat_image_source'] (the same layer-scoped ownership the IMS loader uses,
 already was). It builds a synthetic multi-page TIFF, loads it through the real
 `_open_stack_generic`, captures the lazy wrapper(s) handed to `viewer.add_image`, drops the
 FileIOClass, forces `gc.collect()`, and reads a frame. It must succeed.
@@ -74,7 +74,7 @@ def multipage_tiff():
 
 def test_generic_stack_readers_survive_gc_when_only_layers_held(qapp, multipage_tiff):
     """After a lazy TIFF load, holding ONLY the layers must keep the backing reader/handle open
-    through a GC. This pins the CURRENT (_stack_lazy_refs on FileIOClass) behaviour so the
+    through a GC. This pins the layer-scoped ImageSource retention so the
     upcoming ImageSource migration for the generic loader cannot silently orphan the reader.
 
     The ``qapp`` fixture (pytest-qt) constructs a QApplication first: the generic loader may build
@@ -137,6 +137,22 @@ def test_generic_stack_readers_survive_gc_when_only_layers_held(qapp, multipage_
             "lazy-loading small multi-page TIFFs, this guard needs a larger/synthetic-lazy input."
         )
 
+    # After the ImageSource migration, retention is owned by an ImageSource attached to each lazy
+    # layer's metadata['pycat_image_source'] — NOT by self._stack_lazy_refs. Assert the source is
+    # actually attached, so a silent detach (which would make the GC guard below vacuous once the
+    # legacy list is removed) fails loudly here instead.
+    for ly in lazy_layers:
+        src = ly.metadata.get('pycat_image_source')
+        assert src is not None, (
+            "a lazy generic-stack layer has no 'pycat_image_source' in its metadata — the "
+            "ImageSource that must keep its reader alive is not attached. Reader retention now "
+            "depends on this (self._stack_lazy_refs has been removed)."
+        )
+        assert len(src) > 0, (
+            "the layer's ImageSource holds no retained readers — nothing is keeping the backing "
+            "handle open."
+        )
+
     # THE GUARD: hold ONLY the layers, drop FileIOClass (and thus _stack_lazy_refs), force GC.
     layers = list(lazy_layers)
     del fio
@@ -157,7 +173,7 @@ def test_generic_stack_readers_survive_gc_when_only_layers_held(qapp, multipage_
 
     assert not failures, (
         "Generic-stack reader retention BROKE after GC — a lazy layer's backing reader/handle "
-        "closed when only the layers were held. _stack_lazy_refs is the current owner; the "
+        "closed when only the layers were held. The layer-scoped ImageSource is the owner; "
         "ImageSource migration must preserve this.\n"
         f"  lazy layers: {len(layers)}\n"
         f"  close-of-handle failures:\n    " + "\n    ".join(failures)

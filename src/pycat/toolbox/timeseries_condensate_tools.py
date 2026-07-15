@@ -1193,9 +1193,10 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
             napari_show_info(f"Loaded '{name}' from cache.")
 
     def _on_discard_cache():
-        source_file = getattr(ui_instance.central_manager.file_io,
-                              '_ims_file_path', None) or                       getattr(ui_instance.central_manager.file_io,
-                              'filePath', None)
+        # The IMS source path used to live on file_io._ims_file_path, but that attribute was removed
+        # when IMS reader retention moved to the layer-scoped ImageSource — it is no longer set, so
+        # the source file is simply the last-opened path on file_io.filePath (set for every loader).
+        source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
         if not source_file:
             napari_show_warning("No source file known — nothing to discard.")
             return
@@ -1307,10 +1308,9 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
                 f"→ {H}×{W}px per frame."
             )
 
-        # Determine cache paths — use source file path if available
-        source_file = getattr(ui_instance.central_manager.file_io,
-                              '_ims_file_path', None) or                       getattr(ui_instance.central_manager.file_io,
-                              'filePath', None)
+        # Determine cache paths — use source file path if available. (file_io._ims_file_path was
+        # removed with the IMS→ImageSource retention migration; filePath is the source path now.)
+        source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
 
         cache_paths = None
         if source_file:

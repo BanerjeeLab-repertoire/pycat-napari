@@ -337,8 +337,14 @@ def prompt_pixel_size_on_load(get_dr, parent=None, central_manager=None):
     dr = get_dr() or {}
     mpp_sq = dr.get('microns_per_pixel_sq')
     from_meta = bool(dr.get('pixel_size_from_metadata'))
-    # Only prompt for the no-valid-scale case (scale is 1.0 and not from metadata).
-    has_valid = bool(mpp_sq) and abs(float(mpp_sq if mpp_sq else 1.0) - 1.0) > 1e-9
+    # Only prompt for the no-valid-scale case. "Valid" = present AND trusted by
+    # provenance (metadata or explicit user set), NOT "value != 1.0" — a genuine
+    # 1.0 um/px must not be treated as missing. (#9)
+    confirmed = bool(dr.get('pixel_size_confirmed'))
+    if bool(mpp_sq) and (from_meta or confirmed):
+        has_valid = True
+    else:
+        has_valid = bool(mpp_sq) and abs(float(mpp_sq if mpp_sq else 1.0) - 1.0) > 1e-9
     if has_valid or from_meta:
         return False
 
@@ -463,9 +469,25 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     state = {'remembered': None, 'confirmed': False}
 
     def _valid_scale():
+        # A scale is VALID when one is present AND we have a reason to trust it —
+        # NOT because its value happens to differ from 1.0. The old test
+        # `abs(mpp - 1.0) > 1e-9` used 1.0 as a missing-value sentinel, which
+        # throws away a GENUINE 1.0 um/px scale (downsampled / low-mag / derived /
+        # synthetic images legitimately have it). Trust it when either the value
+        # came from metadata (`pixel_size_from_metadata`) or the user explicitly
+        # set/confirmed it here (`pixel_size_confirmed`). Only when neither
+        # provenance signal is present do we fall back to the value-based guess,
+        # and even then a wrong `False` merely asks a question the user can answer.
+        # See docs/audits + file_io/tagging.py::_calibration_is_from_metadata,
+        # which fixed the same sentinel on the metadata-decision side.
         dr = get_dr() or {}
-        return bool(dr.get('microns_per_pixel_sq')) and \
-            abs(float(dr.get('microns_per_pixel_sq', 1.0)) - 1.0) > 1e-9
+        mpp = dr.get('microns_per_pixel_sq')
+        if not bool(mpp):
+            return False
+        if bool(dr.get('pixel_size_from_metadata')) or bool(dr.get('pixel_size_confirmed')):
+            return True
+        # No provenance recorded — fall back to the historical value guess.
+        return abs(float(mpp) - 1.0) > 1e-9
 
     def _from_metadata():
         dr = get_dr() or {}
@@ -489,6 +511,10 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
         if dr is not None and v and v > 0:
             dr['microns_per_pixel_sq'] = float(v) ** 2
             dr['pixel_size_from_metadata'] = False
+            # Explicit-user-set provenance: this is what lets _valid_scale() trust
+            # a genuine 1.0 um/px the user typed, instead of re-prompting forever
+            # because the value equals the old sentinel. (#9)
+            dr['pixel_size_confirmed'] = True
             if on_set:
                 try:
                     on_set(v)
