@@ -36,19 +36,27 @@ file_io/
   file_io.py          FileIOClass = thin controller that orchestrates the above
 ```
 
+## Status — ✅ ALL 5 PIECES DONE (as of 1.6.62)
+
+The decomposition is complete. Each piece shipped behaviour-preserving with headless byte-identity
+tests; the final GUI confirm of #5 across all formats (plain TIFF / OME-TIFF / multi-channel TIFF /
+z-stack / CZI) is pending a `run-pycat` on a machine with a display.
+
 ## Sequence (each piece independently shippable + byte-identity tested)
 
-1. **`open_2d_mask` (80) → `readers/mask_reader.py`.** Smallest fat loader = the pilot. Extract the
-   pure read (path → array + metadata) to a free function; the method becomes a delegator that calls
-   it then does napari-layer construction. **← doing this now.**
-2. **`open_2d_image` (224) → `readers/image_reader_2d.py`.** Same pattern, the 2D image path.
-3. **`_open_stack_ims` (250) → `readers/ims_reader.py`.** IMS loader body + `_ImsReader*` wrappers move together.
-4. **`save_and_clear_all` (183) → `writers/`.** Save path; the `_save_layer` stub already points at writers.py, so the seam exists.
-5. **`_open_stack_generic` (542) → `readers/stack_reader.py`, LAST and in sub-pieces.** The monster,
-   and where the audit's "one function decides 7 things at once" (#3) lives. Split it INTERNALLY
-   first (probe → reader-selection → axis-interpretation → layer-construction, each a callable) and
-   only then lift the reading half out. This is also where audit #2 (one ImageSource protocol) and
-   #6 (validated TIFF page order) get addressed.
+1. ✅ **`open_2d_mask` → `readers/mask_reader.py`.** Done (1.6.x).
+2. ✅ **`open_2d_image` → `readers/image_reader_2d.py`.** Done (1.6.x).
+3. ✅ **`_open_stack_ims` → `readers/ims_reader.py`.** Done (1.6.60) — IMS loader body + `_ImsReader*` wrappers.
+4. ✅ **`save_and_clear_all` → `writers/`.** Done (1.6.59) — the write loop → `writers.write_session_outputs`.
+5. ✅ **`_open_stack_generic` → `readers/`, in sub-pieces.** Done (1.6.62), the monster:
+   - **5a** — metadata-read + reader-selection head → `readers/stack_metadata.py::read_stack_structure`.
+   - **5b** — per-branch lazy builders → `readers/stack_layer_builders.py` (tifffile-fallback,
+     time-series incl. the zarr-3.2 shim + on-disk paths, z-stack, T-Z).
+   - **5c** — shared retain + contrast-pin + add_image tail → `_add_lazy_stack_layer`.
+   - **5d** — `_open_stack_generic` is now a slim orchestrator (313 → 186 lines).
+   The Zeiss streaming-CZI branch is a peer path (`_open_czi_streaming`, 1.6.61), not tangled in the
+   loop. (Audit #2's single ImageSource protocol and #6's validated TIFF page order remain as
+   follow-ups, but the god-method decomposition itself is finished.)
 
 ## The one discipline (non-negotiable)
 

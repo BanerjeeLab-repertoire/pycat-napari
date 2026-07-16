@@ -4,6 +4,35 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.63] - 2026-07-15
+### Changed — **File-I/O decomposition #5 (final piece): `_open_stack_generic` becomes a slim orchestrator; the god-class breakup is complete.**
+- **The core stack loader is no longer a 542-line god-method.** `_open_stack_generic` — every
+  TIFF/OME-TIFF/CZI/z-stack load flows through it — is decomposed into pure, Qt/napari-free modules,
+  behaviour-preserving throughout:
+  - **5a** — the metadata-read + reader-selection head (structured reader → dims/scenes/pixel size,
+    else a lazy tifffile-page fallback) → `readers/stack_metadata.py::read_stack_structure`. The Qt
+    scene dialog and the `update_metadata`/`file_metadata` side effects stay in the controller
+    (relocating them is behaviour-preserving — `update_metadata` never propagates, the dialog returns
+    a selection rather than raising).
+  - **5b** — the four per-branch lazy-wrapper builders (tifffile-fallback, time-series, z-stack, T-Z)
+    → `readers/stack_layer_builders.py`, each returning `(wrapper, retain_refs, warnings)` without
+    touching napari. The load-bearing zarr-3.2 shim (bioio's TIFF dask path is broken → tifffile-page
+    wrapper, else a clear error) and multi-file OME handling move unchanged.
+  - **5c** — their shared six-step tail (pin retained refs, surface warnings, **pin contrast from the
+    first frame** so napari doesn't eager-read the whole stack, `add_image`, force per-frame display,
+    announce) → one `_add_lazy_stack_layer` method.
+  - **5d** — `_open_stack_generic` is now a slim orchestrator (**313 → 186 lines**): read head → loop
+    scenes/channels → pick a builder → add layer → finalise.
+- **Behaviour preserved exactly:** same wrappers, same retention (including the T-Z branch, which
+  retains nothing beyond the wrapper napari holds), same contrast pinning, same messages. `_TiffPageStack`
+  / `_LazyArraySource` are injected into the new modules to keep them cycle-free.
+- **Tests:** byte-identity unit tests for `read_stack_structure` and all four builders (fake readers,
+  no Qt), plus the zarr-3.2 error translation; the "no function truncated" guard records the
+  deliberate shrink. Loader integration tests still pass. **Still needs a GUI confirm** — open a plain
+  TIFF, OME-TIFF, multi-channel TIFF, z-stack, and CZI via `run-pycat` and scrub each (headless here).
+- With this, the FileIOClass god-class decomposition roadmap (pieces #1–#5) is **complete** — see
+  `docs/audits/fileio_godclass_roadmap_2026-07-15.md`.
+
 ## [1.6.62] - 2026-07-15
 ### Fixed — **Coordinate readout crashed on mouse-move on newer napari (`get_status` return-type mismatch).**
 - `install_coordinate_readout`'s `get_status` wrapper always returned a plain **string**, but newer
