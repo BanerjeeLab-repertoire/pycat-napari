@@ -16,9 +16,10 @@ Relocating those two out of the fallback-triggering ``try`` is behaviour-preserv
 catches all its own exceptions (never propagates), and ``show_position_selection_dialog`` returns a
 selection rather than raising — so neither ever drove the tifffile fallback in practice.
 
-``_TiffPageStack`` and ``_tiff_pixel_size_um`` live in ``file_io.py`` (heavily used there and imported
-by tests), so they are **injected** rather than imported here — that keeps this module free of an
-import cycle back into its former host.
+``_TiffPageStack`` now lives in ``lazy_sources.py`` (Qt-free by contract); ``_tiff_pixel_size_um``
+still lives in ``file_io.py``. Both are **injected** rather than imported here — that keeps this
+module free of an import cycle back into its former host, and it is the seam the extraction tests
+use to pass a recording stand-in.
 """
 
 from __future__ import annotations

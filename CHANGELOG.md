@@ -4,6 +4,44 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.70] - 2026-07-16
+### Changed — **GUI-free `lazy_sources.py`: the TIFF lazy wrappers no longer live behind a Qt import.**
+- `_TiffPageStack` and `_LazyArraySource` sat in `file_io.py`, beside two `QDialog` subclasses in a
+  module that imports PyQt5 at module scope. **So reaching a TIFF lazy wrapper dragged in the whole
+  GUI stack**, and the wrappers could not be exercised headlessly — exactly what a performance
+  harness or a CI perf gate needs to do (a roadmap item since the BioIO migration). Their bodies
+  never needed Qt: they use `tifffile`, `numpy`, and two already-shared helpers. **Only their address
+  did.**
+- Both classes moved **verbatim** to `file_io/lazy_sources.py`, which is **Qt/napari-free by
+  contract**. The OME file-set helpers `resolve_ome_file_set` / `build_ome_page_map` moved with them:
+  `_TiffPageStack.__init__` calls both unconditionally, they have no other caller, and
+  `lazy_sources` cannot import them back from `file_io` — that would be a hard circular import, since
+  `file_io` now imports `lazy_sources`.
+- `file_io.py` **re-exports** all four names (`# noqa: F401`), the same courtesy the `stack_access`
+  re-export already provides, so existing `from pycat.file_io.file_io import _TiffPageStack` callers
+  resolve unchanged. `file_io.py` drops 3061 → 2691 lines.
+- **Behaviour-preserving.** Same lazy reads, same shapes, same dtypes, same `[0, 1]` normalisation
+  from the source dtype, same `__array__` refusal. A pure move for testability.
+### Added
+- `tests/test_lazy_sources_headless.py` (`core`) — the contract the roadmap wanted: the wrappers
+  exercised **without Qt**. Checks the Qt-free import statically (no GUI import at module scope, the
+  same check `test_headless_science` applies elsewhere) *and* at runtime **in a fresh subprocess** —
+  an in-process `'PyQt5' not in sys.modules` assertion is worthless, because `test_ui_smoke.py`
+  imports PyQt5 at module scope and would make it fail for unrelated reasons. Also asserts a plane
+  read is bit-identical to a full read (normalised the same way), that the `__array__` guard survived
+  the move, and that `file_io`'s re-exports are the *same objects*.
+- Its pycat imports are deliberately inside the test bodies: `conftest.py`'s `pytest_ignore_collect`
+  drops any test module whose module-scope imports name `pycat.file_io` when the GUI stack is absent,
+  and a headless-contract test that silently vanishes from the headless CI job is worse than none.
+### Fixed
+- `test_tiff_planes.py::test_every_TiffPageStack_CONSTRUCTION_has_enough_arguments` parsed
+  `file_io.py` for the `_TiffPageStack` **class definition** — a re-export is invisible to
+  `ast.ClassDef`, so the move would have tripped its `assert definition is not None`. It now reads the
+  arity from `lazy_sources.py` and scans the whole `file_io` package for call sites. It also now
+  counts calls made through the injected name `tiff_page_stack_cls`: since decomposition #5 the
+  loader injects the class rather than importing it, so **the guard had no calls left to check** and
+  the arity bug it exists to catch would have sailed straight through.
+
 ## [1.6.69] - 2026-07-16
 ### Fixed — **`core` (headless) CI failed: `viewer_load` dragged napari in at import.**
 - `test_load_into_viewer_scale.py` (marked `core`, runs with NO napari installed) imports

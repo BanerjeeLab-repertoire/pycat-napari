@@ -13,8 +13,10 @@ controller, which does the contrast-pin + ``add_image`` + retention via ``_add_l
 * ``warnings``    : user-facing strings (e.g. a multi-file OME-TIFF with missing companions) for the
                     controller to surface — kept out of here so the module stays Qt-free.
 
-``_TiffPageStack`` and ``_LazyArraySource`` live in ``file_io.py`` (used across it and imported by
-tests), so they are **injected** to keep this module free of an import cycle. The zarr-3.2-shim
+``_TiffPageStack`` and ``_LazyArraySource`` live in ``lazy_sources.py`` (and are re-exported from
+``file_io.py`` for existing callers). They are **injected** rather than imported: that kept this
+module out of an import cycle back into its former host, and it remains the seam the extraction
+tests use to pass a recording stand-in. The zarr-3.2-shim
 workaround (bioio's TIFF dask path is broken on zarr 3.2 → tifffile-page wrapper, else a clear error)
 is load-bearing and moved unchanged.
 """

@@ -301,6 +301,32 @@ _DELIBERATE = {
     'spatial_randomness_tools.py::_add_spatial_randomness',         # -> _build_spatial_randomness_form
     'timeseries_condensate_tools.py::_add_ts_upscale_stack',        # -> _build_ts_upscale_check_ui
     'ts_cellpose_tools.py::_on_finished',                           # -> _present_transfection_filter
+
+    # 1.6.70 — MOVED, not removed: `file_io.py` -> `lazy_sources.py`.
+    #
+    # `_TiffPageStack` and `_LazyArraySource` sat beside two `QDialog` subclasses in a module that
+    # imports PyQt5 at module scope, so **reaching a TIFF lazy wrapper dragged in the whole GUI
+    # stack** and the wrappers could not be exercised headlessly — which is precisely what a perf
+    # harness or a CI perf gate needs to do. Their bodies never needed Qt; only their address did.
+    #
+    # The bodies moved VERBATIM. `file_io.py` re-exports both class names (plus the two OME
+    # helpers), so every existing `from pycat.file_io.file_io import _TiffPageStack` caller —
+    # `test_vpt_gpu_equivalence.py` does it twice — still resolves, exactly as with the five stack
+    # helpers above. `tests/test_lazy_sources_headless.py` pins the new module's Qt-free contract
+    # and re-checks the re-export identity.
+    #
+    # `_page_index` / `_get_handle` / `_read_frame` / `as_full_array` / `close` are
+    # `_TiffPageStack` methods and travelled inside the class.
+    'file_io.py::_page_index',
+    'file_io.py::_get_handle',
+    'file_io.py::_read_frame',
+    'file_io.py::as_full_array',
+    'file_io.py::close',
+    # The OME file-set helpers are `_TiffPageStack`'s multi-file machinery and have no other
+    # caller, so they moved with it — `lazy_sources` cannot import them back from `file_io`
+    # (that would be a hard circular import, since `file_io` now imports `lazy_sources`).
+    'file_io.py::resolve_ome_file_set',
+    'file_io.py::build_ome_page_map',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

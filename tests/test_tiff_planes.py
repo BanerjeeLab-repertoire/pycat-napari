@@ -206,13 +206,21 @@ def test_every_TiffPageStack_CONSTRUCTION_has_enough_arguments():
     import ast
     import pathlib
 
-    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "file_io"
-              / "file_io.py").read_text(encoding='utf-8', errors='ignore')
-    tree = ast.parse(source)
+    # The class lives in `lazy_sources.py` (extracted from `file_io.py` so the wrappers import
+    # without Qt), but it is CONSTRUCTED elsewhere — so the definition and the call sites are
+    # read from different files, and every file in the package is scanned for calls.
+    file_io_dir = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "file_io")
 
-    definition = next((n for n in ast.walk(tree)
+    def _tree(path):
+        return ast.parse(path.read_text(encoding='utf-8', errors='ignore'))
+
+    definition = next((n for n in ast.walk(_tree(file_io_dir / "lazy_sources.py"))
                        if isinstance(n, ast.ClassDef) and n.name == '_TiffPageStack'), None)
-    assert definition is not None
+    assert definition is not None, (
+        "`_TiffPageStack` is not defined in `lazy_sources.py`. If it moved again, repoint this "
+        "guard — a re-export is invisible to `ast.ClassDef`, so a stale path makes this test "
+        "silently vacuous rather than red."
+    )
 
     init = next(n for n in definition.body
                 if isinstance(n, ast.FunctionDef) and n.name == '__init__')
@@ -220,18 +228,25 @@ def test_every_TiffPageStack_CONSTRUCTION_has_enough_arguments():
     parameters = [a.arg for a in init.args.args[1:]]          # drop `self`
     n_required = len(parameters) - len(init.args.defaults)
 
-    malformed = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if getattr(node.func, 'id', None) != '_TiffPageStack':
-            continue
+    # The loader injects the class as `tiff_page_stack_cls` rather than importing it (the
+    # decomposition's import-cycle dodge), so the real construction sites call it under THAT
+    # name. Checking only the literal `_TiffPageStack(` would leave the guard with no calls to
+    # check at all — the arity bug it exists to catch would sail straight through.
+    _NAMES = {'_TiffPageStack', 'tiff_page_stack_cls'}
 
-        supplied = len(node.args) + len(node.keywords)
-        if supplied < n_required:
-            malformed.append(
-                f"line {node.lineno}: {supplied} argument(s), but {n_required} are required "
-                f"({', '.join(parameters[:n_required])})")
+    malformed = []
+    for path in sorted(file_io_dir.rglob("*.py")):
+        for node in ast.walk(_tree(path)):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, 'id', None) not in _NAMES:
+                continue
+
+            supplied = len(node.args) + len(node.keywords)
+            if supplied < n_required:
+                malformed.append(
+                    f"{path.name} line {node.lineno}: {supplied} argument(s), but {n_required} "
+                    f"are required ({', '.join(parameters[:n_required])})")
 
     assert not malformed, (
         "these `_TiffPageStack(...)` calls will raise TypeError:\n  " + "\n  ".join(malformed)

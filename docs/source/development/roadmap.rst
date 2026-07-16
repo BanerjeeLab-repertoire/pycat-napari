@@ -71,6 +71,14 @@ Two routes, and the choice is not obvious:
 Nobody has hit this yet because the lab's TIFF stacks are time series. **A z-stack TIFF would fail
 today.**
 
+**Unblocked as of 1.6.70.** The first route is now the cheap one: ``_TiffPageStack`` lives in a
+Qt-free ``file_io/lazy_sources.py``, so ``_TiffPageStackZYX`` (ndim=3, ``(Z, Y, X)``) and
+``_TiffPageStackTZYX`` (ndim=4, ``(T, Z, Y, X)``) can be added **beside it and tested headlessly**,
+rather than bolted into the Qt-coupled loader. Both would build on ``tiff_planes.read_tiff_plane``,
+which already computes the Z/TZ page index via ``_page_and_slice`` / ``_legacy_geometry``
+(``frame = ((t * n_z) + z) * channels + c``); the generic loader's TIFF branch would then pick
+ZYX/TZYX the way the IMS branch already does.
+
 .. rubric:: The reader is CACHED, not passed through the dispatch
 
 The external audit asked for the reader to be **opened once and passed down the dispatch chain**.
@@ -95,17 +103,24 @@ reader construction, **not in the product.**
 wrapper**, and that is a real gap in coverage even though it is not a product bug. The single-channel
 IMS path is measured and clean (600 planes, 0.5% of scene per frame).
 
-.. rubric:: The lazy wrappers live behind a Qt import
+.. rubric:: The lazy wrappers live behind a Qt import — RESOLVED (1.6.70)
 
-``_TiffPageStack``, ``_ImsReaderTYX`` and ``_LazyArraySource`` all live in ``file_io.py``, which
-imports the GUI stack at module scope. **Reaching a lazy wrapper therefore drags in PyQt5.**
+``_TiffPageStack``, ``_ImsReaderTYX`` and ``_LazyArraySource`` all lived in ``file_io.py``, which
+imports the GUI stack at module scope, so **reaching a lazy wrapper dragged in PyQt5** and none of
+them could be exercised headlessly — exactly what a performance harness or a CI perf gate wants to
+do.
 
-This is the same class of problem ``test_headless_science`` guards against elsewhere. It does not
-break anything today — every environment that runs PyCAT has Qt — but it means the wrappers **cannot
-be exercised headlessly**, which is exactly what a performance harness or a CI perf gate wants to do.
+All three are now out. ``_ImsReaderTYX`` and its siblings left in decomposition #3
+(``readers/ims_reader.py``); ``_TiffPageStack`` and ``_LazyArraySource`` left in **1.6.70**, to
+``file_io/lazy_sources.py``, together with the OME file-set helpers
+(``resolve_ome_file_set`` / ``build_ome_page_map``) that ``_TiffPageStack`` depends on. The bodies
+moved verbatim; ``file_io.py`` re-exports every name, so existing callers are unaffected.
 
-*A GUI-free ``lazy_sources.py`` would fix it. Small, mechanical, and it unblocks measuring the
-wrappers in CI.*
+The module is **Qt/napari-free by contract**, enforced by
+``tests/test_lazy_sources_headless.py`` — statically (no GUI import at module scope, the same check
+``test_headless_science`` applies elsewhere) and at runtime in a fresh subprocess (an in-process
+``sys.modules`` check is worthless once any other test has imported Qt). That test also reads a
+plane through the wrapper with no Qt in the process — the coverage this item existed to unblock.
 
 Outstanding & Noted (near-term, worth tackling)
 ------------------------------------------------
