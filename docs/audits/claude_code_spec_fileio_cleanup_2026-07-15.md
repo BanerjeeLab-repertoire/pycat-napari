@@ -8,29 +8,32 @@
   a still-owned one is never closed. New `test_reader_cache_closes.py`.
 - **Item 3 ✅** Removed the unconditional `pycat_stack_*` temp dir + `_stack_zarr_paths`; fixed the false
   "(zarr-backed)" labels → "(lazy, dask-backed)".
-- **Item 5 ✅ (partial, per Gable's decision) — 3 of 5 sites converted to `to_unit_float32`:** the IMS
-  single-frame (the real bug), the generic tifffile fallback (eager arrays; a `_TiffPageStack` is
-  passed through unchanged since it is already [0,1]), and the PIL 2-D fallback. **FRAP** and
-  **session-restore** left as intentional (raw / per-image min-max). The systemic raw-vs-[0,1] split in
-  the generic loader's **dask branches** (below) is NOT addressed and is left for a dedicated
-  intensity-consistency pass. Original per-site analysis:
-  - `file_io.py::_open_stack_ims` single-frame (`pos_reader[...].astype(float32)`) — **likely a real bug.**
-    `load_into_viewer` normalises via `img_as_float32`, which does NOT rescale a float input, so the
-    premature `.astype(float32)` leaks RAW COUNTS into analysis, while a multi-frame IMS (via
-    `_ImsReaderTYX`→`to_unit_float32`) is [0,1]. Recommend: drop the `.astype` (let load_into_viewer
-    normalise the uint) OR use `to_unit_float32`.
-  - `readers/stack_layer_builders.py::build_tifffile_fallback_wrapper` (`arr.astype(float32)`) — part of
-    a LARGER inconsistency: the generic loader's **dask branches** wrap `get_image_dask_data(...)` in
-    `_LazyArraySource` with NO normalisation (raw counts), while the **tifffile-page branch**
-    (`_TiffPageStack`) is [0,1]. So the fallback isn't uniquely wrong — the whole generic loader mixes
-    raw and [0,1]. This is a systemic design decision, not a one-line fix.
-  - `readers/image_reader_2d.py` PIL fallback (`astype('float32')`) — inconsistent with the normal 2D
-    path ([0,1] via `dtype_conversion_func` in the controller). Rare NumPy-2.0 path.
-  - `frap_io.py` — FRAP recovery fitting; **likely intentional raw** (leave).
-  - `session_loader.py` — already normalises via per-image **min-max** `(arr-mn)/(mx-mn)`, which differs
-    from `to_unit_float32`'s dtype-max. For a single restored image min-max is defensible; for analysis
-    consistency with a fresh load, dtype-max would match. **Judgment call.**
-  → I did NOT convert any of these (silent Csat/partition corruption risk). Which should change?
+- **Item 5 ✅ DONE — image loading STANDARDISED on dtype-max [0,1], audited safe.** Per Gable's decision
+  (option "standardize on dtype-max everywhere, audited to preserve scientific output"). Every loader now
+  yields the frame-independent dtype-max scale; per-frame **min-max** is eliminated from the load path.
+
+  **CORRECTION to my earlier analysis (both were wrong):**
+  1. The "systemic dask-branch raw counts" claim was **FALSE.** Verified: `_LazyArraySource.__getitem__`
+     applies `to_unit_float32(value, src_dtype)` on every read, and for a raw uint16 dask array
+     `src_dtype` is uint16 → dtype-max [0,1] (65535 → 1.0). The dask branches were always [0,1].
+  2. "IMS single-frame leaks raw counts" was also imprecise: `load_into_viewer` MIN-MAX-normalises float
+     inputs (`apply_rescale_intensity`), so those paths were min-max [0,1], not raw. The real defect was
+     **min-max vs dtype-max**, on the few paths that pre-cast to float32 before `load_into_viewer`.
+
+  **What changed:** IMS single-frame, generic single-frame (`read_plane` no longer forces float32), PIL
+  2-D fallback, and the generic tifffile fallback → dtype-max; and `load_into_viewer`'s float branch no
+  longer min-maxes (a float image is by contract already [0,1] → pass through). FRAP (per-trace ratios)
+  and session-restore (per-image min-max) left intentional.
+
+  **Audit conclusion (Explore agent, full scientific-module survey):** NO module depends on min-max —
+  the entire stack is written for dtype-max. Partition/enrichment/bimodal are scale-cancelling RATIOS;
+  the saturation ceilings (`partition_coefficient_field`/`_local`, `qc_saturation`) assume `1.0`=true max
+  and were *mis-firing* under min-max; N&B / molecular counting need a frame-independent scale;
+  `utils/intensity_semantics` classes min-max DESTROYED and `partition_coefficient_local` REFUSES a
+  min-max layer. Standardising on dtype-max is safe and corrects those latent defects. Also fixed the
+  hazard where `load_into_viewer`'s min-max branch mislabeled the layer as pristine `raw` (so the
+  partition guard failed open on it). Tests: new `test_load_into_viewer_scale.py`; `test_loaders_agree_on_scale.py`
+  (the dtype-max contract) still passes.
 - **Item 6 ✅ (documented + named tag, per Gable).** Kept the value `1` (a napari layer needs a positive,
   finite `layer.scale`; `0`/`NaN`/`None` would give a degenerate transform), but made it non-arbitrary:
   a write-site comment in `stack_load` explains why `1` and that it is a PLACEHOLDER tagged by

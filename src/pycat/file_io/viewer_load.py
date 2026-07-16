@@ -20,7 +20,6 @@ import numpy as np
 
 from pycat.file_io.napari_adapter import _enable_auto_scale_bar
 from pycat.file_io.tagging import _tag_loaded_layer
-from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 from pycat.ui.ui_utils import add_image_with_default_colormap
 from pycat.utils.general_utils import debug_log, dtype_conversion_func
 
@@ -70,11 +69,17 @@ def load_into_viewer(viewer, central_manager, data, name, is_mask=False):
             if np.issubdtype(data.dtype, np.signedinteger):
                 data = data.astype(np.uint16)
         elif np.issubdtype(data.dtype, np.floating):
-            if np.max(data) > 1 or np.min(data) < 0:             
-                # For floating-point types, ensure values are between 0-1 and convert to float32
-                data = apply_rescale_intensity(data, out_min=0.0, out_max=1.0).astype(np.float32)
-            else: 
-                data = data.astype(np.float32)
+            # A float IMAGE is by contract already DTYPE-MAX [0, 1] (`to_unit_float32` /
+            # `dtype_conversion_func` in the loaders). PASS IT THROUGH — do NOT min-max
+            # (`apply_rescale_intensity`), which is a per-frame, offset-injecting contrast stretch
+            # that `utils/intensity_semantics` classifies DESTROYED: it forces every frame's brightest
+            # pixel to exactly 1.0 (false-tripping the saturation ceilings in partition/qc), injects
+            # the frame's dark-noise floor as an offset (corrupting partition-coefficient RATIOS —
+            # `partition_coefficient_local` REFUSES a min-max layer), and is frame-dependent (breaking
+            # any intensity time-course). The loaders now hand in dtype-max [0,1] (or integer, handled
+            # above), so raw-counts floats no longer arrive here. A frame already in range must not be
+            # rescaled a second time. See tests/test_loaders_agree_on_scale.py.
+            data = data.astype(np.float32)
         data = dtype_conversion_func(data, 'float32')  # Ensure image data is correct float32 dtype
         # Add the image to the viewer
         add_image_with_default_colormap(data, viewer, name=name)

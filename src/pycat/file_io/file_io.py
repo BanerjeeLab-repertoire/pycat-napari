@@ -2261,7 +2261,14 @@ class FileIOClass:
                     continue
 
                 if n_t == 1 and n_z == 1:
-                    frame = read_plane(image, path=file_path, c=channel_idx, t=0, z=0, dtype=np.float32)
+                    # Normalise to [0, 1] via the canonical DTYPE-MAX helper — NOT a raw float cast
+                    # (`dtype=np.float32`), which would reach load_into_viewer as raw counts and hit
+                    # its (former) min-max branch: a per-frame contrast stretch that corrupts
+                    # partition ratios and false-trips saturation ceilings. Reads the native (integer)
+                    # dtype, then divides by the dtype max — matching every other loader and the IMS
+                    # single-frame path. See tests/test_loaders_agree_on_scale.py.
+                    _raw = read_plane(image, path=file_path, c=channel_idx, t=0, z=0)
+                    frame = to_unit_float32(_raw, getattr(_raw, 'dtype', None))
                     self.load_into_viewer(
                         frame,
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")

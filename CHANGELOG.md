@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.6.64] - 2026-07-15
-### Changed — **File-I/O audit cleanup: four of the six re-audit items closed (items 5 & 6 deferred to a human intensity-semantics decision).**
+### Changed — **File-I/O audit cleanup: all six re-audit items closed, incl. a full intensity-normalization standardization (dtype-max) audited safe for the scientific stack.**
 - **Item 4 — stale `aicsimageio` in PKG-INFO.** The committed root `PKG-INFO` still declared
   `Requires-Dist: aicsimageio>=4.14.0` (+ `aicspylibczi`) — dependencies removed in the 1.6.0 BioIO
   migration. `PKG-INFO` is build output (regenerated from `pyproject.toml` into the sdist/wheel), so
@@ -27,15 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pycat_stack_*` temp dir (the synchronous full-file zarr transcode that fed it is long gone — every
   branch hands napari an already-lazy wrapper), and the two z-stack / T-Z layer messages that falsely
   claimed "(zarr-backed)" now say "(lazy, dask-backed)".
-- **Item 5 — intensity normalization (three inconsistency sites fixed, per Gable's decision).** Routed
-  three raw-`astype(float32)` sites through the canonical `to_unit_float32` so their intensity matches
-  every other loader ([0, 1] from the source dtype): the **IMS single-frame** path (a real bug — the
-  premature float cast leaked raw counts past `load_into_viewer`'s `img_as_float32`, which does not
-  rescale floats, while multi-frame IMS was already [0, 1]); the **generic tifffile fallback** (eager
-  arrays now normalise; a `_TiffPageStack`, already [0, 1], is passed through — the old `.astype` would
-  have crashed on it); and the **PIL 2-D fallback**. **FRAP** and **session-restore** were left as
-  intentional raw / per-image min-max. A systemic raw-vs-[0, 1] split in the generic loader's dask
-  branches was documented for a future dedicated pass (see the cleanup audit doc).
+- **Item 5 — intensity normalization STANDARDISED on dtype-max [0, 1] across all image loading, audited
+  safe for the scientific stack.** Every loader now yields the frame-independent **dtype-max** scale
+  (`to_unit_float32` = `skimage.img_as_float32`, divide by the dtype ceiling) — never per-frame
+  **min-max** (contrast-stretch each frame's own min..max), which `utils/intensity_semantics` classes
+  DESTROYED. Sites converted:
+  - **IMS single-frame**, **generic single-frame** (`read_plane` no longer forces `dtype=np.float32`),
+    and **PIL 2-D fallback** → dtype-max via the native integer read;
+  - **generic tifffile fallback** → dtype-max (eager arrays normalised; an already-[0,1] `_TiffPageStack`
+    passes through);
+  - **`load_into_viewer`**: its float branch **no longer min-maxes** — a float image is by contract
+    already [0,1], so it passes through. This removes the audit's flagged hazard: min-max mislabeled the
+    layer as pristine `raw`, so `partition_coefficient_local` (which refuses a *tagged* min-max layer)
+    failed open on it.
+  - **FRAP** (per-trace ratios) and **session-restore** (per-image min-max) left as intentional.
+  - **Correction:** an earlier note here claimed the generic loader's *dask branches* produced raw
+    counts — that was WRONG (verified): `_LazyArraySource` already applies `to_unit_float32` on every
+    read (65535 → 1.0), so the dask branches were always dtype-max. The only real anomalies were the
+    float-precast single-frame paths above.
+  - **Audit (`docs/audits/claude_code_spec_fileio_cleanup_2026-07-15.md`):** no scientific module depends
+    on min-max — the whole stack is written for dtype-max. Partition/enrichment/bimodal are scale-cancelling
+    RATIOS; the saturation ceilings (`partition_coefficient_field`/`_local`, `qc_saturation`) assume
+    `1.0`=true max and were *mis-firing* under min-max; N&B / molecular counting need a frame-independent
+    scale; `partition_coefficient_local` already REFUSES min-max layers. Standardising on dtype-max is
+    safe and corrects those latent defects. New `tests/test_load_into_viewer_scale.py`; existing
+    `test_loaders_agree_on_scale.py` (the dtype-max contract) still passes.
 - **Item 6 — the `microns_per_pixel_sq = 1` sentinel — documented + given a named "real-scale tag".** Kept
   the value `1` (a napari layer needs a positive, finite `layer.scale` to render/draw a scale bar; `1`
   maps it at 1 µm/px, where `0`/`NaN` would give a degenerate transform), but made its meaning explicit:
