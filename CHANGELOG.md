@@ -4,6 +4,50 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.80] - 2026-07-16
+### Added — **A harness for the worst bug this codebase can have: a filter default that quietly inverts the result.**
+It does not crash, it does not warn, and it returns a number of the right magnitude in the right units
+that a reader would accept. PyCAT has shipped two, both found by accident:
+- `count_molecules_single(r2_min=0.999)` — R² of a bleaching fit **rises with N**, so gating on fit
+  quality selects for bright cells. Reported a population mean of 77 against a true 44.
+- `filter_cells_by_transfection` with the old mean/background **ratio** at 2.0 — the camera pedestal
+  sits in both numerator and denominator and drags the ratio toward 1, so on a 500-count sensor
+  **every transfected cell was called untransfected.**
+
+Both are fixed. `tests/filter_sensitivity.py` is the machinery that would have caught them:
+`sweep_invariance` plus three named checks — `assert_no_selection_bias`, `assert_offset_invariant`,
+`assert_scale_invariant` — which drive the **real** production functions over synthetic data whose
+truth is known, and assert about a *sweep* rather than a point. A default that is right at its own
+value and catastrophic one step away is exactly the failure mode.
+### Added — **The harness is proved, not just written.**
+Each check has a **positive control** (the current default passes) and a **negative control** (the
+known-bad value is caught) — because a harness nobody has seen fail is not evidence.
+- The mechanism itself is pinned: dim traces fit at R²=0.9951, bright ones at R²=0.9985 — **higher
+  purely because N is higher.** The recovered mean then climbs monotonically with the gate:
+  41.3 → 51.3 → 64.4 (true 44). That direction is what makes it a sampling effect, not noise.
+- The pedestal case reproduces the original table exactly: the old ratio keeps {3,4} at pedestal 0,
+  {4} at 100, and **nothing** from 500 up, while the current contrast-to-noise form is invariant at
+  0/100/500/2000. The old form is reconstructed as a **local test lambda** — never back into
+  production — purely to prove detection.
+- The `scale` check has no validated production case yet, so it is proved against an explicit
+  known-answer stand-in rather than left as an intention.
+- Mutation-checked: blinding `sweep_invariance` turns **all three** negative controls red.
+- A seeded registry (`VALIDATED_CASES`) + a parametrize makes adding the next dangerous default one
+  row, and requires each entry to explain *how* it inverts the result — a list of parameter names is
+  not a warning. `vpt_tools.defocus_r2_max` is explicitly excluded and tested for: it is deprecated
+  and unused, so a sensitivity test on it would assert about code no run reaches and read as coverage.
+### Fixed
+- `filter_cells_by_transfection`'s docstring **summary** still described the removed ratio form
+  (*"SNR = mean(cell intensity) / background"*) — the body and the parameter note were fixed, but the
+  opening paragraph was left describing the bug as though it were the design. Found while building
+  the harness against it; now pinned by the pedestal test.
+### Notes
+- No production behaviour changed — tests plus one docstring correction.
+- Scope is the framework + the two validated cases + the registry. The remaining defaults are the
+  next increment and want prioritising first; the spec names the select-for-the-measured-quantity
+  class (segmentation's `local`/`global_snr_threshold`, condensate `bleach_r2_min`) as the shape most
+  like `r2_min`.
+
 ## [1.6.79] - 2026-07-16
 ### Fixed — **"I selected two images and it loaded all eight."**
 - `_on_load` built `selected_stems` from the multi-select list, used them to size the progress bar,

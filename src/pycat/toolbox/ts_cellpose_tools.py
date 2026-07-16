@@ -368,10 +368,18 @@ def filter_cells_by_transfection(labeled_mask, fluor_frame, snr_threshold=3.0,
     per-cell fluorescence SNR on a single (reference) frame.
 
     This is a coarse "is this cell worth analysing" gate for transiently
-    transfected samples — NOT puncta segmentation. For each cell it computes
-    SNR = mean(cell intensity) / background, where background is a robust low
-    percentile of the whole frame's intensity (a stand-in for the camera/optical
-    floor). Cells with SNR >= threshold are considered transfected.
+    transfected samples — NOT puncta segmentation. For each cell it computes the
+    CONTRAST-to-noise ratio ``(mean_cell - background) / noise_sd``: how many
+    background-noise sigma the cell sits above background, where background is a
+    robust low percentile of the whole frame. Cells with CNR >= threshold are
+    considered transfected.
+
+    (This summary said ``SNR = mean(cell intensity) / background`` — the RATIO
+    form, which was removed precisely because it measured the camera rather than
+    the biology. The body and the ``snr_threshold`` note below were fixed; this
+    paragraph was left describing the bug as though it were the design. Pinned
+    now by ``tests/test_filter_sensitivity.py``, which drives this function
+    across camera pedestals and asserts the verdict does not move.)
 
     Parameters
     ----------
