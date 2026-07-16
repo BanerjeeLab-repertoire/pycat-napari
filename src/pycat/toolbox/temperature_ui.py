@@ -43,7 +43,7 @@ class TemperatureDependentUI:
     def _dr(self):
         return self.central_manager.active_data_class.data_repository
 
-    def _get_stack(self, sname):
+    def _get_stack(self, sname, progress_bar=None):
         """Materialize the named stack ONCE and cache it, so the several
         temperature analyses (clear-frame guess, turbidity, per-temperature,
         transitions) don't each re-decode the whole lazy stack from disk.
@@ -60,7 +60,22 @@ class TemperatureDependentUI:
         cache = getattr(self, '_stack_cache', None)
         if cache is not None and cache[0] == sname and cache[1] is data:
             return cache[2]
-        arr = materialize_stack(data)
+        # ── The cache is why this looked harmless ────────────────────────────────────────
+        #
+        # Only the FIRST call decodes; every later one is instant. So the freeze happens once, on
+        # whichever section the user happens to click first — which is exactly the kind of "it only
+        # hangs sometimes" nobody pins down.
+        #
+        # The bar is the CALLER's: this helper is shared across five sections and cannot know which
+        # one is on screen. Passing it down is the only honest wiring.
+        _pp = None
+        if progress_bar is not None:
+            from pycat.ui.ui_utils import PhasedProgress
+            _pp = PhasedProgress(progress_bar, phases=[("Materializing frames", 1.0)])
+        arr = materialize_stack(data,
+                                progress_callback=_pp.callback if _pp is not None else None)
+        if _pp is not None:
+            _pp.hide()
         self._stack_cache = (sname, data, arr)
         return arr
 
@@ -471,7 +486,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
-        stack = self._get_stack(sname)
+        stack = self._get_stack(sname, progress_bar=self._sync_prog)
         if stack.ndim != 3:
             napari_show_warning("Reference-frame guessing needs a (T, H, W) stack."); return
         res = guess_clear_frame(stack)
@@ -498,7 +513,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return
-        stack = self._get_stack(sname)
+        stack = self._get_stack(sname, progress_bar=self._sync_prog)
         if stack is None or stack.ndim != 3:
             napari_show_warning("Need a (T, H, W) stack to subtract."); return
         ref_idx = int(self._ref_frame.value())
@@ -527,7 +542,7 @@ class TemperatureDependentUI:
         temps = self._dr().get('temp_temperatures')
         if temps is None:
             napari_show_warning("Run Step 2 (Sync Temperatures) first."); return
-        stack = self._get_stack(sname)
+        stack = self._get_stack(sname, progress_bar=self._turb_prog)
         if stack.ndim != 3:
             napari_show_warning("Temperature analysis needs a (T, H, W) stack."); return
 
@@ -669,7 +684,7 @@ class TemperatureDependentUI:
         sname = self._stack_dd.currentText()
         if sname not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Stack layer '{sname}' not found."); return None
-        stack = self._get_stack(sname)
+        stack = self._get_stack(sname, progress_bar=self._export_prog)
         if stack.ndim != 3:
             napari_show_warning("Pattern correction needs a (T, H, W) stack."); return None
         return apply_static_pattern_correction(stack, self._ref_frame.value())
@@ -727,7 +742,7 @@ class TemperatureDependentUI:
         if not out:
             return
 
-        stack = self._get_stack(sname)
+        stack = self._get_stack(sname, progress_bar=self._export_prog)
         if self._export_corrected.isChecked():
             from pycat.toolbox.temperature_tools import apply_static_pattern_correction
             stack = apply_static_pattern_correction(stack, self._ref_frame.value())

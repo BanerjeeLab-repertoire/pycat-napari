@@ -245,6 +245,10 @@ class DropletFusionUI:
         btn = QPushButton("▶  Build Signal")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_build_signal)
+        # Building an image-mode signal decodes the whole stack frame by frame. Without a bar the
+        # panel simply stops, for as long as the acquisition is big.
+        self._build_prog = QProgressBar(); self._build_prog.setVisible(False)
+        form.addRow(self._build_prog)
         form.addRow(btn)
         layout.addWidget(grp)
 
@@ -267,7 +271,11 @@ class DropletFusionUI:
             if name not in [l.name for l in self.viewer.layers]:
                 napari_show_warning(f"Image stack '{name}' not found."); return
             from pycat.file_io.file_io import materialize_stack
-            stack = materialize_stack(self.viewer.layers[name].data)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(self._build_prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(self.viewer.layers[name].data,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
             # Image-mode fusion treats frames as TIME (aspect-ratio relaxation) —
             # warn once if the stack's axis was assumed at load.
             try:

@@ -46,21 +46,14 @@ _MATERIALIZERS = {'materialize_stack', 'as_full_array'}
 #: Each of these needs a bar ADDED to its form, which is a UI change rather than the one-line wiring
 #: this pass is. Listed, not hidden: this IS the remaining work.
 _STILL_SILENT = {
-    # module                      allowed  why
-    'condensate_physics_ui.py':   1,     # _on_fusion has no bar; its siblings do
-    'data_qc_ui.py':              1,     # no QProgressBar is ever constructed here
-    'fusion_ui.py':               1,     # imports QProgressBar; never constructs one
-    # `_ivbf_focus_qc` has no bar of its own, though `_ivbf_dynamics` next door does. Worth naming
-    # how that was found: wiring it to the sibling's `prog` LOOKED right and would have raised
-    # NameError on the first click — `test_no_undefined_names` caught it. A bar is not in scope just
-    # because a sibling section has one.
-    'invitro_bf_ui.py':           1,     # _ivbf_focus_qc
-    # `_get_stack` is a shared, CACHED helper called from several sections, so no single bar is
-    # "its own" — wiring it means every caller passing a reporter down, a signature change across
-    # the module. Worth recording that the spec calls this file "the ONE reference implementation
-    # that does it right" and says not to touch it: it IS right for its batch/export paths, and
-    # this stack load was simply missed. The ratchet found it on its first run.
-    'temperature_ui.py':          1,     # _get_stack
+    # **Empty, and it should stay that way.** Every materialize site in every `*_ui.py` reports
+    # progress. A new one fails the test above; the way to pass is to wire it, not to add a row here.
+    #
+    # Getting to zero needed four sections to gain a bar of their own (`data_qc_ui`, `fusion_ui`,
+    # `condensate_physics_ui._on_fusion`, `invitro_bf_ui._ivbf_focus_qc`) and one shared helper
+    # (`temperature_ui._get_stack`) to take an optional reporter its five callers pass down — that
+    # one is CACHED, so it froze exactly once, on whichever section the user clicked first, which is
+    # the kind of "it only hangs sometimes" nobody ever pins down.
 }
 
 #: Materializing a 2-D array is instant — a bar would flash and vanish. Only STACKS need one.
@@ -128,7 +121,7 @@ def test_a_widget_that_MATERIALIZES_a_stack_reports_progress(path):
 def test_the_widgets_that_were_ROLLED_OUT_stay_rolled_out():
     """Names them, so a regression is a named loss rather than a quiet one."""
     wired = ('frap_ui.py', 'invitro_fluor_ui.py', 'invitro_bf_ui.py', 'brightfield_ui.py',
-             'condensate_physics_ui.py')
+             'condensate_physics_ui.py', 'data_qc_ui.py', 'fusion_ui.py', 'temperature_ui.py')
     for module in wired:
         source = (_UI_DIR / module).read_text(encoding='utf-8', errors='ignore')
         assert 'progress_callback=' in source, f"{module} lost its progress wiring"
@@ -143,21 +136,28 @@ def test_the_reference_implementation_is_UNTOUCHED():
 def test_the_EXCUSED_list_is_SMALL_and_each_entry_is_real():
     """An allowlist is a promise to come back. It should be short, and every entry should name a
     module that actually exists — a stale excuse silently un-ratchets a widget."""
-    assert sum(_STILL_SILENT.values()) <= 5, (
-        "the countdown is going UP — it is the remaining work, not a place to put failures")
+    assert sum(_STILL_SILENT.values()) == 0, (
+        "the countdown reached ZERO — every materialize site reports progress. It is not a place "
+        "to put failures: wire the new site instead.")
     for module in list(_STILL_SILENT) + [m for m, _h in _TINY_OK]:
         assert (_UI_DIR / module).exists(), f"{module} no longer exists — the excuse is stale"
 
 
-def test_the_excused_widgets_REALLY_have_no_progress_bar():
-    """The excuse is "there is no bar to wire", so it had better be true. If someone adds one, the
-    excuse expires and the ratchet should start demanding the wiring.
-
-    Checks for a CONSTRUCTED bar, not the string: `fusion_ui` imports `QProgressBar` and never
-    builds one, so matching the name alone made this test fail against its own allowlist — which
-    is how the sloppiness got caught.
-    """
+def test_the_widgets_that_had_NO_BAR_now_have_one():
+    """`data_qc_ui` and `fusion_ui` constructed no `QProgressBar` at all — so there was nothing to
+    wire and they froze silently. They each have one now, in the same form as the button that starts
+    the work."""
     for module in ('data_qc_ui.py', 'fusion_ui.py'):
         source = (_UI_DIR / module).read_text(encoding='utf-8', errors='ignore')
-        assert 'QProgressBar(' not in source, (
-            f"{module} constructs a QProgressBar now — wire it and drop it from _NO_REPORTER_YET")
+        assert 'QProgressBar(' in source, f"{module} lost the bar it was given"
+
+
+def test_the_shared_CACHED_helper_lets_its_caller_report():
+    """`temperature_ui._get_stack` is called from five sections and caches, so it froze exactly
+    once — on whichever section the user clicked first. It cannot know which bar is on screen, so
+    the caller passes one down."""
+    source = (_UI_DIR / 'temperature_ui.py').read_text(encoding='utf-8', errors='ignore')
+    assert 'def _get_stack(self, sname, progress_bar=None)' in source
+    assert source.count('_get_stack(sname, progress_bar=self.') == 5, (
+        "a caller of the shared helper stopped passing its bar — that section freezes silently "
+        "again, and only when it happens to be the first one clicked")

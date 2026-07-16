@@ -1,3 +1,25 @@
+## [1.6.82] - 2026-07-16
+### Added — **Progress rollout COMPLETE: all 14 materialize sites, countdown at zero.**
+1.6.81 wired 9 and left 5 on a countdown. The last 5 needed more than wiring, which is why they were
+left:
+- **Four sections had no progress bar at all** — `data_qc_ui`, `fusion_ui`,
+  `condensate_physics_ui._on_fusion`, `invitro_bf_ui._ivbf_focus_qc`. Each now has one, in the same
+  form as the button that starts the work. (`data_qc_ui` is the one that stings: QC is exactly the
+  step you run on your *biggest* acquisition, to find out whether it is worth analysing.)
+- **`temperature_ui._get_stack` is a shared, CACHED helper** called from five sections. Being cached,
+  it froze exactly **once** — on whichever section the user happened to click first, which is the
+  kind of "it only hangs sometimes" nobody ever pins down. It cannot know which bar is on screen, so
+  it takes an optional reporter and its five callers pass their own down.
+- `tests/test_progress_rollout.py`'s countdown is now **zero** and asserts it: a new silent
+  materialize fails the build, and the way to pass is to wire it, not to add a row.
+### Notes
+- **The work is still synchronous** — this makes the freeze visible, not shorter. The window may
+  still say "Not Responding" while the bar advances. Real responsiveness needs worker-thread
+  materialization, which is the same change the session loader wants: **worth doing once, for both**.
+  Recorded in `roadmap.rst`.
+- A sibling's bar is not a section's bar: wiring one *looks* right and raises `NameError` on the
+  first click. That is why four sections needed a bar rather than a one-line edit.
+
 # Changelog
 All notable changes to PyCAT-Napari will be documented in this file.
 

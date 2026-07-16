@@ -16,7 +16,7 @@ from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QWidget, QSizePolicy,
+    QDoubleSpinBox, QSpinBox, QCheckBox, QWidget, QSizePolicy, QProgressBar,
 )
 
 
@@ -109,6 +109,10 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     run_btn = QPushButton("▶  Run Quality Report")
     run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
+    # QC on a stack decodes every frame. Without a bar the panel just stops — and QC is exactly the
+    # step a user runs on their BIGGEST acquisition, to find out whether it is worth analysing.
+    run_prog = QProgressBar(); run_prog.setVisible(False)
+
     # holds the latest results + figure so they can be saved
     _state = {'results': None, 'fig': None, 'name': None}
 
@@ -130,8 +134,13 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         # Every other stack-consuming UI already uses `materialize_stack`. This one did not.
         from pycat.file_io.file_io import materialize_stack
         _layer_data = ui_instance.viewer.layers[name].data
-        data = materialize_stack(_layer_data) if getattr(_layer_data, 'ndim', 2) == 3 \
-            else np.asarray(_layer_data)
+        if getattr(_layer_data, 'ndim', 2) == 3:
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(run_prog, phases=[("Materializing frames", 1.0)])
+            data = materialize_stack(_layer_data, progress_callback=_pp.callback)
+            _pp.hide()
+        else:
+            data = np.asarray(_layer_data)      # already 2-D: instant, a bar would only flash
         if data.ndim not in (2, 3):
             napari_show_warning("QC needs a 2-D image or a 3-D (T/Z, H, W) stack."); return
         from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report
@@ -273,6 +282,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
 
     gallery_btn.clicked.connect(_open_gallery)
 
+    outer.addWidget(run_prog)
     outer.addWidget(run_btn)
     outer.addWidget(save_btn)
     outer.addWidget(gallery_btn)

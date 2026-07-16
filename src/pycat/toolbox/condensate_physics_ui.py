@@ -336,6 +336,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     run_fusion = QPushButton("▶  Fit Fusion Relaxation (from merge events)")
     run_fusion.setToolTip("Detect droplet merges, follow the merged droplet's aspect-ratio relaxation, and fit τ (and η/γ if R is set).")
     run_fusion.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    # Its own bar: `prog_msd` / `prog_hist` belong to the sections above and live in their forms.
+    prog_fus = QProgressBar(); prog_fus.setVisible(False)
+    kf.addRow(prog_fus)
     kf.addRow(_bwc(run_fusion, optional=True))
 
     def _on_coarsen():
@@ -373,7 +376,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         if name not in [l.name for l in ui_instance.viewer.layers]:
             napari_show_warning("Select a labelled condensate mask stack first."); return
         from pycat.file_io.file_io import materialize_stack
-        stack = materialize_stack(ui_instance.viewer.layers[name].data, dtype=None)
+        from pycat.ui.ui_utils import PhasedProgress as _PP
+        _pp = _PP(prog_fus, phases=[("Materializing frames", 1.0)])
+        stack = materialize_stack(ui_instance.viewer.layers[name].data, dtype=None,
+                                  progress_callback=_pp.callback)
+        _pp.hide()
         if stack.ndim != 3:
             napari_show_warning("Fusion needs a 3D (T,H,W) mask stack."); return
         mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')

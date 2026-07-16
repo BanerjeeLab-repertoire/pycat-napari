@@ -232,36 +232,33 @@ both need a real ``napari.Viewer``, which needs a GL context that offscreen Qt c
 same reason ``test_ui_smoke.py`` errors headlessly). Their logic is tested; their *docking* and
 *rendering* are not.
 
-.. rubric:: Progress-bar rollout — 9 of 14 materialize sites wired (1.6.81); 5 on a countdown
+.. rubric:: Progress-bar rollout — COMPLETE (1.6.81 → 1.6.82); the wait is now VISIBLE, not shorter
 
-Widgets that materialize a lazy stack decode it frame by frame on the Qt main thread, with nothing to
-say they are working. 9 sites across `frap_ui`, `invitro_fluor_ui`, `invitro_bf_ui`, `brightfield_ui`
-and `condensate_physics_ui` now drive a `PhasedProgress` on the widget's own bar.
+Every ``materialize_stack`` / ``as_full_array`` site in every ``*_ui.py`` reports progress.
+``tests/test_progress_rollout.py`` holds it there: a new silent site fails the build, and the
+countdown is at **zero** — the way to pass is to wire it, not to add a row.
 
-**Why the bar moves at all, on a blocked thread:** ``QProgressBar.setValue`` calls ``repaint()``,
-which is *synchronous*. Measured — 50 updates in a busy loop produce 50 paints, against 0 for a
-control that never touches the bar. A ``QLabel`` produces **0**: ``setText`` only schedules an
-``update()`` the blocked event loop never runs, so **a status label is not a progress reporter here**,
-whatever it says.
+**Why the bar moves on a blocked thread:** ``QProgressBar.setValue`` calls ``repaint()``, which is
+*synchronous*. Measured — 50 updates in a busy loop produce 50 paints, against 0 for a control that
+never touches the bar. A ``QLabel`` produces **0**: ``setText`` only schedules an ``update()`` the
+blocked event loop never runs, so **a status label is not a progress reporter here**.
 
-**What this does NOT do:** the work is still synchronous. The wait is now visible, not shorter, and
-the window may still report "Not Responding" while the bar advances. Real responsiveness means
-materializing on a worker — the same change the session loader needs (below), and worth doing once
-for both.
+Getting to zero needed more than wiring: four sections had no bar at all (``data_qc_ui``,
+``fusion_ui``, ``condensate_physics_ui._on_fusion``, ``invitro_bf_ui._ivbf_focus_qc``) and one
+shared, **cached** helper (``temperature_ui._get_stack``, called from five sections) had to take an
+optional reporter its callers pass down — being cached, it froze exactly *once*, on whichever section
+the user happened to click first, which is the kind of "it only hangs sometimes" nobody pins down.
 
-*Remaining, tracked as a countdown in* ``tests/test_progress_rollout.py`` *(the number only goes
-down; a NEW silent site fails the build):*
+*Two things this pass found on the way:* ``frap_ui`` materialised **every Image layer in the viewer**
+to test ``ndim == 2`` and discarded the stacks — decoding every open acquisition to answer a question
+the array already knew. And ``temperature_ui``, described in its spec as "the ONE reference
+implementation that does it right", had an unwired stack load of its own; the ratchet found it on its
+first run.
 
-* ``condensate_physics_ui._on_fusion``, ``invitro_bf_ui._ivbf_focus_qc`` — the section has no bar,
-  though its siblings do. **Adding one is a UI change, not the one-line wiring this pass was** — and
-  wiring to a sibling's bar is not an option: it *looks* right and raises ``NameError`` on the first
-  click (``test_no_undefined_names`` caught exactly that during this pass).
-* ``data_qc_ui``, ``fusion_ui`` — no ``QProgressBar`` is constructed anywhere in the module.
-* ``temperature_ui._get_stack`` — a shared, **cached** helper called from several sections, so no
-  single bar is "its own"; wiring it means every caller passing a reporter down. Note the spec called
-  this module *"the ONE reference implementation that does it right"* and said not to touch it: it is
-  right for its batch/export paths, and this stack load was simply missed. The ratchet found it on
-  its first run.
+**What remains: the work is still synchronous.** This makes the freeze visible, not shorter — the
+window may still report "Not Responding" while the bar advances. Real responsiveness means
+materializing on a worker, which is the same change the session loader needs (below). **Worth doing
+once, for both**, rather than twice.
 
 .. rubric:: Session load runs on the Qt thread ("Python is not responding") — needs a worker
 

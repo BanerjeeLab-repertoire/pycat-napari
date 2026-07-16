@@ -618,13 +618,22 @@ def _ivbf_focus_qc(ui, layout):
     form.addRow("Defocus threshold:", thr_sp)
     run = QPushButton("▶  Assess Focus")
     run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    # Its own bar. `_ivbf_dynamics` next door has a `prog` from `_run_btn`; that one is NOT in scope
+    # here, and wiring to it raises NameError on the first click (test_no_undefined_names caught
+    # exactly that). A sibling's bar is not this section's bar.
+    prog = QProgressBar(); prog.setVisible(False)
+    form.addRow(prog)
     form.addRow(run)
 
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
             from pycat.file_io.file_io import materialize_stack
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data,
+                                      dtype=np.float32, progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Needs a 3D (T,H,W) stack."); return

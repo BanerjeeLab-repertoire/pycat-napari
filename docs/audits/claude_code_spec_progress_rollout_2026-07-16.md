@@ -1,7 +1,14 @@
 # Claude Code spec — Progress-bar rollout to every widget that freezes on a big stack
 
-## 🟡 STATUS — 9 of 14 sites wired, shipped in 1.6.81. 5 remain on a COUNTDOWN, each with a reason.
-`pytest -m core`: **741 passed, 2 skipped** (was 718).
+## ✅ STATUS — COMPLETE. All 14 sites wired (1.6.81 + 1.6.82); the ratchet's countdown is at ZERO.
+`pytest -m core`: **742 passed, 2 skipped**. Definition of done met: every widget in the table shows a
+moving bar instead of a frozen 0%; `test_progress_rollout.py` passes and fails a future no-progress
+materialize; no complexity regression; behaviour-preserving apart from the reporting (and one real
+efficiency fix, below).
+
+The last 5 needed a bar **added** rather than wired — four sections had none, and
+`temperature_ui._get_stack` is a shared *cached* helper whose five callers now pass their own bar
+down. Being cached, it froze exactly once, on whichever section was clicked first.
 
 **The premise holds, and it was worth checking.** "Wire the callback and the bar moves" is only true
 because `QProgressBar.setValue` calls `repaint()`, which is **synchronous** — measured at 50 paints
