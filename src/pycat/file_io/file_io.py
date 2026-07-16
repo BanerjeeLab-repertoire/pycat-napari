@@ -2169,7 +2169,8 @@ class FileIOClass:
         _struct = read_stack_structure(
             file_path, ext,
             tiff_page_stack_cls=_TiffPageStack,
-            tiff_pixel_size_um=_tiff_pixel_size_um)
+            tiff_pixel_size_um=_tiff_pixel_size_um,
+            ome_pixel_size_um=_ome_pixel_size_um)
         reader_has_structure = _struct.reader_has_structure
         microns_per_pixel = _struct.microns_per_pixel
 
@@ -2404,15 +2405,23 @@ class FileIOClass:
         except Exception as _e:
             debug_log("file_io: CZI metadata via libCZI failed (using BioFormats dims only)", _e)
 
-        # Open the BioFormats reader OFF the main thread (setId parses ~15k frame offsets, ~33 s) so
-        # the event loop keeps painting instead of a dead spinner.
-        napari_show_info("Indexing CZI via BioFormats — one-time frame-index parse; then it scrubs.")
+        # Open the BioFormats reader OFF the main thread (setId parses every frame offset) so the
+        # event loop keeps painting instead of a dead spinner. Surface the frame count (known from
+        # libCZI, opened above) so the user sees the SCALE of the one-time parse — and it ticks an
+        # elapsed-seconds counter, because the parse is opaque (no percentage available).
+        _n_frames = None
+        try:
+            _n_frames = int(getattr(image.dims, 'T', 0) or 0) if image is not None else None
+        except Exception:
+            _n_frames = None
+        _frames_txt = f"{_n_frames:,} frames" if _n_frames else "all frames"
+        napari_show_info(f"Indexing CZI via BioFormats — one-time parse of {_frames_txt}; then it scrubs.")
         try:
             reader = self._run_with_busy_progress(
                 lambda: _czibf.CziBioFormatsReader(file_path),
                 "Opening CZI",
-                "Indexing CZI via BioFormats…\n(one-time frame-index parse — then frames scrub "
-                "on demand)")
+                f"Indexing {_frames_txt} via BioFormats…\n\nOne-time frame-index parse (can take a few "
+                f"minutes for a large file). The window stays responsive; frames then scrub on demand.")
         except Exception as _e:
             napari_show_warning(f"BioFormats could not open this CZI:\n{_e}")
             debug_log("file_io: BioFormats CZI open failed", _e)
@@ -2513,11 +2522,29 @@ class FileIOClass:
         dlg.setAutoClose(False)
         dlg.setAutoReset(False)
 
+        # Tick an ELAPSED-SECONDS counter into the label. The work (BioFormats setId) is opaque — it
+        # exposes no percentage — so the busy bar can only spin; a counting-up "…Ns" is what tells
+        # the user it is actively working, not hung ("spinning but no progress").
+        from PyQt5.QtCore import QTimer
+        _secs = [0]
+
+        def _tick():
+            _secs[0] += 1
+            try:
+                dlg.setLabelText(f"{text}\n\n… {_secs[0]}s elapsed")
+            except Exception:
+                pass
+        _timer = QTimer()
+        _timer.setInterval(1000)
+        _timer.timeout.connect(_tick)
+
         def _on_finished():
+            _timer.stop()
             thread.quit()
             dlg.reset()             # returns from dlg.exec_()
 
         worker.finished.connect(_on_finished)
+        _timer.start()
         thread.start()
         dlg.exec_()                 # spins the event loop until _on_finished()
         thread.wait()

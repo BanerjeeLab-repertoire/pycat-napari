@@ -68,6 +68,31 @@ def test_reader_pixel_size_wins_over_tags():
     assert called['tags'] is False   # a real reader pixel size short-circuits the tag read
 
 
+def test_ome_xml_pixel_size_recovered_when_reader_and_tiff_tags_are_silent():
+    # An OME-TIFF whose baseline XResolution is zeroed (0/1) makes the reader's physical_pixel_sizes
+    # and the TIFF-tag reader both fail, but the OME-XML carries the real value (the "Image 3" bug).
+    img = _FakeImage(scenes=[], py=None)
+    s = read_stack_structure(
+        'f.ome.tiff', '.tiff',
+        tiff_page_stack_cls=None,
+        tiff_pixel_size_um=lambda p: None,
+        ome_pixel_size_um=lambda p: 0.0263576452,
+        open_image=lambda p: img)
+    assert s.reader_has_structure is True
+    assert abs(s.microns_per_pixel - 0.0263576452) < 1e-9
+
+
+def test_ome_xml_wins_over_tiff_tags():
+    img = _FakeImage(scenes=[], py=None)
+    s = read_stack_structure(
+        'f.ome.tiff', '.tiff',
+        tiff_page_stack_cls=None,
+        tiff_pixel_size_um=lambda p: 0.5,             # a (wrong) TIFF-tag value
+        ome_pixel_size_um=lambda p: 0.0263576452,     # OME-XML is authoritative
+        open_image=lambda p: img)
+    assert abs(s.microns_per_pixel - 0.0263576452) < 1e-9
+
+
 class _FakeStack:
     """Stand-in for _TiffPageStack: read_stack_structure only reads .ndim / .shape off it."""
     def __init__(self, path, n, H, W, dtype, channel_idx=0, n_channels=1):

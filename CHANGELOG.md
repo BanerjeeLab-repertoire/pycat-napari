@@ -4,6 +4,25 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.65] - 2026-07-16
+### Fixed — **GUI-confirm follow-ups: pixel size now reaches the status-bar readout; OME-TIFF scale recovered in the stack loader; CZI open shows a live counter.**
+- **Status-bar coordinate readout was showing a coarsely-rounded µm that looked frozen, plus filename
+  clutter.** The dual `px … | µm …` readout now uses **adaptive µm precision** — `ceil(-log10(px_µm))+1`
+  decimals — so a single-pixel move is visible at any magnification (3 dp at 0.026 µm/px, where the old
+  fixed 1 dp only changed every ~20–30 px). Also dropped the redundant layer-name/value part from the
+  string (napari already renders the pixel value); the readout is now the clean `px (r,c) | µm (y,x)`.
+- **A valid OME-TIFF pixel size was missed by the STACK loader.** An OME-TIFF whose baseline
+  `XResolution` is zeroed (`0/1` → the reader's "division by zero") but whose OME-XML carries the real
+  `PhysicalSize` (e.g. a ZEN `…OME TIFF-Export`) loaded UNCALIBRATED via Open Stack — the 2-D loader
+  already recovered this from the OME-XML, but `read_stack_structure` only tried the (broken) TIFF tags.
+  It now tries **OME-XML first, then TIFF tags** (via the existing `_ome_pixel_size_um`), so such files
+  come in calibrated and the µm scale reaches the layer.
+- **Streaming-CZI open now shows it is working.** The one-time BioFormats frame-index parse is opaque
+  (no percentage), so the busy dialog now names the **frame count** and ticks an **elapsed-seconds
+  counter** ("Indexing 15,766 frames… N s elapsed") instead of an unlabeled spinner. (The parse of a
+  multi-GB file is inherently minutes-long; for a file that large, exporting to OME-TIFF from ZEN is
+  faster.)
+
 ## [1.6.64] - 2026-07-15
 ### Changed — **File-I/O audit cleanup: all six re-audit items closed, incl. a full intensity-normalization standardization (dtype-max) audited safe for the scientific stack.**
 - **Item 4 — stale `aicsimageio` in PKG-INFO.** The committed root `PKG-INFO` still declared

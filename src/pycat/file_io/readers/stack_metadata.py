@@ -56,6 +56,7 @@ class StackStructure:
 
 
 def read_stack_structure(file_path, ext, *, tiff_page_stack_cls, tiff_pixel_size_um,
+                         ome_pixel_size_um=None,
                          open_image=_default_open_image) -> StackStructure:
     """Open ``file_path`` for dims/scenes/pixel size, or fall back to a lazy tifffile-page read.
 
@@ -88,14 +89,20 @@ def read_stack_structure(file_path, ext, *, tiff_page_stack_cls, tiff_pixel_size
             debug_log("file_io: reading physical pixel size (falling back to "
                       "1.0 µm/px — micron measurements may be wrong)", _e)
 
-        # Fallback: the reader's physical_pixel_sizes only reads OME-XML and ImageJ metadata, not
-        # the baseline TIFF resolution tags. If it came back empty (== 1.0), read them directly.
+        # Fallback: the reader's physical_pixel_sizes can MISS or CHOKE on a file's real scale — an
+        # OME-TIFF whose baseline XResolution is zeroed (0/1) makes the reader raise "division by
+        # zero" and fall back to 1.0, even though the OME-XML carries the true value. If it came back
+        # on the 1.0 sentinel, recover it: OME-XML FIRST (authoritative for OME-TIFF), then the
+        # baseline TIFF tags. Mirrors the 2-D loader's recovery (file_io.open_2d_image).
         if abs(microns_per_pixel - 1.0) < 1e-9:
-            _tag_px = tiff_pixel_size_um(file_path)
-            if _tag_px is not None:
-                microns_per_pixel = _tag_px
-                debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
-                          "from TIFF resolution tags (the reader missed it)")
+            _rec = ome_pixel_size_um(file_path) if ome_pixel_size_um is not None else None
+            _src = 'OME-XML'
+            if _rec is None:
+                _rec = tiff_pixel_size_um(file_path); _src = 'TIFF resolution tags'
+            if _rec is not None:
+                microns_per_pixel = _rec
+                debug_log(f"file_io: pixel size {_rec:.6f} µm/px recovered from {_src} "
+                          "(the reader missed it)")
 
         return StackStructure(reader_has_structure=True, image=image, scenes=scenes,
                               microns_per_pixel=microns_per_pixel)
@@ -138,12 +145,15 @@ def read_stack_structure(file_path, ext, *, tiff_page_stack_cls, tiff_pixel_size
             arr = arr[np.newaxis]
         n_frames = arr.shape[0]
         H, W = arr.shape[1], arr.shape[2]
-        # Recover pixel size from baseline resolution tags in this branch too.
-        _tag_px = tiff_pixel_size_um(file_path)
-        if _tag_px is not None:
-            microns_per_pixel = _tag_px
-            debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
-                      "from TIFF resolution tags (direct tifffile branch)")
+        # Recover pixel size in this branch too — OME-XML first, then baseline TIFF tags.
+        _rec = ome_pixel_size_um(file_path) if ome_pixel_size_um is not None else None
+        _src = 'OME-XML'
+        if _rec is None:
+            _rec = tiff_pixel_size_um(file_path); _src = 'TIFF resolution tags'
+        if _rec is not None:
+            microns_per_pixel = _rec
+            debug_log(f"file_io: pixel size {_rec:.6f} µm/px recovered from {_src} "
+                      "(direct tifffile branch)")
 
         return StackStructure(reader_has_structure=False, image=None, scenes=[],
                               microns_per_pixel=microns_per_pixel, fallback_array=arr,

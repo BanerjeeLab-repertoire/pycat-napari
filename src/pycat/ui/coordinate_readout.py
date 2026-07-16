@@ -92,19 +92,24 @@ def _coordinate_status(viewer):
     if data_pt is not None:
         parts.append(f"px (r={_fmt(data_pt[-2])}, c={_fmt(data_pt[-1])})")
     if has_scale:
-        parts.append(f"\u00b5m (y={_fmt(world[-2], 1)}, x={_fmt(world[-1], 1)})")
+        # ADAPTIVE um precision: show enough decimals that one pixel step is visible. A fixed 1
+        # decimal froze the readout on sub-0.1 um pixels -- a single pixel moved LESS than the
+        # rounding step, so the um value looked static over 20-30 px. ceil(-log10(px_um)) + 1
+        # decimals makes per-pixel motion legible at any magnification (2 dp at 0.1 um/px, 3 at
+        # 0.026, 1 at >= 1 um/px).
+        try:
+            _px_um = float(scale[-1])
+            _nd = max(1, int(np.ceil(-np.log10(_px_um))) + 1) if _px_um > 0 else 2
+        except Exception:
+            _nd = 2
+        parts.append(f"µm (y={_fmt(world[-2], _nd)}, x={_fmt(world[-1], _nd)})")
     if not parts:
         return None
 
-    # Value under cursor, when resolvable (nice for QC / thresholding).
-    try:
-        if data_pt is not None:
-            idx = tuple(int(round(v)) for v in data_pt)
-            val = np.asarray(layer.data)[idx]
-            parts.append(f"{layer.name} = {_fmt(val, 0) if np.isscalar(val) or val.ndim == 0 else '…'}")
-    except Exception:
-        pass
-
+    # Just the coordinates. The cursor VALUE and the layer NAME are deliberately NOT appended: napari
+    # already renders the pixel value (its status dict carries a 'value' slot we preserve), and the
+    # layer name read as redundant filename clutter in the status bar. This keeps the readout the
+    # clean dual "px ... | um ..." the loaders are calibrated for.
     return "  |  ".join(parts)
 
 
