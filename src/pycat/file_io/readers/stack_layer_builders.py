@@ -7,8 +7,9 @@ controller, which does the contrast-pin + ``add_image`` + retention via ``_add_l
 
 * ``wrapper``     : the lazy (T,Y,X)/(Z,Y,X)/(T,Z,Y,X) source napari will read one plane at a time.
 * ``retain_refs`` : objects whose lifetime must be pinned to the layer (readers + dask arrays), for
-                    the controller to append to ``_stack_lazy_refs``. **Preserved exactly per branch**
-                    — including that the T-Z branch retains nothing beyond the wrapper napari holds.
+                    the controller to retain into the layer-scoped ImageSource. Every lazy branch
+                    (including T-Z, fixed in audit cleanup item 1) returns the handles its wrapper's
+                    on-demand reads depend on.
 * ``warnings``    : user-facing strings (e.g. a multi-file OME-TIFF with missing companions) for the
                     controller to surface — kept out of here so the module stays Qt-free.
 
@@ -140,9 +141,12 @@ def build_zstack_wrapper(file_path, ext, image, channel_idx, *, lazy_array_sourc
 def build_tzstack_wrapper(file_path, ext, image, channel_idx, *, lazy_array_source_cls):
     """Nested time-series-with-z-stack (T, Z, Y, X) — the dask array is already lazy, so napari reads
     one plane per T/Z slider move and the window opens immediately (the old code transcoded the whole
-    channel to a temp zarr first). Retains nothing beyond the wrapper napari holds — matching the
-    original branch exactly."""
-    wrapper, _dask_arr = _dask_stack_wrapper(
+    channel to a temp zarr first).
+
+    Retains ``(image, dask_arr)`` like the z-stack branch: the dask array is lazy, so the READER must
+    stay alive for those on-demand reads. The pre-migration branch retained nothing here — a latent
+    orphaned-reader bug, fixed as part of the ImageSource migration (audit cleanup item 1)."""
+    wrapper, dask_arr = _dask_stack_wrapper(
         'TZYX', "T+Z stack", file_path, ext, image, channel_idx,
         lazy_array_source_cls=lazy_array_source_cls)
-    return wrapper, [], []
+    return wrapper, [(image, dask_arr)], []

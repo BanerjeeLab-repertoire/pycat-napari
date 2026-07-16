@@ -100,12 +100,14 @@ def test_zstack_czi_retains_reader_and_dask():
     assert refs == [(img, w.data)]
 
 
-def test_tzstack_czi_retains_nothing_extra():
+def test_tzstack_czi_retains_reader_and_dask():
     img = _FakeImage()
     w, refs, warns = build_tzstack_wrapper('f.czi', '.czi', img, 0,
                                            lazy_array_source_cls=_FakeLazySource)
     assert w.data.tag == ('TZYX', 0)
-    assert refs == []    # the T-Z branch retained nothing beyond the wrapper napari holds
+    # T-Z retains the reader like the z-stack branch (item-1 fix; the lazy dask needs the reader
+    # kept alive, which the pre-migration branch failed to do).
+    assert refs == [(img, w.data)]
 
 
 @pytest.mark.parametrize("builder,ext", [

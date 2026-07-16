@@ -2211,11 +2211,13 @@ class FileIOClass:
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
-        # Keep lazy sources (readers + dask arrays) alive for as long
-        # as the layers exist, so on-demand frame reads keep working without an
-        # eager copy to disk.
-        if not hasattr(self, '_stack_lazy_refs'):
-            self._stack_lazy_refs = []
+        # Retention is owned by a layer-scoped ImageSource, exactly like the IMS loader — it keeps
+        # the backing reader/dask handles alive for the LAYER's lifetime, so on-demand frame reads
+        # keep working after this method returns, with no controller-scoped list to leak or forget
+        # (the old self._stack_lazy_refs is gone — audit cleanup item 1). `_add_lazy_stack_layer`
+        # retains into it and attaches it to each lazy layer's metadata['pycat_image_source'].
+        from pycat.file_io.image_source import ImageSource
+        self._current_stack_img_source = ImageSource(file_path=file_path)
         channels_to_load = list(range(n_c)) if not reader_has_structure else None
         H = W = n_t = n_z = None
 
@@ -2310,8 +2312,8 @@ class FileIOClass:
         Every lazy branch (tifffile-fallback, time series, z-stack, T-Z) built a wrapper and then did
         the SAME six things. They live here now, once:
 
-        1. pin the branch's retained refs (readers + dask arrays) to ``_stack_lazy_refs`` so on-demand
-           reads keep working for the layer's life;
+        1. pin the branch's retained refs (readers + dask arrays) to the layer-scoped ImageSource so
+           on-demand reads keep working for the layer's life;
         2. surface any builder warnings (e.g. a multi-file OME-TIFF with missing companions);
         3. **PIN CONTRAST from the first frame** — without explicit limits napari auto-estimates by
            calling ``np.asarray()`` on the whole lazy wrapper (``__array__``), which on a lazy source
@@ -2323,7 +2325,11 @@ class FileIOClass:
         """
         from napari.utils.notifications import show_info as _si
         from napari.utils.notifications import show_warning as _sw
-        self._stack_lazy_refs.extend(retain_refs)
+        # Pin the branch's reader/dask handles to the layer-scoped ImageSource — the SOLE owner of
+        # retention now (self._stack_lazy_refs is gone). retain() dedups by identity.
+        _src = self._current_stack_img_source
+        for _r in (retain_refs or []):
+            _src.retain(_r)
         for _w in (warnings or []):
             _sw(_w)
         _add_kwargs = {'name': layer_name, 'colormap': colormap}
@@ -2335,6 +2341,12 @@ class FileIOClass:
             _layer.projection_mode = 'none'
         except Exception:
             pass
+        # Lifetime = layer lifetime: attach the ImageSource so the reader survives GC of the
+        # controller (the retention guard asserts this on every lazy generic layer).
+        try:
+            _layer.metadata['pycat_image_source'] = _src
+        except Exception as _e:
+            debug_log("file_io: could not attach ImageSource to generic stack layer", _e)
         if info_msg:
             _si(info_msg)
         return _layer
