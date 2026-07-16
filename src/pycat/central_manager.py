@@ -82,6 +82,20 @@ class CentralManager:
         from pycat.utils.selection_service import SelectionService
         self.selection = SelectionService()
 
+        # ── "Follow selection in viewer" — OFF, deliberately ─────────────────────────────
+        #
+        # When on, clicking a point in a plot moves the camera and jumps to that object's frame.
+        # That is what brushing used to do **unconditionally**, and it is the "abrupt navigation"
+        # complaint: you click a point to find out what it is, and the view you were reading leaves.
+        #
+        # Off is the honest default because the overlay already answers the question — the object is
+        # outlined where it sits, so you can see *which* one it is without being taken there. Going
+        # to it is a separate intention, and it has its own gestures: a double-click, or Reveal.
+        #
+        # Session-level, like `persist_measurements` — PyCAT has no preference persistence, and
+        # inventing one for a checkbox would be its own piece of work.
+        self.follow_selection = False
+
         # Session-level flag: if True, ball_radius / object_size / cell_diameter
         # are preserved across Save & Clear so the user doesn't need to re-measure
         # when processing a second image from the same experiment. Controlled by the

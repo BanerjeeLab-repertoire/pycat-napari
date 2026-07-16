@@ -484,6 +484,28 @@ class PlottingWidget(QWidget):
             debug_log('PlottingWidget: the plotly figure failed', exc)
             napari_show_warning(f"The plotly figure could not be built: {exc}")
 
+    def _linked_selection(self):
+        """The one Linked Selection dock, created on the first click that needs it.
+
+        Lazily, because a plot that is never clicked should not put a dock in the user's way — and
+        because a batch/headless plot has no viewer window to dock into at all.
+        """
+        widget = getattr(self, '_linked_dock_widget', None)
+        if widget is not None:
+            return widget
+        viewer = getattr(self, 'viewer', None)
+        if viewer is None or not hasattr(viewer, 'window'):
+            return None
+        try:
+            from pycat.ui.linked_selection_dock import LinkedSelectionDock
+            dock = LinkedSelectionDock(viewer, getattr(self, 'central_manager', None))
+            self._linked_dock = dock
+            self._linked_dock_widget = dock.show()
+            return self._linked_dock_widget
+        except Exception as exc:
+            debug_log('PlottingWidget: could not open the linked-selection dock', exc)
+            return None
+
     def _wire_brushing(self, figure, artist, df):
         """**Make the points clickable, if the rows are objects.**
 
@@ -521,24 +543,27 @@ class PlottingWidget(QWidget):
         refs = refs_from_dataframe(df)
 
         def _on_select(ref):
-            crop, message = crop_for_ref(ref, viewer=getattr(self, 'viewer', None))
-            if crop is None:
-                napari_show_warning(
-                    f"That point cannot be shown as an image. {message}")
+            """Show the object in the ONE dock.
+
+            This used to `viewer.add_image(crop, name=f"object {ref.object_id}")`. The layer is
+            reused for the same object, so it is one layer per **distinct object clicked** — explore
+            a scatter for a minute and the layer list fills with crops to clean up by hand. And the
+            name is keyed on `object_id` alone, so `object 7` from two different masks **collide onto
+            one layer**: clicking one segmentation silently overwrote the other's crop.
+            """
+            widget = self._linked_selection()
+            if widget is not None:
+                widget.show_ref(ref)
                 return
-            try:
-                viewer = getattr(self, 'viewer', None)
-                if viewer is not None:
-                    name = f"object {ref.object_id}"
-                    if name in viewer.layers:
-                        viewer.layers[name].data = crop
-                    else:
-                        viewer.add_image(crop, name=name)
-            except Exception as exc:
-                debug_log('PlottingWidget: could not show the picked object', exc)
+            # No dock (no viewer window — a batch/headless plot): say what was found rather than
+            # nothing at all.
+            _crop, message = crop_for_ref(ref, viewer=getattr(self, 'viewer', None))
+            if _crop is None:
+                napari_show_warning(f"That point cannot be shown as an image. {message}")
 
         make_pickable(figure, artist, refs, on_select=_on_select,
-                      viewer=getattr(self, 'viewer', None))
+                      viewer=getattr(self, 'viewer', None),
+                      central_manager=getattr(self, 'central_manager', None))
 
     def plot_data(self):
         """

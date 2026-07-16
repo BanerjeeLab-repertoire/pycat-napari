@@ -4,6 +4,46 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.78] - 2026-07-16
+### Fixed — **Increment 4's lazy refs were defeated by the one function that wires every plot.**
+`make_pickable` ended with `figure._pycat_object_refs = list(refs)`, which rebuilds every ref the
+`LazyRefs` sequence exists to avoid — **measured at 3.0 s for 50 000 points.** So the 6.4-second
+stall 1.6.76 reported as fixed **was still there end to end.** Measuring `refs_from_dataframe` in
+isolation said it was fixed; driving the real path said otherwise. The sequence is indexable, sized
+and iterable — nothing needed it to be a list. Wiring a 100k-point brushable plot now measures
+**0.04 ms**, through the real path this time.
+### Fixed — **A click asked "what is this?" and the view left.**
+- Every pick called `resolve_in_viewer(ref, viewer)` with `centre=True`, so it moved the camera —
+  **and the frame jump was not gated at all.** Clicking a point to find out what it is yanked both
+  your view and your timepoint. That is the "abrupt navigation" complaint, and it was the default.
+- The overlay (1.6.77) is what lets those come apart: the object is outlined **where it sits**, so
+  seeing which one it is no longer costs you your place. `centre` now gates the frame too — both are
+  navigation, so both answer to one flag.
+### Added — **Brushing increment 5 (part 2 of 2): the Linked Selection dock + the interaction model.**
+- `ui/linked_selection_dock.py` — **one dock**, replacing the `object <N>` image layer per distinct
+  object clicked. (It reused the layer for the *same* object, so exploring a scatter filled the layer
+  list with crops to clean up by hand — and the name was keyed on `object_id` alone, so `object 7`
+  from two different masks **collided onto one layer**, silently overwriting each other's crop.)
+  Shows the crop, which dataset/frame/parent/layer it is, and flags a by-position table. Reveal and
+  Pin. The crop goes through increment 1's lazy `crop_for_ref` — one plane, never the acquisition —
+  and it subscribes to increment 4's **deferred** half, so dragging a scatter reads pixels once.
+- **The interaction model:** plain click marks in place; **double-click** navigates; **shift-click**
+  adds to the selection (which `selected_label` could never do — it holds one integer);
+  **Escape** clears. `central_manager.follow_selection` re-enables click-to-navigate and is **OFF by
+  default**. Session-only, like `persist_measurements` — PyCAT has no preference persistence, and
+  inventing one for a checkbox is its own piece of work.
+### Notes
+- **Part E is not built, and should not be until someone confirms it is wanted.** Its premise does
+  not exist in the tree: no results table mixes aggregate rows with per-object rows — aggregates are
+  separate single-row tables under their own titles, and `data_viz_tools` already declines to brush a
+  bbox-less table. It would be new behaviour, not a fix. The overlay already accepts k objects, so
+  the mechanism is there if the need appears.
+- **The dock's *docking* is not covered by tests.** `napari.Viewer` needs a GL context that offscreen
+  Qt cannot provide (which is why `test_ui_smoke.py` errors here), so `add_dock_widget` is unverified
+  — the widget's contents, crop, facts, pin, reveal and subscription all are. Worth a click-test.
+- The brushing arc (increments 1–5) is complete bar Part E and increment 4's Part C, both recorded
+  with what they need. See `roadmap.rst`.
+
 ## [1.6.77] - 2026-07-16
 ### Fixed — **REGRESSION I shipped in 1.6.74: the identity columns were never actually hidden.**
 Increment 2 added `_pycat_entity_id` / `_pycat_layer_id` with a comment calling them hidden — *"a

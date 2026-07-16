@@ -135,7 +135,21 @@ _SELECTED_STYLE = dict(color='#ff8c00', alpha=1.0, linewidth=2.2, zorder=5)
 _NORMAL_STYLE = dict(color='#4c72b0', alpha=0.18, linewidth=0.8, zorder=2)
 
 
-def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None):
+def _follow_enabled(central_manager):
+    """Should a plain click take the user to the object?
+
+    **No, by default.** Clicking a point to ask what it is should not move the camera and jump the
+    frame — that is the "abrupt navigation" complaint, and it is what brushing did unconditionally.
+    Going there is a separate intention with its own gestures (double-click, or Reveal).
+
+    `getattr`-defensive on purpose: plenty of callers have no manager, and a missing preference must
+    read as "don't yank the view", not as a crash.
+    """
+    return bool(getattr(central_manager, 'follow_selection', False))
+
+
+def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None,
+                  central_manager=None):
     """**Attach identity to the points of a plot, and make clicking one mean something.**
 
     Parameters
@@ -152,7 +166,7 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
     if artist is None or not refs:
         return figure
 
-    state = {'previous': None}
+    state = {'previous': None, 'indices': []}
 
     def _on_pick(event):
         if event.artist is not artist:
@@ -170,17 +184,40 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
             debug_log('brushing: could not identify the picked point', exc)
             return
 
-        _emphasise(artist, index, state)
+        # ── What the gesture MEANT ────────────────────────────────────────────────────────
+        #
+        # Every click used to do the same thing: mark it, and take you there. So a click meant to
+        # ask *"what is this point?"* also moved the camera and jumped the frame, and the view you
+        # were reading left. The overlay is what lets these come apart — the object is outlined
+        # where it sits, so seeing which one it is no longer costs you your place.
+        mouse = getattr(event, 'mouseevent', None)
+        modifiers = str(getattr(mouse, 'key', '') or '')
+        adding = 'shift' in modifiers
+        navigate = bool(getattr(mouse, 'dblclick', False)) or _follow_enabled(central_manager)
+
+        if adding:
+            picked = [i for i in state['indices'] if i != index] + [index]
+        else:
+            picked = [index]
+        state['indices'] = picked
+
+        _emphasise(artist, picked, state)
         try:
             event.canvas.draw_idle()
         except Exception:
             pass
 
-        # The three things a pick can do. **None of them is required**, and a plot can want any
+        selected_refs = [refs[i] for i in picked]
+
+        # The things a pick can do. **None of them is required**, and a plot can want any
         # combination — which is why they are separate rather than one god-callback.
         if viewer is not None:
             try:
-                resolve_in_viewer(ref, viewer)
+                if len(selected_refs) > 1:
+                    from pycat.utils.selection_overlay import show_selection
+                    show_selection(viewer, selected_refs)
+                else:
+                    resolve_in_viewer(ref, viewer, centre=navigate)
             except Exception as exc:
                 debug_log('brushing: could not reveal the object in the viewer', exc)
 
@@ -193,15 +230,40 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
         if hub is not None:
             hub.select(ref, source='plot')
 
+    def _on_key(event):
+        """**Escape means nothing is selected** — not "nothing happened"."""
+        if str(getattr(event, 'key', '')) != 'escape':
+            return
+        state['indices'] = []
+        overlay = state.get('overlay')
+        try:
+            if overlay is not None:
+                overlay.set_visible(False)
+            event.canvas.draw_idle()
+        except Exception as exc:
+            debug_log('brushing: could not clear the plot selection', exc)
+        if viewer is not None:
+            try:
+                from pycat.utils.selection_overlay import clear_selection
+                clear_selection(viewer)
+            except Exception as exc:
+                debug_log('brushing: could not clear the viewer overlay', exc)
+
     try:
         figure.canvas.mpl_connect('pick_event', _on_pick)
+        figure.canvas.mpl_connect('key_press_event', _on_key)
     except Exception as exc:
         debug_log('brushing: could not connect the pick event', exc)
 
     # The refs travel WITH the figure, so anything downstream — an export, a saved session, a
     # batch report — can still answer "what is this point?".
+    #
+    # **Stored as they are, NOT `list(refs)`.** That call rebuilt every ref the `LazyRefs` sequence
+    # exists to avoid building — measured at 3.0 s for 50 000 points — so it quietly undid the whole
+    # of increment 4's lazy construction *in the one function that wires every brushable plot*. The
+    # sequence is indexable, sized and iterable; nothing downstream needs it to be a list.
     try:
-        figure._pycat_object_refs = list(refs)
+        figure._pycat_object_refs = refs
     except Exception:
         pass
 
@@ -236,6 +298,7 @@ def _emphasise(artist, index, state):
     try:
         if hasattr(artist, 'get_offsets'):                   # a scatter
             _emphasise_scatter(artist, index, state)
+            return
         elif hasattr(artist, 'set_color'):                   # a line
             previous = state.get('previous')
             if previous is not None:
@@ -247,16 +310,22 @@ def _emphasise(artist, index, state):
 
 
 def _emphasise_scatter(artist, index, state):
-    """Move a one-point overlay onto the picked point. **The base scatter is not touched.**
+    """Move the overlay onto the picked point(s). **The base scatter is not touched.**
+
+    ``index`` may be one index or several — shift-click adds to the selection, and *k* selected
+    points are still k coordinates, not a rewrite of N.
 
     Display-only and deliberately unpickable: ``make_pickable`` maps a click to an index on the
     BASE artist, and an overlay sitting on top that could also be picked would hand back its own
     index — which is 0, i.e. the wrong object, every time.
     """
     offsets = np.asarray(artist.get_offsets(), dtype=float)
-    if index < 0 or index >= len(offsets):
+    wanted = [index] if isinstance(index, (int, np.integer)) else list(index)
+    wanted = [int(i) for i in wanted if 0 <= int(i) < len(offsets)]
+    if not wanted:
         return
-    x, y = offsets[index]
+    points = offsets[wanted]
+    x, y = points[0]
 
     axes = getattr(artist, 'axes', None)
     if axes is None:
@@ -270,8 +339,9 @@ def _emphasise_scatter(artist, index, state):
             [x], [y], s=base * 4.0, facecolor='none', edgecolor=_SELECTED_STYLE['color'],
             linewidth=2.0, zorder=(artist.get_zorder() or 2) + 1, picker=None)
         state['overlay'] = overlay
+        overlay.set_offsets(points)
     else:
-        overlay.set_offsets(np.array([[x, y]]))    # O(1): two coordinates, whatever N is
+        overlay.set_offsets(points)         # k coordinates, whatever N is
         overlay.set_visible(True)
 
 

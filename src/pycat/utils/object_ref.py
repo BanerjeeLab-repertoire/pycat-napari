@@ -359,9 +359,21 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
     if viewer is None:
         return False
 
+    # ── `centre` now gates the FRAME too, because both are navigation ─────────────────────
+    #
+    # The frame step used to be ungated: every click on a plot moved the camera **and** jumped the
+    # timepoint, whether or not the caller asked to be moved. That is the "abrupt navigation"
+    # complaint — you click a point to see what it is, and the view you were reading leaves.
+    #
+    # Both are the same question ("take me there"), so they are answered by the same flag, and
+    # `make_pickable` now passes the user's preference into it (default OFF — see
+    # `central_manager.follow_selection`). A double-click asks explicitly and always navigates.
+    #
+    # The overlay is what makes this safe: the object is *shown* — outlined in place — without the
+    # viewer being yanked to it. Before, marking it and going to it were the same act.
     try:
-        # Move to the right frame first — an object on frame 40 is not visible from frame 0.
-        if ref.frame is not None and len(getattr(viewer, 'dims', []).point or ()) > 0:
+        # An object on frame 40 is not visible from frame 0 — so navigating means the frame too.
+        if centre and ref.frame is not None and len(getattr(viewer, 'dims', []).point or ()) > 0:
             step = list(viewer.dims.current_step)
             step[0] = int(ref.frame)
             viewer.dims.current_step = tuple(step)

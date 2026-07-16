@@ -178,6 +178,33 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: Brushing arc (increments 1–5) — COMPLETE (1.6.73 → 1.6.78), with two items parked
+
+Plot → object → image, keyed on identity rather than row position. What shipped:
+
+* **1** (1.6.73) — the whole-stack crop and the wrong-target highlight; the ``pycat_layer_id`` seed.
+* **2** (1.6.74) — ``EntityKey``/``EntityRef``; the three object tables name their objects.
+* **3** (1.6.75) — VPT's dispatcher promoted to a shared ``SelectionService`` on ``CentralManager``.
+* **4** (1.6.76) — lazy refs; the overlay highlight (which turned out to be a *correctness* fix —
+  the old one highlighted several points, none reliably the right one).
+* **5** (1.6.77–78) — tables brush through sort/filter; the highlight is an overlay rather than the
+  labels layer's paint state; one Linked Selection dock; hover/click/double-click/shift/Escape with
+  camera-follow **off by default**.
+
+Two things are deliberately **not** done, each recorded where it was found:
+
+* **Part E — aggregate rows** (``claude_code_spec_brushing5``). *Its premise does not exist:* no
+  results table mixes aggregate rows with per-object rows — aggregates are separate single-row tables
+  under their own titles, and the plotting widget already declines to brush a bbox-less table. It is
+  **new behaviour, not a fix**, and wants someone to say they want it. The selection overlay already
+  accepts k objects, so the mechanism is there.
+* **Increment 4's Part C — per-frame VPT bead points**, immediately below.
+
+*Not covered by tests:* the dock's ``add_dock_widget`` integration, and VPT's live three-way link —
+both need a real ``napari.Viewer``, which needs a GL context that offscreen Qt cannot provide (the
+same reason ``test_ui_smoke.py`` errors headlessly). Their logic is tested; their *docking* and
+*rendering* are not.
+
 .. rubric:: VPT bead Points layer holds every frame (brushing increment 4, Part C — deferred, needs a profile)
 
 ``_add_pickable_bead_points`` (``vpt_ui.py``) builds ``pts = column_stack([frames, ys, xs])`` — one

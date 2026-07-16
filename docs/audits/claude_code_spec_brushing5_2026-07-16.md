@@ -1,6 +1,38 @@
 # Claude Code spec — Brushing increment 5: the linked-selection inspector & table adapter (the payoff)
 
-## 🟡 STATUS — Parts B + C DONE, shipped in 1.6.77 (part 1 of 2). Parts A/D/E OUTSTANDING.
+## ✅ STATUS — Parts A/B/C/D DONE (1.6.77 + 1.6.78). Part E NOT BUILT — its premise does not exist.
+Part 2 (`1.6.78`) added the dock (A) and the interaction model (D). `pytest -m core`: **697 passed,
+2 skipped**. The brushing arc is complete bar Part E and increment 4's Part C, both recorded with what
+they need.
+
+**Part D found a bigger version of its own complaint.** The spec asks for camera-follow to be gated
+and default OFF. In the tree, `make_pickable` called `resolve_in_viewer(ref, viewer)` with
+`centre=True` **and the frame jump was not gated at all** — so every click moved the camera *and* the
+timepoint. `centre` now gates both (they are the same question), and `follow_selection` defaults OFF.
+
+**Part A's target was slightly different from the spec's description**, and worse: the `object <N>`
+layer is reused for the same object, so it is one layer per *distinct object clicked* — but its name
+is keyed on `object_id` alone, so **`object 7` from two different masks collide onto one layer**,
+silently overwriting each other's crop. The dock removes the whole category.
+
+**And it surfaced that increment 4's Part A never actually worked.** `make_pickable` ended with
+`figure._pycat_object_refs = list(refs)` — rebuilding every ref `LazyRefs` exists to avoid (3.0 s per
+50k points). *The 6.4-second stall 1.6.76 reported as fixed was still there end to end.* Measuring
+`refs_from_dataframe` alone said fixed; driving the real path said otherwise. Now 0.04 ms for 100k.
+
+**Part E — NOT built, deliberately.** Its premise is not in the tree: no results table mixes aggregate
+rows with per-object rows. Aggregates are separate single-row tables under their own titles
+(`condensate_physics_ui`, `vpt_ui`), and `data_viz_tools` already *declines* to brush a bbox-less
+table — the honest behaviour Part E describes as missing. So it is **new behaviour, not a fix**, and
+it needs someone to say they want it. The overlay already accepts k objects, so the mechanism exists
+if the answer is yes.
+
+**Not verifiable here:** the dock's `add_dock_widget` integration. `napari.Viewer` needs a GL context
+offscreen Qt cannot provide (hence `test_ui_smoke.py` erroring), so the widget's contents, crop,
+facts, pin, reveal and dispatcher subscription are tested and its *docking* is not. Flagged rather
+than faked.
+
+## (part 1 of 2 — 1.6.77)
 `pytest -m core`: **680 passed, 2 skipped** (was 670). Split per Gable's decision: the two verifiable
 parts first, the dock + interaction model as a second version.
 
