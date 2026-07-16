@@ -4,6 +4,17 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.62] - 2026-07-15
+### Fixed — **Coordinate readout crashed on mouse-move on newer napari (`get_status` return-type mismatch).**
+- `install_coordinate_readout`'s `get_status` wrapper always returned a plain **string**, but newer
+  napari versions expect `get_status()` to return a **dict** (`{'coords': ..., 'value': ...}`) and do
+  `status['coords']` in `_calc_status_from_cursor`. On those versions every mouse-move over an image
+  raised `TypeError: string indices must be integers, not 'str'` (reported by Meet on the `pycat-16`
+  env). The wrapper now calls the original `get_status` first, matches its return TYPE, and injects the
+  PyCAT dual `px … | µm …` string into the dict's `coords` slot (preserving `value`) on newer napari,
+  or returns the string on older napari — making the readout napari-version-agnostic.
+
+
 ## [1.6.61] - 2026-07-15
 ### Added — **Zeiss streaming CZI now opens (opt-in `[bioformats]`), via a direct BioFormats reader on a worker thread.**
 - **The problem:** Zeiss fast-streaming/timelapse CZI (many-subblock, e.g. a 15,766-frame movie)

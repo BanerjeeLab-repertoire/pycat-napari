@@ -136,16 +136,38 @@ def install_coordinate_readout(viewer):
             return
 
         def _get_status(position=None, *, view_direction=None, dims_displayed=None, world=False):
+            # ── RETURN THE SAME TYPE napari EXPECTS ────────────────────────────────
+            #
+            # napari's ``get_status`` return type CHANGED across versions: older napari returned a
+            # plain status **string**; newer napari returns a **dict** (``{'coords': str, 'value':
+            # str, ...}``) and its ``_calc_status_from_cursor`` does ``status['coords']``. Returning
+            # a bare string there raises ``TypeError: string indices must be integers`` on every
+            # mouse-move (reported by Meet on napari in the ``pycat-16`` env).
+            #
+            # So: call the original FIRST to learn the shape it returns, then inject the PyCAT dual
+            # ``px … | µm …`` string into the right slot — the ``coords`` key when it's a dict, or as
+            # the whole string when it's a string. This makes the readout napari-version-agnostic.
+            try:
+                native = original(position, view_direction=view_direction,
+                                  dims_displayed=dims_displayed, world=world)
+            except Exception:
+                native = None
             try:
                 dual = _coordinate_status(viewer)
-                if dual:
-                    return dual
             except Exception:
-                pass
-            # Any failure falls back to napari's own string — the readout is a convenience, and it
-            # must never be the reason the status bar stops working.
-            return original(position, view_direction=view_direction,
-                            dims_displayed=dims_displayed, world=world)
+                dual = None
+
+            if not dual:
+                # No PyCAT coordinate to show — hand back napari's own status untouched.
+                return native if native is not None else ''
+
+            if isinstance(native, dict):
+                # Newer napari: preserve the dict (keeps 'value' etc.), swap in our coords string.
+                native = dict(native)
+                native['coords'] = dual
+                return native
+            # Older napari (string return) — or an unknown shape: our string is the status.
+            return dual
 
         object.__setattr__(layer, 'get_status', _get_status)
         object.__setattr__(layer, '_pycat_status_wrapped', True)
