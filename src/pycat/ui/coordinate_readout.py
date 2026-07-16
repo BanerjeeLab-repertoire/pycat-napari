@@ -168,7 +168,19 @@ def install_coordinate_readout(viewer):
 
             if isinstance(native, dict):
                 # Newer napari: preserve the dict (keeps 'value' etc.), swap in our coords string.
+                #
+                # ── WRITE THE KEY napari ACTUALLY RENDERS ────────────────────────────────
+                # napari 0.7.x's Layer.get_status returns a dict with TWO coordinate keys:
+                #   status_dict['coordinates'] = 'coords_str: value_str'   <- Qt status bar renders THIS
+                #   status_dict['coords']      = 'coords_str'              <- only the multi-layer path uses this
+                # (viewer_model._calc_status_from_cursor returns the dict verbatim for a single
+                # selected layer; qt_main_window._status_changed then draws status_info['coordinates'].)
+                # The first cut wrote only 'coords' — the key the single-layer draw path IGNORES — so
+                # napari kept rendering its OWN 'coordinates' and the dual "px … | µm …" never showed.
+                # That silently broke the readout for EVERY file. Write BOTH keys so the injection lands
+                # whichever path napari takes.
                 native = dict(native)
+                native['coordinates'] = dual
                 native['coords'] = dual
                 return native
             # Older napari (string return) — or an unknown shape: our string is the status.

@@ -76,3 +76,50 @@ def test_uncalibrated_shows_px_only():
     cr._top_data_layer = lambda v: layer
     s = cr._coordinate_status(_V())
     assert s == "px (r=100, c=137)"    # no µm when there is no real scale
+
+
+def test_wrapper_injects_the_coordinates_key_napari_renders():
+    """REGRESSION GUARD (the multi-hour 'µm readout not fixed' bug): napari 0.7.x's Qt status bar
+    draws ``status_dict['coordinates']`` for a single selected layer; ``status_dict['coords']`` is
+    used only by the multi-layer path. The first dict-injection cut wrote ONLY 'coords', so napari
+    kept rendering its own 'coordinates' and our dual "px … | µm …" never appeared for ANY file.
+    The wrapper must overwrite 'coordinates' (and may also set 'coords')."""
+    px_um = 0.0264
+
+    class _Layer:
+        name = "img"
+        scale = np.array([1.0, px_um, px_um])
+        data = np.zeros((10, 512, 512), np.uint16)
+        visible = True
+        ndim = 3
+
+        def world_to_data(self, w):
+            return np.asarray(w) / self.scale
+
+        # A napari-0.7-shaped get_status: 'coordinates' is what the status bar renders.
+        def get_status(self, position=None, **k):
+            return {"layer_base": "img", "source_type": "", "plugin": "",
+                    "coordinates": "NATIVE napari coords", "coords": "NATIVE", "value": "7"}
+
+    layer = _Layer()
+
+    class _Layers(list):
+        selection = SimpleNamespace(active=layer)
+        events = SimpleNamespace(inserted=SimpleNamespace(connect=lambda *a, **k: None))
+
+    viewer = SimpleNamespace(
+        cursor=SimpleNamespace(position=np.array([5.0, 100 * px_um, 137 * px_um])),
+        layers=_Layers([layer]),
+    )
+    cr._top_data_layer = lambda v: layer
+
+    cr.install_coordinate_readout(viewer)
+    out = layer.get_status(viewer.cursor.position, world=True)
+
+    assert isinstance(out, dict)
+    # The dual string landed in the key napari actually draws — NOT left as napari's native coords.
+    assert out["coordinates"].startswith("px (r=100, c=137)")
+    assert "µm" in out["coordinates"]
+    assert out["coordinates"] != "NATIVE napari coords"
+    # 'value' (and other native keys) preserved.
+    assert out["value"] == "7"

@@ -4,6 +4,24 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.66] - 2026-07-16
+### Fixed — **The dual `px … | µm …` status-bar readout was invisible on EVERY file (wrong napari dict key).**
+- Traced from where napari draws the status bar back to the source. napari 0.7.x's `Layer.get_status`
+  returns a dict with **two** coordinate keys: `status_dict['coordinates']` (= `"coords: value"`, the
+  string the Qt status bar actually renders for a single selected layer, via
+  `qt_main_window._status_changed → setStatusText(coordinates=…)`) and `status_dict['coords']` (used
+  only by the multi-layer/grid path). The 1.6.62 "match get_status return type" fix injected the PyCAT
+  dual string into **`coords`** — the key the single-layer draw path IGNORES — so napari kept rendering
+  its **own** `coordinates` (unlabeled world numbers + the layer name) and the labeled `px … | µm …`
+  readout never appeared for any file. Symptom looked like "only px + filename, no µm" and read as if the
+  pixel-size metadata was being overridden. **The metadata was fine** — verified end-to-end through
+  `open_image_auto → open_2d_image → load_into_viewer → _enable_auto_scale_bar` on real napari `Image`
+  layers: `layer.scale` reaches `[0.0264, 0.0264]` and `scale_bar.unit='um'` correctly. Fix: the wrapper
+  now writes `native['coordinates']` (and keeps `native['coords']`), so the dual readout lands whichever
+  path napari takes. Regression guard: `test_coordinate_readout.py::test_wrapper_injects_the_coordinates_key_napari_renders`.
+- This is the display half of the "µm readout not fixed" report; the adaptive-precision and
+  filename-declutter work from 1.6.65 was correct but never visible because of the key mismatch above.
+
 ## [1.6.65] - 2026-07-16
 ### Fixed — **GUI-confirm follow-ups: pixel size now reaches the status-bar readout; OME-TIFF scale recovered in the stack loader; CZI open shows a live counter.**
 - **Status-bar coordinate readout was showing a coarsely-rounded µm that looked frozen, plus filename
