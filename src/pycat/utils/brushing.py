@@ -53,41 +53,76 @@ from pycat.utils.object_ref import ObjectRef, resolve_in_viewer, resolve_offline
 class SelectionHub:
     """**One object is selected. Every view that cares hears about it.**
 
-    Lifted from ``vpt_ui``'s three-way hub, which had the design right: each view calls
-    ``select()`` with a ``source`` tag, and the hub updates the **other** views. The re-entrancy
-    guard is what stops the highlight the hub triggers in view B from firing B's own emit and
-    looping back — *without it, a click oscillates.*
+    An ``ObjectRef``-shaped face on `selection_service.SelectionService`, kept because this is the
+    API ``make_pickable`` already speaks.
 
-    The difference is that this one is keyed on an ``ObjectRef``, not a ``track_id``, so it works
-    for a condensate, a punctum, a cell or a bead **without knowing which**.
+    ── It used to be a second implementation, and it had lost the guard that matters ──────
+
+    This was written as a lift of ``vpt_ui``'s three-way hub — its docstring said so, and the design
+    was right: each view calls ``select()`` with a ``source`` tag and the hub updates the *others*,
+    keyed on an ``ObjectRef`` rather than a ``track_id`` so it works for a condensate, a punctum, a
+    cell or a bead without knowing which.
+
+    But the lift ended in ``finally: self._busy = False`` — **a synchronous release**, which is
+    precisely the bug VPT's dispatcher documents having fixed:
+
+        *"Several of those emit Qt/napari signals ASYNCHRONOUSLY — they fire after this method has
+        already returned — so a synchronous busy-flag that resets in `finally` does NOT cover them,
+        and the queued signals re-enter here and cascade."*
+
+    So this hub would have oscillated the first time a real Qt view was wired to it. **It never
+    was** — zero production callers, one test — which is the only reason that was never discovered.
+    A copy that drifts is bad; a copy that drifts *and is unused* is a trap with a passing test.
+
+    It is now a thin adapter, so there is one dispatcher and the generic path inherits VPT's guards.
     """
 
-    def __init__(self):
+    def __init__(self, service=None):
+        from pycat.utils.selection_service import SelectionService
+        self._service = service if service is not None else SelectionService()
+        self._refs: dict[str, ObjectRef] = {}
         self._selected: ObjectRef | None = None
-        self._views: dict[str, callable] = {}
-        self._busy = False
+
+    @property
+    def service(self):
+        return self._service
 
     def register_view(self, name, on_select):
         """A view that wants to hear about selections. ``on_select(ref)``."""
-        self._views[str(name)] = on_select
+        def _adapter(selection, _cb=on_select, _hub=self):
+            ref = _hub._refs.get(selection.primary_id) or _hub._selected
+            if ref is not None:
+                _cb(ref)
+
+        # The adapter is a closure, so the hub must own it or it dies on the service's weak ref.
+        self._adapters = getattr(self, '_adapters', {})
+        self._adapters[str(name)] = _adapter
+        self._service.subscribe(str(name), _adapter)
         return self
 
     def select(self, ref: ObjectRef, source=None):
         """Select an object everywhere **except** the view that initiated it."""
-        if ref is None or self._busy:
+        if ref is None:
             return
-        self._busy = True
-        try:
-            self._selected = ref
-            for name, callback in self._views.items():
-                if name == source:
-                    continue          # a view never re-highlights from its own action
-                try:
-                    callback(ref)
-                except Exception as exc:
-                    debug_log(f'brushing: the "{name}" view failed to handle a selection', exc)
-        finally:
-            self._busy = False
+        from pycat.utils.selection_service import Selection
+
+        key = self._key_for(ref)
+        self._refs[key] = ref
+        self._selected = ref
+        selection = Selection(entity_ids=(key,), primary_id=key, mode='selected',
+                              source_view=str(source) if source is not None else '',
+                              generation=self._service.next_generation())
+        self._service.select(selection)
+
+    @staticmethod
+    def _key_for(ref: ObjectRef) -> str:
+        """The ref's stable name if it has one (increment 2), else something unique to it.
+
+        A legacy ref genuinely has no name, and the hub must still dispatch it — so the fallback is
+        the ref's identity, which is stable for as long as the object exists.
+        """
+        entity = getattr(ref, 'entity_id', None)
+        return str(entity) if entity else f"objectref/{id(ref)}"
 
     @property
     def selected(self):

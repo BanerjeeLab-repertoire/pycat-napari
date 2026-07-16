@@ -62,60 +62,118 @@ class VideoParticleTrackingUI:
     # stops the highlight it triggers in view B from firing B's own emit and
     # looping back. The shared key is track_id, which already threads through the
     # Tracks layer, the per-track MSD curves, and the summary table.
-    def _select_track(self, track_id, source=None):
-        """Select a track everywhere. source is the view that initiated it
-        ('plot'|'image'|'table') and is skipped when propagating, so a view never
-        re-highlights from its own action.
+    # ── The dispatcher now lives in `utils.selection_service` ────────────────────────────
+    #
+    # It used to live HERE, and it was the best brushing implementation in PyCAT — with its view
+    # list hardcoded to 'plot' | 'image' | 'table', so nothing outside VPT could join it. Meanwhile
+    # `brushing.SelectionHub` was written as a generic lift of this code and **dropped the delayed
+    # release**, which is the guard that matters; it was never wired to a real Qt view, so nobody
+    # found out.
+    #
+    # `SelectionService` is this logic, generalised: same busy guard, same source suppression, same
+    # zero-delay release, same "one dead view must not take the others down". VPT's three views are
+    # now ordinary subscribers, so a plot elsewhere in PyCAT joins the same dispatcher instead of
+    # reimplementing it. `tests/test_vpt_selection_characterization.py` pins the behaviour this had
+    # before the move and is unchanged by it.
+    def _selection(self):
+        """The shared `SelectionService`. Falls back to a private one if there is no CentralManager
+        (the dispatcher is usable standalone, as the rest of this state already is)."""
+        service = getattr(getattr(self, 'central_manager', None), 'selection', None)
+        if service is None:
+            service = getattr(self, '_local_selection', None)
+            if service is None:
+                from pycat.utils.selection_service import SelectionService
+                service = self._local_selection = SelectionService()
+        return service
 
-        Re-entrancy: propagating a selection makes programmatic changes to the
-        other views (table.selectRow, viewer.dims.current_step, camera.center,
-        points selection). Several of those emit Qt/napari signals ASYNCHRONOUSLY
-        — they fire after this method has already returned — so a synchronous
-        busy-flag that resets in `finally` does NOT cover them, and the queued
-        signals re-enter here and cascade (the "jumps all over the place" loop).
-        Two guards fix it: (1) if the requested track is already the selected one,
-        do nothing (kills the common echo), and (2) the busy flag is cleared on a
-        zero-delay timer, AFTER the event queue drains, so any queued re-entrant
-        signal from this propagation is still suppressed."""
+    def _ensure_selection_views(self):
+        """Register VPT's three views as subscribers, once per service."""
+        service = self._selection()
+        if getattr(self, '_sel_views_for', None) is not service:
+            service.subscribe('vpt.image', self._on_selection_image)
+            service.subscribe('vpt.plot', self._on_selection_plot)
+            service.subscribe('vpt.table', self._on_selection_table)
+            self._sel_views_for = service
+        return service
+
+    @staticmethod
+    def _track_of(selection):
+        """The track id inside a Selection. VPT's ids are `.../vpt/track/<tid>`."""
+        try:
+            return int(str(selection.entity_ids[0]).rsplit('/', 1)[-1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+
+    def _on_selection_image(self, selection):
+        tid = self._track_of(selection)
+        if tid is None:
+            return
+        try:
+            self._reveal_track_in_viewer(tid)
+        except Exception as e:
+            print(f"[PyCAT VPT] link→image failed: {e}")
+
+    def _on_selection_plot(self, selection):
+        tid = self._track_of(selection)
+        if tid is None:
+            return
+        try:
+            self._highlight_track_in_plot(tid)
+        except Exception as e:
+            print(f"[PyCAT VPT] link→plot failed: {e}")
+
+    def _on_selection_table(self, selection):
+        tid = self._track_of(selection)
+        if tid is None:
+            return
+        try:
+            self._highlight_track_in_table(tid)
+        except Exception as e:
+            print(f"[PyCAT VPT] link→table failed: {e}")
+
+    def _track_entity_id(self, tid):
+        """A track's stable id, in the increment-2 `EntityKey` shape.
+
+        VPT keys on a raw `track_id`, which is only meaningful inside one dataset's one tracking
+        run — the same trap `object_id` has. Naming it properly here means a VPT selection and a
+        selection from any other plot are the same kind of thing to the service, and it costs one
+        function call.
+        """
+        from pycat.utils.entity_ref import entity_id_column, source_path_of
+        source = None
+        try:
+            source = source_path_of(self.central_manager.active_data_class)
+        except Exception:
+            source = None
+        return entity_id_column(source, 'vpt', 'track', None, tid)
+
+    def _select_track(self, track_id, source=None):
+        """Select a track everywhere. `source` is the view that initiated it
+        ('plot'|'image'|'table'); it is skipped when propagating, so a view never re-highlights
+        from its own action.
+
+        A thin adapter now: the guard, the suppression and the delayed release all live in
+        `SelectionService`. See the note above the helpers for why they moved.
+        """
         if track_id is None:
             return
         tid = int(track_id)
-        # Echo guard: a programmatic selection that lands back here for the SAME
-        # track is a loop, not a user action — ignore it.
-        if getattr(self, '_selected_track_id', None) == tid and getattr(self, '_sel_busy', False):
-            return
-        if getattr(self, '_sel_busy', False):
-            return
-        self._sel_busy = True
-        try:
-            self._selected_track_id = tid
-            if source != 'image':
-                try:
-                    self._reveal_track_in_viewer(tid)
-                except Exception as e:
-                    print(f"[PyCAT VPT] link→image failed: {e}")
-            if source != 'plot':
-                try:
-                    self._highlight_track_in_plot(tid)
-                except Exception as e:
-                    print(f"[PyCAT VPT] link→plot failed: {e}")
-            if source != 'table':
-                try:
-                    self._highlight_track_in_table(tid)
-                except Exception as e:
-                    print(f"[PyCAT VPT] link→table failed: {e}")
-        finally:
-            # Clear the guard only AFTER the Qt event queue drains, so async
-            # signals emitted by the propagation above (selectRow, dims/camera
-            # changes) are still seen as "busy" and don't re-enter. Fall back to a
-            # synchronous reset if no Qt timer is available.
-            def _release():
-                self._sel_busy = False
-            try:
-                from PyQt5.QtCore import QTimer
-                QTimer.singleShot(0, _release)
-            except Exception:
-                self._sel_busy = False
+        service = self._ensure_selection_views()
+
+        from pycat.utils.selection_service import Selection
+        selection = Selection(
+            entity_ids=(self._track_entity_id(tid),),
+            primary_id=self._track_entity_id(tid),
+            mode='selected',
+            source_view=f'vpt.{source}',
+            generation=service.next_generation(),
+        )
+        # Recorded before propagating: the other views (and `_reveal_track_in_viewer`) read it, and
+        # they read it DURING the propagation this triggers.
+        previous = getattr(self, '_selected_track_id', None)
+        self._selected_track_id = tid
+        if not service.select(selection):
+            self._selected_track_id = previous      # suppressed — nothing was propagated
 
     def _highlight_track_in_plot(self, track_id):
         """Emphasise a track's MSD curve in the live plot (if one is open and its
@@ -255,9 +313,9 @@ class VideoParticleTrackingUI:
 
         # Row-click → select that track everywhere. blockSignals during
         # dispatcher-driven selectRow (in _highlight_track_in_table) prevents the
-        # loop; here we also guard via the dispatcher's _sel_busy.
+        # loop; here we also guard via the dispatcher's busy state.
         def _on_row(*_):
-            if getattr(self, '_sel_busy', False):
+            if self._selection().is_busy:
                 return
             items = table.selectedItems()
             if not items:
@@ -339,7 +397,7 @@ class VideoParticleTrackingUI:
         # mouse_drag_callbacks so it only fires when the picker layer is active;
         # get_value returns the index of the point under the cursor.
         def _on_click(layer, event):
-            if getattr(self, '_sel_busy', False):
+            if self._selection().is_busy:
                 return
             try:
                 idx = layer.get_value(

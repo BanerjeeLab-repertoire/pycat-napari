@@ -79,6 +79,10 @@ class ObjectRef:
     # and a ref without it resolves exactly as before (loudly). Increment 1 makes resolution
     # HONOUR this; filling it at ref-creation time is increment 2's job.
     source_layer_id: str | None = None
+    # The object's stable NAME (increment 2's `_pycat_entity_id`), when the table carried one.
+    # `object_id` says which label; this says which object, across sorts, filters and reloads.
+    # Optional: a legacy table has no name, and such a ref still brushes — by position, as before.
+    entity_id: str | None = None
 
     def crop_slice(self, pad_px: int = 0):
         """The numpy slice that cuts this object out of a frame. ``None`` if there is no bbox."""
@@ -151,13 +155,19 @@ class ObjectRef:
         # makes a ref resolve to its OWN layer instead of the first mask that happens to be open —
         # the wrong-target bug. Absent on a legacy table, which then resolves as it always did (and
         # says that it guessed).
-        layer_id = None
-        try:
-            if '_pycat_layer_id' in row and row['_pycat_layer_id']:
-                value = row['_pycat_layer_id']
-                layer_id = None if (isinstance(value, float) and np.isnan(value)) else str(value)
-        except Exception as exc:
-            debug_log('ObjectRef: could not read the layer id off the row', exc)
+        def _hidden(column):
+            try:
+                if column in row and row[column]:
+                    value = row[column]
+                    if isinstance(value, float) and np.isnan(value):
+                        return None
+                    return str(value)
+            except Exception as exc:
+                debug_log(f'ObjectRef: could not read {column} off the row', exc)
+            return None
+
+        layer_id = _hidden('_pycat_layer_id')
+        entity_id = _hidden('_pycat_entity_id')
 
         return cls(
             object_id=_get('object_id', 'label', 'punctum_label', 'condensate_label',
@@ -178,6 +188,7 @@ class ObjectRef:
             parent_id=_get('cell_label', 'cell label', 'parent_id'),
             tags=dict(tags) if tags else None,
             source_layer_id=layer_id,
+            entity_id=entity_id,
         )
 
 

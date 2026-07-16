@@ -4,6 +4,54 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.75] - 2026-07-16
+### Changed — **Brushing increment 3: VPT's dispatcher is now everyone's.**
+PyCAT had two implementations of linked selection, and the good one was unreachable:
+- `vpt_ui._select_track` — mature, in production, three-way (MSD curve ↔ table ↔ bead) — with its
+  view list **hardcoded** to `'plot'|'image'|'table'`, so nothing else could join it;
+- `brushing.SelectionHub` — the generic lift of it, **zero production callers**.
+
+`utils/selection_service.py` is VPT's dispatcher generalised: the hub's subscriber registry, VPT's
+guards. Owned by `CentralManager` (`central_manager.selection`), beside `_data_switch_callbacks` —
+the same shape of thing, holding its subscribers weakly because a closed dock must not be kept alive
+by having once wanted to hear. VPT's three views are now ordinary subscribers.
+### Fixed — **`SelectionHub` would have oscillated the first time anyone used it.**
+- The lift ended in `finally: self._busy = False` — a **synchronous** release, which is precisely
+  the bug VPT's own docstring records having fixed: *"Several of those emit Qt/napari signals
+  ASYNCHRONOUSLY — they fire after this method has already returned — so a synchronous busy-flag
+  that resets in `finally` does NOT cover them, and the queued signals re-enter here and cascade."*
+  It survived only because it was **never wired to a real Qt view**. It is now a thin shim over the
+  service, so the generic path inherits VPT's delayed release and there is one dispatcher, not two.
+### Added
+- `tests/test_vpt_selection_characterization.py` (`core`) — **written before the extraction, and
+  unchanged by it.** The dispatcher had **zero** test coverage, so "the promotion preserved VPT's
+  behaviour" was an unverifiable claim; these 8 tests pin the contract (source never called back,
+  others updated exactly once, a throwing view doesn't take the others down, re-entrant calls
+  suppressed, the flag actually releases) and pass identically before and after.
+- `tests/test_selection_service.py` (`core`) — echo suppression, re-entrancy, generation/staleness,
+  dataset invalidation, weak subscribers, and a generic plot sharing one dispatcher with a VPT view.
+- `ObjectRef.entity_id` — additive; `from_row` fills it from increment 2's `_pycat_entity_id`, so a
+  selection is keyed on the object's stable name rather than row position.
+### Notes — three of the spec's premises did not survive the tree
+- **VPT's celebrated "echo guard" is dead code.** `if selected == tid and busy: return` sits above
+  `if busy: return` — it is the second guard plus an extra condition, so it can *never* fire
+  independently. Its docstring claims it "kills the common echo", which is not what it does. Lifting
+  it "verbatim" would have carried a dead branch and its false claim into a new module; dropping it
+  is behaviour-preserving by construction. Implementing what the docstring *says* would be a real
+  behaviour change (re-clicking the selected object would become a no-op) — a product decision, not
+  a refactor, so it was not made.
+- **It is `QTimer.singleShot(0, …)`, not an event-queue drain** — the release is *posted behind*
+  what is already queued. Same effect, and worth naming correctly since it is the load-bearing part.
+- **VPT keys on a raw `track_id`**, and the spec's "keys are the increment-2 EntityKey-derived ids"
+  needed a bridge that did not exist (tracks are not one of the stamped tables). VPT now names its
+  tracks through `entity_ref` (`…/vpt/track/<id>`), so a VPT selection and any other plot's are the
+  same kind of thing to the service.
+- `_sel_busy` is gone; two Qt handlers that read it before doing work now read `service.is_busy`, so
+  those early-outs stay alive instead of silently reading a flag nothing sets.
+- The weak-subscriber registry holds **bound methods weakly (`WeakMethod`) and plain callables
+  strongly**: a `weakref.ref` to a lambda dies the instant `subscribe` returns, so a naive weak
+  registry silently never fires. The closed-dock case *is* the bound-method case.
+
 ## [1.6.74] - 2026-07-16
 ### Added — **Brushing increment 2: object tables now name their objects.**
 A plot's points and a table's rows were matched **by row position**. Sort or filter the table and the

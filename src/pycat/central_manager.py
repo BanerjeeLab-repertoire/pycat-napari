@@ -70,6 +70,18 @@ class CentralManager:
         # gates that must re-evaluate whether the new data has a scale).
         self._data_switch_callbacks = []
 
+        # ── The linked-selection dispatcher, application-wide ────────────────────────────
+        #
+        # One object is selected; every view that cares hears about it. This is `vpt_ui`'s proven
+        # three-way dispatcher, generalised — it lived inside VPT with its view list hardcoded to
+        # 'plot'|'image'|'table', so nothing else in PyCAT could join it.
+        #
+        # It sits beside `_data_switch_callbacks` because it is the same shape of thing: a place
+        # views register to be told something changed. It holds its subscribers WEAKLY, though — a
+        # plot dock that is closed must not be kept alive by having once wanted to hear.
+        from pycat.utils.selection_service import SelectionService
+        self.selection = SelectionService()
+
         # Session-level flag: if True, ball_radius / object_size / cell_diameter
         # are preserved across Save & Clear so the user doesn't need to re-measure
         # when processing a second image from the same experiment. Controlled by the
