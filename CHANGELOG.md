@@ -4,6 +4,33 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.68] - 2026-07-16
+### Added — **OperationSpec increment 1: a typed view over the operation vocabulary + a drift guard (validate-first, generates nothing).**
+- An architecture audit flagged that one operation's identity is separately encoded in the UI, batch,
+  Navigator, tag system, and science function — five encodings that can drift. The eventual cure is a
+  canonical `OperationSpec` the subsystems are generated from. This is the **safe foundation**: define
+  the spec as a read-only VIEW over the one place the identity already lives (the `@tags_layer` /
+  UI-op registry, `tag_registry._OPERATIONS`) and make any divergence from the committed Navigator
+  snapshot a **test failure**. Nothing is generated into any subsystem yet.
+- `navigator/operation_spec.py`: frozen `OperationSpec` (increment-1 fields only — `id, role, summary,
+  target, produces, aliases, registered_by`; `inputs`/`parameters`/`batchable` deliberately deferred to
+  a later increment *with* their validation) + `iter_operation_specs()`, a typed view that imports the
+  tag-bearing modules (AST-discovered, so a new decorated module is picked up automatically) and reads
+  `_OPERATIONS`. No new source of truth.
+- `tests/navigator/test_operation_spec_matches_catalog.py` (core): the drift guard — **coverage** (every
+  live op is in `operation_catalog.json`), **no-stale-layer-ops** (every catalog layer op is still live),
+  and **field-fidelity** (`role`/`produces`/`target` match the decorator). Replaces the old
+  hard-coded `cellpose`/`clahe` handful check (folded in, not lost). Runs headlessly — no tag-bearing
+  module imports Qt at module scope.
+- `op_catalog.regenerate_operation_catalog()` + `python -m pycat.navigator.op_catalog --regenerate`: the
+  fix-it path so a failing guard is satisfiable ("run the regen, commit the JSON" — the failure messages
+  name it). Regenerated once: the snapshot is now deterministic (id-sorted, sorted keys) and **provably
+  faithful — zero drift**.
+- **The "79-vs-69" question, resolved:** the snapshot's 79 entries are **63 `@tags_layer` decorator ops
+  + 16 UI-registered ops** (`clahe`, `hand_drawn`, the merges…), all layer ops — NOT 69+10 measure-ops.
+  The `_measure_ops()` set is injected at *build* time and was never stored in this JSON; there are zero
+  stale entries. Batch `_STEP_MAP` is deliberately out of scope (different granularity; its own later spec).
+
 ## [1.6.67] - 2026-07-16
 ### Fixed — **Complexity ratchet was RED (147 > 139); restored by splitting UI builders, not by raising the ceiling.**
 - The downward-only complexity ratchet (`test_complexity_budget.py`) fired: recent feature work pushed

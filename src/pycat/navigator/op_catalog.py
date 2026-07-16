@@ -390,3 +390,96 @@ def build_operation_registry(catalog_path: Optional[str] = None,
             seen.add(o["id"])
             reg.register(_measure_op_contract(o))
     return reg
+
+
+# --------------------------------------------------------------------------- #
+# Regeneration — the snapshot's fix-it button                                  #
+#                                                                              #
+# The drift guard (test_operation_spec_matches_catalog) fails LOUDLY when a    #
+# @tags_layer decorator is added/removed/changed without regenerating this     #
+# JSON. A guard that cannot be satisfied is a trap, so this is the one command #
+# that rewrites the snapshot FROM the live decorators:                         #
+#     python -m pycat.navigator.op_catalog --regenerate                        #
+# The fix for legitimate drift is therefore "run the regen, commit the JSON".  #
+# --------------------------------------------------------------------------- #
+def _provenance_from_registered_by(registered_by: Optional[str]) -> dict:
+    """Derive the snapshot's ``module`` / ``function`` / ``source`` / ``kind`` from a live op's
+    ``registered_by`` (``module.qualname`` for a decorated fn, or the UI-op registrar marker).
+
+    The layer-op contract reads ``module`` + ``function`` (``public_api``), so they must survive
+    regeneration. Verified to reproduce all 79 current entries exactly.
+    """
+    rb = registered_by or ""
+    if rb.endswith("(UI operation)"):
+        return dict(module="tag_registry", function="_register_ui_operations",
+                    source="src/pycat/utils/tag_registry.py", kind="ui")
+    parts = rb.split(".")
+    if len(parts) >= 2:
+        return dict(module=parts[-2], function=parts[-1],
+                    source="src/" + "/".join(parts[:-1]) + ".py", kind="toolbox")
+    return dict(module="", function=rb, source="", kind="toolbox")
+
+
+def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
+    """Rewrite ``operation_catalog.json`` from the LIVE ``@tags_layer``/UI registry, deterministically.
+
+    Walks ``iter_operation_specs()`` (the typed view over ``_OPERATIONS``) and writes one entry per
+    layer op, id-sorted with sorted keys, so the file is stable across runs and reviews. Provenance
+    fields are derived from each op's ``registered_by``; ``role_declared`` (informational — no
+    consumer reads it) is preserved from the existing snapshot when present, else defaults to the
+    op's role. Measure/interpret ops are NOT written: they are injected at build time by
+    ``_measure_ops()`` and were never part of this JSON — adding them would change
+    ``build_operation_registry``'s input contract, which is out of scope for the validate-first
+    increment. Returns the written document.
+    """
+    from .operation_spec import iter_operation_specs
+
+    p = path or os.path.join(_DATA, CATALOG)
+
+    # Preserve the (unread, informational) role_declared from the current snapshot if it exists.
+    prior_role_declared: Dict[str, str] = {}
+    try:
+        with open(p) as fh:
+            for o in json.load(fh).get("operations", []):
+                if "role_declared" in o:
+                    prior_role_declared[o["op"]] = o["role_declared"]
+    except (FileNotFoundError, ValueError):
+        pass
+
+    operations = []
+    for spec in iter_operation_specs():
+        prov = _provenance_from_registered_by(spec.registered_by)
+        operations.append({
+            "op": spec.id,
+            "role": spec.role,
+            "produces": spec.produces,
+            "target": spec.target,
+            "summary": spec.summary,
+            "aliases": list(spec.aliases),
+            "module": prov["module"],
+            "function": prov["function"],
+            "source": prov["source"],
+            "kind": prov["kind"],
+            "role_declared": prior_role_declared.get(spec.id, spec.role),
+        })
+
+    operations.sort(key=lambda o: o["op"])
+    doc = {"operations": operations, "count": len(operations)}
+    with open(p, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return doc
+
+
+if __name__ == "__main__":   # pragma: no cover - thin CLI wrapper
+    import argparse
+
+    ap = argparse.ArgumentParser(description="PyCAT Navigator operation-catalog tool")
+    ap.add_argument("--regenerate", action="store_true",
+                    help="Rewrite operation_catalog.json from the live @tags_layer/UI registry.")
+    args = ap.parse_args()
+    if args.regenerate:
+        _doc = regenerate_operation_catalog()
+        print(f"Regenerated {os.path.join(_DATA, CATALOG)} — {_doc['count']} operations.")
+    else:
+        ap.print_help()
