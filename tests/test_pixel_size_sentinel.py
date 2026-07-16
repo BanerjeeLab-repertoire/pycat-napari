@@ -74,3 +74,24 @@ def test_pre_change_layers_unchanged():
         old = bool(mpp) and abs(float(mpp) - 1.0) > 1e-9
         new = _valid_scale({'microns_per_pixel_sq': mpp})  # no provenance keys
         assert old == new, (mpp, old, new)
+
+
+# ── The production helper `pixel_size.has_real_pixel_size` IS the gate's decision now (field_status
+# delegates to it). It must match `_valid_scale` above case-for-case, and its inverse names the
+# placeholder — the "real-scale tag" that clears when a scale becomes real.
+
+@pytest.mark.parametrize("dr,expected", [
+    ({}, False),                                                         # nothing loaded
+    ({'microns_per_pixel_sq': 1}, False),                               # the placeholder (no prov)
+    ({'microns_per_pixel_sq': 1.0, 'pixel_size_from_metadata': True}, True),   # genuine 1 µm from file
+    ({'microns_per_pixel_sq': 1.0, 'pixel_size_confirmed': True}, True),       # genuine 1 µm user-set
+    ({'microns_per_pixel_sq': 0.108 ** 2, 'pixel_size_from_metadata': True}, True),
+    ({'microns_per_pixel_sq': 0.25}, True),                             # value != 1, no prov → guess
+    ({'microns_per_pixel_sq': None}, False),
+])
+def test_has_real_pixel_size_matches_the_gate_contract(dr, expected):
+    from pycat.utils.pixel_size import has_real_pixel_size, pixel_size_is_placeholder
+    assert has_real_pixel_size(dr) is expected
+    assert pixel_size_is_placeholder(dr) is (not expected)
+    # It IS the gate's mirror, case-for-case.
+    assert has_real_pixel_size(dr) == _valid_scale(dr)

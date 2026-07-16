@@ -36,9 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   have crashed on it); and the **PIL 2-D fallback**. **FRAP** and **session-restore** were left as
   intentional raw / per-image min-max. A systemic raw-vs-[0, 1] split in the generic loader's dask
   branches was documented for a future dedicated pass (see the cleanup audit doc).
-- **Item 6 — the `microns_per_pixel_sq = 1` sentinel — left as-is** (recommended): the plausibility gate
-  + sentinel tests make `1` safe ("means prompt"); switching to `np.nan` would fight those tests for
-  little value.
+- **Item 6 — the `microns_per_pixel_sq = 1` sentinel — documented + given a named "real-scale tag".** Kept
+  the value `1` (a napari layer needs a positive, finite `layer.scale` to render/draw a scale bar; `1`
+  maps it at 1 µm/px, where `0`/`NaN` would give a degenerate transform), but made its meaning explicit:
+  a comment at the write site (`stack_load`) explains why `1` and that it is a PLACEHOLDER tagged by
+  `pixel_size_from_metadata=False` + `pixel_size_confirmed=False`. Added
+  `pixel_size.has_real_pixel_size()` / `pixel_size_is_placeholder()` — a single named "real vs
+  placeholder" tag derived from those provenance flags (no redundant stored flag to drift), that
+  **clears automatically when metadata supplies a scale or the user confirms one**. The field_status gate
+  now delegates to it, so the gate, scale bar, and analysis accessor cannot disagree on "is this a real
+  scale?". (Not switching the value to `np.nan`, which would fight the existing gate tests for little
+  gain.)
 
 ## [1.6.63] - 2026-07-15
 ### Changed — **File-I/O decomposition #5 (final piece): `_open_stack_generic` becomes a slim orchestrator; the god-class breakup is complete.**

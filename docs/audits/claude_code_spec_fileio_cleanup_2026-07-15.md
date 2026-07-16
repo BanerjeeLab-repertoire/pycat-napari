@@ -31,9 +31,13 @@
     from `to_unit_float32`'s dtype-max. For a single restored image min-max is defensible; for analysis
     consistency with a fresh load, dtype-max would match. **Judgment call.**
   → I did NOT convert any of these (silent Csat/partition corruption risk). Which should change?
-- **Item 6 ⏸ DEFERRED — recommend LEAVE.** The `microns_per_pixel_sq = 1` sentinel is made safe by the
-  plausibility gate + sentinel tests, which encode the "1 means prompt" contract; switching to `np.nan`
-  would fight those tests for little value. The spec agrees it's optional/lowest-priority.
+- **Item 6 ✅ (documented + named tag, per Gable).** Kept the value `1` (a napari layer needs a positive,
+  finite `layer.scale`; `0`/`NaN`/`None` would give a degenerate transform), but made it non-arbitrary:
+  a write-site comment in `stack_load` explains why `1` and that it is a PLACEHOLDER tagged by
+  `pixel_size_from_metadata=False` + `pixel_size_confirmed=False`, plus a named "real-scale tag"
+  `pixel_size.has_real_pixel_size()` / `pixel_size_is_placeholder()` (derived from those flags — no
+  redundant stored flag) that clears when a real scale arrives. The field_status gate delegates to it.
+  Did NOT switch to `np.nan` (would fight the gate tests).
 
 ---
 

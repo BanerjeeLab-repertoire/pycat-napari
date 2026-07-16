@@ -226,6 +226,52 @@ def pixel_size_um(data_repository, context=''):
     return float(value ** 0.5)
 
 
+def has_real_pixel_size(data_repository) -> bool:
+    """**Is a REAL lateral calibration on the record — or only the load-time placeholder?**
+
+    This is the single, named answer to *"does this image have a real scale?"* — the "real-scale tag"
+    tracked across load, so the `1`-µm/px placeholder is never mistaken for a measurement.
+
+    ── Why the placeholder is exactly ``1`` (and why it is not arbitrary) ──────────────────────
+
+    When a file carries no usable resolution, the loader writes ``microns_per_pixel_sq = 1`` (see
+    ``stack_load``). That is **deliberate, not a guess about the optics**: a napari image layer needs a
+    *positive, finite* ``layer.scale`` to render and to draw a scale bar — ``0``/``NaN``/``None`` would
+    give it a degenerate transform. ``1`` maps the layer at 1 µm/px, which is renderable and harmless,
+    while the **provenance flags mark it as not-real**:
+
+    * ``pixel_size_from_metadata`` — the value came from the file's metadata;
+    * ``pixel_size_confirmed``     — the user set/confirmed it in the pixel-size panel.
+
+    A real calibration has one of those ``True``; the placeholder has **both** ``False``. So this
+    function is ``from_metadata OR confirmed`` — NOT ``value != 1``, because a genuine 1.000-µm/px image
+    (downsampled / low-mag / synthetic) is real and must not be re-prompted forever. Only when **no
+    provenance was ever recorded** (an older layer) does it fall back to the historical value guess
+    (``value != 1``). This matches the pixel-size gate (``field_status``) and the analysis-side accessor
+    ``pixel_size_um`` (which returns ``NaN`` for the unconfirmed placeholder), so the whole app agrees on
+    what "real scale" means.
+    """
+    dr = data_repository if isinstance(data_repository, dict) else {}
+    mpp = dr.get('microns_per_pixel_sq')
+    if not mpp:
+        return False
+    if bool(dr.get('pixel_size_from_metadata')) or bool(dr.get('pixel_size_confirmed')):
+        return True
+    # No provenance recorded (a pre-provenance layer) — fall back to the old value guess, where an
+    # exact 1.0 reads as the placeholder.
+    try:
+        return abs(float(mpp) - 1.0) > 1e-9
+    except (TypeError, ValueError):
+        return False
+
+
+def pixel_size_is_placeholder(data_repository) -> bool:
+    """True when the pixel size is the load-time PLACEHOLDER (the ``1`` sentinel with no provenance)
+    rather than a real calibration — the inverse of :func:`has_real_pixel_size`. Clears (becomes
+    ``False``) the moment metadata supplies a scale or the user confirms one."""
+    return not has_real_pixel_size(data_repository)
+
+
 def pixel_size_um_or_default(data_repository, default=1.0, context=''):
     """The pixel size in µm, falling back to ``default`` — **and saying so.**
 

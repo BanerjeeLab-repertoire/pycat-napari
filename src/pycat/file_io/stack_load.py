@@ -82,6 +82,19 @@ def _finalise_stack_load(viewer, central_manager, H, W, microns_per_pixel,
                     f"{_reason}\n\nPyCAT will ask you to enter the correct scale.")
             except Exception:
                 pass
+        # ── Why 1, and why it is TAGGED, not arbitrary ────────────────────────────────
+        #
+        # 1 is the "unknown scale" PLACEHOLDER, not a guess about the optics. A napari image layer
+        # needs a positive, finite `layer.scale` to render and to draw a scale bar (napari_adapter
+        # reads `microns_per_pixel_sq` to set it) — 0 / NaN / None would give the layer a degenerate
+        # transform. 1 maps it at 1 µm/px, which is renderable and harmless.
+        #
+        # The two provenance flags are the "real-scale tag" that keeps this HONEST: a real
+        # calibration sets `pixel_size_from_metadata` (from the file) or `pixel_size_confirmed` (the
+        # user), so the placeholder is the one state with BOTH False. That is exactly the check in
+        # `pixel_size.has_real_pixel_size()` and the field_status gate, and it is why the analysis
+        # accessor `pixel_size.pixel_size_um()` returns NaN here rather than a fake 1-µm measurement.
+        # The tag CLEARS automatically the moment metadata supplies a scale or the user confirms one.
         dr['microns_per_pixel_sq'] = 1
         dr['pixel_size_from_metadata'] = False
         # Clear any stale explicit-confirmation so the gate is not held shut by a prior file.

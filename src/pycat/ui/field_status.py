@@ -489,25 +489,14 @@ def add_pixel_size_gate(layout, get_dr, on_set=None, central_manager=None):
     state = {'remembered': None, 'confirmed': False}
 
     def _valid_scale():
-        # A scale is VALID when one is present AND we have a reason to trust it —
-        # NOT because its value happens to differ from 1.0. The old test
-        # `abs(mpp - 1.0) > 1e-9` used 1.0 as a missing-value sentinel, which
-        # throws away a GENUINE 1.0 um/px scale (downsampled / low-mag / derived /
-        # synthetic images legitimately have it). Trust it when either the value
-        # came from metadata (`pixel_size_from_metadata`) or the user explicitly
-        # set/confirmed it here (`pixel_size_confirmed`). Only when neither
-        # provenance signal is present do we fall back to the value-based guess,
-        # and even then a wrong `False` merely asks a question the user can answer.
-        # See docs/audits + file_io/tagging.py::_calibration_is_from_metadata,
-        # which fixed the same sentinel on the metadata-decision side.
-        dr = get_dr() or {}
-        mpp = dr.get('microns_per_pixel_sq')
-        if not bool(mpp):
-            return False
-        if bool(dr.get('pixel_size_from_metadata')) or bool(dr.get('pixel_size_confirmed')):
-            return True
-        # No provenance recorded — fall back to the historical value guess.
-        return abs(float(mpp) - 1.0) > 1e-9
+        # A scale is VALID when one is present AND we have a reason to trust it — provenance
+        # (`pixel_size_from_metadata` / `pixel_size_confirmed`), NOT the value happening to differ
+        # from 1.0 (which throws away a genuine 1.0-µm/px scale on downsampled / low-mag / synthetic
+        # images). This is the shared "real-scale tag" — `pixel_size.has_real_pixel_size` owns the
+        # decision so the gate, the scale bar, and the analysis accessor cannot drift apart. A wrong
+        # `False` in the no-provenance fallback merely asks a question the user can answer.
+        from pycat.utils.pixel_size import has_real_pixel_size
+        return has_real_pixel_size(get_dr() or {})
 
     def _from_metadata():
         dr = get_dr() or {}
