@@ -23,11 +23,16 @@ def _read_channels_via_pil(file_path):
     try:
         from PIL import Image as _PILImage
         import numpy as _np
+        from pycat.file_io.stack_access import to_unit_float32
         _pil_img = _PILImage.open(file_path)
         _frames = []
         try:
             while True:
-                _frames.append(_np.array(_pil_img).astype('float32'))
+                # Normalise to [0, 1] via the canonical helper (audit cleanup item 5), matching the
+                # primary 2-D path — a raw astype('float32') left counts that img_as_float32 does not
+                # rescale, so the PIL fallback silently produced a different intensity scale.
+                _raw = _np.array(_pil_img)
+                _frames.append(to_unit_float32(_raw, _raw.dtype))
                 _pil_img.seek(_pil_img.tell() + 1)
         except EOFError:
             pass

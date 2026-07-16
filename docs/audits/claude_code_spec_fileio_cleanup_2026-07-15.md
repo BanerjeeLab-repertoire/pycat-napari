@@ -8,7 +8,12 @@
   a still-owned one is never closed. New `test_reader_cache_closes.py`.
 - **Item 3 ✅** Removed the unconditional `pycat_stack_*` temp dir + `_stack_zarr_paths`; fixed the false
   "(zarr-backed)" labels → "(lazy, dask-backed)".
-- **Item 5 ⏸ DEFERRED — Gable decides.** The five raw-`astype(float32)` sites, with my analysis:
+- **Item 5 ✅ (partial, per Gable's decision) — 3 of 5 sites converted to `to_unit_float32`:** the IMS
+  single-frame (the real bug), the generic tifffile fallback (eager arrays; a `_TiffPageStack` is
+  passed through unchanged since it is already [0,1]), and the PIL 2-D fallback. **FRAP** and
+  **session-restore** left as intentional (raw / per-image min-max). The systemic raw-vs-[0,1] split in
+  the generic loader's **dask branches** (below) is NOT addressed and is left for a dedicated
+  intensity-consistency pass. Original per-site analysis:
   - `file_io.py::_open_stack_ims` single-frame (`pos_reader[...].astype(float32)`) — **likely a real bug.**
     `load_into_viewer` normalises via `img_as_float32`, which does NOT rescale a float input, so the
     premature `.astype(float32)` leaks RAW COUNTS into analysis, while a multi-frame IMS (via

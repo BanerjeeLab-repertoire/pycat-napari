@@ -27,9 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pycat_stack_*` temp dir (the synchronous full-file zarr transcode that fed it is long gone — every
   branch hands napari an already-lazy wrapper), and the two z-stack / T-Z layer messages that falsely
   claimed "(zarr-backed)" now say "(lazy, dask-backed)".
-- **Items 5 (intensity normalization) & 6 (`microns_per_pixel_sq = 1` sentinel) — DEFERRED to a human
-  decision**, as the spec requires ("Gable decides — intensity semantics are load-bearing for
-  partition/Csat"). Investigation notes are in `docs/audits/claude_code_spec_fileio_cleanup_2026-07-15.md`.
+- **Item 5 — intensity normalization (three inconsistency sites fixed, per Gable's decision).** Routed
+  three raw-`astype(float32)` sites through the canonical `to_unit_float32` so their intensity matches
+  every other loader ([0, 1] from the source dtype): the **IMS single-frame** path (a real bug — the
+  premature float cast leaked raw counts past `load_into_viewer`'s `img_as_float32`, which does not
+  rescale floats, while multi-frame IMS was already [0, 1]); the **generic tifffile fallback** (eager
+  arrays now normalise; a `_TiffPageStack`, already [0, 1], is passed through — the old `.astype` would
+  have crashed on it); and the **PIL 2-D fallback**. **FRAP** and **session-restore** were left as
+  intentional raw / per-image min-max. A systemic raw-vs-[0, 1] split in the generic loader's dask
+  branches was documented for a future dedicated pass (see the cleanup audit doc).
+- **Item 6 — the `microns_per_pixel_sq = 1` sentinel — left as-is** (recommended): the plausibility gate
+  + sentinel tests make `1` safe ("means prompt"); switching to `np.nan` would fight those tests for
+  little value.
 
 ## [1.6.63] - 2026-07-15
 ### Changed — **File-I/O decomposition #5 (final piece): `_open_stack_generic` becomes a slim orchestrator; the god-class breakup is complete.**

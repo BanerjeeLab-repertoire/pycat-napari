@@ -25,12 +25,22 @@ import os
 
 import numpy as np
 
+from pycat.file_io.stack_access import to_unit_float32
 from pycat.utils.general_utils import debug_log
 
 
 def build_tifffile_fallback_wrapper(arr, *, lazy_array_source_cls):
-    """Structured reader failed → the head handed us an in-memory (T,H,W) array; wrap it directly."""
-    arr_ch = arr.astype(np.float32)
+    """Structured reader failed → the head handed us either an eager (T,H,W) ndarray or a lazy
+    ``_TiffPageStack``; wrap it for napari.
+
+    Normalise an eager array to [0, 1] via the canonical helper (audit cleanup item 5) so its
+    intensity matches every other loader path, instead of the old raw ``astype(float32)`` that left
+    0–65535 counts. A ``_TiffPageStack`` already yields [0, 1] frames (and has no ``.astype``), so it
+    is wrapped as-is."""
+    if isinstance(arr, np.ndarray):
+        arr_ch = to_unit_float32(arr, arr.dtype)
+    else:
+        arr_ch = arr   # already a self-normalising lazy wrapper (e.g. _TiffPageStack → [0,1] frames)
     wrapper = lazy_array_source_cls(arr_ch)
     return wrapper, [arr_ch], []
 

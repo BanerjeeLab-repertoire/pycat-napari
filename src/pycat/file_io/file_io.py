@@ -1984,9 +1984,13 @@ class FileIOClass:
                           f"bucket='{_ch_info.get('bucket')}'")
 
                 if n_t == 1 and n_z == 1:
-                    # Single 2D frame — no lazy wrapper needed
+                    # Single 2D frame — no lazy wrapper needed. Normalise to [0, 1] via the canonical
+                    # helper (audit cleanup item 5), NOT a raw astype: load_into_viewer's img_as_float32
+                    # does not rescale a FLOAT input, so a bare .astype(float32) here leaked raw counts
+                    # into analysis while a multi-frame IMS (via _ImsReaderTYX → to_unit_float32) is [0,1].
                     with _suppress_ims_chunk_prints():
-                        frame = pos_reader[0, channel_idx, 0, :, :].astype(np.float32)
+                        _raw = pos_reader[0, channel_idx, 0, :, :]
+                    frame = to_unit_float32(_raw, getattr(_raw, 'dtype', None))
                     self.load_into_viewer(
                         frame, name=f"{self.base_file_name} {_ch_label}{pos_suffix}")
                     channel_data = frame
