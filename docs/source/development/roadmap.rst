@@ -178,6 +178,85 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: 📋 Unresolved after the 2026-07-16 audit session (1.6.70 → 1.6.82) — read this first
+
+Nine specs shipped in that session. What follows is **everything left open**, with what was verified,
+why it was not done, and what it needs — so it can be picked up cold. Items with their own rubric
+below are cross-referenced rather than repeated.
+
+**The one piece of work worth doing next, because it fixes two things at once:**
+
+* **Worker-thread materialization.** Two separate freezes have the same cause and the same cure:
+  ``load_session`` runs on the Qt thread ("Python is not responding"), and every
+  ``materialize_stack`` in every widget does too — 1.6.81/82 made that wait *visible* (a moving bar)
+  without making it *shorter*. Doing this once serves both. The pattern to copy already exists:
+  ``batch_processor.BatchWorker(QThread)``, ``advanced_analysis_ui._AdvancedAnalysisWorker``, and the
+  ``QThread`` + ``moveToThread`` + modal ``QProgressDialog`` in ``file_io.py``. **The trap:** napari
+  layer creation MUST stay on the main thread — the worker reads/decodes and the ``viewer.add_*``
+  calls are marshalled back. Get that wrong and you have traded a freeze for a crash. It is also
+  unverifiable headlessly (see the click-test note below), so it wants someone at a running viewer.
+  See the two rubrics further down for the session-loader and progress-rollout halves.
+
+**Live bugs, verified, not fixed — each is small and each needs a decision, not investigation:**
+
+* **A per-cell grouping in every puncta plot never fires.** ``analysis_plots.py:1166`` gates on
+  ``if 'cell_label' in df.columns``; ``feature_analysis_tools.py:700`` writes ``df['cell label']``
+  — **with a space.** Every other producer and consumer in the codebase uses the underscore. So the
+  grouped rendering silently does nothing for the one table it exists for. 1.6.74 fixed the *ref*
+  side (``ObjectRef.from_row`` accepts both spellings, so puncta refs carry ``parent_id`` again) and
+  deliberately did **not** rename the column: it is user-visible in results tables and CSVs, and
+  renaming it would silently switch this plot's appearance. **The decision is Gable's:** rename the
+  column (plots change), or teach ``analysis_plots`` both spellings (plots change), or leave it.
+  Doing nothing keeps a documented dead branch.
+* **Two different uuids identify the same layer.** ``layer_tag_hook.py:211`` stamps
+  ``metadata['pycat_layer_id'] = uuid4().hex`` (32 chars) — this is what ``ObjectRef.source_layer_id``
+  matches and what the whole brushing arc keys on. ``layer_tags.py:223-238`` has an *older*
+  ``layer_tag_id()`` returning ``metadata['pycat_tag_uid']`` (``uuid4().hex[:12]``), used by
+  ``partial_volume_tools.py:572`` and recorded by ``tag_registry.tags_for_plot`` as ``layer_tag_id``.
+  **They are different values for the same layer**, so anything matching a plot's recorded id against
+  a ref's ``source_layer_id`` will never match. Nothing does *yet* — which is why this is a trap
+  rather than a bug. Whoever wires plot-recorded ids to selection will hit it. The fix is to pick one
+  and make the other an alias.
+* **The tifffile/zarr shim is a safety net nobody installs.** ``file_io/tifffile_zarr_shim.py``
+  aliases the symbol tifffile needs on zarr 3.2, and ``install_tifffile_zarr_shim()`` has **zero
+  production call sites** — only its own definition and ``tests/test_tifffile_zarr_shim.py``. Since
+  1.6.71 TIFF Z/TZ reads natively and no longer needs it, so this is not urgent; but it means the
+  module is dead code that *looks* like a live workaround. Either wire it at import for the paths
+  that still fall to BioIO's dask (CZI), or delete it and keep the test as a record.
+
+**Deliberately deferred, with the reason (do not treat these as oversights):**
+
+* **Brushing Part E — aggregate rows.** Its premise does not exist in the tree: nothing mixes
+  aggregate rows with per-object rows (aggregates are separate single-row tables under their own
+  titles), and ``data_viz_tools`` already declines to brush a bbox-less table. It is **new behaviour,
+  not a fix**, and wants someone to say they want it. The selection overlay already accepts *k*
+  objects, so the mechanism is there. See the brushing-arc rubric.
+* **VPT bead Points layer holds every frame** (brushing increment 4, Part C) — needs a profile first.
+  Own rubric below.
+* **Filter-sensitivity increment 2** — the harness (1.6.80) is built and proved; pointing it at the
+  remaining defaults **needs prioritisation, not machinery**. The spec names the shape most like the
+  proven ``r2_min`` case: the *select-for-the-measured-quantity* class — segmentation's
+  ``local_snr_threshold`` / ``global_snr_threshold`` (~10 sites) and condensate ``bleach_r2_min``.
+  Adding each is one row in ``VALIDATED_CASES`` plus a known-answer fixture. ``vpt_tools``'
+  ``defocus_r2_max`` must NOT be added — it is deprecated and unused, and a test on it would assert
+  about code no run reaches. There are ~37–113 other defaults; **the audit's own view is that they
+  are not equal**, so the next increment is a prioritisation call.
+* **``_is_source_image_layer`` trusts a NAME over a tag.** ``session_manifest.py:52-81`` is an OR: a
+  name containing the source stem wins on its own, so a *derived* layer called "<stem> something" is
+  a false positive unless it happens to hit the hardcoded ``derived_markers`` list. 1.6.72 repaired
+  the tag half (it read ``'origin'``, a key nothing writes) but left the OR: making ``provenance``
+  authoritative would change which layers the save dialog pre-selects, which is a behaviour change
+  that deserves its own decision rather than riding along in a bug fix.
+
+**Developer-environment note (not a product issue, but it will bite the next person):**
+
+* The ``pycat-160`` conda env has a **non-editable** install, so ``pycat`` resolves to
+  ``site-packages`` and a bare ``pytest`` tests the *installed* copy rather than the working tree.
+  Every test run in this session used ``PYTHONPATH=src`` to compensate. CI is unaffected (it does
+  ``pip install --no-deps -e .``). A one-off ``pip install -e .`` locally removes the footgun — worth
+  doing before the next session, because a green run against a stale copy is the kind of thing that
+  costs an afternoon.
+
 .. rubric:: ⚠ NEEDS A CLICK-TEST — two shipped features no automated test can reach
 
 **These are not "untested because nobody got round to it". They are untested because the test
@@ -332,24 +411,31 @@ consistent with the data-local thesis) rather than overlaying or scrubbing posit
 a scene-aware lazy wrapper + a small UI control; deferred to its own focused pass so it
 doesn't destabilise the loader.
 
-.. rubric:: Progress-bar audit (materialization-progress helper shipped; per-method rollout pending)
+.. rubric:: Progress-bar audit — the MATERIALIZATION half is done (1.6.81/82); three items remain
 
-A reusable phased-progress mechanism now exists (``PhasedProgress`` in ``ui_utils`` +
-``progress_callback`` on ``materialize_stack`` / ``as_full_array``) that maps a
-materialization phase and a work phase onto ONE continuous 0→100% bar, fixing the
-"bar reaches 100% twice" confusion. It was applied first to VPT bead detection (the
-parallel-detection pass now fills 0→70% and the scoring pass 70→100%). Remaining work,
-to be done per-method (not as a blanket sweep):
+A reusable phased-progress mechanism exists (``PhasedProgress`` in ``ui_utils`` +
+``progress_callback`` on ``materialize_stack`` / ``as_full_array``) that maps a materialization phase
+and a work phase onto ONE continuous 0→100% bar, fixing the "bar reaches 100% twice" confusion. It
+was applied first to VPT bead detection (detection 0→70%, scoring 70→100%).
 
-* Wire the materialization ``progress_callback`` into the seven UIs that materialize a
-  stack synchronously before a worker starts (frap, condensate_physics, fusion,
-  invitro_bf, brightfield, invitro_fluor, temperature) so large stacks show a
-  "Materializing…" indication instead of a frozen 0%.
-* Add progress bars to the zero-bar UIs that do slow work: ``contrast_cascade_ui``,
-  ``fd_curve_ui``, ``data_qc_ui``.
-* Audit the core cell/condensate runners in ``ui_modules`` (currently under-covered) and
-  add determinate bars where per-cell / per-object loops make progress measurable.
-* Sweep for any remaining indeterminate/fake bars that could be determinate.
+* ✅ **Wire the materialization callback into the UIs that materialize a stack synchronously** —
+  DONE for **all 14 sites across all 8 widgets**, ratcheted at zero by
+  ``tests/test_progress_rollout.py``. See the rollout rubric above; note the honest limit — the wait
+  is now *visible*, not shorter.
+* ✅ ``data_qc_ui`` — done (it had no bar at all; one was added).
+* ⬜ **Zero-bar UIs that do slow work but do NOT materialize:** ``contrast_cascade_ui`` and
+  ``fd_curve_ui`` construct **no** ``QProgressBar`` and call **no** ``materialize_stack`` — so the
+  1.6.81/82 rollout did not touch them and its ratchet does not cover them. *This is a different
+  problem*: their slow work is the analysis itself, so it needs a bar **and** a ``progress_callback``
+  on the tool function, not just wiring. Whoever picks this up should check whether the tool even
+  reports progress before adding a bar with nothing to drive it.
+* ⬜ **The core cell/condensate runners in** ``ui_modules`` (under-covered): add determinate bars
+  where per-cell / per-object loops make progress measurable.
+* ⬜ **Sweep for indeterminate/fake bars that could be determinate.** Worth knowing before starting:
+  ``QProgressBar.setValue`` calls ``repaint()`` and is **synchronous**, so a bar driven from a busy
+  main-thread loop genuinely moves (measured: 50 paints per 50 updates, vs 0 for a control). A
+  ``QLabel`` does **not** — ``setText`` only schedules an ``update()`` the blocked event loop never
+  runs, so **a status label is not a progress reporter**, whatever it says.
 
 .. rubric:: Documentation audit (user feedback — docs drifting from current GUI)
 
