@@ -88,6 +88,74 @@ def _prompt_pixel_size_if_needed(central_manager):
         from pycat.utils.general_utils import report_guarantee_failure
         report_guarantee_failure("file_io: pixel-size prompt on load", _prompt_exc)
 
+def _resolve_stack_axes(central_manager, n_t, n_z):
+    """Reconcile the reader's dims with the user's T/Z answer. Returns ``(n_t, n_z, answer)``.
+
+    ── The user was asked, and the answer was thrown away ──────────────────────────────────
+
+    An undeclared multipage TIFF has no axis metadata, so BioIO puts the pages on **T** — there is
+    nowhere else to put them, and ``image_structure`` reads ``n_t``/``n_z`` straight off
+    ``image.dims``. PyCAT asks the user *"time-series or z-stack?"* precisely because the file
+    cannot say. The answer was then recorded in the repository and tagged onto the layer — **but
+    ``n_t``/``n_z`` were never touched.**
+
+    So a user who answered **"Z-stack"** got ``stack_axis='Z'`` **and** ``dimensionality='2d+t'``.
+    *Two tags on one layer, contradicting each other, on exactly the file where the question was
+    asked.* Anything reading ``dimensionality`` believed the reader; anything reading
+    ``stack_axis`` believed the user.
+
+    Resolved once, HERE, before any tag is written — this is the single point every loader funnels
+    through, so the answer cannot be honoured by one reader and ignored by the next.
+
+    ``answer`` is ``'T'``/``'Z'`` when a human was asked, else None.
+    """
+    answer = None
+    try:
+        dr = central_manager.active_data_class.data_repository
+        if dr.get('stack_axis_assumed') and ((n_t or 1) > 1 or (n_z or 1) > 1):
+            answer = str(dr.get('stack_axis_label') or '?').upper()
+    except Exception as _axis_e:
+        debug_log("file_io: could not read the assumed stack axis", _axis_e)
+
+    if answer == 'Z' and (n_t or 1) > 1 and (n_z or 1) <= 1:
+        # The pages are z-slices; the reader only called them T because the file was silent.
+        n_t, n_z = 1, n_t
+    elif answer == 'T' and (n_z or 1) > 1 and (n_t or 1) <= 1:
+        n_t, n_z = n_z, 1
+    return n_t, n_z, answer
+
+
+def _tag_layout(_LT, layer, n_t, n_z, n_p, axis_answer):
+    """Tag WHAT KIND of stack this is (``dimensionality``) and WHERE each axis lives
+    (``axis_order``), from dims already reconciled with the user's answer.
+
+    ── Why both ────────────────────────────────────────────────────────────────────────────
+
+    **A (N, Y, X) movie and a (N, Y, X) z-stack are the same array.** ``dimensionality`` says which
+    kind it is; ``axis_order`` says which axis is which — the question anything that indexes or
+    **scales** the array actually has to answer. The viewer needs it to put a physical z-step on the
+    right axis, and it has to come from one shared place: a z-scale wired per reader is exactly how
+    IMS, TIFF and CZI drift apart, invisibly, because a stack with the wrong aspect still looks
+    like a stack.
+
+    Channels are split into separate layers and positions into separate scenes, so the layout handed
+    to napari is only ever ``YX`` / ``TYX`` / ``ZYX`` / ``TZYX``.
+    """
+    if n_p and n_p > 1:
+        dim = 'multi-position'
+    elif n_t and n_t > 1:
+        dim = '2d+t'
+    elif n_z and n_z > 1:
+        dim = 'z-stack'
+    else:
+        dim = '2d'
+    _LT.tag_layer(layer, 'dimensionality', dim, source='inferred')
+
+    axes = ('T' if (n_t or 1) > 1 else '') + ('Z' if (n_z or 1) > 1 else '') + 'YX'
+    _LT.tag_layer(layer, 'axis_order', axes,
+                  source=('user_set' if axis_answer in ('T', 'Z') else 'inferred'))
+
+
 def _tag_loaded_layer(central_manager, layer, role=None, n_t=1, n_z=1, n_p=1,
                       microns_per_pixel=None, file_path=None,
                       modality=None, channel=None, provenance='raw'):
@@ -114,16 +182,8 @@ def _tag_loaded_layer(central_manager, layer, role=None, n_t=1, n_z=1, n_p=1,
         if role:
             _LT.tag_layer(layer, 'role', role, source='inferred')
 
-        # Dimensionality from the axis sizes the loader parsed.
-        if n_p and n_p > 1:
-            dim = 'multi-position'
-        elif n_t and n_t > 1:
-            dim = '2d+t'
-        elif n_z and n_z > 1:
-            dim = 'z-stack'
-        else:
-            dim = '2d'
-        _LT.tag_layer(layer, 'dimensionality', dim, source='inferred')
+        n_t, n_z, _axis_answer = _resolve_stack_axes(central_manager, n_t, n_z)
+        _tag_layout(_LT, layer, n_t, n_z, n_p, _axis_answer)
 
         # Scale calibration: a real pixel size is essentially never exactly
         # 1.0 µm/px, so 1.0 means "no metadata / uncalibrated". Viscosity and
@@ -157,12 +217,11 @@ def _tag_loaded_layer(central_manager, layer, role=None, n_t=1, n_z=1, n_p=1,
         # The tag is per-layer and travels with it. `source='user_set'` because the user was
         # *asked* — this is not an inference, it is an answer, and it must not be silently
         # overwritten by the next file's answer.
+        # Resolved above (before `dimensionality`, so the two cannot disagree). This tag records
+        # that a human was ASKED and what they said; `axis_order` records the resulting layout.
         try:
-            _dr_axis = central_manager.active_data_class.data_repository
-            if _dr_axis.get('stack_axis_assumed') and (n_t > 1 or n_z > 1):
-                _LT.tag_layer(layer, 'stack_axis',
-                              str(_dr_axis.get('stack_axis_label') or '?').upper(),
-                              source='user_set')
+            if _axis_answer is not None:
+                _LT.tag_layer(layer, 'stack_axis', _axis_answer, source='user_set')
         except Exception as _axis_e:
             debug_log("file_io: could not tag the stack axis", _axis_e)
 

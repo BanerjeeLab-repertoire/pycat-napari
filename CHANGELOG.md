@@ -4,6 +4,64 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.72] - 2026-07-16
+### Fixed — **The per-layer axis tag was unreadable, so every axis warning named the wrong file.**
+- `get_tags(layer)` returns a **list** of tag records. Four call sites treated it as a mapping —
+  `(get_tags(layer) or {}).get('stack_axis', {}).get('value')` — which raises `AttributeError`
+  straight into a bare `except Exception`. The failure was swallowed and the branch silently did
+  nothing: **the layer carried the tag and the code could not hear it.** `get_tag(layer, key)` was
+  the correct accessor, two functions away, the whole time.
+- Consequence: `warn_if_assumed_axis` always fell back to the shared session label, so opening a
+  movie (labelled T) and then adding a z-stack (labelled Z) made the **movie** warn as 'Z'. That is
+  the exact bug the per-layer tag was added to fix. An MSD on a mislabelled stack computes a rate
+  per frame, and *T and Z load identically — nothing on screen reveals it.*
+- **Why it survived:** `get_tags(layer) or {}` works fine for a layer with NO tags (`[] or {}` →
+  `{}`), and only breaks once a layer has one — i.e. exactly when the branch had work to do.
+- **Why the tests missed it:** `test_axis_is_per_layer.py` monkeypatched `get_tags` to return a
+  dict-shaped fake, validating a data model that does not exist in production. It now drives the
+  real store through `tag_layer` and **fails against the old accessor** (verified by reverting).
+- The other three sites (`file_io._is_reconstructable`, `session_manifest._is_source_image_layer` /
+  `_is_reconstructable`) had the same bug *plus* read tag keys that nothing writes — `'operation'`
+  and `'origin'`, where the vocabulary has `op` and `provenance`. Doubly dead; the name-based checks
+  were carrying those functions alone. Now pointed at the real keys. (No upscale op is registered
+  yet, so those two branches stay inert — but they are inert against a real key instead of a lie.)
+### Added — **Z depth now reaches the viewer, for every reader, from one shared place.**
+- Physical z-depth reached the measurements but never the display: `_enable_auto_scale_bar` wrote
+  only `sc[-1]`/`sc[-2]` (Y, X) and left leading axes at 1.0, so a calibrated z-stack rendered
+  **~15x stretched** (Z=1.0 against ~0.065 µm/px) — for IMS, TIFF and CZI alike.
+- `axis_order` (`'YX'`/`'TYX'`/`'ZYX'`/`'TZYX'`) is a new core tag, written for **every** layer at
+  the single load-time chokepoint (`tagging._tag_loaded_layer`), and `napari_adapter._apply_z_scale`
+  puts `z_step_um` on whichever axis is Z. **Deliberately not in any reader** — a z-scale wired into
+  each loader is how they drift apart, invisibly, since a stack with the wrong aspect still looks
+  like a stack. A format added later inherits this by tagging its layers like everything else.
+- A tag is unavoidable: **a (N, Y, X) movie and a (N, Y, X) z-stack are the same array.** ndim cannot
+  tell them apart, and a z-step on axis 0 of a movie would stretch time. Missing or contradictory
+  tag → decline rather than guess.
+- Verified end-to-end in real napari: a z-stack declaring `PhysicalSizeZ=0.30`/`PhysicalSizeX=0.065`
+  now yields `layer.scale == (0.3, 0.065, 0.065)` — aspect 4.62, the true anisotropy.
+- `tests/test_z_scale_is_shared.py`, `tests/test_layer_tag_accessors.py` (both `core`).
+### Fixed — **The T/Z dialog answer is finally authoritative.**
+- An undeclared multipage TIFF has no axis metadata, so BioIO puts the pages on **T**. PyCAT asks
+  the user "time-series or z-stack?" — and then threw the answer away: it was recorded and tagged,
+  but `n_t`/`n_z` were never touched. Answering "Z-stack" produced `stack_axis='Z'` **and**
+  `dimensionality='2d+t'` — two tags on one layer contradicting each other, on exactly the file
+  where the question was asked. Resolved once at the chokepoint, before either tag is written, so
+  the answer now reaches the viewer as a real z-scale.
+### Notes
+- Unknown z-step **renders** isotropic (the lateral pixel size) rather than leaving the placeholder
+  1.0, which is a ~15x artifact of the placeholder rather than anything about the specimen. Display
+  only: `z_step_um` still returns NaN and 3-D volumes are still NaN — *a stretched picture is not a
+  wrong number*. `z_step_um`'s own once-per-session warning puts the unknown on the record at load,
+  when the user can still set it in the metadata panel.
+- `_align_layer_scales` needed no change: it rebuilds from the layer's current scale and only ever
+  writes `[-2:]`, so a leading Z survives.
+- `_tag_loaded_layer` grew past the 120-line complexity ceiling and was **split** (into
+  `_resolve_stack_axes` + `_tag_layout`), not granted a raised ceiling — the ratchet only moves down.
+- Still open, noted not smuggled: `_is_source_image_layer` remains an OR, so a derived layer whose
+  name contains the source stem is still a false positive unless it hits the hardcoded
+  `derived_markers` list. Making `provenance` authoritative over the name would change which layers
+  the save dialog pre-selects.
+
 ## [1.6.71] - 2026-07-16
 ### Fixed — **A z-stack TIFF did not load at all. Now it loads and scrubs natively.**
 - The generic loader's Z (`ZYX`) and T+Z (`TZYX`) branches were **dask-only**, and BioIO reads TIFF

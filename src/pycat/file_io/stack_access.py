@@ -220,11 +220,16 @@ def warn_if_assumed_axis(data_repository, operation="this analysis", layer=None)
         # **T and Z load identically**, so nothing on screen reveals it.
         #
         # When the caller passes the layer it is about to analyse, its own `stack_axis` tag wins.
+        # `get_tags` returns a LIST of tag records, so `(get_tags(layer) or {}).get('stack_axis', {})`
+        # raised `AttributeError` straight into the `except` below — **and this branch never fired.**
+        # The per-layer tag existed, was correct, and was unreadable; every warning named the axis of
+        # whichever file was opened LAST, which is precisely the bug the tag was added to fix.
+        # `get_tag` is the accessor for one key's value.
         label = None
         if layer is not None:
             try:
-                from pycat.utils.layer_tags import get_tags
-                label = (get_tags(layer) or {}).get('stack_axis', {}).get('value')
+                from pycat.utils.layer_tags import get_tag
+                label = get_tag(layer, 'stack_axis')
             except Exception:
                 label = None
 

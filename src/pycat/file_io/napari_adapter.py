@@ -132,6 +132,66 @@ def _align_layer_scales(viewer, central_manager):
     except Exception:
         pass
 
+def _apply_z_scale(sc, layer, central_manager, px):
+    """Put the physical Z step on the Z axis — **whichever axis that is, for any reader.**
+
+    ── Why this is here and not in a reader ────────────────────────────────────────────────
+
+    Every format can have a Z. Wiring the z-scale into the TIFF loader, then the IMS loader, then
+    the CZI loader is how those three drift apart — and the drift is invisible, because a stack
+    that renders with the wrong aspect looks like a stack. So it is done **once**, at the single
+    point every loader already funnels through, off a fact recorded once at the single load-time
+    tagging chokepoint (`axis_order`). A format added later gets this for free, by tagging its
+    layers like everything else.
+
+    ── Why it needs a tag at all ─────────────────────────────────────────────────────────
+
+    **A (N, Y, X) movie and a (N, Y, X) z-stack are the same array.** ndim cannot tell them apart,
+    and putting a z-step on axis 0 of a movie would stretch time. `axis_order` is the only thing
+    that knows, so if it is absent or disagrees with the array, this declines rather than guesses.
+
+    ── The unknown case ──────────────────────────────────────────────────────────────────
+
+    `z_step_um` returns NaN when the file carries no axial spacing (never a guessed 1.0 — a silent
+    3.3x volume error is the bug it was written against). But napari needs a positive, finite scale
+    on every axis, so for **display** the fallback is the XY pixel size: an isotropic voxel.
+
+    That is a deliberate choice between two wrongs. Leaving the placeholder 1.0 next to a 0.065
+    µm/px lateral scale renders the stack **15x stretched** — an artifact of the placeholder, not a
+    property of the specimen, and it is what happens today for every calibrated z-stack of every
+    format. Isotropic is at least the conventional assumption, and `z_step_um` has already put the
+    "unknown" on the record via its own once-per-session warning (which tells the user to set the
+    step in the metadata panel — at load, when they can still act on it).
+
+    **This is display only.** It never touches `layer.data`, and measurements do not read it: 3-D
+    volumes go through `z_step_um` themselves and still get NaN. A stretched picture is not a
+    wrong number.
+    """
+    import numpy as _np
+    try:
+        from pycat.utils.layer_tags import get_tag
+        axes = str(get_tag(layer, 'axis_order', '') or '')
+    except Exception:
+        return
+
+    if 'Z' not in axes:
+        return
+    if len(axes) != len(sc):
+        # The tag and the array disagree about how many axes there are. Which one is depth is now
+        # a guess, and a guess here silently rescales the wrong axis. Decline.
+        return
+
+    z_at = axes.index('Z')
+    try:
+        dr = central_manager.active_data_class.data_repository
+        from pycat.utils.pixel_size import z_step_um
+        z_um = z_step_um(dr, context='the 3-D view')
+    except Exception:
+        return
+
+    sc[z_at] = float(z_um) if (_np.isfinite(z_um) and z_um > 0) else float(px)
+
+
 def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
     """
     Enable napari's scale bar for a freshly-loaded image.
@@ -171,6 +231,7 @@ def _enable_auto_scale_bar(viewer, central_manager, image_layer=None):
             sc = [float(s) for s in image_layer.scale]
             if all(_np.isfinite(s) and s > 0 for s in sc[:-2]) or len(sc) <= 2:
                 sc[-1] = px; sc[-2] = px
+                _apply_z_scale(sc, image_layer, central_manager, px)
                 image_layer.scale = sc
             label = 'um'
         else:

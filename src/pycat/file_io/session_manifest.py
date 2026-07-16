@@ -64,10 +64,15 @@ def _is_source_image_layer(layer, source_stem):
                                'upscaled', 'overlay', 'picked')
             if not any(m in nm for m in derived_markers):
                 return True
+        # Was `(get_tags(layer) or {}).get('origin', ...)`: `get_tags` returns a LIST, so this
+        # raised into the `except` and never fired — and `origin` is not a tag key anyway (nothing
+        # writes one). The vocabulary's word for where a layer came from is `provenance`, and a
+        # layer loaded from the file is tagged `'raw'` by `_tag_loaded_layer`; derived work gets
+        # 'derived' / 'segmentation' / 'pycat-generated' / 'user-created'. Two mistakes stacked, so
+        # the name check above was carrying this function alone.
         try:
-            from pycat.utils.layer_tags import get_tags
-            tags = get_tags(layer) or {}
-            if str(tags.get('origin', '')).lower() in ('loaded', 'source', 'file'):
+            from pycat.utils.layer_tags import get_tag
+            if str(get_tag(layer, 'provenance', '') or '').lower() == 'raw':
                 return True
         except Exception:
             pass
@@ -85,10 +90,15 @@ def _is_reconstructable(layer):
         nm = str(getattr(layer, 'name', '')).lower()
         if 'upscal' in nm:
             return True
+        # Was `(get_tags(layer) or {}).get('operation', ...)` — a LIST, so it raised into the
+        # `except`, and `operation` is not a tag key: the vocabulary's key for "which operation
+        # produced this" is `op` (validated against the operation registry). Pointed at the real
+        # key now. **No upscaling operation is registered today**, so this branch is still inert —
+        # the NAME check above is what actually catches upscaled layers. It starts working the day
+        # an upscale op is registered, rather than being a lie that reads a key nobody writes.
         try:
-            from pycat.utils.layer_tags import get_tags
-            op = str((get_tags(layer) or {}).get('operation', '')).lower()
-            if 'upscal' in op:
+            from pycat.utils.layer_tags import get_tag
+            if 'upscal' in str(get_tag(layer, 'op', '') or '').lower():
                 return True
         except Exception:
             pass

@@ -47,28 +47,34 @@ def captured_warnings(monkeypatch):
 
 
 class _Layer:
-    """A napari layer carrying a PyCAT tag store."""
+    """A napari layer carrying a REAL PyCAT tag store.
+
+    ── This fixture used to fake the store, and that is why the bug shipped ──────────────
+
+    It hand-built ``metadata['pycat_tags'] = {'stack_axis': {'value': axis}}`` and a
+    ``tags_from_the_layer`` fixture monkeypatched ``get_tags`` to return it. **Neither matched
+    production.** The real store is ``{'tags': [{'key': ..., 'value': ...}, ...]}`` and the real
+    ``get_tags`` returns that **list**.
+
+    So these tests validated a data model that does not exist — and passed for months while the
+    code under test was dead: ``warn_if_assumed_axis`` called ``.get()`` on the list, raised
+    ``AttributeError`` into a bare ``except``, and silently fell back to the shared session label.
+    *The tests asserted the layer's own axis won; production always used the last-loaded file's.*
+
+    The store is now written through the real ``tag_layer``, so nothing here can pass unless the
+    production accessor genuinely reads a real layer's real tag.
+    """
 
     def __init__(self, name, axis=None):
         self.name = name
         self.metadata = {}
         if axis is not None:
-            self.metadata['pycat_tags'] = {
-                'stack_axis': {'value': axis, 'source': 'user_set'}
-            }
-
-
-@pytest.fixture
-def tags_from_the_layer(monkeypatch):
-    """`get_tags` must read the layer it is handed — not a global."""
-    import pycat.utils.layer_tags as layer_tags
-    monkeypatch.setattr(
-        layer_tags, 'get_tags',
-        lambda layer: getattr(layer, 'metadata', {}).get('pycat_tags', {}))
+            from pycat.utils.layer_tags import tag_layer
+            tag_layer(self, 'stack_axis', axis, source='user_set')
 
 
 @pytest.mark.core
-def test_each_LAYER_is_warned_about_ITS_OWN_axis(captured_warnings, tags_from_the_layer):
+def test_each_LAYER_is_warned_about_ITS_OWN_axis(captured_warnings):
     """**The bug.** The session remembers only the *last* file's answer."""
     # The session's label is 'Z' — because the z-stack was loaded SECOND, and overwrote it.
     repository = {'stack_axis_assumed': True, 'stack_axis_label': 'Z'}
@@ -92,7 +98,7 @@ def test_each_LAYER_is_warned_about_ITS_OWN_axis(captured_warnings, tags_from_th
 
 
 @pytest.mark.core
-def test_the_SECOND_stack_is_warned_about_AT_ALL(captured_warnings, tags_from_the_layer):
+def test_the_SECOND_stack_is_warned_about_AT_ALL(captured_warnings):
     """***The one that was actually mislabelled was the one that never warned.***
 
     The flag was ``dr['_axis_warned'] = True`` on the **shared** repository. The first stack spent
@@ -114,7 +120,7 @@ def test_the_SECOND_stack_is_warned_about_AT_ALL(captured_warnings, tags_from_th
 
 
 @pytest.mark.core
-def test_the_same_layer_is_warned_about_only_ONCE(captured_warnings, tags_from_the_layer):
+def test_the_same_layer_is_warned_about_only_ONCE(captured_warnings):
     """Per-layer, not per-call. *A warning on every button press is a warning nobody reads.*"""
     repository = {'stack_axis_assumed': True, 'stack_axis_label': 'T'}
     layer = _Layer('movie.tif', axis='T')
@@ -128,7 +134,7 @@ def test_the_same_layer_is_warned_about_only_ONCE(captured_warnings, tags_from_t
 
 
 @pytest.mark.core
-def test_a_DECLARED_axis_is_never_warned_about(captured_warnings, tags_from_the_layer):
+def test_a_DECLARED_axis_is_never_warned_about(captured_warnings):
     """**Safe no-op when the file said so.** The warning is for a *guess*, not for metadata."""
     repository = {}          # nothing was assumed — the file declared its axes
 

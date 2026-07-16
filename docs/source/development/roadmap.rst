@@ -85,34 +85,50 @@ Two things worth recording, because the obvious implementation of each is wrong:
 and real IMS wrappers over the same volume and demands identical shape/ndim/dtype/len and identical
 pixels for every index pattern, so the TIFF family cannot drift from the IMS one.
 
-.. rubric:: Z depth is not applied to ``layer.scale`` — for ANY reader
+.. rubric:: Z depth is applied to ``layer.scale`` for every reader — RESOLVED (1.6.72)
 
-Physical z-depth reaches the *measurements* (``pixel_size.z_step_um`` reads
-``file_metadata['common']['z_step_um']``, written from the reader's ``physical_pixel_sizes.Z``;
-unknown is NaN, never a guessed 1.0 — ``test_anisotropic_voxel``, and for TIFF now
-``test_ztz_readers_agree``). **It does not reach the viewer.** ``napari_adapter``'s
-``_enable_auto_scale_bar`` writes only ``sc[-1]``/``sc[-2]`` (Y, X) and leaves every leading axis at
-1.0, and ``_align_layer_scales`` slices ``[-2:]`` throughout. So a z-stack renders with a unit Z
-aspect regardless of format — IMS, TIFF, or CZI alike. It is at least **consistently** wrong.
+Physical z-depth reached the *measurements* (``pixel_size.z_step_um``) but **never the viewer**:
+``_enable_auto_scale_bar`` wrote only ``sc[-1]``/``sc[-2]`` (Y, X) and left every leading axis at
+1.0. So a calibrated z-stack rendered with a Z step of 1.0 world units against a ~0.065 µm/px
+lateral scale — **~15x stretched** — for IMS, TIFF and CZI alike. Consistently wrong, but wrong.
 
-Fixing it is not a wire-up, because the prerequisite is missing: **there is no per-layer record of
-axis order.** A shared Z-scale must know that axis 0 is Z for a ``ZYX`` layer but T for a ``TYX``
-one, and nothing stores that. The nearest thing, the ``stack_axis`` tag, is written only for
-undeclared multipage TIFFs, sits outside the ``CORE_KEYS`` vocabulary, and **its only production
-reader is broken**: ``stack_access.warn_if_assumed_axis`` calls ``.get()`` on ``get_tags(layer)``,
-which returns a **list**, so it raises ``AttributeError`` into a bare ``except`` and the per-layer
-branch never fires (``get_tag(layer, 'stack_axis')`` is the correct accessor, two functions away).
-``tests/test_axis_is_per_layer.py`` cannot catch this — it monkeypatches ``get_tags`` to return a
-dict-shaped fake, validating a data model that does not exist. Separately, ``dimensionality`` is
-derived from BioIO dims while the T-vs-Z dialog answer never changes ``n_t``/``n_z``, so the two
-records contradict each other for a user-declared z-stack.
+Done **once, in the shared path**, not per reader — a z-scale wired into each loader is how they
+drift apart, invisibly, because a stack with the wrong aspect still looks like a stack:
 
-*So the work is: introduce a per-layer ``axis_order`` in the tag vocabulary, written at the one
-chokepoint every loader funnels through (``tagging._tag_loaded_layer``); repair the accessor and
-its test; make the dialog answer authoritative; then key Z off it in ``_enable_auto_scale_bar`` and
-teach ``_align_layer_scales`` about a leading Z — with a Z placeholder + provenance flag for the
-honest-unknown case, since napari needs a positive finite scale. Format-agnostic by construction:
-every reader gets it from the shared chokepoint rather than each wiring its own.*
+* ``axis_order`` (``'YX'``/``'TYX'``/``'ZYX'``/``'TZYX'``) is a core tag, written for every layer at
+  the single load-time chokepoint ``tagging._tag_loaded_layer``, which every loader already calls;
+* ``napari_adapter._apply_z_scale`` reads that tag and puts ``z_step_um`` on whichever axis is Z.
+
+**A format added later inherits this by tagging its layers like everything else.** A tag is
+unavoidable here: *a (N, Y, X) movie and a (N, Y, X) z-stack are the same array* — ndim cannot tell
+them apart, and a z-step on axis 0 of a movie would stretch time. Missing or contradictory tag →
+decline, never guess.
+
+Unknown z-step **renders** isotropic (the lateral pixel size) rather than leaving the placeholder
+1.0, which is a ~15x artifact of the placeholder rather than anything about the specimen. This is
+display only: ``z_step_um`` still returns NaN and 3-D volumes are still NaN — *a stretched picture
+is not a wrong number*. ``_align_layer_scales`` needed no change; it rebuilds from the layer's
+current scale and only ever writes ``[-2:]``, so a leading Z survives.
+
+Three prerequisites were fixed on the way, all in ``tests/test_layer_tag_accessors.py``:
+
+* **The per-layer axis reader was dead code.** ``warn_if_assumed_axis`` called ``.get()`` on
+  ``get_tags(layer)``, which returns a **list** — ``AttributeError`` into a bare ``except``, so
+  every warning named the axis of *whichever file was opened last*. Three more call sites had the
+  same bug (``file_io``, ``session_manifest`` ×2), two of them also reading tag keys nothing writes
+  (``'operation'``, ``'origin'`` — the vocabulary has ``op`` and ``provenance``).
+  ``get_tag(layer, key)`` was the correct accessor throughout.
+* **Its test could not fail** — it monkeypatched ``get_tags`` into a dict-shaped fake, validating a
+  data model that does not exist. It now drives the real store, and fails against the old bug.
+* **The T/Z dialog answer is now authoritative.** It never changed ``n_t``/``n_z``, so answering
+  "Z-stack" produced ``stack_axis='Z'`` *and* ``dimensionality='2d+t'`` — two tags on one layer
+  contradicting each other on exactly the file where the user was asked. Resolved once, at the
+  chokepoint, before either tag is written.
+
+*Still open, deliberately:* ``_is_source_image_layer`` remains an OR — a name containing the source
+stem wins on its own, so a derived layer named "<stem> …" is a false positive unless it hits the
+hardcoded ``derived_markers`` list. Making the ``provenance`` tag authoritative over the name would
+change which layers the save dialog pre-selects, so it was noted rather than smuggled into a bug fix.
 
 .. rubric:: The reader is CACHED, not passed through the dispatch
 

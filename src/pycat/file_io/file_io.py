@@ -381,11 +381,14 @@ class LayerDataframeSelectionDialog(QDialog):
                 if 'upscal' in name:
                     return True
                 # Tag-based: provenance says it was derived by an upscale step.
+                # Was `(get_tags(layer) or {}).get('operation', ...)`: `get_tags` returns a LIST, so
+                # this raised into the `except` and never fired, and `operation` is not a tag key —
+                # the vocabulary's key is `op`. (Same two mistakes as the copy in
+                # `session_manifest._is_reconstructable`, which is this function duplicated.) Inert
+                # until an upscale op is registered; the name check above is the live path.
                 try:
-                    from pycat.utils.layer_tags import get_tags
-                    tags = get_tags(layer) or {}
-                    op = str(tags.get('operation', '')).lower()
-                    if 'upscal' in op:
+                    from pycat.utils.layer_tags import get_tag
+                    if 'upscal' in str(get_tag(layer, 'op', '') or '').lower():
                         return True
                 except Exception:
                     pass

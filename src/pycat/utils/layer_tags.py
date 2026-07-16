@@ -72,6 +72,15 @@ CORE_KEYS = {
     'target',        # what the layer is OF: condensate / cell / nucleus / punctum / bead...
     'layer_type',    # the napari type it was added as (image/labels/points/shapes/tracks)
     'dimensionality',# 2d / 2d+t / z-stack / multi-position
+    'axis_order',    # WHICH AXIS IS WHICH: 'YX' / 'TYX' / 'ZYX' / 'TZYX'. `dimensionality` says
+                     # what KIND of stack it is; this says where each axis LIVES, which is what
+                     # anything indexing or scaling the array needs. A (N, Y, X) movie and a
+                     # (N, Y, X) z-stack are the same array — only this tag distinguishes them, and
+                     # without it a shared Z scale cannot know whether axis 0 is depth or time.
+    'stack_axis',    # 'T' / 'Z' — the user's ANSWER for an undeclared multipage TIFF (source
+                     # 'user_set'). Kept distinct from `axis_order`: this records that a human was
+                     # asked and what they said; `axis_order` is the resulting layout, which is also
+                     # set for files that declared their axes and were never in doubt.
     'modality',      # fluorescence / brightfield
     'channel',       # fluorophore / stain identity (free value from metadata)
     'spectral_bucket',   # coarse emission band: blue/green/red/far_red/unknown. The honest
@@ -114,6 +123,12 @@ CORE_VALUES = {
     # 'op' has its values validated against the OPERATION REGISTRY, not a set here -- see
     # tag_registry.get_operation(). A tag that is not a registered operation is REFUSED.
     'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
+    # 'axis_order' — the layout of the array actually handed to napari. Channels are split into
+    # separate layers on load and positions into separate scenes, so C and P never appear here.
+    'axis_order': {'YX', 'TYX', 'ZYX', 'TZYX'},
+    # 'stack_axis' — the answer to "is this multipage TIFF T or Z?". '?' is the honest value for
+    # "the user was asked and the answer did not survive", which beats guessing one.
+    'stack_axis': {'T', 'Z', '?'},
     'modality': {'fluorescence', 'brightfield'},
     'spectral_bucket': {'blue', 'green', 'red', 'far_red', 'transmitted', 'unknown'},
     'scale': {'calibrated', 'uncalibrated'},
