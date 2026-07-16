@@ -20,8 +20,16 @@ import numpy as np
 
 from pycat.file_io.napari_adapter import _enable_auto_scale_bar
 from pycat.file_io.tagging import _tag_loaded_layer
-from pycat.ui.ui_utils import add_image_with_default_colormap
 from pycat.utils.general_utils import debug_log, dtype_conversion_func
+
+# `add_image_with_default_colormap` lives in `pycat.ui.ui_utils`, which imports napari at module
+# scope. Importing it HERE at module scope would drag napari into every importer of `viewer_load`,
+# including headless `core` tests (test_load_into_viewer_scale) that have no napari installed and
+# monkeypatch this name to run without a viewer. So it is bound LAZILY inside `load_into_viewer`
+# below. The module-level name is declared here so tests can
+# `monkeypatch.setattr(viewer_load, 'add_image_with_default_colormap', ...)` and the function will
+# pick up the patched value instead of importing the real (napari-touching) one.
+add_image_with_default_colormap = None  # bound lazily in load_into_viewer; patchable in tests
 
 
 def load_into_viewer(viewer, central_manager, data, name, is_mask=False):
@@ -82,7 +90,12 @@ def load_into_viewer(viewer, central_manager, data, name, is_mask=False):
             data = data.astype(np.float32)
         data = dtype_conversion_func(data, 'float32')  # Ensure image data is correct float32 dtype
         # Add the image to the viewer
-        add_image_with_default_colormap(data, viewer, name=name)
+        # Lazy import (see module-level note): keeps napari out of headless importers; a test's
+        # monkeypatched value on this module takes precedence over the real import.
+        _add_image = add_image_with_default_colormap
+        if _add_image is None:
+            from pycat.ui.ui_utils import add_image_with_default_colormap as _add_image
+        _add_image(data, viewer, name=name)
         # Stash the current file's metadata on the layer so a later
         # multi-image comparison can diff acquisition settings per-layer even
         # though data_repository['file_metadata'] is overwritten on each load.

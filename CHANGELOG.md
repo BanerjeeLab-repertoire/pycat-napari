@@ -4,6 +4,19 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.69] - 2026-07-16
+### Fixed — **`core` (headless) CI failed: `viewer_load` dragged napari in at import.**
+- `test_load_into_viewer_scale.py` (marked `core`, runs with NO napari installed) imports
+  `file_io/viewer_load.py`, which imported `add_image_with_default_colormap` from `ui.ui_utils` at
+  MODULE scope — and `ui_utils` imports napari at module scope. So the import chain pulled napari
+  before the test's monkeypatch could neutralise it → `ModuleNotFoundError: No module named 'napari'`.
+  The `ui_utils` import is now LAZY (bound inside `load_into_viewer`, imported on first real call),
+  with the module-level name kept as a patchable attribute so the test's
+  `monkeypatch.setattr(viewer_load, 'add_image_with_default_colormap', ...)` still works. `viewer_load`
+  is now headlessly importable; production behaviour is unchanged. This is the same headless-import
+  contract the `test_headless_science` guards enforce for the science modules.
+
+
 ## [1.6.68] - 2026-07-16
 ### Added — **OperationSpec increment 1: a typed view over the operation vocabulary + a drift guard (validate-first, generates nothing).**
 - An architecture audit flagged that one operation's identity is separately encoded in the UI, batch,
