@@ -4,6 +4,33 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.64] - 2026-07-15
+### Changed — **File-I/O audit cleanup: four of the six re-audit items closed (items 5 & 6 deferred to a human intensity-semantics decision).**
+- **Item 4 — stale `aicsimageio` in PKG-INFO.** The committed root `PKG-INFO` still declared
+  `Requires-Dist: aicsimageio>=4.14.0` (+ `aicspylibczi`) — dependencies removed in the 1.6.0 BioIO
+  migration. `PKG-INFO` is build output (regenerated from `pyproject.toml` into the sdist/wheel), so
+  the committed copy was a stale artifact nothing reads; untracked it, removed it, and gitignored
+  `PKG-INFO` + `*.egg-info/`. Fixed the one remaining "using AICSImageIO" README credit → BioIO.
+- **Item 1 — generic loader is ImageSource-only.** Reader/dask-handle retention now works like the IMS
+  loader: a per-load `ImageSource` attached to each lazy layer's `metadata['pycat_image_source']`,
+  replacing the controller-scoped `self._stack_lazy_refs` list (removed). Also fixed a latent bug the
+  migration surfaced — the T-Z branch retained nothing, so its lazy dask reader could be orphaned on
+  GC; it now retains the reader like the z-stack branch. Verified by the reader-retention guard
+  (pytest-qt, offscreen), which runs the real loader and confirms the reader survives GC when only
+  layers are held.
+- **Item 2 — the reader cache closes readers it drops.** Eviction (a 5th distinct file), the
+  rewind-failure drop, and `clear_reader_cache()` now `close()` the discarded reader (best-effort) so a
+  cleared viewer doesn't leak file handles (a Windows re-open/delete blocker). The cache and a live
+  layer's `ImageSource` can hold the *same* reader, so `ImageSource.retain()` marks it and the cache
+  skips closing any marked reader — never closing a handle a scrubbing layer still needs.
+- **Item 3 — removed obsolete zarr scaffolding.** The generic loader no longer creates an unconditional
+  `pycat_stack_*` temp dir (the synchronous full-file zarr transcode that fed it is long gone — every
+  branch hands napari an already-lazy wrapper), and the two z-stack / T-Z layer messages that falsely
+  claimed "(zarr-backed)" now say "(lazy, dask-backed)".
+- **Items 5 (intensity normalization) & 6 (`microns_per_pixel_sq = 1` sentinel) — DEFERRED to a human
+  decision**, as the spec requires ("Gable decides — intensity semantics are load-bearing for
+  partition/Csat"). Investigation notes are in `docs/audits/claude_code_spec_fileio_cleanup_2026-07-15.md`.
+
 ## [1.6.63] - 2026-07-15
 ### Changed — **File-I/O decomposition #5 (final piece): `_open_stack_generic` becomes a slim orchestrator; the god-class breakup is complete.**
 - **The core stack loader is no longer a 542-line god-method.** `_open_stack_generic` — every
