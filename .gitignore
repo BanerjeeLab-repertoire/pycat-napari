@@ -167,3 +167,7 @@ cython_debug/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Build metadata — generated into the sdist/wheel at build time; never hand-edited or committed.
+PKG-INFO
+*.egg-info/
