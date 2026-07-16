@@ -738,10 +738,25 @@ class _ZarrTYX:
 # courtesy the ``stack_access`` re-export below already provides.
 from pycat.file_io.lazy_sources import (      # noqa: F401  (re-exported for callers)
     _TiffPageStack,
+    _TiffPageStackZYX,
+    _TiffPageStackTZYX,
     _LazyArraySource,
     resolve_ome_file_set,
     build_ome_page_map,
 )
+
+
+def _lazy_backing_label(wrapper):
+    """What is ACTUALLY behind this lazy layer, for the load message.
+
+    Read off the wrapper rather than hardcoded per branch, because a hardcoded label is how these
+    messages came to announce "(zarr-backed)" for months after the zarr transcode was deleted
+    (cleanup item 3). A routing change now cannot leave the message lying: the label follows the
+    object that was built.
+    """
+    if isinstance(wrapper, (_TiffPageStack, _TiffPageStackZYX, _TiffPageStackTZYX)):
+        return "lazy, native TIFF pages"
+    return "lazy, dask-backed"
 
 
 # ── ONE implementation of the stack helpers, not two ────────────────────────────────────────
@@ -1916,29 +1931,33 @@ class FileIOClass:
                         f"{H}×{W}px → '{layer_name}' (lazy)")
 
                 elif n_t == 1:
-                    # Pure z-stack (Z, Y, X).
+                    # Pure z-stack (Z, Y, X). TIFF reads natively via `_TiffPageStackZYX` — before
+                    # 1.6.71 this branch was dask-only and a z-stack TIFF did NOT load (BioIO's
+                    # TIFF path dies on zarr 3.2).
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{scene_suffix}"
                     _wrapper, _refs, _warns = build_zstack_wrapper(
-                        file_path, ext, image, channel_idx,
+                        file_path, ext, image, channel_idx, n_z, n_c, H, W,
+                        tiff_zstack_cls=_TiffPageStackZYX,
                         lazy_array_source_cls=_LazyArraySource)
                     self._add_lazy_stack_layer(
                         _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} z-stack: {n_z} slices "
-                        f"{H}×{W}px → '{layer_name}' (lazy, dask-backed)")
+                        f"{H}×{W}px → '{layer_name}' ({_lazy_backing_label(_wrapper)})")
 
                 else:
                     # Nested time-series-with-z-stack (T, Z, Y, X) — a genuine lazy 4D array; napari
-                    # adds a T slider AND a Z slider automatically. The dask array is already lazy, so
-                    # the window opens immediately (the old code transcoded the whole channel first).
+                    # adds a T slider AND a Z slider automatically. One plane per slider move, so the
+                    # window opens immediately (the old code transcoded the whole channel first).
                     layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{scene_suffix}"
                     _wrapper, _refs, _warns = build_tzstack_wrapper(
-                        file_path, ext, image, channel_idx,
+                        file_path, ext, image, channel_idx, n_t, n_z, n_c, H, W,
+                        tiff_tzstack_cls=_TiffPageStackTZYX,
                         lazy_array_source_cls=_LazyArraySource)
                     self._add_lazy_stack_layer(
                         _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} T-Z stack: "
                         f"{n_t} timepoints × {n_z} z-slices, "
-                        f"{H}×{W}px → '{layer_name}' (lazy, dask-backed)")
+                        f"{H}×{W}px → '{layer_name}' ({_lazy_backing_label(_wrapper)})")
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),

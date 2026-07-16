@@ -94,7 +94,8 @@ def test_timeseries_tiff_uses_page_reader_and_retains_wrapper(monkeypatch):
 
 def test_zstack_czi_retains_reader_and_dask():
     img = _FakeImage()
-    w, refs, warns = build_zstack_wrapper('f.czi', '.czi', img, 1,
+    w, refs, warns = build_zstack_wrapper('f.czi', '.czi', img, 1, 12, 1, 64, 48,
+                                          tiff_zstack_cls=None,
                                           lazy_array_source_cls=_FakeLazySource)
     assert w.data.tag == ('ZYX', 1)
     assert refs == [(img, w.data)]
@@ -102,7 +103,8 @@ def test_zstack_czi_retains_reader_and_dask():
 
 def test_tzstack_czi_retains_reader_and_dask():
     img = _FakeImage()
-    w, refs, warns = build_tzstack_wrapper('f.czi', '.czi', img, 0,
+    w, refs, warns = build_tzstack_wrapper('f.czi', '.czi', img, 0, 4, 6, 1, 64, 48,
+                                           tiff_tzstack_cls=None,
                                            lazy_array_source_cls=_FakeLazySource)
     assert w.data.tag == ('TZYX', 0)
     # T-Z retains the reader like the z-stack branch (item-1 fix; the lazy dask needs the reader
@@ -110,14 +112,90 @@ def test_tzstack_czi_retains_reader_and_dask():
     assert refs == [(img, w.data)]
 
 
-@pytest.mark.parametrize("builder,ext", [
-    (build_zstack_wrapper, '.tif'),
-    (build_tzstack_wrapper, '.tif'),
-])
-def test_zarr32_error_is_translated_for_tiff(builder, ext):
+def _fake_tifffile(monkeypatch):
+    """Make `tifffile.TiffFile(path)` return a one-page uint16 probe."""
+    import tifffile
+
+    class _Page:
+        dtype = np.dtype('uint16')
+
+    class _FakeTiff:
+        def __enter__(self):
+            self.pages = [_Page()]
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(tifffile, 'TiffFile', lambda p: _FakeTiff())
+
+
+class _FakeZStack:
+    def __init__(self, path, n_z, H, W, dtype, channel_idx=0, n_channels=1):
+        self.shape = (n_z, H, W)
+        self.ctor = (n_z, H, W, channel_idx, n_channels)
+
+    def close(self):
+        pass
+
+
+class _FakeTZStack:
+    def __init__(self, path, n_t, n_z, H, W, dtype, channel_idx=0, n_channels=1):
+        self.shape = (n_t, n_z, H, W)
+        self.ctor = (n_t, n_z, H, W, channel_idx, n_channels)
+
+    def close(self):
+        pass
+
+
+def test_zstack_tiff_uses_page_reader_and_retains_wrapper(monkeypatch):
+    """**A z-stack TIFF did not load at all before 1.6.71.** This branch was dask-only, and BioIO
+    reads TIFF pixels through tifffile's zarr store, which is broken on zarr 3.2 — so the layer
+    died with `zarr 3.2.1 < 3 is not supported` on the first plane read. Only the T branch had ever
+    been given the native tifffile cure. Mirrors
+    `test_timeseries_tiff_uses_page_reader_and_retains_wrapper`."""
+    _fake_tifffile(monkeypatch)
+    img = _FakeImage()
+    w, refs, warns = build_zstack_wrapper('f.tif', '.tif', img, 0, 12, 1, 64, 48,
+                                          tiff_zstack_cls=_FakeZStack,
+                                          lazy_array_source_cls=_FakeLazySource)
+    assert isinstance(w, _FakeZStack)      # native page reader, not the dask wrapper
+    assert w.ctor == (12, 64, 48, 0, 1)
+    assert refs == [w]                     # the open tifffile handle is retained
+    assert img.calls == []                 # the reader's broken dask path was NOT touched
+
+
+def test_tzstack_tiff_uses_page_reader_and_retains_wrapper(monkeypatch):
+    _fake_tifffile(monkeypatch)
+    img = _FakeImage()
+    w, refs, warns = build_tzstack_wrapper('f.tif', '.tif', img, 0, 4, 6, 1, 64, 48,
+                                           tiff_tzstack_cls=_FakeTZStack,
+                                           lazy_array_source_cls=_FakeLazySource)
+    assert isinstance(w, _FakeTZStack)
+    assert w.ctor == (4, 6, 64, 48, 0, 1)
+    assert refs == [w]
+    assert img.calls == []
+
+
+@pytest.mark.parametrize("kind", ['z', 'tz'])
+def test_zarr32_error_is_translated_when_the_native_reader_DECLINES(kind):
+    """The native TIFF reader is now the primary path, so this is no longer the everyday case —
+    but it is still reachable: if the page reader declines or fails, the dask fallback runs, and
+    for a TIFF it fails with tifffile's misleading "zarr < 3" text. The translation must survive.
+
+    (Before 1.6.71 this test asserted that a TIFF z-stack ALWAYS raises — it encoded the bug as
+    the contract. Now it pins the fallback only, with `tiff_*_cls=None` standing in for a decline.)
+    """
     class _RaiseImage:
         def get_image_dask_data(self, axes, C=None):
             raise ValueError("zarr 3.2.1 < 3 is not supported")
 
     with pytest.raises(RuntimeError, match="misleading"):
-        builder('f.tif', ext, _RaiseImage(), 0, lazy_array_source_cls=_FakeLazySource)
+        if kind == 'z':
+            build_zstack_wrapper('f.tif', '.tif', _RaiseImage(), 0, 12, 1, 64, 48,
+                                 tiff_zstack_cls=None,
+                                 lazy_array_source_cls=_FakeLazySource)
+        else:
+            build_tzstack_wrapper('f.tif', '.tif', _RaiseImage(), 0, 4, 6, 1, 64, 48,
+                                  tiff_tzstack_cls=None,
+                                  lazy_array_source_cls=_FakeLazySource)

@@ -142,23 +142,86 @@ def _dask_stack_wrapper(axes, kind, file_path, ext, image, channel_idx, *, lazy_
     return lazy_array_source_cls(dask_arr), dask_arr
 
 
-def build_zstack_wrapper(file_path, ext, image, channel_idx, *, lazy_array_source_cls):
-    """Pure z-stack (Z, Y, X)."""
-    wrapper, dask_arr = _dask_stack_wrapper(
+def _native_tiff_or_dask(axes, kind, file_path, ext, image, channel_idx, *,
+                         native_factory, lazy_array_source_cls):
+    """Try the native tifffile page reader first; fall back to the structured reader's dask array.
+
+    The shape ``build_timeseries_wrapper`` established for TYX, now shared by the Z and T+Z
+    branches — because they had exactly the same problem and only T ever got the cure. For a TIFF
+    the dask array is **never built speculatively**: ``tif.aszarr()`` is broken on zarr 3.2, so
+    building it to "have a fallback ready" just raises. It is built only if the native reader
+    actually declines.
+
+    ``native_factory(tiff_dtype)`` returns the wrapper, or None to decline.
+    """
+    warnings = []
+    dask_arr = None
+    if ext not in ('.tif', '.tiff'):
+        dask_arr = image.get_image_dask_data(axes, C=channel_idx)
+
+    wrapper = None
+    if ext in ('.tif', '.tiff') and native_factory is not None:
+        try:
+            # tifffile reports the dtype directly — no zarr store, no dask.
+            import tifffile as _tf_probe
+            with _tf_probe.TiffFile(file_path) as _probe:
+                _tiff_dtype = _probe.pages[0].dtype
+            wrapper = native_factory(_tiff_dtype)
+        except Exception as _te:
+            debug_log("file_io: native tifffile page reader failed for a "
+                      f"{kind}, using the structured reader's dask wrapper", _te)
+            wrapper = None
+
+    if wrapper is None:
+        if dask_arr is None:
+            wrapper, dask_arr = _dask_stack_wrapper(
+                axes, kind, file_path, ext, image, channel_idx,
+                lazy_array_source_cls=lazy_array_source_cls)
+        else:
+            wrapper = lazy_array_source_cls(dask_arr)
+        retain_refs = [(image, dask_arr)]
+    else:
+        retain_refs = [wrapper]   # keep the tifffile handle open
+    return wrapper, retain_refs, warnings
+
+
+def build_zstack_wrapper(file_path, ext, image, channel_idx, n_z, n_c, H, W, *,
+                         tiff_zstack_cls, lazy_array_source_cls):
+    """Pure z-stack (Z, Y, X).
+
+    TIFF z-stacks read natively via ``_TiffPageStackZYX`` — direct page seeks, no zarr. **This
+    branch used to be dask-only, which meant a z-stack TIFF did not load at all**: BioIO reads TIFF
+    through ``tif.aszarr()``, that store is broken on zarr 3.2, and the layer died with
+    ``zarr 3.2.1 < 3 is not supported`` on the first plane read. Only the T branch had ever been
+    given the tifffile cure. CZI keeps the dask wrapper (it has no tifffile path).
+    """
+    def _native(tiff_dtype):
+        return tiff_zstack_cls(file_path, n_z, H, W, tiff_dtype,
+                               channel_idx=channel_idx, n_channels=n_c)
+
+    return _native_tiff_or_dask(
         'ZYX', "Z stack", file_path, ext, image, channel_idx,
+        native_factory=_native if tiff_zstack_cls is not None else None,
         lazy_array_source_cls=lazy_array_source_cls)
-    return wrapper, [(image, dask_arr)], []
 
 
-def build_tzstack_wrapper(file_path, ext, image, channel_idx, *, lazy_array_source_cls):
-    """Nested time-series-with-z-stack (T, Z, Y, X) — the dask array is already lazy, so napari reads
-    one plane per T/Z slider move and the window opens immediately (the old code transcoded the whole
-    channel to a temp zarr first).
+def build_tzstack_wrapper(file_path, ext, image, channel_idx, n_t, n_z, n_c, H, W, *,
+                          tiff_tzstack_cls, lazy_array_source_cls):
+    """Nested time-series-with-z-stack (T, Z, Y, X) — one plane per T/Z slider move, so the window
+    opens immediately (the old code transcoded the whole channel to a temp zarr first).
 
-    Retains ``(image, dask_arr)`` like the z-stack branch: the dask array is lazy, so the READER must
-    stay alive for those on-demand reads. The pre-migration branch retained nothing here — a latent
-    orphaned-reader bug, fixed as part of the ImageSource migration (audit cleanup item 1)."""
-    wrapper, dask_arr = _dask_stack_wrapper(
+    TIFF reads natively via ``_TiffPageStackTZYX``; see ``build_zstack_wrapper`` for why the dask
+    path could not work for TIFF at all.
+
+    Retention differs by path: the dask array is lazy, so the READER must stay alive for its
+    on-demand reads (``(image, dask_arr)``); the native wrapper owns an open tifffile handle and is
+    retained itself. The pre-migration branch retained nothing here — a latent orphaned-reader bug,
+    fixed as part of the ImageSource migration (audit cleanup item 1)."""
+    def _native(tiff_dtype):
+        return tiff_tzstack_cls(file_path, n_t, n_z, H, W, tiff_dtype,
+                                channel_idx=channel_idx, n_channels=n_c)
+
+    return _native_tiff_or_dask(
         'TZYX', "T+Z stack", file_path, ext, image, channel_idx,
+        native_factory=_native if tiff_tzstack_cls is not None else None,
         lazy_array_source_cls=lazy_array_source_cls)
-    return wrapper, [(image, dask_arr)], []

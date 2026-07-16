@@ -50,34 +50,69 @@ Loader & I/O — open after the BioIO migration (1.6.0–1.6.13)
 Full record: ``docs/audits/bioio_migration_2026-07-13.md``. These are the items that were
 **deliberately not closed**, with what each would actually cost.
 
-.. rubric:: Z-stack and T+Z TIFF still go through BioIO's broken zarr path
+.. rubric:: Z-stack and T+Z TIFF went through BioIO's broken zarr path — RESOLVED (1.6.71)
 
 ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and **tifffile's zarr store is
 incompatible with zarr 3.2** (it fails to import ``RegularChunkGrid``, which zarr renamed, and then
 **blames the version**: ``zarr 3.2.1 < 3 is not supported``, which is not true).
 
-``_TiffPageStack`` handles the **TYX** case natively — direct page seeks, no zarr. **It does not
-handle Z or T+Z.** Those paths now *report the real cause* instead of tifffile's misleading message,
-but **they do not work**.
+``_TiffPageStack`` handled the **TYX** case natively — direct page seeks, no zarr — but the Z and
+T+Z branches were **dask-only**, so a z-stack TIFF **did not load at all**: the layer was built and
+then died on the first plane read. Only the T branch had ever been given the tifffile cure.
 
-Two routes, and the choice is not obvious:
+**TIFF now reads Z and T+Z natively**, via ``_TiffPageStackZYX`` (ndim=3, ``(Z, Y, X)``) and
+``_TiffPageStackTZYX`` (ndim=4, ``(T, Z, Y, X)``) in the Qt-free ``file_io/lazy_sources.py`` — the
+module the 1.6.70 extraction created, which is what made these headlessly testable. The generic
+loader's Z/T+Z branches try the native reader first and keep the dask path only as the fallback for
+formats without a tifffile route (CZI), mirroring what ``build_timeseries_wrapper`` already did
+for T.
 
-* **Extend the native page reader to Z and T+Z.** The page-index arithmetic is already there
-  (``page = ((t * n_z) + z) * n_channels + c``); what is missing is the wrapper shape and the napari
-  dims. *Self-contained. Does not depend on anyone else fixing anything.*
-* **Wait for tifffile or bioio-tifffile to fix the zarr-3 incompatibility.** *Free, but it is
-  someone else's timeline, and the tifffile issue for this has been open a while.*
+Two things worth recording, because the obvious implementation of each is wrong:
 
-Nobody has hit this yet because the lab's TIFF stacks are time series. **A z-stack TIFF would fail
-today.**
+* **The page index is not a formula.** It is tempting to reuse
+  ``frame = ((t * n_z) + z) * channels + c``, but that is only ``_legacy_geometry`` — the
+  **fallback** for a file that declares no axes. The primary map, ``tiff_planes._page_and_slice``,
+  is a mixed-radix fold over the axis order **the file itself declares**, so a ``ZTYX`` or
+  ``CTZYX`` file resolves correctly. Hardcoding the formula puts a real, plausible, **wrong** plane
+  on screen. ``test_ztz_readers_agree`` pins this with a Z-major file.
+* **``read_tiff_plane`` is the right arithmetic in the wrong host.** It reopens the file and
+  rebuilds ``series[0]`` (re-walking the OME-XML) on **every call** — measured at 3.61 ms/plane
+  versus 0.17 ms/plane with a cached handle, and the gap grows with the OME-XML. napari asks for a
+  plane per slider tick, so the wrappers hold the handle open for their lifetime (the contract
+  ``_TiffPageStack`` already stated) and reuse only the *index* arithmetic.
 
-**Unblocked as of 1.6.70.** The first route is now the cheap one: ``_TiffPageStack`` lives in a
-Qt-free ``file_io/lazy_sources.py``, so ``_TiffPageStackZYX`` (ndim=3, ``(Z, Y, X)``) and
-``_TiffPageStackTZYX`` (ndim=4, ``(T, Z, Y, X)``) can be added **beside it and tested headlessly**,
-rather than bolted into the Qt-coupled loader. Both would build on ``tiff_planes.read_tiff_plane``,
-which already computes the Z/TZ page index via ``_page_and_slice`` / ``_legacy_geometry``
-(``frame = ((t * n_z) + z) * channels + c``); the generic loader's TIFF branch would then pick
-ZYX/TZYX the way the IMS branch already does.
+**Consistency is enforced, not assumed:** ``tests/test_ztz_readers_agree.py`` drives the real TIFF
+and real IMS wrappers over the same volume and demands identical shape/ndim/dtype/len and identical
+pixels for every index pattern, so the TIFF family cannot drift from the IMS one.
+
+.. rubric:: Z depth is not applied to ``layer.scale`` — for ANY reader
+
+Physical z-depth reaches the *measurements* (``pixel_size.z_step_um`` reads
+``file_metadata['common']['z_step_um']``, written from the reader's ``physical_pixel_sizes.Z``;
+unknown is NaN, never a guessed 1.0 — ``test_anisotropic_voxel``, and for TIFF now
+``test_ztz_readers_agree``). **It does not reach the viewer.** ``napari_adapter``'s
+``_enable_auto_scale_bar`` writes only ``sc[-1]``/``sc[-2]`` (Y, X) and leaves every leading axis at
+1.0, and ``_align_layer_scales`` slices ``[-2:]`` throughout. So a z-stack renders with a unit Z
+aspect regardless of format — IMS, TIFF, or CZI alike. It is at least **consistently** wrong.
+
+Fixing it is not a wire-up, because the prerequisite is missing: **there is no per-layer record of
+axis order.** A shared Z-scale must know that axis 0 is Z for a ``ZYX`` layer but T for a ``TYX``
+one, and nothing stores that. The nearest thing, the ``stack_axis`` tag, is written only for
+undeclared multipage TIFFs, sits outside the ``CORE_KEYS`` vocabulary, and **its only production
+reader is broken**: ``stack_access.warn_if_assumed_axis`` calls ``.get()`` on ``get_tags(layer)``,
+which returns a **list**, so it raises ``AttributeError`` into a bare ``except`` and the per-layer
+branch never fires (``get_tag(layer, 'stack_axis')`` is the correct accessor, two functions away).
+``tests/test_axis_is_per_layer.py`` cannot catch this — it monkeypatches ``get_tags`` to return a
+dict-shaped fake, validating a data model that does not exist. Separately, ``dimensionality`` is
+derived from BioIO dims while the T-vs-Z dialog answer never changes ``n_t``/``n_z``, so the two
+records contradict each other for a user-declared z-stack.
+
+*So the work is: introduce a per-layer ``axis_order`` in the tag vocabulary, written at the one
+chokepoint every loader funnels through (``tagging._tag_loaded_layer``); repair the accessor and
+its test; make the dialog answer authoritative; then key Z off it in ``_enable_auto_scale_bar`` and
+teach ``_align_layer_scales`` about a leading Z — with a Z placeholder + provenance flag for the
+honest-unknown case, since napari needs a positive finite scale. Format-agnostic by construction:
+every reader gets it from the shared chokepoint rather than each wiring its own.*
 
 .. rubric:: The reader is CACHED, not passed through the dispatch
 

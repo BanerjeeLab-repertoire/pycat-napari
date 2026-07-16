@@ -4,6 +4,50 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.71] - 2026-07-16
+### Fixed — **A z-stack TIFF did not load at all. Now it loads and scrubs natively.**
+- The generic loader's Z (`ZYX`) and T+Z (`TZYX`) branches were **dask-only**, and BioIO reads TIFF
+  pixels through tifffile's `aszarr()` store, which is broken on zarr 3.2. So the layer was built and
+  then died on the first plane read with `ValueError: zarr 3.2.1 < 3 is not supported` — a message
+  that is itself misleading (tifffile fails to import a symbol a newer zarr renamed, and reports it
+  as a version problem). **Only the T branch had ever been given the native tifffile cure.**
+  Reproduced before the fix, and verified after, by driving the real `_open_stack_generic`.
+### Added
+- `_TiffPageStackZYX` (ndim=3, `(Z,Y,X)`) and `_TiffPageStackTZYX` (ndim=4, `(T,Z,Y,X)`) in
+  `file_io/lazy_sources.py` — the Qt-free module 1.6.70 created, which is what lets these be
+  exercised headlessly. One lazy plane read per (t, z); the file handle is held open for the
+  wrapper's life; `[0,1]` normalisation from the source dtype; `__array__` refuses. Re-exported from
+  `file_io.py`.
+- The Z/T+Z loader branches now try the native TIFF reader first and fall back to dask only for
+  formats with no tifffile route (CZI) — the same shape `build_timeseries_wrapper` already used for
+  T, now factored into a shared `_native_tiff_or_dask` so the three branches cannot drift.
+- `tests/test_ztz_readers_agree.py` (`core`) — the deliverable that proves *consistent*: it drives
+  the **real** TIFF wrappers and the **real** IMS wrappers over the same volume and demands
+  identical shape/ndim/dtype/len and identical pixels across every index pattern. The IMS wrappers
+  need only `.shape` + `__getitem__`, so a numpy stand-in exercises the genuine IMS code with no
+  `.ims` file and no `imaris_ims_file_reader` — a real cross-reader comparison, not stub-vs-stub.
+  Mutation-checked: reversing the TZYX squeeze order fails it.
+### Notes — two obvious implementations that are wrong, recorded so they are not retried
+- **The page index is not a formula.** `frame = ((t*n_z)+z)*channels+c` is only `_legacy_geometry`,
+  the fallback for a file that declares *no* axes. The primary map `tiff_planes._page_and_slice` is
+  a mixed-radix fold over the axis order **the file declares**, so `ZTYX`/`CTZYX` resolve correctly.
+  Hardcoding the formula puts a real, plausible, wrong plane on screen. Pinned by a Z-major test.
+- **`read_tiff_plane` is the right arithmetic in the wrong host.** It reopens the file and rebuilds
+  `series[0]` (re-walking the OME-XML) on *every call*: measured 3.61 ms/plane vs 0.17 ms/plane with
+  a cached handle, and the gap grows with the OME-XML. napari asks for a plane per slider tick, so
+  the wrappers cache the handle and reuse only the index arithmetic.
+- **Z depth still does not reach `layer.scale` — for any reader.** It reaches the *measurements*
+  (`z_step_um`, NaN when unknown; pinned for TIFF here), but the viewer renders every z-stack at
+  unit Z aspect regardless of format. That is consistent, not correct, and fixing it needs a
+  per-layer axis-order record that does not exist yet. See `roadmap.rst` — it is its own next piece.
+### Changed
+- The z-stack / T+Z load messages no longer hardcode "(dask-backed)"; the label is read off the
+  wrapper that was actually built (`_lazy_backing_label`). Hardcoded labels are how these messages
+  came to announce "(zarr-backed)" long after the zarr transcode was deleted (cleanup item 3).
+- `test_stack_layer_builders_extraction.py::test_zarr32_error_is_translated_for_tiff` **asserted that
+  a TIFF z-stack always raises** — it encoded the bug as the contract. It now pins the translation
+  for the case it still applies to: the native reader declining and the dask fallback failing.
+
 ## [1.6.70] - 2026-07-16
 ### Changed — **GUI-free `lazy_sources.py`: the TIFF lazy wrappers no longer live behind a Qt import.**
 - `_TiffPageStack` and `_LazyArraySource` sat in `file_io.py`, beside two `QDialog` subclasses in a

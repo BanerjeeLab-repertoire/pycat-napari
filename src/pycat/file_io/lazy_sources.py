@@ -356,6 +356,256 @@ class _TiffPageStack:
                 pass
 
 
+def _lazy_indices(selector, size):
+    """Return concrete indices for an int/slice/list selector against an axis.
+
+    A deliberate twin of ``ims_reader._ims_indices``. The two are **not** shared on purpose: the
+    IMS path is validated and shipping, and importing it here would drag
+    ``imaris_ims_file_reader`` into a module whose entire contract is being cheap and Qt-free to
+    import (it is not installed in the headless `core` CI job). ``test_ztz_readers_agree.py`` is
+    what keeps the twins honest — it drives both families through the same index set and demands
+    identical results, so a divergence is a test failure rather than a silent inconsistency.
+    """
+    if isinstance(selector, slice):
+        return list(range(*selector.indices(size)))
+    if selector is Ellipsis or selector is None:
+        return list(range(size))
+    if isinstance(selector, (list, tuple, np.ndarray)):
+        return [int(i) for i in selector]
+    return [int(selector)]
+
+
+def _tiff_plane_2d(raw, src_dtype):
+    """Normalize a raw TIFF page read to exactly (Y, X) in ``[0, 1]``.
+
+    The TIFF twin of ``ims_reader._ims_frame_2d``, and it exists for the same two reasons:
+
+    * **``[0, 1]`` from the SOURCE dtype, not raw counts.** `read_tiff_plane` and
+      `page.asarray()` both hand back raw counts; a bare ``astype(float32)`` here is the 1.6.x
+      intensity bug (*same pixels, same file, two loaders, a factor of 65535 apart*).
+    * **A page is not always a plane.** An RGB/sample page comes back with a leading `S` axis, and
+      napari raises *"axes don't match array"* on transpose if a singleton survives. Squeeze, then
+      **assert** — a wrong-shaped plane must not reach the viewer quietly.
+    """
+    arr = to_unit_float32(raw, src_dtype if src_dtype is not None
+                          else getattr(raw, 'dtype', None))
+    arr = np.squeeze(arr)
+    if arr.ndim != 2:
+        raise ValueError(f"Expected TIFF plane to reduce to 2-D (Y, X), got shape {arr.shape}")
+    return arr
+
+
+class _TiffPageGeometry:
+    """**Open the file ONCE; ask it for its page order ONCE.** Then every plane is a seek.
+
+    ── Why this is not just ``read_tiff_plane`` ─────────────────────────────────────────────
+
+    ``tiff_planes.read_tiff_plane`` is the right *arithmetic* and the wrong *host* for a scrubbing
+    wrapper: it does ``with tifffile.TiffFile(path) as handle:`` on **every call** and rebuilds
+    ``handle.series[0]`` — which re-walks the OME-XML — before reading a single page. napari asks
+    for a plane on **every slider tick**, so that cost lands per tick. Measured on a 60-plane
+    OME-TIFF z-stack: **3.61 ms/plane reopening vs 0.17 ms/plane with a cached handle — 21x**, and
+    the gap widens with the size of the OME-XML, because the series rebuild is what dominates.
+    Backing the Z/TZ wrappers with it would make them slower than the BioIO path they replace,
+    which is the opposite of why ``_TiffPageStack`` exists.
+
+    So this holds the handle for the life of the wrapper (exactly the contract ``_TiffPageStack``
+    states) and reuses the *page-index arithmetic* — which is the part that carries the hard-won
+    knowledge:
+
+    * ``_page_and_slice`` is the primary map, and it is **not** a fixed formula. It is a
+      mixed-radix fold over the axis order **the file itself declares**, so a ``ZTYX`` or ``CTZYX``
+      file indexes correctly. Its docstring is an autopsy of two earlier versions that hardcoded an
+      order and put the wrong pixels on screen.
+    * ``_legacy_geometry`` is the fallback for a file that declares **no** axes — the plain
+      multipage TIFF PyCAT has already had to ask the user about. Only there does the classic
+      ``frame = ((t * n_z) + z) * channels + c`` apply.
+
+    Reimplementing either would re-open bugs the comments in ``tiff_planes.py`` were written over.
+    """
+
+    def __init__(self, tiff_path):
+        import tifffile as _tf
+        self._tif = _tf.TiffFile(tiff_path)
+        try:
+            series = self._tif.series[0] if self._tif.series else None
+        except Exception:
+            series = None
+        self._series = series
+        # The series' page list spans a multi-file OME set; tifffile resolves the companions
+        # itself. See the reasoning in `tiff_planes.read_tiff_plane`.
+        self._pages = series.pages if series is not None else self._tif.pages
+        self._axes = getattr(series, 'axes', None) if series is not None else None
+        self._shape = getattr(series, 'shape', None) if series is not None else None
+        try:
+            self._page_ndim = len(self._pages[0].shape)
+        except Exception:
+            self._page_ndim = None
+
+    @property
+    def n_pages(self):
+        return len(self._pages)
+
+    def read(self, *, t, c, z, n_channels, n_z):
+        """The raw page (or the plane sliced out of it). Raises IndexError rather than guessing."""
+        from pycat.file_io.tiff_planes import _legacy_geometry, _page_and_slice
+
+        located = None
+        if self._series is not None:
+            located = _page_and_slice(self._axes, self._shape, self._page_ndim, t=t, c=c, z=z)
+
+        if located is not None:
+            index, inner = located
+            pages, n_pages = self._pages, len(self._pages)
+        else:
+            pages, n_pages, index, inner = _legacy_geometry(
+                self._tif, self._pages, t=t, c=c, z=z, n_channels=n_channels, n_z=n_z)
+
+        if index >= n_pages:
+            # **Do not return page 0 and pretend.** A wrong plane is worse than a loud failure —
+            # it looks entirely correct on screen.
+            raise IndexError(
+                f"TIFF page {index} does not exist (file has {n_pages}); "
+                f"asked for t={t}, z={z}, c={c}")
+
+        plane = np.asarray(pages[index].asarray())
+        if inner:
+            plane = plane[inner]
+        return plane
+
+    def close(self):
+        try:
+            self._tif.close()
+        except Exception:
+            pass
+
+
+class _TiffPageStackZYX:
+    """Lazy (Z, Y, X) TIFF view — the native z-stack path, no zarr.
+
+    The contract is ``_ImsReaderZYX``'s, deliberately and exactly: same shape/ndim/dtype, same
+    ``__getitem__`` squeeze, same refusing ``__array__``, same ``__len__``. Downstream code
+    (segmentation, 3-D volume, measurement, brushing) must never have to know whether a z-stack
+    came from IMS or TIFF, so a TIFF-only shape that behaves *almost* the same is the failure this
+    class is written to avoid. ``tests/test_ztz_readers_agree.py`` enforces it.
+
+    Like ``_ImsReaderZYX``, this pins a single timepoint (``t=0``) — a pure z-stack has one.
+    """
+
+    def __init__(self, tiff_path, n_z, H, W, dtype, channel_idx=0, n_channels=1, t=0):
+        self._path = tiff_path
+        self._nc = max(1, int(n_channels))
+        self._ci = int(channel_idx)
+        self._nz = max(1, int(n_z))
+        self._t = int(t)
+        # The SOURCE dtype, kept apart from the dtype we HAND OUT. Conflating them is what let a
+        # wrapper advertise uint16 and return float32 raw counts.
+        self._src_dtype = np.dtype(dtype) if dtype is not None else None
+        self._geom = _TiffPageGeometry(tiff_path)
+
+        self.shape = (int(self._nz), int(H), int(W))
+        self.dtype = np.dtype('float32')
+        self.ndim = 3
+
+    def _read_plane(self, z):
+        raw = self._geom.read(t=self._t, c=self._ci, z=int(z),
+                              n_channels=self._nc, n_z=self._nz)
+        return _tiff_plane_2d(raw, self._src_dtype)
+
+    def __getitem__(self, idx):
+        # The squeeze semantics are `_ImsReaderZYX.__getitem__`'s, copied rather than re-derived.
+        if isinstance(idx, tuple):
+            z_sel = idx[0] if len(idx) > 0 else slice(None)
+            yx_sel = idx[1:] if len(idx) > 1 else (slice(None), slice(None))
+        else:
+            z_sel = idx
+            yx_sel = (slice(None), slice(None))
+        z_indices = _lazy_indices(z_sel, self.shape[0])
+        planes = [self._read_plane(z)[yx_sel] for z in z_indices]
+        if isinstance(z_sel, (int, np.integer)):
+            return planes[0]
+        return np.stack(planes, axis=0)
+
+    def __array__(self, dtype=None):
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def close(self):
+        self._geom.close()
+
+
+class _TiffPageStackTZYX:
+    """Lazy (T, Z, Y, X) TIFF view — the native T+Z path, no zarr.
+
+    ``_ImsReaderTZYX``'s contract, exactly. See `_TiffPageStackZYX` for why that matters.
+    """
+
+    def __init__(self, tiff_path, n_t, n_z, H, W, dtype, channel_idx=0, n_channels=1):
+        self._path = tiff_path
+        self._nc = max(1, int(n_channels))
+        self._ci = int(channel_idx)
+        self._nz = max(1, int(n_z))
+        self._nt = max(1, int(n_t))
+        self._src_dtype = np.dtype(dtype) if dtype is not None else None
+        self._geom = _TiffPageGeometry(tiff_path)
+
+        self.shape = (int(self._nt), int(self._nz), int(H), int(W))
+        self.dtype = np.dtype('float32')
+        self.ndim = 4
+
+    def _read_plane(self, t, z):
+        raw = self._geom.read(t=int(t), c=self._ci, z=int(z),
+                              n_channels=self._nc, n_z=self._nz)
+        return _tiff_plane_2d(raw, self._src_dtype)
+
+    def __getitem__(self, idx):
+        # Copied from `_ImsReaderTZYX.__getitem__` — including the reverse-order squeeze and the
+        # reason for it. A subtly different squeeze here is precisely the inconsistency the
+        # cross-reader agreement test exists to catch.
+        if isinstance(idx, tuple):
+            t_sel = idx[0] if len(idx) > 0 else slice(None)
+            z_sel = idx[1] if len(idx) > 1 else slice(None)
+            yx_sel = idx[2:] if len(idx) > 2 else (slice(None), slice(None))
+        else:
+            t_sel, z_sel, yx_sel = idx, slice(None), (slice(None), slice(None))
+        t_indices = _lazy_indices(t_sel, self.shape[0])
+        z_indices = _lazy_indices(z_sel, self.shape[1])
+        arr = np.stack([
+            np.stack([self._read_plane(t, z)[yx_sel] for z in z_indices], axis=0)
+            for t in t_indices
+        ], axis=0)
+        # Squeeze out scalar-selected axes in reverse order (Z first, then T)
+        # so that arr[0, 0] returns (Y, X), arr[0, :] returns (Z, Y, X), etc.
+        if isinstance(z_sel, (int, np.integer)):
+            arr = arr[:, 0]   # (T, 1, Y, X) -> (T, Y, X) -- squeeze Z
+        if isinstance(t_sel, (int, np.integer)):
+            arr = arr[0]      # (T, ...) -> squeeze T (now leading axis)
+        return arr
+
+    def __array__(self, dtype=None):
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def close(self):
+        self._geom.close()
+
+
+# `as_full_array` is deliberately ABSENT from both Z/TZ wrappers — `_ImsReaderZYX` /
+# `_ImsReaderTZYX` do not define it either, and matching them is the point. `materialize_stack`
+# therefore refuses on a Z/TZ layer (its `np.asarray` hits the guard) exactly as it already does
+# for IMS. Adding it here and not there would be a new inconsistency in a module written to remove
+# one; if a caller ever genuinely needs a whole volume, it should be added to BOTH families, with a
+# test that they agree.
+
+
 class _LazyArraySource:
     """**A napari-facing view over ANY lazy source — dask, zarr, or numpy.**
 
