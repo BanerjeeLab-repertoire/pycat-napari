@@ -4,6 +4,54 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.74] - 2026-07-16
+### Added — **Brushing increment 2: object tables now name their objects.**
+A plot's points and a table's rows were matched **by row position**. Sort or filter the table and the
+correspondence is silently wrong — every point still highlights something, and nothing looks broken.
+`EntityKey` is the name that survives that.
+
+- `utils/entity_ref.py`: `EntityKey` / `EntityLocation` / `EntityRef` (frozen, hashable), plus
+  `stamp_entity_ids`, `attach_layer_id`, and the linkability flag. `ObjectRef` is **untouched** and
+  stays the currency of the brushing path; `EntityRef.as_object_ref()` / `.from_object_ref()` adapt
+  both ways. Additive only — increment 1's fixes are validated and shipping, and a foundation that
+  breaks them is not a foundation.
+- **Not an 89-site sweep.** Identity rides the seam the tag system already consolidates: layer id
+  (the tag hook, increment 1) + operation id + the object-table chokepoints. The other regionprops
+  sites are per-object measurement and keep working exactly as they do today — matched by position,
+  and now **flagged** as such rather than silently trusted (`linkability_of`).
+- The cell, puncta and mask tables carry a hidden `_pycat_entity_id`; refs built from them inherit
+  `source_layer_id`, which **closes the loop increment 1 opened** (it made `resolve_in_viewer` honour
+  the field; nothing filled it, so every ref still took the announced guess).
+- `tests/test_entity_ref.py` (`core`) — identity stable across sort/filter, puncta keys don't
+  collide, a ref from a stamped table resolves to its own layer with two masks open, `ObjectRef`
+  compat unchanged.
+### Fixed
+- **Every punctum ref has carried `parent_id=None`.** `puncta_analysis_func` writes `'cell label'`
+  — with a SPACE — while `ObjectRef.from_row` looks up `cell_label`, so the parent lookup silently
+  missed on the one table it exists for. `from_row` now accepts both spellings; the column is left
+  alone rather than renamed under users who already see it in their results. (The mismatch is live
+  elsewhere too: `analysis_plots.py:1166` gates a per-cell grouping on `cell_label` and never fires
+  for this table — reported, not silently changed.)
+### Notes — four places the spec's premises did not survive the tree
+- **`f"{frame}/{label}"` collides for puncta.** `sk.measure.label` runs *inside* the per-cell loop,
+  so punctum labels restart at 1 in every cell: punctum 1 of cell 1 and punctum 1 of cell 2 would be
+  the **same entity** — the exact guarantee identity exists to provide, broken on the table people
+  brush most. The parent cell is part of the key. Verified on the real analysis: labels `[1,1,1,2,2,2]`
+  → six distinct names.
+- **The layer does not exist when the table is built.** `run_cell_analysis_func` creates
+  'Labeled Cell Mask' *after* `cell_analysis_func` returns, so identity is stamped in two moves:
+  the entity id when the numbers are made, the layer id when the layer is born (`attach_layer_id`).
+- **The puncta table gets no layer id, deliberately.** "Cell Labeled Puncta Mask" is painted with
+  **cell** labels, so pointing puncta refs at it would make a click on punctum 3 highlight cell 3 —
+  the wrong-target bug, reintroduced by being helpful. Puncta stay bbox-resolvable.
+- **A 4th `regionprops_table` exists** (`segmentation_tools.py:1320`) that the spec's "exactly 3"
+  misses — but its DataFrame never leaves the function (a per-label lookup inside a filter loop), so
+  nothing brushes it and it needs no identity. The spec's "3 brushable tables" holds.
+- `measure_region_props` lets the user choose properties and rename columns, so `label` may be absent
+  entirely; that table is stamped before the rename and degrades visibly when it can't be.
+- `puncta_analysis_func` crossed the 120-line ceiling and was **split** (`_finalise_puncta_table`),
+  not granted a raised one — the ratchet only moves down.
+
 ## [1.6.73] - 2026-07-16
 ### Fixed — **Brushing increment 1: the two ways brushing was actively harmful.**
 Increment 1 of five (the audit's own highest-priority pair). Bug fixes plus the minimal

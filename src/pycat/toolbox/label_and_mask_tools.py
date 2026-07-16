@@ -20,6 +20,7 @@ import numpy as np
 
 
 
+from pycat.utils.entity_ref import attach_layer_id, source_path_of, stamp_entity_ids
 from pycat.utils.object_ref import bbox_columns_from_regionprops
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
@@ -712,7 +713,7 @@ class MeasurementDialog(QDialog):
                 for checkbox, textbox in zip(self.checkboxes, self.textboxes) if checkbox.isChecked()]
 
 
-def measure_region_props(labeled_mask, image, selected_props):
+def measure_region_props(labeled_mask, image, selected_props, *, data_instance=None):
     """
     Measures specified properties of labeled regions within an image. It maps the selected properties
     to their corresponding measurements for each region and returns these measurements as a DataFrame.
@@ -725,6 +726,10 @@ def measure_region_props(labeled_mask, image, selected_props):
         The original image corresponding to the labeled mask.
     selected_props : list of tuples
         Each tuple contains the name of a property to measure and its custom name (if provided by the user).
+    data_instance : optional
+        The active data class, used only to record which file the objects came from so a row can be
+        turned back into an image. Optional and defaulted: without it the table still measures
+        exactly the same numbers, it is just matched by row position rather than by identity.
 
     Returns
     -------
@@ -738,6 +743,22 @@ def measure_region_props(labeled_mask, image, selected_props):
 
     # Convert measurements to DataFrame and rename columns based on user input
     measurement_df = pd.DataFrame(sk.measure.regionprops_table(labeled_mask, intensity_image=image, properties=properties_to_measure))
+
+    # ── Named BEFORE the rename, and only if there is a label to name it by ────────────────
+    #
+    # This table is not like the cell/puncta ones: **the user picks the properties** from a
+    # checkbox dialog and may rename the columns. So `label` is not guaranteed to be measured at
+    # all, and if it is, it may not still be called `label` a line later.
+    #
+    # Stamping here — before the rename — is the only point where the column has its known name.
+    # If the user did not select `label`, `stamp_entity_ids` leaves the table untouched and it
+    # stays brushable by row position, flagged rather than silently trusted. That is the honest
+    # outcome: without a label there is genuinely nothing stable to name an object by.
+    measurement_df = stamp_entity_ids(
+        measurement_df, entity_type='mask_object',
+        source_path=source_path_of(data_instance),
+        operation_id='measure_region_props')
+
     measurement_df = measurement_df.rename(columns=custom_names)
 
     return measurement_df
@@ -803,7 +824,12 @@ def run_measure_region_props(mask_layer, image_layer, data_instance):
         return  # Do nothing if user cancels the dialog
 
     # Measure the selected properties and store the results in the data repository
-    measurement_df = measure_region_props(labeled_mask, image, selected_props)
+    measurement_df = measure_region_props(labeled_mask, image, selected_props,
+                                          data_instance=data_instance)
+    # The objects in this table ARE the labels of `mask_layer`, so that is the layer a click should
+    # resolve to — not merely the first mask that happens to be open. (Unlike the cell/puncta
+    # tables, the layer already exists here: it is the input, not a freshly-created output.)
+    measurement_df = attach_layer_id(measurement_df, mask_layer)
     data_instance.data_repository['generic_df'] = pd.concat([data_instance.data_repository['generic_df'], measurement_df], ignore_index=True)
 
     # Show the measurement results in a popup table

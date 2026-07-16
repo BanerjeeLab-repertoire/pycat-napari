@@ -147,6 +147,18 @@ class ObjectRef:
         #
         # So the object's own identity is looked for by every name PyCAT actually uses, and the
         # PARENT is a separate field. They are different questions.
+        # The labels layer this row's object lives in, when the table carries identity. This is what
+        # makes a ref resolve to its OWN layer instead of the first mask that happens to be open —
+        # the wrong-target bug. Absent on a legacy table, which then resolves as it always did (and
+        # says that it guessed).
+        layer_id = None
+        try:
+            if '_pycat_layer_id' in row and row['_pycat_layer_id']:
+                value = row['_pycat_layer_id']
+                layer_id = None if (isinstance(value, float) and np.isnan(value)) else str(value)
+        except Exception as exc:
+            debug_log('ObjectRef: could not read the layer id off the row', exc)
+
         return cls(
             object_id=_get('object_id', 'label', 'punctum_label', 'condensate_label',
                            'droplet_label', 'bead_label', 'track_id', 'cell_label'),
@@ -156,8 +168,16 @@ class ObjectRef:
                          else (str(row['source_path']) if 'source_path' in row
                                and row['source_path'] else None)),
             track_id=_get('track_id'),
-            parent_id=_get('cell_label', 'parent_id'),
+            # ``'cell label'`` — with a SPACE — is what `puncta_analysis_func` actually writes
+            # (`feature_analysis_tools.py:652`), while every other producer and consumer in the
+            # codebase spells it `cell_label`. So this lookup **silently missed on the one table it
+            # exists for**, and every punctum ref has carried `parent_id=None`. Accepting both
+            # spellings fixes the ref without renaming a column users already see in their results.
+            # (The mismatch is live elsewhere too — `analysis_plots.py:1166` gates a per-cell
+            # grouping on `cell_label` and never fires for this table.)
+            parent_id=_get('cell_label', 'cell label', 'parent_id'),
             tags=dict(tags) if tags else None,
+            source_layer_id=layer_id,
         )
 
 

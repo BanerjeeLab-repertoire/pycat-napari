@@ -25,6 +25,7 @@ Date
 import os
 import numpy as np
 
+from pycat.utils.entity_ref import attach_layer_id, source_path_of, stamp_entity_ids
 from pycat.utils.object_ref import normalise_bbox_columns
 import pandas as pd
 import skimage as sk
@@ -485,6 +486,22 @@ def cell_analysis_func(image, cell_masks, omission_mask, data_instance):
     # Merge the features DataFrame with the cell statistics DataFrame
     final_df = pd.concat([df, all_features_df], axis=1)
 
+    # ── Name every row, so a point in a plot means an OBJECT and not a row number ──────────
+    #
+    # Without this, a plot's points and this table's rows are matched **by position** — and the
+    # moment the table is sorted or filtered, every point still highlights something and nothing
+    # looks broken. The name is built from facts that already exist: the file, the operation, and
+    # the label. See `pycat.utils.entity_ref`.
+    #
+    # The labels-layer id is NOT set here on purpose: `run_cell_analysis_func` creates
+    # 'Labeled Cell Mask' *after* this function returns, so the layer these labels belong to does
+    # not exist yet. It is attached there, once it does.
+    final_df = stamp_entity_ids(
+        final_df, entity_type='cell',
+        source_path=source_path_of(data_instance),
+        operation_id='cell_analysis',
+        frame=data_instance.data_repository.get('reference_frame'))
+
     return labeled_cells, final_df
 
 
@@ -562,12 +579,17 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     # Perform cell analysis and retrieve the labeled cell masks and cell statistics
     labeled_cell_masks, cell_df = cell_analysis_func(_image_for_analysis, cell_masks, omission_mask, data_instance)
 
+    # Add the labeled cell masks to the viewer for visualization
+    _labeled_layer = viewer.add_labels(labeled_cell_masks, name='Labeled Cell Mask')
+
+    # NOW the layer exists, so the table can say which layer its objects live in. This is what lets
+    # a click on a cell resolve to THIS mask rather than the first one open — the wrong-target bug.
+    # It cannot be done inside `cell_analysis_func`: the table is built before the layer is added.
+    cell_df = attach_layer_id(cell_df, _labeled_layer)
+
     # Store the cell statistics in the data repository
     data_instance.data_repository['cell_df'] = cell_df
     #data_instance._notify(f"cell_df has been set!")
-
-    # Add the labeled cell masks to the viewer for visualization
-    viewer.add_labels(labeled_cell_masks, name='Labeled Cell Mask')
     # Lineage: the mask is derived_from + belongs_to the image it was segmented
     # from (mark_derived tags role=mask + provenance=segmentation for the 'segment'
     # via). This lets autopopulation find "the mask for this image" structurally.
@@ -583,6 +605,32 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     window_title = "Cell Analysis"
     from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
+
+
+def _finalise_puncta_table(puncta_prop_list, data_instance):
+    """Concatenate the per-cell puncta tables, **name every punctum**, and store the result.
+
+    The name is what makes a point in a puncta plot mean an *object* rather than a row number — see
+    `pycat.utils.entity_ref`.
+
+    **The parent cell is part of the name, and is not optional here.** `sk.measure.label` is called
+    once per cell in the loop above, so punctum labels **restart at 1 in every cell**: punctum 1 of
+    cell 1 and punctum 1 of cell 2 are different objects with the same label. Keyed on frame/label
+    alone they would be the same entity — the exact guarantee identity exists to provide, broken on
+    the table people brush most. `stamp_entity_ids` picks the parent column up automatically.
+
+    No labels-layer id is attached: no open layer holds per-punctum labels (the "Cell Labeled Puncta
+    Mask" is painted with CELL labels), so puncta refs stay bbox-resolvable instead of pointing at a
+    layer whose numbers mean something else. See `run_puncta_analysis_func`.
+    """
+    puncta_df = pd.concat(puncta_prop_list, ignore_index=True)
+    puncta_df = stamp_entity_ids(
+        puncta_df, entity_type='punctum',
+        source_path=source_path_of(data_instance),
+        operation_id='puncta_analysis',
+        frame=data_instance.data_repository.get('reference_frame'))
+    data_instance.set_data('puncta_df', puncta_df)
+    return puncta_df
 
 
 def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance):
@@ -695,9 +743,7 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance):
         # Append the puncta properties DataFrame to a list for later concatenation
         puncta_prop_list.append(df)
 
-    # Concatenate all puncta properties DataFrames and store in the data instance
-    puncta_df = pd.concat(puncta_prop_list, ignore_index=True)
-    data_instance.set_data('puncta_df', puncta_df)
+    _finalise_puncta_table(puncta_prop_list, data_instance)
 
     return cell_labeled_puncta
 
@@ -766,6 +812,18 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     cell_labeled_puncta = puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance)
 
     # Update the viewer with new layers showing the results of the puncta analysis
+    #
+    # ── No `attach_layer_id` here, deliberately ────────────────────────────────────────────
+    #
+    # This layer's label values are **CELL** labels (`cell_labeled_puncta` paints every punctum
+    # with the label of the cell containing it). The puncta table's `label` column is the punctum's
+    # own per-cell label. They are different numbers, so pointing puncta refs at this layer would
+    # make a click on punctum 3 highlight **cell 3** — the wrong-target bug, reintroduced by being
+    # helpful.
+    #
+    # No open layer holds per-punctum labels, so puncta refs carry no `source_layer_id`. They stay
+    # fully resolvable by bbox (`crop_for_ref` / `resolve_offline` need no labels layer at all), and
+    # `resolve_in_viewer` degrades to its announced guess rather than a silent wrong answer.
     viewer.add_labels(cell_labeled_puncta.astype(int), name="Cell Labeled Puncta Mask")
 
     # Create the in-viewer "Overlay Image" exactly as in v1.0.0. This sequence
