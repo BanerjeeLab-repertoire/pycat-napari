@@ -106,7 +106,12 @@ def test_the_store_path_is_found_on_BOTH_zarr_2_and_zarr_3(major, attribute):
 
         found = compat.store_path(array)
 
-        assert found == '/tmp/data.zarr', (
+        # Compare as PATHS, not raw strings. zarr 3's LocalStore exposes `.root` as a ``Path``, and
+        # ``store_path`` returns ``str(root)`` — whose separator is platform-dependent
+        # (``\tmp\data.zarr`` on Windows). A literal ``== '/tmp/data.zarr'`` check would fail on
+        # Windows while the path is in fact correct; ``pathlib`` equality treats ``/`` and ``\`` as
+        # the same separator, so this asserts the capability across platforms.
+        assert found is not None and pathlib.Path(found) == pathlib.Path('/tmp/data.zarr'), (
             f"on zarr {major} the path lives on `.{attribute}` — and it was not found. "
             f"got {found!r}"
         )

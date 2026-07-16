@@ -52,20 +52,25 @@ def test_restore_dataframes(tmp_path):
     assert len(repo['vpt_tracks']) == 3
 
 
-class _Img:
+# The class NAME matters: default_session_selection / _is_source_image_layer /
+# _is_reconstructable branch on `type(layer).__name__` ('Image' vs 'Labels' etc.), which is how
+# they tell a source Image from a derived mask. napari's real layers are classes literally named
+# `Image` / `Labels` / `Tracks`, so the fakes must be too — a fake named `_Img` reads as
+# `__name__ == '_Img'`, never matches 'Image', and the source layer is silently never excluded.
+class Image:
     def __init__(self, n): self.name = n
-class _Labels:
+class Labels:
     def __init__(self, n): self.name = n
-class _Tracks:
+class Tracks:
     def __init__(self, n): self.name = n
 
 
 def test_default_selection_excludes_source_and_upscale():
-    layers = [_Img("3.30 hr_1_MMStack_Pos0.ome C0-blue Stack"),
-              _Labels("Cell Mask"),
-              _Tracks("Bead Trajectories"),
-              _Img("Pre-Processed Fluorescence Image"),
-              _Img("Upscaled Image")]
+    layers = [Image("3.30 hr_1_MMStack_Pos0.ome C0-blue Stack"),
+              Labels("Cell Mask"),
+              Tracks("Bead Trajectories"),
+              Image("Pre-Processed Fluorescence Image"),
+              Image("Upscaled Image")]
     keepL, keepD = sm.default_session_selection(
         layers, ['vpt_tracks', 'cell_df'], "3.30 hr_1_MMStack_Pos0.ome")
     assert "3.30 hr_1_MMStack_Pos0.ome C0-blue Stack" not in keepL   # source

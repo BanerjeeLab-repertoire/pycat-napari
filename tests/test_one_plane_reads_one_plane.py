@@ -71,6 +71,30 @@ def _peak_allocation(function):
     return peak
 
 
+def _cleanup(path, *closeables):
+    """Portable temp-file teardown.
+
+    A lazy stack wrapper (``_TiffPageStack``) keeps the TIFF **open** for on-demand page reads —
+    that is the whole point of lazy loading, not a leak. **Windows refuses to unlink a file with an
+    open handle** (POSIX allows it), so the wrapper must be closed FIRST. We close every closeable,
+    drop lingering references, then unlink — tolerating any residual lock rather than failing a test
+    whose assertion has already run.
+    """
+    for c in closeables:
+        try:
+            if c is not None and hasattr(c, 'close'):
+                c.close()
+        except Exception:
+            pass
+    gc.collect()
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except PermissionError:
+        pass   # a handle outlived close() on Windows — the OS temp reaper will collect it
+
+
 @pytest.fixture
 def a_fifty_frame_tiff():
     handle, path = tempfile.mkstemp(suffix='.tif')
@@ -85,7 +109,7 @@ def a_fifty_frame_tiff():
 
     yield path, 512 * 512, 50
 
-    os.unlink(path)
+    _cleanup(path)
 
 
 @pytest.mark.core
@@ -213,6 +237,7 @@ def test_SCRUBBING_one_frame_allocates_one_frame():
     os.close(handle)
 
     n_frames, size = 60, 512
+    wrapper = None
     try:
         tifffile.imwrite(
             path,
@@ -237,7 +262,7 @@ def test_SCRUBBING_one_frame_allocates_one_frame():
             f"correctness test can see it."
         )
     finally:
-        os.unlink(path)
+        _cleanup(path, wrapper)
 
 
 @pytest.mark.core
@@ -254,6 +279,7 @@ def test_np_asarray_on_a_WRAPPER_still_REFUSES():
     handle, path = tempfile.mkstemp(suffix='.tif')
     os.close(handle)
 
+    wrapper = None
     try:
         tifffile.imwrite(path, np.random.default_rng(0).integers(
             0, 255, (20, 128, 128), dtype=np.uint8))
@@ -265,4 +291,4 @@ def test_np_asarray_on_a_WRAPPER_still_REFUSES():
             np.asarray(wrapper)
 
     finally:
-        os.unlink(path)
+        _cleanup(path, wrapper)
