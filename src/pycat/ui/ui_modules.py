@@ -4295,6 +4295,42 @@ class MenuManager:
 
         dialog.exec_()
 
+    def _load_discovered_session(self, folder, sessions):
+        """Pick ONE session and load it. **A session picker, not a file multi-select.**
+
+        PyCAT knows what a session needs — its manifest records exactly that — so there is nothing
+        for the user to curate here. The old dialog asked which *files* to load, `selectAll()`d them,
+        and then ignored the answer anyway. The only question worth asking is *which session*, and
+        only when there is more than one.
+        """
+        from PyQt5.QtWidgets import QInputDialog
+        from napari.utils.notifications import show_info as napari_show_info
+
+        chosen = sessions[0]
+        if len(sessions) > 1:
+            labels = [
+                f"{s['name']}  —  {s['n_layers']} layer(s), {s['n_dataframes']} table(s)"
+                f"{'  ' + s['created'] if s['created'] else ''}"
+                for s in sessions
+            ]
+            label, ok = QInputDialog.getItem(
+                None, "Load Session",
+                f"{len(sessions)} sessions found in {folder.name}. Which one?",
+                labels, 0, False)
+            if not ok:
+                return
+            chosen = sessions[labels.index(label)]
+
+        from pycat.file_io.session_loader import load_session
+        result = load_session(
+            chosen['dir'], self.central_manager.viewer,
+            self.central_manager.active_data_class,
+        )
+        napari_show_info(
+            f"Restored session '{chosen['name']}': "
+            f"{len(result['loaded_layers'])} layer(s), {len(result['loaded_dfs'])} table(s)."
+        )
+
     def _open_session_loader(self):
         """Open a folder browser to select a PyCAT output directory and reload."""
         from PyQt5.QtWidgets import (QFileDialog, QDialog, QVBoxLayout,
@@ -4307,6 +4343,7 @@ class MenuManager:
             show_warning as napari_show_warning,
         )
         from pycat.file_io.session_loader import scan_output_folder, load_session
+        from pycat.file_io.session_manifest import discover_sessions
 
         folder = QFileDialog.getExistingDirectory(
             None, "Select PyCAT Output Folder", "",
@@ -4318,6 +4355,16 @@ class MenuManager:
 
         groups = scan_output_folder(folder)
         if not groups:
+            # ── The sessions are in SUBFOLDERS, and nothing looked there ──────────────────
+            #
+            # Saving always creates its own `session_<stem>_<timestamp>/`. The scan above is
+            # `folder.iterdir()` — one level, files only — so pointing at the parent directory the
+            # sessions were saved into (the obvious thing to do) reported "no outputs found" with
+            # every session sitting in plain view underneath it.
+            sessions = discover_sessions(folder)
+            if sessions:
+                self._load_discovered_session(folder, sessions)
+                return
             napari_show_warning(
                 f"No recognised PyCAT outputs found in {folder.name}.\n"
                 "Expected files like *_preprocessed.tiff, *_cell_df.csv, etc."
@@ -4388,9 +4435,14 @@ class MenuManager:
                 prog_bar.setValue(done)
                 status_lbl.setText(f"Loading {done}/{total}…")
 
+            # `stems=selected_stems` — the fix. These were computed above, used to size the
+            # progress bar, and then **thrown away**: `load_session(folder, ...)` re-scanned the
+            # whole folder, so selecting two images out of eight loaded all eight. The bar carried
+            # the tell — its maximum was the SELECTED count while the load reported over ALL files.
             result = load_session(
                 folder, self.central_manager.viewer,
                 data_instance, progress_callback=_prog,
+                stems=selected_stems,
             )
 
             prog_bar.setVisible(False); load_btn.setEnabled(True)

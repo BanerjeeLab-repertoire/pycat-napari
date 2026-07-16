@@ -178,6 +178,33 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: ⚠ NEEDS A CLICK-TEST — two shipped features no automated test can reach
+
+**These are not "untested because nobody got round to it". They are untested because the test
+environment cannot reach them**, and both shipped on that basis. Everything around them is covered;
+what is listed here is the last inch, and it needs a human with a running viewer.
+
+The blocker is the same for both: they need a real ``napari.Viewer``, which needs an OpenGL context.
+Offscreen Qt does not provide one — this is exactly why ``tests/test_ui_smoke.py`` **errors** rather
+than fails in a headless run (``OpenGL.error``… at the ``viewer`` fixture). Plain Qt widgets and Qt's
+model/view *are* testable headlessly, and are tested; a GL canvas is not.
+
+1. **The Linked Selection dock's docking** (1.6.78, ``ui/linked_selection_dock.py``). Its contents,
+   crop, facts, pin, reveal and dispatcher subscription are all covered by
+   ``tests/test_linked_selection_dock.py``. Its ``viewer.window.add_dock_widget(...)`` is not.
+   *To check:* open a results plot, click a point. The dock should appear on the right showing the
+   object's crop — **and your camera and frame should not move.** (Clicks no longer navigate; that is
+   1.6.78's interaction model. Double-click, or the Reveal button, is what goes there. If the new
+   default reads as broken rather than fixed, ``central_manager.follow_selection = True`` restores
+   the old behaviour and it is a one-line default flip.)
+
+2. **VPT's live three-way link** (1.6.75, ``vpt_ui``). Its dispatcher was promoted into the shared
+   ``SelectionService``; ``tests/test_vpt_selection_characterization.py`` pins the contract and was
+   written *before* the extraction and is unchanged by it, so the promotion is proven
+   behaviour-preserving at the dispatcher level. What no test exercises is the real Qt link:
+   *to check:* open a VPT session with per-track metrics, and confirm MSD curve ↔ table row ↔ bead
+   still select each other, still without the "jumps all over the place" oscillation.
+
 .. rubric:: Brushing arc (increments 1–5) — COMPLETE (1.6.73 → 1.6.78), with two items parked
 
 Plot → object → image, keyed on identity rather than row position. What shipped:
@@ -204,6 +231,31 @@ Two things are deliberately **not** done, each recorded where it was found:
 both need a real ``napari.Viewer``, which needs a GL context that offscreen Qt cannot provide (the
 same reason ``test_ui_smoke.py`` errors headlessly). Their logic is tested; their *docking* and
 *rendering* are not.
+
+.. rubric:: Session load runs on the Qt thread ("Python is not responding") — needs a worker
+
+``load_session`` is called directly from ``_on_load`` on the Qt main thread
+(``ui_modules.py``), so a multi-file restore blocks the UI and Windows shows the "Not Responding"
+dialog. The selection and discovery bugs around it are fixed (1.6.79); **this half is not.**
+
+The fix the spec (`claude_code_spec_session_loader_2026-07-16.md`) describes is right: stage the load
+(source image → derived layers → dataframes → VPT tracks), run it in a worker, and emit
+``progress_callback(done, total)`` per item. The codebase already has the pattern to copy —
+``batch_processor.BatchWorker(QThread)``, ``advanced_analysis_ui._AdvancedAnalysisWorker``, and the
+``QThread`` + ``moveToThread`` + modal ``QProgressDialog`` in ``file_io.py``.
+
+**Why it was not done with the rest:** napari layer creation must happen on the main thread — the
+worker reads and decodes, and the ``viewer.add_*`` calls are marshalled back. The spec's own caution
+is the reason to be careful: *"Getting this wrong trades the freeze for a crash."* And it is
+precisely the change **no test here can reach**: it needs a real ``napari.Viewer``, which needs a GL
+context that offscreen Qt does not provide (see the click-test note above). Shipping an unverifiable
+threading change into the save/restore path — the one that holds a user's work — is a bad trade
+against a progress bar that pauses.
+
+*What it needs:* someone able to exercise a real multi-file session restore in a running viewer, so
+the worker can be verified rather than hoped at. ``load_session`` is 149 lines and already over the
+complexity ceiling, so staging it into per-phase helpers is worth doing on its own and is the
+prerequisite either way.
 
 .. rubric:: VPT bead Points layer holds every frame (brushing increment 4, Part C — deferred, needs a profile)
 

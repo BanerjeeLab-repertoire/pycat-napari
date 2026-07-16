@@ -271,6 +271,7 @@ def load_session(
     data_instance,
     stem_filter: Optional[str] = None,
     progress_callback=None,
+    stems=None,
 ) -> dict:
     """
     Load all recognised PyCAT outputs from folder into the napari viewer.
@@ -355,7 +356,19 @@ def load_session(
 
     groups = scan_output_folder(folder)
 
-    if stem_filter:
+    # ── The user's selection is honoured ──────────────────────────────────────────────────
+    #
+    # It was not. The dialog computed the selected stems, used them to size the progress bar, and
+    # then called `load_session(folder, ...)` with **no filter at all** — so selecting two images out
+    # of eight loaded all eight. The progress bar carried the tell: its maximum was the SELECTED
+    # count while the load reported over the WHOLE folder.
+    #
+    # `stem_filter` was a single SUBSTRING, which cannot express "these three of eight" even if the
+    # dialog had passed it. `stems` is the set the dialog actually has.
+    if stems is not None:
+        wanted = {str(s) for s in stems}
+        groups = {s: v for s, v in groups.items() if s in wanted}
+    elif stem_filter:
         groups = {s: v for s, v in groups.items()
                   if stem_filter.lower() in s.lower()}
 

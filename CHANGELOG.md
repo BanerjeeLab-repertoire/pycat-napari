@@ -4,6 +4,45 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.79] - 2026-07-16
+### Fixed — **"I selected two images and it loaded all eight."**
+- `_on_load` built `selected_stems` from the multi-select list, used them to size the progress bar,
+  and then **threw them away** — calling `load_session(folder, ...)` with no filter, which re-scans
+  the whole folder. The progress bar carried the tell: **its maximum was the selected count while
+  the load reported over every file.** The dialog also `selectAll()`s on open, so the default was
+  "everything" and the selection never meant anything.
+- `stem_filter` was a single **substring** (`stem_filter.lower() in s.lower()`), so it could not have
+  expressed "these three of eight" even if the dialog had passed it — and filtering for `img_A` would
+  have dragged in `img_A_control`. `load_session(..., stems={...})` takes the set the dialog has.
+- `stems=None` still means "no filter" (back-compat); `stems=set()` loads **nothing**. That
+  distinction is the whole bug in miniature — `if stems:` would collapse an empty selection back to
+  "load everything", so it is `if stems is not None:`, mutation-checked.
+### Fixed — **"No recognised PyCAT outputs found" — with eight sessions sitting right there.**
+- Saving always creates its own `session_<stem>_<timestamp>/` subfolder. The load dialog scans
+  `folder.iterdir()` — one level, files only — so **pointing at the parent directory the sessions
+  were saved into reported that there was nothing there.** Nothing ever looked in the subfolders
+  where the save path puts them.
+- `session_manifest.discover_sessions(folder)` finds every session at or one level under `folder`,
+  newest first. One level because that is where the save path puts them; a deep crawl of someone's
+  data drive is its own bug. `read_manifest` is unchanged, so existing folders load as before.
+- With sessions found, the dialog becomes a **session picker** — one session, loaded whole. PyCAT
+  knows what a session needs (its manifest records exactly that), so the only question worth asking
+  is *which session*, and only when there is more than one.
+### Notes — what this spec assumed, and what the tree actually says
+- **"A folder may contain SEVERAL sessions ... `read_manifest` assumes ONE fixed filename per folder
+  — it can't represent multiple sessions"** — true of the filename, but PyCAT's save path **cannot
+  produce that folder**: `default_session_dir` timestamps a fresh subfolder per save, so manifests
+  never collide. The real defect is the opposite one: the sessions are in subfolders and *nothing
+  looked there*. So no per-session manifest renaming was needed — `discover_sessions` was.
+- **Part C (staged, off-thread loading) is NOT done.** The freeze is real (`load_session` runs on the
+  Qt thread), and the fix is a worker with napari layer creation marshalled back to the main thread —
+  which the spec itself flags: *"Getting this wrong trades the freeze for a crash."* It is the one
+  part no test here can reach: it needs a real `napari.Viewer`, and offscreen Qt has no GL context.
+  Shipping an unverifiable threading change into a save/restore path is a bad trade against a
+  progress bar that pauses. Recorded in `roadmap.rst` with what it needs.
+- **Partial restore (Part B's advanced toggle) is not built** — with the session picker, the default
+  *is* the whole session, which was the point. An opt-in subset restore can follow if anyone wants it.
+
 ## [1.6.78] - 2026-07-16
 ### Fixed — **Increment 4's lazy refs were defeated by the one function that wires every plot.**
 `make_pickable` ended with `figure._pycat_object_refs = list(refs)`, which rebuilds every ref the

@@ -38,6 +38,8 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+from pycat.utils.general_utils import debug_log
 import pandas as pd
 
 
@@ -190,6 +192,57 @@ def read_manifest(folder):
             return json.load(f)
     except Exception:
         return None
+
+
+def discover_sessions(folder, max_depth=1):
+    """**Every session at or under ``folder``.** ``[{'dir', 'manifest', 'name', 'source', ...}]``.
+
+    ── The folder the user picks is not the folder the session is in ──────────────────────
+
+    Saving always creates its own subfolder — ``default_session_dir`` is
+    ``session_<stem>_<timestamp>`` — so a manifest never collides with another, and a session dir has
+    exactly one. That is the good news.
+
+    The bad news is that **nothing ever looked there.** The load dialog scans with
+    ``folder.iterdir()``, one level, for loose output *files*. So a user who points at the parent
+    directory their sessions were saved into — the obvious thing to do — gets *"No recognised PyCAT
+    outputs found"*, with eight sessions sitting in plain view underneath it.
+
+    So this looks in ``folder`` **and its immediate subfolders**. One level by default because that is
+    where the save path puts them; deeper would be guessing, and a slow crawl of someone's whole data
+    drive is its own bug.
+
+    Sorted newest-first: the session you just saved is the one you are most likely to want back.
+    """
+    folder = Path(folder)
+    found = []
+
+    def _add(directory):
+        manifest = read_manifest(directory)
+        if not manifest:
+            return
+        source = (manifest.get('source_image') or {}).get('path') or ''
+        found.append({
+            'dir': directory,
+            'manifest': manifest,
+            'name': Path(source).stem or directory.name,
+            'source': source,
+            'created': manifest.get('created') or '',
+            'n_layers': len(manifest.get('layers') or []),
+            'n_dataframes': len(manifest.get('dataframes') or []),
+        })
+
+    try:
+        _add(folder)
+        if max_depth > 0:
+            for child in sorted(folder.iterdir()):
+                if child.is_dir():
+                    _add(child)
+    except Exception as exc:
+        debug_log('discover_sessions: could not scan for sessions', exc)
+
+    found.sort(key=lambda s: s['created'], reverse=True)
+    return found
 
 
 def restore_dataframes_from_manifest(manifest, folder, data_repository):
