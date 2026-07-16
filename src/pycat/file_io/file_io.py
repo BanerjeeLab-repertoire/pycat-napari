@@ -2150,23 +2150,29 @@ class FileIOClass:
         from pycat.file_io.multidim_io import (
             show_position_selection_dialog, _ZarrTZYX_generic)
 
-        microns_per_pixel = 1.0
         n_c = 1
 
-        # ── Read metadata ────────────────────────────────────────────────
-        try:
-            # `open_image` is the seam: it routes to aicsimageio or bioio, and raises
-            # ImageReaderUnavailable with the exact `pip install` line when neither is
-            # present. The hand-rolled ImportError that used to live here said less.
-            image = open_image(file_path)
-            # **This flag never meant "is it aicsimageio?"** — it meant *"did the structured
-            # reader give us dimensions, scenes and channel metadata, or are we falling back to
-            # reading raw pages?"* The old name described the **implementation** rather than the
-            # **question**, and it went stale the moment BioIO replaced aicsimageio in 1.6.0.
-            reader_has_structure = True
+        # ── Read metadata + select reader (extracted: readers/stack_metadata.py, decomposition #5a) ──
+        #
+        # The pure read (structured reader → dims/scenes/pixel size, else a lazy tifffile-page
+        # fallback) now lives in read_stack_structure. `_TiffPageStack` / `_tiff_pixel_size_um` are
+        # injected because they live here and are used elsewhere. The Qt scene dialog and the
+        # data-repository side effects (update_metadata / file_metadata) STAY in the controller —
+        # they are not pure, and relocating them out of the fallback-triggering try is behaviour-
+        # preserving (update_metadata never propagates; the dialog returns a selection, not a raise).
+        from pycat.file_io.readers.stack_metadata import read_stack_structure
+        _struct = read_stack_structure(
+            file_path, ext,
+            tiff_page_stack_cls=_TiffPageStack,
+            tiff_pixel_size_um=_tiff_pixel_size_um)
+        reader_has_structure = _struct.reader_has_structure
+        microns_per_pixel = _struct.microns_per_pixel
+
+        if reader_has_structure:
+            image = _struct.image
 
             # ── Multi-position (scene) detection ───────────────────────
-            scenes = list(getattr(image, 'scenes', []) or [])
+            scenes = _struct.scenes
             scenes_to_load = [image.current_scene] if scenes else [None]
             if len(scenes) > 1:
                 scene_dicts = [{'position_index': i, 'filename': s}
@@ -2184,97 +2190,21 @@ class FileIOClass:
                 else:
                     scenes_to_load = [image.current_scene]
 
-            try:
-                px = image.physical_pixel_sizes
-                microns_per_pixel = float(px.Y) if px.Y else 1.0
-            except Exception as _e:
-                debug_log("file_io: reading physical pixel size (falling back to "
-                          "1.0 µm/px — micron measurements may be wrong)", _e)
-                pass
-
-            # Fallback: the reader's physical_pixel_sizes only reads OME-XML and
-            # ImageJ metadata, not the baseline TIFF resolution tags. If it came
-            # back empty (== 1.0), try reading XResolution/ResolutionUnit directly.
-            if abs(microns_per_pixel - 1.0) < 1e-9:
-                _tag_px = _tiff_pixel_size_um(file_path)
-                if _tag_px is not None:
-                    microns_per_pixel = _tag_px
-                    debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
-                              "from TIFF resolution tags (the reader missed it)")
-
             self.central_manager.active_data_class.update_metadata(image)
-            # Also store the normalised metadata record for the metadata widget
-            # and results export.
+            # Also store the normalised metadata record for the metadata widget and results export.
             try:
                 from pycat.file_io.metadata_extract import extract_metadata
                 _md = extract_metadata(file_path, image=image)
                 self.central_manager.active_data_class.data_repository['file_metadata'] = _md
             except Exception as _mde:
                 debug_log("file_io: metadata extraction failed", _mde)
-
-        except Exception as _e:
-            debug_log("file_io: the structured reader failed, falling back to direct "
-                      "tifffile read (scene/T/Z metadata unavailable)", _e)
-            reader_has_structure = False
+        else:
             scenes_to_load = [None]
-            # ── A METADATA defect must not trigger a full EAGER read ────────────
-            #
-            # The ``except Exception`` above catches **everything** — including a failure to parse
-            # something entirely optional: a channel name, a physical pixel size, a scene entry, a
-            # plugin property. Any of those used to drop PyCAT into ``tifffile.imread(file_path)``,
-            # which **reads the whole file into memory.**
-            #
-            # ***A cosmetic metadata problem should not cost a gigabyte.***
-            #
-            # ``_TiffPageStack`` does per-page seeks — the same lazy contract as the primary path.
-            # If it cannot be built either, THEN the file is genuinely unreadable and the eager
-            # read is the honest last resort.
-            import tifffile
-            arr = None
-
-            # ── The 1.6.4 version of this was BROKEN and never ran ────────────────
-            #
-            # It called ``_TiffPageStack(file_path)`` — **one argument, where five are required.**
-            # That raised ``TypeError``, was caught by the ``except`` below, and **fell straight
-            # through to the eager read anyway.** *Item 8 was reported fixed and was not.*
-            #
-            # The shape comes from tifffile directly, which is the whole point: **BioIO's metadata
-            # is what failed**, and tifffile can still read the pages.
-            try:
-                with tifffile.TiffFile(file_path) as _probe:
-                    _pages = _probe.pages
-                    _n_pages = len(_pages)
-                    if _n_pages > 0:
-                        _first = _pages[0]
-                        _H, _W = int(_first.shape[-2]), int(_first.shape[-1])
-                        arr = _TiffPageStack(file_path, _n_pages, _H, _W, _first.dtype,
-                                             channel_idx=0, n_channels=1)
-                        debug_log("file_io: BioIO metadata unavailable — reading pages LAZILY "
-                                  "via tifffile, not a full eager read", _e)
-            except Exception as _lazy_exc:
-                debug_log("file_io: the lazy TIFF page reader failed too", _lazy_exc)
-                arr = None
-
-            if arr is None:
-                # Genuinely unreadable lazily. **A full read is the honest last resort** — and it
-                # is now reached only when the lazy path has actually been tried and failed, rather
-                # than because the call to it was malformed.
-                debug_log("file_io: falling back to a FULL eager read of %s" % file_path)
-                arr = tifffile.imread(file_path)
-            while arr.ndim > 3 and arr.shape[0] == 1:
-                arr = arr[0]
-            if arr.ndim == 2:
-                arr = arr[np.newaxis]
-            n_frames = arr.shape[0]
-            H, W = arr.shape[1], arr.shape[2]
+            arr = _struct.fallback_array
+            n_frames = _struct.n_frames
+            H, W = _struct.H, _struct.W
             n_c = 1
             n_t, n_z = n_frames, 1
-            # Recover pixel size from baseline resolution tags in this branch too.
-            _tag_px = _tiff_pixel_size_um(file_path)
-            if _tag_px is not None:
-                microns_per_pixel = _tag_px
-                debug_log(f"file_io: pixel size {_tag_px:.6f} µm/px recovered "
-                          "from TIFF resolution tags (direct tifffile branch)")
 
         zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
         self._stack_zarr_paths = []
