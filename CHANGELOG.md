@@ -4,6 +4,36 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.61] - 2026-07-15
+### Added — **Zeiss streaming CZI now opens (opt-in `[bioformats]`), via a direct BioFormats reader on a worker thread.**
+- **The problem:** Zeiss fast-streaming/timelapse CZI (many-subblock, e.g. a 15,766-frame movie)
+  cannot be decoded by *any* libCZI path — metadata reads fine but every pixel read raises
+  `RuntimeError: not implemented`. A bake-off across 4 real CZIs (`docs/audits/czi_bakeoff_2026-07-15.md`)
+  confirmed libCZI reads confocal **and** widefield-single-subblock CZI fine and fast (no JVM); only the
+  **streaming layout** fails. So `.czi` now tries libCZI first and **only diverts to BioFormats when a
+  pixel read actually fails** (routing rule (a)) — normal CZI keeps its fast, no-JVM path.
+- **The reader** (`readers/czi_bioformats.py`, Qt/napari-free): pixels come from the **direct**
+  BioFormats Java reader (`loci.formats.ImageReader.openBytes`, ~5 ms/plane) — *not* bioio's dask path,
+  which measured **50–80 s/plane** here. A lazy (T,Y,X) wrapper reads one plane per slider move,
+  normalises to [0,1] float32 (the analysis-stack contract), and `__array__` **refuses** an implicit
+  full-stack read (the lazy-guard that stops napari materialising 15,766 frames for a thumbnail). The
+  reader is retained for the layers' lifetime via `ImageSource`, exactly like the IMS path.
+- **Non-blocking open:** the one-time ~33 s frame-index parse runs on a `QThread` worker behind a busy
+  "Indexing CZI via BioFormats…" dialog so the UI stays responsive (with a synchronous fallback if the
+  Qt/threading setup is unavailable). Per-plane reads are already scrubbable, so no frame cache is
+  needed on this path.
+- **Dependency reality (shifted since the original audit):** `bioio-bioformats 2.0.0` now requires
+  `numpy>=2.1` (via `bffile`), which would break PyCAT's `numpy<2.1` pin (cellpose + numba) — so the
+  `[bioformats]` extra pins **`bioio-bioformats<2.0`**. That line bundles Java BioFormats 6.7.0, which
+  *cannot* read these CZIs, so PyCAT overrides the scyjava endpoint to **`formats-gpl:8.1.1`** and
+  registers the **OME Maven repo** (for the `woolz` transitive jar) at JVM start.
+- **Tests:** `tests/test_czi_bioformats_reader.py` — unit coverage of the lazy wrapper (shape, dtype,
+  single-plane vs slice, `__array__` refusal) with no JVM, plus a skip-unless-installed integration
+  test that opens the real 8.1 GB streaming CZI through BioFormats and asserts planes read non-zero.
+- **Still needs a GUI confirm:** the worker-thread anti-freeze UX and scrubbing smoothness were
+  verified headlessly at the reader level but not yet through `run-pycat` on a display. Opt-in and
+  libCZI-first, so users without the extra (and all normal-CZI users) are unaffected.
+
 ## [1.6.60] - 2026-07-15
 ### Changed — **File-I/O decomposition #3: the lazy IMS reader classes + helpers move into a pure, Qt/napari-free `readers/ims_reader.py`.**
 - **The lazy IMS wrappers no longer live in the god-class.** `_open_stack_ims` interleaves reader

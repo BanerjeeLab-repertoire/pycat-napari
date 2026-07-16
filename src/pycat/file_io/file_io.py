@@ -2130,6 +2130,19 @@ class FileIOClass:
         are detected via the reader's `.scenes` and offered through the
         same position-selection dialog used for IMS sibling files.
         """
+        # ── Zeiss fast-streaming CZI: libCZI cannot decode it ──────────────────
+        #
+        # Confocal and widefield-single-subblock CZI read fine (and fast, no JVM) through libCZI, so
+        # only DIVERT to BioFormats when a pixel read actually fails — the streaming/many-subblock
+        # layout (e.g. a 15,766-frame movie) raises "not implemented" on every plane. The BioFormats
+        # path is opt-in (`pip install pycat-napari[bioformats]`). See
+        # docs/audits/czi_bakeoff_2026-07-15.md.
+        if ext == '.czi':
+            from pycat.file_io.readers import czi_bioformats as _czibf
+            if not _czibf.libczi_can_read(file_path):
+                self._open_czi_streaming(file_path)
+                return
+
         import tempfile, zarr as _zarr
 
         from napari.utils.notifications import show_info as napari_show_info
@@ -2656,6 +2669,170 @@ class FileIOClass:
                                   n_z if reader_has_structure else 1,
                                   file_path, source='generic')
 
+    def _open_czi_streaming(self, file_path: str):
+        """Load a Zeiss streaming CZI (which libCZI cannot decode) via BioFormats.
+
+        Pixels come from the direct BioFormats reader (``openBytes``, ~5 ms/plane — bioio's dask path
+        is ~1000× slower); dims, pixel size and channel identity come from libCZI's metadata (which
+        reads fine — only its PIXEL reads fail). The ~33 s one-time reader open (parsing the frame
+        index) runs on a worker thread so the Qt UI stays responsive. The reader's lifetime is pinned
+        to the layers via ``ImageSource``, exactly like the IMS path. See
+        docs/audits/czi_bakeoff_2026-07-15.md.
+        """
+        from napari.utils.notifications import show_info as napari_show_info
+        from napari.utils.notifications import show_warning as napari_show_warning
+        from pycat.file_io.readers import czi_bioformats as _czibf
+        from pycat.file_io.image_source import ImageSource
+
+        if not _czibf.bioformats_available():
+            napari_show_warning(
+                "This is a Zeiss fast-streaming CZI, which the built-in reader (libCZI) cannot "
+                "decode. Install the BioFormats extra to open it:\n"
+                "    pip install pycat-napari[bioformats]\n"
+                "Alternatively, export it to OME-TIFF from ZEN.")
+            return
+
+        # Metadata via libCZI — it opens the file fine; only the pixel reads fail.
+        microns_per_pixel = 1.0
+        image = None
+        try:
+            image = open_image(file_path)
+            try:
+                px = image.physical_pixel_sizes
+                microns_per_pixel = float(px.Y) if px.Y else 1.0
+            except Exception as _pe:
+                debug_log("file_io: CZI physical pixel size unavailable", _pe)
+            self.central_manager.active_data_class.update_metadata(image)
+            try:
+                from pycat.file_io.metadata_extract import extract_metadata
+                _md = extract_metadata(file_path, image=image)
+                self.central_manager.active_data_class.data_repository['file_metadata'] = _md
+            except Exception as _mde:
+                debug_log("file_io: CZI metadata extraction failed", _mde)
+        except Exception as _e:
+            debug_log("file_io: CZI metadata via libCZI failed (using BioFormats dims only)", _e)
+
+        # Open the BioFormats reader OFF the main thread (setId parses ~15k frame offsets, ~33 s) so
+        # the event loop keeps painting instead of a dead spinner.
+        napari_show_info("Indexing CZI via BioFormats — one-time frame-index parse; then it scrubs.")
+        try:
+            reader = self._run_with_busy_progress(
+                lambda: _czibf.CziBioFormatsReader(file_path),
+                "Opening CZI",
+                "Indexing CZI via BioFormats…\n(one-time frame-index parse — then frames scrub "
+                "on demand)")
+        except Exception as _e:
+            napari_show_warning(f"BioFormats could not open this CZI:\n{_e}")
+            debug_log("file_io: BioFormats CZI open failed", _e)
+            return
+
+        n_t, n_c, H, W = reader.n_t, reader.n_c, reader.H, reader.W
+
+        # Pin the reader's lifetime to the layers (lazy plane reads go back to it), same as IMS.
+        _img_source = ImageSource(file_path=file_path)
+        _img_source.retain(reader)
+
+        for channel_idx in range(n_c):
+            try:
+                _ch_info = extract_channel_info(image, channel_idx) if image is not None else None
+            except Exception:
+                _ch_info = None
+            if not _ch_info:
+                _ch_info = {'layer_name': f'C{channel_idx}', 'bucket': 'unknown'}
+            _ch_label = _ch_info.get('layer_name', f'C{channel_idx}')
+            _ch_colormap = suggest_colormap(_ch_info.get('bucket', 'unknown'))
+
+            lazy = reader.channel_stack(channel_idx)
+            layer_name = f"{self.base_file_name} {_ch_label} Stack"
+            # One frame for contrast; without explicit limits napari calls np.asarray() on the whole
+            # lazy stack (→ __array__, which REFUSES) to auto-estimate — see the IMS path.
+            try:
+                _plane0 = lazy[0]
+            except Exception as _pe:
+                debug_log("file_io: CZI first-frame prefetch failed", _pe)
+                _plane0 = None
+            _clim = _lazy_contrast_limits(lazy, prefetched=_plane0)
+            _add = dict(name=layer_name, colormap=_ch_colormap)
+            if _clim is not None:
+                _add['contrast_limits'] = _clim
+            _layer = self.viewer.add_image(lazy, **_add)
+            try:
+                _layer.projection_mode = 'none'   # show the current frame, not a mean projection
+            except Exception:
+                pass
+            try:
+                _layer.metadata['pycat_image_source'] = _img_source
+            except Exception as _e:
+                debug_log("file_io: could not attach ImageSource to CZI layer", _e)
+            napari_show_info(
+                f"Lazy-loaded CZI {_ch_label}: {n_t} frames {H}×{W}px via BioFormats "
+                f"(frames read on demand)")
+
+        self._finalise_stack_load(H, W, microns_per_pixel, list(range(n_c)),
+                                  n_t, 1, file_path, source='generic')
+
+    def _run_with_busy_progress(self, fn, title, text):
+        """Run blocking ``fn()`` OFF the Qt main thread with a responsive busy dialog; return its
+        result (or re-raise its exception).
+
+        The BioFormats reader open is a single ~33 s Java call — ``processEvents`` cannot interleave
+        with it, so it MUST run on a worker thread or the window freezes (the exact symptom this
+        replaces). We run it on a ``QThread`` and spin a modal, indeterminate ``QProgressDialog``
+        until it finishes, so the UI keeps painting. If the Qt/threading setup is unavailable
+        (headless, no Qt), fall back to a plain synchronous call — a brief freeze, but correct,
+        rather than blocking forever.
+        """
+        try:
+            from PyQt5.QtCore import QThread, QObject, pyqtSignal, Qt
+            from PyQt5.QtWidgets import QProgressDialog
+        except Exception:
+            return fn()
+
+        box = {}
+
+        class _Worker(QObject):
+            finished = pyqtSignal()
+
+            def run(self):
+                try:
+                    box['value'] = fn()
+                except BaseException as e:   # reported back to the caller's thread
+                    box['error'] = e
+                finally:
+                    self.finished.emit()
+
+        thread = QThread()
+        worker = _Worker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+
+        parent = None
+        try:
+            _win = getattr(self.viewer, 'window', None)
+            parent = getattr(_win, '_qt_window', None)
+        except Exception:
+            parent = None
+
+        # (min, max) = (0, 0) → indeterminate/busy bar; cancel label None → no cancel button.
+        dlg = QProgressDialog(text, None, 0, 0, parent)
+        dlg.setWindowTitle(title)
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+
+        def _on_finished():
+            thread.quit()
+            dlg.reset()             # returns from dlg.exec_()
+
+        worker.finished.connect(_on_finished)
+        thread.start()
+        dlg.exec_()                 # spins the event loop until _on_finished()
+        thread.wait()
+
+        if 'error' in box:
+            raise box['error']
+        return box.get('value')
 
     # ── Shared post-load logic ───────────────────────────────────────────────
 

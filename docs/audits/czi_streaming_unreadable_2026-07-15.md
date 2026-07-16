@@ -1,10 +1,34 @@
 # CZI streaming-acquisition files: unreadable by libCZI — investigation pin
 
 **Date:** 2026-07-15
-**Status:** READER WORKS, INTEGRATION DOES NOT. BioFormats reads the pixels correctly, but the
-GUI load freezes the UI for 2–5 minutes (main-thread blocking) and scrubbing lags in chunks. CZI
-is TEMPORARILY DISABLED in the loader (clear notice shown) until the non-blocking integration is
-built. Reader routing + shim + opt-in extra are in and correct; only the UX integration remains.
+**Status (updated 2026-07-15, v1.6.61): READER BUILT + SHIPPED (opt-in), pending a GUI confirm.**
+The reader was **built, not re-enabled** — the earlier BioFormats reader code described below was a
+loose-file drop that never landed in the tree; only the `[bioformats]` extra had. What shipped in
+1.6.61 (see `docs/audits/czi_bakeoff_2026-07-15.md` for the empirical basis):
+- **Routing rule (a):** `.czi` tries libCZI first (fast, no JVM — reads confocal AND
+  widefield-single-subblock fine); only the streaming/many-subblock layout diverts to BioFormats.
+- **Pixels via the DIRECT BioFormats reader** (`readers/czi_bioformats.py`,
+  `loci.formats.ImageReader.openBytes`, ~5 ms/plane) — NOT bioio's dask, which measured 50–80 s/plane
+  here. Lazy (T,Y,X) wrapper, `__array__` refuses, reader retained via `ImageSource`.
+- **Non-blocking open:** the ~33 s one-time frame-index parse runs on a `QThread` worker behind a
+  busy "Indexing CZI…" dialog (`_run_with_busy_progress`), with a synchronous fallback.
+- **Dependency reality (changed since this audit):** `bioio-bioformats 2.0.0` now requires
+  `numpy>=2.1` (via `bffile`), which breaks PyCAT's `numpy<2.1` pin — so the extra pins `<2.0`, and
+  PyCAT overrides the Java BioFormats version to `formats-gpl:8.1.1` (6.7.0 can't read the file) +
+  registers the OME Maven repo at JVM start.
+- **Verified headlessly:** reader opens the real 8.1 GB streaming CZI, reads planes non-zero at
+  ~5 ms; unit + integration tests pass. **NOT yet GUI-confirmed** — the worker-thread anti-freeze UX
+  and scrubbing smoothness need a `run-pycat` check on a machine with a display.
+
+The rest of this doc is the original investigation, preserved for context.
+
+---
+
+_Original status (superseded):_ READER WORKS, INTEGRATION DOES NOT. BioFormats reads the pixels
+correctly, but the GUI load freezes the UI for 2–5 minutes (main-thread blocking) and scrubbing lags
+in chunks. CZI is TEMPORARILY DISABLED in the loader (clear notice shown) until the non-blocking
+integration is built. Reader routing + shim + opt-in extra are in and correct; only the UX
+integration remains.
 
 ---
 

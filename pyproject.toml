@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.60"
+version = "1.6.61"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -116,14 +116,20 @@ gpu = [
 ]
 # BioFormats-backed reader for Zeiss CZI files that libCZI (bioio-czi) CANNOT decode -- notably
 # fast streaming/timelapse acquisitions, where every libCZI read raises "not implemented" even
-# though ZEN opens the file. bioio-bioformats reads them lazily (~0.03 s/plane after a one-time
-# ~30 s open). It is OPT-IN because it pulls a JVM (scyjava/jgo/cjdk download a JRE on first use) --
-# far heavier than the rest of the stack -- and its own metadata omits a numpy upper bound, so the
-# numpy pin is repeated here to stop `pip install ...[bioformats]` from pulling numpy>=2.1 and
-# breaking cellpose (needs <2.1) and numba (needs <2.5). See
-# docs/audits/czi_streaming_unreadable_2026-07-15.md.
+# though ZEN opens the file. PyCAT reads pixels via the DIRECT BioFormats reader
+# (readers/czi_bioformats.py: loci.formats.ImageReader.openBytes, ~5 ms/plane after a one-time
+# ~33 s frame-index parse) -- NOT bioio's dask path, which measured 50-80 s/plane. It is OPT-IN
+# because it pulls a JVM (scyjava/jgo/cjdk download a JRE on first use), far heavier than the rest
+# of the stack.
+#
+# **bioio-bioformats MUST be pinned <2.0.** 2.0.0 depends on bffile, which requires numpy>=2.1 --
+# and PyCAT pins numpy<2.1 (cellpose + numba), so `pip install ...[bioformats]` would be
+# unresolvable. 1.3.x is the numpy-safe line. The `numpy<2.1` pin is repeated here as a belt so the
+# extra can never trample the base env. (1.3.x bundles Java BioFormats 6.7.0, which cannot read
+# these CZIs; PyCAT overrides the scyjava endpoint to formats-gpl:8.1.1 + the OME Maven repo at JVM
+# start -- see readers/czi_bioformats.py.) See docs/audits/czi_bakeoff_2026-07-15.md.
 bioformats = [
-    "bioio-bioformats",
+    "bioio-bioformats<2.0",
     "numpy<2.1",
 ]
 # Plotly is OPTIONAL, and deliberately so.
