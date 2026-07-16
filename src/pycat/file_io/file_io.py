@@ -2143,8 +2143,6 @@ class FileIOClass:
                 self._open_czi_streaming(file_path)
                 return
 
-        import tempfile, zarr as _zarr
-
         from napari.utils.notifications import show_info as napari_show_info
         from napari.utils.notifications import show_warning as napari_show_warning
         from pycat.file_io.multidim_io import (
@@ -2209,8 +2207,9 @@ class FileIOClass:
             n_c = 1
             n_t, n_z = n_frames, 1
 
-        zarr_dir = tempfile.mkdtemp(prefix='pycat_stack_')
-        self._stack_zarr_paths = []
+        # (No temp zarr store: the old synchronous full-file zarr transcode is gone — every branch
+        # now hands napari an already-lazy wrapper. The `pycat_stack_*` mkdtemp and `_stack_zarr_paths`
+        # it fed were obsolete scaffolding — audit cleanup item 3.)
         # Retention is owned by a layer-scoped ImageSource, exactly like the IMS loader — it keeps
         # the backing reader/dask handles alive for the LAYER's lifetime, so on-demand frame reads
         # keep working after this method returns, with no controller-scoped list to leak or forget
@@ -2284,7 +2283,7 @@ class FileIOClass:
                     self._add_lazy_stack_layer(
                         _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} z-stack: {n_z} slices "
-                        f"{H}×{W}px → '{layer_name}' (zarr-backed)")
+                        f"{H}×{W}px → '{layer_name}' (lazy, dask-backed)")
 
                 else:
                     # Nested time-series-with-z-stack (T, Z, Y, X) — a genuine lazy 4D array; napari
@@ -2298,7 +2297,7 @@ class FileIOClass:
                         _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} T-Z stack: "
                         f"{n_t} timepoints × {n_z} z-slices, "
-                        f"{H}×{W}px → '{layer_name}' (zarr-backed)")
+                        f"{H}×{W}px → '{layer_name}' (lazy, dask-backed)")
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),
