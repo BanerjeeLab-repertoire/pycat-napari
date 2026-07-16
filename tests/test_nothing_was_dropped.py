@@ -275,6 +275,19 @@ _DELIBERATE = {
     'file_io.py::_update_scale_bar_for_active_layer',
     'file_io.py::_fit_view_to_layer',
 
+    # 1.6.62 — SHRUNK by extraction, not truncated (god-class decomposition #5). `_open_stack_generic`
+    # went 313 → 186 lines because its metadata-read head and its per-branch lazy-wrapper construction
+    # were lifted into pure modules, NOT because logic was dropped:
+    #   * the head (structured reader → dims/scenes/pixel size, else the tifffile-page fallback)
+    #     → `readers/stack_metadata.py::read_stack_structure`;
+    #   * the four lazy branches (tifffile-fallback / time-series / z-stack / T-Z, incl. the zarr-3.2
+    #     shim + multi-file OME handling) → `readers/stack_layer_builders.py`;
+    #   * their shared tail (retain + contrast-pin + add_image + projection + announce) → the new
+    #     `_add_lazy_stack_layer` method.
+    # Every branch's behaviour — the wrappers, the retention (incl. the T-Z branch retaining nothing),
+    # the contrast pinning — is preserved; the controller now orchestrates rather than inlines.
+    'file_io.py::_open_stack_generic',
+
     'metadata_extract.py::extract_aicsimage_metadata',
     'channel_naming.py::extract_channel_info_from_aicsimage',
 }

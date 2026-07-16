@@ -2149,6 +2149,9 @@ class FileIOClass:
         from napari.utils.notifications import show_warning as napari_show_warning
         from pycat.file_io.multidim_io import (
             show_position_selection_dialog, _ZarrTZYX_generic)
+        from pycat.file_io.readers.stack_layer_builders import (
+            build_tifffile_fallback_wrapper, build_timeseries_wrapper,
+            build_zstack_wrapper, build_tzstack_wrapper)
 
         n_c = 1
 
@@ -2241,49 +2244,15 @@ class FileIOClass:
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
 
-                import os as _os
-
                 if not reader_has_structure:
                     # tifffile fallback — single (T,H,W), no Z/scene metadata
-                    arr_ch = arr.astype(np.float32)
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
-                    # Data is already in memory — wrap it directly (no disk copy).
-                    wrapper = _LazyArraySource(arr_ch)
-                    self._stack_lazy_refs.append(arr_ch)
-                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
-                    #
-                    # Without explicit limits, napari auto-estimates contrast **and builds the
-                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
-                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
-                    # disk one frame at a time.**
-                    #
-                    # PyCAT's own source has documented this for months, on the IMS path::
-                    #
-                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
-                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
-                    #
-                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
-                    # user can still adjust the contrast afterwards.
-                    #
-                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
-                    # reaches this path without limits now fails loudly instead of hanging. That is
-                    # the right trade, but pinning the limits is what stops it happening at all.)
-                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
-                    _clim = _lazy_contrast_limits(wrapper)
-                    if _clim is not None:
-                        _add_kwargs['contrast_limits'] = _clim
-                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    # Show the current frame, not a projection — a stray
-                    # 'mean' projection mode averages the whole time-series
-                    # into a flat/black display.
-                    try:
-                        _stack_layer.projection_mode = 'none'
-                    except Exception:
-                        pass
-                    napari_show_info(
+                    _wrapper, _refs, _warns = build_tifffile_fallback_wrapper(
+                        arr, lazy_array_source_cls=_LazyArraySource)
+                    self._add_lazy_stack_layer(
+                        _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}: {n_frames} frames "
-                        f"{H}\u00d7{W}px → '{layer_name}'"
-                    )
+                        f"{H}×{W}px → '{layer_name}'")
                     continue
 
                 if n_t == 1 and n_z == 1:
@@ -2293,311 +2262,82 @@ class FileIOClass:
                         name=f"{self.base_file_name} {_ch_label}{scene_suffix}")
 
                 elif n_z == 1:
-                    # Pure time series (T, Y, X). the structured reader's dask array is lazy
-                    # but SLOW to scrub: indexing it per slider-move re-executes
-                    # the dask/reader graph for that frame, re-decoding through
-                    # the TIFF/CZI backend every time — so scrubbing a modest
-                    # TIFF lags badly even though an IMS (native zarr random
-                    # access) scrolls smoothly. Materialize once, frame-by-frame,
-                    # into an on-disk zarr store (memory-bounded — never holds
-                    # the whole stack in RAM) so subsequent frame reads are fast
-                    # zarr random access, matching the IMS path.
+                    # Pure time series (T, Y, X): the tifffile-page fast path (or the reader's dask).
                     layer_name = f"{self.base_file_name} {_ch_label} Stack{scene_suffix}"
-
-                    # ── For a TIFF the dask array is never built ────────────────────
-                    #
-                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and
-                    # **tifffile's zarr store is broken on zarr 3.2**::
-                    #
-                    #     ImportError: cannot import name 'RegularChunkGrid'
-                    #     -> re-raised as: ValueError: zarr 3.2.1 < 3 is not supported
-                    #
-                    # *(That message is a lie — 3.2.1 is not less than 3. tifffile blames the
-                    # version for any ImportError out of its zarr-3 module.)*
-                    #
-                    # **And this line crashed before ``_TiffPageStack`` was ever reached** — the
-                    # dask array was built first, and then used only for its ``dtype``. For a TIFF
-                    # it is not needed at all: ``_TiffPageStack`` seeks pages directly, and
-                    # tifffile reports the dtype without touching zarr.
-                    dask_arr = None
-                    if ext not in ('.tif', '.tiff'):
-                        dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
-                    # Lazy by design: pull exactly one frame per slider move —
-                    # no eager copy. For TIFF/OME-TIFF (incl. Micro-Manager
-                    # MMStack) read frames straight from the multipage TIFF via
-                    # tifffile, which is a direct per-page seek and far faster to
-                    # scrub than the structured reader's dask path (which walks the OME
-                    # plane-map on every frame). CZI has no tifffile path, so it
-                    # keeps the dask wrapper.
-                    wrapper = None
-                    if ext in ('.tif', '.tiff'):
-                        try:
-                            # tifffile reports the dtype directly — no zarr store, no dask.
-                            import tifffile as _tf_probe
-                            with _tf_probe.TiffFile(file_path) as _probe:
-                                _tiff_dtype = _probe.pages[0].dtype
-
-                            wrapper = _TiffPageStack(
-                                file_path, n_t, H, W, _tiff_dtype,
-                                channel_idx=channel_idx, n_channels=n_c)
-                            # If this is a multi-file OME set with missing
-                            # companions, tell the user we're using only the
-                            # frames that physically exist (least-friction: warn
-                            # and proceed rather than block).
-                            _pinfo = getattr(wrapper, '_present_info', None)
-                            if _pinfo and _pinfo.get('missing'):
-                                from napari.utils.notifications import show_warning as _sw
-                                _sw(f"This OME-TIFF references "
-                                    f"{len(_pinfo['referenced'])} linked files but "
-                                    f"{len(_pinfo['missing'])} are missing "
-                                    f"({', '.join(_pinfo['missing'][:3])}"
-                                    f"{'…' if len(_pinfo['missing'])>3 else ''}). "
-                                    f"Loading only the {wrapper.shape[0]} frames that "
-                                    f"are present. If you meant to analyse the full "
-                                    f"set, keep the linked .ome.tif files together.")
-                            # Sanity check: for the single-file fast path the page
-                            # count must be consistent with (frames x channels).
-                            # (Multi-file mode sizes itself from the page map, so
-                            # skip this check there.)
-                            _pages_attr = getattr(wrapper, '_pages', None)
-                            if _pages_attr is not None:
-                                _npages = len(_pages_attr)
-                                if n_c > 1 and _npages < n_t * n_c:
-                                    wrapper.close()
-                                    wrapper = None
-                        except Exception as _te:
-                            debug_log("file_io: tifffile page reader failed, "
-                                      "using the structured reader's dask wrapper", _te)
-                            wrapper = None
-                    if wrapper is None:
-                        # The tifffile page reader declined or failed. Fall back to BioIO's dask
-                        # array — building it NOW, because for a TIFF it was deliberately not built
-                        # above (``tif.aszarr()`` is broken on zarr 3.2).
-                        #
-                        # **This can itself fail on a TIFF**, and if it does the file genuinely
-                        # cannot be read lazily — which is worth saying plainly rather than
-                        # crashing in tifffile's zarr store with a message that blames the wrong
-                        # thing.
-                        if dask_arr is None:
-                            try:
-                                dask_arr = image.get_image_dask_data('TYX', C=channel_idx)
-                            except Exception as _dask_exc:
-                                raise RuntimeError(
-                                    f"Could not read {os.path.basename(file_path)} lazily.\n\n"
-                                    f"The tifffile page reader declined, and BioIO's dask path "
-                                    f"failed too: {_dask_exc}\n\n"
-                                    f"If this says 'zarr < 3 is not supported', that message is "
-                                    f"misleading — it is tifffile's zarr store failing to import "
-                                    f"from a newer zarr, not a version that is too old."
-                                ) from _dask_exc
-
-                        wrapper = _LazyArraySource(dask_arr)
-                        self._stack_lazy_refs.append((image, dask_arr))
-                    else:
-                        self._stack_lazy_refs.append(wrapper)  # keep handle open
-                    # Pin contrast_limits from the first frame. Without this,
-                    # napari auto-estimates the display range by calling
-                    # np.asarray() on the whole wrapper (__array__), which
-                    # materialises EVERY frame on each slider move — the real
-                    # cause of TIFF/CZI scrubbing lag (the IMS path already does
-                    # this; the generic path did not).
-                    _add_kw = dict(name=layer_name, colormap=_ch_colormap)
-                    _clim = _lazy_contrast_limits(wrapper)
-                    if _clim is not None:
-                        _add_kw['contrast_limits'] = _clim
-                    _stack_layer = self.viewer.add_image(wrapper, **_add_kw)
-                    # Show the current frame, not a projection — a stray
-                    # 'mean' projection mode averages the whole time-series
-                    # into a flat/black display.
-                    try:
-                        _stack_layer.projection_mode = 'none'
-                    except Exception:
-                        pass
-                    napari_show_info(
+                    _wrapper, _refs, _warns = build_timeseries_wrapper(
+                        file_path, ext, image, channel_idx, n_t, n_c, H, W,
+                        tiff_page_stack_cls=_TiffPageStack,
+                        lazy_array_source_cls=_LazyArraySource)
+                    self._add_lazy_stack_layer(
+                        _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix}: {n_t} frames "
-                        f"{H}\u00d7{W}px → '{layer_name}' (lazy)"
-                    )
+                        f"{H}×{W}px → '{layer_name}' (lazy)")
 
                 elif n_t == 1:
-                    # Pure z-stack (Z, Y, X)
+                    # Pure z-stack (Z, Y, X).
                     layer_name = f"{self.base_file_name} {_ch_label} Z-Stack{scene_suffix}"
-
-                    # ── BioIO's dask path is broken for TIFF on zarr 3.2 ────────────
-                    #
-                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and tifffile's
-                    # zarr store fails to import from zarr 3.2 — then **blames the version**::
-                    #
-                    #     ValueError: zarr 3.2.1 < 3 is not supported
-                    #
-                    # *3.2.1 is not less than 3.* The real error is ``cannot import name
-                    # 'RegularChunkGrid'``, one frame up, where nobody looks.
-                    #
-                    # ``_TiffPageStack`` handles the **TYX** case natively (direct page seeks, no
-                    # zarr). It does **not** handle Z or T+Z, so those still go through BioIO — and
-                    # if that fails, **say what actually happened** rather than let tifffile's
-                    # misleading message reach the user.
-                    try:
-                        dask_arr = image.get_image_dask_data('ZYX', C=channel_idx)
-                    except Exception as _dask_exc:
-                        if 'zarr' in str(_dask_exc).lower() and ext in ('.tif', '.tiff'):
-                            raise RuntimeError(
-                                f"Cannot read {os.path.basename(file_path)} lazily.\n\n"
-                                f"BioIO reads TIFF pixels through tifffile's zarr store, and that "
-                                f"store is incompatible with the installed zarr "
-                                f"({_dask_exc}).\n\n"
-                                f"**That message is misleading** — it is not that zarr is too old. "
-                                f"tifffile's zarr module fails to import a symbol that a newer "
-                                f"zarr renamed, and tifffile reports it as a version problem.\n\n"
-                                f"2-D time series are read natively and are unaffected. This is a "
-                                f"TIFF Z stack, which still depends on that path."
-                            ) from _dask_exc
-                        raise
-                    wrapper = _LazyArraySource(dask_arr)
-                    self._stack_lazy_refs.append((image, dask_arr))
-                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
-                    #
-                    # Without explicit limits, napari auto-estimates contrast **and builds the
-                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
-                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
-                    # disk one frame at a time.**
-                    #
-                    # PyCAT's own source has documented this for months, on the IMS path::
-                    #
-                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
-                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
-                    #
-                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
-                    # user can still adjust the contrast afterwards.
-                    #
-                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
-                    # reaches this path without limits now fails loudly instead of hanging. That is
-                    # the right trade, but pinning the limits is what stops it happening at all.)
-                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
-                    _clim = _lazy_contrast_limits(wrapper)
-                    if _clim is not None:
-                        _add_kwargs['contrast_limits'] = _clim
-                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    # Show the current frame, not a projection — a stray
-                    # 'mean' projection mode averages the whole time-series
-                    # into a flat/black display.
-                    try:
-                        _stack_layer.projection_mode = 'none'
-                    except Exception:
-                        pass
-                    napari_show_info(
+                    _wrapper, _refs, _warns = build_zstack_wrapper(
+                        file_path, ext, image, channel_idx,
+                        lazy_array_source_cls=_LazyArraySource)
+                    self._add_lazy_stack_layer(
+                        _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} z-stack: {n_z} slices "
-                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed)"
-                    )
+                        f"{H}×{W}px → '{layer_name}' (zarr-backed)")
 
                 else:
-                    # Nested time-series-with-z-stack (T, Z, Y, X) — the
-                    # scenario this fix targets. Previously this branch
-                    # picked EITHER T or Z as "the" stack dimension and
-                    # silently discarded the other entirely. Now both are
-                    # preserved as a genuine lazy 4D array; napari adds a
-                    # T slider and a Z slider automatically for 4D layers.
+                    # Nested time-series-with-z-stack (T, Z, Y, X) — a genuine lazy 4D array; napari
+                    # adds a T slider AND a Z slider automatically. The dask array is already lazy, so
+                    # the window opens immediately (the old code transcoded the whole channel first).
                     layer_name = f"{self.base_file_name} {_ch_label} T-Z Stack{scene_suffix}"
-                    zarr_path = _os.path.join(
-                        zarr_dir, f'ch{channel_idx}_tz{scene_suffix or "0"}')
-                    # ── This TRANSCODED THE WHOLE FILE before showing anything ─────
-                    #
-                    # It was::
-                    #
-                    #     z = _zarr.open(zarr_path, mode='w', ...)
-                    #     for t in range(n_t):
-                    #         for zi in range(n_z):
-                    #             z[t, zi] = np.asarray(dask_arr[t, zi])
-                    #
-                    # **Every (t, z) plane, decoded and written to a temporary zarr, on the
-                    # synchronous path, before the first pixel reaches the screen.** On a 4-D
-                    # acquisition that is the entire selected channel — and the user is looking at
-                    # a frozen window while it happens.
-                    #
-                    # *It was not accidentally eager. It was a deliberate full-file copy, and the
-                    # note beside it said "nothing pre-loaded beyond this write pass" — which is
-                    # true, and which was the whole problem.*
-                    #
-                    # **The dask array is ALREADY lazy.** Wrapping it directly gives napari a
-                    # 4-D source that reads one plane per slider move, and the window opens
-                    # immediately.
-                    #
-                    # *(A zarr cache is still the right thing for repeated random access — but it
-                    # belongs in the background, behind an "optimize for browsing" action, not on
-                    # the critical path to first display.)*
-
-                    # ── BioIO's dask path is broken for TIFF on zarr 3.2 ────────────
-                    #
-                    # ``bioio-tifffile`` builds its dask array via ``tif.aszarr()``, and tifffile's
-                    # zarr store fails to import from zarr 3.2 — then **blames the version**::
-                    #
-                    #     ValueError: zarr 3.2.1 < 3 is not supported
-                    #
-                    # *3.2.1 is not less than 3.* The real error is ``cannot import name
-                    # 'RegularChunkGrid'``, one frame up, where nobody looks.
-                    #
-                    # ``_TiffPageStack`` handles the **TYX** case natively (direct page seeks, no
-                    # zarr). It does **not** handle Z or T+Z, so those still go through BioIO — and
-                    # if that fails, **say what actually happened** rather than let tifffile's
-                    # misleading message reach the user.
-                    try:
-                        dask_arr = image.get_image_dask_data('TZYX', C=channel_idx)
-                    except Exception as _dask_exc:
-                        if 'zarr' in str(_dask_exc).lower() and ext in ('.tif', '.tiff'):
-                            raise RuntimeError(
-                                f"Cannot read {os.path.basename(file_path)} lazily.\n\n"
-                                f"BioIO reads TIFF pixels through tifffile's zarr store, and that "
-                                f"store is incompatible with the installed zarr "
-                                f"({_dask_exc}).\n\n"
-                                f"**That message is misleading** — it is not that zarr is too old. "
-                                f"tifffile's zarr module fails to import a symbol that a newer "
-                                f"zarr renamed, and tifffile reports it as a version problem.\n\n"
-                                f"2-D time series are read natively and are unaffected. This is a "
-                                f"TIFF T+Z stack, which still depends on that path."
-                            ) from _dask_exc
-                        raise
-                    wrapper = _LazyArraySource(dask_arr)
-                    # ── Pin the contrast limits, or napari reads EVERY frame ────────
-                    #
-                    # Without explicit limits, napari auto-estimates contrast **and builds the
-                    # thumbnail** by calling ``np.asarray()`` on the layer — which hits
-                    # ``__array__`` and, on a lazy wrapper, **loads the entire acquisition off
-                    # disk one frame at a time.**
-                    #
-                    # PyCAT's own source has documented this for months, on the IMS path::
-                    #
-                    #     "On a USB-HDD IMS stack that is the real cause of the multi-second
-                    #      stalls (e.g. when adding an ROI layer forces a layer-list refresh)."
-                    #
-                    # **The IMS branches pin them. These three did not.** One frame is cheap; the
-                    # user can still adjust the contrast afterwards.
-                    #
-                    # (In 1.6.4 ``__array__`` RAISES rather than materialising — so a layer that
-                    # reaches this path without limits now fails loudly instead of hanging. That is
-                    # the right trade, but pinning the limits is what stops it happening at all.)
-                    _add_kwargs = {'name': layer_name, 'colormap': _ch_colormap}
-                    _clim = _lazy_contrast_limits(wrapper)
-                    if _clim is not None:
-                        _add_kwargs['contrast_limits'] = _clim
-                    _stack_layer = self.viewer.add_image(wrapper, **_add_kwargs)
-                    # Show the current frame, not a projection — a stray
-                    # 'mean' projection mode averages the whole time-series
-                    # into a flat/black display.
-                    try:
-                        _stack_layer.projection_mode = 'none'
-                    except Exception:
-                        pass
-                    napari_show_info(
+                    _wrapper, _refs, _warns = build_tzstack_wrapper(
+                        file_path, ext, image, channel_idx,
+                        lazy_array_source_cls=_LazyArraySource)
+                    self._add_lazy_stack_layer(
+                        _wrapper, layer_name, _ch_colormap, _refs, _warns,
                         f"Loaded {_ch_label}{scene_suffix} T-Z stack: "
-                        f"{n_t} timepoints \u00d7 {n_z} z-slices, "
-                        f"{H}\u00d7{W}px → '{layer_name}' (zarr-backed, "
-                        f"nothing pre-loaded beyond this write pass)"
-                    )
+                        f"{n_t} timepoints × {n_z} z-slices, "
+                        f"{H}×{W}px → '{layer_name}' (zarr-backed)")
 
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),
                                   n_t if reader_has_structure else n_frames,
                                   n_z if reader_has_structure else 1,
                                   file_path, source='generic')
+
+    def _add_lazy_stack_layer(self, wrapper, layer_name, colormap, retain_refs, warnings, info_msg):
+        """Shared tail for the generic loader's lazy branches (decomposition #5c).
+
+        Every lazy branch (tifffile-fallback, time series, z-stack, T-Z) built a wrapper and then did
+        the SAME six things. They live here now, once:
+
+        1. pin the branch's retained refs (readers + dask arrays) to ``_stack_lazy_refs`` so on-demand
+           reads keep working for the layer's life;
+        2. surface any builder warnings (e.g. a multi-file OME-TIFF with missing companions);
+        3. **PIN CONTRAST from the first frame** — without explicit limits napari auto-estimates by
+           calling ``np.asarray()`` on the whole lazy wrapper (``__array__``), which on a lazy source
+           either loads every frame off disk or (post-1.6.4) raises. One frame is cheap;
+        4. ``add_image``;
+        5. force per-frame display (``projection_mode='none'``), not a mean projection that averages
+           the time-series to a flat/black image;
+        6. announce the load.
+        """
+        from napari.utils.notifications import show_info as _si
+        from napari.utils.notifications import show_warning as _sw
+        self._stack_lazy_refs.extend(retain_refs)
+        for _w in (warnings or []):
+            _sw(_w)
+        _add_kwargs = {'name': layer_name, 'colormap': colormap}
+        _clim = _lazy_contrast_limits(wrapper)
+        if _clim is not None:
+            _add_kwargs['contrast_limits'] = _clim
+        _layer = self.viewer.add_image(wrapper, **_add_kwargs)
+        try:
+            _layer.projection_mode = 'none'
+        except Exception:
+            pass
+        if info_msg:
+            _si(info_msg)
+        return _layer
 
     def _open_czi_streaming(self, file_path: str):
         """Load a Zeiss streaming CZI (which libCZI cannot decode) via BioFormats.
