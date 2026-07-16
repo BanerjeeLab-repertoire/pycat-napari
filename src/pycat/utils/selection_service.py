@@ -98,12 +98,15 @@ class SelectionService:
     the fact that it once wanted to hear about selections.
     """
 
-    def __init__(self, defer=None):
+    def __init__(self, defer=None, debounce=None):
         self._subscribers: dict[str, object] = {}
+        self._deferred_subscribers: dict[str, object] = {}
         self._selected: Selection | None = None
         self._busy = False
         self._generations = itertools.count(1)
         self._defer = defer if defer is not None else _qt_defer
+        self._debounce = debounce if debounce is not None else _qt_debounce
+        self._pending: Selection | None = None
 
     # ── subscription ──────────────────────────────────────────────────────────────────────
     def subscribe(self, view_id, callback):
@@ -111,8 +114,27 @@ class SelectionService:
         self._subscribers[str(view_id)] = _as_callable(callback)
         return self
 
+    def subscribe_deferred(self, view_id, callback):
+        """``callback(selection)`` for the **expensive** half of a selection — the one that reads
+        pixels (a crop, an offline resolve, a reveal).
+
+        ── Why two kinds of subscriber ────────────────────────────────────────────────────
+
+        Dragging across a scatter, or holding an arrow key down a table, emits a burst of
+        selections. The **cheap** feedback (moving a marker, selecting a row) must land on every
+        one of them or the UI feels dead — it costs microseconds. The **expensive** one must not:
+        resolving the image for every intermediate point means reading a file per hover, and the
+        only one the user will ever look at is the last.
+
+        So these fire on a trailing debounce, for the most recent selection only. Everything before
+        it is superseded before it was worth doing.
+        """
+        self._deferred_subscribers[str(view_id)] = _as_callable(callback)
+        return self
+
     def unsubscribe(self, view_id):
         self._subscribers.pop(str(view_id), None)
+        self._deferred_subscribers.pop(str(view_id), None)
         return self
 
     @property
@@ -185,11 +207,33 @@ class SelectionService:
                     callback(selection)
                 except Exception as exc:
                     debug_log(f'selection: the "{view_id}" view failed to handle a selection', exc)
+            # The expensive half is coalesced: only the LAST selection of a burst is worth an
+            # image read, and the user only ever sees that one.
+            if self._deferred_subscribers:
+                self._pending = selection
+                self._debounce(self._flush_deferred)
         finally:
             # (2) the delayed release. See the docstring — this is the difference between the
             # working dispatcher and the one that oscillates.
             self._defer(self._release)
         return True
+
+    def _flush_deferred(self):
+        """Run the expensive subscribers for the most recent selection, and drop the rest."""
+        selection, self._pending = self._pending, None
+        if selection is None:
+            return
+        for view_id, handle in list(self._deferred_subscribers.items()):
+            if view_id == selection.source_view:
+                continue
+            callback = handle()
+            if callback is None:
+                self._deferred_subscribers.pop(view_id, None)
+                continue
+            try:
+                callback(selection)
+            except Exception as exc:
+                debug_log(f'selection: the "{view_id}" view failed to resolve a selection', exc)
 
     def _release(self):
         self._busy = False
@@ -227,3 +271,34 @@ def _qt_defer(fn):
         QTimer.singleShot(0, fn)
     except Exception:
         fn()
+
+
+_DEBOUNCE_MS = 30      # a hover burst coalesces; a deliberate click still feels immediate
+
+
+def _qt_debounce(fn):
+    """Run ``fn`` after a short trailing delay, restarting the clock on each call.
+
+    30 ms is below the threshold where a click feels laggy and comfortably above the interval a
+    drag or a held arrow key emits at, so a burst collapses to one image read.
+
+    Without Qt this runs inline: there is no event loop to trail behind, and a debounce that never
+    fires is a feature that never happens (the same trap as the deferred release).
+    """
+    try:
+        from PyQt5.QtCore import QTimer
+    except Exception:
+        fn()
+        return
+
+    timer = getattr(_qt_debounce, '_timer', None)
+    if timer is None:
+        timer = QTimer()
+        timer.setSingleShot(True)
+        _qt_debounce._timer = timer
+    try:
+        timer.timeout.disconnect()
+    except Exception:
+        pass
+    timer.timeout.connect(fn)
+    timer.start(_DEBOUNCE_MS)

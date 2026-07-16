@@ -654,3 +654,174 @@ def test_source_layer_id_is_OPTIONAL_so_every_existing_ref_still_works():
     ref = ObjectRef(object_id=1, frame=0, bbox=(0, 0, 4, 4), source_path='x.tif')
     assert ref.source_layer_id is None
     assert 'source_layer_id' in ref.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Brushing increment 4 — the scaling fixes
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.core
+def test_wiring_a_BIG_plot_does_not_build_a_ref_for_every_point():
+    """**The refs cost 380x the plot they decorate.**
+
+    `refs_from_dataframe` used `iterrows()` to build one `ObjectRef` per row when the plot was
+    *wired*: measured at **6.4 s for 100k points, against 0.02 s for the scatter itself**. The user
+    waits for all of it, and a click uses exactly one of them.
+
+    Refs are now built on access. This asserts the shape of that — no per-row construction at wiring
+    — rather than a wall-clock number, which would be a flaky test on someone else's machine.
+    """
+    from pycat.utils import object_ref as ref_mod
+
+    built = []
+    real_from_row = ref_mod.ObjectRef.from_row
+
+    class _Counting(ref_mod.ObjectRef):
+        pass
+
+    def _counting_from_row(row, **kw):
+        built.append(1)
+        return real_from_row(row, **kw)
+
+    N = 5000
+    df = pd.DataFrame({'label': np.arange(1, N + 1),
+                       'bbox_y0': np.zeros(N, int), 'bbox_x0': np.zeros(N, int),
+                       'bbox_y1': np.full(N, 4), 'bbox_x1': np.full(N, 4)})
+
+    original = ref_mod.ObjectRef.from_row
+    ref_mod.ObjectRef.from_row = staticmethod(_counting_from_row)
+    try:
+        refs = ref_mod.refs_from_dataframe(df, source_path='a.tif')
+        assert built == [], (
+            f"wiring the plot built {len(built)} refs — that is the 6.4-second stall")
+        assert len(refs) == N, "the refs must still report one per row"
+
+        one = refs[1234]
+        assert len(built) == 1, "a click should build exactly one ref"
+        assert one.object_id == 1235
+    finally:
+        ref_mod.ObjectRef.from_row = original
+
+
+@pytest.mark.core
+def test_lazy_refs_behave_like_the_LIST_they_replaced():
+    """Every caller indexes, lens or iterates them — the laziness must be invisible."""
+    from pycat.utils.object_ref import ObjectRef, refs_from_dataframe
+
+    df = pd.DataFrame({'label': [10, 20, 30]})
+    refs = refs_from_dataframe(df, source_path='a.tif')
+
+    assert len(refs) == 3
+    assert [r.object_id for r in refs] == [10, 20, 30]          # iteration
+    assert refs[-1].object_id == 30                             # negative index
+    assert [r.object_id for r in refs[1:]] == [20, 30]          # slicing
+    assert all(isinstance(r, ObjectRef) for r in refs)
+
+
+@pytest.mark.core
+def test_the_lazy_ref_cache_stays_BOUNDED():
+    """The whole point is not holding 100k objects; a cache that grows without bound would put them
+    straight back."""
+    from pycat.utils.object_ref import refs_from_dataframe
+
+    N = 500
+    refs = refs_from_dataframe(pd.DataFrame({'label': np.arange(N)}))
+    for i in range(N):
+        _ = refs[i]
+
+    assert len(refs._cache) <= refs._CACHE_LIMIT, (
+        f"the cache grew to {len(refs._cache)} — it is re-creating the problem it exists to avoid")
+
+
+@pytest.mark.core
+def test_a_ROW_that_cannot_build_a_ref_keeps_the_refs_INDEX_ALIGNED():
+    """`make_pickable` maps a click to `refs[index]`. A row that fails must still occupy its slot,
+    or every point after it points at the wrong object."""
+    from pycat.utils.object_ref import refs_from_dataframe
+
+    refs = refs_from_dataframe(pd.DataFrame({'label': [1, None, 3]}))
+    assert len(refs) == 3
+    assert refs[0].object_id == 1
+    assert refs[2].object_id == 3          # still in slot 2, not shifted up
+
+
+@pytest.mark.core
+def test_clicking_ONE_point_highlights_ONE_point():
+    """**It used to highlight several, and none of them reliably the right one.**
+
+    `_emphasise` handed `set_sizes` an array of length `index + 1` — shorter than the collection —
+    because a scatter built with a scalar `s=` reports ONE size and the code's `np.repeat` guard
+    was a no-op. matplotlib TILES a short size array, so clicking point 5 of 20 enlarged points
+    5, 11 and 17.
+
+    The user clicks one object and sees several, with nothing to say which is real.
+    """
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from pycat.utils.brushing import _emphasise
+
+    fig, ax = plt.subplots()
+    try:
+        base = ax.scatter(np.arange(20), np.arange(20), s=60)     # ONE size for 20 points
+        state = {'previous': None}
+
+        _emphasise(base, 5, state)
+
+        overlay = state.get('overlay')
+        assert overlay is not None, "no selection overlay was created"
+
+        marked = np.asarray(overlay.get_offsets())
+        assert marked.shape == (1, 2), f"the overlay marks {len(marked)} points, not one"
+        assert tuple(marked[0]) == (5.0, 5.0), "the overlay is not on the point that was picked"
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.core
+def test_the_BASE_scatter_is_never_touched_by_a_selection():
+    """O(1) and, more importantly, unable to mis-mark: if the base artist is not modified, it
+    cannot end up tiling a short size array across the collection again."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from pycat.utils.brushing import _emphasise
+
+    fig, ax = plt.subplots()
+    try:
+        base = ax.scatter(np.arange(50), np.arange(50), s=60)
+        before_sizes = np.array(base.get_sizes(), copy=True)
+        before_offsets = np.array(base.get_offsets(), copy=True)
+
+        state = {'previous': None}
+        for index in (5, 17, 42):
+            _emphasise(base, index, state)
+
+        assert np.array_equal(np.asarray(base.get_sizes()), before_sizes), (
+            "the base scatter's sizes were rewritten — that is the O(N) path AND the bug")
+        assert np.array_equal(np.asarray(base.get_offsets()), before_offsets)
+
+        # ...and the overlay followed the last selection, reusing one artist.
+        assert tuple(np.asarray(state['overlay'].get_offsets())[0]) == (42.0, 42.0)
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.core
+def test_the_selection_overlay_is_NOT_pickable():
+    """It sits on top of the base artist. If it could be picked it would hand back its own index —
+    0 — i.e. the wrong object, every time."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from pycat.utils.brushing import _emphasise
+
+    fig, ax = plt.subplots()
+    try:
+        base = ax.scatter(np.arange(10), np.arange(10), s=60)
+        state = {'previous': None}
+        _emphasise(base, 3, state)
+        assert not state['overlay'].get_picker(), "the display-only overlay can steal clicks"
+    finally:
+        plt.close(fig)

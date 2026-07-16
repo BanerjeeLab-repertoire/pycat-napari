@@ -209,16 +209,33 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
 
 
 def _emphasise(artist, index, state):
-    """Show the selection on the plot too. A click that changes nothing visible feels broken."""
+    """Show the selection on the plot too. A click that changes nothing visible feels broken.
+
+    ── The old scatter branch highlighted the WRONG POINTS ────────────────────────────────
+
+    It rewrote the marker-size array::
+
+        sizes = np.asarray(artist.get_sizes(), ...)          # s=60 -> array([60.]), size 1
+        if sizes.size == 1:
+            sizes = np.repeat(sizes, len(state.get('n', [1])) or 1)   # `state` has no 'n' -> x1
+        new_sizes = np.full(max(index + 1, sizes.size), base)         # length index+1 (!)
+        new_sizes[index] = base * 4.0
+        artist.set_sizes(new_sizes)
+
+    A scatter built with a scalar ``s=`` reports **one** size, and ``state`` never had an ``'n'``
+    key, so the repeat was a no-op and the array handed to ``set_sizes`` was ``index + 1`` long —
+    **shorter than the collection.** matplotlib TILES a short size array across the points, so
+    clicking point 5 of 20 enlarged points **5, 11 and 17**. *The user clicks one object and sees
+    several, with nothing to say which is the real one* — the same class of failure as the
+    wrong-target highlight increment 1 fixed, in the other direction.
+
+    So the base artist is now **never modified**. The selection is a second, one-point overlay whose
+    coordinates are moved: two numbers per click instead of a whole array, and — the part that
+    matters — it can only ever mark the point that was actually picked.
+    """
     try:
-        if hasattr(artist, 'get_sizes'):                     # a scatter
-            sizes = np.asarray(artist.get_sizes(), dtype=float)
-            if sizes.size == 1:
-                sizes = np.repeat(sizes, len(state.get('n', [1])) or 1)
-            base = float(np.median(sizes)) if sizes.size else 36.0
-            new_sizes = np.full(max(index + 1, sizes.size), base)
-            new_sizes[index] = base * 4.0
-            artist.set_sizes(new_sizes)
+        if hasattr(artist, 'get_offsets'):                   # a scatter
+            _emphasise_scatter(artist, index, state)
         elif hasattr(artist, 'set_color'):                   # a line
             previous = state.get('previous')
             if previous is not None:
@@ -227,6 +244,35 @@ def _emphasise(artist, index, state):
             state['previous'] = artist
     except Exception as exc:
         debug_log('brushing: could not emphasise the picked point', exc)
+
+
+def _emphasise_scatter(artist, index, state):
+    """Move a one-point overlay onto the picked point. **The base scatter is not touched.**
+
+    Display-only and deliberately unpickable: ``make_pickable`` maps a click to an index on the
+    BASE artist, and an overlay sitting on top that could also be picked would hand back its own
+    index — which is 0, i.e. the wrong object, every time.
+    """
+    offsets = np.asarray(artist.get_offsets(), dtype=float)
+    if index < 0 or index >= len(offsets):
+        return
+    x, y = offsets[index]
+
+    axes = getattr(artist, 'axes', None)
+    if axes is None:
+        return
+
+    overlay = state.get('overlay')
+    if overlay is None or getattr(overlay, 'axes', None) is not axes:
+        sizes = np.asarray(artist.get_sizes(), dtype=float)
+        base = float(np.median(sizes)) if sizes.size else 36.0
+        overlay = axes.scatter(
+            [x], [y], s=base * 4.0, facecolor='none', edgecolor=_SELECTED_STYLE['color'],
+            linewidth=2.0, zorder=(artist.get_zorder() or 2) + 1, picker=None)
+        state['overlay'] = overlay
+    else:
+        overlay.set_offsets(np.array([[x, y]]))    # O(1): two coordinates, whatever N is
+        overlay.set_visible(True)
 
 
 # ── The batch resolver: a point becomes an IMAGE, with no session ─────────────────────────

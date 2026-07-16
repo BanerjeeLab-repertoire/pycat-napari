@@ -4,6 +4,51 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.76] - 2026-07-16
+### Fixed — **Clicking one point on a plot highlighted several, and none of them reliably.**
+This was filed as a performance item. It is a correctness bug, and the performance claim attached to
+it was wrong by three orders of magnitude — both established by measuring first.
+- `_emphasise` rewrote the base scatter's marker-size array on every click. A scatter built with a
+  scalar `s=` reports **one** size, and the code's `np.repeat` guard read a `state` key (`'n'`) that
+  never existed, so it was a no-op — the array handed to `set_sizes` was `index + 1` long, **shorter
+  than the collection.** matplotlib **tiles** a short size array, so **clicking point 5 of 20
+  enlarged points 5, 11 and 17.** The user clicks one object and sees several, with nothing to say
+  which is real — the same class of failure as the wrong-target highlight increment 1 fixed.
+- The base artist is now never modified. The selection is a second, one-point overlay whose
+  coordinates move: O(1) per click, and structurally unable to mark a point that was not picked.
+  It is deliberately unpickable — sitting above the base artist, a pickable overlay would hand back
+  its own index (0) on every click.
+### Changed — **Opening a big brushable plot no longer stalls for seconds.**
+- `refs_from_dataframe` used `iterrows()` to build one `ObjectRef` per row when the plot was *wired*.
+  **Measured: 6.43 s for 100 000 points, against 0.02 s for the scatter itself — the refs cost ~380x
+  the plot they decorate,** and a click uses exactly one of them. Now **0.006 ms** at wiring, with
+  the one ref built on the click (0.34 ms).
+- `refs_from_dataframe` keeps its signature and returns a `LazyRefs` sequence, so every caller —
+  `make_pickable`'s `refs[index]`, `len(refs)`, iteration, slicing — is unchanged. Its cache is
+  bounded at 64: the point is not holding 100k objects, and an unbounded cache would put them back.
+### Added
+- `SelectionService.subscribe_deferred` — the **expensive** half of a selection (reading pixels for
+  a crop or an offline resolve) fires on a ~30 ms trailing debounce, for the most recent selection
+  only. Cheap feedback (moving a marker, selecting a row) still lands on every event, because it
+  costs microseconds and a UI that skips it feels dead. Dragging across a scatter now costs one
+  image read, not one per point.
+### Notes
+- **`_emphasise`'s O(N) rewrite was never the problem it was filed as:** one click on 100 000 points
+  measured **1.28 ms**. The overlay artist is worth doing because it fixes the wrong-highlight bug,
+  not because it saves a millisecond. Recorded so the next reader doesn't re-derive it.
+- **Part C (per-frame VPT bead points) is deliberately NOT done.** Its premise — that a Points layer
+  holding every frame is slow — is unverified: napari already slices Points by dims, the benefit
+  could not be measured here (offscreen has no GL), and the change rewires the validated bead
+  picker's index→track_id mapping. After Part B's stated rationale turned out to be wrong by ~1000x,
+  refactoring a working picker on an unmeasured claim is not a trade worth making. It wants a
+  measurement on a real long acquisition first.
+- **Bounded LRU caches for decoded frames/crops are also not done:** the lazy readers already hold
+  their file handles open, a crop measures ~0.17 ms/plane, and the debounce removes the burst case
+  the cache was meant to absorb. Caching acquisitions is the trap this whole arc exists to avoid.
+- A `Sequence`'s iteration walks `__getitem__` until `IndexError`, so `LazyRefs` bounds-checks
+  **before** its catch-all — a swallowed `IndexError` answered with a blank ref makes `for ref in
+  refs` loop forever. It did; the test that iterates caught it.
+
 ## [1.6.75] - 2026-07-16
 ### Changed — **Brushing increment 3: VPT's dispatcher is now everyone's.**
 PyCAT had two implementations of linked selection, and the good one was unreachable:

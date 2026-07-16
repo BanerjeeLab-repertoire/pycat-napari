@@ -251,3 +251,49 @@ def test_a_ref_from_a_STAMPED_table_carries_its_name_into_the_selection():
 
     assert refs[1].entity_id == 'C:/a.tif/cell_analysis/cell/0/2'
     assert refs[0].entity_id != refs[1].entity_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Increment 4 — the expensive half is coalesced
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_a_BURST_of_selections_costs_ONE_expensive_resolve():
+    """**Dragging across a scatter emits a selection per point.**
+
+    The cheap feedback (move a marker, select a row) must land on every one or the UI feels dead —
+    it costs microseconds. The expensive one — reading pixels for a crop — must not: the user only
+    ever looks at the last one, and doing the rest means a file read per hover.
+    """
+    from pycat.utils.selection_service import SelectionService
+
+    flush = []
+    service = SelectionService(defer=lambda fn: fn(), debounce=lambda fn: flush.append(fn))
+
+    cheap, expensive = [], []
+    service.subscribe('table', lambda s: cheap.append(s.entity_ids[0]))
+    service.subscribe_deferred('image', lambda s: expensive.append(s.entity_ids[0]))
+
+    for name in ('a', 'b', 'c', 'd'):        # a drag
+        service.select(_sel(name, source='plot'))
+
+    assert cheap == ['a', 'b', 'c', 'd'], "cheap feedback was dropped — the UI would feel dead"
+    assert expensive == [], "an image was resolved before the burst had settled"
+
+    flush[-1]()                               # the trailing edge fires
+    assert expensive == ['d'], (
+        f"expected ONE resolve, for the most recent selection; got {expensive}")
+
+
+def test_the_deferred_subscriber_also_skips_its_OWN_selection():
+    from pycat.utils.selection_service import SelectionService
+
+    flush = []
+    service = SelectionService(defer=lambda fn: fn(), debounce=lambda fn: flush.append(fn))
+    heard = []
+    service.subscribe_deferred('plot', lambda s: heard.append(s.entity_ids))
+
+    service.select(_sel('a', source='plot'))
+    for fn in flush:
+        fn()
+    assert heard == [], "a view was made to resolve the image for its own click"
