@@ -4,6 +4,43 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.81] - 2026-07-16
+### Added — **A widget that decodes a big stack now shows it is working.**
+`materialize_stack` decodes a lazy stack frame by frame. On a long acquisition that is seconds to
+minutes with **nothing on screen to say anything is happening**. `progress_callback=` and
+`PhasedProgress` have existed for a while; almost nothing used them. 9 sites now do:
+`frap_ui` (2), `invitro_fluor_ui` (3), `brightfield_ui` (2), `invitro_bf_ui` (1),
+`condensate_physics_ui` (1).
+### Added
+- `tests/test_progress_rollout.py` — a **countdown** ratchet (`_STILL_SILENT`), not a blanket
+  allowlist. Each module's remaining silent sites are counted; the number only goes down, and a NEW
+  silent materialize fails the build. The first draft used a per-module excuse and a mutation adding
+  a second silent call to an already-excused module **passed** — so it was rebuilt as a count, which
+  catches it.
+### Fixed
+- `frap_ui` materialized **every Image layer in the viewer** and then discarded the ones that turned
+  out not to be 2-D — decoding every big lazy stack open, in full, to answer a question the array
+  already knew (`ndim`). It now asks the shape first. A progress bar there would only have reported
+  work that should not happen.
+### Notes — what this buys, precisely
+- **Why the bar moves on a blocked thread:** `QProgressBar.setValue` calls `repaint()`, which is
+  *synchronous*. Measured: 50 updates in a busy loop → **50 paints**, against **0** for a control
+  that never touches the bar. So the spec's premise holds.
+- **A status label is not a progress reporter.** `QLabel.setText` → **0** paints: it only schedules
+  an `update()` that the blocked event loop never runs. Worth knowing before wiring one.
+- **The work is still synchronous.** This makes the wait *visible*, not shorter — the window may
+  still say "Not Responding" while the bar advances. Real responsiveness needs a worker; that is the
+  same change the session loader wants, and worth doing once for both. Recorded in `roadmap.rst`.
+- **5 sites remain, each with a reason**, not an excuse: `condensate_physics_ui._on_fusion` and
+  `invitro_bf_ui._ivbf_focus_qc` have no bar of their own (adding one is a UI change, not wiring);
+  `data_qc_ui` and `fusion_ui` construct no bar at all; `temperature_ui._get_stack` is a shared
+  *cached* helper with no single owning bar.
+- **The spec called `temperature_ui` "the ONE reference implementation that does it right" and said
+  not to touch it.** It is right for its batch/export paths — and it has an unwired stack load of its
+  own (`_get_stack`). The ratchet found it on its first run.
+- Wiring a section to a *sibling's* bar looks right and raises `NameError` on the first click. The
+  repo's own `test_no_undefined_names` caught exactly that during this pass, on `invitro_bf_ui`.
+
 ## [1.6.80] - 2026-07-16
 ### Added — **A harness for the worst bug this codebase can have: a filter default that quietly inverts the result.**
 It does not crash, it does not warn, and it returns a number of the right magnitude in the right units

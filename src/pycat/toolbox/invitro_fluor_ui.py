@@ -995,14 +995,22 @@ def _ivf_dynamics(ui, layout):
 
         from pycat.file_io.file_io import materialize_stack
         try:
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Dynamics needs a 3D (T,H,W) label stack."); return
 
         try:
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp2 = _PP(prog, phases=[("Materializing intensity frames", 1.0)])
             img_stack = materialize_stack(
-                ui.viewer.layers[img_dd.currentText()].data, dtype=np.float32)
+                ui.viewer.layers[img_dd.currentText()].data, dtype=np.float32,
+                progress_callback=_pp2.callback)
+            _pp2.hide()
         except Exception:
             img_stack = None
 
@@ -1180,7 +1188,11 @@ def _ivf_frame_qc(ui, layout):
         try:
             from pycat.file_io.file_io import materialize_stack
             layer = ui.viewer.layers[stack_dd.currentText()]
-            stack = materialize_stack(layer.data, dtype=np.float32)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(layer.data, dtype=np.float32,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("QC needs a 3D (T,H,W) stack."); return

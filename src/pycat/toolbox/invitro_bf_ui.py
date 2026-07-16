@@ -524,7 +524,11 @@ def _ivbf_dynamics(ui, layout):
             coarsening_statistics, detect_sedimentation, detect_and_fit_fusions)
         try:
             from pycat.file_io.file_io import materialize_stack
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Needs a 3D (T,H,W) mask stack."); return

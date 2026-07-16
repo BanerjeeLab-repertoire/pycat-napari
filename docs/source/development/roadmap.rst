@@ -232,6 +232,37 @@ both need a real ``napari.Viewer``, which needs a GL context that offscreen Qt c
 same reason ``test_ui_smoke.py`` errors headlessly). Their logic is tested; their *docking* and
 *rendering* are not.
 
+.. rubric:: Progress-bar rollout — 9 of 14 materialize sites wired (1.6.81); 5 on a countdown
+
+Widgets that materialize a lazy stack decode it frame by frame on the Qt main thread, with nothing to
+say they are working. 9 sites across `frap_ui`, `invitro_fluor_ui`, `invitro_bf_ui`, `brightfield_ui`
+and `condensate_physics_ui` now drive a `PhasedProgress` on the widget's own bar.
+
+**Why the bar moves at all, on a blocked thread:** ``QProgressBar.setValue`` calls ``repaint()``,
+which is *synchronous*. Measured — 50 updates in a busy loop produce 50 paints, against 0 for a
+control that never touches the bar. A ``QLabel`` produces **0**: ``setText`` only schedules an
+``update()`` the blocked event loop never runs, so **a status label is not a progress reporter here**,
+whatever it says.
+
+**What this does NOT do:** the work is still synchronous. The wait is now visible, not shorter, and
+the window may still report "Not Responding" while the bar advances. Real responsiveness means
+materializing on a worker — the same change the session loader needs (below), and worth doing once
+for both.
+
+*Remaining, tracked as a countdown in* ``tests/test_progress_rollout.py`` *(the number only goes
+down; a NEW silent site fails the build):*
+
+* ``condensate_physics_ui._on_fusion``, ``invitro_bf_ui._ivbf_focus_qc`` — the section has no bar,
+  though its siblings do. **Adding one is a UI change, not the one-line wiring this pass was** — and
+  wiring to a sibling's bar is not an option: it *looks* right and raises ``NameError`` on the first
+  click (``test_no_undefined_names`` caught exactly that during this pass).
+* ``data_qc_ui``, ``fusion_ui`` — no ``QProgressBar`` is constructed anywhere in the module.
+* ``temperature_ui._get_stack`` — a shared, **cached** helper called from several sections, so no
+  single bar is "its own"; wiring it means every caller passing a reporter down. Note the spec called
+  this module *"the ONE reference implementation that does it right"* and said not to touch it: it is
+  right for its batch/export paths, and this stack load was simply missed. The ratchet found it on
+  its first run.
+
 .. rubric:: Session load runs on the Qt thread ("Python is not responding") — needs a worker
 
 ``load_session`` is called directly from ``_on_load`` on the Qt main thread

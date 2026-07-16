@@ -445,6 +445,17 @@ class FRAPUI:
             candidates = []
             for l in self.viewer.layers:
                 if isinstance(l, napari.layers.Image):
+                    # ── Ask the SHAPE before decoding the pixels ──────────────────────────
+                    #
+                    # This materialised every Image layer in the viewer and then threw away the
+                    # ones that turned out not to be 2-D — i.e. it decoded every big lazy stack
+                    # open, in full, to answer a question the array already knew. A progress bar
+                    # here would only report work that should not happen: a lazy wrapper knows its
+                    # own `ndim`/`shape` without reading a single frame.
+                    if getattr(l.data, 'ndim', None) != 2:
+                        continue
+                    if tuple(getattr(l.data, 'shape', ()) or ()) != (H, W):
+                        continue
                     try:
                         a = materialize_stack(l.data)
                     except Exception:
@@ -491,7 +502,14 @@ class FRAPUI:
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Recovery stack '{name}' not found."); return
         from pycat.file_io.file_io import materialize_stack
-        stack = materialize_stack(self.viewer.layers[name].data)
+        from pycat.ui.ui_utils import PhasedProgress
+        # The bar moves even though this blocks the thread: QProgressBar.setValue calls repaint(),
+        # which is synchronous. (A status LABEL would not — setText only schedules an update that
+        # the blocked event loop never runs.) This makes the wait VISIBLE; it does not remove it.
+        _pp = PhasedProgress(self._prog, phases=[("Materializing frames", 1.0)])
+        stack = materialize_stack(self.viewer.layers[name].data,
+                                  progress_callback=_pp.callback)
+        _pp.hide()
         # FRAP treats frames as TIME (recovery curve) — warn once if the axis was
         # assumed at load.
         try:
@@ -595,7 +613,11 @@ class FRAPUI:
         pbname = self._prebleach_dd.currentText()
         if pbname != "None" and pbname in [l.name for l in self.viewer.layers]:
             from pycat.file_io.file_io import materialize_stack
-            prebleach_stack = materialize_stack(self.viewer.layers[pbname].data)
+            from pycat.ui.ui_utils import PhasedProgress
+            _pp = PhasedProgress(self._prog, phases=[("Materializing pre-bleach frames", 1.0)])
+            prebleach_stack = materialize_stack(self.viewer.layers[pbname].data,
+                                                progress_callback=_pp.callback)
+            _pp.hide()
 
         # Fit model + ROI geometry
         use_rd   = self._rb_rd.isChecked()

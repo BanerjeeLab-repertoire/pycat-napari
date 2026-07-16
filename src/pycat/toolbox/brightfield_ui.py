@@ -748,7 +748,11 @@ def _add_bf_dynamics(ui, layout):
         )
         try:
             from pycat.file_io.file_io import materialize_stack
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:
@@ -943,8 +947,12 @@ def _add_bf_frame_qc(ui, layout):
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
             from pycat.file_io.file_io import materialize_stack
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
             stack = materialize_stack(
-                ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32)
+                ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32,
+                progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:

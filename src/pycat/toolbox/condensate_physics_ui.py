@@ -493,7 +493,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         try:
             from pycat.file_io.file_io import materialize_stack
             layer = ui_instance.viewer.layers[stack_dd_qc.currentText()]
-            stack = materialize_stack(layer.data, dtype=np.float32)
+            from pycat.ui.ui_utils import PhasedProgress as _PP
+            _pp = _PP(prog_qc, phases=[("Materializing frames", 1.0)])
+            stack = materialize_stack(layer.data, dtype=np.float32,
+                                      progress_callback=_pp.callback)
+            _pp.hide()
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:
