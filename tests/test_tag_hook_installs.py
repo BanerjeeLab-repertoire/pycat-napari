@@ -149,3 +149,63 @@ def test_the_hook_uses_object_setattr_and_NOT_plain_setattr():
             f"is a pydantic model, and this silently kills the entire tag system. Use "
             f"`object.__setattr__`."
         )
+
+
+@pytest.mark.core
+def test_EVERY_layer_the_hook_touches_gets_a_STABLE_ID():
+    """**"Which layer did this object come from?" had no answer, so callers guessed.**
+
+    `resolve_in_viewer` took the first labels layer, and with two segmentations open a punctum from
+    one analysis highlighted an unrelated object in the other — presented as if it were right.
+
+    The id is stamped here for the same reason the `role` is: **116 `add_*` call sites, and the
+    117th is exactly the one that would forget.** One place, every layer, zero per-call-site edits.
+    """
+    hook = pytest.importorskip("pycat.utils.layer_tag_hook")
+
+    viewer = _PydanticLikeViewer()
+    hook.install(viewer)
+
+    ids = set()
+    for kind in ('image', 'labels', 'points', 'shapes', 'tracks', 'vectors', 'surface'):
+        layer = getattr(viewer, f'add_{kind}')([[1, 2], [3, 4]], name=f'a {kind}')
+        layer_id = layer.metadata.get('pycat_layer_id')
+        assert layer_id, f"an added {kind} layer carries no `pycat_layer_id`"
+        ids.add(layer_id)
+
+    assert len(ids) == 7, "layer ids collided — an id shared by two layers identifies neither"
+
+
+@pytest.mark.core
+def test_an_existing_layer_id_is_NEVER_overwritten():
+    """A restored session's layers keep the ids their saved refs point at. Re-stamping would
+    silently orphan every one of them."""
+    hook = pytest.importorskip("pycat.utils.layer_tag_hook")
+
+    viewer = _PydanticLikeViewer()
+    hook.install(viewer)
+
+    original = viewer.add_image([[1, 2], [3, 4]], name='restored')
+    original.metadata['pycat_layer_id'] = 'a-saved-id'
+
+    # Re-adding a layer that already carries an id must leave it alone.
+    again = viewer._make('image', name='restored')
+    again.metadata['pycat_layer_id'] = 'a-saved-id'
+    assert again.metadata['pycat_layer_id'] == 'a-saved-id'
+
+
+@pytest.mark.core
+def test_the_layer_id_stamp_does_not_break_the_hook_or_the_layer():
+    """**Additive metadata only.** A tagging failure must never cost the user their layer, and the
+    id must not disturb the tags the hook already guarantees."""
+    hook = pytest.importorskip("pycat.utils.layer_tag_hook")
+    from pycat.utils.layer_tags import get_tag
+
+    viewer = _PydanticLikeViewer()
+    hook.install(viewer)
+
+    layer = viewer.add_image([[1.0, 2.0], [3.0, 4.0]], name='an image')
+
+    assert layer.name == 'an image'                       # the layer itself is untouched
+    assert get_tag(layer, 'role') == 'image'              # the role guarantee still holds
+    assert layer.metadata.get('pycat_layer_id')

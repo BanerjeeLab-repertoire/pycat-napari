@@ -189,6 +189,29 @@ def _wrap(viewer, original, layer_type):
             data = kwargs.get('data', args[0] if args else None)
             name = kwargs.get('name', getattr(layer, 'name', None))
 
+            # ── Every layer gets a STABLE ID, for the same reason it gets a role ──
+            #
+            # "Which layer did this object come from?" had no answer, so anything that needed one
+            # guessed — `resolve_in_viewer` took the FIRST labels layer, and with two segmentations
+            # open a punctum from analysis A highlighted an unrelated object in mask B, presented
+            # as if it were right.
+            #
+            # A label value is only meaningful inside ONE mask: label 7 exists in every
+            # segmentation that has seven objects, and they are not the same object. So the ID has
+            # to be the layer's, and it has to be stamped where **no call site can forget** — the
+            # same argument this whole hook exists for. One place, every layer, zero per-call-site
+            # edits.
+            #
+            # Additive metadata only: napari neither reads nor cares about it, and it never
+            # replaces an existing id (a restored session's layer keeps the id its refs point at).
+            try:
+                meta = getattr(layer, 'metadata', None)
+                if isinstance(meta, dict) and not meta.get('pycat_layer_id'):
+                    from uuid import uuid4
+                    meta['pycat_layer_id'] = uuid4().hex
+            except Exception as exc:
+                debug_log('layer_tag_hook: could not stamp a layer id', exc)
+
             # ── The ROLE is always set. This is the guarantee. ──────────────────
             role = _role_from(layer_type, data, viewer)
             tag_layer(layer, 'role', role, source='inferred')

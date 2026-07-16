@@ -479,3 +479,178 @@ def test_the_bbox_import_is_PRESENT_wherever_it_is_USED():
         f"to the call sites and not to the import — which fails at RUNTIME, not at import, so "
         f"nothing catches it until a user runs that analysis."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Brushing increment 1 — the two ways brushing was HARMFUL
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+
+class _RecordingLazyStack:
+    """A lazy stack with the real refusing `__array__`, that records any full-read attempt.
+
+    This is the shape of every PyCAT lazy wrapper (`_TiffPageStack`, `_ImsReader*`,
+    `_LazyArraySource`): indexable per plane, and `__array__` refuses rather than quietly
+    materialising an acquisition. See `test_no_eager_reads.py`.
+    """
+
+    def __init__(self, arr):
+        self._a = arr
+        self.shape = arr.shape
+        self.ndim = arr.ndim
+        self.dtype = np.dtype('float32')
+        self.full_read_attempts = 0
+
+    def __getitem__(self, key):
+        return self._a[key]
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __array__(self, dtype=None):
+        self.full_read_attempts += 1
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
+
+
+class _StubLayer:
+    def __init__(self, name, data, role, layer_id=None):
+        from pycat.utils.layer_tags import tag_layer
+        self.name = name
+        self.data = data
+        self.metadata = {}
+        self.selected_label = None
+        self.show_selected_label = False
+        tag_layer(self, 'role', role, source='inferred')
+        if layer_id:
+            self.metadata['pycat_layer_id'] = layer_id
+
+
+class _StubLayers(list):
+    def __init__(self, items):
+        super().__init__(items)
+        self.selection = set()
+
+
+class _StubViewer:
+    class _Dims:
+        point = ()
+        current_step = (0, 0, 0)
+
+    class _Cam:
+        center = (0.0, 0.0, 0.0)
+
+    def __init__(self, layers):
+        self.layers = _StubLayers(layers)
+        self.dims = self._Dims()
+        self.camera = self._Cam()
+
+
+@pytest.mark.core
+def test_a_click_CROPS_without_materialising_the_acquisition():
+    """**One click asked for the whole acquisition to take an 8-pixel crop.**
+
+    `crop_for_ref` did `data = np.asarray(layer.data)` and *then* sliced. On a lazy TIFF/IMS/CZI
+    layer that is the `np.asarray(layer.data)` materialisation trap, in the brushing path.
+
+    On the current tree it is worse than slow: every lazy wrapper's `__array__` **refuses**, so the
+    eager read did not freeze — it raised, the surrounding `except` abandoned the live-layer path
+    entirely, and the click silently fell through to re-reading the FILE. With the file moved, the
+    user was told *"The source file is gone"* while the layer sat open in the viewer.
+
+    The fix is only the order: index the plane → slice the window → `np.asarray` the tiny crop.
+    """
+    from pycat.utils.brushing import crop_for_ref
+    from pycat.utils.object_ref import ObjectRef
+
+    stack = _RecordingLazyStack(
+        np.random.default_rng(0).random((40, 128, 128)).astype(np.float32))
+    viewer = _StubViewer([_StubLayer('movie', stack, 'image')])
+
+    ref = ObjectRef(object_id=3, frame=10, bbox=(20, 30, 28, 38),
+                    source_path='/nonexistent/gone.tif')
+    crop, message = crop_for_ref(ref, viewer=viewer, pad_px=8)
+
+    assert stack.full_read_attempts == 0, (
+        "`np.asarray` fired on the lazy layer — one click tried to load the entire acquisition "
+        "to take an 8-pixel crop.")
+    assert crop is not None, (
+        f"the crop came back empty ({message!r}) even though the layer is open in the viewer — "
+        f"the eager read raised and the live-layer path was abandoned.")
+    assert crop.shape == (24, 24)
+    # The crop is the real pixels, from the right plane.
+    assert np.array_equal(crop, stack._a[10][12:36, 22:46])
+
+
+@pytest.mark.core
+def test_an_object_resolves_to_ITS_OWN_layer_not_merely_the_FIRST_one():
+    """**With two segmentations open, a punctum from analysis B highlighted an object in mask A.**
+
+    `resolve_in_viewer` took the first layer with a labels/mask role and set
+    `selected_label = ref.object_id` on it. **A label value is only meaningful inside one mask** —
+    label 7 exists in every segmentation that has seven objects, and they are not the same object.
+
+    Nothing about the result looked wrong: the user is shown the wrong object as if it were right.
+    That is a scientific error, not a UX wrinkle.
+    """
+    from pycat.utils.object_ref import ObjectRef, resolve_in_viewer
+
+    mask_a = _StubLayer('Segmentation A', np.zeros((32, 32), np.uint16), 'labels', 'aaaa1111')
+    mask_b = _StubLayer('Segmentation B', np.zeros((32, 32), np.uint16), 'labels', 'bbbb2222')
+    viewer = _StubViewer([mask_a, mask_b])
+
+    # The object came from B — the SECOND layer — and now says so.
+    ref = ObjectRef(object_id=7, bbox=(1, 1, 5, 5), source_layer_id='bbbb2222')
+    assert resolve_in_viewer(ref, viewer, centre=False) is True
+
+    assert mask_b.selected_label == 7, "the object did not resolve to the layer it came from"
+    assert mask_a.selected_label is None, (
+        "an UNRELATED segmentation was highlighted — label 7 in mask A is not the same object as "
+        "label 7 in mask B")
+
+
+@pytest.mark.core
+def test_a_LEGACY_ref_still_resolves_but_says_it_GUESSED():
+    """Additive: a ref with no `source_layer_id` (every ref today, until increment 2 fills it)
+    keeps the old first-match behaviour — but a silently-wrong highlight becomes a visibly
+    degraded one."""
+    from pycat.utils.object_ref import ObjectRef, layers_for_ref, resolve_in_viewer
+
+    mask_a = _StubLayer('Segmentation A', np.zeros((32, 32), np.uint16), 'labels', 'aaaa1111')
+    mask_b = _StubLayer('Segmentation B', np.zeros((32, 32), np.uint16), 'labels', 'bbbb2222')
+    viewer = _StubViewer([mask_a, mask_b])
+
+    legacy = ObjectRef(object_id=7, bbox=(1, 1, 5, 5))          # no source_layer_id
+    assert resolve_in_viewer(legacy, viewer, centre=False) is True
+    assert mask_a.selected_label == 7                            # old behaviour preserved
+
+    _candidates, note = layers_for_ref(legacy, viewer)
+    assert note and 'may not be the right one' in note, (
+        "the fallback was silent — the whole point is that a guess announces itself")
+
+
+@pytest.mark.core
+def test_a_ref_whose_layer_is_CLOSED_resolves_to_NOTHING_rather_than_the_wrong_thing():
+    """The ref knows its layer, and that layer is not open. The honest answer is "not here" —
+    quietly using a different mask is the original bug wearing a new hat."""
+    from pycat.utils.object_ref import ObjectRef, layers_for_ref
+
+    mask_a = _StubLayer('Segmentation A', np.zeros((32, 32), np.uint16), 'labels', 'aaaa1111')
+    viewer = _StubViewer([mask_a])
+
+    ref = ObjectRef(object_id=7, bbox=(1, 1, 5, 5), source_layer_id='cccc3333')   # not open
+    candidates, note = layers_for_ref(ref, viewer)
+
+    assert candidates == [], "a ref whose own layer is closed grabbed a different mask"
+    assert 'not open' in note
+
+
+@pytest.mark.core
+def test_source_layer_id_is_OPTIONAL_so_every_existing_ref_still_works():
+    """`ObjectRef` is frozen and constructed all over the codebase. The field is additive and
+    defaulted; increment 2 fills it."""
+    from pycat.utils.object_ref import ObjectRef
+
+    ref = ObjectRef(object_id=1, frame=0, bbox=(0, 0, 4, 4), source_path='x.tif')
+    assert ref.source_layer_id is None
+    assert 'source_layer_id' in ref.to_dict()

@@ -67,6 +67,18 @@ class ObjectRef:
     track_id: int | None = None         # for time-series objects
     parent_id: int | None = None        # e.g. the cell a punctum belongs to
     tags: dict | None = None            # what produced it (op / role / target)
+    # WHICH LAYER this object came from -- matched against `layer.metadata['pycat_layer_id']`,
+    # stamped on every layer by the tag hook.
+    #
+    # **`object_id` is a label value, and a label value is only meaningful inside ONE mask.**
+    # Label 7 exists in every segmentation that has seven objects, and they are not the same
+    # object. Without this field, resolution had to guess which mask was meant, and it guessed
+    # "the first one open" -- see `resolve_in_viewer`.
+    #
+    # Optional and defaulted: every existing `ObjectRef(...)` / `from_row(...)` call still works,
+    # and a ref without it resolves exactly as before (loudly). Increment 1 makes resolution
+    # HONOUR this; filling it at ref-creation time is increment 2's job.
+    source_layer_id: str | None = None
 
     def crop_slice(self, pad_px: int = 0):
         """The numpy slice that cuts this object out of a frame. ``None`` if there is no bbox."""
@@ -180,6 +192,50 @@ def bbox_columns_from_regionprops(prop):
 
 # ── The resolvers. The plot does not know which one it is talking to. ─────────────────────
 
+def layers_for_ref(ref: ObjectRef, viewer, roles=('labels', 'mask')):
+    """**The layers this object could have come from, best first** — plus why, if we had to guess.
+
+    Returns ``(layers, note)``. ``note`` is empty when the answer is *known*; otherwise it says what
+    was assumed, so a caller can degrade visibly instead of silently.
+
+    ── Why this exists ────────────────────────────────────────────────────────────────────
+
+    Resolution used to take **the first layer with a labels/mask role** and set
+    ``selected_label = ref.object_id`` on it. **A label value is only meaningful inside one mask**:
+    label 7 exists in every segmentation that has seven objects, and they are not the same object.
+    So with two segmentations open, a punctum from analysis A highlighted an unrelated object in
+    mask B — *and nothing about it looked wrong.* That is a scientific error, not a UX wrinkle: the
+    user is shown the wrong object as if it were the right one.
+
+    A ref that knows its own layer resolves to that layer. A ref that does not (an older one, or one
+    built before increment 2 fills the field) falls back to the old behaviour — but **says so**.
+    """
+    from pycat.utils.layer_tags import get_tag
+
+    candidates = [l for l in getattr(viewer, 'layers', []) if get_tag(l, 'role') in roles]
+    if not candidates:
+        return [], ''
+
+    if ref.source_layer_id:
+        owned = [l for l in candidates
+                 if (getattr(l, 'metadata', None) or {}).get('pycat_layer_id')
+                 == ref.source_layer_id]
+        if owned:
+            return owned, ''
+        # The ref knows its layer and that layer is not open. Do NOT quietly use a different one:
+        # the ref is telling us the honest answer is "not here".
+        return [], (f"the layer this object came from is not open "
+                    f"(layer id {ref.source_layer_id[:8]}…)")
+
+    if len(candidates) > 1:
+        return candidates, (
+            f"this object does not record which layer it came from, and {len(candidates)} "
+            f"labels/mask layers are open — using '{getattr(candidates[0], 'name', '?')}'. "
+            f"It may not be the right one.")
+
+    return candidates, ''
+
+
 def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
     """**Interactive**: find the object in a live layer and reveal it.
 
@@ -207,15 +263,19 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
         except Exception as exc:
             debug_log('resolve_in_viewer: could not centre the camera', exc)
 
-    # Select the labels layer that holds this object, if one is open.
+    # Select the labels layer that holds this object — **its own**, not merely the first one open.
     try:
-        for layer in viewer.layers:
-            if get_tag(layer, 'role') in ('labels', 'mask'):
-                viewer.layers.selection = {layer}
-                if ref.object_id is not None and hasattr(layer, 'selected_label'):
-                    layer.selected_label = int(ref.object_id)
-                    layer.show_selected_label = True
-                return True
+        candidates, note = layers_for_ref(ref, viewer)
+        if note:
+            # Loud, not silent: the old behaviour is still available to legacy refs, but it is a
+            # guess and it is recorded as one.
+            debug_log(f'resolve_in_viewer: {note}', None)
+        for layer in candidates:
+            viewer.layers.selection = {layer}
+            if ref.object_id is not None and hasattr(layer, 'selected_label'):
+                layer.selected_label = int(ref.object_id)
+                layer.show_selected_label = True
+            return True
     except Exception as exc:
         debug_log('resolve_in_viewer: could not select the object', exc)
 

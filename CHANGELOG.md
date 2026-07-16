@@ -4,6 +4,51 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.73] - 2026-07-16
+### Fixed — **Brushing increment 1: the two ways brushing was actively harmful.**
+Increment 1 of five (the audit's own highest-priority pair). Bug fixes plus the minimal
+layer-identity seed increments 2–5 build on. No new architecture; no `SelectionService`, no
+`EntityRef` — those are increments 2–3.
+
+**1. One click asked for the whole acquisition, to take an 8-pixel crop.**
+- `crop_for_ref` did `data = np.asarray(layer.data)` and *then* sliced — the recurring
+  `np.asarray(layer.data)` materialization trap, in the brushing path.
+- **Worse than slow on the current tree:** every lazy wrapper's `__array__` now *refuses*
+  (`refuse_implicit_full_read`), so the eager read did not freeze — it **raised**, the surrounding
+  `except` abandoned the live-layer path entirely, and the click silently fell back to re-reading
+  the file. With the file moved or gone the user was told *"The source file is gone"* **while the
+  layer sat open in the viewer.** Reproduced, then fixed.
+- The fix is only the order: index the plane (lazily) → slice the window → `np.asarray` the tiny
+  crop. `np.asarray` never touches `layer.data`. If a wrapper can't be indexed lazily, the `except`
+  still falls through to `resolve_offline` — never to a whole-stack read.
+
+**2. An object resolved to the FIRST labels layer, not its own.**
+- `resolve_in_viewer` grabbed the first layer with a labels/mask role and set
+  `selected_label = ref.object_id` on it. **A label value is only meaningful inside one mask** —
+  label 7 exists in every segmentation that has seven objects, and they are not the same object. So
+  with two segmentations open, a punctum from analysis A highlighted an unrelated object in mask B,
+  **and nothing about it looked wrong.** That is a scientific error, not a UX wrinkle.
+- Refs now carry an optional `source_layer_id` and resolution honours it. A ref whose layer is
+  **closed** resolves to *nothing* rather than quietly using a different mask — the honest answer is
+  "not here". A legacy ref without the field keeps the old first-match behaviour but **says it
+  guessed**, so a silently-wrong highlight becomes a visibly-degraded one.
+- `crop_for_ref` got the same correction via a shared `layers_for_ref` helper, so the two cannot
+  drift apart.
+### Added
+- **The identity seed.** Every layer now carries `metadata['pycat_layer_id']` (uuid4), stamped in
+  the one place every layer is already tagged — the viewer tag hook. Same argument the hook itself
+  exists for: **116 `add_*` call sites, and the 117th is the one that would forget.** One place,
+  every layer, zero per-call-site edits. Never overwrites an existing id, so a restored session's
+  layers keep the ids their saved refs point at.
+- `ObjectRef.source_layer_id` — additive and defaulted, so every existing `ObjectRef(...)` /
+  `from_row(...)` call still works untouched. Increment 1 makes resolution **honour** it; increment 2
+  makes ref-creation **fill** it.
+- Guard tests in `test_brushing.py` (no-eager-read on a refusing lazy wrapper; wrong-target with two
+  masks open; legacy fallback announces itself; a closed layer resolves to nothing) and in
+  `test_tag_hook_installs.py` (every layer type gets a unique id; an existing id is never
+  overwritten; the stamp breaks neither the hook nor the layer). All `core`, all mutation-checked —
+  reverting either fix turns them red.
+
 ## [1.6.72] - 2026-07-16
 ### Fixed — **The per-layer axis tag was unreadable, so every axis warning named the wrong file.**
 - `get_tags(layer)` returns a **list** of tag records. Four call sites treated it as a mapping —
