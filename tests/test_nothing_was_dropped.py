@@ -234,6 +234,27 @@ _DELIBERATE = {
     'file_io.py::_apply_saved_tags_to_layer',
     'file_io.py::atomic_write',
 
+    # 1.6.60 — EXTRACTED to `file_io/readers/ims_reader.py`, not deleted (god-class decomposition
+    # #3). The three lazy IMS wrapper classes (`_ImsReaderTYX`/`ZYX`/`TZYX`) and their pure helpers
+    # moved out of `file_io.py`; `_open_stack_ims` is unchanged and `file_io` IMPORTS the classes +
+    # `_suppress_ims_chunk_prints` + `_ims_pixel_size_um` back, so every caller is untouched.
+    #
+    # These six are the free functions / methods that moved with them and so no longer parse as
+    # `file_io.py::<name>`:
+    #   _suppress_ims_chunk_prints, _ims_indices, _ims_pixel_size_um  -> module-level in ims_reader.py
+    #   _ims_frame_2d                                                 -> module-level (the classes'
+    #        only caller; leaving it in file_io would have been an import cycle)
+    #   _read_plane                                                   -> method of _ImsReaderZYX /
+    #        _ImsReaderTZYX, now in ims_reader.py
+    #   _to_float                                                     -> nested inside
+    #        ims_reader.py::_ims_pixel_size_um, unchanged
+    'file_io.py::_suppress_ims_chunk_prints',
+    'file_io.py::_ims_indices',
+    'file_io.py::_ims_pixel_size_um',
+    'file_io.py::_ims_frame_2d',
+    'file_io.py::_read_plane',
+    'file_io.py::_to_float',
+
     # 1.6.24 — EXTRACTED to `file_io/napari_adapter.py`, not deleted.
     #
     # **The camera, the scale bar, and the layer-scale alignment are napari DISPLAY. They are not

@@ -60,12 +60,18 @@ class _Spinbox:
 
 
 def _warned_while_syncing(data_repository):
+    # Detect the warning ROUTING-INDEPENDENTLY. `_warn_once` records the warning in the
+    # module-level `_WARNED` set BEFORE it tries to surface it — and it surfaces via
+    # napari's `show_warning` when napari is importable (a GUI notification, no stdout),
+    # falling back to `print` only when that raises. Asserting on captured stdout therefore
+    # silently depends on napari being ABSENT; with napari installed the warning fires but
+    # never reaches stdout. `_WARNED` is populated on either path, so it is the honest signal
+    # for "did PyCAT warn?". (stdout is still redirected to keep the print-fallback quiet.)
     _WARNED.clear()
-    captured = io.StringIO()
-    with contextlib.redirect_stdout(captured):
+    with contextlib.redirect_stdout(io.StringIO()):
         sync_spinbox_from_metadata(_Spinbox(), data_repository,
                                    context='advanced_analysis_ui')
-    return 'Frame interval unknown' in captured.getvalue()
+    return bool(_WARNED)
 
 
 @pytest.mark.core
@@ -101,18 +107,31 @@ def test_a_MOVIE_with_no_frame_interval_is_STILL_warned_about():
 
 @pytest.mark.core
 def test_an_UNKNOWN_time_axis_FAILS_TOWARD_THE_LOUD_SIDE():
-    """An older session, or a loader not yet taught to record ``n_t``, must **warn**.
+    """An older session, or a loader not yet taught to record ``n_t``, must **warn** — *once an
+    image is actually loaded.*
 
-    *A spurious warning on a still image is noise. A missing one on a movie is a wrong number in a
-    paper.*
+    The contract was tightened (commit "Fix frame-interval warning firing with no image loaded"):
+    an EMPTY session — nothing loaded, no ``file_metadata`` and no ``n_t`` — stays SILENT, because
+    the panels build their spinbox before any file is opened and a warning that fires there cannot
+    apply (and trains the user to scroll past the one that matters). "Unknown → loud" still holds,
+    but only once an image is present. See ``tests/test_frame_interval_no_image.py`` for the full
+    contract.
+
+    *A spurious warning on a still image is noise. A missing one on a loaded movie is a wrong number
+    in a paper.*
     """
-    assert has_time_axis({}), "an unrecorded time axis must be treated as a movie, not a still"
-    assert has_time_axis({'n_t': None})
+    # Image loaded (file_metadata present), frame count not recorded → fail toward the loud side.
+    assert has_time_axis({'file_metadata': {}}), \
+        "an unrecorded time axis on a LOADED image must be treated as a movie, not a still"
+    assert has_time_axis({'file_metadata': {}, 'n_t': None})
+    # An older session that recorded n_t (so an image WAS loaded) but left it unparseable → loud.
     assert has_time_axis({'n_t': 'not a number'})
+    # Nothing loaded at all → silent: there is no image for a frame interval to be wrong about.
+    assert not has_time_axis({})
 
-    assert _warned_while_syncing({}), (
-        "with `n_t` never recorded, the warning was suppressed. It must fire — the cost of being "
-        "wrong in that direction is a factor-of-two error in every dynamics result."
+    assert _warned_while_syncing({'file_metadata': {}}), (
+        "with an image loaded but `n_t` never recorded, the warning was suppressed. It must fire — "
+        "the cost of being wrong in that direction is a factor-of-two error in every dynamics result."
     )
 
 

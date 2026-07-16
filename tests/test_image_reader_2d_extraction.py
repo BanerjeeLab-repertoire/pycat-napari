@@ -38,7 +38,12 @@ def _install_fakes(monkeypatch, S, C):
         # encode the coordinate so identity is verifiable, not just shape
         return np.array([[scene if scene is not None else -1, c, t]])
 
-    def extract_channel_info(image, ch_num):
+    def extract_channel_info(image, ch_num, pixel_frame=None):
+        # Must accept `pixel_frame`: the real extract_channel_info signature grew it
+        # (image, channel_index, pixel_frame=None) so the reader can classify modality
+        # from pixels when metadata is silent. The reader calls it with pixel_frame=...;
+        # a 2-arg fake raises TypeError, which the reader's `except: pass` swallows,
+        # leaving channel_info empty — the whole reason these assertions were failing.
         return {'channel': ch_num, 'name': f'ch{ch_num}'}
 
     monkeypatch.setattr(ir, "open_image", open_image)
