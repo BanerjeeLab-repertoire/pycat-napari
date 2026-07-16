@@ -541,13 +541,11 @@ def measure_spatial_randomness(
 # UI entry point (Toolbox → Spatial Metrology)
 # ---------------------------------------------------------------------------
 
-def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
-    """
-    Widget to measure departure-from-randomness of an image or ROI.
+def _build_spatial_randomness_form(ui_instance):
+    """Build the Spatial Randomness input form.
 
-    Uses the (ui_instance, layout, separate_widget) convention so it slots
-    into the Toolbox menu with {'separate_widget': True} or into a pipeline
-    dock by passing a layout.
+    Returns the group box plus every input widget the run callback needs, in
+    the same construction order they were created inline.
     """
     import napari
     from PyQt5.QtWidgets import (
@@ -596,6 +594,20 @@ def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
     btn  = QPushButton("▶  Measure Departure from Randomness")
     btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
+
+    return grp, image_dd, roi_dd, frame_spin, perm_spin, window_spin, prog, btn
+
+
+def _add_spatial_randomness(ui_instance, layout=None, separate_widget=False):
+    """
+    Widget to measure departure-from-randomness of an image or ROI.
+
+    Uses the (ui_instance, layout, separate_widget) convention so it slots
+    into the Toolbox menu with {'separate_widget': True} or into a pipeline
+    dock by passing a layout.
+    """
+    (grp, image_dd, roi_dd, frame_spin, perm_spin, window_spin,
+     prog, btn) = _build_spatial_randomness_form(ui_instance)
 
     def _on_run():
         from napari.utils.notifications import (

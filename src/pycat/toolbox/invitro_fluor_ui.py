@@ -482,16 +482,7 @@ def _ivf_segmentation(ui, layout):
 
     prog, run = _run_btn(form, "▶  Segment Droplets")
 
-    def _on_run():
-        from pycat.toolbox.segmentation_tools import (
-            segment_subcellular_objects, cell_mask_stretching)
-        try:
-            pre = ui._img(pre_dd)
-            raw = ui._img(raw_dd)
-        except KeyError as e:
-            napari_show_warning(str(e)); return
-        ball = int(ui._dr().get('ball_radius', 15))
-
+    def _gather_seg_params():
         if rb_otsu.isChecked():      method = 'otsu'
         elif rb_multi.isChecked():   method = 'multiotsu'
         elif rb_sauv.isChecked():    method = 'sauvola'
@@ -505,6 +496,40 @@ def _ivf_segmentation(ui, layout):
         p_win    = sauv_win.value(); p_k = sauv_k.value()
         p_minr   = min_r.value(); p_kurt = kurt_sp.value(); p_lsnr = lsnr_sp.value()
         p_minarea= min_area.value(); p_round = round_cb.isChecked()
+        return (method, p_sens, p_classes, p_upper, p_win, p_k,
+                p_minr, p_kurt, p_lsnr, p_minarea, p_round)
+
+    def _present_segmentation(result, method, p_sens, p_classes, p_upper,
+                              p_win, p_k, p_minr, p_kurt, p_lsnr,
+                              p_minarea, p_round):
+        prog.setVisible(False); run.setEnabled(True)
+        labeled, unrefined = result
+        n = int(labeled.max())
+        ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
+        ui._dr()['ivf_droplet_mask'] = labeled
+        ui._record('ivf_segmentation', {
+            'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
+            'method': method,
+            'otsu_sensitivity': p_sens,
+            'multiotsu_classes': p_classes, 'multiotsu_upper': p_upper,
+            'sauvola_window': p_win, 'sauvola_k': p_k,
+            'min_radius': p_minr, 'kurtosis': p_kurt, 'local_snr': p_lsnr,
+            'min_area': p_minarea, 'reject_nonround': p_round,
+        })
+        napari_show_info(f"In vitro: {n} droplets segmented ({method}).")
+
+    def _on_run():
+        from pycat.toolbox.segmentation_tools import (
+            segment_subcellular_objects, cell_mask_stretching)
+        try:
+            pre = ui._img(pre_dd)
+            raw = ui._img(raw_dd)
+        except KeyError as e:
+            napari_show_warning(str(e)); return
+        ball = int(ui._dr().get('ball_radius', 15))
+
+        (method, p_sens, p_classes, p_upper, p_win, p_k,
+         p_minr, p_kurt, p_lsnr, p_minarea, p_round) = _gather_seg_params()
 
         # RF needs its scribble layer up front (can't run in a worker w/o it).
         rf_scribbles = None
@@ -588,21 +613,9 @@ def _ivf_segmentation(ui, layout):
         ui._ivf_seg_worker = worker
 
         def _done(result):
-            prog.setVisible(False); run.setEnabled(True)
-            labeled, unrefined = result
-            n = int(labeled.max())
-            ui.viewer.add_labels(labeled, name=f"IVF Droplet Mask ({n} droplets)")
-            ui._dr()['ivf_droplet_mask'] = labeled
-            ui._record('ivf_segmentation', {
-                'pre_layer': pre_dd.currentText(), 'raw_layer': raw_dd.currentText(),
-                'method': method,
-                'otsu_sensitivity': p_sens,
-                'multiotsu_classes': p_classes, 'multiotsu_upper': p_upper,
-                'sauvola_window': p_win, 'sauvola_k': p_k,
-                'min_radius': p_minr, 'kurtosis': p_kurt, 'local_snr': p_lsnr,
-                'min_area': p_minarea, 'reject_nonround': p_round,
-            })
-            napari_show_info(f"In vitro: {n} droplets segmented ({method}).")
+            _present_segmentation(result, method, p_sens, p_classes, p_upper,
+                                  p_win, p_k, p_minr, p_kurt, p_lsnr,
+                                  p_minarea, p_round)
 
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -921,6 +934,54 @@ def _ivf_dynamics(ui, layout):
 
     prog, run = _run_btn(form, "▶  Run Dynamics")
 
+    def _present_dynamics(res):
+        prog.setVisible(False); run.setEnabled(True)
+        dr = ui._dr()
+        dr['ivf_trajectories'] = res['tracks']
+        tables = []
+
+        if 'coarsening_stats' in res:
+            dr['ivf_coarsening_stats'] = res['coarsening_stats']
+            tables.append(("Coarsening per frame", res['coarsening_stats']))
+            if 'coarsening_fit' in res:
+                co = res['coarsening_fit']
+                co_df = pd.DataFrame([{k:v for k,v in co.items() if not hasattr(v,'__len__')}])
+                tables.append(("Coarsening fit", co_df))
+                napari_show_info(f"Coarsening: {co.get('preferred_mechanism','?')}")
+            if 'sedimentation' in res:
+                sed = res['sedimentation']
+                sed_df = pd.DataFrame([{k:v for k,v in sed.items() if k!='recommendation'}])
+                tables.append(("Sedimentation analysis", sed_df))
+                if sed.get('sedimentation_detected'):
+                    napari_show_warning(f"Sedimentation: {sed.get('recommendation','')}")
+
+        if 'msd' in res:
+            dr['ivf_msd'] = res['msd']
+            fit = res['msd_fit']
+            fit_df = pd.DataFrame([{k:v for k,v in fit.items() if not hasattr(v,'__len__')}])
+            tables += [("MSD", res['msd']), ("Diffusion fit", fit_df),
+                        ("Per-track D,α", res['msd_pt'])]
+            napari_show_info(
+                f"MSD: D={fit.get('D_um2_per_s',np.nan):.4f} µm²/s "
+                f"α={fit.get('alpha',np.nan):.3f} ({fit.get('motion_type','?')})")
+
+        if 'fusions' in res and not res['fusions'].empty:
+            dr['ivf_fusions'] = res['fusions']
+            tables.append(("Fusion relaxation", res['fusions']))
+            n_ok = res['fusions']['fit_success'].sum()
+            napari_show_info(f"Fusion events: {len(res['fusions'])} detected, "
+                              f"{n_ok} fitted successfully.")
+
+        if 'km' in res:
+            dr['ivf_km'] = res['km']
+            tables.append(("KM survival", res['km']))
+
+        _show("IVF Dynamics", tables)
+        ui._record('ivf_dynamics', {
+            'mask_stack': stack_dd.currentText(),
+            'frame_interval_s': dt_sp.value(),
+            'max_displacement_um': disp_sp.value()})
+
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
             extract_frame_properties, link_trajectories_bayesian,
@@ -996,52 +1057,7 @@ def _ivf_dynamics(ui, layout):
         ui._ivf_dyn_worker = worker
 
         def _done(res):
-            prog.setVisible(False); run.setEnabled(True)
-            dr = ui._dr()
-            dr['ivf_trajectories'] = res['tracks']
-            tables = []
-
-            if 'coarsening_stats' in res:
-                dr['ivf_coarsening_stats'] = res['coarsening_stats']
-                tables.append(("Coarsening per frame", res['coarsening_stats']))
-                if 'coarsening_fit' in res:
-                    co = res['coarsening_fit']
-                    co_df = pd.DataFrame([{k:v for k,v in co.items() if not hasattr(v,'__len__')}])
-                    tables.append(("Coarsening fit", co_df))
-                    napari_show_info(f"Coarsening: {co.get('preferred_mechanism','?')}")
-                if 'sedimentation' in res:
-                    sed = res['sedimentation']
-                    sed_df = pd.DataFrame([{k:v for k,v in sed.items() if k!='recommendation'}])
-                    tables.append(("Sedimentation analysis", sed_df))
-                    if sed.get('sedimentation_detected'):
-                        napari_show_warning(f"Sedimentation: {sed.get('recommendation','')}")
-
-            if 'msd' in res:
-                dr['ivf_msd'] = res['msd']
-                fit = res['msd_fit']
-                fit_df = pd.DataFrame([{k:v for k,v in fit.items() if not hasattr(v,'__len__')}])
-                tables += [("MSD", res['msd']), ("Diffusion fit", fit_df),
-                            ("Per-track D,α", res['msd_pt'])]
-                napari_show_info(
-                    f"MSD: D={fit.get('D_um2_per_s',np.nan):.4f} µm²/s "
-                    f"α={fit.get('alpha',np.nan):.3f} ({fit.get('motion_type','?')})")
-
-            if 'fusions' in res and not res['fusions'].empty:
-                dr['ivf_fusions'] = res['fusions']
-                tables.append(("Fusion relaxation", res['fusions']))
-                n_ok = res['fusions']['fit_success'].sum()
-                napari_show_info(f"Fusion events: {len(res['fusions'])} detected, "
-                                  f"{n_ok} fitted successfully.")
-
-            if 'km' in res:
-                dr['ivf_km'] = res['km']
-                tables.append(("KM survival", res['km']))
-
-            _show("IVF Dynamics", tables)
-            ui._record('ivf_dynamics', {
-                'mask_stack': stack_dd.currentText(),
-                'frame_interval_s': dt_sp.value(),
-                'max_displacement_um': disp_sp.value()})
+            _present_dynamics(res)
 
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)

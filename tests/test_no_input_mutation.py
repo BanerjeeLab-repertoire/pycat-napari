@@ -83,6 +83,12 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         'plot_msd_trajectories',  # `line_registry` is a registry — a dict the caller wants filled
         '_draw_msd_into',         # ditto, and the name says "into"
         'plot_vpt_panel',         # ditto
+        # 1.6.67 — complexity-ratchet split. `dr` here is the DATA REPOSITORY (a dict results are
+        # stored into), NOT a caller image/mask array. Writing `dr[key] = ...` is the contract, as
+        # everywhere else in the codebase. It was closure-scoped before the `_on_dynamic` split
+        # hoisted this worker-setup to module level and made `dr` a parameter — same writes, same
+        # behavior; only the scope changed, which is what exposed it to this static check.
+        '_start_dynamic_worker',
     }
 
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"

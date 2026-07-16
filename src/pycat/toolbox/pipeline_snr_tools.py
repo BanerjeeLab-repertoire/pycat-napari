@@ -141,20 +141,15 @@ def compute_snr_table(viewer):
     return rows
 
 
-def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
-    """
-    Add the Pipeline SNR Analysis dock to the viewer.
-    Scans for existing diagnostic step layers, computes SNR for each, and
-    displays a colour-coded table.  A 'Refresh' button re-scans after
-    running the diagnostic widget.
+def _build_snr_panel_widgets():
+    """Build the static widgets for the Pipeline SNR Analysis panel.
+
+    Returns ``(outer_layout, table, note_label, refresh_btn)``.
     """
     from PyQt5.QtWidgets import (
-        QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-        QTableWidget, QTableWidgetItem, QLabel, QSizePolicy,
+        QVBoxLayout, QHBoxLayout, QPushButton,
+        QTableWidget, QLabel, QSizePolicy,
         QHeaderView, QAbstractItemView)
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QColor
-    import numpy as np
 
     outer = QVBoxLayout()
 
@@ -197,6 +192,23 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
     refresh_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     btn_row.addWidget(refresh_btn)
     outer.addLayout(btn_row)
+
+    return outer, table, note, refresh_btn
+
+
+def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
+    """
+    Add the Pipeline SNR Analysis dock to the viewer.
+    Scans for existing diagnostic step layers, computes SNR for each, and
+    displays a colour-coded table.  A 'Refresh' button re-scans after
+    running the diagnostic widget.
+    """
+    from PyQt5.QtWidgets import QWidget, QTableWidgetItem
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QColor
+    import numpy as np
+
+    outer, table, note, refresh_btn = _build_snr_panel_widgets()
 
     def _populate():
         table.setRowCount(0)

@@ -4,6 +4,24 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.67] - 2026-07-16
+### Fixed — **Complexity ratchet was RED (147 > 139); restored by splitting UI builders, not by raising the ceiling.**
+- The downward-only complexity ratchet (`test_complexity_budget.py`) fired: recent feature work pushed
+  the number of functions over 120 lines from 139 to **147** (8 new offenders), blocking CI. The
+  forbidden fix is to raise `_MAX_LONG_FUNCTIONS` — that silently grandfathers the new complexity and
+  makes the guard worthless. Instead, **12 pure-Qt UI-builder functions** (`_add_*` / `_on_run` /
+  `_on_finished` / `_on_dynamic` — widget construction and signal wiring, **zero numerical science**)
+  were each split by extracting a contiguous widget block into a same-file helper: `_add_analysis`
+  (frap), `_add_pipeline_snr_analysis`, `_add_spatial_randomness`, `_add_ts_upscale_stack` + `_on_finished`
+  (timeseries_condensate), `_on_finished` (ts_cellpose), `_add_molecular_counting`, `_add_run_cellpose_segmentation`,
+  `_add_run_sacf_analysis`, `_on_dynamic` (advanced_analysis), and both `_on_run` (invitro_fluor). Count
+  **147 → 135**; the ceiling was **lowered** to 135 (the ratchet moving down — it working). No science
+  function was touched. As a bonus, hoisting the `_on_dynamic` worker-setup to module level shrank the
+  codebase's longest function `_add_advanced_analysis` from 677 → **637** lines.
+- Behaviour-preserving: every split is a verbatim contiguous move (same widgets, order, signals); full
+  `pytest -m core` green (580 passed), pyflakes clean, all touched modules import. The deliberate shrinks
+  are recorded in `test_nothing_was_dropped.py::_DELIBERATE` and `test_no_input_mutation.py` with reasons.
+
 ## [1.6.66] - 2026-07-16
 ### Fixed — **The dual `px … | µm …` status-bar readout was invisible on EVERY file (wrong napari dict key).**
 - Traced from where napari draws the status bar back to the source. napari 0.7.x's `Layer.get_status`

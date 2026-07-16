@@ -80,46 +80,8 @@ class _SegmentationWidgetsMixin:
         seg_layout.addWidget(method_group)
 
         # ── Cellpose model selector (version-aware) ──────────────────────
-        from pycat.toolbox.segmentation_tools import (
-            available_cellpose_models, default_cellpose_model)
-        cp_model_group = QWidget()
-        cp_model_row = QVBoxLayout(cp_model_group)
-        cp_model_row.setContentsMargins(2, 0, 0, 0)
-        self.add_text_label(cp_model_row, 'Cellpose model:')
-        cp_model_dropdown = QComboBox()
-        try:
-            _models = available_cellpose_models()
-        except Exception:
-            _models = ['cyto2']
-        cp_model_dropdown.addItems(_models)
-        _default = default_cellpose_model() if _models else 'cyto2'
-        _idx = cp_model_dropdown.findText(_default)
-        if _idx >= 0:
-            cp_model_dropdown.setCurrentIndex(_idx)
-        cp_model_dropdown.setToolTip(
-            "cyto2 = fast Cellpose <4 CNN (default). cpsam = Cellpose-SAM "
-            "(Cellpose >=4 only; much slower on CPU). Only models supported by "
-            "your installed Cellpose version are shown.")
-        cp_model_row.addWidget(cp_model_dropdown)
-
-        # Refine-masks toggle. When ON, Cellpose's masks are post-processed
-        # (binary → watershed split → morphological opening → relabel + edge
-        # extension) — the legacy behaviour the 2D pipeline was validated with.
-        # When OFF, Cellpose's instance masks are used directly, which preserves
-        # its learned per-object boundaries and is usually better on images
-        # Cellpose already segments well. Defaults to ON here to preserve the
-        # existing validated 2D result; untick it to compare against raw Cellpose.
-        cp_refine_cb = QCheckBox("Refine masks (watershed + morphology cleanup)")
-        cp_refine_cb.setChecked(True)
-        cp_refine_cb.setToolTip(
-            "ON (default): apply PyCAT's watershed-split + morphological-opening\n"
-            "cleanup to Cellpose's masks (the legacy 2D behaviour). Can split\n"
-            "erroneously-merged blobs, but may erode thin/dim/touching cells and\n"
-            "degrade otherwise-good Cellpose boundaries.\n"
-            "OFF: use Cellpose's masks as-is — usually best when Cellpose already\n"
-            "segments the image well.")
-        cp_model_row.addWidget(cp_refine_cb)
-        seg_layout.addWidget(cp_model_group)
+        cp_model_group, cp_model_dropdown, cp_refine_cb = \
+            self._build_cellpose_model_selector(seg_layout)
 
         # ── Shared image dropdown ────────────────────────────────────────
         image_dropdown = self._layer_row(seg_layout, 'Select image layer:', napari.layers.Image, name_hint='Upscaled Segmentation')
@@ -195,6 +157,54 @@ class _SegmentationWidgetsMixin:
         seg_widget.setLayout(seg_layout)
         self._add_widget_to_layout_or_dock(seg_widget, layout, separate_widget,
                                             "Cell Segmentation")
+
+    def _build_cellpose_model_selector(self, seg_layout):
+        """Build the version-aware Cellpose model selector + refine toggle.
+
+        Adds the group to ``seg_layout`` and returns
+        ``(cp_model_group, cp_model_dropdown, cp_refine_cb)`` for the caller.
+        """
+        from pycat.toolbox.segmentation_tools import (
+            available_cellpose_models, default_cellpose_model)
+        cp_model_group = QWidget()
+        cp_model_row = QVBoxLayout(cp_model_group)
+        cp_model_row.setContentsMargins(2, 0, 0, 0)
+        self.add_text_label(cp_model_row, 'Cellpose model:')
+        cp_model_dropdown = QComboBox()
+        try:
+            _models = available_cellpose_models()
+        except Exception:
+            _models = ['cyto2']
+        cp_model_dropdown.addItems(_models)
+        _default = default_cellpose_model() if _models else 'cyto2'
+        _idx = cp_model_dropdown.findText(_default)
+        if _idx >= 0:
+            cp_model_dropdown.setCurrentIndex(_idx)
+        cp_model_dropdown.setToolTip(
+            "cyto2 = fast Cellpose <4 CNN (default). cpsam = Cellpose-SAM "
+            "(Cellpose >=4 only; much slower on CPU). Only models supported by "
+            "your installed Cellpose version are shown.")
+        cp_model_row.addWidget(cp_model_dropdown)
+
+        # Refine-masks toggle. When ON, Cellpose's masks are post-processed
+        # (binary → watershed split → morphological opening → relabel + edge
+        # extension) — the legacy behaviour the 2D pipeline was validated with.
+        # When OFF, Cellpose's instance masks are used directly, which preserves
+        # its learned per-object boundaries and is usually better on images
+        # Cellpose already segments well. Defaults to ON here to preserve the
+        # existing validated 2D result; untick it to compare against raw Cellpose.
+        cp_refine_cb = QCheckBox("Refine masks (watershed + morphology cleanup)")
+        cp_refine_cb.setChecked(True)
+        cp_refine_cb.setToolTip(
+            "ON (default): apply PyCAT's watershed-split + morphological-opening\n"
+            "cleanup to Cellpose's masks (the legacy 2D behaviour). Can split\n"
+            "erroneously-merged blobs, but may erode thin/dim/touching cells and\n"
+            "degrade otherwise-good Cellpose boundaries.\n"
+            "OFF: use Cellpose's masks as-is — usually best when Cellpose already\n"
+            "segments the image well.")
+        cp_model_row.addWidget(cp_refine_cb)
+        seg_layout.addWidget(cp_model_group)
+        return cp_model_group, cp_model_dropdown, cp_refine_cb
 
     def _run_stardist_segmentation(self, layer_name: str):
         """Run StarDist 2D segmentation on the named layer."""

@@ -499,22 +499,14 @@ def extract_spot_traces(stack: np.ndarray, label_mask: np.ndarray) -> list:
 # UI entry point (Toolbox)
 # ---------------------------------------------------------------------------
 
-def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
+def _build_molecular_counting_panel(ui_instance):
     """
-    Widget: count fluorophores per spot/cell by photobleaching step-noise.
+    Build the molecular-counting group box and its input widgets.
 
-    Takes a (T,H,W) intensity stack + a 2D labels mask, extracts each region's
-    bleaching trace, and estimates a pooled single-fluorophore brightness and
-    per-region molecule counts.
+    Returns (grp, stack_dd, mask_dd, fast_spin, r2_spin, prog, btn) so the
+    caller can wire the run signal and dock/embed the group box.
     """
     import napari
-    # QSizePolicy is imported HERE, not only in the separate-widget branch below.
-    # It is used a few lines down (setSizePolicy on the radio buttons / checkboxes /
-    # run button). Because the ONLY other import of it sat in a later `else:` branch
-    # of this same function, Python treated QSizePolicy as a function-LOCAL for the
-    # whole scope -- so the earlier use raised UnboundLocalError UNCONDITIONALLY and
-    # this widget could never be constructed. The later branch's import is harmless
-    # but redundant.
     from PyQt5.QtWidgets import (
         QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
         QProgressBar, QSizePolicy)
@@ -555,6 +547,32 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
     btn  = QPushButton("▶  Count Molecules")
     btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     form.addRow(prog); form.addRow(btn)
+
+    return grp, stack_dd, mask_dd, fast_spin, r2_spin, prog, btn
+
+
+def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
+    """
+    Widget: count fluorophores per spot/cell by photobleaching step-noise.
+
+    Takes a (T,H,W) intensity stack + a 2D labels mask, extracts each region's
+    bleaching trace, and estimates a pooled single-fluorophore brightness and
+    per-region molecule counts.
+    """
+    import napari
+    # QSizePolicy is imported HERE, not only in the separate-widget branch below.
+    # It is used a few lines down (setSizePolicy on the radio buttons / checkboxes /
+    # run button). Because the ONLY other import of it sat in a later `else:` branch
+    # of this same function, Python treated QSizePolicy as a function-LOCAL for the
+    # whole scope -- so the earlier use raised UnboundLocalError UNCONDITIONALLY and
+    # this widget could never be constructed. The later branch's import is harmless
+    # but redundant.
+    from PyQt5.QtWidgets import (
+        QGroupBox, QFormLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
+        QProgressBar, QSizePolicy)
+
+    grp, stack_dd, mask_dd, fast_spin, r2_spin, prog, btn = \
+        _build_molecular_counting_panel(ui_instance)
 
     def _on_run():
         from napari.utils.notifications import show_info as _info, show_warning as _warn

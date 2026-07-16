@@ -927,22 +927,15 @@ def upscale_stack_to_zarr(stack_like, factor, progress_cb=None):
     return _ZarrStack(_zarr.open(out_dir, mode='r'))
 
 
-def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
-    """Optional early upscale step for the time-series workflow.
-
-    Upscales the raw stack frame-by-frame into a lazy zarr-backed stack, so the
-    whole downstream pipeline (preprocess, Cellpose, condensate analysis) runs on
-    the upscaled data — matching the 2D workflow order (upscale BEFORE
-    preprocess). Optional and gated: if the data already meets Cellpose's
-    resolution needs, upscaling is unnecessary and the check says so.
+def _build_ts_upscale_check_ui(ui_instance):
+    """Build the upscale group box, its input rows (raw-stack dropdown, factor
+    spinbox, advice label) and the 'check if upscaling is needed' button plus its
+    handler. Returns (grp, form, stack_dropdown, factor_spin) so the caller can
+    attach the run controls and worker below. Pure UI construction moved verbatim
+    out of _add_ts_upscale_stack to keep that function under the complexity gate.
     """
-    # QThread/pyqtSignal are for the NESTED _UpWorker class defined below in this
-    # function — nesting already makes it lazy; it just needs the names in scope.
-    from PyQt5.QtCore import QThread, pyqtSignal
-    # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout
     import napari
-    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QSpinBox, QLabel
+    from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QPushButton, QSizePolicy, QSpinBox
 
     grp = QGroupBox("Upscale Stack (optional)")
     form = QFormLayout(grp)
@@ -997,6 +990,27 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
                            f"{rec}× (→ ~{cell_d*rec:.0f} px).</span>")
             factor_spin.setValue(rec)
     check_btn.clicked.connect(_on_check)
+    return grp, form, stack_dropdown, factor_spin
+
+
+def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
+    """Optional early upscale step for the time-series workflow.
+
+    Upscales the raw stack frame-by-frame into a lazy zarr-backed stack, so the
+    whole downstream pipeline (preprocess, Cellpose, condensate analysis) runs on
+    the upscaled data — matching the 2D workflow order (upscale BEFORE
+    preprocess). Optional and gated: if the data already meets Cellpose's
+    resolution needs, upscaling is unnecessary and the check says so.
+    """
+    # QThread/pyqtSignal are for the NESTED _UpWorker class defined below in this
+    # function — nesting already makes it lazy; it just needs the names in scope.
+    from PyQt5.QtCore import QThread, pyqtSignal
+    # GUI imported here, not at module scope — the analysis in this module needs none.
+    from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout
+    import napari
+    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QSpinBox, QLabel
+
+    grp, form, stack_dropdown, factor_spin = _build_ts_upscale_check_ui(ui_instance)
 
     run_btn = QPushButton("▶  Upscale Stack (lazy)")
     run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -2598,51 +2612,11 @@ def _add_run_timeseries_condensate_analysis(
             'compute_spatial': spatial_checkbox.isChecked(),
         })
 
-    def _on_finished(results_df, condensate_stack, stack_name):
-        progress_bar.setVisible(False)
-        run_btn.setEnabled(True)
-        cancel_btn.setVisible(False)
-
-        if results_df.empty:
-            napari_show_info("Time-Series analysis cancelled.")
-            return
-
-        # Store results
-        data_instance = ui_instance.central_manager.active_data_class
-        data_instance.data_repository['timeseries_condensate_df'] = results_df
-
-        # Add condensate stack to viewer
-        if condensate_stack.size > 0:
-            ui_instance.viewer.add_labels(
-                condensate_stack.astype(int),
-                name=f"TimeSeries Condensate Masks"
-            )
-
-        # Build summary: condensate fraction vs frame per cell
-        agg_dict = dict(
-            n_cells=('cell_label', 'count'),
-            mean_condensate_fraction=('condensate_fraction', 'mean'),
-            std_condensate_fraction=('condensate_fraction', 'std'),
-            mean_total_area_um2=('total_condensate_area_um2', 'mean'),
-            total_n_condensates=('n_condensates', 'sum'),
-        )
-        # Add spatial summaries to frame-level aggregation if present
-        spatial_cols_present = [c for c in
-            ['nnd_mean_um','nnd_cv','kde_mean_density',
-             'hull_occupancy','hull_compactness','spacing_cv']
-            if c in results_df.columns]
-        for sc in spatial_cols_present:
-            agg_dict[f'mean_{sc}'] = (sc, 'mean')
-
-        summary = results_df.groupby('frame').agg(
-            **agg_dict).round(6).reset_index()
-
-        tables = [
-            ("Per-Cell Per-Frame Results", results_df.round(4)),
-            ("Summary (per frame)", summary),
-        ]
-
-        # Optional post-run Ripley's L and PCF (per cell across all frames)
+    def _append_ripley_pcf_tables(results_df, condensate_stack, data_instance, tables):
+        """Post-run Ripley's L / PCF per cell across all frames, appended to the
+        results-dialog `tables` list in place. Closure over ui_instance,
+        _run_ripley_ref and _mask_name_ref; moved verbatim out of _on_finished to
+        keep that function under the complexity gate."""
         _run_ripley = _run_ripley_ref[0]
         if _run_ripley:
             try:
@@ -2726,6 +2700,53 @@ def _add_run_timeseries_condensate_analysis(
                     ]
             except Exception as _re:
                 print(f"[PyCAT TS] Ripley/PCF computation failed: {_re}")
+
+    def _on_finished(results_df, condensate_stack, stack_name):
+        progress_bar.setVisible(False)
+        run_btn.setEnabled(True)
+        cancel_btn.setVisible(False)
+
+        if results_df.empty:
+            napari_show_info("Time-Series analysis cancelled.")
+            return
+
+        # Store results
+        data_instance = ui_instance.central_manager.active_data_class
+        data_instance.data_repository['timeseries_condensate_df'] = results_df
+
+        # Add condensate stack to viewer
+        if condensate_stack.size > 0:
+            ui_instance.viewer.add_labels(
+                condensate_stack.astype(int),
+                name=f"TimeSeries Condensate Masks"
+            )
+
+        # Build summary: condensate fraction vs frame per cell
+        agg_dict = dict(
+            n_cells=('cell_label', 'count'),
+            mean_condensate_fraction=('condensate_fraction', 'mean'),
+            std_condensate_fraction=('condensate_fraction', 'std'),
+            mean_total_area_um2=('total_condensate_area_um2', 'mean'),
+            total_n_condensates=('n_condensates', 'sum'),
+        )
+        # Add spatial summaries to frame-level aggregation if present
+        spatial_cols_present = [c for c in
+            ['nnd_mean_um','nnd_cv','kde_mean_density',
+             'hull_occupancy','hull_compactness','spacing_cv']
+            if c in results_df.columns]
+        for sc in spatial_cols_present:
+            agg_dict[f'mean_{sc}'] = (sc, 'mean')
+
+        summary = results_df.groupby('frame').agg(
+            **agg_dict).round(6).reset_index()
+
+        tables = [
+            ("Per-Cell Per-Frame Results", results_df.round(4)),
+            ("Summary (per frame)", summary),
+        ]
+
+        # Optional post-run Ripley's L and PCF (per cell across all frames)
+        _append_ripley_pcf_tables(results_df, condensate_stack, data_instance, tables)
 
         show_dataframes_dialog("Time-Series Condensate Analysis", tables)
 

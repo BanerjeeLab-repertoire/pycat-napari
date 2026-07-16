@@ -649,6 +649,54 @@ def run_sacf_analysis(image_layer, mode, data_instance, viewer,
 # UI widget
 # ---------------------------------------------------------------------------
 
+def _build_sacf_roi_inputs(ui_instance, sacf_layout):
+    """
+    Build the three ROI-mode input sections (LIR / drawn-rect / whole-image),
+    add them to ``sacf_layout``, and return their widgets and dropdowns.
+    """
+    import napari
+    from PyQt5.QtWidgets import QVBoxLayout, QWidget
+
+    # ── LIR inputs ─────────────────────────────────────────────────────────
+    lir_widget = QWidget()
+    lir_layout = QVBoxLayout(lir_widget)
+    lir_layout.setContentsMargins(0, 0, 0, 0)
+    ui_instance.add_text_label(lir_layout, 'Image layer:', font_size=9)
+    image_dropdown_lir = ui_instance.create_layer_dropdown(napari.layers.Image)
+    lir_layout.addWidget(image_dropdown_lir)
+    ui_instance.add_text_label(lir_layout, 'Labeled cell mask:', font_size=9)
+    labels_dropdown = ui_instance.create_layer_dropdown(napari.layers.Labels)
+    lir_layout.addWidget(labels_dropdown)
+    sacf_layout.addWidget(lir_widget)
+
+    # ── Drawn-rect inputs ──────────────────────────────────────────────────
+    rect_widget = QWidget()
+    rect_layout = QVBoxLayout(rect_widget)
+    rect_layout.setContentsMargins(0, 0, 0, 0)
+    ui_instance.add_text_label(rect_layout, 'Image layer:', font_size=9)
+    image_dropdown_rect = ui_instance.create_layer_dropdown(napari.layers.Image)
+    rect_layout.addWidget(image_dropdown_rect)
+    ui_instance.add_text_label(rect_layout, 'Shapes layer (rectangles):', font_size=9)
+    shapes_dropdown = ui_instance.create_layer_dropdown(napari.layers.Shapes)
+    rect_layout.addWidget(shapes_dropdown)
+    rect_widget.setVisible(False)
+    sacf_layout.addWidget(rect_widget)
+
+    # ── Whole-image inputs ─────────────────────────────────────────────────
+    whole_widget = QWidget()
+    whole_layout = QVBoxLayout(whole_widget)
+    whole_layout.setContentsMargins(0, 0, 0, 0)
+    ui_instance.add_text_label(whole_layout, 'Image layer:', font_size=9)
+    image_dropdown_whole = ui_instance.create_layer_dropdown(napari.layers.Image)
+    whole_layout.addWidget(image_dropdown_whole)
+    whole_widget.setVisible(False)
+    sacf_layout.addWidget(whole_widget)
+
+    return (lir_widget, image_dropdown_lir, labels_dropdown,
+            rect_widget, image_dropdown_rect, shapes_dropdown,
+            whole_widget, image_dropdown_whole)
+
+
 def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
     """
     Build the SACF widget.  Three radio buttons select the ROI mode; the
@@ -685,40 +733,10 @@ def _add_run_sacf_analysis(ui_instance, layout=None, separate_widget=False):
     sacf_layout.addWidget(rb_rect)
     sacf_layout.addWidget(rb_whole)
 
-    # ── LIR inputs ─────────────────────────────────────────────────────────
-    lir_widget = QWidget()
-    lir_layout = QVBoxLayout(lir_widget)
-    lir_layout.setContentsMargins(0, 0, 0, 0)
-    ui_instance.add_text_label(lir_layout, 'Image layer:', font_size=9)
-    image_dropdown_lir = ui_instance.create_layer_dropdown(napari.layers.Image)
-    lir_layout.addWidget(image_dropdown_lir)
-    ui_instance.add_text_label(lir_layout, 'Labeled cell mask:', font_size=9)
-    labels_dropdown = ui_instance.create_layer_dropdown(napari.layers.Labels)
-    lir_layout.addWidget(labels_dropdown)
-    sacf_layout.addWidget(lir_widget)
-
-    # ── Drawn-rect inputs ──────────────────────────────────────────────────
-    rect_widget = QWidget()
-    rect_layout = QVBoxLayout(rect_widget)
-    rect_layout.setContentsMargins(0, 0, 0, 0)
-    ui_instance.add_text_label(rect_layout, 'Image layer:', font_size=9)
-    image_dropdown_rect = ui_instance.create_layer_dropdown(napari.layers.Image)
-    rect_layout.addWidget(image_dropdown_rect)
-    ui_instance.add_text_label(rect_layout, 'Shapes layer (rectangles):', font_size=9)
-    shapes_dropdown = ui_instance.create_layer_dropdown(napari.layers.Shapes)
-    rect_layout.addWidget(shapes_dropdown)
-    rect_widget.setVisible(False)
-    sacf_layout.addWidget(rect_widget)
-
-    # ── Whole-image inputs ─────────────────────────────────────────────────
-    whole_widget = QWidget()
-    whole_layout = QVBoxLayout(whole_widget)
-    whole_layout.setContentsMargins(0, 0, 0, 0)
-    ui_instance.add_text_label(whole_layout, 'Image layer:', font_size=9)
-    image_dropdown_whole = ui_instance.create_layer_dropdown(napari.layers.Image)
-    whole_layout.addWidget(image_dropdown_whole)
-    whole_widget.setVisible(False)
-    sacf_layout.addWidget(whole_widget)
+    # ── ROI-mode input sections (LIR / drawn-rect / whole-image) ───────────
+    (lir_widget, image_dropdown_lir, labels_dropdown,
+     rect_widget, image_dropdown_rect, shapes_dropdown,
+     whole_widget, image_dropdown_whole) = _build_sacf_roi_inputs(ui_instance, sacf_layout)
 
     # ── Show/hide on mode change ───────────────────────────────────────────
     def _on_mode_changed(btn_id):

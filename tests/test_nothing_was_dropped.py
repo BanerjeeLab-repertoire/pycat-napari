@@ -290,6 +290,17 @@ _DELIBERATE = {
 
     'metadata_extract.py::extract_aicsimage_metadata',
     'channel_naming.py::extract_channel_info_from_aicsimage',
+
+    # 1.6.67 — complexity-ratchet unblock (147 -> 135). These pure-Qt UI BUILDERS shrank >30%
+    # because a contiguous block of widget construction / signal wiring was EXTRACTED INTO A HELPER
+    # IN THE SAME FILE — not deleted. Every line survives (in `_build_*` / `_present_*` helpers);
+    # same widgets, same order, same signals, zero science touched. The shrink is the move, not a
+    # truncation. (The other functions split in the same pass shrank <30% and don't need an entry.)
+    'frap_ui.py::_add_analysis',                                    # -> _build_fit_model
+    'pipeline_snr_tools.py::_add_pipeline_snr_analysis',            # -> _build_snr_panel_widgets
+    'spatial_randomness_tools.py::_add_spatial_randomness',         # -> _build_spatial_randomness_form
+    'timeseries_condensate_tools.py::_add_ts_upscale_stack',        # -> _build_ts_upscale_check_ui
+    'ts_cellpose_tools.py::_on_finished',                           # -> _present_transfection_filter
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

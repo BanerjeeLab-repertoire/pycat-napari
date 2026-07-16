@@ -47,6 +47,51 @@ class _AdvancedAnalysisWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
+def _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_dd,
+                          sigma_spin, area_w_spin, max_disp, max_gap, tm_gap_dist,
+                          tm_merge_cb, tm_split_cb, tm_kalman_cb, _task, dr):
+    worker = _AdvancedAnalysisWorker(_task, {})
+    ui_instance._dyn_worker = worker
+    worker.progress.connect(lambda v, m: prog_d.setValue(v))
+    stop_d.setVisible(True)
+    try: stop_d.clicked.disconnect()
+    except Exception: pass
+    stop_d.clicked.connect(lambda: (worker.requestInterruption(), stop_d.setEnabled(False)))
+    stop_d.setEnabled(True)
+
+    def _done(res):
+        prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
+        for k, v in res.items():
+            dr[f'dyn_{k}'] = v
+        from pycat.ui.ui_utils import show_dataframes_dialog
+        tables = [(k.replace('_',' ').title(), v.round(4) if hasattr(v,'round') else v)
+                  for k, v in res.items() if isinstance(v, pd.DataFrame)]
+        if tables:
+            show_dataframes_dialog("Dynamic Spatial Phenotyping", tables)
+        _linker_names = {0: 'bayesian', 1: 'greedy', 2: 'trackmate'}
+        ui_instance._record('dynamic_spatial', {
+            'stack':      stack_dd.currentText(),
+            'linker':     _linker_names.get(linker_dd.currentIndex(), 'bayesian'),
+            'sigma_um':   sigma_spin.value(),
+            'area_weight':area_w_spin.value(),
+            'max_disp':   max_disp.value(),
+            'max_gap':    max_gap.value(),
+            'tm_gap_closing_distance': tm_gap_dist.value(),
+            'tm_allow_merging':  tm_merge_cb.isChecked(),
+            'tm_allow_splitting': tm_split_cb.isChecked(),
+            'tm_use_kalman':     tm_kalman_cb.isChecked(),
+        })
+        napari_show_info("Dynamic spatial phenotyping complete.")
+
+    def _err(msg):
+        prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
+        napari_show_warning("Dynamic analysis error — see terminal.")
+        print(f"[PyCAT Dynamic] ERROR:\n{msg}")
+
+    worker.finished.connect(_done); worker.error.connect(_err)
+    worker.start()
+
+
 def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     """
     Tabbed widget with three sections:
@@ -482,46 +527,9 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
 
             return res
 
-        worker = _AdvancedAnalysisWorker(_task, {})
-        ui_instance._dyn_worker = worker
-        worker.progress.connect(lambda v, m: prog_d.setValue(v))
-        stop_d.setVisible(True)
-        try: stop_d.clicked.disconnect()
-        except Exception: pass
-        stop_d.clicked.connect(lambda: (worker.requestInterruption(), stop_d.setEnabled(False)))
-        stop_d.setEnabled(True)
-
-        def _done(res):
-            prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
-            for k, v in res.items():
-                dr[f'dyn_{k}'] = v
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            tables = [(k.replace('_',' ').title(), v.round(4) if hasattr(v,'round') else v)
-                      for k, v in res.items() if isinstance(v, pd.DataFrame)]
-            if tables:
-                show_dataframes_dialog("Dynamic Spatial Phenotyping", tables)
-            _linker_names = {0: 'bayesian', 1: 'greedy', 2: 'trackmate'}
-            ui_instance._record('dynamic_spatial', {
-                'stack':      stack_dd.currentText(),
-                'linker':     _linker_names.get(linker_dd.currentIndex(), 'bayesian'),
-                'sigma_um':   sigma_spin.value(),
-                'area_weight':area_w_spin.value(),
-                'max_disp':   max_disp.value(),
-                'max_gap':    max_gap.value(),
-                'tm_gap_closing_distance': tm_gap_dist.value(),
-                'tm_allow_merging':  tm_merge_cb.isChecked(),
-                'tm_allow_splitting': tm_split_cb.isChecked(),
-                'tm_use_kalman':     tm_kalman_cb.isChecked(),
-            })
-            napari_show_info("Dynamic spatial phenotyping complete.")
-
-        def _err(msg):
-            prog_d.setVisible(False); run_d.setEnabled(True); stop_d.setVisible(False)
-            napari_show_warning("Dynamic analysis error — see terminal.")
-            print(f"[PyCAT Dynamic] ERROR:\n{msg}")
-
-        worker.finished.connect(_done); worker.error.connect(_err)
-        worker.start()
+        _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_dd,
+                              sigma_spin, area_w_spin, max_disp, max_gap, tm_gap_dist,
+                              tm_merge_cb, tm_split_cb, tm_kalman_cb, _task, dr)
 
     run_d.clicked.connect(_on_dynamic)
     # Dynamic Spatial Phenotyping applies only to (T,H,W) time-series data.

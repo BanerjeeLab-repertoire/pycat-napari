@@ -884,64 +884,7 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
             progress_bar.setValue(done)
             progress_label.setText(f"Cellpose: {done} / {total} keyframes done…")
 
-        def _on_finished(mask_stack, kf_indices):
-            progress_bar.setVisible(False)
-            progress_label.setVisible(False)
-            run_btn.setEnabled(True)
-
-            if max_proj_check.isChecked():
-                # Union of all keyframe masks — conservative cell ROI.
-                # np.broadcast_to WITHOUT .copy() creates a read-only
-                # stride-tricked view: the same 2D union array is presented
-                # as (T,H,W) without allocating n_t separate copies in
-                # memory. Safe here since this data is only read/displayed,
-                # never mutated after creation.
-                union = np.zeros(mask_stack.shape[1:], dtype=np.uint16)
-                for t in kf_indices:
-                    union = np.where(mask_stack[t] > 0, mask_stack[t], union)
-                mask_stack = np.broadcast_to(union, mask_stack.shape)
-
-            # Add (T, H, W) label stack to viewer as a genuinely writable
-            # array — napari Labels layers support paint/edit tools, so a
-            # read-only lazy view or broadcast_to view (used above purely
-            # to save memory during storage/return) must be materialised
-            # into a real, independent array here rather than handed to
-            # add_labels() directly. This is a one-time cost paid only if
-            # the user displays the layer, not held throughout the session.
-            display_stack = np.asarray(mask_stack).copy()
-
-            ts_mask_name = f"TS Cell Masks [{layer_name}]"
-            ui_instance.viewer.add_labels(
-                display_stack, name=ts_mask_name
-            )
-
-            # Labeled Cell Mask: use the keyframe with the most detected
-            # cells rather than always frame 0. When max_projection=False,
-            # frame 0 may have an empty individual mask while other keyframes
-            # succeeded — picking the best-populated keyframe is always safe.
-            best_kf = max(kf_indices,
-                          key=lambda k: int(np.asarray(mask_stack[k]).max()))
-            ui_instance.viewer.add_labels(
-                np.asarray(mask_stack[best_kf]).copy(), name="Labeled Cell Mask"
-            )
-
-            # Store the LAZY (or broadcast-view) version in the data
-            # repository, not display_stack — this data is only ever read,
-            # never mutated, downstream (confirmed: batch_step_registry.py
-            # stores it into per-file state without further writes), so
-            # keeping it lazy here avoids holding a full duplicated-frame
-            # array in memory for the rest of the session.
-            data_inst = ui_instance.central_manager.active_data_class
-            data_inst.data_repository['ts_cell_mask_stack'] = mask_stack
-            data_inst.data_repository['ts_cellpose_keyframes'] = kf_indices
-
-            n_cells = int(np.asarray(mask_stack[best_kf]).max())
-            napari_show_info(
-                f"Keyframe Cellpose complete: {len(kf_indices)} keyframes, "
-                f"{n_t} total frames, {n_cells} cells (best keyframe: {best_kf}). "
-                f"Mask stack → '{ts_mask_name}'"
-            )
-
+        def _present_transfection_filter(mask_stack, best_kf, data_inst):
             # ── Optional transfection filter ──────────────────────────────
             # Score each cell by fluorescence SNR on the reference frame and
             # drop untransfected cells into a SEPARATE "Transfected Cells" mask
@@ -1000,6 +943,66 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
                 except Exception as _tf_e:
                     napari_show_warning(
                         f"Transfection filter failed: {_tf_e}")
+
+        def _on_finished(mask_stack, kf_indices):
+            progress_bar.setVisible(False)
+            progress_label.setVisible(False)
+            run_btn.setEnabled(True)
+
+            if max_proj_check.isChecked():
+                # Union of all keyframe masks — conservative cell ROI.
+                # np.broadcast_to WITHOUT .copy() creates a read-only
+                # stride-tricked view: the same 2D union array is presented
+                # as (T,H,W) without allocating n_t separate copies in
+                # memory. Safe here since this data is only read/displayed,
+                # never mutated after creation.
+                union = np.zeros(mask_stack.shape[1:], dtype=np.uint16)
+                for t in kf_indices:
+                    union = np.where(mask_stack[t] > 0, mask_stack[t], union)
+                mask_stack = np.broadcast_to(union, mask_stack.shape)
+
+            # Add (T, H, W) label stack to viewer as a genuinely writable
+            # array — napari Labels layers support paint/edit tools, so a
+            # read-only lazy view or broadcast_to view (used above purely
+            # to save memory during storage/return) must be materialised
+            # into a real, independent array here rather than handed to
+            # add_labels() directly. This is a one-time cost paid only if
+            # the user displays the layer, not held throughout the session.
+            display_stack = np.asarray(mask_stack).copy()
+
+            ts_mask_name = f"TS Cell Masks [{layer_name}]"
+            ui_instance.viewer.add_labels(
+                display_stack, name=ts_mask_name
+            )
+
+            # Labeled Cell Mask: use the keyframe with the most detected
+            # cells rather than always frame 0. When max_projection=False,
+            # frame 0 may have an empty individual mask while other keyframes
+            # succeeded — picking the best-populated keyframe is always safe.
+            best_kf = max(kf_indices,
+                          key=lambda k: int(np.asarray(mask_stack[k]).max()))
+            ui_instance.viewer.add_labels(
+                np.asarray(mask_stack[best_kf]).copy(), name="Labeled Cell Mask"
+            )
+
+            # Store the LAZY (or broadcast-view) version in the data
+            # repository, not display_stack — this data is only ever read,
+            # never mutated, downstream (confirmed: batch_step_registry.py
+            # stores it into per-file state without further writes), so
+            # keeping it lazy here avoids holding a full duplicated-frame
+            # array in memory for the rest of the session.
+            data_inst = ui_instance.central_manager.active_data_class
+            data_inst.data_repository['ts_cell_mask_stack'] = mask_stack
+            data_inst.data_repository['ts_cellpose_keyframes'] = kf_indices
+
+            n_cells = int(np.asarray(mask_stack[best_kf]).max())
+            napari_show_info(
+                f"Keyframe Cellpose complete: {len(kf_indices)} keyframes, "
+                f"{n_t} total frames, {n_cells} cells (best keyframe: {best_kf}). "
+                f"Mask stack → '{ts_mask_name}'"
+            )
+
+            _present_transfection_filter(mask_stack, best_kf, data_inst)
 
             # Record for batch
             ui_instance._record('ts_cellpose_keyframe', {

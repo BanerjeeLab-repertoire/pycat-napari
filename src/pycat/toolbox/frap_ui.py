@@ -350,6 +350,17 @@ class FRAPUI:
             "the maximum of the corrected recovery curve.")
         form.addRow("Pre-bleach stack (opt):", self._prebleach_dd)
 
+        self._build_fit_model(form)
+
+        self._prog = QProgressBar(); self._prog.setVisible(False)
+        btn = QPushButton("▶  Run FRAP Analysis")
+        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        btn.clicked.connect(self._on_analyze)
+        form.addRow(self._prog); from pycat.ui.field_status import button_with_circle as _bwc
+        form.addRow(_bwc(btn))
+        layout.addWidget(grp)
+
+    def _build_fit_model(self, form):
         # Fit model selector
         model_grp = QGroupBox("Fit model")
         model_grp.setFlat(True)
@@ -419,14 +430,6 @@ class FRAPUI:
         self._rb_empirical.toggled.connect(lambda _: _on_model())
         self._rb_rd.toggled.connect(lambda _: _on_model())
         self._rb_circ.toggled.connect(lambda _: _on_model())
-
-        self._prog = QProgressBar(); self._prog.setVisible(False)
-        btn = QPushButton("▶  Run FRAP Analysis")
-        btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        btn.clicked.connect(self._on_analyze)
-        form.addRow(self._prog); from pycat.ui.field_status import button_with_circle as _bwc
-        form.addRow(_bwc(btn))
-        layout.addWidget(grp)
 
     def _offer_stack_2d_images(self, current_name, current_stack):
         """When the chosen recovery layer is 2D (the 'loaded as individual images'
