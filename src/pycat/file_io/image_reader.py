@@ -146,9 +146,41 @@ def _cache_key(path):
         return None
 
 
+def _safe_close(reader):
+    """Release a reader's OS handle. On Windows an unclosed BioIO/tifffile/BioFormats reader keeps a
+    file HANDLE open, blocking re-open or delete of the file. Best-effort: try ``close()``, else the
+    context-manager ``__exit__``, and never raise."""
+    for attr in ("close", "__exit__"):
+        fn = getattr(reader, attr, None)
+        if callable(fn):
+            try:
+                fn() if attr == "close" else fn(None, None, None)
+            except Exception:
+                pass
+            return
+
+
+def _discard_reader(reader):
+    """Close a reader the cache is DROPPING — unless a live layer still owns it.
+
+    The cache and a layer's ``ImageSource`` can hold the **same** reader object (the generic loader
+    retains the very reader ``open_image`` cached). ``ImageSource.retain`` marks such a reader
+    ``_pycat_cache_keep_open``; closing a marked one would break that layer's on-demand reads, so we
+    leave it open and let it close when the layer (and its ImageSource) are gone. Only readers the
+    cache alone holds are closed here."""
+    if reader is None or getattr(reader, '_pycat_cache_keep_open', False):
+        return
+    _safe_close(reader)
+
+
 def clear_reader_cache():
-    """Drop every cached reader. Called when the viewer is cleared, and available for tests."""
+    """Drop every cached reader — CLOSING each (unless a live layer still owns it), so a cleared
+    viewer does not leave file handles open. Called when the viewer is cleared, and available for
+    tests."""
+    _readers = list(_READER_CACHE.values())
     _READER_CACHE.clear()
+    for _r in _readers:
+        _discard_reader(_r)
 
 
 def _reader_kwargs_for(path, kwargs):
@@ -264,8 +296,9 @@ def open_image(path, **kwargs):
                     _cached.set_scene(_first)
         except Exception:
             # A reader that cannot be rewound is a reader that cannot be shared. **Drop it and
-            # build a fresh one** rather than hand out an object in an unknown state.
-            _READER_CACHE.pop(_key, None)
+            # build a fresh one** rather than hand out an object in an unknown state. Close it on
+            # the way out (unless a live layer still owns it) so its handle is not leaked.
+            _discard_reader(_READER_CACHE.pop(_key, None))
             _cached = None
 
         if _cached is not None:
@@ -285,7 +318,7 @@ def open_image(path, **kwargs):
             _reader = BioImage(path, **_reader_kwargs_for(path, kwargs))
             if _key is not None:
                 if len(_READER_CACHE) >= _READER_CACHE_LIMIT:
-                    _READER_CACHE.pop(next(iter(_READER_CACHE)))
+                    _discard_reader(_READER_CACHE.pop(next(iter(_READER_CACHE))))
                 _READER_CACHE[_key] = _reader
             return _reader
         except Exception as exc:
@@ -326,7 +359,7 @@ def open_image(path, **kwargs):
     _reader = AICSImage(path, **kwargs)
     if _key is not None:
         if len(_READER_CACHE) >= _READER_CACHE_LIMIT:
-            _READER_CACHE.pop(next(iter(_READER_CACHE)))
+            _discard_reader(_READER_CACHE.pop(next(iter(_READER_CACHE))))
         _READER_CACHE[_key] = _reader
     return _reader
 

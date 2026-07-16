@@ -73,6 +73,17 @@ class ImageSource:
         """
         if not any(r is reader for r in self.readers):
             self.readers.append(reader)
+        # Mark the underlying reader(s) so the bounded reader cache (image_reader._READER_CACHE)
+        # will NOT ``.close()`` a handle a live layer still needs: the cache and this ImageSource can
+        # hold the SAME reader object, and closing it would break the layer's on-demand reads. The
+        # generic loader retains ``(reader, dask_arr)`` tuples, so unwrap one level; best-effort —
+        # ndarrays/dask arrays that reject an attribute simply aren't marked (only real readers with
+        # a file handle need this).
+        for _obj in (reader if isinstance(reader, tuple) else (reader,)):
+            try:
+                _obj._pycat_cache_keep_open = True
+            except Exception:
+                pass
         return reader
 
     def close(self) -> None:
