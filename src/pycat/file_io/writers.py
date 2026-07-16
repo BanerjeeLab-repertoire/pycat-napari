@@ -427,7 +427,11 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
                 # A truncated CSV is the worst of all: it opens, it parses, and it is short.
                 # Nothing about 340 rows of an 800-row results table looks wrong.
                 with atomic_write(save_name + f'_{df_name}.csv') as _tmp:
-                    df_value.to_csv(_tmp, index=True)
+                    # The user's results, not PyCAT's bookkeeping: the `_pycat_*` identity
+                    # columns are dropped on the way out. Nothing reads them back from a CSV —
+                    # session restore goes through the manifest.
+                    from pycat.utils.entity_ref import without_identity
+                    without_identity(df_value).to_csv(_tmp, index=True)
                 manifest_dfs.append({
                     'key': df_name,
                     'file': os.path.basename(save_name + f'_{df_name}.csv')})

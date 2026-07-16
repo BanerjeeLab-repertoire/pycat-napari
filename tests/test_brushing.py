@@ -527,15 +527,46 @@ class _StubLayer:
 
 
 class _StubLayers(list):
+    """A layer list that also answers by NAME, as napari's does."""
+
     def __init__(self, items):
         super().__init__(items)
         self.selection = set()
+
+    def __contains__(self, key):
+        if isinstance(key, str):
+            return any(getattr(l, 'name', None) == key for l in self)
+        return list.__contains__(self, key)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            for layer in self:
+                if getattr(layer, 'name', None) == key:
+                    return layer
+            raise KeyError(key)
+        return list.__getitem__(self, key)
+
+    def remove(self, key):
+        list.remove(self, self[key] if isinstance(key, str) else key)
+
+
+class _OverlayLayer:
+    """What `add_shapes` / `add_points` hand back — records what it was asked to draw."""
+
+    def __init__(self, data, name=None, **kwargs):
+        self.data = data
+        self.name = name
+        self.visible = True
+        self.metadata = {}
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class _StubViewer:
     class _Dims:
         point = ()
         current_step = (0, 0, 0)
+        ndim = 2
 
     class _Cam:
         center = (0.0, 0.0, 0.0)
@@ -544,6 +575,17 @@ class _StubViewer:
         self.layers = _StubLayers(layers)
         self.dims = self._Dims()
         self.camera = self._Cam()
+
+    def _add(self, data, **kwargs):
+        layer = _OverlayLayer(data, **kwargs)
+        self.layers.append(layer)
+        return layer
+
+    def add_shapes(self, data, **kwargs):
+        return self._add(data, **kwargs)
+
+    def add_points(self, data, **kwargs):
+        return self._add(data, **kwargs)
 
 
 @pytest.mark.core
@@ -603,10 +645,16 @@ def test_an_object_resolves_to_ITS_OWN_layer_not_merely_the_FIRST_one():
     ref = ObjectRef(object_id=7, bbox=(1, 1, 5, 5), source_layer_id='bbbb2222')
     assert resolve_in_viewer(ref, viewer, centre=False) is True
 
-    assert mask_b.selected_label == 7, "the object did not resolve to the layer it came from"
-    assert mask_a.selected_label is None, (
-        "an UNRELATED segmentation was highlighted — label 7 in mask A is not the same object as "
-        "label 7 in mask B")
+    assert viewer.layers.selection == {mask_b}, (
+        "the object did not resolve to the layer it came from — an UNRELATED segmentation was "
+        "selected, and label 7 in mask A is not the same object as label 7 in mask B")
+
+    # And the highlight is an OVERLAY: neither mask's paint state was touched. See
+    # `selection_overlay` — `selected_label` is napari's label-painting state, which PyCAT's own
+    # paint tools write, so borrowing it to mean "highlighted" broke both features quietly.
+    assert mask_a.selected_label is None and mask_b.selected_label is None, (
+        "brushing hijacked a labels layer's paint state")
+    assert 'Selection' in viewer.layers, "no selection overlay was drawn"
 
 
 @pytest.mark.core
@@ -622,7 +670,7 @@ def test_a_LEGACY_ref_still_resolves_but_says_it_GUESSED():
 
     legacy = ObjectRef(object_id=7, bbox=(1, 1, 5, 5))          # no source_layer_id
     assert resolve_in_viewer(legacy, viewer, centre=False) is True
-    assert mask_a.selected_label == 7                            # old behaviour preserved
+    assert viewer.layers.selection == {mask_a}                   # old first-match, preserved
 
     _candidates, note = layers_for_ref(legacy, viewer)
     assert note and 'may not be the right one' in note, (

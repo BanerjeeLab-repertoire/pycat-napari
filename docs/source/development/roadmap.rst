@@ -178,6 +178,30 @@ Outstanding & Noted (near-term, worth tackling)
 
 Concrete, mostly self-contained items surfaced during recent audits:
 
+.. rubric:: VPT bead Points layer holds every frame (brushing increment 4, Part C — deferred, needs a profile)
+
+``_add_pickable_bead_points`` (``vpt_ui.py``) builds ``pts = column_stack([frames, ys, xs])`` — one
+point per bead **per frame**. Brushing increment 4 proposed holding only the current frame's
+detections in the layer, keeping the rest in a compact DataFrame plus a ``frame → indices`` map, and
+swapping the visible subset on ``viewer.dims.events.current_step``.
+
+**Deferred deliberately, because the premise is unmeasured.** napari's Points layer already slices by
+dims, so the *rendering* is per-frame already; what the full layer costs is hit-testing and the
+property arrays, and nobody has profiled that on a real long acquisition. Against that, the change
+rewires the **validated** bead picker: the click path is ``layer.get_value(...) → idx →
+self._bead_picker_tids[idx]``, an index into the *full* array, so a per-frame layer means rebuilding
+both the points and the id map on every frame change — the kind of edit that breaks picking quietly.
+
+The deciding context: increment 4's *other* performance claim (that ``_emphasise``'s O(N) size
+rewrite was slow) turned out to be wrong by ~1000x — it measures **1.28 ms on 100 000 points** — and
+the same measurement found that it was silently highlighting the *wrong points* instead. After that,
+refactoring a working picker on an unmeasured claim is not a trade worth making.
+
+*What it needs first:* a profile on one of the long acquisitions (a 1200-frame bead movie), showing
+what the Points layer actually costs at pick and draw time. If it costs, the ``frame → indices`` map
+is the right shape and the spec's design stands. Recorded in
+``docs/audits/claude_code_spec_brushing4_2026-07-16.md``.
+
 .. rubric:: FIJI-style independent multi-image comparison (architectural — pinned)
 
 PyCAT can now load images without clearing (add-without-clear) and toggle napari's grid

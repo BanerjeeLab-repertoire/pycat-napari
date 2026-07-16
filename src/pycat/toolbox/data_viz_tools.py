@@ -26,6 +26,21 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QRadioButton, QButt
 from PyQt5.QtCore import Qt
 
 
+def _plottable_columns(df):
+    """The columns a user can meaningfully put on an axis.
+
+    The `_pycat_*` identity columns are names, not numbers — plotting `_pycat_entity_id` against
+    area is meaningless, and offering it invites the question of what it measures. They were
+    introduced (1.6.74) with a comment calling them hidden and nothing that hid them; these combos
+    listed them for two versions.
+    """
+    try:
+        from pycat.utils.entity_ref import visible_columns
+        return visible_columns(df)
+    except Exception:
+        return list(df.columns)
+
+
 class PlottingWidget(QWidget):
     """
     A widget for selecting and visualizing data from different DataFrames using various types of plots.
@@ -206,7 +221,7 @@ class PlottingWidget(QWidget):
 
         # Get the name of the currently selected DataFrame
         current_df_name = self.df_combo.currentText()
-        current_df_columns = self.dataframes[current_df_name].columns.tolist()
+        current_df_columns = _plottable_columns(self.dataframes[current_df_name])
 
         # Clear the dropdowns for line plot
         self.line_x_combo.clear()
@@ -245,8 +260,8 @@ class PlottingWidget(QWidget):
         self.line_y_combo = QComboBox()
         self.line_y_combo.setToolTip("Column to plot on the Y axis.")
         # Populate the QComboBoxes with DataFrame columns
-        self.line_x_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
-        self.line_y_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
+        self.line_x_combo.addItems(_plottable_columns(self.dataframes[self.df_combo.currentText()]))
+        self.line_y_combo.addItems(_plottable_columns(self.dataframes[self.df_combo.currentText()]))
 
         # For setting the X and Y data 
         xy_layout = QHBoxLayout()
@@ -322,7 +337,7 @@ class PlottingWidget(QWidget):
         checkbox_widget.setLayout(self.checkbox_layout)
         # Create and add checkboxes based on DataFrame columns
         self.checkboxes = []
-        for column in self.dataframes[self.df_combo.currentText()].columns:
+        for column in _plottable_columns(self.dataframes[self.df_combo.currentText()]):
             checkbox = QCheckBox(column)
             self.checkboxes.append(checkbox)
             self.checkbox_layout.addWidget(checkbox)  # Use self.checkbox_layout here
@@ -375,7 +390,7 @@ class PlottingWidget(QWidget):
         # Create a dropdown for the histogram data
         self.hist_data_combo = QComboBox()
         self.hist_data_combo.setToolTip("Column whose distribution the histogram shows.")
-        self.hist_data_combo.addItems(self.dataframes[self.df_combo.currentText()].columns)
+        self.hist_data_combo.addItems(_plottable_columns(self.dataframes[self.df_combo.currentText()]))
         # Create input fields for number of bins and bin width
         self.hist_bins_input = QLineEdit()
         self.hist_bins_input.setToolTip("Number of histogram bins. Leave blank to auto-select.")

@@ -48,6 +48,14 @@ class DataFrameModel(QAbstractTableModel):
             The pandas DataFrame to initialize the model. Defaults to an empty DataFrame.
         """
         super(DataFrameModel, self).__init__()
+        # Identity columns are machinery, not measurement — see `entity_ref.without_identity`.
+        # Filtered HERE because this model is the chokepoint every results table renders through,
+        # so nothing downstream has to remember.
+        try:
+            from pycat.utils.entity_ref import without_identity
+            df = without_identity(df)
+        except Exception:
+            pass
         self._data = df
 
     def rowCount(self, parent=None):

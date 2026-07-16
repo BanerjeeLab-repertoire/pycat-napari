@@ -42,15 +42,44 @@ class _Layer:
 
 
 class _Layers(list):
+    """A layer list that also answers by NAME, as napari's does."""
+
     def __init__(self, items):
         super().__init__(items)
         self.selection = set()
+
+    def __contains__(self, key):
+        if isinstance(key, str):
+            return any(getattr(l, 'name', None) == key for l in self)
+        return list.__contains__(self, key)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            for layer in self:
+                if getattr(layer, 'name', None) == key:
+                    return layer
+            raise KeyError(key)
+        return list.__getitem__(self, key)
+
+    def remove(self, key):
+        list.remove(self, self[key] if isinstance(key, str) else key)
+
+
+class _Overlay:
+    def __init__(self, data, name=None, **kw):
+        self.data = data
+        self.name = name
+        self.visible = True
+        self.metadata = {}
+        for k, v in kw.items():
+            setattr(self, k, v)
 
 
 class _Viewer:
     class _Dims:
         point = ()
         current_step = (0, 0, 0)
+        ndim = 2
 
     class _Cam:
         center = (0.0, 0.0, 0.0)
@@ -59,6 +88,17 @@ class _Viewer:
         self.layers = _Layers(layers)
         self.dims = self._Dims()
         self.camera = self._Cam()
+
+    def _add(self, data, **kw):
+        layer = _Overlay(data, **kw)
+        self.layers.append(layer)
+        return layer
+
+    def add_shapes(self, data, **kw):
+        return self._add(data, **kw)
+
+    def add_points(self, data, **kw):
+        return self._add(data, **kw)
 
 
 def test_the_key_is_the_SAME_object_however_the_table_is_SORTED_or_FILTERED():
@@ -158,8 +198,11 @@ def test_a_ref_built_from_a_stamped_table_resolves_to_ITS_OWN_layer():
 
     viewer = _Viewer([mask_a, mask_b])                   # A is FIRST — the old code would pick it
     assert resolve_in_viewer(refs[1], viewer, centre=False) is True
-    assert mask_b.selected_label == 2, "the cell did not resolve to the layer it came from"
-    assert mask_a.selected_label is None, "an unrelated segmentation was highlighted"
+    assert viewer.layers.selection == {mask_b}, (
+        "the cell did not resolve to the layer it came from — an unrelated segmentation was picked")
+    # The highlight is an overlay; no layer's paint state is hijacked. See `selection_overlay`.
+    assert mask_a.selected_label is None and mask_b.selected_label is None
+    assert 'Selection' in viewer.layers, "no selection overlay was drawn"
 
 
 def test_attach_layer_id_is_a_SECOND_step_because_the_layer_is_born_LAST():

@@ -4,6 +4,56 @@ All notable changes to PyCAT-Napari will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.77] - 2026-07-16
+### Fixed — **REGRESSION I shipped in 1.6.74: the identity columns were never actually hidden.**
+Increment 2 added `_pycat_entity_id` / `_pycat_layer_id` with a comment calling them hidden — *"a
+user reading a results table should not have to scroll past them, and a plot must never offer them
+as an axis"* — **and nothing hid them.** A doc comment is not a mechanism. For two versions:
+- every results dialog listed both columns (`DataFrameModel` renders every column a df has);
+- every plot axis dropdown offered `_pycat_entity_id` as something to plot;
+- **every saved results CSV carried them into the user's spreadsheet** (`writers.py`'s `to_csv`).
+
+`entity_ref.visible_columns` / `without_identity` now enforce it at all three sites. The DataFrames
+keep the columns — the machinery needs them; nothing reads them back from a CSV, since session
+restore goes through the manifest.
+### Added — **Brushing increment 5 (part 1 of 2): tables brush by identity, and the highlight is an overlay.**
+- `ui/brushable_table.py` — **a results table that still means the right object after you sort it.**
+  Linked tables were keyed on row position: VPT's `row_for_id = {track_id: visual row}` is correct
+  exactly until the view is sorted, after which every highlight lands on whatever row moved there.
+  *Nothing looks broken — a row is selected, it just isn't the one you asked for.* The table now keys
+  on the increment-2 entity id and sorts via a `QSortFilterProxyModel`, so identity stays on the
+  **source** row while the view reorders. Selection goes out to, and comes back from, the one
+  increment-3 `SelectionService`. **This is what increments 1–4 were building toward.**
+  Mutation-checked: keying on the visual row (VPT's bug) turns the sort tests red.
+- Tables **without** entity ids still work by position and report `linkability_of` — degraded and
+  labelled beats silently wrong.
+- `utils/selection_overlay.py` — the highlight is now dedicated `Shapes` (bbox) + `Points` (centre)
+  overlay layers, reused rather than accumulated.
+### Fixed — **Brushing stopped hijacking the label-painting tool.**
+- `resolve_in_viewer` set `layer.selected_label = ref.object_id` + `show_selected_label = True`.
+  That is **napari's label-painting state**, which PyCAT's own paint tools write (`ui_modules.py`,
+  `invitro_fluor_ui.py` both set `selected_label = 1` to pick the brush's label). So clicking a point
+  on a plot silently changed which label the user was about to paint with, and `show_selected_label`
+  hid every other object in their mask. Borrowing a widget's state to mean something else is how two
+  features quietly break each other.
+- It also could not work for the cases brushing exists for: an object whose mask is not open (batch),
+  a punctum (no layer carries punctum labels — see 1.6.74), or more than one object at once
+  (`selected_label` holds one integer). The layer is still *selected*; its contents are not touched.
+### Notes — the spec's premises, checked first
+- **`show_dataframes_dialog` is already a `QTableView` + `QAbstractTableModel`**, not the eager
+  `QTableWidget` the spec assumes — rows were never populated eagerly. So this was a proxy + wiring
+  job, not a rewrite. (The genuinely eager table is VPT's `QTableWidget`; replacing it is part 2.)
+- **"layers accumulate" is not quite right:** `data_viz_tools` reuses an `object <N>` layer by name,
+  so it is one layer per *distinct object clicked*, not per click. The sharper defect is the name
+  collision — `object 7` from two different masks share one layer.
+- **Part E's premise does not exist:** no results table mixes aggregate rows with per-object rows.
+  Aggregates are separate single-row tables under their own titles, and `data_viz_tools` already
+  declines to brush a table with no bbox. Part E would be new behaviour, not a fix — flagged rather
+  than invented.
+- **There is no preference persistence to hang "Follow selection in viewer" on.** `persist_measurements`
+  is a session-only attribute + checkbox; there is no QSettings or prefs file. A toggle would be
+  session-only, or persistence is new scope. Deferred to part 2 with the dock it gates.
+
 ## [1.6.76] - 2026-07-16
 ### Fixed — **Clicking one point on a plot highlighted several, and none of them reliably.**
 This was filed as a performance item. It is a correctness bug, and the performance claim attached to

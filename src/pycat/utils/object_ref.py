@@ -375,7 +375,24 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
         except Exception as exc:
             debug_log('resolve_in_viewer: could not centre the camera', exc)
 
-    # Select the labels layer that holds this object — **its own**, not merely the first one open.
+    # ── The highlight is an OVERLAY, not the labels layer's paint state ───────────────────
+    #
+    # This used to set `layer.selected_label = ref.object_id` + `show_selected_label = True`. That
+    # is **napari's label-painting state**, which PyCAT's own paint tools write — so a click on a
+    # plot silently changed the label the user was about to paint with, and hid every other object
+    # in their mask. It also could not work for the cases brushing exists for: an object whose mask
+    # is not open, a punctum (no layer carries punctum labels), or more than one object at once.
+    #
+    # See `pycat.utils.selection_overlay`.
+    drew = False
+    try:
+        from pycat.utils.selection_overlay import show_selection
+        drew = show_selection(viewer, [ref])
+    except Exception as exc:
+        debug_log('resolve_in_viewer: could not draw the selection overlay', exc)
+
+    # Selecting the object's OWN layer is still useful — it is what makes the layer list follow the
+    # user — but it no longer touches that layer's contents or its paint state.
     try:
         candidates, note = layers_for_ref(ref, viewer)
         if note:
@@ -384,14 +401,11 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
             debug_log(f'resolve_in_viewer: {note}', None)
         for layer in candidates:
             viewer.layers.selection = {layer}
-            if ref.object_id is not None and hasattr(layer, 'selected_label'):
-                layer.selected_label = int(ref.object_id)
-                layer.show_selected_label = True
-            return True
+            break
     except Exception as exc:
         debug_log('resolve_in_viewer: could not select the object', exc)
 
-    return bool(ref.bbox)
+    return drew or bool(ref.bbox)
 
 
 def resolve_offline(ref: ObjectRef, *, pad_px=8):

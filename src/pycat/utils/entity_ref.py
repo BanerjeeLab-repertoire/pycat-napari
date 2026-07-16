@@ -47,8 +47,19 @@ from pycat.utils.object_ref import ObjectRef
 
 # The hidden columns. Hidden because they are identity, not measurement: a user reading a results
 # table should not have to scroll past them, and a plot must never offer them as an axis.
+#
+# **"Hidden" has to be enforced, not merely asserted.** When these were introduced (1.6.74) this
+# comment was the only thing hiding them: `DataFrameModel` shows every column a df has, the plot's
+# axis combos are filled from `df.columns`, and `to_csv` writes the lot. So for two versions every
+# results dialog listed `_pycat_entity_id`, every axis dropdown offered it, and every saved CSV
+# carried it into the user's spreadsheet. `visible_columns` / `without_identity` are what actually
+# hide them; a doc comment is not a mechanism.
 ENTITY_ID_COLUMN = '_pycat_entity_id'
 LAYER_ID_COLUMN = '_pycat_layer_id'
+
+#: Every column that is identity rather than measurement. The `_pycat_` prefix is the contract:
+#: anything added here later is hidden everywhere at once.
+HIDDEN_PREFIX = '_pycat_'
 
 UNKNOWN = 'unknown'
 
@@ -285,6 +296,29 @@ def attach_layer_id(df, labels_layer):
     except Exception as exc:
         debug_log('attach_layer_id: could not attach the labels-layer id', exc)
     return df
+
+
+def visible_columns(df):
+    """The columns a USER should see: measurements, not identity."""
+    try:
+        return [c for c in df.columns if not str(c).startswith(HIDDEN_PREFIX)]
+    except Exception:
+        return []
+
+
+def without_identity(df):
+    """``df`` with the identity columns dropped — for display, for plotting, and for export.
+
+    Identity is machinery. It belongs on the object, not in the scientist's results table: a CSV that
+    lands in someone's spreadsheet with a ``_pycat_entity_id`` column is noise at best and a question
+    at worst ("is this a measurement?"). Nothing reads these back from a CSV — session restore goes
+    through the manifest — so exporting them buys nothing and costs clarity.
+    """
+    try:
+        hidden = [c for c in df.columns if str(c).startswith(HIDDEN_PREFIX)]
+        return df.drop(columns=hidden) if hidden else df
+    except Exception:
+        return df
 
 
 def has_entity_ids(df) -> bool:
