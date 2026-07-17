@@ -35,6 +35,10 @@ imports nothing heavy at module scope.
 
 import ast
 import importlib.util
+import os
+import pathlib
+
+import pytest
 
 # Packages the headless (`core`) CI deliberately does not install. A test module needing
 # any of these at import time is a GUI / file-IO test, not a core scientific one.
@@ -76,3 +80,60 @@ def pytest_ignore_collect(collection_path, config):
             if any(name.startswith(p) for p in _GUI_BOUND_PYCAT):
                 return True
     return False
+
+
+# ── The suite must test the WORKING TREE, not an installed copy ───────────────────────────
+#
+# A non-editable install makes `pycat` resolve to site-packages, so a bare `pytest` tests
+# whatever was last installed — **and passes**. That is the worst possible failure mode: a
+# green suite that never executed the code under review. It has already happened here (the
+# 2026-07-16 audit recorded it against the `pycat-160` env; the same trap was live in this
+# repo's own `pycat`/`pycat-dev` envs).
+#
+# It cannot be fixed by fixing an env, because the next machine gets it again. So the suite
+# refuses to run rather than lie about what it tested.
+#
+# CI is safe: `.github/workflows/core.yml` installs with `pip install --no-deps -e .`, so
+# `pycat` resolves inside the checkout and this passes.
+#
+# The escape hatch exists for one real case — deliberately testing a built wheel before a
+# release — and is deliberately awkward to reach by accident.
+
+def _pycat_import_location():
+    import importlib.util
+    spec = importlib.util.find_spec("pycat")
+    if spec is None or not spec.origin:
+        return None
+    return pathlib.Path(spec.origin).resolve()
+
+
+def pytest_configure(config):
+    if os.environ.get("PYCAT_ALLOW_INSTALLED"):
+        return
+
+    found = _pycat_import_location()
+    repo_src = (pathlib.Path(__file__).resolve().parent.parent / "src").resolve()
+
+    if found is None:
+        raise pytest.UsageError(
+            "`pycat` is not importable at all. Install the working tree with:\n"
+            "    pip install --no-deps -e .\n"
+            "(or run with PYTHONPATH=src)"
+        )
+
+    if repo_src not in found.parents:
+        raise pytest.UsageError(
+            f"These tests would run against an INSTALLED copy of pycat, not this working tree.\n"
+            f"\n"
+            f"  importing pycat from : {found}\n"
+            f"  this working tree is : {repo_src}\n"
+            f"\n"
+            f"A bare `pytest` against a non-editable install tests whatever was last installed "
+            f"and PASSES — a green suite that never ran your changes. Fix it with:\n"
+            f"\n"
+            f"    pip install --no-deps -e .\n"
+            f"\n"
+            f"(`--no-deps` is deliberate — see the note in core.yml.) Or run with PYTHONPATH=src.\n"
+            f"To test an installed build on purpose (e.g. checking a wheel before release), set "
+            f"PYCAT_ALLOW_INSTALLED=1."
+        )

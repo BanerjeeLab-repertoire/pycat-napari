@@ -62,6 +62,7 @@ import numpy as np
 
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops
+from pycat.utils.math_utils import robust_focus_energy
 from pycat.utils.tag_registry import tags_layer
 # Optical density is a LOG of a RATIO, so it needs the detector's zero point. An image
 # that has been normalised, CLAHE'd or top-hatted cannot produce one: measured, the
@@ -737,7 +738,12 @@ def bf_focus_metric(image: np.ndarray, mask: np.ndarray = None) -> float:
     img = np.asarray(image, dtype=np.float32)
     diff = img[:, 2:] - img[:, :-2]
     if mask is None:
-        return float((diff ** 2).mean())
+        # A plain ``.mean()`` here is what let a bright out-of-plane speck win the argmax (the
+        # scenario in this function's docstring). ``robust_focus_energy`` drops the top ~1% of
+        # per-pixel gradients before averaging, so a few dust pixels cannot dominate an extended,
+        # genuinely in-focus object — and on a clean frame it does not move the chosen frame. This
+        # is the maskless defence; the mask path below stays exact where a region IS supplied.
+        return robust_focus_energy(diff ** 2)
     m = np.asarray(mask)
     if m.shape != img.shape:
         raise ValueError(
@@ -779,7 +785,7 @@ def bf_analyse_focus_series(
 
         gy = ndimage.sobel(frame, axis=0)
         gx = ndimage.sobel(frame, axis=1)
-        tenens.append(float((gy**2 + gx**2).mean()))
+        tenens.append(robust_focus_energy(gy**2 + gx**2))
 
         m = frame.mean()
         norms.append(float(frame.var() / (m**2 + 1e-9)))
@@ -1117,16 +1123,18 @@ def bf_analyse_frame_quality(
         frame_n = (frame - mn) / (mx - mn + 1e-8)
 
         # Brenner gradient
-        brenners.append(float(((frame_n[:, 2:] - frame_n[:, :-2])**2).mean()))
+        brenners.append(robust_focus_energy((frame_n[:, 2:] - frame_n[:, :-2])**2))
 
         # Tenengrad
         gy = ndimage.sobel(frame_n, axis=0)
         gx = ndimage.sobel(frame_n, axis=1)
-        tenens.append(float((gy**2 + gx**2).mean()))
+        tenens.append(robust_focus_energy(gy**2 + gx**2))
 
         # Normalised variance
         m = frame_n.mean()
-        norm_vars.append(float(frame_n.var() / max(m**2, 1e-9)))
+        # Robust variance: drop the top of the squared deviations, so a bright speck's few
+        # extreme pixels do not inflate the spread. Same defence as the gradient metrics.
+        norm_vars.append(float(robust_focus_energy((frame_n - m)**2) / max(m**2, 1e-9)))
 
         # Fraction of dark pixels (condensate presence indicator)
         dark_fracs.append(float((frame_n < 0.5).mean()))

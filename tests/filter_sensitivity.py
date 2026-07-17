@@ -142,9 +142,28 @@ def assert_scale_invariant(run, *, pixel_sizes, truth, tol, param='microns_per_p
 # **`vpt_tools.defocus_r2_max` must NOT be added** — it is deprecated and unused (`vpt_tools.py`),
 # so a "sensitivity test" on it would assert about code no run reaches, and read as coverage.
 #
-# Next up (increment 2, needs prioritising first): the select-for-the-measured-quantity class —
-# segmentation's `local_snr_threshold` / `global_snr_threshold` (~10 sites) and condensate
-# `bleach_r2_min`. They share the `r2_min` shape: a quality gate on the thing being measured.
+# ── Increment 2 (1.6.89): the prioritisation call, with what it rejected and why ──────────
+#
+# The increment was "needs prioritisation, not machinery". Prioritising meant checking the three
+# candidates rather than adding all three, and **one of them does not belong**:
+#
+# * `segmentation local_snr/global_snr` — ADDED, as OFFSET sensitivity, not the `r2_min` shape the
+#   spec guessed. The old form was `object_mean / bg_std`: the pedestal is in the numerator and not
+#   the denominator, so the verdict moved with the camera (measured: the same punctum reported "SNR"
+#   115 at a 500-count pedestal and 416 at 2000). Fixed in 1.6.86 — and it had survived because the
+#   fix reached only the slow filter while the DEFAULT path kept the broken form.
+# * `segmentation local ring geometry` — ADDED, and it is the **first validated SCALE case**. The
+#   check type had machinery and no case; 1.6.87 produced one.
+# * `condensate bleach_r2_min` — **NOT ADDED, and it is not an oversight.** The spec expected the
+#   `r2_min` shape, but `bleach_r2` gates nothing: `has_bleaching` only picks the reported
+#   `dominant_cause` label, so there is no population statistic to bias. Nor is it offset-sensitive:
+#   `fit_photobleaching` fits `I(t) = I0*exp(-t/tau) + I_inf`, and I_inf absorbs a pedestal —
+#   measured, r_squared = 0.9989 at pedestals 0, 100, 500 and 2000. A sensitivity test on it would
+#   assert an invariant that cannot break, which is coverage, not a warning. (Different reason from
+#   `defocus_r2_max` below, which is excluded for being dead — this one runs, it just is not a filter.)
+#
+# ~37-113 other defaults remain. The audit's view stands: they are not equal, and the next increment
+# is another prioritisation call, not a sweep.
 VALIDATED_CASES = (
     {
         'id': 'molecular_counting.r2_min',
@@ -162,5 +181,30 @@ VALIDATED_CASES = (
                "was called untransfected.",
         'good': 'contrast-to-noise (current)',
         'bad': 'mean/background ratio at 2.0 (removed)',
+    },
+    {
+        'id': 'segmentation.local_snr_threshold',
+        'check': 'offset_invariance',
+        'why': "The old gate was object_mean/bg_std — the pedestal in the numerator and NOT the "
+               "denominator, so the score scaled with the camera: the same punctum reported 'SNR' "
+               "115 at a 500-count pedestal and 416 at 2000. Against a threshold of 1.0 it could "
+               "never reject anything, so a zero-contrast noise blob was kept at any real pedestal "
+               "and counted. It survived because the 1.5.416 CNR fix reached only the slow filter "
+               "while the DEFAULT path (_PYCAT_REFINE_FAST) kept the broken form (fixed 1.6.86).",
+        'good': 'contrast-to-noise, background-subtracted (current)',
+        'bad': 'object_mean / bg_std (removed 1.6.86)',
+    },
+    {
+        'id': 'segmentation.local_ring_geometry',
+        'check': 'scale_invariance',
+        'why': "The interior/background ring was a fixed 1-4px REGARDLESS of object size, so the "
+               "same physical condensate was probed differently at different pixel sizes: at a "
+               "finer pixel size it spans more pixels, the fixed rim sits proportionally closer to "
+               "its boundary, and the ring samples the object's own halo instead of background — "
+               "contrast is underestimated and REAL objects are rejected. The rim now scales with "
+               "the object (0.5/0.5/1.0 x r_eq), which reproduces the old geometry exactly for a "
+               "punctum (1/1/2) and fixes it for everything larger (1.6.87).",
+        'good': 'radii scaled to the object (current)',
+        'bad': 'fixed 1/1/2 px rim (removed 1.6.87)',
     },
 )

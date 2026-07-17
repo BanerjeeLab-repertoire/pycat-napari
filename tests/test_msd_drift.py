@@ -62,7 +62,15 @@ def test_drift_correction_recovers_alpha_and_D(drift):
     tracks = _tracks(drift)
 
     def _fit(df):
-        msd = physics.compute_msd(df, frame_interval_s=_DT)
+        # min_track_length is pinned to this fixture's own track length rather
+        # than left to the default. This test is about DRIFT, and its tracks are
+        # 60 frames; the shipping default is 200 (see `MIN_TRACK_LENGTH_FRAMES` —
+        # 30 honest lags x the n/4 lag rule). Leaving it implicit meant the whole
+        # fixture was silently rejected and `compute_msd` returned an empty frame,
+        # which surfaced as `KeyError: 'n_pairs'` — a confusing way to say "your
+        # tracks are too short". Stating it keeps this test measuring drift, and
+        # keeps it from breaking again the next time the default moves.
+        msd = physics.compute_msd(df, frame_interval_s=_DT, min_track_length=5)
         return physics.fit_anomalous_diffusion(msd, confine_to_defensible_bounds=False)
 
     uncorrected = _fit(tracks)

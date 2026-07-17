@@ -26,8 +26,15 @@ import copy
 import pandas as pd
 import numpy as np
 from scipy.spatial.distance import euclidean
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Notifications via the shim, NOT a direct napari import — the data layer must be
+# importable with no GUI stack. It was not: `data_modules` imported
+# `napari.utils.notifications` at module scope, so `BaseDataClass` could not be
+# constructed headlessly, and `test_set_data_new_key` (a `core` test of pure dict
+# logic) failed in CI with `No module named 'napari'`. The shim forwards to napari
+# when a UI is present and prints otherwise — same pattern `condensate_physics_tools`
+# uses (1.5.378), and the data layer deserves it at least as much as the physics.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 
@@ -127,12 +134,25 @@ class BaseDataClass:
         numpy arrays, dictionaries, and other objects. The key should be a string that uniquely
         identifies the data being stored.
         """
-        # Validation to ensure that the key exists and the data is of the correct type
-        if self.data_repository[key].__class__ != data.__class__:
-            napari_show_warning(f"Data type mismatch for key {key}.")
-        # if self.data_repository[key] doesnt exist yet, create it
-        elif key not in self.data_repository:
+        # ── Check EXISTENCE before class; a type change WARNS but still STORES ────────────
+        #
+        # This read `self.data_repository[key].__class__` FIRST, then checked `key not in ...` — so
+        # a genuinely new key raised `KeyError` on the very first line, before the "new key" branch
+        # could run. `data_repository` is a plain dict (not a defaultdict), so it was a real crash,
+        # masked only because most callers set keys the repository is pre-seeded with. Existence is
+        # now checked first.
+        #
+        # On a type mismatch, `set_data` now WARNS and STORES (it did not, before — the original
+        # branch warned and kept the old value). That resolves the decision flagged when the reorder
+        # first shipped, in the direction `set_data` should behave: it is a SETTER, so it always
+        # sets, and the warning is advisory. The old reject was its own silent failure — e.g. a key
+        # seeded as `int` (`object_size`, `microns_per_pixel_sq`) rejected a legitimate `float`
+        # update, keeping the stale int while the caller believed it had updated. Storing fixes that.
+        if key not in self.data_repository:
             self.data_repository[key] = data
+        elif self.data_repository[key].__class__ != data.__class__:
+            napari_show_warning(f"Data type mismatch for key {key}.")
+            self.data_repository[key] = copy.deepcopy(data)      # warn, but still set
         else:
             self.data_repository[key] = copy.deepcopy(data)
 

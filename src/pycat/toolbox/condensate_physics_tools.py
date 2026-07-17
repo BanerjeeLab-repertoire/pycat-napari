@@ -61,12 +61,180 @@ import numpy as np
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops as _bbox_cols
 from pycat.utils.general_utils import debug_log
+from pycat.utils.math_utils import robust_focus_energy
 import pandas as pd
 
 # Notifications via the shim: keeps the physics importable with no GUI stack (1.5.378).
 from pycat.utils.notify import show_warning as napari_show_warning
+from pycat.utils.notify import show_info as napari_show_info
 from pycat.utils.fit_quality import assess_fit
 from scipy import optimize, stats, ndimage
+
+
+# ── How long must a track be before its MSD means anything? ──────────────────
+#
+# The default was **5 frames**, and five frames cannot support an MSD fit. This is
+# not a taste question, and the number is not invented here — it follows from the
+# lag-window reasoning this codebase already committed to.
+#
+# `compute_msd` computes lags out to `n_frames // 4` (beyond n/4 there are too few
+# displacement pairs for the estimate to be reliable). And
+# `viscosity_from_diffusion_with_ci` documents what a lag window is worth,
+# measured against ground truth:
+#
+#     30 lags -> the 95% CI on D is honest        (fold 1.7x)
+#      4 lags -> it claims 95% and delivers 78%   (fold 1.9x, OVER-CONFIDENT)
+#
+# So a usable fit needs ~30 lags, and the n/4 rule turns that into a track length:
+#
+#     30 lags x 4  =  120 frames MINIMUM
+#     200 frames   ->  50 lags, comfortably inside the honest regime
+#     5 frames     ->   1 lag   <- the old default
+#
+# At one lag there is no log-log slope to fit: alpha is unconstrained, and D is a
+# single displacement variance dominated by the localisation-noise floor. The MSD
+# of a diffusing bead is
+#
+#     MSD(tau) = 4 D tau^alpha + 4 sigma_loc^2
+#
+# and that constant `4 sigma_loc^2` offset is exactly what a broad lag window is
+# needed to separate from the slope. With a handful of lags the fit cannot tell a
+# slow bead from a noisy stationary one, and the finite-track-length bias (each
+# track's own MSD is itself an average over few pairs) sits on top of it.
+#
+# 200 is the floor Gable specified and it is defensible: 50 lags is well past the
+# 30 where the CI was measured to be honest, and it leaves headroom for tracks
+# that are gappy rather than contiguous.
+#
+# **This filter reports what it rejects** (`_report_short_track_rejections`). A
+# short track is often a LINKING failure rather than an absent bead, and raising
+# the bar without saying so would turn one silent problem into a bigger one.
+MIN_TRACK_LENGTH_FRAMES = 200
+
+# Lag-window facts the constant above is derived from. Named so the two cannot
+# drift apart silently: if the fit gate's honest-lag count changes, the minimum
+# track length has to move with it.
+_HONEST_LAG_COUNT = 30          # lags at which the CI on D was measured honest
+_MAX_LAG_FRACTION = 4           # compute_msd's max_lag = n_frames // 4
+
+
+def _short_track_rejections(tracks_df, min_track_length):
+    """Which tracks the length filter drops, and whether they look like FRAGMENTS.
+
+    A short track has two very different meanings:
+
+      * the bead genuinely was not there (it left, bleached, never existed) — the
+        filter is doing its job;
+      * the bead WAS there and the LINKER lost it — the track is short because
+        tracking failed, and the number that survives is a biased subset.
+
+    The second is Gable's report: *stable beads, still fragmented.* The two look
+    identical in the output, which is why this reports rather than just filters.
+
+    Two signatures, both computed from `tracks_df` alone:
+
+    **gappy** — the track has few points but spans many frames (`span >> len`).
+    The bead was detected on and off across a long window, so it was present the
+    whole time and the linker only caught it sometimes. Dropout.
+
+    **co-located** — two or more short tracks sit within `radius` of each other and
+    their frame windows DO NOT OVERLAP. One bead cannot be in two places, and a
+    second bead cannot occupy the first one's spot the moment it disappears. That
+    is one bead cut into pieces. (Overlapping windows are excluded precisely
+    because those CAN be two real neighbouring beads.)
+
+    `radius` is derived from the data, not chosen: it is a small multiple of the
+    median per-frame step, i.e. how far a bead of this population actually moves.
+    A heuristic pointing at a cause — not a measurement, and it deliberately does
+    not attempt to re-link anything.
+
+    Returns a dict; never raises — a diagnostic must not be able to break the
+    analysis it is describing.
+    """
+    out = dict(n_rejected=0, n_total=0, n_gappy=0, n_colocated=0, radius_um=float('nan'))
+    try:
+        short = []
+        steps = []
+        for tid, grp in tracks_df.groupby('track_id'):
+            if tid < 0:
+                continue
+            out['n_total'] += 1
+            g = grp.sort_values('frame')
+            t = g['frame'].values.astype(int)
+            y = g['y_um'].values.astype(float)
+            x = g['x_um'].values.astype(float)
+            if len(g) > 1:
+                d = np.hypot(np.diff(y), np.diff(x)) / np.maximum(1, np.diff(t))
+                steps.extend(d[np.isfinite(d)].tolist())
+            if len(g) >= min_track_length:
+                continue
+            out['n_rejected'] += 1
+            span = int(t.max() - t.min() + 1)
+            if span >= min_track_length:
+                out['n_gappy'] += 1          # present across a long window, caught rarely
+            short.append((float(y.mean()), float(x.mean()), int(t.min()), int(t.max())))
+
+        if not short:
+            return out
+
+        # How far does a bead in THIS population move in a frame? Fragments of one
+        # bead land within a few of those. Median, so a handful of mis-links do not
+        # set the scale.
+        med_step = float(np.median(steps)) if steps else 0.0
+        radius = max(5.0 * med_step, 1e-9)
+        out['radius_um'] = radius
+
+        # O(n^2) over REJECTED tracks only, which is the small set by construction.
+        involved = set()
+        for i in range(len(short)):
+            yi, xi, a0, a1 = short[i]
+            for j in range(i + 1, len(short)):
+                yj, xj, b0, b1 = short[j]
+                if a0 <= b1 and b0 <= a1:
+                    continue                  # windows overlap -> could be two real beads
+                if np.hypot(yi - yj, xi - xj) <= radius:
+                    involved.add(i); involved.add(j)
+        out['n_colocated'] = len(involved)
+    except Exception as exc:
+        debug_log('short-track diagnostic failed; not reporting', exc)
+    return out
+
+
+def _report_short_track_rejections(stats):
+    """Say what the length filter did. **A filter that says nothing is a lie of omission.**
+
+    Escalates: a fragmentation signature is a warning because the surviving tracks
+    are then a biased subset and the viscosity computed from them is not the
+    viscosity of the sample.
+    """
+    n_rej, n_tot = stats.get('n_rejected', 0), stats.get('n_total', 0)
+    if not n_rej:
+        return
+    frag = stats.get('n_colocated', 0) + stats.get('n_gappy', 0)
+    msg = (f"MSD: {n_rej} of {n_tot} tracks rejected as shorter than the minimum "
+           f"track length.")
+    if frag:
+        bits = []
+        if stats.get('n_colocated'):
+            bits.append(f"{stats['n_colocated']} sit on top of each other at different "
+                        f"times (within {stats['radius_um']*1000:.0f} nm)")
+        if stats.get('n_gappy'):
+            bits.append(f"{stats['n_gappy']} span more frames than they have points")
+        napari_show_warning(
+            msg + " **" + " and ".join(bits) + "** — that is the signature of a bead "
+            "the LINKER lost, not a bead that was absent. One bead cannot be in two "
+            "places at different times, and a bead detected on and off across a long "
+            "window was present the whole time.\n\nSo these are a linking failure, and "
+            "the tracks that survived are a biased subset — the viscosity from them is "
+            "not the viscosity of the sample. Check the linking distance and max frame "
+            "gap before trusting the number.")
+    elif n_tot and n_rej >= 0.8 * n_tot:
+        napari_show_warning(
+            msg + " At least 80% of tracks were rejected. Either the movie is too "
+            "short for the minimum track length, or the linker is not holding beads — "
+            "worth checking before trusting what is left.")
+    else:
+        napari_show_info(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +245,7 @@ def compute_msd(
     tracks_df: pd.DataFrame,
     max_lag: int = None,
     frame_interval_s: float = 1.0,
-    min_track_length: int = 5,
+    min_track_length: int = MIN_TRACK_LENGTH_FRAMES,
     reject_outlier_tracks: bool = True,
     outlier_iqr_factor: float = 1.5,
 ) -> pd.DataFrame:
@@ -104,7 +272,10 @@ def compute_msd(
     frame_interval_s : float
         Physical time per frame in seconds.
     min_track_length : int
-        Tracks shorter than this are excluded.
+        Tracks shorter than this are excluded. **Default 200 frames** — see
+        ``MIN_TRACK_LENGTH_FRAMES``. Rejected tracks are counted and reported, not
+        silently dropped: a short track is often a LINKING failure rather than an
+        absent bead, and the two have very different meanings.
 
     Returns
     -------
@@ -116,7 +287,13 @@ def compute_msd(
     """
     frames = sorted(tracks_df['frame'].unique())
     if max_lag is None:
-        max_lag = max(1, len(frames) // 4)
+        max_lag = max(1, len(frames) // _MAX_LAG_FRACTION)
+
+    # Say what the length filter rejected, and whether those look like beads the
+    # LINKER lost rather than beads that were absent. Reported before the work
+    # below, so the message still lands when nothing survives to compute.
+    _report_short_track_rejections(
+        _short_track_rejections(tracks_df, min_track_length))
 
     # One MSD value per track per lag (tracks are the independent unit).
     per_track: dict[int, list[float]] = {lag: [] for lag in range(1, max_lag + 1)}
@@ -730,7 +907,7 @@ def fit_anomalous_diffusion(
 def msd_per_track(
     tracks_df: pd.DataFrame,
     frame_interval_s: float = 1.0,
-    min_track_length: int = 5,
+    min_track_length: int = MIN_TRACK_LENGTH_FRAMES,
 ) -> pd.DataFrame:
     """
     Fit anomalous diffusion to each individual track.
@@ -1593,7 +1770,9 @@ def _frame_gradient_energy(frame: np.ndarray) -> float:
     """
     gy = ndimage.sobel(frame, axis=0)
     gx = ndimage.sobel(frame, axis=1)
-    return float(np.sqrt(gy**2 + gx**2).mean())
+    # Robust mean edge strength: an out-of-plane speck cannot hijack the argmax. See
+    # `robust_focus_energy` — clean frames are unaffected, debris is trimmed.
+    return robust_focus_energy(np.sqrt(gy**2 + gx**2))
 
 
 def _fit_linear_trend(values: np.ndarray) -> dict:
@@ -1660,7 +1839,9 @@ def analyse_frame_quality(
         frame = stack[t].astype(np.float32)
         mean_int.append(float(frame.mean()))
         lap      = ndimage.laplace(frame)
-        lap_var.append(float(lap.var()))
+        # Robust Laplacian variance: a bright out-of-plane speck's few large-magnitude
+        # pixels no longer dominate the spread, so 'best frame' is the sample, not the dust.
+        lap_var.append(float(robust_focus_energy((lap - lap.mean())**2)))
         entropy.append(_frame_entropy(frame, entropy_bins))
         grad_en.append(_frame_gradient_energy(frame))
 
@@ -1868,7 +2049,7 @@ def per_track_msd_curves(
     tracks_df: pd.DataFrame,
     max_lag: int = None,
     frame_interval_s: float = 1.0,
-    min_track_length: int = 5,
+    min_track_length: int = MIN_TRACK_LENGTH_FRAMES,
     n_lags: int = 40,
 ) -> pd.DataFrame:
     """

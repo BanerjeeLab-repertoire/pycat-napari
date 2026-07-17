@@ -463,6 +463,44 @@ def resolve_offline(ref: ObjectRef, *, pad_px=8):
         debug_log('resolve_offline: could not read the crop', exc)
         return None, f"Could not read {path.name}: {exc}"
 
+#: The spellings a cell label answers to, in priority order. ``'cell label'`` — with a SPACE — is
+#: what ``puncta_analysis_func`` writes (``feature_analysis_tools.py``); every other producer and
+#: consumer in the codebase uses the underscore. See ``cell_label_column``.
+CELL_LABEL_SPELLINGS = ('cell_label', 'cell label', 'parent_id')
+
+
+def cell_label_column(df):
+    """The column holding the cell label, whatever it is spelled. ``None`` if there is not one.
+
+    **One producer disagrees with the whole codebase.** ``puncta_analysis_func`` writes
+    ``'cell label'`` with a space; everything else writes ``cell_label``. So a plain
+    ``'cell_label' in df.columns`` **silently misses on the one table it exists for** — which is
+    exactly what happened twice:
+
+    * ``ObjectRef.from_row`` looked up ``cell_label`` and every punctum ref carried
+      ``parent_id=None`` (fixed 1.6.74, by accepting both);
+    * ``analysis_plots`` gated a per-cell grouping on it, so multi-cell puncta data was drawn as ONE
+      line connecting points *across* cells — a pooled series rendered as a trajectory — instead of
+      per-cell traces plus a mean (fixed 1.6.90, by calling this).
+
+    The column is **not renamed**, deliberately: it is user-visible in results tables and CSVs, and
+    renaming it would silently change what those files say. Accepting both spellings fixes the
+    readers without touching anything a user has already saved.
+
+    This lives in one place so the next reader does not have to rediscover the split.
+    """
+    if df is None:
+        return None
+    try:
+        columns = df.columns
+    except AttributeError:
+        return None
+    for name in CELL_LABEL_SPELLINGS:
+        if name in columns:
+            return name
+    return None
+
+
 def normalise_bbox_columns(df):
     """**Rename skimage's ``bbox-0..bbox-3`` to the ``bbox_y0..bbox_x1`` an ObjectRef reads.**
 

@@ -1240,6 +1240,201 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
             viewer.add_labels(output_mask, name=f"Random Forest Segmentation {idx+1} on {image_layer.name}")
 
 
+# ── The two refinement filters SHARE this, because they diverged once already ──
+#
+# `puncta_refinement_filtering_func_fast` is documented as bit-for-bit identical to
+# `puncta_refinement_filtering_func`, and `tests/test_segmentation_refine.py`
+# asserts it. It was not true. The 1.5.416 CNR fix was applied to the slow filter
+# and **never to the fast one** — which is the DEFAULT (`_PYCAT_REFINE_FAST = True`):
+#
+#     slow:  local_cnr = (dilated_mean - loc_med) / loc_sd     <- the fix
+#     fast:  dilated_mean / (img_local_bg_std + eps)           <- the dead bare ratio
+#
+# So the gate the slow path's own comment calls dead — "these two conditions have
+# never rejected anything" — was still live for every user, and the ground-truth
+# calibration justifying its threshold described code nobody ran. The equivalence
+# test passed because `local_intensity_condition` decides first in its fixture and
+# masks the difference (measured: puncta amplitudes 8->25 flip together at 11).
+#
+# What the fast path was keeping, measured against ground truth
+# (`synthetic_puncta_image`, 3 amplitudes x 3 seeds):
+#
+#     amp=30   bare kept 3-11 real + 22-30 SPURIOUS  ->  CNR removed 0 real, 14-19 spurious
+#     amp=60   bare kept  6-8 real + 16-19 SPURIOUS  ->  CNR removed 0 real, 12-14 spurious
+#     amp=120  bare kept 18-27 real + 12-21 SPURIOUS ->  CNR removed 0 real, 10-18 spurious
+#
+# Zero real puncta lost in any run; 128 spurious detections removed. (The amp=8
+# worry from the calibration — a real punctum at CNR 0.8, below the 1.0 cut — never
+# arises: at amp=8 the intensity and kurtosis checks have already removed it, so the
+# SNR gate is never consulted.)
+#
+# Copying the fix into the second implementation would leave two copies to drift
+# again. These helpers ARE the fix: one definition, both callers.
+
+
+def _local_ring_radii(area_px, cell_area_px):
+    """How far to erode, and where to put the local-background ring, FOR THIS OBJECT.
+
+    ── The rim was a fixed 1-4px no matter how big the object was ────────────
+
+    `local_intensity_condition` and `gradient_condition` compare an object's
+    interior (eroded 1px) against a band 1-4px outside it — regardless of the
+    object's own size. That geometry is right for a point-like punctum a few px
+    across. It is wrong for a condensate spanning tens to hundreds of px:
+
+      * eroding 1px off a 30px-wide object removes almost nothing, so the
+        "interior" sample is essentially the whole object, boundary included;
+      * a 1-4px ring hugging a large object's edge sits INSIDE that object's own
+        halo — the PSF tail and the real concentration gradient at its boundary
+        both scale with the object — so the "background" is contaminated upward,
+        the contrast is underestimated, and the checks misfire on real objects.
+
+    Both are the same bug: a fixed-scale probe measuring a variable-scale object.
+    The earlier attempt exempted large objects from the checks; this fixes what the
+    checks measure instead, which means nothing needs exempting and the same rule
+    applies at every size.
+
+    Radii scale with the object's equivalent radius `r_eq = sqrt(area/pi)`:
+
+        erode = gap = 0.5 * r_eq        band = 1.0 * r_eq
+
+    **For a typical punctum this reproduces today's geometry exactly.**
+    `min_spot_radius=2` gives `min_area ~13px` -> `r_eq ~2px` -> erode 1, gap 1,
+    band 2: a ring from +1 to +3, which is what the fixed code did. So puncta are
+    unaffected and only the objects the fixed scale could not describe change.
+
+    The ceiling comes from the physics, not from taste. In cellulo the cell bounds
+    the condensate, and all but extreme condensates are at most ~25% of the cell
+    DIAMETER — so 25% of the cell's equivalent radius is the largest standoff that
+    can be justified, and past it the ring would start sampling other cells or
+    leave the cell entirely. In vitro there is no cell and objects can exceed one,
+    but `cell_area_px` is then the field, so the cap scales with that instead. The
+    floor of 3px keeps a tiny/degenerate cell from collapsing the ring to nothing.
+
+    Returns `(erode_r, gap_r, band_r)` in pixels, each >= 1.
+    """
+    area = max(1.0, float(area_px))
+    r_eq = float(np.sqrt(area / np.pi))
+    cell_r = float(np.sqrt(max(1.0, float(cell_area_px)) / np.pi))
+    cap = max(3, int(round(0.25 * cell_r)))
+
+    erode_r = int(min(max(1, int(round(0.5 * r_eq))), cap))
+    gap_r = int(min(max(1, int(round(0.5 * r_eq))), cap))
+    band_r = int(min(max(2, int(round(1.0 * r_eq))), cap))
+    return erode_r, gap_r, band_r
+
+
+def _ring_masks(puncta_mask_holder, erode_r, gap_r, band_r):
+    """Interior, dilated-object and local-background masks at the given radii.
+
+    Shared so the two filters cannot drift — the same reason `_snr_conditions` is
+    shared. `binary_dilation` with `disk(r)` is one call rather than r iterations of
+    `disk(1)`, which also removes the old 3x loop.
+    """
+    interior = ndi.binary_erosion(puncta_mask_holder, sk.morphology.disk(erode_r))
+    dilated = ndi.binary_dilation(puncta_mask_holder, sk.morphology.disk(gap_r))
+    outer = ndi.binary_dilation(dilated, sk.morphology.disk(band_r))
+    local_bg = outer ^ dilated
+    return interior, dilated, local_bg
+
+
+def _robust_bg(vals):
+    """Background level and spread as (median, MAD-sigma). **Robust on purpose.**
+
+    A plain mean/std is contaminated by NEIGHBOURING PUNCTA in the local ring:
+    measured, a bright (amp=60) punctum with 3 neighbours had its ring_std inflated
+    from 5 to 18, collapsing its CNR from 6.7 to 1.7. The metric was reporting
+    crowding, not contrast, and a threshold calibrated against it would have deleted
+    real puncta.
+    """
+    v = np.asarray(vals, dtype=float).ravel()
+    if v.size < 4:
+        return (float(np.mean(v)) if v.size else 0.0,
+                float(np.std(v)) if v.size else 1.0)
+    med = float(np.median(v))
+    mad = 1.4826 * float(np.median(np.abs(v - med)))
+    return med, (mad if mad > 0 else float(np.std(v)) or 1.0)
+
+
+def _snr_conditions(img_dilated_object_mean, img_local_bg_pixels, cell_bg_iqr,
+                    local_snr_threshold, global_snr_threshold):
+    """The two SNR rejections, as CONTRAST to noise rather than a bare ratio.
+
+    This used to be `object_mean / bg_std` — NO background subtraction. The camera
+    pedestal is in the numerator and not the denominator, so the "SNR" scaled with
+    the pedestal:
+
+        pedestal 500  -> reported "SNR" 115
+        pedestal 2000 -> reported "SNR" 416
+
+    The gate rejects when SNR <= threshold, and the threshold is 1.0 — so it
+    rejected only when `object_mean <= bg_std`. On any camera with a positive
+    background that NEVER happens: a "punctum" of pure noise with zero contrast has
+    object_mean 120 against bg_std 5, and is kept.
+
+    The correct quantity is contrast above background in units of background NOISE,
+    which is pedestal-invariant:
+
+        CNR = (object_mean - background) / background_noise
+
+    Calibrated against ground truth (12 fields, 8 puncta each):
+
+        SPURIOUS (pure noise)  median CNR 0.0, 95th pct 0.4
+        REAL punctum amp=8     median 0.8   (at the detection limit)
+        REAL punctum amp=15    median 1.6
+        REAL punctum amp=30    median 3.2
+        REAL punctum amp=120   median 12.7
+
+    Spurious detections top out at 0.4, so a threshold of 1.0 separates noise from
+    real puncta. `cell_bg_iqr` is the cell background with outliers already removed.
+    """
+    eps = np.finfo(np.float32).eps
+    loc_med, loc_sd = _robust_bg(img_local_bg_pixels)
+    cell_med, cell_sd = _robust_bg(cell_bg_iqr)
+    local_cnr = (img_dilated_object_mean - loc_med) / (loc_sd + eps)
+    global_cnr = (img_dilated_object_mean - cell_med) / (cell_sd + eps)
+    return (local_cnr <= local_snr_threshold, global_cnr <= global_snr_threshold)
+
+
+def _report_refinement_drops(dropped, reason_counts, n_in):
+    """**Tell the user what the filter did.** Shared by both implementations.
+
+    A filter that removes objects and says nothing is indistinguishable from a
+    segmentation that never found them. The counts are named so a suspicious
+    rejection (e.g. everything dropped on `area`, meaning min_spot_radius is wrong
+    for this pixel size) is visible immediately rather than after a day of
+    confusion.
+
+    The fast path — the DEFAULT — carried none of this: `napari_show_info` appeared
+    twice in the slow filter and zero times in the fast one. So the always-on
+    summary, added precisely so that puncta could not vanish silently, was itself
+    silent for every user who had not set an env var.
+    """
+    n_dropped = len(dropped)
+    if not n_dropped:
+        return
+    detail = ", ".join(f"{k} ({v})" for k, v in
+                       sorted(reason_counts.items(), key=lambda kv: -kv[1]))
+    msg = (f"Puncta refinement: {n_dropped} of {n_in} detections rejected. "
+           f"Reasons: {detail}. "
+           f"(A detection can fail several conditions, so these sum to more than the "
+           f"number dropped.)")
+    if n_in and n_dropped == n_in:
+        napari_show_warning(
+            msg + " **EVERY detection was rejected.** That usually means a threshold is "
+            "wrong for this data rather than that the puncta are all spurious — "
+            "check min_spot_radius against the pixel size, and the SNR thresholds "
+            "against the image contrast.")
+    elif n_in and n_dropped >= 0.8 * n_in:
+        # >= not >: 4 of 5 is exactly 80%, and a user who loses four fifths of their
+        # detections should hear about it.
+        napari_show_warning(
+            msg + " At least 80% were rejected — worth checking the thresholds before "
+            "trusting the count.")
+    else:
+        napari_show_info(msg)
+
+
 @tags_layer('puncta_filter', role='labels',
             summary='Puncta filtering by size/shape/intensity', target='punctum')
 def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, cell_mask, labeled_puncta_mask, min_spot_radius,
@@ -1329,16 +1524,15 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     for label in np.unique(labeled_puncta_mask)[1:]:
         # Create a binary mask for each object
         puncta_mask_holder = labeled_puncta_mask == label
-        # Erode the mask for the gradient image
-        eroded_puncta_holder = ndi.binary_erosion(puncta_mask_holder, sk.morphology.disk(1))
-        # Dilate the mask (encompases more of the full spot fluorescence to aviod its tails in the local bg)
-        dilated_puncta_holder = ndi.binary_dilation(puncta_mask_holder, sk.morphology.disk(1))
-        # Dilate the mask by 3 pixels for local bg aroud the object
-        dilated_local_mask = puncta_mask_holder.copy()
-        for _ in range(3):
-            dilated_local_mask = ndi.binary_dilation(dilated_local_mask, sk.morphology.disk(1)) # diamond element gives smaller dilations
-        # The local bg is simply the dilated mask minus the puncta mask
-        local_bg_mask = dilated_local_mask ^ dilated_puncta_holder
+        # Interior, dilated object, and the local-background ring — at radii SCALED
+        # TO THIS OBJECT. A fixed 1-4px probe describes a punctum and misdescribes a
+        # condensate; see `_local_ring_radii`. For a punctum the radii come out 1/1/2,
+        # which is exactly the fixed geometry this replaces.
+        _erode_r, _gap_r, _band_r = _local_ring_radii(
+            int(puncta_mask_holder.sum()), cell_area)
+        eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
+            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+        dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         # Collect pixel values from various masks and images for analysis
         # Get the pixels for each mask from the original image
@@ -1430,69 +1624,14 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         # Setup ellipticity based condition
         ellipticty_condition = ellipticity > 0.99
         # Setup gradient based condition
-        gradient_condition = (gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)) and not is_large_object
-        # ── CONTRAST to noise, not a bare ratio ────────────────────────────────
-        #
-        # This used to be `object_mean / bg_std` — NO background subtraction. The camera
-        # pedestal is in the numerator and not the denominator, so the "SNR" scales with
-        # the pedestal. For an IDENTICAL punctum (true contrast 50 counts):
-        #
-        #     pedestal 0    -> reported "SNR"  14
-        #     pedestal 100  -> reported "SNR"  34
-        #     pedestal 500  -> reported "SNR" 115
-        #     pedestal 2000 -> reported "SNR" 416
-        #
-        # The gate rejects when SNR <= threshold, and the threshold is 1.0 — so it rejects
-        # only when `object_mean <= bg_std`. On any camera with a positive background that
-        # NEVER happens: even a "punctum" of PURE NOISE with zero contrast has
-        # object_mean = 120 against bg_std = 5, and is kept.
-        #
-        # **These two conditions have never rejected anything.** Two of the five puncta
-        # quality checks have been dead for the entire life of the pipeline.
-        #
-        # The correct quantity is the CONTRAST above background in units of the background
-        # NOISE, which is pedestal-invariant:
-        #
-        #     CNR = (object_mean - background) / background_noise
-        #
-        # Calibrated against ground truth (12 fields, 8 puncta each):
-        #
-        #     SPURIOUS (pure noise)  median CNR 0.0, 95th pct **0.4**
-        #     REAL punctum amp=8     median 0.8   (at the detection limit)
-        #     REAL punctum amp=15    median 1.6
-        #     REAL punctum amp=30    median 3.2
-        #     REAL punctum amp=120   median 12.7
-        #
-        # Spurious detections top out at 0.4, so a threshold of 1.0 separates noise from
-        # real puncta. The DEFAULT IS UNCHANGED AT 1.0 — but it now means "one sigma of
-        # contrast above background" instead of a pedestal-dependent number that gated
-        # nothing.
-        #
-        # The background is estimated ROBUSTLY (median + MAD). A plain mean/std is
-        # contaminated by NEIGHBOURING PUNCTA in the local ring: measured, a bright
-        # (amp=60) punctum with 3 neighbours nearby had its ring_std inflated from 5 to 18,
-        # collapsing its CNR from 6.7 to 1.7 — the metric was reporting crowding, not
-        # contrast, and a threshold calibrated against it would have deleted real puncta.
-        _eps = np.finfo(np.float32).eps
-
-        def _robust_bg(vals):
-            v = np.asarray(vals, dtype=float).ravel()
-            if v.size < 4:
-                return (float(np.mean(v)) if v.size else 0.0,
-                        float(np.std(v)) if v.size else 1.0)
-            med = float(np.median(v))
-            mad = 1.4826 * float(np.median(np.abs(v - med)))
-            return med, (mad if mad > 0 else float(np.std(v)) or 1.0)
-
-        _loc_med, _loc_sd = _robust_bg(img_local_bg_pixels)
-        # `cell_bg_iqr` is the cell background with outliers already removed.
-        _cell_med, _cell_sd = _robust_bg(cell_bg_iqr)
-
-        local_cnr = (img_dilated_object_mean - _loc_med) / (_loc_sd + _eps)
-        global_cnr = (img_dilated_object_mean - _cell_med) / (_cell_sd + _eps)
-
-        local_snr_condition = local_cnr <= local_snr_threshold
-        global_snr_condition = global_cnr <= global_snr_threshold
+        gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
+        # The two SNR rejections. CONTRAST to noise, not a bare ratio -- see
+        # `_snr_conditions`, which is SHARED with the fast filter. It used to be
+        # inlined here and only here, which is exactly how the fast path (the
+        # default) kept the dead pedestal-scaled formula this replaced.
+        local_snr_condition, global_snr_condition = _snr_conditions(
+            img_dilated_object_mean, img_local_bg_pixels, cell_bg_iqr,
+            local_snr_threshold, global_snr_threshold)
 
         # If any of the conditions are met, remove the object from the mask
         _reasons = []
@@ -1536,35 +1675,11 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
                       f"(area={_a}px, obj_mean={img_object_mean:.0f}): "
                       f"{', '.join(_reasons)}")
 
-    # ── Tell the user what the filter did ──────────────────────────────────────
-    #
-    # A filter that removes objects and says nothing is indistinguishable from a
-    # segmentation that never found them. The counts are named so a suspicious rejection
-    # (e.g. everything dropped on `area`, meaning min_spot_radius is wrong for this pixel
-    # size) is visible immediately rather than after a day of confusion.
-    _n_in = int(len(np.unique(labeled_puncta_mask)) - 1)
-    _n_dropped = len(_dropped)
-    if _n_dropped:
-        _detail = ", ".join(f"{k} ({v})" for k, v in
-                            sorted(_reason_counts.items(), key=lambda kv: -kv[1]))
-        _msg = (f"Puncta refinement: {_n_dropped} of {_n_in} detections rejected. "
-                f"Reasons: {_detail}. "
-                f"(A detection can fail several conditions, so these sum to more than the "
-                f"number dropped.)")
-        if _n_in and _n_dropped == _n_in:
-            _msg += (" **EVERY detection was rejected.** That usually means a threshold is "
-                     "wrong for this data rather than that the puncta are all spurious — "
-                     "check min_spot_radius against the pixel size, and the SNR thresholds "
-                     "against the image contrast.")
-            napari_show_warning(_msg)
-        elif _n_in and _n_dropped >= 0.8 * _n_in:
-            # >= not >: 4 of 5 is exactly 80%, and a user who loses four fifths of their
-            # detections should hear about it.
-            _msg += (" At least 80% were rejected — worth checking the thresholds before "
-                     "trusting the count.")
-            napari_show_warning(_msg)
-        else:
-            napari_show_info(_msg)
+    # Tell the user what the filter did -- see `_report_refinement_drops`, which is
+    # SHARED with the fast filter. This summary used to live only here, so the
+    # default path reported nothing at all.
+    _report_refinement_drops(_dropped, _reason_counts,
+                             int(len(np.unique(labeled_puncta_mask)) - 1))
 
     return refined_puncta_mask
 
@@ -1606,27 +1721,34 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
     props = sk.measure.regionprops(labeled_puncta_mask, intensity_image=original_img)
     cell_area = np.sum(cell_mask)
     min_area = math.ceil(np.pi * min_spot_radius**2)
-    _disk1 = sk.morphology.disk(1)
     H, W = labeled_puncta_mask.shape
+    # Accumulated for the summary below: what was rejected, and why. Same contract
+    # as the slow filter, via the same reporter.
+    _dropped = []
+    _reason_counts = {}
 
     for p in props:
         label = p.label
-        # Object bounding box, padded by 4 px to contain the 3-step dilation ring
-        # (3 dilations + the extra dilated_puncta_holder) with margin to spare.
+        # Ring radii SCALED TO THIS OBJECT — see `_local_ring_radii`. The same call
+        # the slow filter makes, so the two cannot describe an object differently.
+        _erode_r, _gap_r, _band_r = _local_ring_radii(int(p.area), cell_area)
+
+        # Object bounding box, padded to contain the ring. The pad used to be a
+        # fixed 4px, which was exactly enough for the fixed 3-step dilation — now
+        # that the ring scales with the object, a fixed pad would CLIP it, and the
+        # windowed filter would silently sample a different background from the
+        # full-array one. +1 for the erosion/rounding margin.
         r0, c0, r1, c1 = p.bbox  # (min_row, min_col, max_row, max_col)
-        pad = 4
+        pad = _gap_r + _band_r + 1
         rr0 = max(0, r0 - pad); rr1 = min(H, r1 + pad)
         cc0 = max(0, c0 - pad); cc1 = min(W, c1 + pad)
 
         sub_label = labeled_puncta_mask[rr0:rr1, cc0:cc1]
         puncta_mask_holder = (sub_label == label)
 
-        eroded_puncta_holder = ndi.binary_erosion(puncta_mask_holder, _disk1)
-        dilated_puncta_holder = ndi.binary_dilation(puncta_mask_holder, _disk1)
-        dilated_local_mask = puncta_mask_holder.copy()
-        for _ in range(3):
-            dilated_local_mask = ndi.binary_dilation(dilated_local_mask, _disk1)
-        local_bg_mask = dilated_local_mask ^ dilated_puncta_holder
+        eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
+            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+        dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         sub_orig = original_img[rr0:rr1, cc0:cc1]
         sub_proc = processed_img[rr0:rr1, cc0:cc1]
@@ -1690,9 +1812,14 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         is_oversized_and_irregular = (_area > cell_area*max_area_fraction) and (p.solidity < 0.85)
         area_condition = is_oversized_and_irregular or is_undersized
         ellipticty_condition = ellipticity > 0.99
-        gradient_condition = (gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)) and not is_large_object
-        local_snr_condition = (img_dilated_object_mean/(img_local_bg_std+np.finfo(np.float32).eps)) <= local_snr_threshold
-        global_snr_condition = (img_dilated_object_mean/(cell_bg_std+np.finfo(np.float32).eps)) <= global_snr_threshold
+        gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
+        # The SAME call the slow filter makes. This was the divergence: the 1.5.416
+        # CNR fix went into the slow path and never into this one -- the DEFAULT --
+        # so the dead pedestal-scaled ratio kept every noise blob that survived the
+        # other checks. Ground truth: 0 real puncta lost, 128 spurious removed.
+        local_snr_condition, global_snr_condition = _snr_conditions(
+            img_dilated_object_mean, img_local_bg_pixels, cell_bg_iqr,
+            local_snr_threshold, global_snr_threshold)
 
         _reasons = []
         if local_intensity_condition: _reasons.append('local_intensity')
@@ -1705,11 +1832,25 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         if global_snr_condition:      _reasons.append('global_snr')
         if _reasons:
             refined_puncta_mask[labeled_puncta_mask == label] = 0
+            # Accumulate the SUMMARY, not just the debug print. This path had only
+            # the print — behind an env var, to a console a napari user never sees —
+            # so the "always record why" guarantee the slow filter carries was
+            # missing from the one that actually runs.
+            _dropped.append({
+                'label': int(label),
+                'area_px': int(_area),
+                'object_mean': float(img_object_mean),
+                'reasons': list(_reasons),
+            })
+            for _r in _reasons:
+                _reason_counts[_r] = _reason_counts.get(_r, 0) + 1
             if _refine_debug_enabled():
                 print(f"[PyCAT refine-fast] dropped label {int(label)} "
                       f"(area={int(_area)}px, obj_mean={img_object_mean:.0f}): "
                       f"{', '.join(_reasons)}")
 
+    _report_refinement_drops(_dropped, _reason_counts,
+                             int(len(np.unique(labeled_puncta_mask)) - 1))
     return refined_puncta_mask
 
 def puncta_refinement_func(original_image, processed_image, puncta_mask, cell_mask, min_spot_radius=2,
@@ -2314,11 +2455,32 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     else:
         # Segment and refine on the cropped ROI
         puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
+        # ── Pass the thresholds ON. They used to stop here. ────────────────────
+        #
+        # This call took `min_spot_radius` and `fast` and DROPPED the other five —
+        # kurtosis_threshold, local_snr_threshold, global_snr_threshold,
+        # intensity_hwhm_scale, max_area_fraction. They are accepted by this
+        # function, threaded down from `run_segment_subcellular_objects`, and were
+        # then silently discarded here; `puncta_refinement_func` fell back to its
+        # own defaults.
+        #
+        # Those defaults are IDENTICAL to this function's (-3.0, 1.0, 1.0, 1.17,
+        # 0.25), which is exactly why nobody saw it: at defaults the bug is
+        # invisible. It only bites when a user CHANGES a threshold — at which point
+        # their control silently does nothing and the refinement keeps using -3.0.
+        #
+        # Same class as the dead SNR gate (1.5.416): a consequential decision made
+        # without telling anyone. A UI control that does not reach the code it names
+        # is worse than no control, because it looks like it worked.
         refined_puncta_mask_crop = puncta_refinement_func(
-            orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=min_spot_radius,
-            kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
-            global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
-            max_area_fraction=max_area_fraction, fast=refine_fast)
+            orig_crop, proc_crop, puncta_mask_crop, mask_crop,
+            min_spot_radius=min_spot_radius,
+            kurtosis_threshold=kurtosis_threshold,
+            local_snr_threshold=local_snr_threshold,
+            global_snr_threshold=global_snr_threshold,
+            intensity_hwhm_scale=intensity_hwhm_scale,
+            max_area_fraction=max_area_fraction,
+            fast=refine_fast)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
