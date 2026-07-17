@@ -1,41 +1,53 @@
-## [1.6.89] - 2026-07-17
-### Added — **Filter-sensitivity increment 2: two new validated cases, and one deliberate rejection.**
-The increment was *"needs prioritisation, not machinery"*. Prioritising meant **checking** the three
-candidates the spec named rather than adding all three — and one of them does not belong.
+## [1.6.90] - 2026-07-17
+### Fixed — **The three live bugs the audit verified and left: all three, and one was worse than recorded.**
 
-**`segmentation.local_snr_threshold` / `global_snr_threshold` — ADDED, as OFFSET sensitivity.** Not
-the `r2_min` selection-bias shape the spec guessed. The old gate was `object_mean / bg_std`: the
-pedestal sits in the numerator and *not* the denominator, so the score scaled with the camera — the
-same punctum reported "SNR" 115 at a 500-count pedestal and 416 at 2000. Against a threshold of 1.0
-it could never reject anything, so a zero-contrast noise blob was kept at any real pedestal and
-counted. Same family as the registered `ts_cellpose` case, found independently, and it survived far
-longer because the 1.5.416 fix reached only the slow filter while the **default** path kept the broken
-form until 1.6.86.
+**A per-cell grouping in every puncta plot never fired.** `analysis_plots._grouped` gated on
+`'cell_label'`; `puncta_analysis_func` writes `'cell label'` — with a **space** — and is the only
+producer in the codebase that does. Recorded as a silently-dead branch; it is worse than that. The
+`else` it always took runs one `ax.plot` over a **pooled multi-cell frame**, connecting points
+*across* cells into a single line — a zigzag between unrelated objects, drawn as though it were a
+trajectory. The picture said something untrue. Now resolved through `object_ref.cell_label_column`,
+which accepts both spellings in one place.
 
-**`segmentation.local_ring_geometry` — ADDED, and it is the FIRST validated `scale_invariance` case.**
-The harness shipped that check type with machinery and no case: *"the check type exists so the
-increment that finds one does not also have to invent the harness."* 1.6.87 found one. A fixed 1-4px
-rim is a probe in pixels: the same physical condensate at a finer pixel size spans more pixels, so the
-rim sits proportionally closer to its boundary and samples the object's own halo instead of
-background. Same specimen, different objective, different verdict — and nothing in the output would
-say the population had been excluded. The negative control pins `_local_ring_radii` to its old `(1,1,2)`
-rather than keeping a second copy of the filter that could drift from the real one.
+**The column is deliberately NOT renamed.** It is user-visible in results tables and CSVs; renaming
+it would silently change files a user has already saved. That decision was made in 1.6.74 (for
+`ObjectRef.from_row`), and its comment already named this exact site as the remaining live mismatch —
+so this finishes an existing decision rather than making a new one.
 
-**`condensate.bleach_r2_min` — NOT ADDED, and it is not an oversight.** The spec expected the `r2_min`
-shape, but `bleach_r2` gates nothing: `has_bleaching` only picks the reported `dominant_cause` label,
-so there is no population statistic to bias. Getting it wrong mislabels a diagnosis; it does not
-invert a number. Nor is it offset-sensitive — `fit_photobleaching` fits `I(t) = I0·exp(−t/τ) + I_inf`,
-and **I_inf absorbs a pedestal**: measured, `r_squared = 0.9989` at pedestals 0, 100, 500 and 2000. A
-sensitivity test on it would assert an invariant that cannot break, which is coverage, not a warning.
-Both reasons are pinned as tests rather than comments, because they are claims about code and code
-changes: if `has_bleaching` ever gates a population, the test fails and the case should be added.
-(A different reason from `defocus_r2_max`, which is excluded for being dead — this one runs, it just
-is not a filter.)
+**Two different uuids identified the same layer.** `layer_tag_hook` stamps `pycat_layer_id`
+(`uuid4().hex`, 32 chars) — what `ObjectRef.source_layer_id` carries and the brushing arc keys on;
+`layer_tags.layer_tag_id` minted `pycat_tag_uid` (`uuid4().hex[:12]`) — what `partial_volume_tools`
+uses and what `tags_for_plot` records. Two values, one layer, so matching a plot's recorded id against
+a ref could never succeed. `pycat_layer_id` now wins (it is the one with consumers) and
+`pycat_tag_uid` is kept as an **alias holding the same value**, so existing readers keep working and
+now agree with the refs. A legacy-only `pycat_tag_uid` is adopted rather than replaced; a *stale* one
+alongside a `pycat_layer_id` is replaced, because it could not have matched anything anyway.
+
+**The tifffile/zarr shim was not dead code — it was a fix nobody installed, for a LIVE bug.** The
+audit recorded it as *"dead code that looks like a live workaround"* and suggested deleting it.
+Reproduced on this tree (zarr 3.2.1, tifffile 2026.4.11) with no shim:
+
+```
+from zarr.core.chunk_grids import RegularChunkGrid   -> ImportError
+tifffile ... .aszarr()                               -> ValueError: zarr 3.2.1 < 3 is not supported
+```
+
+(tifffile blames the version for *any* ImportError out of its zarr-3 module; 3.2.1 is not < 3.) Per
+the shim's own docstring, that breaks **every read that falls to the BioIO dask path — multi-channel
+TIFFs and all CZI — from loading lazily.** It is now installed in `pycat/file_io/__init__.py`: the
+package that owns those reads, and early enough to land before `tifffile.zarr` is first imported. The
+call is idempotent, no-ops when the symbol exists, swallows a missing zarr, and declines to install a
+broken stand-in.
 ### Notes
-- ~37-113 other defaults remain. The audit's view stands: **they are not equal**, so the next
-  increment is another prioritisation call, not a sweep.
-- Each new case keeps the established shape: a **mechanism** test proving the fixture exhibits the
-  effect (otherwise the negative control proves nothing), a **positive** control on current
-  production, and a **negative** control reconstructing the old behaviour *locally* — never back into
-  production.
+- **`test_zarr_compat` was silently disabling lazy reads for every test that ran after it.** It fakes
+  `zarr` in `sys.modules`, saved *two* modules and deleted *all* of them, so `zarr.core.chunk_grids`
+  never came back. Worse: `_reload_compat` imports `pycat.file_io` transitively **during the fake
+  window**, so the shim ran against a fake zarr, installed nothing, and never retried — the import is
+  cached. Verified: `TIFFFILE_ZARR_READY` is False afterwards and restoring the real zarr does not
+  undo it. That is why `test_zarr_shim_is_installed` failed in the full suite and passed alone. The
+  test now restores every zarr module and re-installs the shim: a test that fakes a global module owns
+  the damage.
+- `tests/test_tifffile_zarr_shim.py` already proved the shim *works* when called; nothing proved it
+  was *called*. The distance between those two tests is where this bug lived, and
+  `test_zarr_shim_is_installed.py` closes it.
 

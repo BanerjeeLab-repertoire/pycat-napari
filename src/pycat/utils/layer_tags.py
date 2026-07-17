@@ -223,19 +223,43 @@ def representation_satisfies(provided, required) -> bool:
 def layer_tag_id(layer) -> str:
     """A stable identifier for a layer, used as the edge target.
 
-    napari layer names are unique within a viewer at any moment, so the name is
-    a workable id; we also stash a uuid in metadata the first time we see a layer
-    so an edge survives a rename. Falls back to the name if metadata is absent.
+    napari layer names are unique within a viewer at any moment, so the name is a
+    workable id; we also stash a uuid in metadata the first time we see a layer so an
+    edge survives a rename. Falls back to the name if metadata is absent.
+
+    ── One layer had TWO ids, and they were different values ─────────────────
+
+    This used to mint its own ``pycat_tag_uid`` (``uuid4().hex[:12]``), while
+    ``layer_tag_hook`` independently stamps ``pycat_layer_id`` (``uuid4().hex``, 32
+    chars) — and **that** is what ``ObjectRef.source_layer_id`` carries and what the
+    whole brushing arc keys on. So the id a plot recorded via ``tags_for_plot`` and
+    the id a ref carried were different strings **for the same layer**, and any code
+    matching one against the other could never match.
+
+    Nothing did, yet — which is why this was a trap rather than a bug, and why it was
+    safe to fix by picking one. ``pycat_layer_id`` wins because it is the one with
+    consumers. ``pycat_tag_uid`` is kept as an **alias holding the same value**, so
+    existing readers (``partial_volume_tools``, ``tags_for_plot``) keep working and
+    now agree with the refs.
+
+    A legacy layer carrying a stale ``pycat_tag_uid`` has it replaced rather than
+    honoured: it could not have matched anything anyway, so preserving it would only
+    preserve the mismatch.
     """
     try:
         md = layer.metadata
         if not isinstance(md, dict):
             return str(getattr(layer, 'name', id(layer)))
-        uid = md.get('pycat_tag_uid')
+        # The brushing id is authoritative when present.
+        uid = md.get('pycat_layer_id')
+        if not uid:
+            # Adopt a legacy tag uid rather than mint a second value for one layer.
+            uid = md.get('pycat_tag_uid')
         if not uid:
             import uuid as _uuid
-            uid = _uuid.uuid4().hex[:12]
-            md['pycat_tag_uid'] = uid
+            uid = _uuid.uuid4().hex
+        md['pycat_layer_id'] = uid
+        md['pycat_tag_uid'] = uid          # alias: one layer, one id
         return uid
     except Exception:
         return str(getattr(layer, 'name', id(layer)))

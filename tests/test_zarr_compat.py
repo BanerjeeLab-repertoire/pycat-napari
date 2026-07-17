@@ -76,6 +76,53 @@ def _fake_zarr(major):
     return zarr, storage
 
 
+def _ZARR_MODULES():
+    return [k for k in sys.modules if k.startswith('zarr') or k.endswith('zarr_compat')]
+
+
+def _saved_zarr_modules():
+    """Every real zarr module currently loaded.
+
+    ── This used to save two and delete forty ────────────────────────────────
+
+    The teardown removes **all** `zarr*` modules so the next test re-imports against a fresh fake.
+    The setup only remembered `zarr` and `zarr.storage`, so everything else — `zarr.core`,
+    `zarr.core.chunk_grids`, ... — was deleted and never restored. Whatever imported them next got
+    a *fresh* module, losing any state the session had put there.
+
+    That was invisible until something depended on such state: `pycat.file_io` installs the
+    tifffile/zarr shim at import (an alias on `zarr.core.chunk_grids`), once. Purge the module and
+    the alias goes with it — the import will not run again — so **these tests silently disabled
+    lazy TIFF/CZI reads for every test that ran after them**, and `test_zarr_shim_is_installed`
+    failed in the full suite while passing alone.
+
+    A test that fakes a global module must put back exactly what it found.
+    """
+    return {k: sys.modules[k] for k in _ZARR_MODULES()}
+
+
+def _restore_zarr_modules(saved):
+    """Drop the fakes, put the real modules back, and repair what faking them broke.
+
+    Restoring `sys.modules` is not sufficient on its own. `pycat.file_io` installs the
+    tifffile/zarr shim **at import, once** — and if these tests caused that import to happen while
+    `zarr` was a fake (which `_reload_compat` does, via `from pycat.file_io import zarr_compat`),
+    the shim found no real `zarr.core.chunk_grids`, installed nothing, and **never retries**: the
+    module is cached. Verified: importing `pycat.file_io` against a fake zarr leaves
+    `TIFFFILE_ZARR_READY = False`, and putting the real zarr back does not undo it.
+
+    The consequence was silent and session-wide — lazy TIFF/CZI reads disabled for every test that
+    ran afterwards, which is why `test_zarr_shim_is_installed` failed in the full suite and passed
+    alone. A test that fakes a global module owns the damage.
+    """
+    for name in _ZARR_MODULES():
+        del sys.modules[name]
+    sys.modules.update(saved)
+
+    from pycat.file_io.tifffile_zarr_shim import install_tifffile_zarr_shim
+    install_tifffile_zarr_shim()
+
+
 def _reload_compat(zarr, storage):
     for name in [k for k in sys.modules if k.startswith('zarr')
                  or k.endswith('zarr_compat')]:
@@ -96,7 +143,9 @@ def test_the_store_path_is_found_on_BOTH_zarr_2_and_zarr_3(major, attribute):
     A check that reads only one of them returns ``None`` on the other — *silently* — and PyCAT
     copies a stack it did not need to copy.
     """
-    saved = {k: sys.modules.get(k) for k in ('zarr', 'zarr.storage')}
+    # Save EVERY zarr module, not just these two. The teardown deletes all of them, so
+    # capturing a subset silently drops the rest -- see `_ZARR_MODULES`.
+    saved = _saved_zarr_modules()
     try:
         zarr, storage = _fake_zarr(major)
         compat = _reload_compat(zarr, storage)
@@ -118,12 +167,7 @@ def test_the_store_path_is_found_on_BOTH_zarr_2_and_zarr_3(major, attribute):
         assert compat.is_filesystem_backed(array) is True
 
     finally:
-        for name in [k for k in sys.modules if k.startswith('zarr')
-                     or k.endswith('zarr_compat')]:
-            del sys.modules[name]
-        for key, value in saved.items():
-            if value is not None:
-                sys.modules[key] = value
+        _restore_zarr_modules(saved)
 
 
 @pytest.mark.core
@@ -133,7 +177,9 @@ def test_an_IN_MEMORY_zarr_is_not_reported_as_a_file_on_disk(major):
 
     The whole point of the question is to tell a filesystem-backed stack from one that is not.
     """
-    saved = {k: sys.modules.get(k) for k in ('zarr', 'zarr.storage')}
+    # Save EVERY zarr module, not just these two. The teardown deletes all of them, so
+    # capturing a subset silently drops the rest -- see `_ZARR_MODULES`.
+    saved = _saved_zarr_modules()
     try:
         zarr, storage = _fake_zarr(major)
         compat = _reload_compat(zarr, storage)
@@ -144,12 +190,7 @@ def test_an_IN_MEMORY_zarr_is_not_reported_as_a_file_on_disk(major):
         assert compat.is_filesystem_backed(array) is False
 
     finally:
-        for name in [k for k in sys.modules if k.startswith('zarr')
-                     or k.endswith('zarr_compat')]:
-            del sys.modules[name]
-        for key, value in saved.items():
-            if value is not None:
-                sys.modules[key] = value
+        _restore_zarr_modules(saved)
 
 
 @pytest.mark.core

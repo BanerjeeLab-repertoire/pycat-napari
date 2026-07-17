@@ -1165,8 +1165,23 @@ def plot_spatial_metrology(dfs, title="Spatial metrology", interactive=True):
     axes = np.atleast_1d(axes).ravel()
 
     def _grouped(ax, df, xcol, ycol, ref=None):
-        if 'cell_label' in df.columns and df['cell_label'].nunique() > 1:
-            for _, g in df.groupby('cell_label'):
+        # ── This gate never fired on the one table it exists for ──────────────
+        #
+        # It read `'cell_label'`; `puncta_analysis_func` writes `'cell label'` — with a
+        # SPACE — and is the only producer in the codebase that does. So multi-cell
+        # puncta data always fell to the `else`, where one `ax.plot` over a POOLED
+        # frame connects points ACROSS cells into a single line: a zigzag between
+        # unrelated objects, drawn as though it were a trajectory. Not a cosmetic
+        # miss — the picture said something untrue.
+        #
+        # `cell_label_column` accepts both spellings. The column is deliberately NOT
+        # renamed: it is user-visible in results tables and CSVs. Same call 1.6.74
+        # made for `ObjectRef.from_row`, whose comment already named this site.
+        from pycat.utils.object_ref import cell_label_column
+
+        label_col = cell_label_column(df)
+        if label_col is not None and df[label_col].nunique() > 1:
+            for _, g in df.groupby(label_col):
                 g = g.sort_values(xcol)
                 ax.plot(g[xcol], g[ycol], lw=1.0, alpha=0.4, color='#4c72b0')
             piv = df.pivot_table(index=xcol, values=ycol, aggfunc='mean')
