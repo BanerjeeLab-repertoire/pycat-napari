@@ -60,15 +60,12 @@ def test_updating_an_EXISTING_key_of_the_same_type_still_deepcopies():
     assert dc.data_repository['cell_df'].loc[0, 'y'] == 1, "the store was not a deep copy"
 
 
-def test_a_TYPE_MISMATCH_on_an_existing_key_still_warns_and_keeps_the_old_value(monkeypatch):
-    """**Behaviour deliberately UNCHANGED.** The original mismatch branch warned and did not store;
-    this preserves that exactly.
+def test_a_TYPE_MISMATCH_on_an_existing_key_WARNS_and_STORES(monkeypatch):
+    """**`set_data` is a setter: it warns on a type change, then still sets.**
 
-    The spec asked to store-anyway here, on the stated grounds of "preserving current behaviour" —
-    but the current behaviour rejects, so storing would be a semantic *change*, not a preservation.
-    Left as a separate decision (a real one: whether a mismatched write should overwrite, and the
-    related quirk that int-seeded numeric keys reject a float update). Pinning the current contract
-    so that decision is made deliberately, not drifted into.
+    The decision flagged when the reorder first shipped is resolved here in this direction. The old
+    reject (warn, keep the old value) was its own silent failure — a caller believed it had updated
+    the key while the stale value persisted.
     """
     import pycat.data.data_modules as dm
 
@@ -78,6 +75,20 @@ def test_a_TYPE_MISMATCH_on_an_existing_key_still_warns_and_keeps_the_old_value(
     dc = _data_class()                              # 'cell_df' seeded as an (empty) DataFrame
     dc.set_data('cell_df', "not a dataframe")       # str vs DataFrame — a mismatch
 
-    assert warnings, "a type mismatch must still warn"
-    assert isinstance(dc.data_repository['cell_df'], pd.DataFrame), (
-        "a mismatched write overwrote the old value — that is a behaviour change, not this fix")
+    assert warnings, "a type mismatch must warn"
+    assert dc.data_repository['cell_df'] == "not a dataframe", (
+        "a mismatched write must still STORE — the warning is advisory, not a rejection")
+
+
+def test_an_INT_seeded_key_accepts_a_FLOAT_update(monkeypatch):
+    """The concrete win from storing on mismatch: a key seeded as `int` (`microns_per_pixel_sq`)
+    used to reject a legitimate `float` update, silently keeping the stale int."""
+    import pycat.data.data_modules as dm
+    monkeypatch.setattr(dm, 'napari_show_warning', lambda msg: None)
+
+    dc = _data_class()                              # 'microns_per_pixel_sq' seeded as int 1
+    assert isinstance(dc.data_repository['microns_per_pixel_sq'], int)
+
+    dc.set_data('microns_per_pixel_sq', 0.0425)     # int -> float
+    assert dc.data_repository['microns_per_pixel_sq'] == 0.0425, (
+        "the float update was rejected, leaving the stale int")

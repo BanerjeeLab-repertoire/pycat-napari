@@ -127,24 +127,25 @@ class BaseDataClass:
         numpy arrays, dictionaries, and other objects. The key should be a string that uniquely
         identifies the data being stored.
         """
-        # ── Check EXISTENCE before class ─────────────────────────────────────────────────
+        # ── Check EXISTENCE before class; a type change WARNS but still STORES ────────────
         #
         # This read `self.data_repository[key].__class__` FIRST, then checked `key not in ...` — so
         # a genuinely new key raised `KeyError` on the very first line, before the "new key" branch
-        # could run. `data_repository` is a plain dict (not a defaultdict), so this is a real crash,
-        # masked only because most callers set keys the repository is pre-seeded with. Reordering so
-        # the existence check comes first is the whole fix.
+        # could run. `data_repository` is a plain dict (not a defaultdict), so it was a real crash,
+        # masked only because most callers set keys the repository is pre-seeded with. Existence is
+        # now checked first.
         #
-        # The class-mismatch branch is UNCHANGED on purpose: as before, it warns and keeps the old
-        # value (the original `if` had no assignment). The spec asked to store-anyway here, on the
-        # stated grounds of "preserving current behaviour" — but the current behaviour rejects, so
-        # that would be a semantic change, not a preservation. Left as a separate decision (see the
-        # note shipped with this fix): whether a type mismatch should overwrite, and relatedly that
-        # numeric keys seeded as int (`object_size`, `microns_per_pixel_sq`) reject a float update.
+        # On a type mismatch, `set_data` now WARNS and STORES (it did not, before — the original
+        # branch warned and kept the old value). That resolves the decision flagged when the reorder
+        # first shipped, in the direction `set_data` should behave: it is a SETTER, so it always
+        # sets, and the warning is advisory. The old reject was its own silent failure — e.g. a key
+        # seeded as `int` (`object_size`, `microns_per_pixel_sq`) rejected a legitimate `float`
+        # update, keeping the stale int while the caller believed it had updated. Storing fixes that.
         if key not in self.data_repository:
             self.data_repository[key] = data
         elif self.data_repository[key].__class__ != data.__class__:
             napari_show_warning(f"Data type mismatch for key {key}.")
+            self.data_repository[key] = copy.deepcopy(data)      # warn, but still set
         else:
             self.data_repository[key] = copy.deepcopy(data)
 

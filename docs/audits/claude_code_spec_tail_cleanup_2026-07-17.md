@@ -1,5 +1,20 @@
 # Claude Code spec — Tail cleanup: finish the six outstanding sub-tasks
 
+> **STATUS — CLOSED (2026-07-17, tree 1.6.92).** All six items landed.
+> - **Items 1, 2, 3** (VPT overlay unpadded pulse + in-place trajectory; short-track fragmentation
+>   diagnostic): already shipped in **1.6.85** — verified present, no new work.
+> - **Item 5** (focus mask threading): shipped in **1.6.91**. The spec's Fix 2 did not survive the
+>   tree — it targeted dead code (`bf_analyse_focus_series`, zero callers) and callers with no mask
+>   available. Per the user's explicit choice, delivered instead as a **maskless robustification**
+>   (`math_utils.robust_focus_energy`, top-1% trim), wired into `bf_focus_metric` and both quality
+>   tables. Debris z-sweep test with a live negative control.
+> - **Item 4** (`set_data`): the reorder shipped in 1.6.91; the pinned store-vs-reject decision is
+>   resolved here in **1.6.92** — warns-and-stores on a type mismatch.
+> - **Item 6** (README): all four fixes shipped in **1.6.92** — `[dev]` backtrack warning, filled dev
+>   step 2 + unified `pycat-env`, `pytest` test command, stale version literal removed.
+> Every premise was re-verified against the live tree before acting; the spec targeted 1.6.90, and
+> four of six items were already done by the time it was picked up.
+
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. Clears the tail
 left across three prior specs (VPT rework, audit quick-wins, README audit). All six are small,
 verified, and mutually independent — ship as one version or several. Touches

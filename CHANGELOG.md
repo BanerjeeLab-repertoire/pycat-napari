@@ -1,3 +1,23 @@
+## [1.6.92] - 2026-07-17
+### Changed — **`set_data` now WARNS-and-STORES on a type mismatch (resolving the flagged decision).**
+The reorder in 1.6.91 fixed the new-key `KeyError` but deliberately *pinned* the type-mismatch branch
+as reject-and-keep-old, flagging the store-vs-reject choice as a separate decision. This resolves it
+in the setter direction: on a type change `set_data` now warns (advisory) and still stores the new
+value. The old reject was its own silent failure — a key seeded as `int` (`microns_per_pixel_sq`,
+`object_size`) rejected a legitimate `float` update, keeping the stale int while the caller believed
+it had updated. `set_data` is a setter; it always sets. Tests updated: a mismatch warns-and-stores; an
+int-seeded key accepts a float update.
+
+### Docs — **README tail cleanup: current install, correct test command, no stale literal, followable dev setup.**
+- `[dev]`/extras install now carries a ⚠️ warning that a bare `pip install "pycat-napari[dev]"` can
+  silently backtrack to an old 1.5.x resolution; steer to install-first-then-extras or the editable
+  install.
+- Blank Development step 2 filled with real env-creation commands; env name unified to `pycat-env`
+  throughout (the outlier `pycat-16`/`pycat-napari-env` names removed).
+- Wrong test command `pytest --cov=pycat_napari tests/` → `pytest` (the package is `pycat`; coverage
+  is already configured in pyproject addopts).
+- Stale `Current Version: 1.5.357` literal → point to PyPI / `pip show pycat-napari`.
+
 ## [1.6.91] - 2026-07-17
 ### Fixed — **`set_data` crashed on any genuinely new key.**
 `BaseDataClass.set_data` read the stored value's class (`self.data_repository[key].__class__`) BEFORE

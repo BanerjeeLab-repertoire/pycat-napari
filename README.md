@@ -95,8 +95,8 @@ into a 1.5 environment leaves both behind, and **the result is an environment wh
 go straight back to it.)*
 
 ```bash
-conda create -n pycat-16 python=3.12 -y
-conda activate pycat-16
+conda create -n pycat-env python=3.12 -y
+conda activate pycat-env
 pip install pycat-napari
 ```
 
@@ -303,8 +303,15 @@ This single command is **safe on both GPU and CPU-only machines** — on a compu
 
 You can install PyCAT with additional tools, features, and packages. For example, dev, test, and doc tools. The devbio-napari package adds numerous additional image analysis tools. Learn more at [devbio-napari documentation](https://github.com/haesleinhuepf/devbio-napari).
 
+> ⚠️ **Install PyCAT first, then add extras — and into the SAME environment.** A bare
+> `pip install "pycat-napari[dev]"` into a fresh environment can silently resolve to an **old 1.5.x**
+> release (pip backtracks past the modern 1.6 pins to satisfy the extra), which is not the version
+> you want. Run the extras **after** `pip install pycat-napari`, so pip keeps the version you already
+> have. Contributors working from a clone should use the editable install instead — see
+> [Development](#development).
+
 ```bash
-# Development tools
+# Development tools (run AFTER `pip install pycat-napari`, in the same environment)
 pip install "pycat-napari[dev]"
 
 # Additional bio-image analysis tools
@@ -714,14 +721,18 @@ git clone https://github.com/BanerjeeLab-repertoire/pycat-napari.git
 cd pycat-napari
 ```
 
-2. Create development environment:
+2. Create and activate the development environment:
 ```bash
-# Windows
+# Create the environment (same on Windows, macOS Intel, and macOS Apple Silicon)
+mamba create -n pycat-env python=3.12
+# (conda works too: conda create -n pycat-env python=3.12 -y)
 
-# Mac M1/ARM
-
-mamba activate pycat-napari-env
+# Activate it
+mamba activate pycat-env
 ```
+> **macOS Apple Silicon (M1/M2/M3):** use a native **arm64** Miniforge so the environment is arm64
+> (check with `python -c "import platform; print(platform.machine())"` → `arm64`). See the
+> Apple-Silicon note in the beginner install above.
 
 3. Install development dependencies:
 ```bash
@@ -733,8 +744,8 @@ pip install -e ".[dev]"
 # Install test dependencies
 pip install -e ".[test]"
 
-# Run tests with coverage
-pytest --cov=pycat_napari tests/
+# Run the tests (coverage is configured in pyproject.toml — `--cov=pycat` is applied automatically)
+pytest
 ```
 
 ## Contributing
@@ -874,7 +885,7 @@ pip install "numpy<2.0"
 
 ## Project Status & Roadmap
 
-Current Version: 1.5.357
+For the current version, see [PyCAT on PyPI](https://pypi.org/project/pycat-napari/) or run `pip show pycat-napari`.
 
 ### Recent Updates
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
