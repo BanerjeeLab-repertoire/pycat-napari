@@ -1,3 +1,60 @@
+## [1.6.86] - 2026-07-17
+### Fixed — **The CNR fix never reached the default refinement path. Neither did the drop reporting.**
+1.6.84 recorded this as known-and-unfixed; it is now measured and fixed.
+
+`puncta_refinement_filtering_func_fast` is documented as bit-for-bit identical to
+`puncta_refinement_filtering_func`, and `tests/test_segmentation_refine.py` asserts it. **It was not
+true.** The 1.5.416 CNR fix went into the slow filter and never into the fast one — and
+`_PYCAT_REFINE_FAST = True`, so the fast one is what every user runs:
+
+```
+slow:  local_cnr = (dilated_mean - loc_med) / loc_sd      # background-subtracted, robust median+MAD
+fast:  dilated_mean / (img_local_bg_std + eps)            # the dead pedestal-scaled ratio
+```
+
+So the gate the slow path's own comment calls dead — *"these two conditions have never rejected
+anything"* — was **still live in the default**, and the ground-truth calibration justifying its
+threshold of 1.0 described code nobody executed. The fast path also carried **none** of the always-on
+drop reporting (`napari_show_info` ×2 in the slow filter, ×0 in the fast one), so the summary added
+precisely so that puncta could not vanish silently was itself silent for everyone.
+
+**Why the equivalence test passed anyway:** `local_intensity_condition` decides first in its fixture
+and masks the difference — measured, puncta amplitudes 8→25 flip together at 11, so the SNR gate never
+gets a vote. The test is real; its fixture simply cannot reach the divergence.
+`tests/test_refine_fast_slow_parity.py` reaches it deliberately (a bright rim *outside* the object, so
+local intensity fires and the SNR gate is what decides — the case where slow rejected on `local_snr`
+while fast kept all 900px).
+
+**What it cost, measured against ground truth** (`synthetic_puncta_image`, 3 amplitudes × 3 seeds, so
+every detection is scored real-or-spurious rather than merely counted):
+
+| amp | fast kept (bare ratio) | CNR kept | CNR removed |
+|------|------------------------------|-------------------|--------------------|
+| 30 | 3–11 real + **22–30 spurious** | same real + 8–13 | **0 real**, 14–19 spurious |
+| 60 | 6–8 real + **16–19 spurious** | same real + 2–6 | **0 real**, 12–14 spurious |
+| 120 | 18–27 real + **12–21 spurious** | same real + 1–6 | **0 real**, 10–18 spurious |
+
+**Zero real puncta lost in any run; 128 spurious removed.** The real-punctum count is identical under
+both filters in every single run — CNR only ever took noise blobs. (The amp=8 concern from the
+calibration — a real punctum at CNR 0.8, below the 1.0 cut — never arises: at amp=8 the intensity and
+kurtosis checks have already removed it, so the SNR gate is never consulted.) On the bundled real
+`Image 1`, the default now keeps **6** where it kept 11; the 5 that left were almost certainly noise.
+
+**The fix is shared code, not a copied formula.** `_robust_bg`, `_snr_conditions` and
+`_report_refinement_drops` are now module-level and called by BOTH filters. Copying the fix across
+would have left two copies to drift again — which is exactly how this happened. A test asserts neither
+filter computes the ratio inline and that both call the shared helpers.
+### Notes
+- **The `@tags_layer` decorator on `puncta_refinement_filtering_func` was briefly applied to the wrong
+  function** while extracting the helpers (Python allows comments between a decorator and its `def`,
+  so it bound to `_robust_bg` and the file still parsed). `tests/test_tag_registry.py` caught it. The
+  ratchets earn their keep.
+- **This changes counts.** Fewer detections survive refinement, and the ones that leave are — measured
+  on ground truth — noise the default path was keeping and counting. Worth eyeballing one real image
+  before/after: the synthetic beads are not condensates.
+- The large-object exemption remains held on `Meet-Raval-exemption`. Its blocker was this divergence,
+  so it is now unblocked and can be reassessed on its own merits.
+
 ## [1.6.85] - 2026-07-17
 ### Fixed — **VPT: an MSD default that could not support a fit, and a ring that sat where the bead started.**
 
