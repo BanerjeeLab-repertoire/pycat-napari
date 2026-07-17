@@ -1382,11 +1382,33 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         ellipticity = 1 - (df['axis_minor_length'].values[0]/df['axis_major_length'].values[0])
 
 
+        # ── Large-object exemption for the fixed-scale edge/local checks ───────
+        # local_intensity_condition and gradient_condition both compare an
+        # object's "interior" (eroded by 1px) against a "rim"/"local
+        # background" band that is only 1-4px wide, REGARDLESS of the
+        # object's own size. That scale is correct for point-like puncta
+        # (a few px across), where a 1px erosion/dilation meaningfully
+        # separates core from edge. For a large condensate spanning tens to
+        # hundreds of pixels, eroding by 1px removes almost nothing -- the
+        # "interior" sample is nearly the whole (texture-rich, often noisy)
+        # object, while the "rim"/"local background" sample is a vanishingly
+        # thin sliver relative to the object's true boundary. Empirically
+        # (validated on the bundled example dataset), this makes both checks
+        # misfire on essentially every real large condensate -- not a
+        # parameter-tuning issue, a scale mismatch in what's being measured.
+        # min_spot_radius=2 -> min_area=~13px; 150px is comfortably above any
+        # single punctum (matches rim_close_min_result_area's semantics in
+        # fz_segmentation_and_binarization: "well above a single punctum's
+        # area"). Large objects remain fully subject to kurtosis, ellipticity,
+        # cell-intensity, and SNR checks, and to the area/solidity check below
+        # for implausible (e.g. erroneously merged) shapes.
+        is_large_object = df['area'].values[0] >= 150
+
         # Setup local intensity based conditions
         local_intensity_condition = (
             img_object_mean < (img_local_bg_mean + intensity_hwhm_scale*img_local_bg_std) or
             processed_object_mean < (processed_local_bg_mean + intensity_hwhm_scale*processed_local_bg_std)
-        )
+        ) and not is_large_object
 
         # Setup global intensity based conditions
         cell_intensity_condition = img_object_mean < cell_bg_mean
@@ -1408,7 +1430,7 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
         # Setup ellipticity based condition
         ellipticty_condition = ellipticity > 0.99
         # Setup gradient based condition
-        gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
+        gradient_condition = (gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)) and not is_large_object
         # ── CONTRAST to noise, not a bare ratio ────────────────────────────────
         #
         # This used to be `object_mean / bg_std` — NO background subtraction. The camera
@@ -1646,10 +1668,20 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         ellipticity = 1 - (_min / _maj) if _maj > 0 else 0.0
         _area = p.area
 
+        # See puncta_refinement_filtering_func for the rationale: the fixed
+        # 1-4px erosion/dilation scale used by local_intensity_condition and
+        # gradient_condition below only meaningfully separates "core" from
+        # "edge" for point-like puncta; at large-condensate scale it samples
+        # a texture-rich interior against a vanishingly thin rim and misfires
+        # on real objects. Exempt objects above this size from those two
+        # checks only; all other checks (including area/solidity below)
+        # still apply.
+        is_large_object = _area >= 150
+
         local_intensity_condition = (
             img_object_mean < (img_local_bg_mean + intensity_hwhm_scale*img_local_bg_std) or
             processed_object_mean < (processed_local_bg_mean + intensity_hwhm_scale*processed_local_bg_std)
-        )
+        ) and not is_large_object
         cell_intensity_condition = img_object_mean < cell_bg_mean
         kurtosis_condition = img_object_kurtosis < kurtosis_threshold or processed_object_kurtosis < kurtosis_threshold
         # See puncta_refinement_filtering_func for the rationale: large
@@ -1658,7 +1690,7 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
         is_oversized_and_irregular = (_area > cell_area*max_area_fraction) and (p.solidity < 0.85)
         area_condition = is_oversized_and_irregular or is_undersized
         ellipticty_condition = ellipticity > 0.99
-        gradient_condition = gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)
+        gradient_condition = (gradient_local_bg_mean < (gradient_object_mean + np.std(gradient_object_pixels)/4)) and not is_large_object
         local_snr_condition = (img_dilated_object_mean/(img_local_bg_std+np.finfo(np.float32).eps)) <= local_snr_threshold
         global_snr_condition = (img_dilated_object_mean/(cell_bg_std+np.finfo(np.float32).eps)) <= global_snr_threshold
 
@@ -2282,7 +2314,11 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     else:
         # Segment and refine on the cropped ROI
         puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
-        refined_puncta_mask_crop = puncta_refinement_func(orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=min_spot_radius, fast=refine_fast)
+        refined_puncta_mask_crop = puncta_refinement_func(
+            orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=min_spot_radius,
+            kurtosis_threshold=kurtosis_threshold, local_snr_threshold=local_snr_threshold,
+            global_snr_threshold=global_snr_threshold, intensity_hwhm_scale=intensity_hwhm_scale,
+            max_area_fraction=max_area_fraction, fast=refine_fast)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
