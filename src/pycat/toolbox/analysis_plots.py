@@ -683,10 +683,12 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                     return
                 prev = _pstate['prev']
                 if prev is event.artist:
-                    try:
-                        on_pick_track(tid)
-                    except Exception:
-                        pass
+                    # Already the selected track: nothing to restyle and nothing
+                    # to re-select. This used to fall through to on_pick_track
+                    # anyway, which re-ran the whole reveal — so a second click on
+                    # the same curve paid for a camera move + overlay rebuild to
+                    # arrive at the state it was already in, and fed the very
+                    # draw_event/re-entrancy loop the reveal guard exists to stop.
                     return
                 if prev is not None and prev in _line_to_tid:
                     try:

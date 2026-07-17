@@ -1644,16 +1644,149 @@ class VideoParticleTrackingUI:
         except Exception as _e:
             print(f"[PyCAT VPT] track-length histogram skipped: {_e}")
 
+    def _follow_enabled(self):
+        """Should a plot click take the user to the bead? **No, by default.**
+
+        VPT reads the SAME session preference the generic brushing path reads
+        (`pycat.utils.brushing._follow_enabled` → `central_manager.follow_selection`)
+        rather than owning a second flag. Two flags meaning "follow the selection"
+        is how the next person gets one of them wrong.
+        """
+        from pycat.utils.brushing import _follow_enabled as _follow
+        return _follow(getattr(self, 'central_manager', None))
+
+    def _world_scale_yx(self, mpp):
+        """The (y, x) scale the image layer is ACTUALLY drawn at.
+
+        Read once and used for both the highlight and the camera, so they stay
+        consistent even when the layer scale differs from `_mpx()` — e.g. the
+        pixel-size gate never fired and the image sits at scale 1.0. Placing the
+        overlay in the same world frame the image uses is what guarantees it lands
+        on the bead. This is the exact µm-vs-px confusion that bit before: pin it
+        to one source of truth, the image layer's own scale.
+        """
+        import numpy as _np
+        for layer in self.viewer.layers:
+            if layer.__class__.__name__ == 'Image':
+                scale = _np.asarray(layer.scale, float)
+                if scale.size >= 2:
+                    return float(scale[-2]), float(scale[-1])
+                break
+        return mpp, mpp
+
+    def _navigate_to_bead(self, f0, y0, x0, sc_y, sc_x):
+        """Take the user to the bead — **only if they asked to be taken there.**
+
+        The frame step and the camera answer the same question ("take me there"),
+        so one preference gates both. With follow OFF (the default) this is a
+        no-op and the pick merely marks the track in place: the view stays where
+        the user put it, and — because there is no camera move — there is no
+        `draw_event` to loop back through the pick.
+        """
+        if not self._follow_enabled():
+            return
+        # Step to the track's first frame (T axis is axis 0 for a movie). A bead on
+        # frame 40 is not visible from frame 0, so going there means the frame too.
+        try:
+            if self.viewer.dims.ndim > 2:
+                step = list(self.viewer.dims.current_step)
+                step[0] = f0
+                self.viewer.dims.current_step = tuple(step)
+        except Exception:
+            pass
+        # Centre the camera on the bead, in the image's world frame.
+        try:
+            self.viewer.camera.center = (y0 * sc_y, x0 * sc_x)
+        except Exception:
+            pass
+
+    def _draw_picked_track(self, path, mpp, sc_y, sc_x):
+        """Trace the picked track as a connected LINE (a Shapes 'path').
+
+        Not a column of filled circles: those sit on top of and obscure the track
+        already plotted in the Bead Trajectories layer. A small ring marks where it
+        starts. One Shapes + one Points layer, reused — never accumulated.
+        """
+        hl_line = "Picked track"
+        hl_start = "Picked track start"
+        try:
+            for name in (hl_line, hl_start):
+                if name in self.viewer.layers:
+                    self.viewer.layers.remove(name)
+            if path.shape[0] >= 2:
+                # Bright, thin and slightly transparent, ON TOP of the trajectory —
+                # a highlight that does not hide what it highlights. edge_width is
+                # in data (pixel) units.
+                kw = dict(name=hl_line, shape_type='path',
+                          edge_color='#ff8c00', face_color='transparent',
+                          edge_width=max(1.0, 0.25 / mpp),
+                          opacity=0.85, scale=[sc_y, sc_x])
+                try:
+                    self.viewer.add_shapes([path], **kw)
+                except Exception:
+                    # Older napari: edge_width may need to be a scalar list.
+                    kw['edge_width'] = float(max(1.0, 0.25 / mpp))
+                    self.viewer.add_shapes([path], **kw)
+            kw = dict(name=hl_start, size=max(6, 0.5 / mpp),
+                      face_color='transparent', border_color='#ff8c00',
+                      opacity=0.95, scale=[sc_y, sc_x])
+            try:
+                self.viewer.add_points(path[:1], **kw)
+            except Exception:
+                kw.pop('border_color', None); kw['edge_color'] = '#ff8c00'
+                self.viewer.add_points(path[:1], **kw)
+        except Exception:
+            pass
+
+    def _announce_picked_track(self, track_id, g, f0):
+        """One line about the picked track — what it is, without going to it."""
+        import numpy as _np
+        try:
+            n = int(len(g))
+            step_nm = float(_np.median(_np.sqrt(
+                _np.sum(_np.diff(g[['y_um', 'x_um']].values, axis=0) ** 2,
+                        axis=1)))) * 1000 if n > 1 else 0.0
+            napari_show_info(
+                f"Track {int(track_id)}: {n} frames, starts frame {f0}, "
+                f"median step {step_nm:.0f} nm — highlighted in viewer.")
+        except Exception:
+            pass
+
     def _reveal_track_in_viewer(self, track_id):
-        """Plot -> data brushing: clicking a track in the MSD plot reveals that
-        exact bead in the napari viewer — steps to its first frame, centres the
-        camera on it, drops a transient highlight marker, and surfaces its row.
+        """Plot -> data brushing: clicking a track in the MSD plot marks that exact
+        bead in the napari viewer — traces its trajectory, and surfaces its row.
 
         napari's Tracks layer has no per-track selection API, so instead of
-        recolouring one track inside the layer we (a) centre + step the viewer to
-        the picked track and (b) add a short-lived Points highlight at the bead's
-        position, which is the clear visual cue the user asked for.
+        recolouring one track inside the layer we add a short-lived Shapes path
+        highlight at the bead's position, which is the clear visual cue.
+
+        ── Marking it and going to it are two different acts ──────────────────
+
+        This used to step the frame and move the camera on EVERY pick. Two
+        problems, and only one of them was cosmetic:
+
+        1. It was abrupt navigation — you click a track to ask what it is, and the
+           view you were reading leaves. The generic brushing path settled this
+           already (`follow_selection`, OFF by default); VPT's plot has its own
+           pick route and never got the memo, so it kept yanking the view.
+        2. It LOOPED. Moving the camera/frame fires napari's `draw_event`, which
+           re-runs the MSD plot's blit-capture, which can re-enter the pick and
+           reveal again — a continuous jump until force-close.
+
+        So: the navigation is gated on the preference (1), and the whole reveal is
+        re-entrant-guarded (2). The guard is not redundant with the preference —
+        `follow_selection = True` is a supported state, and it must not loop for
+        the users who turn it on.
         """
+        # ── Re-entrancy: a camera move must not become another reveal ─────────
+        #
+        # Set before the work, released on the next event-loop tick AFTER it — the
+        # same delayed pattern `SelectionService` uses, and for the same reason.
+        # The release has to outlive both this call and the `draw_event` our own
+        # camera move fires, which is why it is deferred rather than cleared here.
+        if getattr(self, '_revealing', False):
+            return
+        self._revealing = True
         try:
             import numpy as _np
             tracks = self._dr().get('vpt_tracks')
@@ -1671,22 +1804,7 @@ class VideoParticleTrackingUI:
             f0 = int(g['frame'].iloc[0])
             y0 = float(ys[0]); x0 = float(xs[0])
 
-            # Read the image layer's ACTUAL scale ONCE and use it for BOTH the
-            # highlight points and the camera, so they stay consistent even if the
-            # layer scale differs from self._mpx() (e.g. the pixel-size gate never
-            # fired and the image is at scale 1.0). Placing the points in the same
-            # world frame the image uses guarantees they overlay the bead, and the
-            # camera then centres on that same world point. (This is the exact
-            # µm-vs-px consistency that caused earlier confusion — pin it to one
-            # source of truth: the image layer's own scale.)
-            img_scale_yx = None
-            for _l in self.viewer.layers:
-                if _l.__class__.__name__ == 'Image':
-                    _s = _np.asarray(_l.scale, float)
-                    if _s.size >= 2:
-                        img_scale_yx = (float(_s[-2]), float(_s[-1]))
-                    break
-            sc_y, sc_x = img_scale_yx if img_scale_yx else (mpp, mpp)
+            sc_y, sc_x = self._world_scale_yx(mpp)
 
             # Select the Tracks layer if present (so the picked track is in focus).
             if "Bead Trajectories" in self.viewer.layers:
@@ -1696,72 +1814,17 @@ class VideoParticleTrackingUI:
                 except Exception:
                     pass
 
-            # Step to the track's first frame (T axis is axis 0 for a movie).
-            try:
-                if self.viewer.dims.ndim > 2:
-                    step = list(self.viewer.dims.current_step)
-                    step[0] = f0
-                    self.viewer.dims.current_step = tuple(step)
-            except Exception:
-                pass
-
-            # Centre the camera on the bead, in the image's world frame.
-            try:
-                self.viewer.camera.center = (y0 * sc_y, x0 * sc_x)
-            except Exception:
-                pass
-
-            # Transient highlight: draw the picked track as a connected LINE that
-            # TRACES the trajectory (a Shapes 'path'), not a column of filled
-            # circles that sit on top of and obscure the track already plotted in
-            # the Bead Trajectories layer. A single small marker at the first
-            # frame shows where it starts. Reuse one Shapes + one Points layer.
-            try:
-                hl_line = "Picked track"
-                hl_start = "Picked track start"
-                path = _np.column_stack([ys, xs])       # (N, 2) y,x pixel coords
-                for _n in (hl_line, hl_start):
-                    if _n in self.viewer.layers:
-                        self.viewer.layers.remove(_n)
-                if path.shape[0] >= 2:
-                    # A bright, thin, slightly-transparent line ON TOP of the
-                    # trajectory — visible as a highlight without hiding the
-                    # underlying track. edge_width is in data (pixel) units.
-                    _sh_kw = dict(name=hl_line, shape_type='path',
-                                  edge_color='#ff8c00', face_color='transparent',
-                                  edge_width=max(1.0, 0.25 / mpp),
-                                  opacity=0.85, scale=[sc_y, sc_x])
-                    try:
-                        self.viewer.add_shapes([path], **_sh_kw)
-                    except Exception:
-                        # Older napari: edge_width may need to be a scalar list.
-                        _sh_kw['edge_width'] = float(max(1.0, 0.25 / mpp))
-                        self.viewer.add_shapes([path], **_sh_kw)
-                # small start marker (one point), offset visually by being a ring
-                _pt_kw = dict(name=hl_start, size=max(6, 0.5 / mpp),
-                              face_color='transparent', border_color='#ff8c00',
-                              opacity=0.95, scale=[sc_y, sc_x])
-                try:
-                    self.viewer.add_points(path[:1], **_pt_kw)
-                except Exception:
-                    _pt_kw.pop('border_color', None); _pt_kw['edge_color'] = '#ff8c00'
-                    self.viewer.add_points(path[:1], **_pt_kw)
-            except Exception:
-                pass
-
-            # Surface a one-line summary of the picked track.
-            try:
-                n = int(len(g))
-                step_nm = float(_np.median(_np.sqrt(
-                    _np.sum(_np.diff(g[['y_um', 'x_um']].values, axis=0) ** 2,
-                            axis=1)))) * 1000 if n > 1 else 0.0
-                napari_show_info(
-                    f"Track {int(track_id)}: {n} frames, starts frame {f0}, "
-                    f"median step {step_nm:.0f} nm — highlighted in viewer.")
-            except Exception:
-                pass
+            self._navigate_to_bead(f0, y0, x0, sc_y, sc_x)
+            self._draw_picked_track(_np.column_stack([ys, xs]), mpp, sc_y, sc_x)
+            self._announce_picked_track(track_id, g, f0)
         except Exception as _e:
             print(f"[PyCAT VPT] reveal track failed: {_e}")
+        finally:
+            # In a `finally` so a broken reveal cannot wedge the plot: a guard that
+            # never releases is not a fix, it is a dead plot — every later pick
+            # would be silently swallowed.
+            from pycat.utils.selection_service import _qt_defer
+            _qt_defer(lambda: setattr(self, '_revealing', False))
 
     # ── Step 5: microrheology ──────────────────────────────────────────
     def _add_microrheology(self, layout):

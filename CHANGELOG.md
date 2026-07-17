@@ -1,3 +1,67 @@
+## [1.6.83] - 2026-07-16
+### Fixed — **VPT: the detection tier is now measured, not assumed; the MSD plot click no longer loops.**
+
+**The GPU/CPU equivalence guard was unmemoised overhead on the hot path.** Before trusting the GPU,
+`detect_beads_stack` detected frame 0 on BOTH backends and compared. Its comment said *"Runs once,
+cheap"*; there was no cache, and it ran on every call from all four call sites — including the live
+preview, which re-runs on every spinbox tick. Whether the GPU agrees with skimage is a property of
+the **machine + cupy/driver build + the LoG params**, never of the data, so the verdict is now
+memoised on exactly those invariants (`gpu_matches_cpu`). The CHECK is preserved — a cache miss runs
+the full double-detect, and a mismatching GPU is still never trusted — only the repetition is gone.
+Frame 0 is passed as a callable so a cache hit does not even perform the read. Measured saving:
+**23 ms/detect** (171x201) to **173 ms/detect** (512x512), on every repeat.
+
+**The tier order was a fixed preference, and it was wrong.** `GPU > CPU-parallel > serial` was
+enforced by making the pool unreachable whenever a GPU existed (`if ... and not gpu_on`) — the pool
+never competed, it was a fallback. Measured here (GTX 1080, 7 workers, constant bead density):
+
+| xy | serial | GPU | CPU-pool (7w) | T=1000 |
+|------|-----------|-----------|--------------------|---------------------|
+| 512 | 136.9 ms | 49.5 ms | 46.2 ms + 5.0 s | GPU 50 s, pool 51 s |
+| 1024 | 528.1 ms | 249.0 ms | 166.8 ms + 5.4 s | GPU 250 s, pool 172 s |
+| 2048 | 2817.2 ms | 1123.1 ms | 1068.4 ms + 6.8 s | GPU 1124 s, pool 1075 s |
+
+The GPU is only ~2-3x ONE CPU core here — not enough to beat seven of them — so at real acquisition
+sizes the fixed order picked the **slower** tier. There was no GPU contention to fear: pool workers
+detect on the CPU (`detect_beads_frame`'s `use_gpu` defaults to `False`), so the tiers are
+independent. `_choose_detection_tier` now costs all three for the actual stack and takes the minimum.
+Verified live at 1024x1024x120: `auto` picks the pool over an available GPU, and all three tiers
+return identical detections. An explicit `use_gpu='gpu'` / `parallel='cpu'` is still honoured as a
+request; only `'auto'` has to justify itself.
+
+**The pool was gated on `n_frames > 1`, which is not a threshold.** A 20-frame stack got a 7-worker
+pool and took **5043 ms instead of 451 ms — an ~11x LOSS** — because a spawn costs ~4.9 s and that
+stack is 0.27 s of work. Per-frame cost is now probed (14 ms at 171x201, 2.8 s at 2048x2048, so no
+fixed frame-count rule is right at both ends) and memoised per shape+params, and the pool is modelled
+with **Amdahl** rather than the worker count: it parallelises detection only — template building,
+scoring and classification stay in the parent — which is why 7 workers return ~3x, not ~7x. This only
+ever bit GPU-less machines, which is why it survived on a dev box with CUDA.
+
+**The MSD plot click looped until force-close.** `_reveal_track_in_viewer` set `dims.current_step` and
+`camera.center` on every pick; moving the camera fires napari's `draw_event`, which re-runs the plot's
+blit-capture and re-enters the pick. `_select_track`'s guard stops selection *echo* — it never saw
+this path. Two independent fixes: the navigation now honours the **existing**
+`central_manager.follow_selection` (OFF by default), which removes the loop for the default case
+because there is no camera move to fire the event; and the reveal is re-entrancy-guarded
+(`_revealing`, released via `_qt_defer` in a `finally`), because `follow_selection = True` is a
+supported state that must not force-close a session. A click on the already-selected curve is now a
+true no-op — it previously fell through to `on_pick_track` and re-ran the whole reveal.
+### Notes
+- **VPT reads the same `follow_selection` the generic brushing path reads** — it is not a new flag.
+  The preference shipped with brushing increment 5 (1.6.7x); VPT's plot has its own pick route and
+  simply never honoured it. A second flag meaning "follow the selection" is how one of them gets wrong.
+- **The pool-over-GPU win is ~3%** (2.9% measured at 1024x120, ~4.4% projected at 2048x1000). Real,
+  and free, but small. The large wins here are the pool gate (~11x on short stacks) and the memo.
+- **The first GPU call in a process costs ~942 ms** (CUDA context + kernel JIT). A one-off, but it
+  lands on the first detect and is a better explanation for "GPU felt slow" than the tier ever was.
+- Amdahl `p = 0.78` fits the swept 2.6-3.2x; the live 1024 run implied ~2.46x, so the model runs
+  slightly optimistic. It picks correctly because the ordering holds. Crossovers (T~54 at 1024, T~21
+  at 2048) are fitted from two stack lengths — approximate. All timings are synthetic Gaussians at
+  constant density, not real beads; the selector adapts by probing.
+- The tier is still not exposed in the UI — no call site passes `use_gpu`/`parallel`, so every detect
+  runs `'auto'`. `auto` is now honest, which was the actual complaint; a user-facing Auto/GPU/CPU/
+  Serial control remains available to build if wanted.
+
 ## [1.6.82] - 2026-07-16
 ### Added — **Progress rollout COMPLETE: all 14 materialize sites, countdown at zero.**
 1.6.81 wired 9 and left 5 on a countdown. The last 5 needed more than wiring, which is why they were

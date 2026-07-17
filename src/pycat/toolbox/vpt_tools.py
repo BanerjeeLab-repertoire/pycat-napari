@@ -42,6 +42,7 @@ import pandas as pd
 
 import skimage as sk
 from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
+from pycat.utils.general_utils import debug_log
 import scipy.ndimage as ndi
 
 # Notifications go through the shim so this module's PHYSICS (detection, MSD,
@@ -1575,6 +1576,214 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
         n_beads_used=len(motion_sigmas))
 
 
+# ── GPU/CPU equivalence: verified ONCE per session, never once per call ──────
+#
+# Whether the GPU blob detector agrees with skimage is a property of the
+# **machine** (driver + cupy build) and the **LoG params**. It is not a property
+# of the data: the same machine running the same params cannot agree on one
+# stack and disagree on the next. So the verdict is memoised on exactly those
+# invariants and nothing else — deliberately NOT on the stack.
+#
+# It used to run on every `detect_beads_stack` call. That is four call sites
+# (including the live preview, which re-runs on every param change), each paying
+# a full CPU-detect + GPU-detect + compare of frame 0 before the real work
+# started — enough to erase a marginal GPU win and make GPU feel slower than
+# CPU-parallel.
+#
+# The CHECK is preserved, not removed: a cache miss still runs it in full, and a
+# mismatching GPU is still never trusted. Only the repetition is gone.
+_GPU_EQUIV_CACHE: dict = {}
+
+
+def _gpu_build_id() -> str:
+    """The cupy/driver build a verdict belongs to.
+
+    Part of the cache key because a cupy or driver swap mid-session is the one
+    thing that could legitimately change the answer. Cheap to read, and it means
+    the cache can never outlive the build it was measured on.
+    """
+    try:
+        import cupy
+        return (f"{getattr(cupy, '__version__', '?')}/"
+                f"{cupy.cuda.runtime.runtimeGetVersion()}")
+    except Exception:
+        return 'no-cupy'
+
+
+def _run_gpu_equivalence_check(frame, *, min_sigma, max_sigma, num_sigma,
+                              threshold, host_mask=None) -> bool:
+    """Detect one frame on BOTH backends and report whether they agree.
+
+    The expensive half of the guard, kept as its own function so the memo above
+    is the only thing deciding how often it runs (and so a test can spy on it).
+    """
+    cpu = detect_beads_frame(
+        frame, min_sigma=min_sigma, max_sigma=max_sigma, num_sigma=num_sigma,
+        threshold=threshold, host_mask=host_mask, use_gpu=False)
+    gpu = detect_beads_frame(
+        frame, min_sigma=min_sigma, max_sigma=max_sigma, num_sigma=num_sigma,
+        threshold=threshold, host_mask=host_mask, use_gpu=True)
+
+    def _key(cs):
+        return sorted((round(float(y), 3), round(float(x), 3)) for (y, x) in cs)
+
+    return _key(cpu) == _key(gpu)
+
+
+def gpu_matches_cpu(frame_getter, *, min_sigma, max_sigma, num_sigma, threshold,
+                    host_mask=None) -> bool:
+    """Can the GPU detector be trusted for these params on this machine?
+
+    Memoised per process. `frame_getter` is a callable so that a cache HIT never
+    even reads frame 0 — on the hot path (a preview re-running on every spinbox
+    tick) the whole guard collapses to one dict lookup.
+
+    Any failure reads as "do not trust the GPU": a guard that cannot prove
+    equivalence has not proven it.
+    """
+    key = (_gpu_build_id(), float(min_sigma), float(max_sigma),
+           int(num_sigma), float(threshold))
+    if key in _GPU_EQUIV_CACHE:
+        return _GPU_EQUIV_CACHE[key]
+    try:
+        verdict = _run_gpu_equivalence_check(
+            frame_getter(), min_sigma=min_sigma, max_sigma=max_sigma,
+            num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+    except Exception as exc:
+        debug_log('GPU equivalence guard failed; not trusting the GPU', exc)
+        verdict = False
+    _GPU_EQUIV_CACHE[key] = verdict
+    return verdict
+
+
+# ── Which detection tier? Cost all three; pick the cheapest. ─────────────────
+#
+# The rule used to be a FIXED preference order — "GPU > CPU-parallel > serial" —
+# implemented by making the pool unreachable whenever a GPU existed:
+#
+#     if quality_mode == 'fast' and not gpu_on and ...:     # the pool never competed
+#
+# Two things were wrong with that, and both are measured on this tree (GTX 1080,
+# 7 CPU workers, constant bead density, per frame):
+#
+#     xy      serial       GPU      CPU-pool(7w)      T=1000 total
+#     512    136.9 ms    49.5 ms   46.2 ms + 5.0 s    GPU  50 s | pool  51 s
+#     1024   528.1 ms   249.0 ms  166.8 ms + 5.4 s    GPU 250 s | pool 172 s
+#     2048  2817.2 ms  1123.1 ms 1068.4 ms + 6.8 s    GPU 1124 s | pool 1075 s
+#
+# 1. The GPU is only ~2-3x one CPU core here — not enough to beat SEVEN of them.
+#    On a real 2048x2048x1000 stack the fixed order picked the slower tier, which
+#    is exactly the "GPU felt slower than CPU-parallel" report from the workflow.
+# 2. The pool was gated on `n_frames > 1`, which is not a threshold: a 20-frame
+#    stack got a 7-worker pool and took 5043 ms instead of 451 ms (an ~11x LOSS),
+#    because a spawn costs ~4.9 s and that stack is 0.27 s of work.
+#
+# There is no GPU contention to fear from letting the pool compete: the workers
+# detect on the CPU (`detect_beads_frame`'s use_gpu defaults to False), so the two
+# tiers use different hardware and are genuinely independent.
+#
+# So: measure what a frame costs on this data, model each tier's total, take the
+# minimum. Nothing here is a fixed preference.
+
+# The pool parallelises DETECTION only — template building, scoring and
+# classification stay in the parent process (see `_detect_frame_worker`). That
+# serial tail is why 7 workers return ~3x and not ~7x. Amdahl with p = 0.78
+# reproduces the measured 2.64-3.17x across 512/1024/2048.
+_POOL_PARALLEL_FRACTION = 0.78
+
+_FRAME_COST_CACHE: dict = {}
+
+
+def _pool_spawn_cost_s() -> float:
+    """Roughly what standing up a worker pool costs, in seconds.
+
+    Platform-derived rather than measured, because measuring it means paying it —
+    and the whole question is whether to pay it at all.
+
+    The split that matters is the start method, not the OS: `fork` clones a warm
+    interpreter and is nearly free, while `spawn` (Windows, and macOS since 3.8)
+    starts every worker from scratch and re-imports numpy/skimage/pandas in each
+    one. 4.0 s is a deliberately conservative read of the 4.9-6.8 s measured here:
+    under-spawning costs a little speed, over-spawning costs seconds.
+    """
+    try:
+        import multiprocessing
+        method = multiprocessing.get_start_method(allow_none=True)
+        if method is None:
+            method = multiprocessing.get_start_method()
+    except Exception:
+        method = 'spawn'
+    return 0.05 if method == 'fork' else 4.0
+
+
+def _pool_speedup(workers) -> float:
+    """What `workers` workers actually deliver — Amdahl, not the worker count."""
+    if not workers or workers < 2:
+        return 1.0
+    p = _POOL_PARALLEL_FRACTION
+    return 1.0 / ((1.0 - p) + p / float(workers))
+
+
+def _frame_costs_s(frame, *, gpu_ok, min_sigma, max_sigma, num_sigma, threshold,
+                   host_mask=None):
+    """`(serial_s, gpu_s|None)` for ONE frame. Probed once per (build, params, shape).
+
+    Probed rather than assumed, because per-frame cost spans 14 ms (a 171x201 crop)
+    to 2.8 s (a 2048x2048 field) and the tier that wins moves with it — no fixed
+    frame-count threshold is right at both ends.
+
+    Keyed on the frame SHAPE as well as the params and build, because shape is what
+    the cost depends on. Contrast `gpu_matches_cpu`, whose verdict is a property of
+    the machine and is deliberately NOT keyed on the data: same cache discipline,
+    different invariants, because they are answering different questions.
+
+    A probe that raises returns `(0.0, None)` — "cost unknown", which the selector
+    reads as a reason to stay on the tier that needs no justification.
+    """
+    import time
+    key = (_gpu_build_id(), float(min_sigma), float(max_sigma), int(num_sigma),
+           float(threshold), tuple(getattr(frame, 'shape', ()) or ()), bool(gpu_ok))
+    if key in _FRAME_COST_CACHE:
+        return _FRAME_COST_CACHE[key]
+
+    def _time(use_gpu):
+        t0 = time.perf_counter()
+        detect_beads_frame(frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                           num_sigma=num_sigma, threshold=threshold,
+                           host_mask=host_mask, use_gpu=use_gpu)
+        return time.perf_counter() - t0
+
+    try:
+        costs = (_time(False), _time(True) if gpu_ok else None)
+    except Exception as exc:
+        debug_log('tier probe: frame 0 would not detect; costs unknown', exc)
+        costs = (0.0, None)
+    _FRAME_COST_CACHE[key] = costs
+    return costs
+
+
+def _choose_detection_tier(*, n_frames, t_ser, t_gpu, workers, gpu_ok, pool_ok) -> str:
+    """The cheapest tier for THIS stack: `'gpu'` | `'pool'` | `'serial'`.
+
+        serial : t_ser * T
+        gpu    : t_gpu * T
+        pool   : spawn + (t_ser * T) / speedup(workers)
+
+    With the cost unknown (`t_ser` 0), fall back to the old preference rather than
+    guess — a wrong guess here costs minutes on a long stack.
+    """
+    if not n_frames or n_frames < 1 or not t_ser or t_ser <= 0:
+        return 'gpu' if gpu_ok else 'serial'
+
+    options = [('serial', t_ser * n_frames)]
+    if gpu_ok and t_gpu and t_gpu > 0:
+        options.append(('gpu', t_gpu * n_frames))
+    if pool_ok and workers and workers >= 2 and n_frames > 1:
+        options.append(('pool', _pool_spawn_cost_s()
+                        + (t_ser * n_frames) / _pool_speedup(workers)))
+    return min(options, key=lambda kv: kv[1])[0]
+
+
 @tags_layer('bead_detect', role='overlay',
             summary='Bead detection across a stack (blob LoG)', target='bead')
 def detect_beads_stack(
@@ -1664,50 +1873,72 @@ def detect_beads_stack(
             pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
-    # ── Optional CPU-parallel pre-detection (fast mode only) ─────────────────
-    # The expensive, embarrassingly-parallel part is per-frame blob detection.
-    # When enabled and the stack is file-backed (so workers can re-open it),
-    # detect coords for all frames across a process pool up front, then do the
-    # cheap scoring/classification serially below (where the shared template
-    # lives). Falls back cleanly to serial if anything is unavailable.
-    # ── Tier selection: GPU > CPU-parallel > serial ─────────────────────────
-    # GPU (LoG convolutions on-device) is the biggest single-machine win and is
-    # done IN-PROCESS: we do not also spin up a process pool, because the pool
-    # workers would contend for the one GPU. So GPU takes priority; only when no
-    # GPU is present do we consider the CPU process-pool path.
-    gpu_on = False
+    # ── Tier selection ───────────────────────────────────────────────────────
+    # No fixed preference order — each tier is costed for THIS stack and the
+    # cheapest wins. See the note above `_choose_detection_tier` for the
+    # measurements that killed the old "GPU > CPU-parallel > serial" rule.
+    _variant = (detection_variant or 'baseline').lower()
+
+    def _frame0():
+        from pycat.file_io.file_io import iter_frames as _itf
+        return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
+
+    # Is the GPU a CANDIDATE? The equivalence guard still runs whenever it is —
+    # even if the pool ends up winning — because "never trust a mismatching GPU"
+    # is a correctness rule, not a performance one, and the memo makes it free.
+    gpu_ok = False
     if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
         try:
             from pycat.toolbox.gpu_utils import gpu_available
-            gpu_on = bool(gpu_available())
+            gpu_ok = bool(gpu_available())
         except Exception:
-            gpu_on = False
-        if gpu_on:
-            # Equivalence guard: verify the GPU blob detector matches the CPU
-            # (skimage) detector on the FIRST frame before trusting it for the
-            # whole stack. If they disagree (a driver/cupy quirk), fall back to
-            # CPU so results are never silently wrong. Runs once, cheap.
-            try:
-                from pycat.file_io.file_io import iter_frames as _itf
-                _t0, _f0 = next(iter(_itf(bead_stack, indices=frame_indices)))
-                _cpu = detect_beads_frame(
-                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
-                    num_sigma=num_sigma, threshold=threshold,
-                    host_mask=host_mask, use_gpu=False)
-                _gpu = detect_beads_frame(
-                    _f0, min_sigma=min_sigma, max_sigma=max_sigma,
-                    num_sigma=num_sigma, threshold=threshold,
-                    host_mask=host_mask, use_gpu=True)
-                # Compare as sorted rounded coordinate sets.
-                def _key(cs):
-                    return sorted((round(float(y), 3), round(float(x), 3))
-                                  for (y, x) in cs)
-                if _key(_cpu) != _key(_gpu):
-                    gpu_on = False   # disagreement → do not trust GPU
-            except Exception:
-                gpu_on = False
+            gpu_ok = False
+        if gpu_ok:
+            # Memoised per process on (build, LoG params) — a cache hit costs one
+            # dict lookup and does not touch frame 0; a miss still runs the full
+            # double-detect once. See `gpu_matches_cpu`.
+            gpu_ok = gpu_matches_cpu(
+                _frame0, min_sigma=min_sigma, max_sigma=max_sigma,
+                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
 
-    _variant = (detection_variant or 'baseline').lower()
+    # Is the POOL a candidate? Ring-merge needs per-detection sigma from blob_log
+    # (which the worker path does not carry) and hot-pixel reject filters coords
+    # against a stack-level mask, so both stay serial.
+    _src_desc = _bead_source_descriptor(bead_stack) if quality_mode == 'fast' else None
+    try:
+        import os as _os
+        _max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+    except Exception:
+        _max_workers = 1
+    pool_ok = (quality_mode == 'fast'
+               and _variant not in ('ring_merge', 'hot_pixel_reject')
+               and parallel in ('auto', 'cpu', 'process')
+               and _src_desc is not None and _max_workers >= 2
+               and bool(n_frames) and n_frames > 1)
+
+    # An explicit request is the caller telling us which tier they want; only
+    # 'auto' has to justify itself against the others.
+    if use_gpu in ('gpu', True, 'true') and gpu_ok:
+        _tier = 'gpu'
+    elif parallel in ('cpu', 'process') and pool_ok:
+        _tier = 'pool'
+    elif not gpu_ok and not pool_ok:
+        _tier = 'serial'
+    else:
+        _t_ser, _t_gpu = _frame_costs_s(
+            _frame0(), gpu_ok=gpu_ok, min_sigma=min_sigma, max_sigma=max_sigma,
+            num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+        _tier = _choose_detection_tier(
+            n_frames=n_frames, t_ser=_t_ser, t_gpu=_t_gpu, workers=_max_workers,
+            gpu_ok=gpu_ok, pool_ok=pool_ok)
+        debug_log(
+            f'VPT tier: {_tier} for {n_frames} x {tuple(getattr(bead_stack, "shape", ()))[-2:]} '
+            f'(serial {_t_ser*1000:.0f} ms/frame'
+            + (f', GPU {_t_gpu*1000:.0f} ms/frame' if _t_gpu else '')
+            + (f', pool ~{_t_ser/_pool_speedup(_max_workers)*1000:.0f} ms/frame + '
+               f'{_pool_spawn_cost_s():.1f} s spawn' if pool_ok else '') + ')', None)
+
+    gpu_on = (_tier == 'gpu')
     # Hot-pixel reject: build the fixed-sensor-pixel mask ONCE from the stack's
     # temporal statistics (scene-independent), then drop detections landing on
     # those pixels. Needs all frames, so it's a stack-level pre-pass.
@@ -1723,56 +1954,42 @@ def detect_beads_stack(
             print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
             _hot_mask = None
     precomputed_coords = None
-    # Ring-merge needs per-detection sigma from blob_log, which the parallel
-    # worker path doesn't carry, so run detection serially for that variant.
-    # Hot-pixel reject also runs serially (it filters coords against the mask).
-    if quality_mode == 'fast' and not gpu_on \
-            and _variant not in ('ring_merge', 'hot_pixel_reject') \
-            and parallel in ('auto', 'cpu', 'process'):
-        src_desc = _bead_source_descriptor(bead_stack)
+    if _tier == 'pool':
         try:
-            import os as _os
-            max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
+                              num_sigma=num_sigma, threshold=threshold,
+                              host_mask=host_mask)
+            idxs = (list(frame_indices) if frame_indices is not None
+                    else list(range(n_frames)))
+            tasks = [(t, _src_desc, True, det_kwargs, merge_radius_px)
+                     for t in idxs]
+            precomputed_coords = {}
+            with ProcessPoolExecutor(max_workers=_max_workers) as ex:
+                _n_par = len(tasks)
+                futures = [ex.submit(_detect_frame_worker, task)
+                           for task in tasks]
+                _done_par = 0
+                for fut in as_completed(futures):
+                    t, coords = fut.result()
+                    precomputed_coords[t] = coords
+                    _done_par += 1
+                    # Report progress DURING parallel detection — the
+                    # expensive phase. as_completed fires as each frame
+                    # finishes, so the bar advances smoothly instead of
+                    # sitting at 0 until the (cheap) scoring loop runs.
+                    # Parallel detection is phase 1 of 2 → map it to the
+                    # first 70% of the bar so the subsequent scoring loop
+                    # continues from there instead of restarting at 0
+                    # (avoids the bar hitting 100% twice).
+                    if progress_callback is not None and _n_par:
+                        progress_callback(
+                            int(_done_par / _n_par * 0.70 * max(1, n_frames)),
+                            max(1, n_frames))
         except Exception:
-            max_workers = 1
-        # Only worth it with a real descriptor and enough frames + workers.
-        if src_desc is not None and max_workers > 1 and n_frames and n_frames > 1:
-            try:
-                from concurrent.futures import ProcessPoolExecutor
-                det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
-                                  num_sigma=num_sigma, threshold=threshold,
-                                  host_mask=host_mask)
-                idxs = (list(frame_indices) if frame_indices is not None
-                        else list(range(n_frames)))
-                tasks = [(t, src_desc, True, det_kwargs, merge_radius_px)
-                         for t in idxs]
-                precomputed_coords = {}
-                from concurrent.futures import as_completed
-                with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                    _n_par = len(tasks)
-                    futures = [ex.submit(_detect_frame_worker, task)
-                               for task in tasks]
-                    _done_par = 0
-                    for fut in as_completed(futures):
-                        t, coords = fut.result()
-                        precomputed_coords[t] = coords
-                        _done_par += 1
-                        # Report progress DURING parallel detection — the
-                        # expensive phase. as_completed fires as each frame
-                        # finishes, so the bar advances smoothly instead of
-                        # sitting at 0 until the (cheap) scoring loop runs.
-                        # Parallel detection is phase 1 of 2 → map it to the
-                        # first 70% of the bar so the subsequent scoring loop
-                        # continues from there instead of restarting at 0
-                        # (avoids the bar hitting 100% twice).
-                        if progress_callback is not None and _n_par:
-                            progress_callback(
-                                int(_done_par / _n_par * 0.70 * max(1, n_frames)),
-                                max(1, n_frames))
-            except Exception:
-                # Any failure (pickling, worker crash, host_mask not picklable)
-                # → fall back to serial detection below.
-                precomputed_coords = None
+            # Any failure (pickling, worker crash, host_mask not picklable)
+            # → fall back to serial detection below.
+            precomputed_coords = None
 
     done = 0
     for t, frame in iter_frames(bead_stack, indices=frame_indices):
