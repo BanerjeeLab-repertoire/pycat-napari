@@ -42,7 +42,16 @@ def _make_synthetic_stack(path, n_frames=4, shape=(128, 128), n_beads=25, seed=0
             img += 200.0 * np.exp(-((yy - jy) ** 2 + (xx - jx) ** 2) / (2 * 2.0 ** 2))
         frames.append(img.astype(np.uint16))
     stack = np.stack(frames, 0)
-    tifffile.imwrite(path, stack)
+    # ── Write it as GRAYSCALE PAGES, not an RGB image ────────────────────────────────────
+    #
+    # ``imwrite`` of a small ``(n, H, W)`` array is AMBIGUOUS: tifffile's heuristic reads a
+    # leading axis of 3-4 back as RGB *samples* on one page, not as ``n`` frames — so the
+    # by-descriptor read (which this test compares against the in-memory stack) returned an
+    # ``(n, H, W)`` blob instead of frame ``t``, and the equivalence assertion failed on shape.
+    # Real acquisitions are long multi-page / OME TIFFs and never hit this; the artefact is
+    # specific to a hand-written ≤4-frame stack. ``photometric='minisblack'`` is tifffile's own
+    # documented cure (it is what its DeprecationWarning tells you to pass).
+    tifffile.imwrite(path, stack, photometric='minisblack')
     return stack
 
 

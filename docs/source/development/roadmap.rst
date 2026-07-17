@@ -935,11 +935,14 @@ The concentrations, and the ones most likely to bite:
 * ``segmentation_tools`` — ``local_snr_threshold=1.0`` and ``global_snr_threshold=1.0`` appear
   **20 times** across the puncta pipeline, and that SNR is the **un-subtracted ratio** already
   fixed elsewhere (see the BUG rubric below). It decides which puncta survive.
-* ``vpt_tools`` — ~20 detection/linking defaults (``threshold=0.02``, ``max_linking_distance_um``,
-  ``min_track_length=5``, ``classify_beads(defocus_r2_max=0.85)``). These gate which beads and
-  which tracks reach the viscosity calculation.
-* ``condensate_physics_tools`` — ``min_track_length=5``, ``reject_outlier_tracks=True``,
-  ``min_independent_pairs=10``, ``bleach_r2_min=0.7``.
+* ``vpt_tools`` — ~20 detection/linking defaults (``threshold=0.02``, ``max_linking_distance_um``).
+  These gate which beads and which tracks reach the viscosity calculation. (Two named here are
+  already handled: ``min_track_length`` was raised 5 → 200 with a lag-window derivation and a
+  fragmentation diagnostic in 1.6.85; ``classify_beads(defocus_r2_max)`` is deprecated/unused and
+  is explicitly excluded from the filter-sensitivity registry.)
+* ``condensate_physics_tools`` — ``reject_outlier_tracks=True``, ``min_independent_pairs=10``,
+  ``bleach_r2_min=0.7`` (``min_track_length`` is now the derived ``MIN_TRACK_LENGTH_FRAMES=200``,
+  1.6.85 — no longer a dangerous default).
 * ``brightfield_tools`` — ``min_diameter_px=3``, ``max_diameter_px=50``, ``min_circularity=0.5``:
   a size/shape gate that will silently exclude a whole population of condensates if the pixel
   size differs from whatever it was tuned on.

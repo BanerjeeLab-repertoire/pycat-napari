@@ -1,5 +1,50 @@
 # Claude Code spec — VPT rework: detection speed, MSD default, brushing loop, selection overlay
 
+## ✅ STATUS — DONE. All five problems implemented (1.6.83 + 1.6.85), verified against 1.6.91.
+This spec had already been executed across two versions before this closure; it just never carried a
+status block. Verified: every problem is implemented, each has a dedicated passing test, and **three
+of the five root causes did not survive contact with the tree** — the fixes address what is actually
+there, and the deviations are recorded below so they do not read as unmotivated.
+
+- **Problem 1 — equivalence guard + tier default (1.6.83).** The guard is memoised on its true
+  invariants ``(gpu build id incl. cupy version, min/max/num sigma, threshold)`` — a hit does not even
+  read frame 0; a miss still runs the full double-detect, so a mismatching GPU is never trusted. The
+  *"Runs once, cheap"* comment the spec quoted **did not exist** in that form. And the tier default was
+  done better than asked: rather than a heuristic, ``_choose_detection_tier`` now **measures** all
+  three (GPU / CPU-pool / serial) and takes the minimum — measured, GTX 1080, the 7-worker pool beats
+  the GPU (the GPU is only ~2-3× one core), and the pool's spawn cost is Amdahl-modelled so a
+  20-frame stack is not handed a 5-second pool for 0.27 s of work. Tests: ``test_vpt_equivalence_guard_memo``,
+  ``test_vpt_pool_gate``.
+- **Problem 2 — MSD default + fragmentation diagnostic (1.6.85).** ``MIN_TRACK_LENGTH_FRAMES = 200``
+  (spec's floor), *derived* from the committed lag-window reasoning (30 honest lags × the n/4 rule =
+  120-frame minimum; 200 gives 50 lags with headroom) and pinned to the fit gate by a test so they
+  cannot drift. Short tracks are **reported, not silently dropped** — two fragmentation signatures
+  (co-located tracks in non-overlapping frame windows; gappy tracks), reported, not re-linked. Tests:
+  ``test_msd_min_track_length``, ``test_msd_drift``.
+- **Problem 3 — plot-click loop (1.6.83).** ``_reveal_track_in_viewer`` is wrapped in a ``_revealing``
+  re-entrancy flag released on the next event-loop tick, and the camera/frame move is gated on the
+  shared ``follow_selection`` preference (OFF by default, from brushing increment 5) — so the default
+  case does not move the view at all and cannot loop. The already-selected click is a no-op. Test:
+  ``test_vpt_reveal_loop``.
+- **Problem 4 — ring offset (1.6.85).** The root cause was **not padding** — ``pad_px`` never reaches
+  the overlay marker (it is only consumed by the offline crop; now pinned by a test). The ring sat at
+  the frame-0 position because ``add_points(path[:1])`` had no frame axis, so a ``(T,Y,X)`` viewer drew
+  it on every frame at the start point. Fixed with one point per frame at ``(frame, y, x)``, plus a
+  ~1.5 Hz display-only pulse (one QTimer per pick, self-cancelling). Test: ``test_picked_bead_ring``.
+- **Problem 5 — shifted-ghost trajectory (1.6.85).** There is **no shifted ghost**: the "Picked track"
+  overlay and the Tracks layer both take their scale from the image layer, so they align exactly. The
+  duplicate overlay is kept (rather than recolouring the Tracks layer, which would borrow display
+  state to mean "selected" — the ``selected_label`` mistake ``selection_overlay`` exists to undo) and
+  demoted to secondary emphasis, since the ring now pulses on the bead.
+
+**Closed here (1.6.91-era):** ``tests/test_vpt_parallel_equivalence.py`` had been RED — a pre-existing
+stale test (added 1.5.293, broken by a later tifffile upgrade, invisible because it is not
+``core``-marked). Its fixture wrote a ≤4-frame stack with a bare ``imwrite``, which tifffile now reads
+back as an **RGB image**, so the by-descriptor disk read diverged from the in-memory serial path. Fixed
+with ``photometric='minisblack'`` (tifffile's own documented cure); real long acquisitions never hit
+this. The parallel/serial detection equivalence contract is now genuinely green.
+
+
 **Date:** 2026-07-16 · **Target tree:** 1.6.80 · Verified against the 1.6.80 tree. Five distinct,
 independently-root-caused problems from a real VPT workflow run. Each is separable — ship as one
 version or several, but fix them by cause, not symptom. Touches `vpt_tools.py`, `vpt_ui.py`,
