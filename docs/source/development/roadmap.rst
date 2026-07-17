@@ -248,14 +248,22 @@ below are cross-referenced rather than repeated.
   authoritative would change which layers the save dialog pre-selects, which is a behaviour change
   that deserves its own decision rather than riding along in a bug fix.
 
-**Developer-environment note (not a product issue, but it will bite the next person):**
+**Developer-environment note — RESOLVED (1.6.88), and it can no longer come back:**
 
-* The ``pycat-160`` conda env has a **non-editable** install, so ``pycat`` resolves to
-  ``site-packages`` and a bare ``pytest`` tests the *installed* copy rather than the working tree.
-  Every test run in this session used ``PYTHONPATH=src`` to compensate. CI is unaffected (it does
-  ``pip install --no-deps -e .``). A one-off ``pip install -e .`` locally removes the footgun — worth
-  doing before the next session, because a green run against a stale copy is the kind of thing that
-  costs an afternoon.
+* The trap: a **non-editable** install makes ``pycat`` resolve to ``site-packages``, so a bare
+  ``pytest`` tests the *installed* copy rather than the working tree — **and passes.** A green suite
+  that never executed your changes is the worst failure mode there is, and it cost this project an
+  afternoon at least once. It was recorded here against the ``pycat-160`` env (work machine); the
+  same trap was independently live in the home machine's ``pycat``/``pycat-dev``.
+* **Fixing an env does not fix this**, because the next machine gets it again. ``tests/conftest.py``
+  now refuses to run when ``pycat`` resolves outside the checkout, and says exactly how to fix it
+  (``pip install --no-deps -e .``). Verified three ways: quiet on an editable env, fires on a
+  simulated stale install, and ``PYCAT_ALLOW_INSTALLED=1`` still allows the one legitimate case —
+  deliberately testing a built wheel before a release.
+* CI was never affected (it does ``pip install --no-deps -e .``), so the guard passes there.
+* Both envs on the home machine are now editable, and a bare ``pytest`` works — ``PYTHONPATH=src``
+  is no longer needed. **``pycat-160`` on the work machine still needs the one-off**
+  ``pip install --no-deps -e .``; until then the guard will stop the run rather than let it lie.
 
 .. rubric:: ⚠ NEEDS A CLICK-TEST — two shipped features no automated test can reach
 

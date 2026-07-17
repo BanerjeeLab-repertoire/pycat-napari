@@ -1,3 +1,25 @@
+## [1.6.88] - 2026-07-17
+### Fixed — **A bare `pytest` could test an installed copy of PyCAT and pass.**
+A non-editable install makes `pycat` resolve to `site-packages`, so `pytest` runs against whatever was
+last installed **and goes green** — a suite that never executed the code under review. This is the
+worst failure mode available: not a red build, a *lying* one. The 2026-07-16 audit recorded it against
+the `pycat-160` env; the same trap was independently live in this machine's `pycat` (a stale 1.6.69)
+and `pycat-dev`. Every test run in the previous session used `PYTHONPATH=src` to work around it.
+
+Fixing an env does not fix this — the next machine gets it again. `tests/conftest.py` now **refuses to
+run** when `pycat` resolves outside the checkout, and names the fix (`pip install --no-deps -e .`).
+Verified three ways: quiet on an editable env, fires on a simulated stale install, and
+`PYCAT_ALLOW_INSTALLED=1` still permits the one legitimate case (testing a built wheel before a
+release). CI was never affected — `core.yml` installs with `pip install --no-deps -e .` — so the guard
+passes there.
+### Notes
+- Both envs on the home machine are now editable and a bare `pytest` works; `PYTHONPATH=src` is no
+  longer needed. `pycat-160` (work machine) still wants the one-off `pip install --no-deps -e .` —
+  until then the guard stops the run rather than let it lie.
+- Also removed an orphaned `site-packages/pycat` husk left by the old non-editable install: the `.py`
+  files were already gone, leaving 10 numba cache files and empty directories that Python still
+  treated as a namespace package.
+
 ## [1.6.87] - 2026-07-17
 ### Fixed — **The local-background ring now scales with the object it is measuring.**
 `local_intensity_condition` and `gradient_condition` compared an object's interior (eroded 1px)
