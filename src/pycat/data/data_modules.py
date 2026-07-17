@@ -127,12 +127,24 @@ class BaseDataClass:
         numpy arrays, dictionaries, and other objects. The key should be a string that uniquely
         identifies the data being stored.
         """
-        # Validation to ensure that the key exists and the data is of the correct type
-        if self.data_repository[key].__class__ != data.__class__:
-            napari_show_warning(f"Data type mismatch for key {key}.")
-        # if self.data_repository[key] doesnt exist yet, create it
-        elif key not in self.data_repository:
+        # ── Check EXISTENCE before class ─────────────────────────────────────────────────
+        #
+        # This read `self.data_repository[key].__class__` FIRST, then checked `key not in ...` — so
+        # a genuinely new key raised `KeyError` on the very first line, before the "new key" branch
+        # could run. `data_repository` is a plain dict (not a defaultdict), so this is a real crash,
+        # masked only because most callers set keys the repository is pre-seeded with. Reordering so
+        # the existence check comes first is the whole fix.
+        #
+        # The class-mismatch branch is UNCHANGED on purpose: as before, it warns and keeps the old
+        # value (the original `if` had no assignment). The spec asked to store-anyway here, on the
+        # stated grounds of "preserving current behaviour" — but the current behaviour rejects, so
+        # that would be a semantic change, not a preservation. Left as a separate decision (see the
+        # note shipped with this fix): whether a type mismatch should overwrite, and relatedly that
+        # numeric keys seeded as int (`object_size`, `microns_per_pixel_sq`) reject a float update.
+        if key not in self.data_repository:
             self.data_repository[key] = data
+        elif self.data_repository[key].__class__ != data.__class__:
+            napari_show_warning(f"Data type mismatch for key {key}.")
         else:
             self.data_repository[key] = copy.deepcopy(data)
 

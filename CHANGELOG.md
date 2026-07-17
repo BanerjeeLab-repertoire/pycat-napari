@@ -1,3 +1,46 @@
+## [1.6.91] - 2026-07-17
+### Fixed — **`set_data` crashed on any genuinely new key.**
+`BaseDataClass.set_data` read the stored value's class (`self.data_repository[key].__class__`) BEFORE
+checking whether the key existed. `data_repository` is a plain dict, so a new key raised `KeyError`
+on the first line, before the "new key" branch could run. Masked only because the repository is
+pre-seeded with the common keys. Reordered so existence is checked first.
+- **The type-mismatch branch is UNCHANGED on purpose.** The audit spec asked to store-anyway there,
+  citing "current store-anyway behaviour" — but the current behaviour *rejects* (warns and keeps the
+  old value), so storing would be a semantic change, not a preservation. Left as a deliberate,
+  separate decision (see the note), pinned so it is chosen rather than drifted into.
+### Fixed — **"Best frame" could be the sharpest speck of DUST, not the sample (science).**
+Every whole-frame focus/quality metric — Brenner, Tenengrad, normalised variance, Laplacian variance,
+gradient energy — scores sharpness by a plain `mean`/`var` of a per-pixel magnitude. That aggregate
+is dominated by its largest values, so a **bright speck of debris on a different focal plane** (dust
+has its own focus curve) can, at *its* focus frame, contribute a handful of extreme-gradient pixels
+that outscore a genuinely in-focus but spatially-extended sample. The argmax lands on the junk frame,
+and nothing says so. Documented in `bf_focus_metric`'s own docstring; reproduced here on a synthetic
+z-sweep (plain metric picks the debris frame, robust metric picks the sample).
+- `math_utils.robust_focus_energy` — the maskless defence: drop the top ~1% of per-pixel
+  contributions before averaging. **Spatial extent is the discriminator, not magnitude** — a real
+  in-focus object lights up *many* pixels (99% survive the trim); a speck lights up *few* (all
+  trimmed). On clean data, trimming 1% of a smooth distribution does **not move the chosen frame**.
+- Wired into `bf_focus_metric` (maskless path), the three metrics in `bf_analyse_frame_quality`, and
+  `analyse_frame_quality`'s Laplacian variance + gradient energy. Entropy is left alone (histogram-
+  based, a speck barely moves it). Verified: on a debris z-sweep the real functions now score the
+  sample sharpest; on a clean sweep the chosen frame is unchanged; the masked `bf_focus_metric` path
+  is exact. Mutation-checked — disabling the trim turns the debris tests red.
+### Notes — where the audit spec's Fix 2 did not survive the tree
+- The spec's Fix 2 said to thread a segmentation `mask=` through the focus scorers. **It targeted
+  the wrong functions and a mask that is never available:** `bf_analyse_focus_series` (its named
+  target) has **zero callers**; the live path `bf_analyse_frame_quality` computes its metrics inline,
+  not via `bf_focus_metric`; and **no focus-QC caller has a mask** (those panels have only an image
+  dropdown, and QC usually runs before segmentation exists). Threading `mask=None` everywhere would
+  have added inert parameters that change nothing and leave the bug intact. Per Gable's call, the fix
+  is the **maskless robustification** above — which helps every current caller, none of whom can pass
+  a mask. `bf_focus_metric`'s existing mask path is kept exact for the day a mask source is wired.
+- `bf_analyse_frame_quality` min-max normalises each frame independently, which already partly
+  counters a bright speck, so its robustification is defence-in-depth (no regression) rather than a
+  demonstrated flip — recorded in the test rather than overclaimed.
+- **Open decision (from Fix 1):** whether a type-mismatched `set_data` should overwrite or reject,
+  and the related quirk that numeric keys seeded as `int` (`object_size`, `microns_per_pixel_sq`)
+  reject a `float` update with a warning. Left for a deliberate call.
+
 ## [1.6.90] - 2026-07-17
 ### Fixed — **The three live bugs the audit verified and left: all three, and one was worse than recorded.**
 

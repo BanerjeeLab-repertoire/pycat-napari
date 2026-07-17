@@ -61,6 +61,7 @@ import numpy as np
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops as _bbox_cols
 from pycat.utils.general_utils import debug_log
+from pycat.utils.math_utils import robust_focus_energy
 import pandas as pd
 
 # Notifications via the shim: keeps the physics importable with no GUI stack (1.5.378).
@@ -1769,7 +1770,9 @@ def _frame_gradient_energy(frame: np.ndarray) -> float:
     """
     gy = ndimage.sobel(frame, axis=0)
     gx = ndimage.sobel(frame, axis=1)
-    return float(np.sqrt(gy**2 + gx**2).mean())
+    # Robust mean edge strength: an out-of-plane speck cannot hijack the argmax. See
+    # `robust_focus_energy` — clean frames are unaffected, debris is trimmed.
+    return robust_focus_energy(np.sqrt(gy**2 + gx**2))
 
 
 def _fit_linear_trend(values: np.ndarray) -> dict:
@@ -1836,7 +1839,9 @@ def analyse_frame_quality(
         frame = stack[t].astype(np.float32)
         mean_int.append(float(frame.mean()))
         lap      = ndimage.laplace(frame)
-        lap_var.append(float(lap.var()))
+        # Robust Laplacian variance: a bright out-of-plane speck's few large-magnitude
+        # pixels no longer dominate the spread, so 'best frame' is the sample, not the dust.
+        lap_var.append(float(robust_focus_energy((lap - lap.mean())**2)))
         entropy.append(_frame_entropy(frame, entropy_bins))
         grad_en.append(_frame_gradient_energy(frame))
 

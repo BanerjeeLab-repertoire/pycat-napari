@@ -212,32 +212,41 @@ about how the app should feel, and no test can make it.
   unverifiable headlessly (see the click-test note below), so it wants someone at a running viewer.
   See the two rubrics further down for the session-loader and progress-rollout halves.
 
-**Live bugs, verified, not fixed — each is small and each needs a decision, not investigation:**
+**Live bugs, verified — ALL FIVE now fixed (1.6.90 + 1.6.91):**
 
-* **A per-cell grouping in every puncta plot never fires.** ``analysis_plots.py:1166`` gates on
-  ``if 'cell_label' in df.columns``; ``feature_analysis_tools.py:700`` writes ``df['cell label']``
-  — **with a space.** Every other producer and consumer in the codebase uses the underscore. So the
-  grouped rendering silently does nothing for the one table it exists for. 1.6.74 fixed the *ref*
-  side (``ObjectRef.from_row`` accepts both spellings, so puncta refs carry ``parent_id`` again) and
-  deliberately did **not** rename the column: it is user-visible in results tables and CSVs, and
-  renaming it would silently switch this plot's appearance. **The decision is Gable's:** rename the
-  column (plots change), or teach ``analysis_plots`` both spellings (plots change), or leave it.
-  Doing nothing keeps a documented dead branch.
-* **Two different uuids identify the same layer.** ``layer_tag_hook.py:211`` stamps
-  ``metadata['pycat_layer_id'] = uuid4().hex`` (32 chars) — this is what ``ObjectRef.source_layer_id``
-  matches and what the whole brushing arc keys on. ``layer_tags.py:223-238`` has an *older*
-  ``layer_tag_id()`` returning ``metadata['pycat_tag_uid']`` (``uuid4().hex[:12]``), used by
-  ``partial_volume_tools.py:572`` and recorded by ``tag_registry.tags_for_plot`` as ``layer_tag_id``.
-  **They are different values for the same layer**, so anything matching a plot's recorded id against
-  a ref's ``source_layer_id`` will never match. Nothing does *yet* — which is why this is a trap
-  rather than a bug. Whoever wires plot-recorded ids to selection will hit it. The fix is to pick one
-  and make the other an alias.
-* **The tifffile/zarr shim is a safety net nobody installs.** ``file_io/tifffile_zarr_shim.py``
-  aliases the symbol tifffile needs on zarr 3.2, and ``install_tifffile_zarr_shim()`` has **zero
-  production call sites** — only its own definition and ``tests/test_tifffile_zarr_shim.py``. Since
-  1.6.71 TIFF Z/TZ reads natively and no longer needs it, so this is not urgent; but it means the
-  module is dead code that *looks* like a live workaround. Either wire it at import for the paths
-  that still fall to BioIO's dask (CZI), or delete it and keep the test as a record.
+* ✅ **A per-cell grouping in every puncta plot never fired** — the plot gated on ``cell_label`` while
+  ``puncta_analysis_func`` writes ``'cell label'`` (a space). RESOLVED in 1.6.90 via
+  ``object_ref.cell_label_column``, which accepts both spellings in one place — and it was *worse*
+  than recorded: the ``else`` it always took drew one ``ax.plot`` over a pooled multi-cell frame,
+  connecting points *across* cells into a single zigzag line, a picture that said something untrue.
+  The column is deliberately NOT renamed (user-visible in saved CSVs).
+* ✅ **Two different uuids identified the same layer** (``pycat_layer_id`` vs ``pycat_tag_uid``).
+  RESOLVED in 1.6.90: ``pycat_layer_id`` wins and ``pycat_tag_uid`` is kept as an alias holding the
+  same value, so existing readers keep working and now agree with the refs.
+* ✅ **The tifffile/zarr shim was a fix nobody installed — for a LIVE bug**, not the dead code it
+  looked like. RESOLVED in 1.6.90: reproduced on this tree (zarr 3.2.1 breaks tifffile's
+  ``aszarr()``, which breaks every read that falls to BioIO's dask path — multi-channel TIFF, all
+  CZI), and now installed in ``file_io/__init__.py`` before ``tifffile.zarr`` is first imported. Also
+  fixed a test that was silently disabling lazy reads for the rest of the suite by faking ``zarr`` in
+  ``sys.modules`` and not restoring it.
+* ✅ **``set_data`` raised ``KeyError`` on any genuinely new key** (class-check before existence-check
+  on a plain dict). RESOLVED in 1.6.91.
+* ✅ **"Best frame" could be the sharpest speck of dust** — every whole-frame focus/quality metric was
+  dominated by a few extreme pixels, so debris on a different focal plane could outscore the sample.
+  RESOLVED in 1.6.91 with a maskless robust aggregation (``math_utils.robust_focus_energy``). *Note
+  the audit spec's own Fix 2 targeted dead code and a mask no caller has; the real fix was different
+  — see* ``claude_code_spec_audit_quickwins`` *for why.*
+
+**Two OPEN DECISIONS surfaced by those fixes (small, but genuinely Gable's call — not oversights):**
+
+* **Type-mismatched ``set_data``: overwrite or reject?** The original rejects (warns, keeps old); the
+  audit spec assumed it stored. Preserved the reject behaviour in 1.6.91 rather than silently change
+  it. Related quirk: numeric keys seeded as ``int`` (``object_size``, ``microns_per_pixel_sq``)
+  reject a ``float`` update with a warning. Pinned by ``test_set_data_new_key`` so the current
+  contract is chosen deliberately.
+* **The ``'cell label'`` column spelling.** 1.6.90 made every *reader* accept both, so nothing is
+  broken — but the producer still writes the odd spelling. Renaming it is user-visible in saved CSVs;
+  left as-is unless there is a reason to normalise.
 
 **Deliberately deferred, with the reason (do not treat these as oversights):**
 

@@ -1,5 +1,37 @@
 # Claude Code spec — Two audit-derived correctness fixes
 
+## ✅ STATUS — DONE, shipped in 1.6.91 (executed against the 1.6.90 tree). Fix 2 done DIFFERENTLY.
+`pytest -m core`: **874 passed, 2 skipped**. Both bugs verified live on the current tree before fixing.
+
+**Fix 1 (`set_data` KeyError) — done as specified, with ONE correction.** The bug is exactly as
+described: class-check before existence-check, `KeyError` on any new key (`data_repository` is a plain
+dict — reproduced). Reordered. **But the spec's mismatch handling is wrong:** it says to store-anyway
+"to preserve current store-anyway behaviour", and the current behaviour does NOT store on a mismatch
+(the original `if` branch only warns). Storing would be a semantic *change*. Left the mismatch branch
+exactly as it was (warn, keep old) and flagged the store-vs-reject question — plus the related quirk
+that int-seeded numeric keys reject a float update — as a real decision, pinned by a test.
+
+**Fix 2 (focus scores the sharpest debris) — REAL bug, but the spec's fix targeted the wrong code.**
+Verified in the tree:
+- `bf_analyse_focus_series` (the spec's named target, `:778`) has **ZERO callers** — dead code.
+- The spec's `:840` is a *different* function (`select_best_slice`), not `bf_analyse_focus_series`.
+- The live path `bf_analyse_frame_quality` computes its metrics **inline**, not through
+  `bf_focus_metric`, so wiring a mask into `bf_focus_metric` would not reach it.
+- **No focus-QC caller has a mask.** `brightfield_ui` / `invitro_bf_ui` / `condensate_physics_ui` /
+  `invitro_fluor_ui` all pass only an image stack; the panels have no Labels dropdown, and QC runs
+  before segmentation exists. Threading `mask=None` through would add inert parameters that change
+  nothing for any user and leave the bug intact — the "dead machinery" trap.
+
+So per Gable's decision, Fix 2 is the **maskless robustification** the spec did not propose:
+`math_utils.robust_focus_energy` trims the top ~1% of per-pixel contributions before averaging
+(spatial extent, not magnitude, is what separates an in-focus object from a speck), wired into
+`bf_focus_metric`'s maskless path, all three metrics of `bf_analyse_frame_quality`, and
+`analyse_frame_quality`'s Laplacian variance + gradient energy. It helps **every** current caller —
+none of whom can supply a mask — and `bf_focus_metric`'s existing mask path is preserved exact for the
+day one is wired. Proved on a synthetic debris z-sweep (real functions; plain-mean baseline picks the
+debris, robust picks the sample), no-regression on a clean sweep, mutation-checked.
+
+
 **Date:** 2026-07-16 · **Target tree:** 1.6.70 · Verified against the 1.6.70 tree. Two small,
 independent, verified correctness fixes from the science/engineering audit. Both contained, no design
 questions, collision-free with the loader/brushing/OperationSpec work in flight. Do them as one commit

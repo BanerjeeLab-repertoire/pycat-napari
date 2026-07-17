@@ -18,6 +18,42 @@ Date
 import numpy as np
 
 
+def robust_focus_energy(per_pixel, trim_fraction=0.01):
+    """**Focus energy that a small out-of-plane speck cannot hijack.**
+
+    Every whole-frame sharpness metric in PyCAT — Brenner ``mean(diff²)``, Tenengrad
+    ``mean(gy²+gx²)``, Laplacian variance, normalised variance — reduces to *aggregating a per-pixel
+    magnitude*. A plain ``mean`` / ``var`` is dominated by its largest values, and that is exactly
+    the failure mode ``bf_focus_metric``'s docstring demonstrates: a bright speck of dust on a
+    *different focal plane* has its own focus curve, and at the speck's focus frame its handful of
+    extreme-gradient pixels can outscore an in-focus, spatially-extended sample — so "the best frame"
+    becomes the junk frame.
+
+    **The discriminating fact is spatial extent, not magnitude.** A real in-focus object lights up
+    *many* pixels; a speck lights up *few*. So dropping the top ``trim_fraction`` of per-pixel values
+    before taking the mean removes the speck's dominance almost entirely, while barely touching an
+    extended object (which still has ~99% of its sharp pixels left). On a clean frame — no debris —
+    trimming 1% of a smooth distribution shifts every frame's score by the same tiny amount and does
+    **not move the argmax**, so the frame chosen for clean data is unchanged.
+
+    ``trim_fraction`` is the largest speck, as a fraction of the frame, this defends against: 1%
+    covers dust up to ~50×50 px on a 512² frame. Larger debris on a different plane is a rarer, and
+    genuinely harder, problem this does not claim to solve.
+
+    Returns the trimmed mean of ``per_pixel`` (flattened). ``trim_fraction=0`` is the plain mean —
+    the original behaviour, available for an explicit opt-out.
+    """
+    values = np.asarray(per_pixel, dtype=np.float64).ravel()
+    if values.size == 0:
+        return 0.0
+    k = int(values.size * float(trim_fraction))
+    if k <= 0:
+        return float(values.mean())
+    # Partition so the k largest sit at the end (O(n), no full sort), then mean everything below.
+    kept = np.partition(values, values.size - k)[:values.size - k]
+    return float(kept.mean()) if kept.size else float(values.mean())
+
+
 def remove_outliers_iqr(data):
     """
     Remove outliers from a dataset using the Interquartile Range (IQR) method. This method
