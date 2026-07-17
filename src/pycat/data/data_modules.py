@@ -26,8 +26,15 @@ import copy
 import pandas as pd
 import numpy as np
 from scipy.spatial.distance import euclidean
-from napari.utils.notifications import show_info as napari_show_info
-from napari.utils.notifications import show_warning as napari_show_warning
+# Notifications via the shim, NOT a direct napari import — the data layer must be
+# importable with no GUI stack. It was not: `data_modules` imported
+# `napari.utils.notifications` at module scope, so `BaseDataClass` could not be
+# constructed headlessly, and `test_set_data_new_key` (a `core` test of pure dict
+# logic) failed in CI with `No module named 'napari'`. The shim forwards to napari
+# when a UI is present and prints otherwise — same pattern `condensate_physics_tools`
+# uses (1.5.378), and the data layer deserves it at least as much as the physics.
+from pycat.utils.notify import show_info as napari_show_info
+from pycat.utils.notify import show_warning as napari_show_warning
 
 
 
