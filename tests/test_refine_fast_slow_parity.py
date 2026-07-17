@@ -52,9 +52,18 @@ def notices(monkeypatch):
 
 
 def _scene(kind, size=96):
-    """`halo_annulus` is the scene that exposed the divergence: a bright rim OUTSIDE
-    the object, so `local_intensity` fires and — once it does — the SNR gate is what
-    decides. That is where slow and fast parted company."""
+    """Scenes for the parity checks.
+
+    `halo_annulus` is the one that exposed the divergence: a bright rim OUTSIDE the
+    object, so `local_intensity` fires and — once it does — the SNR gate decides.
+    That is where slow and fast parted company. Note it is no longer REJECTED: since
+    the rim scales with the object (`_local_ring_radii`), the ring clears the halo
+    and the object passes on its merits. It is kept here because parity on it is
+    exactly what used to fail.
+
+    `noise_blob` is a detection with no real contrast — what the bare ratio could
+    never reject and CNR does.
+    """
     rng = np.random.default_rng(0)
     img = rng.normal(120, 4, (size, size)).astype(np.float32)
     obj = np.zeros((size, size), dtype=bool)
@@ -66,6 +75,8 @@ def _scene(kind, size=96):
         halo[24:66, 24:66] = True
         img[halo & ~obj] += 60
         img[obj] += 25
+    elif kind == 'noise_blob':
+        pass                      # a "detection" over pure background: zero contrast
     cell = np.zeros((size, size), dtype=int)
     cell[4:size-4, 4:size-4] = 1
     return img, cell, obj, obj.astype(int)
@@ -137,7 +148,7 @@ def test_the_background_estimate_is_ROBUST_to_neighbours():
 
 # ── parity, on the scene that broke it ───────────────────────────────────────
 
-@pytest.mark.parametrize('kind', ['uniform_bright', 'halo_annulus'])
+@pytest.mark.parametrize('kind', ['uniform_bright', 'halo_annulus', 'noise_blob'])
 def test_slow_and_fast_AGREE(kind):
     """`halo_annulus` is the case the existing equivalence fixture cannot reach:
     slow rejected the object on local_snr while fast kept all 900px."""
@@ -158,7 +169,7 @@ def test_the_default_path_is_still_the_FAST_one():
 def test_the_FAST_path_reports_its_drops(notices):
     """It reported nothing at all. The always-on summary exists so that puncta cannot
     vanish silently — and it was absent from the only path that runs by default."""
-    img, cell, obj, lab = _scene('halo_annulus')
+    img, cell, obj, lab = _scene('noise_blob')
     seg.puncta_refinement_filtering_func_fast(img, img.copy(), obj, cell, lab, 2, **_P)
 
     hits = [m for m in notices if 'rejected' in m.lower()]
@@ -168,7 +179,7 @@ def test_the_FAST_path_reports_its_drops(notices):
 def test_the_fast_report_NAMES_the_reason(notices):
     """A count alone does not help. "everything dropped on area" is what tells a user
     their min_spot_radius is wrong for this pixel size."""
-    img, cell, obj, lab = _scene('halo_annulus')
+    img, cell, obj, lab = _scene('noise_blob')
     seg.puncta_refinement_filtering_func_fast(img, img.copy(), obj, cell, lab, 2, **_P)
 
     hits = [m for m in notices if 'reasons:' in m.lower()]
@@ -187,7 +198,7 @@ def test_BOTH_paths_report_the_same_way(notices):
 def test_EVERYTHING_rejected_escalates_to_a_warning(notices):
     """Losing every detection usually means a threshold is wrong for the data, not
     that the puncta are all spurious — and it should not read as a quiet info line."""
-    img, cell, obj, lab = _scene('halo_annulus')
+    img, cell, obj, lab = _scene('noise_blob')
     seg.puncta_refinement_filtering_func_fast(img, img.copy(), obj, cell, lab, 2, **_P)
 
     assert [m for m in notices if 'every detection was rejected' in m.lower()], (

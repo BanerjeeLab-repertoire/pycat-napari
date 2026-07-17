@@ -1,3 +1,58 @@
+## [1.6.87] - 2026-07-17
+### Fixed — **The local-background ring now scales with the object it is measuring.**
+`local_intensity_condition` and `gradient_condition` compared an object's interior (eroded 1px)
+against a band 1-4px outside it — **regardless of the object's own size**. That geometry describes a
+point-like punctum. It does not describe a condensate spanning tens to hundreds of pixels:
+
+- eroding 1px off a 30px-wide object removes almost nothing, so the "interior" sample is essentially
+  the whole object, boundary included;
+- a 1-4px ring hugging a large object's edge sits **inside that object's own halo** — the PSF tail and
+  the real concentration gradient at its boundary both scale with the object — so the "background" is
+  contaminated upward, the contrast is underestimated, and the checks **reject real objects**.
+
+`_local_ring_radii` scales the geometry to each object: `erode = gap = 0.5·r_eq`, `band = 1.0·r_eq`,
+where `r_eq = sqrt(area/π)`. **A punctum comes out at 1/1/2 — exactly the fixed geometry this
+replaces** (`min_spot_radius=2` → `min_area ~13px` → `r_eq ~2px`), so punctate results do not move and
+only the objects the fixed scale could not describe change. `_ring_masks` builds the three masks from
+one shared definition, so the two filters cannot drift. The fast path's bbox pad, previously a fixed
+4px sized for exactly the old 3-step dilation, now scales with the ring — a fixed pad would have
+clipped it and silently made the windowed filter sample a different background from the full-array one.
+
+**The ceiling is physical, not taste.** In cellulo the cell bounds the condensate and all but extreme
+ones are at most ~25% of the cell **diameter**, so the standoff caps at 25% of the cell's equivalent
+radius — past that the ring would sample other cells. In vitro condensates can exceed a cell and
+`cell_area` is then the field, so the cap scales with that instead of pinning every experiment to one
+number.
+
+**Measured against ground truth** (`synthetic_puncta_image`, 3 amplitudes × 3 seeds), versus the fixed
+ring:
+
+| | real puncta kept | spurious kept |
+|---|---|---|
+| amp=30 ×3 | 3→7, 3→8, 11→14 | 8→9, 13→15, 8→8 |
+| amp=60 ×3 | 6→10, 7→9, 8→11 | 5→5, 6→6, 2→3 |
+| amp=120 ×3 | 18→21, 25→27, 27→28 | 1→1, 6→6, 3→3 |
+
+**+27 real puncta recovered across 9 fields, for +4 spurious.** The fixed rim was rejecting genuine
+objects. A large object with a halo — the case that motivated all of this — now survives on its merits
+in both filters, with no exemption anywhere.
+### Notes
+- **This supersedes the `Meet-Raval` large-object exemption, which is now closed rather than merged.**
+  Meet's diagnosis was right and is the reason this exists: the fixed-scale checks misfire on real
+  large condensates. The remedy aimed at the symptom — skip the checks for objects ≥150px — and could
+  not survive contact with the tree:
+  - It worked because the **fast path's SNR gate was dead**. Once 1.6.86 made CNR live, CNR read the
+    same fixed rim, so exempting `local_intensity` merely handed the object to `local_snr`. Measured:
+    `exemption ON → dropped on local_snr, 0px kept`; `exemption OFF → dropped on local_intensity +
+    local_snr, 0px kept`. It rescued nothing.
+  - **A fixed pixel bar could not have been right**: in vitro condensates exceed a cell, so "large"
+    has no fixed value; and ground truth put real detections at a **median area of 157px**, so a 150px
+    bar sits at the median rather than "comfortably above any single punctum" as its comment claimed.
+
+  Fixing what the checks measure means nothing needs exempting and one rule holds at every size.
+  Branch `Meet-Raval-exemption` is retained for the record.
+- Removes the old 3× `disk(1)` dilation loop in favour of one `disk(r)` call.
+
 ## [1.6.86] - 2026-07-17
 ### Fixed — **The CNR fix never reached the default refinement path. Neither did the drop reporting.**
 1.6.84 recorded this as known-and-unfixed; it is now measured and fixed.

@@ -1272,6 +1272,72 @@ def run_train_and_apply_rf_classifier(image_layer, label_layer, data_instance, v
 # again. These helpers ARE the fix: one definition, both callers.
 
 
+def _local_ring_radii(area_px, cell_area_px):
+    """How far to erode, and where to put the local-background ring, FOR THIS OBJECT.
+
+    ── The rim was a fixed 1-4px no matter how big the object was ────────────
+
+    `local_intensity_condition` and `gradient_condition` compare an object's
+    interior (eroded 1px) against a band 1-4px outside it — regardless of the
+    object's own size. That geometry is right for a point-like punctum a few px
+    across. It is wrong for a condensate spanning tens to hundreds of px:
+
+      * eroding 1px off a 30px-wide object removes almost nothing, so the
+        "interior" sample is essentially the whole object, boundary included;
+      * a 1-4px ring hugging a large object's edge sits INSIDE that object's own
+        halo — the PSF tail and the real concentration gradient at its boundary
+        both scale with the object — so the "background" is contaminated upward,
+        the contrast is underestimated, and the checks misfire on real objects.
+
+    Both are the same bug: a fixed-scale probe measuring a variable-scale object.
+    The earlier attempt exempted large objects from the checks; this fixes what the
+    checks measure instead, which means nothing needs exempting and the same rule
+    applies at every size.
+
+    Radii scale with the object's equivalent radius `r_eq = sqrt(area/pi)`:
+
+        erode = gap = 0.5 * r_eq        band = 1.0 * r_eq
+
+    **For a typical punctum this reproduces today's geometry exactly.**
+    `min_spot_radius=2` gives `min_area ~13px` -> `r_eq ~2px` -> erode 1, gap 1,
+    band 2: a ring from +1 to +3, which is what the fixed code did. So puncta are
+    unaffected and only the objects the fixed scale could not describe change.
+
+    The ceiling comes from the physics, not from taste. In cellulo the cell bounds
+    the condensate, and all but extreme condensates are at most ~25% of the cell
+    DIAMETER — so 25% of the cell's equivalent radius is the largest standoff that
+    can be justified, and past it the ring would start sampling other cells or
+    leave the cell entirely. In vitro there is no cell and objects can exceed one,
+    but `cell_area_px` is then the field, so the cap scales with that instead. The
+    floor of 3px keeps a tiny/degenerate cell from collapsing the ring to nothing.
+
+    Returns `(erode_r, gap_r, band_r)` in pixels, each >= 1.
+    """
+    area = max(1.0, float(area_px))
+    r_eq = float(np.sqrt(area / np.pi))
+    cell_r = float(np.sqrt(max(1.0, float(cell_area_px)) / np.pi))
+    cap = max(3, int(round(0.25 * cell_r)))
+
+    erode_r = int(min(max(1, int(round(0.5 * r_eq))), cap))
+    gap_r = int(min(max(1, int(round(0.5 * r_eq))), cap))
+    band_r = int(min(max(2, int(round(1.0 * r_eq))), cap))
+    return erode_r, gap_r, band_r
+
+
+def _ring_masks(puncta_mask_holder, erode_r, gap_r, band_r):
+    """Interior, dilated-object and local-background masks at the given radii.
+
+    Shared so the two filters cannot drift — the same reason `_snr_conditions` is
+    shared. `binary_dilation` with `disk(r)` is one call rather than r iterations of
+    `disk(1)`, which also removes the old 3x loop.
+    """
+    interior = ndi.binary_erosion(puncta_mask_holder, sk.morphology.disk(erode_r))
+    dilated = ndi.binary_dilation(puncta_mask_holder, sk.morphology.disk(gap_r))
+    outer = ndi.binary_dilation(dilated, sk.morphology.disk(band_r))
+    local_bg = outer ^ dilated
+    return interior, dilated, local_bg
+
+
 def _robust_bg(vals):
     """Background level and spread as (median, MAD-sigma). **Robust on purpose.**
 
@@ -1458,16 +1524,15 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     for label in np.unique(labeled_puncta_mask)[1:]:
         # Create a binary mask for each object
         puncta_mask_holder = labeled_puncta_mask == label
-        # Erode the mask for the gradient image
-        eroded_puncta_holder = ndi.binary_erosion(puncta_mask_holder, sk.morphology.disk(1))
-        # Dilate the mask (encompases more of the full spot fluorescence to aviod its tails in the local bg)
-        dilated_puncta_holder = ndi.binary_dilation(puncta_mask_holder, sk.morphology.disk(1))
-        # Dilate the mask by 3 pixels for local bg aroud the object
-        dilated_local_mask = puncta_mask_holder.copy()
-        for _ in range(3):
-            dilated_local_mask = ndi.binary_dilation(dilated_local_mask, sk.morphology.disk(1)) # diamond element gives smaller dilations
-        # The local bg is simply the dilated mask minus the puncta mask
-        local_bg_mask = dilated_local_mask ^ dilated_puncta_holder
+        # Interior, dilated object, and the local-background ring — at radii SCALED
+        # TO THIS OBJECT. A fixed 1-4px probe describes a punctum and misdescribes a
+        # condensate; see `_local_ring_radii`. For a punctum the radii come out 1/1/2,
+        # which is exactly the fixed geometry this replaces.
+        _erode_r, _gap_r, _band_r = _local_ring_radii(
+            int(puncta_mask_holder.sum()), cell_area)
+        eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
+            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+        dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         # Collect pixel values from various masks and images for analysis
         # Get the pixels for each mask from the original image
@@ -1634,7 +1699,6 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
     props = sk.measure.regionprops(labeled_puncta_mask, intensity_image=original_img)
     cell_area = np.sum(cell_mask)
     min_area = math.ceil(np.pi * min_spot_radius**2)
-    _disk1 = sk.morphology.disk(1)
     H, W = labeled_puncta_mask.shape
     # Accumulated for the summary below: what was rejected, and why. Same contract
     # as the slow filter, via the same reporter.
@@ -1643,22 +1707,26 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
 
     for p in props:
         label = p.label
-        # Object bounding box, padded by 4 px to contain the 3-step dilation ring
-        # (3 dilations + the extra dilated_puncta_holder) with margin to spare.
+        # Ring radii SCALED TO THIS OBJECT — see `_local_ring_radii`. The same call
+        # the slow filter makes, so the two cannot describe an object differently.
+        _erode_r, _gap_r, _band_r = _local_ring_radii(int(p.area), cell_area)
+
+        # Object bounding box, padded to contain the ring. The pad used to be a
+        # fixed 4px, which was exactly enough for the fixed 3-step dilation — now
+        # that the ring scales with the object, a fixed pad would CLIP it, and the
+        # windowed filter would silently sample a different background from the
+        # full-array one. +1 for the erosion/rounding margin.
         r0, c0, r1, c1 = p.bbox  # (min_row, min_col, max_row, max_col)
-        pad = 4
+        pad = _gap_r + _band_r + 1
         rr0 = max(0, r0 - pad); rr1 = min(H, r1 + pad)
         cc0 = max(0, c0 - pad); cc1 = min(W, c1 + pad)
 
         sub_label = labeled_puncta_mask[rr0:rr1, cc0:cc1]
         puncta_mask_holder = (sub_label == label)
 
-        eroded_puncta_holder = ndi.binary_erosion(puncta_mask_holder, _disk1)
-        dilated_puncta_holder = ndi.binary_dilation(puncta_mask_holder, _disk1)
-        dilated_local_mask = puncta_mask_holder.copy()
-        for _ in range(3):
-            dilated_local_mask = ndi.binary_dilation(dilated_local_mask, _disk1)
-        local_bg_mask = dilated_local_mask ^ dilated_puncta_holder
+        eroded_puncta_holder, dilated_puncta_holder, local_bg_mask = _ring_masks(
+            puncta_mask_holder, _erode_r, _gap_r, _band_r)
+        dilated_local_mask = local_bg_mask | dilated_puncta_holder
 
         sub_orig = original_img[rr0:rr1, cc0:cc1]
         sub_proc = processed_img[rr0:rr1, cc0:cc1]
