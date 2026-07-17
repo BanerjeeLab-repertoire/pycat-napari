@@ -185,6 +185,21 @@ why it was not done, and what it needs — so it can be picked up cold. Items wi
 below are cross-referenced rather than repeated.
 
 **The one piece of work worth doing next, because it fixes two things at once:**
+**— STATUS (1.6.90): the machinery is built and tested on branch ``worker-thread-materialize``
+(``741c9af``). It is NOT wired and NOT merged.** ``pycat/utils/qt_worker.run_with_progress`` runs a
+function on a ``QThread`` and returns its value **on the caller's thread**, so ``viewer.add_*`` never
+moves — it deliberately refuses a callback/future API for that reason. ``materialize_stack`` fits
+exactly (pure decode, already takes ``progress_callback``). Building it found **two real bugs in the
+pattern this rubric says to copy**: (1) ``dlg.exec_()`` never returns when the work is FAST — the
+worker finishes before ``exec_()`` is entered, ``reset()`` fires first, and the dialog blocks forever;
+``file_io.py``'s BioFormats caller hides it behind a ~33 s call, a small stack would not. (2) A signal
+connected to a plain function has no thread affinity, so Qt runs it **on the worker**, touching a
+QProgressDialog off-main. Both are fixed in the helper (QEventLoop + a main-thread QObject bridge).
+**The open decision, which needs a viewer:** ``load_session`` already takes a ``progress_callback``
+and its dialog owns a bar — so wiring means either two competing bars (ours modal over theirs) or a
+nested loop with no dialog and nothing blocking a second operation underneath. That is a judgement
+about how the app should feel, and no test can make it.
+
 
 * **Worker-thread materialization.** Two separate freezes have the same cause and the same cure:
   ``load_session`` runs on the Qt thread ("Python is not responding"), and every
