@@ -1,3 +1,43 @@
+## [1.6.84] - 2026-07-17
+### Fixed — **The refinement thresholds never reached the refiner.**
+`segment_subcellular_objects` accepts five refinement thresholds — `kurtosis_threshold`,
+`local_snr_threshold`, `global_snr_threshold`, `intensity_hwhm_scale`, `max_area_fraction` — and
+`run_segment_subcellular_objects` threads them down from the UI. The call to `puncta_refinement_func`
+passed `min_spot_radius` and `fast` and **dropped the other five**, so the refiner silently fell back
+to its own defaults.
+
+Those defaults are **identical** to the caller's (`-3.0, 1.0, 1.0, 1.17, 0.25`), which is exactly why
+this survived: at defaults it changes nothing. It only bites when a user **changes** a threshold — at
+which point their control does nothing and the refinement carries on at `-3.0`. Same class as the dead
+SNR gate of 1.5.416: a consequential decision made without telling anyone. A UI control that does not
+reach the code it names is worse than no control, because it looks like it worked.
+
+`tests/test_refinement_thresholds_reach_the_refiner.py` passes NON-default values and asserts what
+arrives — asserting on output at defaults would pass against the bug. It also pins that the two
+signatures' defaults stay identical: if they ever drift, the dropped-argument bug would start changing
+results at defaults too, and would read as a science regression rather than a plumbing one.
+### Notes
+- Found while reviewing `Meet-Raval`, where it rode along inside "Improved segmentation for large
+  condensates". It is independent of condensate size, so it ships on its own rather than under a title
+  that hides it. Authorship preserved.
+- **The large-object exemption from that branch is NOT included** — it is held on `Meet-Raval-exemption`.
+  It is correct in principle (the local-intensity and gradient checks compare a 1px-eroded interior
+  against a 1-4px rim regardless of object size, which does not describe a large condensate), but it
+  removes the two checks that were **masking a pre-existing slow/fast divergence**, and it must not
+  merge until that is settled. See below.
+- **KNOWN, UNFIXED: the 1.5.416 CNR fix never reached the fast refinement path, which is the DEFAULT**
+  (`_PYCAT_REFINE_FAST = True`). The slow filter computes a background-subtracted, robust
+  `local_cnr = (dilated_mean - loc_med) / loc_sd`; the fast filter still computes the bare
+  `dilated_mean / img_local_bg_std` — the pedestal-in-the-numerator formula that the slow path's own
+  comment says "**never rejected anything**". Both SNR gates are therefore still dead for every default
+  user, and the ground-truth calibration justifying the CNR threshold describes code that does not run.
+  The fast path also carries **none** of the always-on drop reporting (`napari_show_info` x2 in the slow
+  filter, x0 in the fast one). `tests/test_segmentation_refine.py` asserts the two are bit-for-bit
+  identical and passes — verified that `local_intensity_condition` decides first and masks the
+  difference (puncta amplitudes 8→25 flip together at 11), so the test is real but its fixture cannot
+  reach the divergence. Porting CNR to the fast path will change existing counts and is being measured
+  against real data before it lands.
+
 ## [1.6.83] - 2026-07-16
 ### Fixed — **VPT: the detection tier is now measured, not assumed; the MSD plot click no longer loops.**
 
