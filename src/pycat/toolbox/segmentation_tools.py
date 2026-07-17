@@ -2282,7 +2282,32 @@ def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, 
     else:
         # Segment and refine on the cropped ROI
         puncta_mask_crop = fz_segmentation_and_binarization(bg_removed_crop, mask_crop, ball_radius)
-        refined_puncta_mask_crop = puncta_refinement_func(orig_crop, proc_crop, puncta_mask_crop, mask_crop, min_spot_radius=min_spot_radius, fast=refine_fast)
+        # ── Pass the thresholds ON. They used to stop here. ────────────────────
+        #
+        # This call took `min_spot_radius` and `fast` and DROPPED the other five —
+        # kurtosis_threshold, local_snr_threshold, global_snr_threshold,
+        # intensity_hwhm_scale, max_area_fraction. They are accepted by this
+        # function, threaded down from `run_segment_subcellular_objects`, and were
+        # then silently discarded here; `puncta_refinement_func` fell back to its
+        # own defaults.
+        #
+        # Those defaults are IDENTICAL to this function's (-3.0, 1.0, 1.0, 1.17,
+        # 0.25), which is exactly why nobody saw it: at defaults the bug is
+        # invisible. It only bites when a user CHANGES a threshold — at which point
+        # their control silently does nothing and the refinement keeps using -3.0.
+        #
+        # Same class as the dead SNR gate (1.5.416): a consequential decision made
+        # without telling anyone. A UI control that does not reach the code it names
+        # is worse than no control, because it looks like it worked.
+        refined_puncta_mask_crop = puncta_refinement_func(
+            orig_crop, proc_crop, puncta_mask_crop, mask_crop,
+            min_spot_radius=min_spot_radius,
+            kurtosis_threshold=kurtosis_threshold,
+            local_snr_threshold=local_snr_threshold,
+            global_snr_threshold=global_snr_threshold,
+            intensity_hwhm_scale=intensity_hwhm_scale,
+            max_area_fraction=max_area_fraction,
+            fast=refine_fast)
 
         # Paste cropped results back into full-size output arrays
         puncta_mask = np.zeros_like(cell_mask)
