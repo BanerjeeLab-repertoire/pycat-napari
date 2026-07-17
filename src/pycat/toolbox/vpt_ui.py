@@ -1700,43 +1700,143 @@ class VideoParticleTrackingUI:
         except Exception:
             pass
 
-    def _draw_picked_track(self, path, mpp, sc_y, sc_x):
-        """Trace the picked track as a connected LINE (a Shapes 'path').
+    # A gentle ~1.5 Hz breathe: fast enough to catch the eye, slow enough not to
+    # strobe. 12 steps a cycle is smooth at this rate and costs ~15 repaints/sec
+    # of ONE small Points layer.
+    _PULSE_MS = 55
+    _PULSE_STEPS = 12
 
-        Not a column of filled circles: those sit on top of and obscure the track
-        already plotted in the Bead Trajectories layer. A small ring marks where it
-        starts. One Shapes + one Points layer, reused — never accumulated.
+    def _pulse_layer(self, layer, base_size):
+        """Breathe the ring's size/opacity. **Display only — never the data.**
+
+        A one-shot expand-and-fade would be cheaper, but it is gone by the time you
+        look up from the plot you clicked. A standing pulse is still there when your
+        eye arrives, which is the whole job.
+
+        Owns a single QTimer, replaced on every pick — a timer per click would
+        accumulate, and each one would keep a dead layer alive by referring to it.
+        The timer stops itself if the layer is gone (the user can always delete an
+        overlay, and a timer writing to a removed layer would raise forever).
+        """
+        from PyQt5.QtCore import QTimer
+        import math
+
+        old = getattr(self, '_pulse_timer', None)
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+
+        state = {'i': 0}
+
+        def _tick():
+            try:
+                if layer not in self.viewer.layers:
+                    timer.stop()
+                    return
+                state['i'] = (state['i'] + 1) % self._PULSE_STEPS
+                phase = 2 * math.pi * state['i'] / self._PULSE_STEPS
+                grow = 0.5 * (1 + math.sin(phase))          # 0..1
+                layer.size = base_size * (1.0 + 0.45 * grow)
+                layer.opacity = 0.55 + 0.45 * grow
+            except Exception:
+                # A napari version that will not take a scalar size, a deleted
+                # layer, a closed viewer: stop pulsing, keep the ring.
+                try:
+                    timer.stop()
+                except Exception:
+                    pass
+
+        timer = QTimer()
+        timer.timeout.connect(_tick)
+        timer.start(self._PULSE_MS)
+        self._pulse_timer = timer
+        return timer
+
+    def _draw_picked_track(self, path, frames, mpp, sc_y, sc_x):
+        """Ring the picked bead ON the frame you are looking at, and trace its path.
+
+        ── The ring used to sit where the bead STARTED ───────────────────────
+
+        The marker was `add_points(path[:1])` — one point, `(1, 2)`, y and x with
+        **no frame coordinate**. In a (T, Y, X) viewer that is a 2-D layer, so
+        napari drew it on EVERY frame at the bead's frame-0 position. Scrub
+        forward and the bead moves off while the ring stays behind: the "circle is
+        offset from the bead" complaint. It was never padding — nothing pads this
+        marker — it was a missing axis. `selection_overlay._centre_for` already
+        guards the same trap ("a 3-D+ viewer needs the leading coordinate or the
+        rectangle floats across every slice"); this path never got the memo.
+
+        So the ring is now one point PER FRAME at `(frame, y, x)`. napari shows
+        the one on the current slice, which means it sits ON the bead wherever you
+        are in the movie — the true centre, by construction, at every timepoint.
+
+        The trajectory line stays 2-D on purpose: a path is meant to be visible
+        across the whole movie. Only the ring is per-frame.
         """
         hl_line = "Picked track"
-        hl_start = "Picked track start"
+        hl_start = "Picked bead"
         try:
-            for name in (hl_line, hl_start):
+            for name in (hl_line, hl_start, "Picked track start"):
                 if name in self.viewer.layers:
-                    self.viewer.layers.remove(name)
+                    self.viewer.layers.remove(name)      # incl. the old layer name
             if path.shape[0] >= 2:
-                # Bright, thin and slightly transparent, ON TOP of the trajectory —
-                # a highlight that does not hide what it highlights. edge_width is
-                # in data (pixel) units.
+                # ── The RING is the emphasis; the path is context ──────────────
+                #
+                # This traces the picked track over the Bead Trajectories layer. It
+                # is a second copy, and it is NOT offset from the first: both take
+                # their scale from the image layer (`[1.0, sc_y, sc_x]`), which is
+                # the one source of truth, so they land on each other exactly.
+                #
+                # It stays a separate overlay rather than recolouring the track
+                # inside the Tracks layer. napari does expose `color_by`, so that
+                # is possible now — but it would mean borrowing a layer's display
+                # state to mean "selected", which is the `selected_label` mistake
+                # `pycat.utils.selection_overlay` exists to undo: a user who has
+                # coloured their tracks by velocity would silently lose it on a
+                # plot click.
+                #
+                # Secondary on purpose. Once the ring pulses ON the bead, a heavy
+                # line on top of an already-clear zoomed circle is noise — so this
+                # is thin and quiet, and the eye goes to the ring.
                 kw = dict(name=hl_line, shape_type='path',
                           edge_color='#ff8c00', face_color='transparent',
-                          edge_width=max(1.0, 0.25 / mpp),
-                          opacity=0.85, scale=[sc_y, sc_x])
+                          edge_width=max(0.5, 0.12 / mpp),
+                          opacity=0.45, scale=[sc_y, sc_x])
                 try:
                     self.viewer.add_shapes([path], **kw)
                 except Exception:
                     # Older napari: edge_width may need to be a scalar list.
                     kw['edge_width'] = float(max(1.0, 0.25 / mpp))
                     self.viewer.add_shapes([path], **kw)
-            kw = dict(name=hl_start, size=max(6, 0.5 / mpp),
-                      face_color='transparent', border_color='#ff8c00',
-                      opacity=0.95, scale=[sc_y, sc_x])
-            try:
-                self.viewer.add_points(path[:1], **kw)
-            except Exception:
-                kw.pop('border_color', None); kw['edge_color'] = '#ff8c00'
-                self.viewer.add_points(path[:1], **kw)
+            self._add_bead_ring(hl_start, path, frames, mpp, sc_y, sc_x)
         except Exception:
             pass
+
+    def _add_bead_ring(self, name, path, frames, mpp, sc_y, sc_x):
+        """The ring itself: per-frame when the viewer has a time axis, else flat.
+
+        A hollow ring, never a filled disc — the point is to draw the eye to the
+        bead, not to cover it up.
+        """
+        import numpy as _np
+        ndim = int(getattr(self.viewer.dims, 'ndim', 2) or 2)
+        if ndim >= 3 and frames is not None and len(frames) == path.shape[0]:
+            data = _np.column_stack([_np.asarray(frames, float), path])
+            scale = [1.0, sc_y, sc_x]        # the time axis is not microns
+        else:
+            data = path[:1]
+            scale = [sc_y, sc_x]
+        kw = dict(name=name, size=max(6, 0.5 / mpp), face_color='transparent',
+                  border_color='#ff8c00', opacity=0.95, scale=scale)
+        try:
+            layer = self.viewer.add_points(data, **kw)
+        except Exception:
+            kw.pop('border_color', None); kw['edge_color'] = '#ff8c00'
+            layer = self.viewer.add_points(data, **kw)
+        self._pulse_layer(layer, base_size=max(6, 0.5 / mpp))
+        return layer
 
     def _announce_picked_track(self, track_id, g, f0):
         """One line about the picked track — what it is, without going to it."""
@@ -1815,7 +1915,8 @@ class VideoParticleTrackingUI:
                     pass
 
             self._navigate_to_bead(f0, y0, x0, sc_y, sc_x)
-            self._draw_picked_track(_np.column_stack([ys, xs]), mpp, sc_y, sc_x)
+            self._draw_picked_track(_np.column_stack([ys, xs]),
+                                    g['frame'].values.astype(int), mpp, sc_y, sc_x)
             self._announce_picked_track(track_id, g, f0)
         except Exception as _e:
             print(f"[PyCAT VPT] reveal track failed: {_e}")
@@ -1890,8 +1991,24 @@ class VideoParticleTrackingUI:
         form.addRow("Temperature (°C):", self._temp_C)
 
         self._min_track = QSpinBox()
-        self._min_track.setRange(2, 1000); self._min_track.setValue(5)
-        self._min_track.setToolTip("Minimum track length (frames) to include in the MSD.")
+        # Default from the physics, not from this widget — see
+        # `MIN_TRACK_LENGTH_FRAMES` for the lag-window derivation. The spinbox used
+        # to default to 5, which is one usable lag: no slope to fit.
+        from pycat.toolbox.condensate_physics_tools import MIN_TRACK_LENGTH_FRAMES
+        self._min_track.setRange(2, 10000); self._min_track.setValue(MIN_TRACK_LENGTH_FRAMES)
+        self._min_track.setToolTip(
+            "Minimum track length (frames) to include in the MSD.\n\n"
+            f"Default {MIN_TRACK_LENGTH_FRAMES}. MSD lags are computed out to "
+            "n_frames/4, and the 95% CI on D is honest at ~30 lags but delivers only "
+            "78% coverage at 4 — so a usable fit needs 30x4 = 120 frames minimum. "
+            f"{MIN_TRACK_LENGTH_FRAMES} frames gives 50 lags, with headroom for gappy "
+            "tracks.\n\n"
+            "Lower it and the log-log slope loses the lag window it needs to separate "
+            "the diffusive part from the localisation-noise floor (MSD = 4Dt^a + "
+            "4*sigma_loc^2) — alpha becomes unconstrained and D collapses to a single "
+            "noisy displacement variance.\n\n"
+            "Rejected tracks are reported, including whether they look like the linker "
+            "lost the bead rather than the bead being absent.")
         form.addRow("Min track length:", self._min_track)
 
         # Drift-correction mode (#9). COM subtraction is standard for

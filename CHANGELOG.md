@@ -1,3 +1,61 @@
+## [1.6.85] - 2026-07-17
+### Fixed — **VPT: an MSD default that could not support a fit, and a ring that sat where the bead started.**
+
+**`min_track_length` was 5 frames, and five frames is one lag.** The number is now derived rather
+than chosen, from reasoning this codebase already committed to: `compute_msd` computes lags out to
+`n_frames // 4`, and `viscosity_from_diffusion_with_ci` documents — measured against ground truth —
+that the 95% CI on D is **honest at 30 lags** and **claims 95% while delivering 78% at 4**. So a
+usable fit needs ~30 lags, and the n/4 rule turns that into **30x4 = 120 frames minimum**.
+`MIN_TRACK_LENGTH_FRAMES = 200` gives 50 lags with headroom for gappy tracks. At one lag there is no
+log-log slope to fit: α is unconstrained, and D collapses to a single displacement variance sitting
+on the localisation-noise floor — `MSD(τ) = 4Dτ^α + 4σ_loc²`, and separating that constant offset
+from the slope is exactly what a broad lag window buys. The constant lives in one place and every
+entry point (`compute_msd`, `msd_per_track`, `per_track_msd_curves`, `run_vpt_analysis`, the UI
+spinbox) reads it; a test asserts it stays consistent with the fit gate's honest-lag count, so the
+two cannot drift apart silently.
+
+**A short track is often a LINKING failure, not an absent bead** (Gable: *stable beads, still
+fragmented*) — and the two are indistinguishable in the output, which makes the surviving tracks a
+biased subset and the viscosity from them not the viscosity of the sample. The filter now reports
+what it rejected and flags two signatures: **co-located** short tracks (several sitting on the same
+spot in non-overlapping frame windows — one bead cannot be in two places at different times) and
+**gappy** ones (more frames spanned than points held — the bead was present throughout and was caught
+only sometimes). Overlapping windows are deliberately NOT flagged: those can be two real neighbouring
+beads, and a diagnostic that cries wolf gets ignored. It reports; it does not attempt to re-link
+anything — that is the separate linker-gap work, and the detection/linking baseline is validated at
+8.325.
+
+**The selection ring sat where the bead started.** It was `add_points(path[:1])` — one point, `(1, 2)`:
+y and x with **no frame coordinate**. In a (T, Y, X) viewer that is a 2-D layer, so napari drew it on
+every frame at the bead's frame-0 position; scrub forward and the bead moves off while the ring stays
+behind. It is now one point per frame at `(frame, y, x)`, so it sits ON the bead at every timepoint by
+construction. It also **pulses** (~1.5 Hz, size + opacity on a `QTimer`) — display-only, never the
+data layer, one timer replaced per pick, and it stops itself if the overlay is deleted.
+### Notes
+- **Three of the source spec's five root causes did not survive contact with the tree**, and are
+  recorded here because the fixes look unmotivated without them:
+  - *"Respect the follow-selection preference from brushing increment 5, which hasn't landed yet"* —
+    it landed. `central_manager.follow_selection` existed, defaulted off, and was tested; VPT's plot
+    simply had its own pick route and never honoured it (fixed in 1.6.83). No new flag was needed.
+  - *"The ring is offset because the highlight uses `pad_px=8`"* — nothing pads the ring.
+    `resolve_in_viewer`'s `pad_px` appears only in its own signature and is never used in its body
+    (now pinned by a test); `_centre_for` already returns the exact bbox centre. The only real
+    consumer is `resolve_offline`, for the CROP window, where padding is wanted. The offset was a
+    missing axis, which looks identical from the outside.
+  - *"The trajectory highlight is a shifted ghost tied to the same pad_px"* — it is not shifted. The
+    Tracks layer and the overlay both take `scale = [1.0, img_scale_y, img_scale_x]` from the image
+    layer, the one source of truth, so they land on each other exactly.
+- **The duplicate trajectory overlay stays, deliberately.** napari's Tracks layer does expose
+  `color_by`, so recolouring the picked track in place is possible — but it would mean borrowing a
+  layer's display state to mean "selected", which is the `selected_label` mistake
+  `pycat.utils.selection_overlay` was written to undo: a user who has coloured tracks by velocity
+  would lose it on a plot click. The line is instead demoted to **secondary** emphasis (thinner,
+  dimmer) now that the ring pulses on the bead — the spec's own point that a heavy line on top of an
+  already-clear zoomed circle is noise.
+- `tests/test_msd_drift.py` now pins `min_track_length` to its own 60-frame fixture. It is a test
+  about drift, and leaving the default implicit silently rejected the whole fixture — surfacing as
+  `KeyError: 'n_pairs'`, a confusing way to say "your tracks are too short".
+
 ## [1.6.84] - 2026-07-17
 ### Fixed — **The refinement thresholds never reached the refiner.**
 `segment_subcellular_objects` accepts five refinement thresholds — `kurtosis_threshold`,

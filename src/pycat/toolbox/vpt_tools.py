@@ -43,6 +43,10 @@ import pandas as pd
 import skimage as sk
 from pycat.utils.general_utils import remove_small_objects_compat as _remove_small_objects_compat
 from pycat.utils.general_utils import debug_log
+# The one place the minimum-track-length number lives, with the lag-window
+# reasoning it is derived from. Imported rather than repeated: a second copy of a
+# scientific default is a second thing to forget to change.
+from pycat.toolbox.condensate_physics_tools import MIN_TRACK_LENGTH_FRAMES
 import scipy.ndimage as ndi
 
 # Notifications go through the shim so this module's PHYSICS (detection, MSD,
@@ -2660,7 +2664,7 @@ def run_vpt_analysis(
     linker: str = 'trackmate',
     max_linking_distance_um: float = 2.0,
     max_frame_gap: int = 2,
-    min_track_length: int = 5,
+    min_track_length: int = MIN_TRACK_LENGTH_FRAMES,
     progress_callback=None,
 ) -> dict:
     """
