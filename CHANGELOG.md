@@ -1,26 +1,43 @@
-## [1.6.93] - 2026-07-17
-### Fixed — **CI red: a `core` test reached napari through the data layer.**
-`test_set_data_new_key` (1.6.91) is marked `core` — it must run on the headless CI runner, which has
-no napari. It exercises `BaseDataClass.set_data`, and `pycat.data.data_modules` imported
-`napari.utils.notifications` **at module scope**, so all five of its tests died on the runner with
-`ModuleNotFoundError: No module named 'napari'`. The logic under test is pure dict handling; the
-napari coupling was incidental (two notification calls).
+## [1.6.94] - 2026-07-17
+### Added — **Calibration → concentration → ΔG_transfer: intensity ratios become biophysical parameters.**
+The flagship differentiator: PyCAT could say "the dense phase is 30× brighter" but not "the dense
+phase is 40 µM" or give the transfer free energy a manuscript wants. New `utils/calibration.py` is the
+shared authority for intensity → apparent molar concentration → ΔG = −RT ln(K_p). It is a standalone
+module, not buried in the partition code, because one calibration serves many consumers (concentration
+mapping, and later FCS/N&B/ratiometric).
 
-`data_modules` now uses the `pycat.utils.notify` shim — forwards to napari when a UI is present,
-prints otherwise — the same pattern `condensate_physics_tools` has used since 1.5.378. napari was the
-*only* GUI dependency in the entire `pycat.data` package, so this makes the data layer importable with
-no GUI stack. Verified by reproducing the CI condition exactly (import + construct + `set_data` with
-napari blocked in `sys.modules`).
+**The validity gate is the point, not the arithmetic.** A calibration curve is only valid under the
+acquisition it was measured with — change the exposure, gain, or laser and the intensity scale changes,
+so the curve's slope converts nothing; it just produces a wrong number of the right magnitude. That is
+the exact "plausible lie" this codebase forbids (the pixel-size gate, the z-step NaN, the CNR fix). So
+`check_calibration_validity` **fails loud**: a mismatched exposure/gain/laser/channel, or a *missing*
+critical field, is a HARD BLOCK — the concentration is not computed. A minor pixel-size difference (it
+does not change the intensity scale) only WARNs.
 
-**Why it reached CI at all:** the headless-import contract (`test_headless_science`) is enforced only
-over `src/pycat/toolbox/`. `data_modules` lives in `pycat.data`, so nothing watched it. New guard
-`test_data_layer_is_headless` closes that gap — static (no module-scope GUI import) and dynamic
-(constructs with napari blocked) — and is verified to fail against the pre-fix module.
+Included in this first slice:
+- `CalibrationCurve` + `AcquisitionFingerprint` (built from `metadata_extract`, absent fields honestly
+  `None`), `build_calibration` (linear fit + fit statistics), JSON `save_curve`/`load_curve` (versioned
+  schema, rejects unknown), `curve_age_days` (drift is first-class — a stale curve mis-scales silently).
+- `intensity_to_concentration` → `measurement.Parameter` (µM + 1σ + `CALIBRATED` provenance). The
+  uncertainty is the confidence band of the fitted line — it widens away from the calibration's centre,
+  the honest behaviour. An intensity outside the calibrated range downgrades to `FITTED` with a note, so
+  extrapolation is never presented as a measurement.
+- `delta_g_transfer(c_dense, c_dilute, temperature_K)` → `Parameter`, with error propagation
+  `σ_ΔG = RT·√[(σ_d/C_d)² + (σ_l/C_l)²]`. **Refuses** a non-positive concentration (ln undefined — a
+  saturated/over-subtracted phase must not become a free energy) and a temperature below ~150 K
+  (Celsius passed as Kelvin — 24 °C → 24 K is absurd for aqueous biology).
+- **One consumer, additively:** `partition_enrichment_tools.client_enrichment` gains optional
+  `calibration_curve` / `image_metadata` / `temperature_K`. With a valid curve it reports
+  `dense_concentration`, `dilute_concentration`, `Kp_calibrated`, `delta_g_transfer` alongside the
+  intensity ratio; a mismatch reports the verdict and computes **no** concentration; with no curve the
+  return dict is byte-identical to before.
 ### Notes
-- `conftest`'s auto-skip could not have caught this: it scans **module-scope** imports, and the test
-  reaches `data_modules` through a function-local import. The right fix was decoupling the module, not
-  skipping the test — the logic genuinely is core-able, and now is.
-- Reviewed the rest of 1.6.91/1.6.92 (the `robust_focus_energy` trimmed-mean focus metric and its
-  rollout across the Brenner/Tenengrad/Laplacian sites, the `set_data` existence-before-class fix):
-  sound, no changes needed.
+- Every calibrated result is a `measurement.Parameter` (units + uncertainty + provenance), never a bare
+  float, so trustworthiness travels with the number.
+- All tests are `core` (pure, headless) — the reason calibration is a standalone module. Verified
+  end-to-end: a real image yields real-unit K_p and ΔG under a matching acquisition and refuses under a
+  mismatched one, leaving no plausible concentration behind.
+- **Later increments** (not built here, per the spec): broader consumers (FCS, N&B, ratiometric), the
+  consolidated condensate-thermodynamics export table (comparative-phenotyping increment 2), and a
+  calibration-curve manager UI.
 

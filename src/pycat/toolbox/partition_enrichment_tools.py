@@ -56,6 +56,9 @@ def client_enrichment(
     dilute_gap_px: int = 0,
     background: float = 0.0,
     background_mask: Optional[np.ndarray] = None,
+    calibration_curve=None,
+    image_metadata: Optional[dict] = None,
+    temperature_K: Optional[float] = None,
 ) -> dict:
     """
     Global client partition coefficient:  K = (dense − bg) / (dilute − bg).
@@ -194,10 +197,61 @@ def client_enrichment(
             "(a signal-free region). If the image genuinely has no offset — because it was "
             "already background-subtracted — this warning can be ignored.")
 
-    return dict(dense_mean=dense_c, dilute_mean=dilute_c,
-                dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
-                background=bg, enrichment=enrichment,
-                n_dense_px=n_dense, n_dilute_px=n_dilute)
+    result = dict(dense_mean=dense_c, dilute_mean=dilute_c,
+                  dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
+                  background=bg, enrichment=enrichment,
+                  n_dense_px=n_dense, n_dilute_px=n_dilute)
+
+    # ── Optional CALIBRATED path — real units, gated ─────────────────────────
+    #
+    # Additive: with no curve this is skipped and `result` is exactly what it has always been.
+    # With a curve, the dense/dilute intensities become apparent molar concentrations and their
+    # ratio becomes a real K_p and a transfer free energy — BUT only through the validity gate. A
+    # curve measured under a different acquisition converts nothing; it just produces a wrong number
+    # of the right magnitude, which is the exact failure this codebase refuses to ship. So a
+    # mismatch is reported as `calibration_validity` and the concentrations are NOT computed.
+    if calibration_curve is not None:
+        result.update(_calibrated_partition(
+            calibration_curve, image_metadata, dense_c, dilute_c, temperature_K))
+
+    return result
+
+
+def _calibrated_partition(curve, image_metadata, dense_intensity, dilute_intensity,
+                          temperature_K):
+    """Concentrations + real-unit K_p + ΔG for `client_enrichment`, behind the validity gate.
+
+    Kept out of `client_enrichment` so that function does not grow, and so the gated conversion is
+    testable on its own. Returns only extra keys; on a hard block it returns the verdict and no
+    concentrations — a refused calibration must not leave a plausible number behind.
+    """
+    from pycat.utils.calibration import (check_calibration_validity, intensity_to_concentration,
+                                         delta_g_transfer)
+
+    verdict = check_calibration_validity(curve, image_metadata or {})
+    out = {'calibration_validity': {'valid': verdict.valid, 'level': verdict.level,
+                                    'reason': verdict.reason}}
+    if not verdict.valid:
+        napari_show_warning(f"Calibrated partition: refused — {verdict.reason}. Reporting the "
+                            f"intensity ratio only.")
+        return out
+    if verdict.level == 'warn':
+        napari_show_warning(f"Calibrated partition: {verdict.reason}")
+
+    c_dense = intensity_to_concentration(dense_intensity, curve, name='dense_concentration')
+    c_dilute = intensity_to_concentration(dilute_intensity, curve, name='dilute_concentration')
+    out['dense_concentration'] = c_dense
+    out['dilute_concentration'] = c_dilute
+    out['Kp_calibrated'] = (c_dense.value / c_dilute.value
+                            if c_dilute.value not in (0, None) and c_dilute.value > 0 else float('nan'))
+
+    if temperature_K is not None:
+        try:
+            out['delta_g_transfer'] = delta_g_transfer(c_dense, c_dilute, temperature_K)
+        except ValueError as exc:
+            out['delta_g_transfer'] = None
+            napari_show_warning(f"Calibrated partition: ΔG not computed — {exc}")
+    return out
 
 
 def client_enrichment_per_condensate(
