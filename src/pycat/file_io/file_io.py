@@ -1767,6 +1767,12 @@ class FileIOClass:
 
     # ── Generic back-end (TIFF, CZI, …) ────────────────────────────────────
 
+    # Above this size, run the libCZI open-probe on a worker thread (a streaming movie's subblock
+    # parse is multi-second). Small confocal/widefield CZIs are a few MB and parse instantly, so they
+    # probe inline — no worker dialog to flash. Streaming movies are GBs, so the gap is enormous; the
+    # threshold only has to sit between them.
+    _CZI_OFFTHREAD_BYTES = 256 * 1024 * 1024
+
     def _open_stack_generic(self, file_path: str, ext: str):
         """
         Generic stack loader for TIFF, OME-TIFF, and CZI files via the reader seamImage.
@@ -1788,10 +1794,25 @@ class FileIOClass:
         # layout (e.g. a 15,766-frame movie) raises "not implemented" on every plane. The BioFormats
         # path is opt-in (`pip install pycat-napari[bioformats]`). See
         # docs/audits/czi_bakeoff_2026-07-15.md.
+        #
+        # The probe OPENS libCZI (parsing every subblock offset — ~11 s for a 15,766-frame movie), so
+        # for a big file run it OFF the Qt thread behind the busy dialog, else that parse freezes the
+        # window before the BioFormats indexing even starts. A small CZI parses in milliseconds, so it
+        # stays inline (a worker dialog would only flash). The probe returns the libCZI image, which
+        # the streaming loader reuses — the big open is paid ONCE, not twice.
         if ext == '.czi':
+            import os as _os
             from pycat.file_io.readers import czi_bioformats as _czibf
-            if not _czibf.libczi_can_read(file_path):
-                self._open_czi_streaming(file_path)
+            _probe = (lambda: _czibf.probe_libczi(file_path))
+            if _os.path.getsize(file_path) > self._CZI_OFFTHREAD_BYTES:
+                _can_read, _czi_image = self._run_with_busy_progress(
+                    _probe, "Reading CZI",
+                    "Indexing this CZI's frames…\n\nLarge Zeiss files parse every frame offset first; "
+                    "the window stays responsive.")
+            else:
+                _can_read, _czi_image = _probe()
+            if not _can_read:
+                self._open_czi_streaming(file_path, image=_czi_image)
                 return
 
         from napari.utils.notifications import show_info as napari_show_info
@@ -2013,7 +2034,7 @@ class FileIOClass:
             _si(info_msg)
         return _layer
 
-    def _open_czi_streaming(self, file_path: str):
+    def _open_czi_streaming(self, file_path: str, image=None):
         """Load a Zeiss streaming CZI (which libCZI cannot decode) via BioFormats.
 
         Pixels come from the direct BioFormats reader (``openBytes``, ~5 ms/plane — bioio's dask path
@@ -2022,6 +2043,9 @@ class FileIOClass:
         index) runs on a worker thread so the Qt UI stays responsive. The reader's lifetime is pinned
         to the layers via ``ImageSource``, exactly like the IMS path. See
         docs/audits/czi_bakeoff_2026-07-15.md.
+
+        ``image`` : the libCZI metadata image from the routing probe, reused so a big movie's
+        multi-second libCZI open is not paid a second time. Opened here only if not supplied.
         """
         from napari.utils.notifications import show_info as napari_show_info
         from napari.utils.notifications import show_warning as napari_show_warning
@@ -2036,11 +2060,12 @@ class FileIOClass:
                 "Alternatively, export it to OME-TIFF from ZEN.")
             return
 
-        # Metadata via libCZI — it opens the file fine; only the pixel reads fail.
+        # Metadata via libCZI — it opens the file fine; only the pixel reads fail. Reuse the probe's
+        # image when given (the big open is not paid twice); open here only as a fallback.
         microns_per_pixel = 1.0
-        image = None
         try:
-            image = open_image(file_path)
+            if image is None:
+                image = open_image(file_path)
             try:
                 px = image.physical_pixel_sizes
                 microns_per_pixel = float(px.Y) if px.Y else 1.0

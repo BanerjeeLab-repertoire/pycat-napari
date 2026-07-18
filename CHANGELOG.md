@@ -1,3 +1,28 @@
+## [1.6.110] - 2026-07-18
+### Changed — **Opening a big streaming CZI no longer freezes the UI on the libCZI probe.**
+The streaming-CZI reader (BioFormats, shipped 1.6.61) already opened its Java reader off-thread — but
+the libCZI **metadata** open that routes to it ran on the Qt main thread, and for a 15,766-frame movie
+parsing every subblock offset is ~11 s. Worse, it ran **twice**: once to decide the file needs
+BioFormats, then again inside the streaming loader for pixel size / channel names. So ~20 s of "Not
+Responding" preceded the (already responsive) BioFormats indexing dialog.
+
+- **The two libCZI opens are deduplicated.** The routing probe (`probe_libczi`) now returns the libCZI
+  image alongside its can-read verdict, and the streaming loader reuses it instead of re-opening —
+  the multi-second subblock parse is paid once.
+- **For a large CZI the probe runs off the Qt thread** behind the existing busy dialog, so even the
+  first parse stays responsive. A small confocal/widefield CZI (a few MB, parses in milliseconds) still
+  probes inline — a worker dialog would only flash. The gate is file size (`_CZI_OFFTHREAD_BYTES`,
+  256 MB), which sits far below any streaming movie and far above any normal CZI.
+### Notes
+- No change to the reader itself or to normal-CZI behaviour (still libCZI, fast, no JVM). Verified: the
+  streaming reader still opens and reads the real 8 GB file (integration test), and `probe_libczi`
+  returns the image even when the pixel read fails (headless tests). **Needs a viewer:** confirm
+  opening the streaming `.czi` shows the responsive indexing dialog from the start, with no initial
+  freeze.
+- Housekeeping: the CZI reader was fully built and shipped in 1.6.61 but never got a CHANGELOG entry;
+  this documents the format is supported (confocal/widefield via libCZI; Zeiss fast-streaming via the
+  opt-in `[bioformats]` extra).
+
 ## [1.6.109] - 2026-07-18
 ### Fixed — **QC on a long movie no longer OOMs; it assesses a bounded sample.**
 With the IMS decode fixed (1.6.108), QC got further and then hit a *second* out-of-memory: `run_full_qc`

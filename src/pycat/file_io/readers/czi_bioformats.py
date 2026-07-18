@@ -192,18 +192,30 @@ class _CziChannelStack:
         return self.shape[0]
 
 
-def libczi_can_read(path) -> bool:
-    """Probe whether the DEFAULT (libCZI) path can actually read this CZI's pixels.
+def probe_libczi(path):
+    """Open the CZI via libCZI and test whether it can actually READ pixels.
 
-    Metadata always reads; only the pixel read distinguishes a normal CZI (libCZI is fine, and far
-    cheaper — no JVM) from a streaming one (libCZI raises "not implemented"). Returns True if libCZI
-    reads plane 0, False on any pixel-read failure. Cheap: the streaming file fails in <0.1 s.
+    Returns ``(can_read, image)``. Metadata always reads; only the pixel read distinguishes a normal
+    CZI (libCZI is fine, and far cheaper — no JVM) from a streaming one (libCZI raises "not
+    implemented"). `can_read` is True iff libCZI reads plane 0.
+
+    **The libCZI image is returned regardless of `can_read`** — its metadata (dims, pixel size,
+    channels) is valid even for a streaming file whose pixel reads fail, and the streaming loader
+    reuses it so the multi-second libCZI open of a big movie (parsing every subblock offset) is paid
+    ONCE, not once here and again in ``_open_czi_streaming``. `image` is None only if the open itself
+    failed.
     """
+    from pycat.file_io.image_reader import open_image
+    image = None
     try:
-        from pycat.file_io.image_reader import open_image
-        img = open_image(path)
-        _ = np.asarray(img.get_image_dask_data("YX", T=0, C=0, Z=0).compute())
-        return True
+        image = open_image(path)
+        _ = np.asarray(image.get_image_dask_data("YX", T=0, C=0, Z=0).compute())
+        return True, image
     except Exception as e:
         debug_log("czi_bioformats: libCZI cannot read pixels (will try BioFormats)", e)
-        return False
+        return False, image
+
+
+def libczi_can_read(path) -> bool:
+    """Back-compat bool wrapper over :func:`probe_libczi` (drops the reused image)."""
+    return probe_libczi(path)[0]

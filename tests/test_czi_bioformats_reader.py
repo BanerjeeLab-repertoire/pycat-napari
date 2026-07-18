@@ -68,6 +68,57 @@ def test_bioformats_available_is_bool():
     assert isinstance(cb.bioformats_available(), bool)
 
 
+# ── probe_libczi: routes AND hands back the libCZI image so the big open isn't paid twice ────
+
+def test_probe_returns_the_image_even_when_the_PIXEL_read_fails(monkeypatch):
+    """A streaming CZI: libCZI opens (metadata) but its pixel read raises. The image must still come
+    back so the streaming loader reuses it — the multi-second subblock parse is paid ONCE, not again
+    in `_open_czi_streaming`."""
+    import pycat.file_io.image_reader as ir
+
+    class _Img:
+        def get_image_dask_data(self, *a, **k):
+            raise RuntimeError("The method or operation is not implemented.")
+
+    img = _Img()
+    monkeypatch.setattr(ir, 'open_image', lambda p: img)
+    can_read, out = cb.probe_libczi("streaming.czi")
+    assert can_read is False and out is img
+
+
+def test_probe_is_TRUE_and_returns_the_image_when_the_read_succeeds(monkeypatch):
+    import pycat.file_io.image_reader as ir
+
+    class _DD:
+        def compute(self):
+            return np.zeros((2, 2), np.uint16)
+
+    class _Img:
+        def get_image_dask_data(self, *a, **k):
+            return _DD()
+
+    img = _Img()
+    monkeypatch.setattr(ir, 'open_image', lambda p: img)
+    assert cb.probe_libczi("normal.czi") == (True, img)
+
+
+def test_probe_image_is_NONE_only_when_the_OPEN_itself_fails(monkeypatch):
+    import pycat.file_io.image_reader as ir
+
+    def _boom(p):
+        raise IOError("cannot open")
+
+    monkeypatch.setattr(ir, 'open_image', _boom)
+    assert cb.probe_libczi("broken.czi") == (False, None)
+
+
+def test_libczi_can_read_is_just_the_bool_of_probe(monkeypatch):
+    monkeypatch.setattr(cb, 'probe_libczi', lambda p: (True, object()))
+    assert cb.libczi_can_read("x.czi") is True
+    monkeypatch.setattr(cb, 'probe_libczi', lambda p: (False, None))
+    assert cb.libczi_can_read("x.czi") is False
+
+
 # ── Integration: a real streaming CZI through BioFormats ────────────────────────────────────
 
 _CZI = os.environ.get("PYCAT_CZI_STREAMING_FILE") or (
