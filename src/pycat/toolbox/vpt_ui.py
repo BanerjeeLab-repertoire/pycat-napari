@@ -1644,17 +1644,6 @@ class VideoParticleTrackingUI:
         except Exception as _e:
             print(f"[PyCAT VPT] track-length histogram skipped: {_e}")
 
-    def _follow_enabled(self):
-        """Should a plot click take the user to the bead? **No, by default.**
-
-        VPT reads the SAME session preference the generic brushing path reads
-        (`pycat.utils.brushing._follow_enabled` → `central_manager.follow_selection`)
-        rather than owning a second flag. Two flags meaning "follow the selection"
-        is how the next person gets one of them wrong.
-        """
-        from pycat.utils.brushing import _follow_enabled as _follow
-        return _follow(getattr(self, 'central_manager', None))
-
     def _world_scale_yx(self, mpp):
         """The (y, x) scale the image layer is ACTUALLY drawn at.
 
@@ -1674,19 +1663,22 @@ class VideoParticleTrackingUI:
                 break
         return mpp, mpp
 
-    def _navigate_to_bead(self, f0, y0, x0, sc_y, sc_x):
-        """Take the user to the bead — **only if they asked to be taken there.**
+    # How much of the image (in pixels) to frame around the bead when zooming to it on a click.
+    _BEAD_ZOOM_WINDOW_PX = 80.0
 
-        The frame step and the camera answer the same question ("take me there"),
-        so one preference gates both. With follow OFF (the default) this is a
-        no-op and the pick merely marks the track in place: the view stays where
-        the user put it, and — because there is no camera move — there is no
-        `draw_event` to loop back through the pick.
+    def _navigate_to_bead(self, f0, y0, x0, sc_y, sc_x):
+        """Take the user to the bead: step to its frame, centre on it, and zoom in.
+
+        A plot click IS "take me to this bead" — that is what the user asked for. It was gated off
+        while the plot-click loop existed (a camera move fired a ``draw_event`` that re-entered the
+        pick); with one ``button_press`` per click (1.6.100) and the ``_revealing`` re-entrancy guard,
+        the move is safe, so navigation is on by default now.
+
+        The bead can sit on any frame, so going to it means the frame too; and centring alone is not
+        enough on a 1000-frame movie where the bead is a few pixels — so it also zooms to frame a small
+        window (``_BEAD_ZOOM_WINDOW_PX``) around it.
         """
-        if not self._follow_enabled():
-            return
-        # Step to the track's first frame (T axis is axis 0 for a movie). A bead on
-        # frame 40 is not visible from frame 0, so going there means the frame too.
+        # Step to the track's first frame (axis 0 for a movie/stack).
         try:
             if self.viewer.dims.ndim > 2:
                 step = list(self.viewer.dims.current_step)
@@ -1694,69 +1686,31 @@ class VideoParticleTrackingUI:
                 self.viewer.dims.current_step = tuple(step)
         except Exception:
             pass
-        # Centre the camera on the bead, in the image's world frame.
+        # Centre on the bead, in the image's world frame.
         try:
             self.viewer.camera.center = (y0 * sc_y, x0 * sc_x)
+        except Exception:
+            pass
+        # Zoom so a small window around the bead fills the view. napari zoom is canvas-px per
+        # world-unit, so zoom = canvas_px / (window_px · scale). Fall back to a sane canvas size.
+        try:
+            canvas = getattr(getattr(self.viewer, 'window', None), 'qt_viewer', None)
+            canvas_px = min(canvas.canvas.size) if canvas is not None else 600
+            world_extent = self._BEAD_ZOOM_WINDOW_PX * max(sc_y, sc_x)
+            if world_extent > 0:
+                self.viewer.camera.zoom = float(canvas_px) / world_extent
         except Exception:
             pass
 
     # Width of the picked-track highlight line, in DATA (pixel) units — NOT scaled by pixel size, so
     # it stays a thin trace at any magnification. The one knob to tune the highlight's weight by eye.
-    _PICKED_TRACK_WIDTH_PX = 1.0
+    _PICKED_TRACK_WIDTH_PX = 0.4
 
-    # A gentle ~1.5 Hz breathe: fast enough to catch the eye, slow enough not to
-    # strobe. 12 steps a cycle is smooth at this rate and costs ~15 repaints/sec
-    # of ONE small Points layer.
-    _PULSE_MS = 55
-    _PULSE_STEPS = 12
-
-    def _pulse_layer(self, layer, base_size):
-        """Breathe the ring's size/opacity. **Display only — never the data.**
-
-        A one-shot expand-and-fade would be cheaper, but it is gone by the time you
-        look up from the plot you clicked. A standing pulse is still there when your
-        eye arrives, which is the whole job.
-
-        Owns a single QTimer, replaced on every pick — a timer per click would
-        accumulate, and each one would keep a dead layer alive by referring to it.
-        The timer stops itself if the layer is gone (the user can always delete an
-        overlay, and a timer writing to a removed layer would raise forever).
-        """
-        from PyQt5.QtCore import QTimer
-        import math
-
-        old = getattr(self, '_pulse_timer', None)
-        if old is not None:
-            try:
-                old.stop()
-            except Exception:
-                pass
-
-        state = {'i': 0}
-
-        def _tick():
-            try:
-                if layer not in self.viewer.layers:
-                    timer.stop()
-                    return
-                state['i'] = (state['i'] + 1) % self._PULSE_STEPS
-                phase = 2 * math.pi * state['i'] / self._PULSE_STEPS
-                grow = 0.5 * (1 + math.sin(phase))          # 0..1
-                layer.size = base_size * (1.0 + 0.45 * grow)
-                layer.opacity = 0.55 + 0.45 * grow
-            except Exception:
-                # A napari version that will not take a scalar size, a deleted
-                # layer, a closed viewer: stop pulsing, keep the ring.
-                try:
-                    timer.stop()
-                except Exception:
-                    pass
-
-        timer = QTimer()
-        timer.timeout.connect(_tick)
-        timer.start(self._PULSE_MS)
-        self._pulse_timer = timer
-        return timer
+    # The pulsing ring was removed (1.6.104). It oscillated the Points layer's opacity/size on a
+    # QTimer, but a per-frame ring is only present on the bead's own frame, so away from that frame
+    # there was nothing to glow — the user saw the opacity slider churning with no visible effect, and
+    # a continuous repaint for nothing. A static ring plus the zoom-to-bead navigation is clearer and
+    # cheaper.
 
     def _draw_picked_track(self, path, frames, mpp, sc_y, sc_x):
         """Ring the picked bead ON the frame you are looking at, and trace its path.
@@ -1835,14 +1789,15 @@ class VideoParticleTrackingUI:
         else:
             data = path[:1]
             scale = [sc_y, sc_x]
-        kw = dict(name=name, size=max(6, 0.5 / mpp), face_color='transparent',
-                  border_color='#ff8c00', opacity=0.95, scale=scale)
+        # Fixed pixel-unit size so a fine pixel size does not balloon the ring (0.5/mpp did). Static —
+        # the zoom-to-bead navigation is what draws the eye, not a pulse.
+        kw = dict(name=name, size=12, face_color='transparent',
+                  border_color='#ff8c00', opacity=0.9, scale=scale)
         try:
             layer = self.viewer.add_points(data, **kw)
         except Exception:
             kw.pop('border_color', None); kw['edge_color'] = '#ff8c00'
             layer = self.viewer.add_points(data, **kw)
-        self._pulse_layer(layer, base_size=max(6, 0.5 / mpp))
         return layer
 
     def _announce_picked_track(self, track_id, g, f0):
@@ -1892,23 +1847,19 @@ class VideoParticleTrackingUI:
         recolouring one track inside the layer we add a short-lived Shapes path
         highlight at the bead's position, which is the clear visual cue.
 
-        ── Marking it and going to it are two different acts ──────────────────
+        ── Going to the bead, without looping ────────────────────────────────
 
-        This used to step the frame and move the camera on EVERY pick. Two
-        problems, and only one of them was cosmetic:
+        A pick navigates to the bead (`_navigate_to_bead`: step to its frame,
+        centre, zoom) — that is what the user asked a plot click to do. It used to
+        LOOP, though: moving the camera/frame fires napari's `draw_event`, which
+        re-runs the MSD plot's blit-capture, which can re-enter the pick and reveal
+        again — a continuous jump until force-close. That is why navigation was
+        gated off for a while.
 
-        1. It was abrupt navigation — you click a track to ask what it is, and the
-           view you were reading leaves. The generic brushing path settled this
-           already (`follow_selection`, OFF by default); VPT's plot has its own
-           pick route and never got the memo, so it kept yanking the view.
-        2. It LOOPED. Moving the camera/frame fires napari's `draw_event`, which
-           re-runs the MSD plot's blit-capture, which can re-enter the pick and
-           reveal again — a continuous jump until force-close.
-
-        So: the navigation is gated on the preference (1), and the whole reveal is
-        re-entrant-guarded (2). The guard is not redundant with the preference —
-        `follow_selection = True` is a supported state, and it must not loop for
-        the users who turn it on.
+        Two things made it safe to turn back on (1.6.104): one `button_press` per
+        click instead of dozens of `pick_event`s (1.6.100), and this reveal being
+        re-entrant-guarded (below) so the camera move it fires cannot come back
+        round as a second reveal.
         """
         # ── Re-entrancy: a camera move must not become another reveal ─────────
         #

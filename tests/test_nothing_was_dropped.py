@@ -73,6 +73,21 @@ _DELIBERATE = {
     # to `_connect_nearest_curve_click` + `_apply_pick`.
     'analysis_plots.py::_on_pick',
 
+    # 1.6.104 — the picked-bead PULSE was removed. `_pulse_layer` armed a QTimer that oscillated the
+    # ring's size/opacity to draw the eye. But the ring is per-frame — present only on the bead's own
+    # frame — so scrubbing away from that frame left NOTHING to pulse while the opacity slider churned
+    # on for nothing (reported from the viewer). Zoom-to-bead navigation draws the eye now; the ring is
+    # a static marker. No successor — the pulse mechanism is simply gone, along with `_PULSE_MS`/
+    # `_PULSE_STEPS`.
+    'vpt_ui.py::_pulse_layer',
+
+    # 1.6.104 — `_follow_enabled` (VPT) went dead when a plot click became "always navigate to the
+    # bead" (the user asked for it, and it is safe now the click-loop is fixed — see `_on_pick` above).
+    # The reveal no longer consults a follow preference, so this wrapper had no caller. The GENERIC
+    # brushing path still has its own `pycat.utils.brushing._follow_enabled` for the double-click/
+    # follow_selection case — this was only VPT's now-unused copy.
+    'vpt_ui.py::_follow_enabled',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

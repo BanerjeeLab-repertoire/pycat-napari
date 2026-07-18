@@ -1,3 +1,27 @@
+## [1.6.104] - 2026-07-18
+### Changed — **A VPT plot click now goes to the bead; the pulse is gone.**
+From the viewer, on the picked track: the opacity slider oscillated continuously with no visible glow,
+the highlight line was too bold to see detail through, and a click should take the stack to the bead's
+z-slice and zoom in. Three fixes.
+
+- **A plot click navigates to the bead — on by default.** `_navigate_to_bead` steps to the bead's
+  frame, centres on it, and **zooms** so a small window (`_BEAD_ZOOM_WINDOW_PX = 80 px`) around it fills
+  the view. Navigation was gated off while the plot-click loop existed; with one `button_press` per
+  click (1.6.100) and the `_revealing` re-entrancy guard, the camera move is safe, so going to the bead
+  — what the user asked a click to do — is the default now. VPT's now-unused `_follow_enabled` wrapper
+  was removed; the generic brushing path keeps its own for the `follow_selection`/double-click case.
+- **The pulsing ring was removed.** `_pulse_layer` armed a QTimer that oscillated the ring's
+  size/opacity. But the ring is per-frame — present only on the bead's own frame — so scrubbing away
+  left nothing to pulse while the opacity slider churned on for nothing. The ring is a static hollow
+  marker now (`size=12, opacity=0.9`); the zoom-to-bead navigation is what draws the eye.
+- **The picked-track highlight was thinned**, `_PICKED_TRACK_WIDTH_PX` 1.0 → 0.4, so the trace no
+  longer obscures the trajectory detail underneath it.
+### Notes
+- Headless-tested: the pick navigates (steps + centres) and marks the track, the reveal stays
+  re-entrant-guarded so navigating cannot loop, the ring is static with no timer armed, and the removed
+  symbols are recorded in `_DELIBERATE`. **The zoom-to-bead feel is UI-coupled and needs a viewer** —
+  confirm a plot click lands on the bead at a sensible zoom and the thinner line reads well.
+
 ## [1.6.103] - 2026-07-18
 ### Added — **Session auto-restore: a load reopens the analysis method and rebuilds its view.**
 Loading a session restored the dataframes into the repository but left an empty panel — the user had

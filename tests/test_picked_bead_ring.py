@@ -237,58 +237,28 @@ def test_the_overlay_is_NEVER_accumulated(immediate_qtimer):
     assert len(rings) == 1, f'{len(rings)} ring layers after 3 picks'
 
 
-# ── the pulse ────────────────────────────────────────────────────────────────
+# ── the ring is STATIC (1.6.104) ──────────────────────────────────────────────
+#
+# The ring used to pulse — a QTimer oscillated its size/opacity. Removed: a per-frame ring is only
+# present on the bead's own frame, so scrubbing away from that frame left nothing to glow while the
+# opacity slider churned on for nothing (viewer report). The zoom-to-bead navigation draws the eye
+# now; the ring just marks the spot at a fixed size/opacity.
 
-def test_the_pulse_changes_SIZE_and_OPACITY_only(immediate_qtimer):
-    """Display state, never the data. An overlay that edits pixels is not an overlay."""
+def test_the_ring_has_a_FIXED_size_and_opacity(immediate_qtimer):
+    """No timer, no oscillation — a plain marker at a steady size and opacity."""
     v = _Viewer(ndim=3)
     _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
     ring = v.layers['Picked bead']
-    before = ring.data.copy()
-
-    timer = immediate_qtimer[-1]
-    seen = set()
-    for _ in range(6):
-        timer.fire()
-        seen.add((ring.size, ring.opacity))
-
-    assert len(seen) > 1, 'the ring never changed — it is not pulsing'
-    assert np.array_equal(ring.data, before), 'the pulse moved the data'
+    assert ring.size == 12
+    assert ring.opacity == 0.9
 
 
-def test_the_pulse_touches_ONLY_the_overlay_layer(immediate_qtimer):
-    """Never the image/labels layer — the caution the spec is explicit about."""
+def test_NO_pulse_timer_is_armed_by_a_pick(immediate_qtimer):
+    """The pulse is gone: drawing the ring must not start any QTimer. A running timer would be the old
+    repaint-for-nothing coming back."""
     v = _Viewer(ndim=3)
-    img = v.layers['movie']
     _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
-
-    before = (img.scale, getattr(img, 'size', None), getattr(img, 'opacity', None))
-    for _ in range(6):
-        immediate_qtimer[-1].fire()
-
-    assert (img.scale, getattr(img, 'size', None),
-            getattr(img, 'opacity', None)) == before, 'the pulse touched the image layer'
-
-
-def test_only_ONE_pulse_timer_survives_repeated_picks(immediate_qtimer):
-    """A timer per click would accumulate, and each would pin a dead layer alive."""
-    v = _Viewer(ndim=3)
-    hub = _hub(v)
-    for _ in range(3):
-        hub._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
 
     running = [t for t in immediate_qtimer if t.started and not t.stopped]
-    assert len(running) == 1, f'{len(running)} pulse timers still running'
-
-
-def test_the_pulse_STOPS_when_the_ring_is_deleted(immediate_qtimer):
-    """The user can always delete an overlay. A timer writing to a removed layer
-    would raise on every tick, forever."""
-    v = _Viewer(ndim=3)
-    _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
-    timer = immediate_qtimer[-1]
-
-    v.layers.remove('Picked bead')
-    timer.fire()
-
-    assert timer.stopped, 'the pulse kept running after its layer was deleted'
+    assert running == [], f'{len(running)} timers armed — the pulse was not removed'
