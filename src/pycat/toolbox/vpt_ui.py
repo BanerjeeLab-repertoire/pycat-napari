@@ -188,29 +188,52 @@ class VideoParticleTrackingUI:
         lines = reg.get('lines'); canvas = reg.get('canvas')
         state = reg.setdefault('state', {'prev': None})
         blit = reg.get('blit_highlight')
-        if not lines:
+        if lines is None:
             return
         prev = state.get('prev')
+
         ln = lines.get(int(track_id))
+        changed = False          # did the LINE SET change (promote/demote)? then blit is invalid
+        if ln is None:
+            # Not in the representative sample — promote it to a focus curve so it can be shown.
+            promote = reg.get('promote')
+            if promote is not None:
+                try:
+                    ln = promote(int(track_id))
+                    changed = ln is not None
+                except Exception:
+                    ln = None
         if ln is prev:
             return   # already highlighted — nothing to redraw
-        if prev is not None and prev in lines.values():
-            try:
-                prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
-                prev.set_zorder(1)
-            except Exception:
-                pass
+
+        # Un-highlight the previous track: a promoted focus curve is REMOVED when it stops being
+        # selected; a sample line is restored to the faint base style.
+        if prev is not None:
+            demote = reg.get('demote_line')
+            if demote is not None and demote(prev):
+                changed = True
+            elif prev in lines.values():
+                try:
+                    prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
+                    prev.set_zorder(1)
+                except Exception:
+                    pass
+
+        state['prev'] = ln
         if ln is not None:
             try:
                 ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
                 ln.set_zorder(5)
-                state['prev'] = ln
-                if blit is not None:
-                    blit(ln, prev)          # fast: only the two changed lines
-                elif canvas is not None:
-                    canvas.draw_idle()      # fallback
             except Exception:
                 pass
+        try:
+            if changed or blit is None:
+                if canvas is not None:
+                    canvas.draw_idle()     # the line set changed — a blit assumes a fixed set
+            elif ln is not None:
+                blit(ln, prev)             # fast path: both lines are sampled
+        except Exception:
+            pass
 
     def _highlight_track_in_table(self, track_id):
         """Select the track's row in the summary table (if the linked table is

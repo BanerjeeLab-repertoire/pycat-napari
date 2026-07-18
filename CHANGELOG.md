@@ -1,3 +1,26 @@
+## [1.6.119] - 2026-07-18
+### Added — **Interaction layer 3: a track selected from the table shows even if it isn't in the MSD sample.**
+The MSD spaghetti plot draws a fidelity-targeted representative subset (~100 of N), so a track picked
+in the table that wasn't sampled had no curve to highlight — the bidirectional brushing quietly
+couldn't reach it. Now the plot promotes it on demand.
+
+- `plot_msd_trajectories` registers `promote(tid)` — draws a non-sampled track's curve on demand and
+  returns its line — and `demote_line(line)` — removes it when it's deselected. A **sample line is
+  never removed**; only a promoted focus curve is. The displayed set is effectively
+  `representative_sample ∪ selected`.
+- **VPT's `_highlight_track_in_plot` uses them**: when a selected track has no line it promotes one;
+  when the previously-highlighted track was a promoted curve it demotes (removes) it instead of
+  restyling. A promote/demote changes the line set, so it does a full redraw there rather than the
+  blit fast-path (which assumes a fixed set); highlighting a sampled track still blits.
+### Notes
+- Headless-tested against the real `plot_msd_trajectories`: only the sample is drawn up front, a
+  non-sampled track promotes (and is marked a focus curve), a sampled track's promote returns its
+  existing line, demote removes a promoted curve but NEVER a sample line, and a track with no data
+  promotes to nothing. **The live feel needs a viewer:** confirm selecting a table row for a track
+  outside the sample now highlights its curve, and deselecting removes the promoted curve.
+- Builds on 1.6.118's `SelectionState`. Gap 4 (`LineCollection` background) and Gap 5 (the
+  `SelectionView` adapter contract) remain as separate additive passes.
+
 ## [1.6.118] - 2026-07-18
 ### Added — **Interaction layer 1: selection is now a hover / selected / pinned STATE.**
 First increment of the interaction-layer spec. Selection was a single object — no multi-select, no

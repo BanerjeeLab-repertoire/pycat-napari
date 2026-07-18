@@ -474,6 +474,51 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         except Exception:
             pass
 
+    # ── A track selected from another view but NOT in the representative sample ─────────────
+    #
+    # The spaghetti plot draws a fidelity-targeted subset, so a track picked in the TABLE that was
+    # not sampled has no artist to highlight. Promote it on demand — draw its curve and add it to the
+    # maps so the highlight path finds it — and demote (remove) it when it is deselected. The sample
+    # lines are never removed; only promoted focus curves are. Bounded rendering, full brushing.
+    _promoted = set()
+
+    def _promote_track(tid):
+        """Draw a non-sampled track's curve on demand and return its Line2D (or None if the track has
+        no data / no per-track frame). A track already drawn is returned as-is, not redrawn."""
+        tid = int(tid)
+        existing = _tid_to_line.get(tid)
+        if existing is not None:
+            return existing
+        if per_track_df is None or 'track_id' not in getattr(per_track_df, 'columns', ()):
+            return None
+        g = per_track_df[per_track_df['track_id'] == tid]
+        if not len(g):
+            return None
+        g = g.sort_values('lag_s')
+        (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0', alpha=0.18, lw=0.8, zorder=1)
+        _tid_to_line[tid] = ln
+        if _pickable:
+            _line_to_tid[ln] = tid
+        _promoted.add(tid)
+        return ln
+
+    def _demote_line(line):
+        """Remove ``line`` from the plot IFF it is a promoted focus curve — never a sample line.
+        Returns True if it removed something (so the caller does a full redraw, not a blit)."""
+        tid = _line_to_tid.get(line)
+        if tid is None:
+            tid = next((t for t, l in _tid_to_line.items() if l is line), None)
+        if tid is None or tid not in _promoted:
+            return False
+        try:
+            line.remove()
+        except Exception:
+            pass
+        _tid_to_line.pop(tid, None)
+        _line_to_tid.pop(line, None)
+        _promoted.discard(tid)
+        return True
+
     # Expose the track_id -> Line2D map + canvas so a linked-selection dispatcher
     # can highlight a curve when the selection comes from another view.
     # `blit_highlight` lets the dispatcher redraw only the changed lines too,
@@ -486,6 +531,9 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             line_registry['canvas'] = fig.canvas
             line_registry['state'] = _state if (on_pick_track is not None and _line_to_tid) else {'prev': None}
             line_registry['blit_highlight'] = _blit_highlight
+            line_registry['promote'] = _promote_track
+            line_registry['demote_line'] = _demote_line
+            line_registry['promoted'] = _promoted
         except Exception:
             pass
 
