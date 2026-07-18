@@ -1,3 +1,27 @@
+## [1.6.118] - 2026-07-18
+### Added — **Interaction layer 1: selection is now a hover / selected / pinned STATE.**
+First increment of the interaction-layer spec. Selection was a single object — no multi-select, no
+pinning while exploring, no independent hover. `SelectionService` now holds a `SelectionState`
+(`selected: frozenset`, `primary`, `hovered`, `pinned: frozenset`, `generation`) and publishes the
+whole state per change, with commands that produce a new one:
+
+- `toggle(entity, source)` — ctrl-click to build a comparison set; `select_entity` — single select;
+  `hover(entity, source)` — independent of selection; `pin`/`unpin` — survive a clear;
+  `clear_selection(source)` — clears selected + hovered but **keeps pins** (Escape's semantics).
+- **Back-compat is total.** `SelectionState` quacks like the old `Selection` (`entity_ids`,
+  `primary_id`, `source_view`, `is_empty`), so every existing subscriber (the dock, the VPT views, the
+  plots) and every existing test keeps working unchanged — the dispatch core (busy-guard, delayed
+  release, deferred-debounce) is untouched, just extracted into `_publish` and shared by the old
+  `select(Selection)` entry and the new commands.
+### Notes
+- Headless-tested: toggle add/remove, clear keeps pins, hover doesn't disturb selection, one command =
+  one generation = one publish, a command reaches old subscribers via the back-compat interface, and
+  the source view is skipped. All 72 existing selection/brushing tests still green.
+- This is the keystone the pyqtgraph plot backend should be built against (its adapter must speak this
+  state, not the old bare callback). Remaining interaction-layer increments (honest hit-testing —
+  largely done in 1.6.100 via click-cycling; non-sampled track promotion; `LineCollection` background;
+  the `SelectionView` adapter contract) are separate, additive passes.
+
 ## [1.6.117] - 2026-07-18
 ### Fixed — **CZI exit hang: force the exit from `atexit`, not `aboutToQuit` (which never fired).**
 1.6.116's `QApplication.aboutToQuit` hook did not fix the hang — it is installed from the CZI-open

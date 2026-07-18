@@ -62,6 +62,48 @@ class Selection:
         return not self.entity_ids
 
 
+@dataclasses.dataclass(frozen=True)
+class SelectionState:
+    """**The interaction state — hover, selection, and pins — as ONE immutable value.**
+
+    A superset of the old single-object ``Selection``: ``selected`` can hold several entities
+    (ctrl-click a comparison set), ``pinned`` survives a ``clear`` (Escape keeps pins), and
+    ``hovered`` is independent of both. The service publishes the whole state per change, so a view
+    sees hover and pins, not just a lone selection.
+
+    It also **quacks like ``Selection``** — ``entity_ids`` / ``primary_id`` / ``source_view`` /
+    ``is_empty`` — so every subscriber written against the old dispatch keeps working unchanged. That
+    back-compat is mandatory: the dock, the VPT views and the plots all read those attributes.
+    """
+
+    selected: frozenset = frozenset()
+    primary: str | None = None
+    hovered: str | None = None
+    pinned: frozenset = frozenset()
+    generation: int = 0
+    source_view: str = ''            # who caused THIS state — skipped when propagating (echo guard)
+
+    # ── back-compat: the old Selection read interface ─────────────────────────────────────
+    @property
+    def entity_ids(self) -> tuple:
+        """The selected ids, primary first then the rest sorted — a stable order for the tuple the
+        old subscribers expect (a lone selection is just ``(id,)``)."""
+        head = (self.primary,) if self.primary in self.selected else ()
+        return head + tuple(sorted(e for e in self.selected if e != self.primary))
+
+    @property
+    def primary_id(self) -> str | None:
+        return self.primary
+
+    @property
+    def mode(self) -> str:
+        return 'selected'
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.selected
+
+
 def _as_callable(callback):
     """A handle to ``callback``: **weak if it has an owner, strong if it does not.**
 
@@ -101,12 +143,12 @@ class SelectionService:
     def __init__(self, defer=None, debounce=None):
         self._subscribers: dict[str, object] = {}
         self._deferred_subscribers: dict[str, object] = {}
-        self._selected: Selection | None = None
+        self._state = SelectionState()
         self._busy = False
         self._generations = itertools.count(1)
         self._defer = defer if defer is not None else _qt_defer
         self._debounce = debounce if debounce is not None else _qt_debounce
-        self._pending: Selection | None = None
+        self._pending: SelectionState | None = None
 
     # ── subscription ──────────────────────────────────────────────────────────────────────
     def subscribe(self, view_id, callback):
@@ -138,8 +180,15 @@ class SelectionService:
         return self
 
     @property
-    def selected(self) -> Selection | None:
-        return self._selected
+    def selected(self):
+        """The current selection as a back-compat object (reads like the old ``Selection``), or
+        ``None`` when nothing is selected."""
+        return self._state if self._state.selected else None
+
+    @property
+    def state(self) -> SelectionState:
+        """The full interaction state — hover, selection, pins — that adapters read."""
+        return self._state
 
     @property
     def is_busy(self) -> bool:
@@ -157,46 +206,33 @@ class SelectionService:
 
     # ── dispatch ──────────────────────────────────────────────────────────────────────────
     def select(self, selection: Selection):
-        """Dispatch to every subscriber **except** ``selection.source_view``.
-
-        ── One guard, not two: VPT's "echo guard" is dead code ────────────────────────────
-
-        ``vpt_ui._select_track`` opens with what reads as two guards::
-
-            if self._selected_track_id == tid and self._sel_busy:   # (1) "the echo guard"
-                return
-            if self._sel_busy:                                      # (2) the busy guard
-                return
-
-        **(1) can never fire a return that (2) would not** — it is (2) plus an extra condition, so
-        it is strictly subsumed. Its docstring claims *"if the requested track is already the
-        selected one, do nothing (kills the common echo)"*, which would be a real second guard —
-        but that is not what the code does, because it also requires ``_sel_busy``.
-
-        Lifting it "verbatim" would carry a dead branch into a new module and, worse, carry the
-        claim with it. Dropping it is **behaviour-preserving by construction** (a branch that
-        cannot fire cannot be missed). Implementing what the docstring *says* would be a real
-        behaviour change — re-clicking the selected object would become a no-op — and that is a
-        product decision, not a refactor, so it is not made here.
-
-        What IS load-bearing is the **delayed release**: the busy flag clears only after the Qt
-        event queue drains, because the propagation below makes programmatic changes
-        (``selectRow``, ``dims.current_step``, ``camera.center``) whose signals fire *after* this
-        returns. A synchronous ``finally`` does not cover them — they re-enter and cascade. That is
-        the guard ``SelectionHub`` dropped, and why it oscillates the moment a real Qt view is
-        wired to it.
-        """
+        """Back-compat entry: dispatch a single ``Selection``. An empty selection is a no-op (as it
+        always was). Folds the ``Selection`` into the richer state, keeping the current pins/hover,
+        then publishes."""
         if selection is None or selection.is_empty:
             return False
+        return self._publish(SelectionState(
+            selected=frozenset(selection.entity_ids), primary=selection.primary_id,
+            hovered=self._state.hovered, pinned=self._state.pinned,
+            generation=selection.generation, source_view=selection.source_view))
 
+    def _publish(self, state: SelectionState) -> bool:
+        """Set the state and hand it to every subscriber **except** its ``source_view``.
+
+        The **delayed release** is the load-bearing part (VPT's guard, which ``SelectionHub``
+        dropped): the busy flag clears only after the Qt queue drains, because the propagation below
+        makes programmatic changes (``selectRow``, ``dims.current_step``, ``camera.center``) whose
+        signals fire *after* this returns. A synchronous ``finally`` would not cover them — they
+        re-enter and cascade, the "jumps all over the place" loop. (The old ``select`` docstring's
+        note that VPT's second "echo guard" was dead code still holds; only the busy guard matters.)
+        """
         if self._busy:
             return False
-
         self._busy = True
         try:
-            self._selected = selection
+            self._state = state
             for view_id, handle in list(self._subscribers.items()):
-                if view_id == selection.source_view:
+                if view_id == state.source_view:
                     continue          # a view never re-highlights from its own action
                 callback = handle()
                 if callback is None:
@@ -204,19 +240,54 @@ class SelectionService:
                     self._subscribers.pop(view_id, None)
                     continue
                 try:
-                    callback(selection)
+                    callback(state)
                 except Exception as exc:
                     debug_log(f'selection: the "{view_id}" view failed to handle a selection', exc)
-            # The expensive half is coalesced: only the LAST selection of a burst is worth an
-            # image read, and the user only ever sees that one.
+            # The expensive half is coalesced: only the LAST state of a burst is worth an image read.
             if self._deferred_subscribers:
-                self._pending = selection
+                self._pending = state
                 self._debounce(self._flush_deferred)
         finally:
-            # (2) the delayed release. See the docstring — this is the difference between the
-            # working dispatcher and the one that oscillates.
-            self._defer(self._release)
+            self._defer(self._release)          # the delayed release — see above
         return True
+
+    # ── state commands (each produces a new state and publishes it) ───────────────────────
+    def select_entity(self, entity_id, source=''):
+        """Make ``entity_id`` the whole selection (pins survive)."""
+        return self._publish(dataclasses.replace(
+            self._state, selected=frozenset({entity_id}), primary=entity_id,
+            generation=self.next_generation(), source_view=source))
+
+    def toggle(self, entity_id, source=''):
+        """Add/remove ``entity_id`` from the selection — ctrl-click to build a comparison set."""
+        sel = set(self._state.selected) ^ {entity_id}
+        primary = entity_id if entity_id in sel else next(iter(sel), None)
+        return self._publish(dataclasses.replace(
+            self._state, selected=frozenset(sel), primary=primary,
+            generation=self.next_generation(), source_view=source))
+
+    def hover(self, entity_id, source=''):
+        """Set the hovered entity (independent of selection; ``None`` clears hover)."""
+        return self._publish(dataclasses.replace(
+            self._state, hovered=entity_id,
+            generation=self.next_generation(), source_view=source))
+
+    def pin(self, entity_id, source=''):
+        """Pin an entity so it survives a ``clear_selection`` (explore another without losing it)."""
+        return self._publish(dataclasses.replace(
+            self._state, pinned=self._state.pinned | {entity_id},
+            generation=self.next_generation(), source_view=source))
+
+    def unpin(self, entity_id, source=''):
+        return self._publish(dataclasses.replace(
+            self._state, pinned=self._state.pinned - {entity_id},
+            generation=self.next_generation(), source_view=source))
+
+    def clear_selection(self, source=''):
+        """Escape's semantics: clear selected + hovered, **keep pins**."""
+        return self._publish(dataclasses.replace(
+            self._state, selected=frozenset(), primary=None, hovered=None,
+            generation=self.next_generation(), source_view=source))
 
     def _flush_deferred(self):
         """Run the expensive subscribers for the most recent selection, and drop the rest."""
@@ -245,18 +316,22 @@ class SelectionService:
         A selection outliving its data is a click that resolves to whatever now sits at that id —
         the same class of wrongness as row-position matching. The ids are ``EntityKey`` column
         values, which begin with the dataset id (see `entity_ref.EntityKey.as_column_value`).
+        Pins that name the closed dataset are dropped too; pins on other datasets survive.
         """
-        current = self._selected
-        if current is None or not dataset_id:
+        current = self._state
+        if not current.selected or not dataset_id:
             return False
         prefix = f"{dataset_id}/"
         if any(str(e).startswith(prefix) for e in current.entity_ids):
-            self._selected = None
+            self._state = SelectionState(
+                pinned=frozenset(p for p in current.pinned if not str(p).startswith(prefix)))
             return True
         return False
 
     def clear(self):
-        self._selected = None
+        """Full reset (no dispatch) — the lifecycle drop, e.g. on a data switch. For Escape's
+        keep-the-pins clear that DOES notify views, use ``clear_selection``."""
+        self._state = SelectionState()
 
 
 def _qt_defer(fn):
