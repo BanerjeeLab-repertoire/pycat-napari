@@ -1,3 +1,28 @@
+## [1.6.108] - 2026-07-18
+### Fixed — **`materialize_stack` could not read the IMS readers (QC crashed on an .ims stack).**
+Running QC (or any full-stack analysis) on a lazy `.ims` movie raised
+`RuntimeError: An implicit full-stack read was attempted on _ImsReaderTYX`. **A pre-existing bug the
+1.6.107 off-thread change surfaced** by re-raising it cleanly instead of swallowing it: the old QC
+code called the same `materialize_stack`.
+
+- `materialize_stack` is the *sanctioned* full-read path, but for a lazy wrapper without
+  `as_full_array` it fell through to `np.asarray(stack_like)` — and the IMS readers' `__array__` now
+  **refuses** an implicit full read (`lazy_guard.refuse_implicit_full_read`) rather than truncating to
+  one frame, so the blessed reader raised the very error it exists to prevent. It now reads any 3-D
+  indexable wrapper **frame by frame via `__getitem__`** (guard-safe, the same access the guard's own
+  message points to), keyed on shape before it ever touches `np.asarray`. Plain numpy / dask /
+  `as_full_array` wrappers are unchanged. Regression-tested with a wrapper that refuses `__array__`.
+### Changed — **Data Quality Control moved to the top level of Analysis Methods.**
+It was tucked inside **Toolbox → Data Visualization**, which is both hard to find and conceptually
+wrong — QC is the first thing you do to a dataset, not a plot. It is now a top-level item in the
+**Analysis Methods** menu, next to Exploratory Analysis. (Per-frame **Frame Quality / Focus QC** stays
+under Data Visualization; that is the different, per-frame scorer.)
+### Notes
+- Headless-tested: `materialize_stack` reads a guard-refusing 3-D wrapper frame-by-frame, preserves
+  label dtype, and drives the progress callback. **Needs a viewer:** confirm QC now runs on the .ims
+  stack (with the modal decode dialog), and that Data Quality Control appears at the top of Analysis
+  Methods.
+
 ## [1.6.107] - 2026-07-18
 ### Changed — **Every widget's stack decode runs off the Qt thread now.**
 The other half of 1.6.106. Fourteen sites across eight widgets decoded a lazy stack with

@@ -61,3 +61,53 @@ def test_materialize_plain_3d_array():
     out = materialize_stack(data)
     assert out.shape == (3, 6, 6)
     assert np.allclose(out, data)
+
+
+class _RefusingWrapper:
+    """Mimics the IMS readers (`_ImsReaderTYX` …): a lazy 3D stack whose ``__array__`` REFUSES an
+    implicit full read (``lazy_guard.refuse_implicit_full_read``) rather than truncating, but which
+    is indexable per frame. This is the shape that crashed QC on a 600-frame .ims: `materialize_stack`
+    used to call ``np.asarray(wrapper)`` on the way to its rebuild, which the guard turned into a
+    ``RuntimeError`` — so the sanctioned full-read path could not read the one wrapper family that
+    most needs it.
+    """
+    def __init__(self, arr):
+        self._a = arr
+        self.shape = arr.shape
+
+    def __array__(self, dtype=None):
+        raise RuntimeError("An implicit full-stack read was attempted (guard).")
+
+    def __getitem__(self, t):
+        return self._a[t]
+
+
+def test_materialize_reads_a_wrapper_that_REFUSES_asarray():
+    """The regression: a guard-refusing 3D wrapper must materialise via per-frame indexing, not raise.
+    (QC on a large .ims hit exactly this.)"""
+    data = (np.random.rand(6, 8, 8) * 100).astype(np.float32)
+    w = _RefusingWrapper(data)
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        np.asarray(w)                                   # the guard fires on a whole-wrapper read
+
+    out = materialize_stack(w, dtype=np.float32)        # but the sanctioned path reads it frame-by-frame
+    assert out.shape == (6, 8, 8)
+    assert np.allclose(out, data)
+
+
+def test_materialize_refusing_wrapper_preserves_label_dtype():
+    masks = np.zeros((4, 8, 8), dtype=np.int32)
+    masks[1, 2:5, 2:5] = 7
+    out = materialize_stack(_RefusingWrapper(masks), dtype=None)
+    assert out.dtype == np.int32 and out.shape == (4, 8, 8)
+    assert set(np.unique(out)) == set(np.unique(masks))
+
+
+def test_materialize_reports_progress_frame_by_frame():
+    """The per-frame path drives the progress callback, so the off-thread dialog advances."""
+    seen = []
+    materialize_stack(_RefusingWrapper(np.zeros((5, 4, 4), np.float32)),
+                      progress_callback=lambda done, total: seen.append((done, total)))
+    assert seen[-1] == (5, 5) and len(seen) == 5

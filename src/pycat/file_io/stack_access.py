@@ -104,18 +104,21 @@ def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
     if hasattr(stack_like, 'compute'):
         out = np.asarray(stack_like.compute())
         return out if dtype is None else out.astype(dtype)
-    arr = np.asarray(stack_like)
-    # If __array__ truncated a 3D wrapper to 2D but it advertises a 3D shape,
-    # rebuild by indexing frames.
+    # A 3D lazy wrapper WITHOUT as_full_array (e.g. the IMS readers): read it frame by frame through
+    # __getitem__. `np.asarray(wrapper)` is the wrong tool here — its __array__ either truncates to a
+    # single frame (the old lazy contract) or REFUSES outright (`lazy_guard.refuse_implicit_full_read`,
+    # which the IMS readers now raise, and which used to crash materialize_stack itself). Indexing is
+    # the guard-safe full read the guard's own message points callers to, and it is what makes
+    # materialize_stack the honest "give me every frame" for any indexable stack.
     shp = getattr(stack_like, 'shape', None)
-    if arr.ndim == 2 and shp is not None and len(shp) == 3:
-        # Preserve source dtype when dtype is None (e.g. integer label masks
-        # must NOT be floated). Infer from the first frame otherwise.
-        _f0 = np.asarray(stack_like[0])
+    if shp is not None and len(shp) == 3 and not isinstance(stack_like, np.ndarray):
+        # Preserve source dtype when dtype is None (e.g. integer label masks must NOT be floated);
+        # infer from the first frame otherwise.
+        n = int(shp[0])
+        _f0 = np.asarray(stack_like[0])            # one frame, via __getitem__ — not __array__
         _dt = _f0.dtype if dtype is None else dtype
-        out = np.empty(shp, dtype=_dt)
+        out = np.empty(tuple(shp), dtype=_dt)
         out[0] = _f0.astype(_dt)
-        n = shp[0]
         if progress_callback is not None:
             try: progress_callback(1, n)
             except Exception: pass
@@ -125,6 +128,8 @@ def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
                 try: progress_callback(t + 1, n)
                 except Exception: pass
         return out
+    # Plain numpy / 2D / eager: a direct read is correct and instant.
+    arr = np.asarray(stack_like)
     return arr if dtype is None else arr.astype(dtype)
 
 def iter_frames(stack_like, dtype=np.float32, indices=None):

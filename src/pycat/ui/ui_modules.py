@@ -5311,6 +5311,10 @@ class MenuManager:
         self._add_actions_to_menu(coloc_analysis_actions, coloc_analysis_submenu)
 
         analysis_methods_dict = {
+            # Data QC is the FIRST thing you do to a dataset — is it in focus, drifting, bleaching,
+            # a real time series? It belongs at the top level of Analysis Methods, not tucked inside
+            # Toolbox → Data Visualization where it was hard to find and conceptually misfiled.
+            'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True}),
             'Exploratory Analysis': (self.central_manager.analysis_methods_ui._switch_to_general_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
         }
         self._add_actions_to_menu(analysis_methods_dict, self.analysis_methods_menu)
@@ -5536,7 +5540,7 @@ class MenuManager:
         data_visualization_submenu = self.toolbox_menu.addMenu('Data Visualization')
         data_visualization_actions = {
             'Plotting Widget': (self.central_manager.toolbox_functions_ui._add_plotting_widget, {'separate_widget': True}),
-            'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True}),
+            # (Data Quality Control moved to the top level of Analysis Methods — see there.)
             # Per-frame focus/entropy/out-of-focus scoring for ANY stack (was
             # reachable only from the temperature + brightfield workflows).
             'Frame Quality / Focus QC': (self.central_manager.toolbox_functions_ui._add_frame_quality_qc, {'separate_widget': True}),
