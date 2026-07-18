@@ -31,8 +31,20 @@ import scipy.ndimage as ndi
 # helpers
 # ---------------------------------------------------------------------------
 
+#: How many frames QC assesses from a long time series. QC is a health check, not a measurement, so an
+#: evenly-spaced sample across the whole acquisition answers it — while reading every one of a 600- to
+#: 1000-frame 2048² movie is both a multi-GiB allocation and needlessly slow. 64 frames spans the run
+#: for drift/bleaching/focus and keeps the working set to ~1 GiB even at 2048². The UI reads only these
+#: frames off disk (see `materialize_stack(max_frames=…)`).
+QC_MAX_FRAMES = 64
+
+
 def _to_float(img):
-    return np.asarray(img, dtype=np.float64)
+    # float32, not float64: QC is a diagnostic, and float32 is ample precision for every metric here
+    # (clipping fractions, SNR ratios, focus variance, phase-correlation drift). float64 DOUBLED the
+    # memory of an already-large stack — an 18.8 GiB allocation that OOM'd QC on a 600-frame 2048²
+    # movie — and for a stack already decoded as float32 this is now a no-op view rather than a copy.
+    return np.asarray(img, dtype=np.float32)
 
 
 def _robust_noise_std(img):
@@ -1353,8 +1365,14 @@ def _not_applicable(name, why):
 
 def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
-                is_zstack=False):
-    """Run every applicable metric and return an ordered list of result dicts."""
+                is_zstack=False, n_source_frames=None):
+    """Run every applicable metric and return an ordered list of result dicts.
+
+    n_source_frames : if `data` is an evenly-spaced SUBSAMPLE of a longer time series (QC caps a long
+        movie at `QC_MAX_FRAMES` to bound memory), pass the ORIGINAL frame count so the report can say
+        so honestly — QC assessed N of M frames, and a high-frequency vibration check saw a lower
+        sampling rate. None means `data` is the whole thing.
+    """
     a = np.asarray(data)
     is_stack = a.ndim == 3 and a.shape[0] > 1
     # ── A check that cannot apply must not RUN. It must not "pass", either. ─────
@@ -1449,6 +1467,25 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
         # broken. Pass `channels=[ch1, ch2, ...]` and it gives a verdict.
         qc_chromatic(n_channels, channels=channels),
     ]
+
+    # ── Be honest when QC assessed a SAMPLE, not the whole movie ────────────────
+    #
+    # A long time series is capped at QC_MAX_FRAMES to bound memory, so the report must say it looked
+    # at N of M frames rather than imply it read them all — and flag the one check that sampling
+    # changes: vibration is a high-frequency measurement, and a wider inter-frame interval lowers the
+    # frequency range it can see.
+    if (n_source_frames is not None and is_stack
+            and int(n_source_frames) > int(a.shape[0])):
+        results.insert(0, dict(
+            name='Frames assessed', tier='core', status='info',
+            value=float(a.shape[0]), unit='frames',
+            headline=f"{int(a.shape[0])} of {int(n_source_frames)} frames "
+                     f"(evenly sampled across the acquisition)",
+            how="QC is a health check, so it assesses an evenly-spaced sample of a long movie rather "
+                "than every frame — this bounds memory and time. Drift, bleaching and focus are "
+                "sampled across the whole run; the vibration check sees a lower sampling rate, so it "
+                "detects slower motion than a full-rate read would.",
+            good="", diag=None))
     return results
 
 

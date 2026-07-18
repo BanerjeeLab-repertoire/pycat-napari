@@ -1,3 +1,32 @@
+## [1.6.109] - 2026-07-18
+### Fixed — **QC on a long movie no longer OOMs; it assesses a bounded sample.**
+With the IMS decode fixed (1.6.108), QC got further and then hit a *second* out-of-memory: `run_full_qc`
+upcast the whole stack to **float64** (18.8 GiB for a 600×2048² movie), and even at float32 the
+per-metric transients (`qc_snr`'s `np.diff` over every frame) are multi-GiB. Both were pre-existing and
+independent of the off-thread work. Three parts:
+
+- **QC now assesses an evenly-spaced sample of a long time series**, capped at `QC_MAX_FRAMES` (64).
+  The UI reads **only those frames** off disk (`materialize_stack(max_frames=…)` indexes them via
+  `__getitem__`), so a 600-frame movie costs ~1 GiB instead of ~18 GiB. QC is a health check, so an
+  evenly-spaced sample across the acquisition answers it — and the report now carries a **"Frames
+  assessed: N of M"** row that says so, and flags that the sampling lowers the rate the vibration check
+  sees (drift, bleaching and focus are sampled across the whole run and unaffected).
+- **`_to_float` casts to float32, not float64** — ample precision for every QC metric, half the memory,
+  and a no-op (no copy) for a stack already decoded as float32.
+- **The 3-D check reads the SHAPE, not a `.ndim` attribute.** The IMS readers advertise a `(T, Y, X)`
+  shape but no `ndim`, so `getattr(_layer_data, 'ndim', 2)` read them as 2-D and fell to
+  `np.asarray(wrapper)` — the lazy-guard refusal, i.e. the original crash. QC now derives 3-D from the
+  shape and takes the decode path.
+### Notes
+- Headless-tested: `materialize_stack(max_frames=…)` returns evenly-spaced frames and reads ONLY those
+  (endpoints included); `_to_float` is float32 and copy-free; the QC report adds the sampling note only
+  when it actually subsampled. **Needs a viewer:** confirm QC now completes on the 600-frame .ims with
+  the report showing "64 of 600 frames".
+- **Judgment call worth your eye:** the sample is *strided* (spans the whole acquisition), which keeps
+  drift/bleaching/focus honest but lowers the vibration check's frequency range. If you'd rather QC use
+  a contiguous native-rate window (vibration correct, drift only over the window) or raise the 64-frame
+  cap, say so — both are one-line changes.
+
 ## [1.6.108] - 2026-07-18
 ### Fixed — **`materialize_stack` could not read the IMS readers (QC crashed on an .ims stack).**
 Running QC (or any full-stack analysis) on a lazy `.ims` movie raised

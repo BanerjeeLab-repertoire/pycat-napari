@@ -968,3 +968,32 @@ def test_the_vignetting_panel_does_not_contradict_its_own_verdict():
         f"normalised to the centre) — an autoscaled axis draws a flat field as a wild "
         f"oscillation, and the picture then contradicts the 'good' verdict beside it."
     )
+
+
+# ── QC of a long movie is bounded and honest about it ─────────────────────────
+
+def test_run_full_qc_notes_when_it_assessed_only_a_SAMPLE():
+    """A long time series is capped at QC_MAX_FRAMES (memory), so the report must say it looked at
+    N of M frames — never imply it read them all."""
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+    stack = np.random.rand(20, 32, 32).astype(np.float32)      # stands in for the sampled frames
+
+    results = qc.run_full_qc(stack, n_source_frames=600)
+
+    note = next((r for r in results if r['name'] == 'Frames assessed'), None)
+    assert note is not None and note['status'] == 'info'
+    assert '20 of 600' in note['headline']
+    assert 'vibration' in note['how'].lower()                  # flags the sampling-sensitive check
+
+
+def test_run_full_qc_adds_NO_note_when_it_read_everything():
+    """No sampling → no note. The 'Frames assessed' row appears only when QC actually subsampled."""
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+    stack = np.random.rand(20, 32, 32).astype(np.float32)
+
+    # n_source_frames == len(stack): nothing was dropped.
+    results = qc.run_full_qc(stack, n_source_frames=20)
+    assert not any(r['name'] == 'Frames assessed' for r in results)
+    # and the default (unknown source) adds nothing either
+    results2 = qc.run_full_qc(stack)
+    assert not any(r['name'] == 'Frames assessed' for r in results2)

@@ -82,7 +82,7 @@ def extract_2d_plane(layer_data, frame_index=0, dtype=np.float32):
         out = np.asarray(layer_data)
         return out if dtype is None else out.astype(dtype)
 
-def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
+def materialize_stack(stack_like, dtype=np.float32, progress_callback=None, max_frames=None):
     """Return a real (T, H, W) numpy array from any stack-like layer data.
 
     Handles PyCAT's lazy wrappers (_TiffPageStack, _ZarrTYX_generic, IMS
@@ -96,7 +96,38 @@ def materialize_stack(stack_like, dtype=np.float32, progress_callback=None):
         read, so a caller can show a determinate "Materializing…" bar. Only the
         frame-by-frame rebuild path reports progress (the only genuinely slow
         case); eager arrays return immediately.
+    max_frames : optional cap for the TIME axis. When a 3-D stack has more than
+        this many frames, only `max_frames` EVENLY-SPACED frames are read (via
+        per-frame indexing, so only those frames touch disk/memory) and returned
+        as a smaller (k, H, W) array. For diagnostics that don't need every frame
+        (QC health checks) — it turns an 18 GiB full read into a bounded one.
+        Default None = read every frame.
     """
+    # ── Subsample the time axis (bounded, evenly-spaced) when asked ────────────
+    #
+    # For a health check on a long movie, reading all 600–1000 full-res frames is both a huge
+    # allocation and needless: an evenly-spaced sample across the whole acquisition answers the
+    # question. Read ONLY those frames, by index (guard-safe __getitem__), so a lazy wrapper never
+    # decodes the frames we skip. Note: this samples the whole run for drift/bleaching/focus, but it
+    # widens the inter-frame interval, so a high-frequency VIBRATION check sees a lower sampling rate.
+    shp0 = getattr(stack_like, 'shape', None)
+    if (max_frames is not None and shp0 is not None and len(shp0) == 3
+            and int(shp0[0]) > int(max_frames)):
+        idx = np.unique(np.linspace(0, int(shp0[0]) - 1, int(max_frames)).astype(int))
+        _f0 = np.asarray(stack_like[int(idx[0])])
+        _dt = _f0.dtype if dtype is None else dtype
+        out = np.empty((len(idx),) + tuple(int(s) for s in shp0[1:]), dtype=_dt)
+        out[0] = _f0.astype(_dt)
+        if progress_callback is not None:
+            try: progress_callback(1, len(idx))
+            except Exception: pass
+        for k, t in enumerate(idx[1:], start=1):
+            out[k] = np.asarray(stack_like[int(t)]).astype(_dt)
+            if progress_callback is not None:
+                try: progress_callback(k + 1, len(idx))
+                except Exception: pass
+        return out
+
     # Lazy wrappers expose as_full_array() or are safely indexable by frame.
     if hasattr(stack_like, 'as_full_array'):
         return stack_like.as_full_array(dtype=dtype, progress_callback=progress_callback)

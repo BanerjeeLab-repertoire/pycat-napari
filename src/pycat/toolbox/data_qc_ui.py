@@ -133,14 +133,27 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         #
         # Every other stack-consuming UI already uses `materialize_stack`. This one did not.
         from pycat.utils.qt_worker import materialize_off_thread
+        from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report, QC_MAX_FRAMES
         _layer_data = ui_instance.viewer.layers[name].data
-        if getattr(_layer_data, 'ndim', 2) == 3:
-            data = materialize_off_thread(_layer_data, viewer=ui_instance.viewer)
+        # Read the dimensionality from SHAPE, not a `.ndim` attribute: the IMS readers advertise a
+        # (T, Y, X) shape but no `ndim`, so `getattr(..., 'ndim', 2)` used to read them as 2-D and fall
+        # to `np.asarray(wrapper)` — which the lazy guard REFUSES (the crash the user hit).
+        _shape = getattr(_layer_data, 'shape', None)
+        _nd = getattr(_layer_data, 'ndim', None)
+        if _nd is None:
+            _nd = len(_shape) if _shape is not None else 2
+        _n_source = None
+        if _nd == 3:
+            # A long movie is capped to QC_MAX_FRAMES evenly-spaced frames — read OFF the Qt thread and
+            # only those frames off disk (a full 600×2048² read is ~18 GiB and OOM'd QC). The report
+            # notes it assessed N of M frames.
+            _n_source = int(_shape[0]) if _shape is not None else None
+            data = materialize_off_thread(_layer_data, viewer=ui_instance.viewer,
+                                          max_frames=QC_MAX_FRAMES)
         else:
             data = np.asarray(_layer_data)      # already 2-D: instant, a bar would only flash
         if data.ndim not in (2, 3):
             napari_show_warning("QC needs a 2-D image or a 3-D (T/Z, H, W) stack."); return
-        from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report
         try:
             results = run_full_qc(
                 data,
@@ -149,6 +162,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 frame_interval_s=(dt.value() or None),
                 process_timescale_s=(tau.value() or None),
                 n_channels=nch.value(), is_zstack=zstack_cb.isChecked(),
+                n_source_frames=_n_source,
                 # ── A correct check that never receives its data never runs ──────
                 #
                 # `qc_chromatic` MEASURES correctly when handed the channel images (0.00 px on
