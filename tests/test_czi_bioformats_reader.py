@@ -119,6 +119,75 @@ def test_libczi_can_read_is_just_the_bool_of_probe(monkeypatch):
     assert cb.libczi_can_read("x.czi") is False
 
 
+# ── LRU cache + read-ahead prefetch (headless, no JVM) ──────────────────────────────────────
+
+def _fake_reader(n_t=50, H=4, W=4):
+    """A CziBioFormatsReader with the cache/prefetch wired but `_read_plane_raw` faked — no JVM."""
+    import numpy as _np
+    r = cb.CziBioFormatsReader.__new__(cb.CziBioFormatsReader)
+    r.n_t, r.n_c, r.n_z, r.H, r.W = n_t, 1, 1, H, W
+    r.src_dtype = _np.dtype('u2')
+    r.reads = []
+
+    def _raw(t, c, z):
+        r.reads.append((int(t), int(c)))
+        return _np.full((H, W), float(t), dtype=_np.float32)
+    r._read_plane_raw = _raw
+    r._init_cache()
+    return r
+
+
+def test_a_repeated_plane_read_HITS_the_cache():
+    r = _fake_reader()
+    try:
+        assert r._read_plane(10, 0, 0)[0, 0] == 10.0
+        r._read_plane(10, 0, 0)                       # second read of the same frame
+        assert r.reads.count((10, 0)) == 1            # only ONE raw read — the rest is cache
+    finally:
+        r.close()
+
+
+def test_reading_a_frame_PREFETCHES_the_ones_ahead():
+    """The point of the whole thing: after viewing frame t, the next frames are decoded in the
+    background, so a forward scrub lands on cache hits."""
+    import time
+    r = _fake_reader()
+    try:
+        r._read_plane(10, 0, 0)
+        # give the daemon prefetcher a beat to read ahead
+        for _ in range(50):
+            if r._cache_get((10 + r._PREFETCH_AHEAD, 0)) is not None:
+                break
+            time.sleep(0.01)
+        assert r._cache_get((11, 0)) is not None      # frame ahead is cached
+        assert r._cache_get((15, 0)) is not None
+        # and a subsequent forward read does NOT trigger a new raw read for a prefetched frame
+        n_before = len(r.reads)
+        r._read_plane(11, 0, 0)
+        assert (11, 0) not in r.reads[n_before:]
+    finally:
+        r.close()
+
+
+def test_the_cache_is_byte_BUDGETED_not_unbounded():
+    # a 2048² reader must cap to far fewer frames than a 500² one — the LRU is memory-bounded
+    big = _fake_reader(n_t=10, H=2048, W=2048)
+    small = _fake_reader(n_t=10, H=500, W=500)
+    try:
+        assert big._cache_max < small._cache_max
+        assert big._cache_max >= 4                    # always keeps a working set
+    finally:
+        big.close(); small.close()
+
+
+def test_close_stops_the_prefetcher():
+    r = _fake_reader()
+    r.close()
+    assert r._closed is True
+    r._prefetch.join(timeout=2.0)
+    assert not r._prefetch.is_alive()
+
+
 # ── Integration: a real streaming CZI through BioFormats ────────────────────────────────────
 
 _CZI = os.environ.get("PYCAT_CZI_STREAMING_FILE") or (

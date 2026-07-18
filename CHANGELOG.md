@@ -1,3 +1,28 @@
+## [1.6.113] - 2026-07-18
+### Changed — **Streaming CZI scrubbing is smooth: an LRU cache + background read-ahead.**
+The direct BioFormats reader decodes ~5 ms/plane, which showed as intermittent stalls scrubbing the
+15,766-frame movie frame by frame. The reader now caches planes and reads AHEAD.
+
+- **Byte-budgeted LRU cache** (256 MB → 268 planes at 500², 16 at 2048²) so repeats and small back-and-
+  forth scrubs are instant.
+- **Background read-ahead**: a single worker thread decodes the next few frames (`_PREFETCH_AHEAD = 8`)
+  ahead of the frame last accessed, and bails the moment the user moves on, so a forward scrub lands on
+  already-decoded planes. Measured on the real 8 GB file: a 25 fps forward scrub was served **30/30
+  from cache (0 ms)**, versus ~5 ms/plane cold.
+- Every read (foreground + prefetch) is serialised on one lock — a loci `ImageReader` is not safe for
+  concurrent `openBytes` — held per plane (~5 ms), so a foreground miss never waits long.
+- **The prefetch thread detaches from the JVM whenever it goes idle.** A JNI thread that attached (via
+  `openBytes`) and never detached blocks `DestroyJavaVM`, hanging the whole process at exit — found and
+  fixed here; the process now exits cleanly.
+### Notes
+- Headless-tested: cache hit on repeat, read-ahead caches the frames ahead, the cache is byte-budgeted,
+  and close stops the prefetcher. The reader was also run end-to-end on the real 8 GB file (opens,
+  reads, prefetches frame 101 after frame 100, exits cleanly). **Needs a viewer:** confirm scrubbing
+  the streaming `.czi` is now smooth with no intermittent stalls.
+- The `@integration` real-file test hit an intermittent jpype `startJVM` access violation in this
+  session's harness (unrelated to this change — the prefetch thread starts *after* JVM init, and it is
+  deselected from the core suite); the reader is verified via the standalone benchmark above.
+
 ## [1.6.112] - 2026-07-18
 ### Fixed — **The CZI open no longer cancels itself.**
 A regression in 1.6.111 (unreleased): opening the streaming CZI reported "CZI open cancelled" and

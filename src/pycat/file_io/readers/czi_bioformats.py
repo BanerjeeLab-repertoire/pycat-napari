@@ -26,6 +26,9 @@ Qt/napari-free. All state is the loci reader + numpy.
 
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
+
 import numpy as np
 
 from pycat.file_io.stack_access import to_unit_float32
@@ -111,7 +114,18 @@ class CziBioFormatsReader:
 
     Its lifetime must outlive the layers (lazy plane reads go back to it), so the loader retains it
     via the ``ImageSource`` pattern, exactly like the IMS readers.
+
+    ── LRU cache + read-ahead so scrubbing is smooth ──────────────────────────────────────────
+    A plane is ~5 ms to ``openBytes``, which is visible as an intermittent stall when scrubbing a long
+    movie frame by frame. So planes are cached (a byte-budgeted LRU), and a single background thread
+    reads AHEAD of the frame last accessed — a forward scrub then lands on already-decoded planes.
+    Every read (foreground and prefetch) is serialised on one lock, because a loci ``ImageReader`` is
+    NOT safe for concurrent ``openBytes``; the lock is held per plane (~5 ms), so a foreground miss
+    never waits long behind the prefetcher.
     """
+
+    _CACHE_BYTES = 256 * 1024 * 1024     # LRU budget: 256 planes at 500², 16 at 2048² — bounded either way
+    _PREFETCH_AHEAD = 8                  # frames to read ahead of the current one on a forward scrub
 
     def __init__(self, path):
         _ensure_jvm()
@@ -127,24 +141,119 @@ class CziBioFormatsReader:
         self.H = int(self._reader.getSizeY())
         self.W = int(self._reader.getSizeX())
         self.src_dtype = _numpy_dtype(self._reader)
+        self._init_cache()
+
+    def _init_cache(self):
+        """Set up the LRU cache + prefetch thread. Separate from ``__init__`` so the cache/prefetch
+        logic is testable without a JVM (construct the reader, set n_t/H/W/src_dtype, call this)."""
+        # `_read_lock` serialises openBytes; `_cache_lock` guards the LRU dict.
+        self._read_lock = threading.Lock()
+        self._cache_lock = threading.Lock()
+        self._cache = OrderedDict()                          # (t, c) -> float32 (Y, X) plane
+        self._cache_max = max(4, int(self._CACHE_BYTES / (self.H * self.W * 4)))
+        self._closed = False
+        self._target = None                                  # (t, c) last accessed; prefetch reads ahead
+        self._target_cv = threading.Condition()
+        self._prefetch = threading.Thread(target=self._prefetch_loop, daemon=True)
+        self._prefetch.start()
+
+    # ── cache ────────────────────────────────────────────────────────────────
+    def _cache_get(self, key):
+        with self._cache_lock:
+            plane = self._cache.get(key)
+            if plane is not None:
+                self._cache.move_to_end(key)
+            return plane
+
+    def _cache_put(self, key, plane):
+        with self._cache_lock:
+            self._cache[key] = plane
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._cache_max:
+                self._cache.popitem(last=False)              # evict least-recently-used
+
+    def _read_plane_raw(self, t, c, z):
+        """The actual JVM read, serialised. One (Y, X) plane, normalised to [0, 1] float32 (same
+        contract as ``to_unit_float32`` on every other loader)."""
+        with self._read_lock:
+            if self._closed or self._reader is None:
+                raise RuntimeError("CZI reader is closed")
+            _attach_thread()
+            idx = int(self._reader.getIndex(int(z), int(c), int(t)))
+            buf = self._reader.openBytes(idx)
+            arr = np.frombuffer(bytes(buf), dtype=self.src_dtype).reshape(self.H, self.W)
+            return to_unit_float32(arr, self.src_dtype)
 
     def _read_plane(self, t, c, z):
-        """One (Y, X) plane, normalised to [0, 1] float32 — the range the analysis stack expects
-        (same contract as ``to_unit_float32`` on every other loader)."""
-        _attach_thread()
-        idx = int(self._reader.getIndex(int(z), int(c), int(t)))
-        buf = self._reader.openBytes(idx)
-        arr = np.frombuffer(bytes(buf), dtype=self.src_dtype).reshape(self.H, self.W)
-        return to_unit_float32(arr, self.src_dtype)
+        """Cached (Y, X) plane read; also points the prefetcher at this frame so the next ones ahead
+        are decoded in the background."""
+        key = (int(t), int(c))
+        plane = self._cache_get(key)
+        if plane is None:
+            plane = self._read_plane_raw(t, c, z)
+            self._cache_put(key, plane)
+        with self._target_cv:
+            self._target = key
+            self._target_cv.notify()
+        return plane
+
+    @staticmethod
+    def _detach_jvm():
+        """Detach THIS thread from the JVM. A JNI thread that attached (via ``openBytes``) and never
+        detaches blocks ``DestroyJavaVM`` — so an idle or finished prefetcher would HANG the whole
+        process at exit. Idempotent / harmless if never attached."""
+        try:
+            import jpype
+            if jpype.isJVMStarted():
+                jpype.detachThreadFromJVM()
+        except Exception:
+            pass
+
+    def _prefetch_loop(self):
+        """Read AHEAD of the last-accessed frame into the cache; bail the moment the user moves, so no
+        effort is spent on frames they have already scrubbed past.
+
+        The thread DETACHES from the JVM whenever it goes idle (after each read-ahead pass), so it is
+        never holding a JVM attachment while blocked on the condition — otherwise the process would
+        hang at exit if the reader was never closed (a still-attached thread blocks JVM shutdown even
+        as a Python daemon)."""
+        try:
+            while not self._closed:
+                with self._target_cv:
+                    while self._target is None and not self._closed:
+                        self._target_cv.wait()
+                    if self._closed:
+                        return
+                    t, c = self._target
+                    self._target = None                      # one read-ahead pass per access
+                for dt in range(1, self._PREFETCH_AHEAD + 1):
+                    with self._target_cv:
+                        if self._closed or self._target is not None:
+                            break                            # user moved (or closing) — restart on the new target
+                    nt = t + dt
+                    if not (0 <= nt < self.n_t) or self._cache_get((nt, c)) is not None:
+                        continue
+                    try:
+                        self._cache_put((nt, c), self._read_plane_raw(nt, c, 0))
+                    except Exception as e:
+                        debug_log("czi_bioformats: prefetch read failed", e)
+                        break
+                self._detach_jvm()                           # idle again — hold no JVM attachment
+        finally:
+            self._detach_jvm()
 
     def channel_stack(self, channel_idx):
         """A lazy (T, Y, X) view of one channel (z is fixed at 0 — the streaming files are 2-D+T)."""
         return _CziChannelStack(self, int(channel_idx))
 
     def close(self):
+        self._closed = True
+        with self._target_cv:
+            self._target_cv.notify_all()                     # wake the prefetcher so it can exit
         try:
-            if self._reader is not None:
-                self._reader.close()
+            with self._read_lock:
+                if self._reader is not None:
+                    self._reader.close()
         except Exception as e:
             debug_log("czi_bioformats: reader close failed", e)
         finally:
