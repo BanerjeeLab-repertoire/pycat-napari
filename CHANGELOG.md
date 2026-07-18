@@ -1,3 +1,20 @@
+## [1.6.117] - 2026-07-18
+### Fixed — **CZI exit hang: force the exit from `atexit`, not `aboutToQuit` (which never fired).**
+1.6.116's `QApplication.aboutToQuit` hook did not fix the hang — it is installed from the CZI-open
+**worker thread**, where a cross-thread Qt `connect` is unreliable, and the hang is at Python
+interpreter shutdown *after* `napari.run()` returns. Moved the guarantee to an **`atexit`** handler:
+it runs on the main thread right before Python joins the JVM's non-daemon threads (exactly where it
+hangs), so `os._exit(0)` there terminates cleanly. `aboutToQuit` is kept as a best-effort earlier
+trigger.
+- The handler prints `[PyCAT CZI] BioFormats JVM was open — forcing a clean process exit…` when it
+  runs, so it is visible whether the fix engaged. Verified at the process level: the standalone reader
+  fires the handler and exits `0`.
+- Only the welcome-logo temp-file cleanup atexit is pre-empted (harmless), and only in a CZI session.
+### Notes
+- **Needs a viewer:** open the streaming `.czi`, close PyCAT — you should see that force-exit line and
+  get the prompt back. If you close and do NOT see the line, `napari.run()` isn't returning on close
+  and I'll hook the viewer's window-close event instead.
+
 ## [1.6.116] - 2026-07-18
 ### Fixed — **Closing PyCAT after a CZI now returns the terminal (force a clean exit).**
 Headless mode (1.6.115) was not enough: something in the napari/Qt + BioFormats-JVM combination still

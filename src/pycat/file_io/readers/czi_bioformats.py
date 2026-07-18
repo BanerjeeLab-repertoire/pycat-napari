@@ -100,22 +100,16 @@ def _ensure_jvm():
 
 
 def _install_forced_exit_on_quit():
-    """Guarantee the process TERMINATES when the user closes PyCAT after opening a CZI.
+    """Guarantee the process TERMINATES when PyCAT closes after a CZI opened the JVM.
 
     Even headless, the BioFormats JVM leaves non-daemon Java threads that survive shutdown inside the
-    napari/Qt process — the window closes but the terminal never returns (a plain script exits fine,
-    which is why this only bites in the GUI). Rather than chase which Java/Qt thread refuses to die,
-    force a clean exit at the app's quit point: once a CZI has started the JVM, `QApplication`'s
-    ``aboutToQuit`` (fired after the user closes the last window, after other quit handlers) flushes
-    the streams and ``os._exit(0)``. Only reached in a CZI session, where the alternative is a hang.
+    napari/Qt process: ``napari.run()`` returns when the window closes, but Python then hangs joining
+    those threads — the terminal never comes back (a plain script exits fine, so it only bites in the
+    GUI). An ``atexit`` handler runs on the main thread right BEFORE that join, so ``os._exit(0)`` there
+    terminates past the hang; it is the reliable path (Qt's ``aboutToQuit`` is a best-effort earlier
+    trigger, and it may not fire — this is installed from the CZI-open WORKER thread). The only atexit
+    it pre-empts is the welcome-logo temp-file cleanup — harmless. Only ever armed in a CZI session.
     """
-    try:
-        from PyQt5.QtWidgets import QApplication
-    except Exception:
-        return
-    app = QApplication.instance()
-    if app is None:                              # headless / script — it exits cleanly on its own
-        return
     global _EXIT_HOOK_INSTALLED
     if _EXIT_HOOK_INSTALLED:
         return
@@ -124,12 +118,22 @@ def _install_forced_exit_on_quit():
     def _force_exit():
         import os, sys
         try:
+            print("[PyCAT CZI] BioFormats JVM was open — forcing a clean process exit so the "
+                  "terminal returns.", flush=True)
             sys.stdout.flush(); sys.stderr.flush()
         except Exception:
             pass
         os._exit(0)
 
-    app.aboutToQuit.connect(_force_exit)
+    import atexit
+    atexit.register(_force_exit)                 # the guarantee: runs before Python joins JVM threads
+    try:
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(_force_exit)  # best-effort earlier trigger
+    except Exception:
+        pass
 
 
 def _attach_thread():
