@@ -1,3 +1,18 @@
+## [1.6.112] - 2026-07-18
+### Fixed — **The CZI open no longer cancels itself.**
+A regression in 1.6.111 (unreleased): opening the streaming CZI reported "CZI open cancelled" and
+aborted on its own, with no user interaction. `QProgressDialog.close()` **emits `canceled`**, so when
+the dialog closed on *normal completion*, the cancel handler fired and marked the load cancelled.
+
+- The finish handler now marks completion (`done`), and the cancel handler ignores the
+  `canceled` that `close()` emits once the work is done — only a real "Give up" click (or Escape/X)
+  *before* completion cancels. Regression-tested (`test_busy_progress.py`, real Qt loop): a successful
+  call returns its value instead of raising the cancellation.
+### Notes
+- Rolls up with 1.6.110 (dedupe + off-thread libCZI probe) and 1.6.111 (dialog auto-closes + "Give
+  up"). **Needs a viewer:** confirm the streaming `.czi` now opens to completion on its own, and "Give
+  up" still cancels cleanly.
+
 ## [1.6.111] - 2026-07-18
 ### Fixed — **The CZI "indexing" dialog now closes itself, and "Give up" actually works.**
 From the viewer, on the streaming-CZI open dialog: it stayed open with the elapsed counter frozen, and

@@ -2166,26 +2166,14 @@ class FileIOClass:
                                   n_t, 1, file_path, source='generic')
 
     def _run_with_busy_progress(self, fn, title, text, cancellable=True):
-        """Run blocking ``fn()`` OFF the Qt main thread with a responsive busy dialog; return its
-        result (or re-raise its exception). Raises :class:`StackLoadCancelled` if the user gives up.
+        """Run blocking ``fn()`` OFF the Qt thread behind a modal busy dialog; return its result (or
+        re-raise). Raises :class:`StackLoadCancelled` on "Give up". Headless → plain sync call.
 
-        The BioFormats reader open is a single ~33 s Java call — ``processEvents`` cannot interleave
-        with it, so it MUST run on a worker thread or the window freezes. We run it on a ``QThread``
-        and spin a modal, indeterminate ``QProgressDialog`` until it finishes, so the UI keeps
-        painting. Headless (no Qt), fall back to a plain synchronous call.
-
-        Two things this gets right that the naive version did not:
-
-        * **The dialog closes when the work finishes.** ``worker.finished`` is emitted FROM the worker
-          thread; a plain-function slot then runs ON the worker, and ``dlg.reset()`` from there does
-          not end the main thread's modal loop — so the dialog hung open (elapsed frozen = work
-          already done) until the user X'd it. The finish handler is a ``QObject`` slot built here, so
-          ``AutoConnection`` → ``QueuedConnection`` and it runs on the main thread where the dialog
-          lives. A ``QEventLoop`` (not ``dlg.exec_()``) is ended by ``loop.quit()``.
-        * **"Give up" actually frees the UI.** The JVM call cannot be interrupted, so cancel DETACHES:
-          it stops waiting and lets the orphaned worker finish in the background (result dropped),
-          rather than ``thread.wait()`` blocking the UI until the parse completes — which is the hang
-          the user hit when X-ing out.
+        Two things the naive version got wrong (both seen opening a streaming CZI): the dialog must
+        CLOSE when the work finishes — the finish handler is a main-thread ``QObject`` slot ending a
+        ``QEventLoop``, not a worker-thread plain function whose ``dlg.reset()`` never returns the
+        modal loop; and "Give up" must FREE the UI — the JVM call can't be interrupted, so cancel
+        detaches (drops the orphan's result) rather than ``thread.wait()`` blocking (the X-out hang).
         """
         try:
             from PyQt5.QtCore import (QThread, QObject, pyqtSignal, pyqtSlot, Qt,
@@ -2247,6 +2235,7 @@ class FileIOClass:
         class _Bridge(QObject):
             @pyqtSlot()
             def on_finished(self):          # runs on the MAIN thread (queued) — closes the dialog
+                _state['done'] = True
                 _timer.stop()
                 thread.quit()
                 if loop.isRunning():
@@ -2255,6 +2244,11 @@ class FileIOClass:
         worker.finished.connect(bridge.on_finished)
 
         def _on_cancel():
+            # `QProgressDialog.close()` (below, on NORMAL completion) also emits `canceled` — ignore
+            # that, or every successful open would report itself cancelled. Only a real Give-up click,
+            # before the work finishes, counts.
+            if _state.get('done'):
+                return
             _state['cancelled'] = True
             _timer.stop()
             if loop.isRunning():
