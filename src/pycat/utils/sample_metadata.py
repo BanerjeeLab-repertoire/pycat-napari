@@ -166,6 +166,23 @@ class SampleMetadataResolver:
                       'none')
         return SampleMetadata(fields=merged, source=winner, field_sources=field_sources)
 
+    def known_fields(self):
+        """The condition-field vocabulary this resolver can produce, sorted and de-duplicated.
+
+        The union of the sample sheet's columns, the in-app tags' keys, and the filename pattern's
+        placeholders — knowable before any image is read, which is what lets the consolidated table
+        fix its schema up front and stream. A field that only some images have is still declared, so a
+        streamed CSV never drifts a column.
+        """
+        fields = set()
+        for cond in self._sheet.values():
+            fields.update(cond)
+        for cond in self._in_app.values():
+            fields.update(cond)
+        if self._pattern:
+            fields.update(re.findall(r'\{(\w+)\}', self._pattern))
+        return sorted(fields)
+
     def warn_unmatched_sheet_rows(self):
         """After a batch, warn about sheet rows no image used — a likely filename typo, not a crash."""
         unused = set(self._sheet) - self._matched_stems

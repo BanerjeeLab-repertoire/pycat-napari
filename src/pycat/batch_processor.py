@@ -183,6 +183,9 @@ class BatchWorker(QThread):
         output_dir: Path,
         step_registry: Dict[str, Callable],
         parent=None,
+        sample_sheet_path=None,
+        filename_pattern=None,
+        in_app_tags=None,
     ):
         super().__init__(parent)
         self.files = files
@@ -190,6 +193,11 @@ class BatchWorker(QThread):
         self.output_dir = output_dir
         self.step_registry = step_registry
         self._cancelled = False
+        # Comparative phenotyping: a condition label per image + one consolidated table.
+        # All optional — with no sheet/pattern/tag the batch behaves exactly as before.
+        self.sample_sheet_path = sample_sheet_path
+        self.filename_pattern = filename_pattern
+        self.in_app_tags = in_app_tags
 
     def cancel(self):
         self._cancelled = True
@@ -242,6 +250,13 @@ class BatchWorker(QThread):
         results = []
         total = len(self.files)
 
+        # ── Comparative phenotyping: resolver + one consolidated table ────────
+        #
+        # Built only when a condition source was supplied; otherwise `writer` stays None and this
+        # whole feature is inert — the batch behaves exactly as before. The writer's schema is fixed
+        # from the resolver's known field vocabulary up front, which is what lets it stream.
+        resolver, writer = self._build_phenotyping(output_dir)
+
         for idx, image_path in enumerate(self.files):
             if self._cancelled:
                 self.finished.emit(
@@ -256,18 +271,68 @@ class BatchWorker(QThread):
             file_output.mkdir(exist_ok=True)
 
             try:
-                self._process_file(image_path, file_output)
+                state = self._process_file(image_path, file_output)
+                self._append_to_consolidated(writer, resolver, image_path, state)
                 results.append(f"✓ {image_path.name}")
             except Exception as exc:  # noqa: BLE001
                 tb = traceback.format_exc()
                 results.append(f"✗ {image_path.name}: {exc}")
                 print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{tb}")
 
+        if resolver is not None:
+            resolver.warn_unmatched_sheet_rows()
+        if writer is not None and writer.n_images:
+            print(f"[PyCAT Batch] {writer.summary()}")
+
         summary = "\n".join(results)
         self.finished.emit(
             f"Batch complete — {total} file(s) processed.\n"
             f"Output: {output_dir}\n\n{summary}"
         )
+
+    def _build_phenotyping(self, output_dir):
+        """`(resolver, writer)` for the consolidated table, or `(None, None)` when no source is set.
+
+        Kept out of `run()` so the wiring is one call and the no-source path is obviously inert.
+        """
+        if not (self.sample_sheet_path or self.filename_pattern or self.in_app_tags):
+            return None, None
+        from pycat.utils.sample_metadata import SampleMetadataResolver
+        from pycat.utils.consolidated_table import ConsolidatedLongWriter
+
+        resolver = SampleMetadataResolver(
+            sheet_path=self.sample_sheet_path, filename_pattern=self.filename_pattern,
+            in_app_tags=self.in_app_tags)
+        writer = ConsolidatedLongWriter(
+            Path(output_dir) / 'consolidated_long.csv', condition_fields=resolver.known_fields())
+        return resolver, writer
+
+    def _append_to_consolidated(self, writer, resolver, image_path, state):
+        """Melt this image's object tables into the consolidated table, with its condition label.
+
+        No-op when the feature is off or the image produced no object tables. Never raises into the
+        batch loop — a consolidated-table hiccup must not fail an image that otherwise processed.
+        """
+        if writer is None or resolver is None or not isinstance(state, dict):
+            return
+        try:
+            from pycat.utils.consolidated_table import records_from_data_repository
+            data_instance = state.get('data_instance')
+            repo = getattr(data_instance, 'data_repository', None) or {}
+            records = records_from_data_repository(repo)
+            if not records:
+                return
+            import pycat as _pycat
+            provenance = {
+                'pixel_size_um': repo.get('microns_per_pixel_sq'),
+                'pycat_version': getattr(_pycat, '__version__', ''),
+            }
+            writer.add_image(image_path.stem,
+                             [(t, df) for t, df in records],
+                             sample_metadata=resolver.for_image(image_path),
+                             provenance={k: v for k, v in provenance.items() if v is not None})
+        except Exception as exc:  # noqa: BLE001
+            print(f"[PyCAT Batch] consolidated table: skipped {image_path.name} ({exc})")
 
     def _process_file(self, image_path: Path, output_dir: Path):
         """
@@ -306,6 +371,9 @@ class BatchWorker(QThread):
                       f"{image_path.name}:\n{traceback.format_exc()}")
                 print(f"[PyCAT Batch] Skipping remaining steps for this file.")
                 break
+        # Returned so the consolidated-table wiring can read this image's object tables out of
+        # `state['data_instance']`. Existing callers ignore the return; this is additive.
+        return state
 
 
 # ---------------------------------------------------------------------------
