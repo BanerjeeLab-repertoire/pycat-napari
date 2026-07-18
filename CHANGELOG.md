@@ -1,36 +1,33 @@
-## [1.6.96] - 2026-07-17
-### Added — **Comparative phenotyping increment 2: the consolidated long-format table (the keystone).**
-Batch wrote one folder per image and nothing at the top level, so a study across N mutants was N
-folders of disconnected CSVs joined by hand — the error-prone manual step PyCAT exists to remove. New
-`utils/consolidated_table.py` assembles one tidy table:
+## [1.6.97] - 2026-07-17
+### Added — **Comparative phenotyping increment 3: comparative figures with honest, replicate-aware stats.**
+Cross-condition comparison over the consolidated table (increment 2). Two modules: the statistics
+(`utils/comparative_stats.py`) and the figures (`utils/comparative_figures.py`).
 
-    image_stem | <condition fields> | object_type | object_id | measurement | value | units |
-                 channel | frame | pixel_size_um | pycat_version | operation_id
+**The statistics are the part that has to be right.** The easiest false result in imaging biology is
+pseudoreplication — treat 5 000 puncta from 3 cells as 5 000 independent observations and any trivial
+difference becomes p < 10⁻⁹. PyCAT's own doctrine (`pixel_wise_corr_analysis_tools`) is that the
+inferential unit is the biological replicate, not the object. So `compare_conditions` **aggregates each
+condition×replicate to one value first**, making the replicate the unit, then tests (Mann-Whitney /
+Kruskal-Wallis, or t / ANOVA parametric). It reports the test used and n at **both** levels, and
+**refuses to infer** when a condition has < 2 replicates — descriptive only, never a pixel-level
+p-value dressed as a biological one. Measured on identical null data: the pseudoreplicated test gives
+p = 2.6×10⁻⁸⁷, the replicate-aware one gives p = 0.70. It recovers real replicate-level effects and
+does not cry significance on a pseudoreplicated null — the roadmap's three deliverables, each a test.
 
-- **Long (tidy), not wide** — one measurement/value/units triple per row, the substrate grouped stats
-  and faceting need. Wide is a pivot away; long is not recoverable from wide.
-- **Condition labels joined per row** from increment 1's `SampleMetadata` — every measurement knows
-  its mutant/dose/replicate. An absent condition field is **blank, never fabricated** (the honesty
-  contract; a comparison across a guessed label is silently wrong).
-- **Provenance travels per row** (pixel size, version, operation, channel, frame) — traceable and
-  self-describing by construction.
-- **Streaming** — `ConsolidatedLongWriter` appends each image and holds no other in memory (a
-  200-image batch keeps counters, not rows); the schema is fixed from the condition vocabulary up
-  front, so append never drifts a column.
-- **Additive** — this sits alongside the per-image folders; it removes nothing.
-
-The assembly (`melt_object_measurements`, `build_image_long_table`), the streaming writer, and the
-`records_from_data_repository` extractor (per-object tables keyed `<type>_df`) are all pure and tested
-headlessly — assembly correctness is not trusted to a GUI run.
+**The figures make the replicate structure visible.** `condition_comparison_figure` draws every
+condition twice — the object cloud (light, many) and the **replicate means on top** (dark, few) —
+because the honest test runs on those few points and the picture should show it. The annotation
+carries the test, the p-value, and n at both levels, straight from the stats; a pseudoreplicated null
+is labelled `n.s.`, a too-few-replicates case `NO TEST`, never a fabricated star.
+`dose_response_figure` gives mean ± SEM **over replicates**, same rule.
 ### Notes
-- **The batch-loop wiring is on branch `phenotyping-batch-wire`, NOT here** — it edits the Qt-bound
-  `BatchWorker`, which cannot be exercised without a real batch run, and this session cannot drive one
-  (the same boundary as the worker-thread task). The keystone *logic* ships to main, fully verified; a
-  user runs the wiring branch to confirm a live batch emits `consolidated_long.csv` correctly, then it
-  merges. The library is usable directly today (point `ConsolidatedLongWriter` at per-image outputs).
-- The calibration columns increment 1's spec anticipated (`dense_concentration_uM`, `Kp`,
-  `dG_transfer_kcal_mol`, 1.6.94) melt into this table like any other measurement — the two increments
-  compose.
-- Increment 3 (comparative faceted figures with honest stats) is a view over this table, not built
-  here.
+- Static matplotlib (Agg, renders headlessly). **Interactive brushing and a PyQtGraph render are
+  deferred** — they need a viewer, and the roadmap scopes them as "later"; this ships the part
+  verifiable without one. The static figures are usable today and are the substrate a brushing layer
+  would sit over.
+- All `core` — the statistics are pure and their correctness is exactly what must not be trusted to a
+  figure someone glances at. Verified: the object-cloud + replicate-means design renders correctly on
+  a 3-condition graded effect.
+- Increment 4 (publication figure refinement — themes, labels, export polish) is the remaining
+  comparative-phenotyping increment.
 
