@@ -132,13 +132,10 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         # found nothing to report". It did not look.
         #
         # Every other stack-consuming UI already uses `materialize_stack`. This one did not.
-        from pycat.file_io.file_io import materialize_stack
+        from pycat.utils.qt_worker import materialize_off_thread
         _layer_data = ui_instance.viewer.layers[name].data
         if getattr(_layer_data, 'ndim', 2) == 3:
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(run_prog, phases=[("Materializing frames", 1.0)])
-            data = materialize_stack(_layer_data, progress_callback=_pp.callback)
-            _pp.hide()
+            data = materialize_off_thread(_layer_data, viewer=ui_instance.viewer)
         else:
             data = np.asarray(_layer_data)      # already 2-D: instant, a bar would only flash
         if data.ndim not in (2, 3):

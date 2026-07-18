@@ -375,12 +375,9 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         name = fus_stack_dd.currentText()
         if name not in [l.name for l in ui_instance.viewer.layers]:
             napari_show_warning("Select a labelled condensate mask stack first."); return
-        from pycat.file_io.file_io import materialize_stack
-        from pycat.ui.ui_utils import PhasedProgress as _PP
-        _pp = _PP(prog_fus, phases=[("Materializing frames", 1.0)])
-        stack = materialize_stack(ui_instance.viewer.layers[name].data, dtype=None,
-                                  progress_callback=_pp.callback)
-        _pp.hide()
+        from pycat.utils.qt_worker import materialize_off_thread
+        stack = materialize_off_thread(ui_instance.viewer.layers[name].data,
+                                       viewer=ui_instance.viewer, dtype=None)
         if stack.ndim != 3:
             napari_show_warning("Fusion needs a 3D (T,H,W) mask stack."); return
         mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
@@ -498,13 +495,10 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         from pycat.toolbox.condensate_physics_tools import (
             analyse_frame_quality, apply_bleach_correction)
         try:
-            from pycat.file_io.file_io import materialize_stack
+            from pycat.utils.qt_worker import materialize_off_thread
             layer = ui_instance.viewer.layers[stack_dd_qc.currentText()]
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(prog_qc, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(layer.data, dtype=np.float32,
-                                      progress_callback=_pp.callback)
-            _pp.hide()
+            stack = materialize_off_thread(layer.data, viewer=ui_instance.viewer,
+                                           dtype=np.float32)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:

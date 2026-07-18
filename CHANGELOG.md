@@ -1,3 +1,32 @@
+## [1.6.107] - 2026-07-18
+### Changed — **Every widget's stack decode runs off the Qt thread now.**
+The other half of 1.6.106. Fourteen sites across eight widgets decoded a lazy stack with
+`materialize_stack` on the Qt main thread — the 1.6.81/82 progress bars made that wait visible (a
+synchronous `repaint()` advances the bar) without making it shorter, so the window could still say
+"Not Responding" while the bar moved. All fourteen now decode through a worker.
+
+- **New `qt_worker.materialize_off_thread(layer.data, viewer=…, **kw)`** wraps `materialize_stack` in
+  `run_with_progress`: the decode runs on a `QThread` behind a modal dialog, and the array comes back
+  on the caller's thread — safe to hand straight to analysis, exactly as before. `dtype=` and any other
+  kwargs pass through unchanged.
+- **Converted:** FRAP (recovery + pre-bleach), condensate-physics (fusion + QC), data-QC,
+  brightfield (dynamics + focus-QC), in-vitro fluorescence (dynamics + intensity + QC), in-vitro
+  brightfield (dynamics + focus-QC), fusion (image mode), and the temperature module's shared cached
+  `_get_stack` (which froze once, on whichever section was clicked first). The inline `PhasedProgress`
+  bars for the decode phase are retired in favour of the modal dialog.
+- **Not converted:** FRAP's 2-D per-candidate scan (`_offer_stack_2d_images`) — it decodes single 2-D
+  frames in a loop, where an off-thread dialog would flash once per candidate. It stays synchronous and
+  is the one excused entry.
+### Notes
+- The progress-rollout ratchet (`test_progress_rollout.py`) is rewritten for the new contract: a
+  `*_ui.py` that decodes a stack **directly** (synchronously, on the Qt thread — bar or no bar) now
+  fails; the way to pass is to route it through `materialize_off_thread`. The countdown is at zero.
+- Headless-tested: the helper decodes via `materialize_stack` on the worker, passes kwargs and a
+  callable progress callback, and survives a viewer with no Qt window; plus the five real-thread
+  integration tests (work off-main, value back on-main, progress crosses to main, errors re-raise,
+  threads cleaned up). **The per-widget feel needs a viewer** — confirm a dynamics/QC/FRAP run on a
+  long stack shows the modal dialog and no longer says "Not Responding".
+
 ## [1.6.106] - 2026-07-18
 ### Changed — **Session load runs off the Qt thread — no more "Not Responding".**
 Loading a session lagged the UI (you reported it; Windows shows "Python is not responding" on a longer

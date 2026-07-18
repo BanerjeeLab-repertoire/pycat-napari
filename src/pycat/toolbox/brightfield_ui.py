@@ -747,12 +747,9 @@ def _add_bf_dynamics(ui, layout):
             fit_coarsening, kaplan_meier_lifetimes,
         )
         try:
-            from pycat.file_io.file_io import materialize_stack
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None,
-                                      progress_callback=_pp.callback)
-            _pp.hide()
+            from pycat.utils.qt_worker import materialize_off_thread
+            stack = materialize_off_thread(ui.viewer.layers[stack_dd.currentText()].data,
+                                           viewer=ui.viewer, dtype=None)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:
@@ -946,13 +943,10 @@ def _add_bf_frame_qc(ui, layout):
     def _on_run():
         from pycat.toolbox.brightfield_tools import bf_analyse_frame_quality
         try:
-            from pycat.file_io.file_io import materialize_stack
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(
-                ui.viewer.layers[stack_dd.currentText()].data, dtype=np.float32,
-                progress_callback=_pp.callback)
-            _pp.hide()
+            from pycat.utils.qt_worker import materialize_off_thread
+            stack = materialize_off_thread(
+                ui.viewer.layers[stack_dd.currentText()].data, viewer=ui.viewer,
+                dtype=np.float32)
         except KeyError as e:
             napari_show_warning(f"Layer not found: {e}"); return
         if stack.ndim != 3:

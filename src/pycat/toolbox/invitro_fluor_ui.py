@@ -993,24 +993,18 @@ def _ivf_dynamics(ui, layout):
             coarsening_statistics, detect_sedimentation,
             detect_and_fit_fusions)
 
-        from pycat.file_io.file_io import materialize_stack
+        from pycat.utils.qt_worker import materialize_off_thread
         try:
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(ui.viewer.layers[stack_dd.currentText()].data, dtype=None,
-                                      progress_callback=_pp.callback)
-            _pp.hide()
+            stack = materialize_off_thread(ui.viewer.layers[stack_dd.currentText()].data,
+                                           viewer=ui.viewer, dtype=None)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("Dynamics needs a 3D (T,H,W) label stack."); return
 
         try:
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp2 = _PP(prog, phases=[("Materializing intensity frames", 1.0)])
-            img_stack = materialize_stack(
-                ui.viewer.layers[img_dd.currentText()].data, dtype=np.float32,
-                progress_callback=_pp2.callback)
-            _pp2.hide()
+            img_stack = materialize_off_thread(
+                ui.viewer.layers[img_dd.currentText()].data, viewer=ui.viewer,
+                dtype=np.float32, text="Decoding intensity frames…")
         except Exception:
             img_stack = None
 
@@ -1186,13 +1180,9 @@ def _ivf_frame_qc(ui, layout):
         from pycat.toolbox.condensate_physics_tools import (
             analyse_frame_quality, apply_bleach_correction)
         try:
-            from pycat.file_io.file_io import materialize_stack
+            from pycat.utils.qt_worker import materialize_off_thread
             layer = ui.viewer.layers[stack_dd.currentText()]
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(prog, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(layer.data, dtype=np.float32,
-                                      progress_callback=_pp.callback)
-            _pp.hide()
+            stack = materialize_off_thread(layer.data, viewer=ui.viewer, dtype=np.float32)
         except KeyError as e: napari_show_warning(str(e)); return
         if stack.ndim != 3:
             napari_show_warning("QC needs a 3D (T,H,W) stack."); return

@@ -158,3 +158,57 @@ def test_the_worker_thread_is_CLEANED_UP(qtbot):
     assert threading.active_count() <= before + 1, (
         f'threads leaked: {before} -> {threading.active_count()}'
     )
+
+
+# ── materialize_off_thread: the one-call wrapper the widgets decode through ────────────────
+
+@pytest.mark.core
+def test_materialize_off_thread_DECODES_and_returns_the_array(monkeypatch):
+    """It runs `materialize_stack` (headless: synchronously) and returns its result — the array the
+    caller then hands to analysis, on the caller's thread."""
+    import pycat.file_io.file_io as fio
+    from pycat.utils.qt_worker import materialize_off_thread
+
+    sentinel = object()
+    monkeypatch.setattr(fio, 'materialize_stack', lambda data, **kw: sentinel)
+
+    assert materialize_off_thread('LAYER_DATA') is sentinel
+
+
+@pytest.mark.core
+def test_materialize_off_thread_PASSES_kwargs_and_a_progress_callback(monkeypatch):
+    """`dtype=` (and any other kwarg) reach `materialize_stack`, and it always gets a callable
+    `progress_callback` — a lazy decoder calls it per frame and must not get `None`."""
+    import numpy as np
+    import pycat.file_io.file_io as fio
+    from pycat.utils.qt_worker import materialize_off_thread
+
+    seen = {}
+
+    def _fake(data, *, progress_callback=None, **kw):
+        progress_callback(1, 1)          # must be callable, even headless
+        seen['data'] = data
+        seen['kw'] = kw
+        return np.zeros((2, 2))
+
+    monkeypatch.setattr(fio, 'materialize_stack', _fake)
+    out = materialize_off_thread('DATA', dtype=np.float32)
+
+    assert seen['data'] == 'DATA'
+    assert seen['kw'] == {'dtype': np.float32}
+    assert out.shape == (2, 2)
+
+
+@pytest.mark.core
+def test_materialize_off_thread_survives_a_viewer_with_no_qt_window(monkeypatch):
+    """The `viewer=` is only for parenting the dialog. A fake viewer (or one whose `window` chain is
+    absent) must not break the decode — the parent just resolves to None."""
+    import pycat.file_io.file_io as fio
+    from pycat.utils.qt_worker import materialize_off_thread
+
+    monkeypatch.setattr(fio, 'materialize_stack', lambda data, **kw: 'decoded')
+
+    class _Viewer:            # no `.window`
+        pass
+
+    assert materialize_off_thread('d', viewer=_Viewer()) == 'decoded'

@@ -159,3 +159,34 @@ def run_with_progress(fn, *, title='Working', text='Working…', parent=None,
     if 'error' in box:
         raise box['error']
     return box.get('value')
+
+
+def materialize_off_thread(layer_data, *, viewer=None, parent=None,
+                           title='Loading', text='Decoding frames…', **materialize_kw):
+    """Decode a (possibly lazy) stack on a worker thread, behind a modal progress dialog.
+
+    The one-call replacement for the pattern that froze the UI in every stack-consuming widget::
+
+        _pp = PhasedProgress(bar, phases=[("Materializing frames", 1.0)])
+        stack = materialize_stack(layer.data, progress_callback=_pp.callback)   # freezes
+        _pp.hide()
+
+    That made the wait *visible* — ``QProgressBar.setValue`` calls a synchronous ``repaint()`` — but
+    not *shorter*: the decode still ran on the Qt thread, so the window could still say
+    "Not Responding". Here the decode runs on a ``QThread`` (via `run_with_progress`) while a modal
+    ``QProgressDialog`` keeps the window painting, and the array is returned **on the caller's
+    thread** — safe to hand straight to analysis or ``viewer.add_*``, exactly as before.
+
+    ``**materialize_kw`` (e.g. ``dtype=np.float32``) pass through to ``materialize_stack`` unchanged.
+    ``viewer`` (or an explicit ``parent``) only parents the dialog; either may be omitted. Headless,
+    ``run_with_progress`` falls back to a synchronous decode, so this is safe in tests and scripts.
+    """
+    from pycat.file_io.file_io import materialize_stack
+    if parent is None and viewer is not None:
+        try:
+            parent = viewer.window._qt_window
+        except Exception:
+            parent = None
+    return run_with_progress(
+        lambda progress: materialize_stack(layer_data, progress_callback=progress, **materialize_kw),
+        title=title, text=text, parent=parent)
