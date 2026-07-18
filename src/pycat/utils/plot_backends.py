@@ -48,7 +48,7 @@ import numpy as np
 from pycat.utils.general_utils import debug_log
 
 
-BACKENDS = ('matplotlib', 'seaborn', 'plotly')
+BACKENDS = ('matplotlib', 'seaborn', 'plotly', 'pyqtgraph')
 
 
 def available_backends():
@@ -81,6 +81,16 @@ def available_backends():
                 "the identity is visible even without the click.")
     except Exception as exc:
         status['plotly'] = (False, f'plotly is not installed: {exc}')
+
+    # PyQtGraph — the native-Qt interactive backend. Optional; offered only when installed, so the
+    # headless-import contract holds (PyCAT must import and run without it).
+    from pycat.utils.plot_backend_pyqtgraph import pyqtgraph_available
+    if pyqtgraph_available():
+        status['pyqtgraph'] = (True, '')
+    else:
+        status['pyqtgraph'] = (
+            False, 'pyqtgraph is not installed — the interactive-explore backend. '
+                   'Install it (`pip install pyqtgraph`) to brush a native-Qt scatter.')
 
     return status
 

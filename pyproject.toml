@@ -152,6 +152,13 @@ plotly-interactive = [
     "plotly",
     "PyQtWebEngine",
 ]
+# PyQtGraph: the native-Qt INTERACTIVE-EXPLORE plot backend (matplotlib stays for export, plotly stays
+# as the browser option). Optional and lightweight (pure Qt, no WebEngine) -- a click is a Qt signal in
+# napari's own event loop, so it brushes through the SelectionService with no JS bridge. PyCAT imports
+# and runs without it; `plot_backends` only offers 'pyqtgraph' when it is installed.
+pyqtgraph = [
+    "pyqtgraph",
+]
 spatial = [
     "shapely",
 ]
