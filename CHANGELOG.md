@@ -1,32 +1,33 @@
-## [1.6.98] - 2026-07-17
-### Added — **Comparative phenotyping increment 4: publication figure refinement.**
-The polish layer. `utils/figure_publication.py` refines ANY PyCAT matplotlib figure to
-publication quality without re-running the analysis — a figure holds its data, an editable `FigureSpec`
-holds the presentation over it (title, labels, limits, ticks, theme, fonts, journal-column sizing,
-significance brackets). matplotlib stays the publication backend.
+## [1.6.99] - 2026-07-18
+### Fixed — **VPT plot-click: the real loop, the offset trajectory, and the too-bold highlight (from viewer testing).**
+Real-viewer feedback surfaced three bugs the headless tests could not — exactly the "verified by
+simulation, not by eye" gap that was flagged all along.
 
-- **`FigureSpec`** round-trips through a dict and versioned JSON — a spec is a set of overrides, so an
-  empty spec is a no-op and a caller changes only what they name. `apply_spec` applies it **presentation
-  only**; a test asserts the plotted data never moves.
-- **Export** at publication settings: vector PDF/SVG + high-DPI PNG, sized to journal column widths
-  (single 89 mm / one-and-a-half 120 mm / double 183 mm), fonts embedded editable (`pdf.fonttype=42`;
-  SVG keeps text as text, not outlined paths). Tested: the requested format is produced, DPI scales the
-  raster resolution, and the column width is honoured.
-- **The colour-blind-safe palette is computed, not chosen by eye.** `PUBLICATION_PALETTE` is Okabe-Ito
-  **minus its yellow**, validated with the dataviz validator on a white surface: worst adjacent CVD
-  ΔE 9.6 (deuteranopia, above the 8 target), normal-vision ΔE 20. The validator *caught* Okabe-Ito's
-  yellow failing the lightness band on white (L 0.90) — a legibility problem "it's the standard palette"
-  would have shipped. A self-contained OKLab-lightness test guards against re-introducing exactly that.
+**The click still looped through many tracks — and it was NOT the 1.6.83 re-entrancy loop.** Every MSD
+line is drawn with `set_picker(5)`, and the curves all fan out from near the origin, so a single click
+there lands within the pick radius of dozens of lines. matplotlib fires a *separate* `pick_event` for
+each, so one press became dozens of genuine selections + reveals — which drained (visibly, in the
+terminal) long after the window was closed. The re-entrancy guard could not catch this because the
+picks are not re-entrancy; they are real, separate events. `_debounce_picks` now collapses the many
+picks from one click into ONE, on the line **closest** to the click (measured in pixels, so it is
+correct on a log-log plot): one click, one track.
+
+**The picked trajectory was offset from the bead.** The reveal drew `y_um`/`x_um` — the
+**drift-corrected** positions — while the base "Bead Trajectories" layer draws `y_um_raw`/`x_um_raw`,
+the raw positions that sit on the actual beads. Drift correction subtracts the centre-of-mass motion,
+so the corrected path is shifted, and the highlight traced that shift instead of the bead. It now
+prefers the raw coords, exactly as the base layer does, so it lands on the bead it highlights.
+
+**The picked trajectory was too bold and buried the detail.** Its width was `0.12 / mpp` — inverse
+pixel size — so at a fine pixel size it ballooned (mpp 0.05 → 2.4 px). It is now a thin fixed width in
+pixel units (`_PICKED_TRACK_WIDTH_PX`, the one knob), so it stays a thin trace at any magnification and
+the eye goes to the pulsing ring.
 ### Notes
-- **Recolouring is opt-in (`recolor=False` default), a correction rendering surfaced.** A blanket
-  retheme repainted the comparative figure's *intentional* colours (the replicate means are one colour
-  so they read as "the units tested"). A refine pass now adjusts fonts/spines/size/labels without
-  hijacking colour meaning; `recolor=True` opts a plain multi-series plot into the palette. Verified by
-  rendering the increment-3 figure through the refine pass and confirming its colours survive.
-- Significance brackets draw what they are told; the honesty (is this significant *at the replicate
-  level*) lives in `comparative_stats` — a bracket is never auto-generated from a pixel-level test.
-- **The refinement UI is deferred** — it needs a viewer. The spec + export core ships and is usable
-  today; the UI sits over it later. This completes the comparative-phenotyping arc's headless-buildable
-  increments (1-4); the interactive layers (brushing, PyQtGraph, the batch wiring, the refine UI) await
-  a viewer session.
+- The debounce collapse is unit-tested (N picks from one click → one selection on the nearest line);
+  the real "one click = one track" behaviour needs confirmation at a viewer, as does the trajectory
+  now sitting on the bead. The re-entrancy guard's tests still pass — they cover a different failure
+  that also exists.
+- **Session loading is separately broken** (loading a saved session does not restore the working
+  state) and blocks fast verification — reported, not yet diagnosed; it needs the specific symptom and
+  a session folder to debug.
 

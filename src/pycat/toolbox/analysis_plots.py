@@ -10,6 +10,77 @@ the window (non-blocking) like the temperature/QC plots.
 import numpy as np
 
 
+# ── One click is ONE selection, even where the curves converge ───────────────────────────────
+#
+# matplotlib fires a ``pick_event`` for EVERY artist whose pick-radius (``set_picker``) contains the
+# click. MSD curves all fan out from near the origin, so a single click there lands within the pick
+# radius of dozens of lines — and without this, each fires its own selection + reveal. That is the
+# "one click loops through many tracks" report: the plot did not re-enter itself, it received dozens
+# of genuine picks from one press, and the queued selections drained (visibly, in the terminal) long
+# after the window was closed.
+#
+# The 1.6.83 re-entrancy guard could not catch this — the picks are not re-entrancy, they are real,
+# separate events. But every pick from one click carries the SAME ``mouseevent``, so they are batched
+# by it and only the line CLOSEST to the click (in pixels) is acted on, once, on the next event-loop
+# tick.
+
+def _pick_pixel_distance(artist, mouseevent):
+    """Squared pixel distance from the click to an artist's nearest vertex. Pixels, so it is correct
+    on a log-log MSD plot where data-coordinate distance would be meaningless."""
+    try:
+        xd, yd = artist.get_data()
+        pts = artist.get_transform().transform(
+            np.column_stack([np.asarray(xd, float), np.asarray(yd, float)]))
+        mx, my = getattr(mouseevent, 'x', None), getattr(mouseevent, 'y', None)
+        if mx is None or my is None:
+            return 0.0
+        return float(np.min((pts[:, 0] - mx) ** 2 + (pts[:, 1] - my) ** 2))
+    except Exception:
+        return float('inf')
+
+
+def _defer_once(fn):
+    """Run ``fn`` on the next Qt event-loop tick; synchronously if there is no Qt (headless)."""
+    try:
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, fn)
+    except Exception:
+        fn()
+
+
+def _debounce_picks(line_to_tid, apply_to_best):
+    """A pick handler that collapses one click's many pick_events into ONE, on the closest line.
+
+    ``apply_to_best(artist, tid)`` does the real work (restyle + fire the selection callback). Picks
+    are accumulated while a resolve is pending, then the nearest is chosen once — so a click in the
+    convergence zone selects the single track under the cursor, not the whole bundle.
+    """
+    batch = {'mouseevent': None, 'artists': [], 'pending': False}
+
+    def _resolve():
+        batch['pending'] = False
+        artists, me = batch['artists'], batch['mouseevent']
+        batch['artists'] = []
+        if not artists:
+            return
+        best = min(artists, key=lambda a: _pick_pixel_distance(a, me))
+        tid = line_to_tid.get(best)
+        if tid is not None:
+            apply_to_best(best, tid)
+
+    def _on_pick(event):
+        if event.artist not in line_to_tid:
+            return
+        if not batch['pending']:                 # first pick of this click — open a batch
+            batch['mouseevent'] = getattr(event, 'mouseevent', None)
+            batch['artists'] = []
+            batch['pending'] = True
+            _defer_once(_resolve)
+        batch['artists'].append(event.artist)
+
+    return _on_pick
+
+
 def _show(fig, interactive):
     if interactive:
         import matplotlib.pyplot as plt
@@ -336,11 +407,7 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     if on_pick_track is not None and _line_to_tid:
         _state = {'prev': None}
 
-        def _on_pick(event):
-            ln = event.artist
-            tid = _line_to_tid.get(ln)
-            if tid is None:
-                return
+        def _apply_pick(ln, tid):
             prev = _state['prev']
             if prev is ln:
                 # same line re-picked — still fire the callback, no redraw needed
@@ -361,8 +428,9 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             except Exception as _e:
                 print(f"[PyCAT VPT] pick callback failed: {_e}")
 
+        # Debounced: one click near the convergence zone hits many lines; act on the closest, once.
         try:
-            fig.canvas.mpl_connect('pick_event', _on_pick)
+            fig.canvas.mpl_connect('pick_event', _debounce_picks(_line_to_tid, _apply_pick))
         except Exception:
             pass
 
@@ -677,18 +745,10 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                 line_registry['state'] = _pstate
                 line_registry['blit_highlight'] = _pblit_highlight
 
-            def _on_pick(event):
-                tid = _line_to_tid.get(event.artist)
-                if tid is None:
-                    return
+            def _apply_pick(artist, tid):
                 prev = _pstate['prev']
-                if prev is event.artist:
-                    # Already the selected track: nothing to restyle and nothing
-                    # to re-select. This used to fall through to on_pick_track
-                    # anyway, which re-ran the whole reveal — so a second click on
-                    # the same curve paid for a camera move + overlay rebuild to
-                    # arrive at the state it was already in, and fed the very
-                    # draw_event/re-entrancy loop the reveal guard exists to stop.
+                if prev is artist:
+                    # Already the selected track: nothing to restyle and nothing to re-select.
                     return
                 if prev is not None and prev in _line_to_tid:
                     try:
@@ -697,18 +757,19 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                     except Exception:
                         pass
                 try:
-                    event.artist.set_color('#ff8c00'); event.artist.set_alpha(1.0)
-                    event.artist.set_linewidth(2.2); event.artist.set_zorder(5)
-                    _pstate['prev'] = event.artist
-                    _pblit_highlight(event.artist, prev)
+                    artist.set_color('#ff8c00'); artist.set_alpha(1.0)
+                    artist.set_linewidth(2.2); artist.set_zorder(5)
+                    _pstate['prev'] = artist
+                    _pblit_highlight(artist, prev)
                 except Exception:
                     pass
                 try:
                     on_pick_track(tid)
                 except Exception as _e:
                     print(f"[PyCAT VPT] consolidated pick callback failed: {_e}")
+            # Debounced: collapse one click's many picks (convergent curves) to the closest track.
             try:
-                fig.canvas.mpl_connect('pick_event', _on_pick)
+                fig.canvas.mpl_connect('pick_event', _debounce_picks(_line_to_tid, _apply_pick))
             except Exception:
                 pass
         # Live toggle: a button that closes this figure and opens separate windows.

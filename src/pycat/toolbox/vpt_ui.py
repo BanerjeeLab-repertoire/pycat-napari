@@ -1700,6 +1700,10 @@ class VideoParticleTrackingUI:
         except Exception:
             pass
 
+    # Width of the picked-track highlight line, in DATA (pixel) units — NOT scaled by pixel size, so
+    # it stays a thin trace at any magnification. The one knob to tune the highlight's weight by eye.
+    _PICKED_TRACK_WIDTH_PX = 1.0
+
     # A gentle ~1.5 Hz breathe: fast enough to catch the eye, slow enough not to
     # strobe. 12 steps a cycle is smooth at this rate and costs ~15 repaints/sec
     # of ONE small Points layer.
@@ -1797,18 +1801,21 @@ class VideoParticleTrackingUI:
                 # coloured their tracks by velocity would silently lose it on a
                 # plot click.
                 #
-                # Secondary on purpose. Once the ring pulses ON the bead, a heavy
-                # line on top of an already-clear zoomed circle is noise — so this
-                # is thin and quiet, and the eye goes to the ring.
+                # Secondary on purpose, and THIN. `edge_width` was `0.12 / mpp` — inverse pixel
+                # size — so at a fine pixel size it ballooned (mpp 0.05 → 2.4 px) and buried the
+                # detail under a fat orange line. It is a highlight, not a headline: a small fixed
+                # width in data (pixel) units, so it stays a thin trace whatever the pixel size, and
+                # the eye goes to the ring. `_PICKED_TRACK_WIDTH_PX` is the one knob if it needs
+                # tuning by eye.
                 kw = dict(name=hl_line, shape_type='path',
                           edge_color='#ff8c00', face_color='transparent',
-                          edge_width=max(0.5, 0.12 / mpp),
-                          opacity=0.45, scale=[sc_y, sc_x])
+                          edge_width=self._PICKED_TRACK_WIDTH_PX,
+                          opacity=0.55, scale=[sc_y, sc_x])
                 try:
                     self.viewer.add_shapes([path], **kw)
                 except Exception:
                     # Older napari: edge_width may need to be a scalar list.
-                    kw['edge_width'] = float(max(1.0, 0.25 / mpp))
+                    kw['edge_width'] = float(self._PICKED_TRACK_WIDTH_PX)
                     self.viewer.add_shapes([path], **kw)
             self._add_bead_ring(hl_start, path, frames, mpp, sc_y, sc_x)
         except Exception:
@@ -1897,10 +1904,19 @@ class VideoParticleTrackingUI:
                 return
             g = g.sort_values('frame')
             mpp = self._mpx()
-            # Track positions in PIXEL (layer-native) coordinates. tracks store
-            # y_um/x_um, so divide by the pixel size to get pixel indices.
-            ys = (g['y_um'].values / mpp)
-            xs = (g['x_um'].values / mpp)
+            # ── Match the BASE trajectory layer's coordinates, or the picked track offsets ──
+            #
+            # The reveal used `y_um`/`x_um` — the DRIFT-CORRECTED positions. But the "Bead
+            # Trajectories" layer (`_rebuild_track_layers`) draws `y_um_raw`/`x_um_raw` when present:
+            # the RAW positions, which sit on the actual beads in the image. Drift correction
+            # subtracts the centre-of-mass motion, so the corrected path is shifted away from the
+            # beads — and the picked track drew that shift as a visible offset from both the bead and
+            # the base trajectory. Prefer the raw coords, exactly as the base layer does, so the
+            # highlight lands on the bead it is highlighting.
+            _yc = 'y_um_raw' if 'y_um_raw' in g else 'y_um'
+            _xc = 'x_um_raw' if 'x_um_raw' in g else 'x_um'
+            ys = (g[_yc].values / mpp)
+            xs = (g[_xc].values / mpp)
             f0 = int(g['frame'].iloc[0])
             y0 = float(ys[0]); x0 = float(xs[0])
 
