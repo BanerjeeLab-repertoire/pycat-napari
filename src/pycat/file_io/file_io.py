@@ -805,6 +805,15 @@ from pycat.file_io.napari_adapter import EAGER_DIAMETER_LAYERS  # noqa: F401
 
 
 
+class StackLoadCancelled(Exception):
+    """The user gave up on a long, uninterruptible open (e.g. the BioFormats CZI index parse).
+
+    Raised by ``_run_with_busy_progress`` when its dialog is cancelled. The work cannot actually be
+    stopped (a blocking JVM call), so the worker is DETACHED — the UI is freed immediately and the
+    orphaned thread's result is dropped when it eventually finishes. Callers catch this to abort the
+    load quietly rather than treating it as a read error."""
+
+
 class FileIOClass:
     """
     A class for handling file input/output operations related to image analysis, including
@@ -1802,15 +1811,20 @@ class FileIOClass:
         # the streaming loader reuses — the big open is paid ONCE, not twice.
         if ext == '.czi':
             import os as _os
+            from napari.utils.notifications import show_info as _czi_show_info
             from pycat.file_io.readers import czi_bioformats as _czibf
             _probe = (lambda: _czibf.probe_libczi(file_path))
-            if _os.path.getsize(file_path) > self._CZI_OFFTHREAD_BYTES:
-                _can_read, _czi_image = self._run_with_busy_progress(
-                    _probe, "Reading CZI",
-                    "Indexing this CZI's frames…\n\nLarge Zeiss files parse every frame offset first; "
-                    "the window stays responsive.")
-            else:
-                _can_read, _czi_image = _probe()
+            try:
+                if _os.path.getsize(file_path) > self._CZI_OFFTHREAD_BYTES:
+                    _can_read, _czi_image = self._run_with_busy_progress(
+                        _probe, "Reading CZI",
+                        "Indexing this CZI's frames…\n\nLarge Zeiss files parse every frame offset "
+                        "first; the window stays responsive.")
+                else:
+                    _can_read, _czi_image = _probe()
+            except StackLoadCancelled:
+                _czi_show_info("CZI open cancelled.")
+                return
             if not _can_read:
                 self._open_czi_streaming(file_path, image=_czi_image)
                 return
@@ -2098,6 +2112,9 @@ class FileIOClass:
                 "Opening CZI",
                 f"Indexing {_frames_txt} via BioFormats…\n\nOne-time frame-index parse (can take a few "
                 f"minutes for a large file). The window stays responsive; frames then scrub on demand.")
+        except StackLoadCancelled:
+            napari_show_info("CZI open cancelled.")
+            return
         except Exception as _e:
             napari_show_warning(f"BioFormats could not open this CZI:\n{_e}")
             debug_log("file_io: BioFormats CZI open failed", _e)
@@ -2148,19 +2165,31 @@ class FileIOClass:
         self._finalise_stack_load(H, W, microns_per_pixel, list(range(n_c)),
                                   n_t, 1, file_path, source='generic')
 
-    def _run_with_busy_progress(self, fn, title, text):
+    def _run_with_busy_progress(self, fn, title, text, cancellable=True):
         """Run blocking ``fn()`` OFF the Qt main thread with a responsive busy dialog; return its
-        result (or re-raise its exception).
+        result (or re-raise its exception). Raises :class:`StackLoadCancelled` if the user gives up.
 
         The BioFormats reader open is a single ~33 s Java call — ``processEvents`` cannot interleave
-        with it, so it MUST run on a worker thread or the window freezes (the exact symptom this
-        replaces). We run it on a ``QThread`` and spin a modal, indeterminate ``QProgressDialog``
-        until it finishes, so the UI keeps painting. If the Qt/threading setup is unavailable
-        (headless, no Qt), fall back to a plain synchronous call — a brief freeze, but correct,
-        rather than blocking forever.
+        with it, so it MUST run on a worker thread or the window freezes. We run it on a ``QThread``
+        and spin a modal, indeterminate ``QProgressDialog`` until it finishes, so the UI keeps
+        painting. Headless (no Qt), fall back to a plain synchronous call.
+
+        Two things this gets right that the naive version did not:
+
+        * **The dialog closes when the work finishes.** ``worker.finished`` is emitted FROM the worker
+          thread; a plain-function slot then runs ON the worker, and ``dlg.reset()`` from there does
+          not end the main thread's modal loop — so the dialog hung open (elapsed frozen = work
+          already done) until the user X'd it. The finish handler is a ``QObject`` slot built here, so
+          ``AutoConnection`` → ``QueuedConnection`` and it runs on the main thread where the dialog
+          lives. A ``QEventLoop`` (not ``dlg.exec_()``) is ended by ``loop.quit()``.
+        * **"Give up" actually frees the UI.** The JVM call cannot be interrupted, so cancel DETACHES:
+          it stops waiting and lets the orphaned worker finish in the background (result dropped),
+          rather than ``thread.wait()`` blocking the UI until the parse completes — which is the hang
+          the user hit when X-ing out.
         """
         try:
-            from PyQt5.QtCore import QThread, QObject, pyqtSignal, Qt
+            from PyQt5.QtCore import (QThread, QObject, pyqtSignal, pyqtSlot, Qt,
+                                      QTimer, QEventLoop)
             from PyQt5.QtWidgets import QProgressDialog
         except Exception:
             return fn()
@@ -2190,20 +2219,21 @@ class FileIOClass:
         except Exception:
             parent = None
 
-        # (min, max) = (0, 0) → indeterminate/busy bar; cancel label None → no cancel button.
-        dlg = QProgressDialog(text, None, 0, 0, parent)
+        # (min, max) = (0, 0) → indeterminate/busy bar. A "Give up" button lets the user abandon a
+        # long parse; label None removes it.
+        dlg = QProgressDialog(text, "Give up" if cancellable else None, 0, 0, parent)
         dlg.setWindowTitle(title)
         dlg.setWindowModality(Qt.WindowModal)
         dlg.setMinimumDuration(0)
         dlg.setAutoClose(False)
         dlg.setAutoReset(False)
 
-        # Tick an ELAPSED-SECONDS counter into the label. The work (BioFormats setId) is opaque — it
-        # exposes no percentage — so the busy bar can only spin; a counting-up "…Ns" is what tells
-        # the user it is actively working, not hung ("spinning but no progress").
-        from PyQt5.QtCore import QTimer
+        loop = QEventLoop()
         _secs = [0]
+        _state = {'cancelled': False}
 
+        # Elapsed-seconds counter (main thread): the work is opaque (no percentage), so a counting-up
+        # "…Ns" is what tells the user it is working, not hung.
         def _tick():
             _secs[0] += 1
             try:
@@ -2214,17 +2244,43 @@ class FileIOClass:
         _timer.setInterval(1000)
         _timer.timeout.connect(_tick)
 
-        def _on_finished():
-            _timer.stop()
-            thread.quit()
-            dlg.reset()             # returns from dlg.exec_()
+        class _Bridge(QObject):
+            @pyqtSlot()
+            def on_finished(self):          # runs on the MAIN thread (queued) — closes the dialog
+                _timer.stop()
+                thread.quit()
+                if loop.isRunning():
+                    loop.quit()
+        bridge = _Bridge()
+        worker.finished.connect(bridge.on_finished)
 
-        worker.finished.connect(_on_finished)
+        def _on_cancel():
+            _state['cancelled'] = True
+            _timer.stop()
+            if loop.isRunning():
+                loop.quit()
+        if cancellable:
+            dlg.canceled.connect(_on_cancel)
+
         _timer.start()
         thread.start()
-        dlg.exec_()                 # spins the event loop until _on_finished()
-        thread.wait()
+        dlg.show()
+        loop.exec_()                 # nested loop; the window keeps painting until quit()
+        dlg.close()
 
+        if _state['cancelled']:
+            # Detach: keep the thread + its main-thread bridge alive (a QThread GC'd mid-run crashes)
+            # until the blocking call returns. bridge.on_finished then quits the thread; thread.finished
+            # drops the references. The result is discarded, the UI is free NOW.
+            orphans = getattr(FileIOClass, '_orphan_load_threads', None)
+            if orphans is None:
+                orphans = FileIOClass._orphan_load_threads = []
+            entry = (thread, worker, bridge)
+            orphans.append(entry)
+            thread.finished.connect(lambda e=entry: e in orphans and orphans.remove(e))
+            raise StackLoadCancelled()
+
+        thread.wait()
         if 'error' in box:
             raise box['error']
         return box.get('value')

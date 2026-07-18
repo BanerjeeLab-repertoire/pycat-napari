@@ -1,3 +1,27 @@
+## [1.6.111] - 2026-07-18
+### Fixed — **The CZI "indexing" dialog now closes itself, and "Give up" actually works.**
+From the viewer, on the streaming-CZI open dialog: it stayed open with the elapsed counter frozen, and
+only advanced when the user X'd it out; there was no cancel button; and X-ing out early hung the UI.
+All three are the same worker-dialog helper (`_run_with_busy_progress`), which had the exact bug the
+newer `qt_worker` was built to avoid.
+
+- **It closes when the work finishes.** `worker.finished` is emitted from the worker thread, and the
+  old finish handler was a plain function — so Qt ran it *on the worker*, and `dlg.reset()` from there
+  never ended the main thread's modal loop. The dialog hung open (frozen elapsed = work already done)
+  until the user dismissed it. The handler is now a `QObject` slot that runs on the main thread (queued
+  delivery), ending a `QEventLoop` with `loop.quit()`.
+- **A "Give up" button that frees the UI.** The BioFormats index parse is a single uninterruptible JVM
+  call, so cancel **detaches**: it stops waiting and lets the orphaned worker finish in the background
+  (result dropped), instead of `thread.wait()` blocking the UI until the parse completes — which was
+  the hang when X-ing out. The detached thread is retained until it finishes so it can't crash by being
+  garbage-collected mid-run. Both CZI open sites report "CZI open cancelled." and abort cleanly.
+### Notes
+- Same fix benefits both CZI busy dialogs (the libCZI index probe and the BioFormats reader open).
+  **Needs a viewer:** confirm the indexing dialog now closes on its own and the layer appears without
+  X-ing out, and that "Give up" dismisses it and frees the window immediately.
+- Still open, deliberately (secondary): the occasional scrubbing latency on the streaming movie —
+  that's the prefetch/cache task (read T±k around the current frame), separate from this dialog fix.
+
 ## [1.6.110] - 2026-07-18
 ### Changed — **Opening a big streaming CZI no longer freezes the UI on the libCZI probe.**
 The streaming-CZI reader (BioFormats, shipped 1.6.61) already opened its Java reader off-thread — but
