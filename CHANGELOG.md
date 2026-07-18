@@ -1,33 +1,32 @@
-## [1.6.97] - 2026-07-17
-### Added — **Comparative phenotyping increment 3: comparative figures with honest, replicate-aware stats.**
-Cross-condition comparison over the consolidated table (increment 2). Two modules: the statistics
-(`utils/comparative_stats.py`) and the figures (`utils/comparative_figures.py`).
+## [1.6.98] - 2026-07-17
+### Added — **Comparative phenotyping increment 4: publication figure refinement.**
+The polish layer. `utils/figure_publication.py` refines ANY PyCAT matplotlib figure to
+publication quality without re-running the analysis — a figure holds its data, an editable `FigureSpec`
+holds the presentation over it (title, labels, limits, ticks, theme, fonts, journal-column sizing,
+significance brackets). matplotlib stays the publication backend.
 
-**The statistics are the part that has to be right.** The easiest false result in imaging biology is
-pseudoreplication — treat 5 000 puncta from 3 cells as 5 000 independent observations and any trivial
-difference becomes p < 10⁻⁹. PyCAT's own doctrine (`pixel_wise_corr_analysis_tools`) is that the
-inferential unit is the biological replicate, not the object. So `compare_conditions` **aggregates each
-condition×replicate to one value first**, making the replicate the unit, then tests (Mann-Whitney /
-Kruskal-Wallis, or t / ANOVA parametric). It reports the test used and n at **both** levels, and
-**refuses to infer** when a condition has < 2 replicates — descriptive only, never a pixel-level
-p-value dressed as a biological one. Measured on identical null data: the pseudoreplicated test gives
-p = 2.6×10⁻⁸⁷, the replicate-aware one gives p = 0.70. It recovers real replicate-level effects and
-does not cry significance on a pseudoreplicated null — the roadmap's three deliverables, each a test.
-
-**The figures make the replicate structure visible.** `condition_comparison_figure` draws every
-condition twice — the object cloud (light, many) and the **replicate means on top** (dark, few) —
-because the honest test runs on those few points and the picture should show it. The annotation
-carries the test, the p-value, and n at both levels, straight from the stats; a pseudoreplicated null
-is labelled `n.s.`, a too-few-replicates case `NO TEST`, never a fabricated star.
-`dose_response_figure` gives mean ± SEM **over replicates**, same rule.
+- **`FigureSpec`** round-trips through a dict and versioned JSON — a spec is a set of overrides, so an
+  empty spec is a no-op and a caller changes only what they name. `apply_spec` applies it **presentation
+  only**; a test asserts the plotted data never moves.
+- **Export** at publication settings: vector PDF/SVG + high-DPI PNG, sized to journal column widths
+  (single 89 mm / one-and-a-half 120 mm / double 183 mm), fonts embedded editable (`pdf.fonttype=42`;
+  SVG keeps text as text, not outlined paths). Tested: the requested format is produced, DPI scales the
+  raster resolution, and the column width is honoured.
+- **The colour-blind-safe palette is computed, not chosen by eye.** `PUBLICATION_PALETTE` is Okabe-Ito
+  **minus its yellow**, validated with the dataviz validator on a white surface: worst adjacent CVD
+  ΔE 9.6 (deuteranopia, above the 8 target), normal-vision ΔE 20. The validator *caught* Okabe-Ito's
+  yellow failing the lightness band on white (L 0.90) — a legibility problem "it's the standard palette"
+  would have shipped. A self-contained OKLab-lightness test guards against re-introducing exactly that.
 ### Notes
-- Static matplotlib (Agg, renders headlessly). **Interactive brushing and a PyQtGraph render are
-  deferred** — they need a viewer, and the roadmap scopes them as "later"; this ships the part
-  verifiable without one. The static figures are usable today and are the substrate a brushing layer
-  would sit over.
-- All `core` — the statistics are pure and their correctness is exactly what must not be trusted to a
-  figure someone glances at. Verified: the object-cloud + replicate-means design renders correctly on
-  a 3-condition graded effect.
-- Increment 4 (publication figure refinement — themes, labels, export polish) is the remaining
-  comparative-phenotyping increment.
+- **Recolouring is opt-in (`recolor=False` default), a correction rendering surfaced.** A blanket
+  retheme repainted the comparative figure's *intentional* colours (the replicate means are one colour
+  so they read as "the units tested"). A refine pass now adjusts fonts/spines/size/labels without
+  hijacking colour meaning; `recolor=True` opts a plain multi-series plot into the palette. Verified by
+  rendering the increment-3 figure through the refine pass and confirming its colours survive.
+- Significance brackets draw what they are told; the honesty (is this significant *at the replicate
+  level*) lives in `comparative_stats` — a bracket is never auto-generated from a pixel-level test.
+- **The refinement UI is deferred** — it needs a viewer. The spec + export core ships and is usable
+  today; the UI sits over it later. This completes the comparative-phenotyping arc's headless-buildable
+  increments (1-4); the interactive layers (brushing, PyQtGraph, the batch wiring, the refine UI) await
+  a viewer session.
 
