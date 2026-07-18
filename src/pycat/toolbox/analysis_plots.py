@@ -25,9 +25,13 @@ import numpy as np
 # per physical click.** The lines are made non-pickable; a single canvas-level handler scans the
 # visible curves once, ranks them by point-to-SEGMENT distance in display pixels (a click can be
 # nearest a segment of one curve yet nearest a *vertex* of another — segments are what the eye sees),
-# and selects the single nearest within a threshold. There is nothing to debounce because there is
-# one event. And where two curves are within an ambiguity margin it does NOT guess — it asks for a
-# click farther along the curve, rather than pick an effectively-arbitrary track near the origin.
+# and selects the nearest within a threshold. There is nothing to debounce because there is one event.
+#
+# For DENSE overlap it always picks the nearest and lets repeated clicks CYCLE through the stack of
+# curves under the cursor — a first design that *refused* to choose where curves overlapped meant
+# nothing ever got selected, because in real MSD data the curves overlap essentially everywhere. The
+# user drives the disambiguation by clicking again, rather than being asked for an uncrowded pixel
+# that does not exist. See ``_connect_nearest_curve_click``.
 
 def _segment_distance_px(line, mx, my):
     """Minimum distance in DISPLAY pixels from ``(mx, my)`` to ``line``'s polyline (point-to-SEGMENT).
@@ -55,37 +59,58 @@ def _segment_distance_px(line, mx, my):
         return float('inf')
 
 
+# How close (display pixels) two clicks must be to count as "the same spot" for cycling.
+_CYCLE_TOLERANCE_PX = 6.0
+
+
 def _connect_nearest_curve_click(fig, ax, line_to_tid, state, apply_selection, *,
-                                 radius_px=8.0, ambiguity_px=3.0, notify=None):
-    """Connect ONE ``button_press_event`` that selects the single nearest curve. Returns the cid.
+                                 radius_px=8.0, notify=None):
+    """Connect ONE ``button_press_event`` that always selects a nearby curve, and CYCLES on repeats.
 
-    No ``pick_event``, no debounce — one event per click. Ranks ``line_to_tid`` by
-    ``_segment_distance_px`` and:
+    No ``pick_event``, no debounce — one event per click. The MSD curves overlap densely everywhere,
+    so refusing to choose where they overlap (the earlier design) meant nothing ever got selected. The
+    honest model for dense data is the opposite: **always pick the nearest curve within ``radius_px``,
+    and let repeated clicks at the same spot cycle through the others there** — the user drives the
+    disambiguation instead of being asked to find an uncrowded pixel that does not exist.
 
-    * ignores clicks outside ``ax`` or beyond ``radius_px`` (empty space);
-    * refuses to guess when the two nearest are within ``ambiguity_px`` of each other — it ``notify``s
-      the user to click a less crowded spot instead of picking an arbitrary track;
-    * suppresses re-selecting the already-selected line (``state['prev']``);
-    * otherwise calls ``apply_selection(line, tid)`` exactly once.
+    * A click near a curve (segment distance ≤ ``radius_px``) selects the nearest, always.
+    * Clicking again at (roughly) the same spot advances through the stack of curves under the cursor,
+      nearest-first, wrapping around.
+    * A click at a NEW spot starts a fresh stack from its nearest curve.
+    * Clicks outside ``ax``, in empty space (beyond ``radius_px``), or with a non-left button do
+      nothing. Re-clicking a lone track (only one curve near) is a no-op.
     """
+    cycle = {'pos': None, 'cands': [], 'idx': -1}
+
     def _on_click(event):
         if event.inaxes is not ax or getattr(event, 'button', 1) != 1:
             return
         mx, my = getattr(event, 'x', None), getattr(event, 'y', None)
         if mx is None or my is None or not line_to_tid:
             return
-        ranked = sorted(((_segment_distance_px(ln, mx, my), tid, ln)
-                         for ln, tid in line_to_tid.items()), key=lambda r: r[0])
-        best_d, best_tid, best_ln = ranked[0]
-        if best_d > radius_px:
-            return                                     # clicked empty space
-        if len(ranked) > 1 and (ranked[1][0] - best_d) < ambiguity_px:
-            if notify is not None:
-                notify("Several tracks overlap here — click farther along a curve to pick one.")
-            return                                     # too ambiguous to choose honestly
-        if state.get('prev') is best_ln:
-            return                                     # already selected — no new selection
-        apply_selection(best_ln, best_tid)
+        near = sorted((d, tid, ln) for d, tid, ln in
+                      ((_segment_distance_px(ln, mx, my), tid, ln)
+                       for ln, tid in line_to_tid.items())
+                      if d <= radius_px)
+        if not near:
+            return                                     # empty space — nothing near the click
+
+        same_spot = (cycle['pos'] is not None
+                     and abs(mx - cycle['pos'][0]) <= _CYCLE_TOLERANCE_PX
+                     and abs(my - cycle['pos'][1]) <= _CYCLE_TOLERANCE_PX)
+        if same_spot and len(cycle['cands']) > 1:
+            cycle['idx'] = (cycle['idx'] + 1) % len(cycle['cands'])   # advance through the stack
+        elif same_spot:
+            return                                     # a lone track re-clicked — nothing new
+        else:
+            cycle['pos'] = (mx, my)                    # a fresh stack, nearest first
+            cycle['cands'] = near
+            cycle['idx'] = 0
+            if notify is not None and len(near) > 1:
+                notify(f"{len(near)} tracks overlap here — click again to cycle through them.")
+
+        _d, tid, ln = cycle['cands'][cycle['idx']]
+        apply_selection(ln, tid)
 
     return fig.canvas.mpl_connect('button_press_event', _on_click)
 

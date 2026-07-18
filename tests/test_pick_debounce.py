@@ -3,12 +3,15 @@
 An audit of the first fix found the debounce intrinsically fragile: it assumed every `pick_event` from
 one mouse press arrives before a zero-delay timer fires, which is not a safe contract, so a click could
 still resolve several tracks. The mechanism was replaced: the MSD lines are non-pickable, and one
-canvas-level `button_press_event` handler selects the single nearest curve. matplotlib fires exactly
-one button-press per click, so there is nothing to batch — the failure mode is gone by construction.
+canvas-level `button_press_event` handler picks the nearest curve. matplotlib fires exactly one
+button-press per click, so there is nothing to batch — the cascade is gone by construction.
 
-These tests drive the REAL handler (`button_press_event`) directly, one call per click, and cover the
-cases the audit named: one press → one track; a dense-overlap click → at most one; empty space → none;
-already-selected → none; nearest by SEGMENT not vertex; and the ambiguity refusal.
+A first cut *refused* to choose where curves overlapped, but real MSD curves overlap essentially
+everywhere, so that meant nothing ever got selected (reported from the viewer). The dense-data model is
+the opposite and is what these test: a near click ALWAYS selects the nearest, and repeated clicks at
+the same spot CYCLE through the overlapping stack. Plus the audit's structural cases: one press → one
+track; empty space → none; outside axes → none; lone-track re-click → no-op; nearest by SEGMENT not
+vertex; and the real matplotlib event path the audit said was never reproduced.
 """
 
 # Third party imports
@@ -57,7 +60,7 @@ class _Fig:
         self.canvas = _Canvas()
 
 
-def _wire(line_to_tid, ax, *, radius_px=8.0, ambiguity_px=3.0):
+def _wire(line_to_tid, ax, *, radius_px=8.0):
     fig = _Fig()
     state = {'prev': None}
     got = []
@@ -68,8 +71,7 @@ def _wire(line_to_tid, ax, *, radius_px=8.0, ambiguity_px=3.0):
 
     notes = []
     ap._connect_nearest_curve_click(fig, ax, line_to_tid, state, _apply,
-                                    radius_px=radius_px, ambiguity_px=ambiguity_px,
-                                    notify=notes.append)
+                                    radius_px=radius_px, notify=notes.append)
     return fig, state, got, notes
 
 
@@ -91,14 +93,15 @@ def test_distance_handles_a_single_point_line():
 
 # ── one click, one selection ─────────────────────────────────────────────────────
 
-def test_ONE_click_in_a_dense_overlap_selects_at_most_ONE():
-    """The bug: near the origin many curves converge. One button_press must yield one selection."""
+def test_ONE_click_in_a_dense_overlap_selects_EXACTLY_ONE():
+    """The bug: near the origin many curves converge. One button_press must yield exactly one
+    selection — not a cascade (the original bug), and not zero (the over-eager refusal)."""
     ax = object()
     # 20 curves all passing through (10,10), fanning out
     lines = {_Line([10, 10 + i], [10, 10 + 2 * i]): i for i in range(20)}
-    fig, state, got, notes = _wire(lines, ax, ambiguity_px=0.0)   # disable ambiguity for this check
+    fig, state, got, notes = _wire(lines, ax)
     fig.canvas.click(ax, 10, 10)
-    assert len(got) <= 1, f'one click selected {len(got)} tracks'
+    assert len(got) == 1, f'one click selected {len(got)} tracks (want exactly 1)'
 
 
 def test_the_NEAREST_curve_wins():
@@ -141,27 +144,52 @@ def test_a_non_left_button_is_ignored():
     assert got == []
 
 
-# ── the ambiguity refusal ────────────────────────────────────────────────────────
+# ── cycling through overlapping candidates (the dense-data model) ────────────────
 
-def test_it_REFUSES_to_guess_when_two_curves_are_indistinguishable():
-    """Where the two nearest are within the ambiguity margin, do not pick an arbitrary track — ask
-    for a click at a less crowded spot."""
+def test_a_track_is_ALWAYS_selected_when_near_even_if_ambiguous():
+    """Real MSD curves overlap everywhere; refusing to choose means never selecting. A near click
+    always selects one, and hints that more are stacked here."""
     ax = object()
     a = _Line([10, 11], [10, 11])
-    b = _Line([10, 11], [10, 11])           # coincident with a at the click point
-    fig, state, got, notes = _wire({a: 1, b: 2}, ax, ambiguity_px=3.0)
+    b = _Line([10, 11], [10, 11])           # coincident — maximally ambiguous
+    fig, state, got, notes = _wire({a: 1, b: 2}, ax)
     fig.canvas.click(ax, 10, 10)
-    assert got == []
-    assert notes and 'overlap' in notes[0].lower()
+    assert len(got) == 1                     # one selected, not zero
+    assert notes and 'cycle' in notes[0].lower()   # told they can cycle
 
 
-def test_a_clearly_nearest_curve_is_NOT_blocked_by_ambiguity():
+def test_REPEATED_clicks_at_the_same_spot_CYCLE_through_the_stack():
+    """The requested UX: click again to move to the next overlapping track, wrapping around."""
     ax = object()
-    a = _Line([0, 1], [0, 1])               # right at the click
-    b = _Line([40, 41], [40, 41])           # far — unambiguous
-    fig, state, got, notes = _wire({a: 1, b: 2}, ax, ambiguity_px=3.0)
+    a = _Line([10, 11], [10, 11])
+    b = _Line([10, 11], [10, 11])
+    c = _Line([10, 11], [10, 11])
+    fig, state, got, notes = _wire({a: 1, b: 2, c: 3}, ax)
+    for _ in range(5):                       # 3 candidates -> 1,2,3,1,2
+        fig.canvas.click(ax, 10, 10)
+    assert got == [1, 2, 3, 1, 2], f'cycling did not walk the stack: {got}'
+
+
+def test_a_click_at_a_NEW_spot_starts_a_fresh_stack():
+    ax = object()
+    a = _Line([0, 1], [0, 1])
+    b = _Line([0, 1], [0, 1])
+    far = _Line([100, 101], [100, 101])
+    fig, state, got, notes = _wire({a: 1, b: 2, far: 9}, ax)
+    fig.canvas.click(ax, 0, 0)               # stack at origin -> 1
+    fig.canvas.click(ax, 0, 0)               # cycle -> 2
+    fig.canvas.click(ax, 100, 100)           # NEW spot -> 9 (fresh)
+    assert got == [1, 2, 9]
+
+
+def test_re_clicking_a_LONE_track_is_a_no_op():
+    """Only one curve near the click: re-clicking the same spot changes nothing (no re-fire)."""
+    ax = object()
+    a = _Line([0, 1], [0, 1])
+    fig, state, got, notes = _wire({a: 1, _Line([80, 81], [80, 81]): 2}, ax)
     fig.canvas.click(ax, 0, 0)
-    assert got == [1] and notes == []
+    fig.canvas.click(ax, 0, 0)
+    assert got == [1]
 
 
 # ── the REAL matplotlib event path (the audit's missing coverage) ────────────────
@@ -220,5 +248,24 @@ def test_REAL_event_convergence_click_does_not_cycle():
 
     _fire(fig, ax, (0.15, 0.06))          # right where the curves bunch
     assert len(got) <= 1, f'convergence click cycled through {len(got)} tracks'
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
+
+def test_REAL_event_repeated_convergence_clicks_CYCLE_one_at_a_time():
+    """The requested UX, through the real event machinery: clicking the dense region repeatedly walks
+    the stack of overlapping tracks — one selection per click, all distinct — instead of refusing."""
+    fig, ax, l2t = _real_fig_with_curves(30)
+    state = {'prev': None}
+    got = []
+    ap._connect_nearest_curve_click(
+        fig, ax, l2t, state,
+        lambda ln, tid: (state.__setitem__('prev', ln), got.append(tid))[-1],
+        notify=lambda m: None)
+
+    for _ in range(4):
+        _fire(fig, ax, (0.15, 0.06))         # same spot, repeatedly
+    assert len(got) == 4, 'a click failed to select (the over-eager refusal is back)'
+    assert len(set(got)) == 4, f'clicks did not cycle to distinct tracks: {got}'
     import matplotlib.pyplot as plt
     plt.close(fig)
