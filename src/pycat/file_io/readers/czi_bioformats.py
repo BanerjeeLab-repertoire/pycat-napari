@@ -77,6 +77,18 @@ def _ensure_jvm():
     import scyjava
     import jpype
     if not jpype.isJVMStarted():
+        # ── Headless, so the process can EXIT ──────────────────────────────────────────────
+        #
+        # Reading a CZI can make BioFormats touch Java AWT (colour models / thumbnails), which spawns
+        # a NON-daemon AWT event thread. That thread keeps the JVM — and the whole Python process —
+        # alive at shutdown: PyCAT's window closes but the terminal never returns (only after a CZI
+        # was opened). A plain script exits fine because it never triggers AWT the way the Qt app
+        # does. `-Djava.awt.headless=true` stops the AWT thread ever starting; BioFormats reads pixels
+        # and metadata without it.
+        try:
+            scyjava.config.enable_headless_mode()
+        except Exception as _e:
+            debug_log("czi_bioformats: could not enable JVM headless mode", _e)
         # woolz lives only in OME's artifactory; formats-gpl:8.1.1 is the version that reads the file.
         scyjava.config.add_repositories({'ome': _OME_MAVEN})
         if _BIOFORMATS_ENDPOINT not in scyjava.config.endpoints:
@@ -168,6 +180,7 @@ class CziBioFormatsReader:
         self._fg_pending = False
         self._last_t = None
         self._tr_lat, self._tr_hits = [], 0                  # PYCAT_CZI_TRACE accumulators
+        self._tr_lockwait, self._tr_openbytes = [], []       # per-stage (all reads, fg + prefetch)
         self._prefetch = threading.Thread(target=self._prefetch_loop, daemon=True)
         self._prefetch.start()
 
@@ -189,12 +202,18 @@ class CziBioFormatsReader:
     def _read_plane_raw(self, t, c, z):
         """The actual JVM read, serialised. One (Y, X) plane, normalised to [0, 1] float32 (same
         contract as ``to_unit_float32`` on every other loader)."""
+        _lw0 = _time.perf_counter() if _TRACE else 0.0
         with self._read_lock:
+            if _TRACE:
+                self._tr_lockwait.append((_time.perf_counter() - _lw0) * 1000.0)
             if self._closed or self._reader is None:
                 raise RuntimeError("CZI reader is closed")
             _attach_thread()
             idx = int(self._reader.getIndex(int(z), int(c), int(t)))
+            _ob0 = _time.perf_counter() if _TRACE else 0.0
             buf = self._reader.openBytes(idx)
+            if _TRACE:
+                self._tr_openbytes.append((_time.perf_counter() - _ob0) * 1000.0)
             # Guard the buffer LAYOUT, not just the reshape: a reshape only fails on a gross size
             # mismatch, but a wrong series / RGB / interleaved / tiled plane can be the wrong size in a
             # way that still reshapes to a shifted image. Fail loudly with the reader's layout instead.
@@ -254,11 +273,14 @@ class CziBioFormatsReader:
         if len(self._tr_lat) >= 24:
             lat = sorted(self._tr_lat)
             n = len(lat)
+            lw = max(self._tr_lockwait) if self._tr_lockwait else 0.0
+            ob = max(self._tr_openbytes) if self._tr_openbytes else 0.0
             print(f"[PyCAT CZI trace] {n} reads  hits {self._tr_hits}/{n} "
-                  f"({100*self._tr_hits/n:.0f}%)  latency ms: median {lat[n//2]:.1f} "
-                  f"p90 {lat[int(n*0.9)]:.1f} max {lat[-1]:.1f}  cache {len(self._cache)}", flush=True)
-            self._tr_lat = []
-            self._tr_hits = 0
+                  f"({100*self._tr_hits/n:.0f}%)  total ms: median {lat[n//2]:.1f} "
+                  f"p90 {lat[int(n*0.9)]:.1f} max {lat[-1]:.1f}  |  worst lock-wait {lw:.0f} "
+                  f"worst openBytes {ob:.0f}  cache {len(self._cache)}", flush=True)
+            self._tr_lat, self._tr_hits = [], 0
+            self._tr_lockwait, self._tr_openbytes = [], []
 
     @staticmethod
     def _detach_jvm():

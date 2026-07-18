@@ -1,3 +1,24 @@
+## [1.6.115] - 2026-07-18
+### Fixed — **Closing PyCAT after opening a CZI no longer hangs the terminal.**
+Long-standing: after opening a streaming CZI, closing PyCAT left the process alive — the window shut
+but the terminal never returned. Reading a CZI can make BioFormats touch Java AWT (colour models /
+thumbnails), which spawns a **non-daemon AWT thread** that keeps the JVM — and the whole Python
+process — running at shutdown. (A plain script exits fine because it never triggers AWT the way the Qt
+app does, which is why it only bit inside `run-pycat`.) The JVM is now started **headless**
+(`scyjava.config.enable_headless_mode()` → `-Djava.awt.headless=true`), so no AWT thread is ever
+created; BioFormats reads pixels and metadata without it (verified: the reader still opens/reads the
+real 8 GB file and the process exits cleanly).
+### Diagnostics
+- The `PYCAT_CZI_TRACE=1` readout now breaks latency into **worst lock-wait** and **worst openBytes**.
+  On the real file this settled the scrubbing question: worst lock-wait **1–2 ms** (the prefetcher is
+  not blocking foreground reads) and worst openBytes **~400 ms** — i.e. the intermittent stutters are
+  BioFormats **seeking to distant frames**, an inherent random-access cost of this streaming CZI that
+  caching cannot remove. The prefetch (1.6.114) is correct and harmless but only helps when scrubbing
+  pauses or revisits cached frames; it cannot get ahead of a continuous drag through new frames.
+### Notes
+- **Needs a viewer:** confirm that opening the streaming `.czi` and then closing PyCAT returns the
+  terminal prompt (no more reopening the terminal).
+
 ## [1.6.114] - 2026-07-18
 ### Changed — **CZI prefetch: foreground-priority + direction-aware (fixes back-and-forth scrubbing).**
 An audit of 1.6.113's prefetch found it structurally wrong for anything but forward playback: it
