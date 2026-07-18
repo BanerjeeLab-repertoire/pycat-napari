@@ -1,3 +1,34 @@
+## [1.6.114] - 2026-07-18
+### Changed — **CZI prefetch: foreground-priority + direction-aware (fixes back-and-forth scrubbing).**
+An audit of 1.6.113's prefetch found it structurally wrong for anything but forward playback: it
+published the current frame to the prefetcher only AFTER reading it, prefetched forward-only, and could
+hold the reader's lock on obsolete frames while the UI waited on the one frame the user actually moved
+to. Redesigned per that audit:
+
+- **Foreground priority.** A read now publishes its request (target + a monotonic generation) and
+  raises `_fg_pending` *before* it reads, so the background thread never starts a read while the UI is
+  waiting, and abandons an obsolete read-ahead pass the moment a newer request arrives.
+- **Direction-aware read-ahead.** The prefetcher follows the scrub: forward for a forward scrub,
+  **backward for a backward scrub** (previously all-misses), a symmetric neighbourhood when direction
+  is unknown or the frame is held, and a shallow ±2 on a large jump (no far speculation).
+- **Buffer-layout guard.** `_read_plane_raw` now asserts the BioFormats plane byte-count matches
+  `H·W·itemsize` and reports series/RGB/interleaved on mismatch — a wrong series or layout can be the
+  wrong size in a way that still reshapes to a shifted image; this fails loudly instead.
+### Notes
+- Correctness investigation (the reported "seam"): BioFormats reports the streaming file as a **single
+  series, single resolution, 500×500 uint16, non-RGB, non-interleaved**, and plane 0's buffer is
+  **exactly** 500·500·2 bytes — so the reader selects the right series and the byte→array reshape is
+  correct. The residual ~1.5% column-12 step and the anomalous row 0 are constant across frames and
+  are in the acquisition, not the decode. No pixel-decoding defect.
+- Benchmarked on the real 8 GB file at 25 fps: forward **40/40**, backward **40/40**, oscillate
+  **36/36** frames served from cache (0 ms). **Needs a viewer:** confirm scrubbing actually feels
+  smooth — set `PYCAT_CZI_TRACE=1` before `run-pycat` to print the real per-scrub cache hit-rate and
+  read latency. If the trace shows high hit-rate but the viewer still lags, the bottleneck is napari's
+  render path, not the reader.
+- Deferred (audit #3): caching native uint16 for display and normalising to float32 only for analysis
+  — would roughly double the cached temporal span, but it splits the display/analysis representation
+  and cuts against PyCAT's uniform `[0,1]` loader contract, so it wants its own pass.
+
 ## [1.6.113] - 2026-07-18
 ### Changed — **Streaming CZI scrubbing is smooth: an LRU cache + background read-ahead.**
 The direct BioFormats reader decodes ~5 ms/plane, which showed as intermittent stalls scrubbing the

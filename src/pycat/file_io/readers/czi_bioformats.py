@@ -26,13 +26,19 @@ Qt/napari-free. All state is the loci reader + numpy.
 
 from __future__ import annotations
 
+import os
 import threading
+import time as _time
 from collections import OrderedDict
 
 import numpy as np
 
 from pycat.file_io.stack_access import to_unit_float32
 from pycat.utils.general_utils import debug_log
+
+# Set PYCAT_CZI_TRACE=1 to print, per ~24 foreground plane reads, the cache hit-rate and the actual
+# read latency the viewer experiences — the ground truth for whether the cache/prefetch is helping.
+_TRACE = bool(os.environ.get("PYCAT_CZI_TRACE"))
 
 # The OME artifactory (for the ``woolz`` transitive jar) and the Java BioFormats version that can
 # actually read the streaming CZI (6.7.0, which bioio-bioformats 1.3.2 pins, cannot).
@@ -152,8 +158,16 @@ class CziBioFormatsReader:
         self._cache = OrderedDict()                          # (t, c) -> float32 (Y, X) plane
         self._cache_max = max(4, int(self._CACHE_BYTES / (self.H * self.W * 4)))
         self._closed = False
-        self._target = None                                  # (t, c) last accessed; prefetch reads ahead
         self._target_cv = threading.Condition()
+        # Prefetch coordination. The FOREGROUND read publishes its request (target + a monotonic
+        # generation) BEFORE it reads, and raises `_fg_pending` while it reads, so the prefetcher can
+        # (a) never obstruct the frame the user is waiting on and (b) abandon obsolete read-ahead the
+        # instant the user moves. `_last_t` tracks direction so read-ahead follows the scrub.
+        self._target = None                                  # ((t, c), generation, offsets) or None
+        self._gen = 0
+        self._fg_pending = False
+        self._last_t = None
+        self._tr_lat, self._tr_hits = [], 0                  # PYCAT_CZI_TRACE accumulators
         self._prefetch = threading.Thread(target=self._prefetch_loop, daemon=True)
         self._prefetch.start()
 
@@ -181,21 +195,70 @@ class CziBioFormatsReader:
             _attach_thread()
             idx = int(self._reader.getIndex(int(z), int(c), int(t)))
             buf = self._reader.openBytes(idx)
+            # Guard the buffer LAYOUT, not just the reshape: a reshape only fails on a gross size
+            # mismatch, but a wrong series / RGB / interleaved / tiled plane can be the wrong size in a
+            # way that still reshapes to a shifted image. Fail loudly with the reader's layout instead.
+            expected = self.H * self.W * self.src_dtype.itemsize
+            if len(buf) != expected:
+                raise RuntimeError(
+                    f"BioFormats plane size mismatch: got {len(buf)} bytes, expected {expected} for "
+                    f"{self.W}x{self.H} {self.src_dtype} — series={int(self._reader.getSeries())}, "
+                    f"rgb={bool(self._reader.isRGB())}, interleaved={bool(self._reader.isInterleaved())}")
             arr = np.frombuffer(bytes(buf), dtype=self.src_dtype).reshape(self.H, self.W)
             return to_unit_float32(arr, self.src_dtype)
 
+    _PREFETCH_JUMP = 16          # a step larger than this is a JUMP, not a scrub — don't speculate far
+
+    def _prefetch_offsets(self, t):
+        """Which neighbours to read ahead, from the scrub DIRECTION (the audit's key point — a
+        forward-only prefetcher is useless for a backward or back-and-forth scrub)."""
+        prev, self._last_t = self._last_t, t
+        n = self._PREFETCH_AHEAD
+        if prev is None or prev == t:
+            return tuple(o for d in range(1, n // 2 + 2) for o in (d, -d))     # symmetric neighbourhood
+        delta = t - prev
+        if abs(delta) > self._PREFETCH_JUMP:
+            return (1, -1, 2, -2)                                              # a jump — stay shallow
+        step = 1 if delta > 0 else -1
+        # steady scrub: read AHEAD in the travel direction, plus two behind to survive a reversal
+        return tuple([step * d for d in range(1, n + 1)] + [-step, -step * 2])
+
     def _read_plane(self, t, c, z):
-        """Cached (Y, X) plane read; also points the prefetcher at this frame so the next ones ahead
-        are decoded in the background."""
+        """Cached (Y, X) plane read. Publishes the request to the prefetcher BEFORE reading and holds
+        `_fg_pending` while reading, so the background thread never obstructs the frame being waited on
+        and abandons obsolete read-ahead the moment the user moves."""
+        _t0 = _time.perf_counter() if _TRACE else 0.0
         key = (int(t), int(c))
-        plane = self._cache_get(key)
-        if plane is None:
-            plane = self._read_plane_raw(t, c, z)
-            self._cache_put(key, plane)
         with self._target_cv:
-            self._target = key
+            self._gen += 1
+            self._fg_pending = True
+            self._target = (key, self._gen, self._prefetch_offsets(key[0]))
             self._target_cv.notify()
-        return plane
+        try:
+            plane = self._cache_get(key)
+            hit = plane is not None
+            if plane is None:
+                plane = self._read_plane_raw(t, c, z)
+                self._cache_put(key, plane)
+            return plane
+        finally:
+            with self._target_cv:
+                self._fg_pending = False
+                self._target_cv.notify()
+            if _TRACE:
+                self._trace_read(hit, (_time.perf_counter() - _t0) * 1000.0)
+
+    def _trace_read(self, hit, ms):
+        self._tr_lat.append(ms)
+        self._tr_hits += int(hit)
+        if len(self._tr_lat) >= 24:
+            lat = sorted(self._tr_lat)
+            n = len(lat)
+            print(f"[PyCAT CZI trace] {n} reads  hits {self._tr_hits}/{n} "
+                  f"({100*self._tr_hits/n:.0f}%)  latency ms: median {lat[n//2]:.1f} "
+                  f"p90 {lat[int(n*0.9)]:.1f} max {lat[-1]:.1f}  cache {len(self._cache)}", flush=True)
+            self._tr_lat = []
+            self._tr_hits = 0
 
     @staticmethod
     def _detach_jvm():
@@ -220,17 +283,21 @@ class CziBioFormatsReader:
         try:
             while not self._closed:
                 with self._target_cv:
-                    while self._target is None and not self._closed:
+                    # Wait for a target AND for the foreground read to FINISH — claiming it mid-read
+                    # would only make us bail on `_fg_pending` and lose it (starvation).
+                    while (self._target is None or self._fg_pending) and not self._closed:
                         self._target_cv.wait()
                     if self._closed:
                         return
-                    t, c = self._target
+                    (t, c), gen, offsets = self._target
                     self._target = None                      # one read-ahead pass per access
-                for dt in range(1, self._PREFETCH_AHEAD + 1):
+                for off in offsets:
                     with self._target_cv:
-                        if self._closed or self._target is not None:
-                            break                            # user moved (or closing) — restart on the new target
-                    nt = t + dt
+                        # Yield to the foreground: never start a read while the UI is waiting on one,
+                        # and drop this whole pass the moment a newer request arrives (`gen` bumped).
+                        if self._closed or self._fg_pending or gen != self._gen:
+                            break
+                    nt = t + off
                     if not (0 <= nt < self.n_t) or self._cache_get((nt, c)) is not None:
                         continue
                     try:

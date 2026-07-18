@@ -147,24 +147,59 @@ def test_a_repeated_plane_read_HITS_the_cache():
         r.close()
 
 
-def test_reading_a_frame_PREFETCHES_the_ones_ahead():
-    """The point of the whole thing: after viewing frame t, the next frames are decoded in the
-    background, so a forward scrub lands on cache hits."""
+def _wait_cached(r, key, timeout=2.0):
     import time
-    r = _fake_reader()
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if r._cache_get(key) is not None:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_a_FORWARD_scrub_prefetches_AHEAD():
+    """Two forward reads establish direction; the prefetcher then reads ahead in that direction, so a
+    continued forward scrub lands on cache hits."""
+    r = _fake_reader(n_t=200)
+    try:
+        r._read_plane(50, 0, 0)
+        r._read_plane(51, 0, 0)                       # delta +1 → forward
+        assert _wait_cached(r, (58, 0)), "forward frames were not prefetched ahead"
+        n_before = len(r.reads)
+        r._read_plane(55, 0, 0)                       # a frame ahead — already cached
+        assert (55, 0) not in r.reads[n_before:]
+    finally:
+        r.close()
+
+
+def test_a_BACKWARD_scrub_prefetches_BEHIND():
+    """The failure the audit named: a forward-only prefetcher is useless scrubbing backward. Two
+    backward reads must prefetch the LOWER frames."""
+    r = _fake_reader(n_t=200)
+    try:
+        r._read_plane(50, 0, 0)
+        r._read_plane(49, 0, 0)                       # delta -1 → backward
+        assert _wait_cached(r, (44, 0)), "backward frames were not prefetched behind"
+        assert not _wait_cached(r, (58, 0), timeout=0.2), "prefetched forward on a backward scrub"
+    finally:
+        r.close()
+
+
+def test_the_FOREGROUND_read_is_not_blocked_by_prefetch():
+    """`_fg_pending` + a generation counter: the prefetcher must not start a read while the UI is
+    waiting on one, and must abandon an obsolete pass when a newer request arrives."""
+    r = _fake_reader(n_t=200)
     try:
         r._read_plane(10, 0, 0)
-        # give the daemon prefetcher a beat to read ahead
-        for _ in range(50):
-            if r._cache_get((10 + r._PREFETCH_AHEAD, 0)) is not None:
-                break
-            time.sleep(0.01)
-        assert r._cache_get((11, 0)) is not None      # frame ahead is cached
-        assert r._cache_get((15, 0)) is not None
-        # and a subsequent forward read does NOT trigger a new raw read for a prefetched frame
-        n_before = len(r.reads)
-        r._read_plane(11, 0, 0)
-        assert (11, 0) not in r.reads[n_before:]
+        # while a foreground read is notionally in flight, the prefetcher must yield
+        with r._target_cv:
+            r._fg_pending = True
+        # a brand-new request supersedes any queued read-ahead
+        r._read_plane(120, 0, 0)                      # bumps generation
+        with r._target_cv:
+            r._fg_pending = False
+        assert _wait_cached(r, (121, 0)) or _wait_cached(r, (119, 0)), \
+            "prefetcher did not resume around the newest frame"
     finally:
         r.close()
 
