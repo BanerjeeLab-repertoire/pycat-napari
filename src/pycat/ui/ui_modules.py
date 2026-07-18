@@ -4443,6 +4443,7 @@ class MenuManager:
                 folder, self.central_manager.viewer,
                 data_instance, progress_callback=_prog,
                 stems=selected_stems,
+                central_manager=self.central_manager,
             )
 
             prog_bar.setVisible(False); load_btn.setEnabled(True)
@@ -4477,6 +4478,12 @@ class MenuManager:
                             "Particle Tracking method to rebuild and view them.")
             except Exception as _ve:
                 print(f"[PyCAT Session] VPT layer rebuild skipped: {_ve}")
+
+            # Clicking Load LOADS and then CLOSES — the completion is reported by the toast above, so
+            # the dialog has done its job. Cancel is the only way to dismiss WITHOUT loading. (Before,
+            # Load left the dialog open and the user had to click Cancel to get rid of it, which reads
+            # as "did it even work?".)
+            dlg.accept()
 
         load_btn.clicked.connect(_on_load)
         dlg.exec_()

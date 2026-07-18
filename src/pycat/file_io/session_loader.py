@@ -240,28 +240,50 @@ def _os_exists(p):
         return False
 
 
-def _load_source_image_into_viewer(src_path, viewer, data_instance):
-    """Load the session's source image through PyCAT's OWN loader so it lands as
-    the correct (lazy) layer type with proper scale/metadata — exactly as if the
-    user had opened it. Falls back to a plain add_image only if the file_io
-    loader is unavailable."""
-    try:
+def _load_source_image_into_viewer(src_path, viewer, data_instance, file_io=None):
+    """Load the session's source image through PyCAT's OWN (LAZY) loader.
+
+    ── Why this must be lazy ─────────────────────────────────────────────────
+
+    A session's source is often a long time-series — the one reported was
+    (1000, 1080, 1440) float32 = **5.79 GiB**. Reading it whole with
+    ``tifffile.imread`` (the old fallback) raises ``MemoryError`` and the session
+    loads **zero layers**. PyCAT already opens such stacks lazily via
+    ``open_image_auto`` (frame-by-frame ``_TiffPageStack``); the trouble was that
+    this function looked for ``file_io`` on ``data_instance.central_manager``,
+    which the loaded ``BaseDataClass`` does not carry — so it silently fell to the
+    eager read and OOM'd. ``file_io`` is now passed in explicitly by the caller.
+
+    Fallbacks are lazy too: a memory-mapped read (no full allocation) before, only
+    as a last resort, the eager read that could exhaust RAM.
+    """
+    # 1) The real path: PyCAT's own lazy opener, with scale + metadata.
+    if file_io is None:
         cm = getattr(data_instance, 'central_manager', None)
-        fio = getattr(cm, 'file_io', None) if cm is not None else None
-        if fio is not None and hasattr(fio, 'open_image_auto'):
-            # open_image_auto picks stack vs 2D and applies scale/metadata.
-            fio.open_image_auto(file_path=src_path, clear_first=False)
+        file_io = getattr(cm, 'file_io', None) if cm is not None else None
+    try:
+        if file_io is not None and hasattr(file_io, 'open_image_auto'):
+            file_io.open_image_auto(file_path=src_path, clear_first=False)
             return True
     except Exception as e:
         print(f"[PyCAT Session] source image via file_io failed, falling back: {e}")
-    # Fallback: plain read
+
+    import os
+    import tifffile
+    # 2) Memory-mapped: napari reads frames on demand; no 5.79 GiB allocation.
     try:
-        import tifffile, numpy as _np, os
+        arr = tifffile.memmap(str(src_path))
+        viewer.add_image(arr, name=os.path.basename(str(src_path)))
+        return True
+    except Exception as e:
+        print(f"[PyCAT Session] memmap fallback failed ({e}); trying an eager read")
+    # 3) Last resort — may OOM on a large stack, but it is the honest final attempt.
+    try:
         arr = tifffile.imread(str(src_path))
         viewer.add_image(arr, name=os.path.basename(str(src_path)))
         return True
     except Exception as e:
-        print(f"[PyCAT Session] source image fallback failed: {e}")
+        print(f"[PyCAT Session] source image could not be loaded: {e}")
         return False
 
 
@@ -272,6 +294,7 @@ def load_session(
     stem_filter: Optional[str] = None,
     progress_callback=None,
     stems=None,
+    central_manager=None,
 ) -> dict:
     """
     Load all recognised PyCAT outputs from folder into the napari viewer.
@@ -320,7 +343,10 @@ def load_session(
         try:
             src = (_manifest.get('source_image') or {}).get('path')
             if src and _os_exists(src):
-                _load_source_image_into_viewer(src, viewer, data_instance)
+                # Prefer the caller's file_io (the loaded BaseDataClass has no central_manager, so
+                # the lazy opener would otherwise be unreachable and the source would OOM).
+                _fio = getattr(central_manager, 'file_io', None)
+                _load_source_image_into_viewer(src, viewer, data_instance, file_io=_fio)
                 loaded_layers.append(f"[source] {src}")
                 print(f"[PyCAT Session] Loaded source image: {src}")
             elif src:

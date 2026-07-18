@@ -1,19 +1,27 @@
-## [1.6.101] - 2026-07-18
-### Fixed — **VPT plot-click: always select the nearest track, and cycle through overlaps on re-click.**
-1.6.100's ambiguity refusal was over-eager for real data: MSD curves overlap essentially *everywhere*,
-so "click farther along a curve to pick one" never resolved — nothing ever got selected, which is a
-worse experience than the original cascade. Reported straight from the viewer.
+## [1.6.102] - 2026-07-18
+### Fixed — **Session load: the source image no longer OOMs, and the dialog closes on load (viewer-reported).**
+Loading a session reported **"0 layers"** and the terminal showed `Unable to allocate 5.79 GiB for an
+array with shape (1000, 1080, 1440) float32`. The source is a long time-series, and
+`_load_source_image_into_viewer` was reading it **whole** with `tifffile.imread` because its lazy
+opener (`open_image_auto`, frame-by-frame) was unreachable — it looked for `file_io` on
+`data_instance.central_manager`, which the loaded `BaseDataClass` does not carry, so it silently fell
+to the eager read and ran out of memory. That failure is what left the session with no layers.
 
-The dense-data model is the opposite, and correct: **a click near a curve ALWAYS selects the nearest,
-and repeated clicks at the same spot cycle through the stack of overlapping tracks there** — the user
-drives the disambiguation by clicking again, rather than being asked to find an uncrowded pixel that
-does not exist. A click at a new spot starts a fresh stack from its nearest curve; re-clicking a lone
-track is a no-op. The "N tracks overlap here — click again to cycle" hint shows once per spot, not on
-every click.
+`file_io` is now passed in by the caller (`load_session(..., central_manager=…)`), so the lazy opener
+is used. The fallbacks are lazy too: a memory-mapped read (no full allocation) before, only as a last
+resort, the eager read.
+
+**The Load dialog now closes on load.** Clicking Load loaded but left the dialog open, so the user had
+to click Cancel to dismiss it — reading as "did it even work?". Load now loads and closes (the toast
+reports what happened); Cancel is the only way to dismiss without loading.
 ### Notes
-- Verified through the real matplotlib event path: repeated clicks at the convergence zone select
-  tracks one at a time, all distinct, cycling — not a cascade (the first bug) and not zero (the
-  over-eager refusal). Fifteen focused tests including the real-`MouseEvent` cases.
-- Still one `button_press_event` per physical click (the 1.6.100 architecture); only the choose-among-
-  candidates policy changed, from refuse to cycle.
+- The lazy wiring is tested headlessly (given a `file_io`, the lazy opener is used and the eager read
+  is never reached; without one, memmap precedes any full allocation). That the lazy layer displays
+  and scrubs still needs a viewer.
+- **Not fixed here — the larger restoration:** the session still does not reopen the analysis method or
+  rebuild its plots/tables. The manifest does not record which method was active, and the VPT
+  track-layer rebuild only fires when the VPT panel is already open. So the dataframes come back but
+  the working view does not. That is a real feature (record the active method; reopen it; have it
+  rebuild from the restored data), needs design + viewer verification, and is the next session-load
+  piece.
 
