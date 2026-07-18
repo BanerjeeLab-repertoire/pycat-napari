@@ -1,16 +1,14 @@
-"""**One click is ONE selection — even where the MSD curves converge.**
+"""**One physical click is ONE selection — via button_press, not per-line pick_event.**
 
-Reported from a real viewer: clicking the VPT MSD plot "loops through many points on one click", and
-after closing the window the terminal kept spitting out tracks it was still iterating. That was NOT
-the 1.6.83 re-entrancy loop — the plot never re-entered itself. matplotlib fires a *separate*
-`pick_event` for every line whose pick-radius (`set_picker(5)`) contains the click, and MSD curves all
-fan out from near the origin, so one click there hits dozens of lines → dozens of genuine selections
-queued.
+An audit of the first fix found the debounce intrinsically fragile: it assumed every `pick_event` from
+one mouse press arrives before a zero-delay timer fires, which is not a safe contract, so a click could
+still resolve several tracks. The mechanism was replaced: the MSD lines are non-pickable, and one
+canvas-level `button_press_event` handler selects the single nearest curve. matplotlib fires exactly
+one button-press per click, so there is nothing to batch — the failure mode is gone by construction.
 
-`_debounce_picks` collapses the many picks from one click into ONE, on the line closest to the click.
-These test that collapse directly: N picks sharing a click → one `apply_to_best`, on the nearest line.
-The re-entrancy guard's tests still pass (they cover a different failure); this covers the one the
-viewer actually hit.
+These tests drive the REAL handler (`button_press_event`) directly, one call per click, and cover the
+cases the audit named: one press → one track; a dense-overlap click → at most one; empty space → none;
+already-selected → none; nearest by SEGMENT not vertex; and the ambiguity refusal.
 """
 
 # Third party imports
@@ -23,113 +21,204 @@ from pycat.toolbox import analysis_plots as ap
 pytestmark = pytest.mark.core
 
 
-class _Artist:
-    """A stand-in Line2D: fixed pixel coordinates so distance-to-click is deterministic."""
-    def __init__(self, px, py):
-        self._px = np.asarray(px, float)
-        self._py = np.asarray(py, float)
+class _Line:
+    """A stand-in Line2D with an identity data→pixel transform, so display coords ARE data coords."""
+    def __init__(self, xs, ys):
+        self._x = np.asarray(xs, float)
+        self._y = np.asarray(ys, float)
 
     def get_data(self):
-        return self._px, self._py
+        return self._x, self._y
 
     def get_transform(self):
         class _T:
             @staticmethod
             def transform(arr):
-                return np.asarray(arr, float)      # identity: data coords ARE pixels here
+                return np.asarray(arr, float)
         return _T()
 
 
-class _Mouse:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
+class _Canvas:
+    def __init__(self):
+        self.handlers = {}
+
+    def mpl_connect(self, name, fn):
+        self.handlers.setdefault(name, []).append(fn)
+        return len(self.handlers[name])
+
+    def click(self, ax, x, y, button=1):
+        ev = type('E', (), {'inaxes': ax, 'x': x, 'y': y, 'button': button})()
+        for fn in self.handlers.get('button_press_event', []):
+            fn(ev)
 
 
-class _Pick:
-    def __init__(self, artist, mouse):
-        self.artist = artist
-        self.mouseevent = mouse
+class _Fig:
+    def __init__(self):
+        self.canvas = _Canvas()
 
 
-def _sync(monkeypatch):
-    """Make `_defer_once` run immediately so a test can drive the resolve without a Qt loop —
-    then feed all of a click's picks BEFORE the resolve, to model the real batched case."""
-    calls = []
-    monkeypatch.setattr(ap, '_defer_once', lambda fn: calls.append(fn))
-    return calls
-
-
-def test_MANY_picks_from_one_click_resolve_to_ONE_selection(monkeypatch):
-    """The bug, as a unit test: a click near the convergence zone picks many lines; exactly one
-    selection results."""
-    deferred = _sync(monkeypatch)
-    near = _Artist([10, 11], [10, 11])           # closest to the click at (10,10)
-    far = _Artist([100, 101], [100, 101])
-    l2t = {near: 1, far: 2}
-    selected = []
-    handler = ap._debounce_picks(l2t, lambda artist, tid: selected.append(tid))
-
-    click = _Mouse(10, 10)
-    handler(_Pick(far, click))                   # both lines picked by ONE click
-    handler(_Pick(near, click))
-    handler(_Pick(far, click))                   # matplotlib order is arbitrary
-    assert len(deferred) == 1, 'more than one resolve scheduled for a single click'
-
-    deferred[0]()                                # the event-loop tick fires
-    assert selected == [1], f'expected one selection on the closest track, got {selected}'
-
-
-def test_the_CLOSEST_line_wins(monkeypatch):
-    deferred = _sync(monkeypatch)
-    a = _Artist([0, 0], [0, 0])
-    b = _Artist([5, 5], [5, 5])
-    c = _Artist([50, 50], [50, 50])
-    l2t = {a: 10, b: 20, c: 30}
+def _wire(line_to_tid, ax, *, radius_px=8.0, ambiguity_px=3.0):
+    fig = _Fig()
+    state = {'prev': None}
     got = []
-    handler = ap._debounce_picks(l2t, lambda artist, tid: got.append(tid))
 
-    click = _Mouse(6, 6)                          # nearest to b
-    for art in (a, c, b):
-        handler(_Pick(art, click))
-    deferred[0]()
-    assert got == [20]
+    def _apply(ln, tid):
+        state['prev'] = ln
+        got.append(tid)
+
+    notes = []
+    ap._connect_nearest_curve_click(fig, ax, line_to_tid, state, _apply,
+                                    radius_px=radius_px, ambiguity_px=ambiguity_px,
+                                    notify=notes.append)
+    return fig, state, got, notes
 
 
-def test_a_SECOND_click_is_a_fresh_batch(monkeypatch):
-    deferred = _sync(monkeypatch)
-    a = _Artist([0, 0], [0, 0])
-    b = _Artist([100, 100], [100, 100])
-    l2t = {a: 1, b: 2}
+# ── segment distance ────────────────────────────────────────────────────────────
+
+def test_distance_is_to_the_SEGMENT_not_the_nearest_vertex():
+    """A click on the drawn edge BETWEEN two sampled points is distance ~0 to that curve — vertex
+    distance would report the gap to the nearest endpoint and could pick a neighbour."""
+    line = _Line([0, 100], [0, 0])          # a long horizontal segment, endpoints far apart
+    d_seg = ap._segment_distance_px(line, 50, 0)      # mid-segment, on the line
+    assert d_seg == pytest.approx(0.0)
+    # the nearest VERTEX is 50px away; segment distance must be far smaller
+    assert d_seg < 1.0
+
+
+def test_distance_handles_a_single_point_line():
+    assert ap._segment_distance_px(_Line([5], [5]), 8, 9) == pytest.approx(np.hypot(3, 4))
+
+
+# ── one click, one selection ─────────────────────────────────────────────────────
+
+def test_ONE_click_in_a_dense_overlap_selects_at_most_ONE():
+    """The bug: near the origin many curves converge. One button_press must yield one selection."""
+    ax = object()
+    # 20 curves all passing through (10,10), fanning out
+    lines = {_Line([10, 10 + i], [10, 10 + 2 * i]): i for i in range(20)}
+    fig, state, got, notes = _wire(lines, ax, ambiguity_px=0.0)   # disable ambiguity for this check
+    fig.canvas.click(ax, 10, 10)
+    assert len(got) <= 1, f'one click selected {len(got)} tracks'
+
+
+def test_the_NEAREST_curve_wins():
+    ax = object()
+    near = _Line([5, 6], [5, 6])
+    far = _Line([80, 81], [80, 81])
+    fig, state, got, notes = _wire({near: 1, far: 2}, ax)
+    fig.canvas.click(ax, 5, 5)
+    assert got == [1]
+
+
+def test_a_click_in_EMPTY_space_selects_nothing():
+    ax = object()
+    fig, state, got, notes = _wire({_Line([0, 1], [0, 1]): 1}, ax, radius_px=8.0)
+    fig.canvas.click(ax, 500, 500)          # far from any curve
+    assert got == []
+
+
+def test_a_click_OUTSIDE_the_axes_is_ignored():
+    ax = object()
+    other_ax = object()
+    fig, state, got, notes = _wire({_Line([0, 0], [0, 0]): 1}, ax)
+    fig.canvas.click(other_ax, 0, 0)        # inaxes is not our ax
+    assert got == []
+
+
+def test_re_clicking_the_SELECTED_track_emits_nothing_new():
+    ax = object()
+    a = _Line([0, 1], [0, 1])
+    fig, state, got, notes = _wire({a: 7, _Line([50, 51], [50, 51]): 8}, ax)
+    fig.canvas.click(ax, 0, 0)
+    fig.canvas.click(ax, 0, 0)              # same spot, same track
+    assert got == [7]                       # not [7, 7]
+
+
+def test_a_non_left_button_is_ignored():
+    ax = object()
+    fig, state, got, notes = _wire({_Line([0, 0], [0, 0]): 1}, ax)
+    fig.canvas.click(ax, 0, 0, button=3)    # right-click
+    assert got == []
+
+
+# ── the ambiguity refusal ────────────────────────────────────────────────────────
+
+def test_it_REFUSES_to_guess_when_two_curves_are_indistinguishable():
+    """Where the two nearest are within the ambiguity margin, do not pick an arbitrary track — ask
+    for a click at a less crowded spot."""
+    ax = object()
+    a = _Line([10, 11], [10, 11])
+    b = _Line([10, 11], [10, 11])           # coincident with a at the click point
+    fig, state, got, notes = _wire({a: 1, b: 2}, ax, ambiguity_px=3.0)
+    fig.canvas.click(ax, 10, 10)
+    assert got == []
+    assert notes and 'overlap' in notes[0].lower()
+
+
+def test_a_clearly_nearest_curve_is_NOT_blocked_by_ambiguity():
+    ax = object()
+    a = _Line([0, 1], [0, 1])               # right at the click
+    b = _Line([40, 41], [40, 41])           # far — unambiguous
+    fig, state, got, notes = _wire({a: 1, b: 2}, ax, ambiguity_px=3.0)
+    fig.canvas.click(ax, 0, 0)
+    assert got == [1] and notes == []
+
+
+# ── the REAL matplotlib event path (the audit's missing coverage) ────────────────
+#
+# The fake-canvas tests above check the handler logic; these drive an actual matplotlib figure with
+# an actual `button_press_event` through the canvas callback machinery — the exact path the audit
+# said was never reproduced. Agg, so no Qt/viewer needed.
+
+def _real_fig_with_curves(n=30):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    line_to_tid = {}
+    for tid in range(n):
+        x = np.linspace(0.1, 10, 20)
+        y = (0.5 + 0.05 * tid) * x ** (0.8 + 0.01 * tid)   # converge near origin, fan out
+        (ln,) = ax.plot(x, y, alpha=0.2)
+        line_to_tid[ln] = tid
+    fig.canvas.draw()
+    return fig, ax, line_to_tid
+
+
+def _fire(fig, ax, data_xy, button=1):
+    from matplotlib.backend_bases import MouseEvent
+    px, py = ax.transData.transform(data_xy)
+    ev = MouseEvent('button_press_event', fig.canvas, px, py, button=button)
+    fig.canvas.callbacks.process('button_press_event', ev)
+
+
+def test_REAL_event_one_press_yields_at_most_one_selection():
+    fig, ax, l2t = _real_fig_with_curves(30)
+    state = {'prev': None}
     got = []
-    handler = ap._debounce_picks(l2t, lambda artist, tid: got.append(tid))
+    ap._connect_nearest_curve_click(
+        fig, ax, l2t, state,
+        lambda ln, tid: (state.__setitem__('prev', ln), got.append(tid))[-1],
+        notify=lambda m: None)
 
-    handler(_Pick(a, _Mouse(0, 0)))              # click 1 -> a
-    deferred[-1]()
-    handler(_Pick(b, _Mouse(100, 100)))          # click 2 -> b (new batch scheduled)
-    deferred[-1]()
-    assert got == [1, 2]
-    assert len(deferred) == 2                     # one resolve per click, not per pick
-
-
-def test_a_pick_on_an_UNKNOWN_artist_is_ignored(monkeypatch):
-    deferred = _sync(monkeypatch)
-    known = _Artist([0, 0], [0, 0])
-    handler = ap._debounce_picks({known: 1}, lambda a, t: None)
-    handler(_Pick(_Artist([1], [1]), _Mouse(0, 0)))     # not in the map
-    assert deferred == [], 'an unmapped artist opened a batch'
+    _fire(fig, ax, (9.5, 3.0))            # a clear click far along one curve
+    assert len(got) <= 1
+    import matplotlib.pyplot as plt
+    plt.close(fig)
 
 
-def test_pixel_distance_uses_the_TRANSFORM_not_raw_data():
-    """A log-log MSD plot warps data→pixels; the distance must be measured in pixels, which is why it
-    goes through the artist's transform."""
-    class _LogArtist(_Artist):
-        def get_transform(self):
-            class _T:
-                @staticmethod
-                def transform(arr):
-                    return np.asarray(arr, float) * 10.0     # a non-identity transform
-            return _T()
+def test_REAL_event_convergence_click_does_not_cycle():
+    """The reported bug, through the real event machinery: a click in the convergence zone must not
+    fire a cascade of selections. (It may select one or, if too ambiguous, none — never many.)"""
+    fig, ax, l2t = _real_fig_with_curves(30)
+    state = {'prev': None}
+    got = []
+    ap._connect_nearest_curve_click(
+        fig, ax, l2t, state,
+        lambda ln, tid: (state.__setitem__('prev', ln), got.append(tid))[-1],
+        notify=lambda m: None)
 
-    art = _LogArtist([1, 2], [1, 2])
-    d = ap._pick_pixel_distance(art, _Mouse(10, 10))         # data (1,1)->pixel (10,10): distance 0
-    assert d == pytest.approx(0.0)
+    _fire(fig, ax, (0.15, 0.06))          # right where the curves bunch
+    assert len(got) <= 1, f'convergence click cycled through {len(got)} tracks'
+    import matplotlib.pyplot as plt
+    plt.close(fig)

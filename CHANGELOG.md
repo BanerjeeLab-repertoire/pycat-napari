@@ -1,33 +1,35 @@
-## [1.6.99] - 2026-07-18
-### Fixed — **VPT plot-click: the real loop, the offset trajectory, and the too-bold highlight (from viewer testing).**
-Real-viewer feedback surfaced three bugs the headless tests could not — exactly the "verified by
-simulation, not by eye" gap that was flagged all along.
+## [1.6.100] - 2026-07-18
+### Fixed — **VPT plot-click: replace the fragile debounce with one button-press per click (audit-driven).**
+An audit of 1.6.99 found the debounce **intrinsically fragile**, and correctly. It assumed every
+matplotlib `pick_event` from one mouse press arrives before `QTimer.singleShot(0)` fires — not a safe
+contract: with redraws and queued Qt/napari callbacks the resolve can run *between* groups of picks, so
+one click still cycled through several tracks. Its unit tests passed only because they drove the
+resolver synchronously, never reproducing the real interleaving — the "verified by simulation" gap,
+one level deeper.
 
-**The click still looped through many tracks — and it was NOT the 1.6.83 re-entrancy loop.** Every MSD
-line is drawn with `set_picker(5)`, and the curves all fan out from near the origin, so a single click
-there lands within the pick radius of dozens of lines. matplotlib fires a *separate* `pick_event` for
-each, so one press became dozens of genuine selections + reveals — which drained (visibly, in the
-terminal) long after the window was closed. The re-entrancy guard could not catch this because the
-picks are not re-entrancy; they are real, separate events. `_debounce_picks` now collapses the many
-picks from one click into ONE, on the line **closest** to the click (measured in pixels, so it is
-correct on a log-log plot): one click, one track.
+**The mechanism is replaced, not patched.** matplotlib fires exactly ONE `button_press_event` per
+physical click, so there is nothing to batch. The MSD lines are made **non-pickable**; a single
+canvas-level handler (`_connect_nearest_curve_click`) scans the visible curves once, ranks them by
+**point-to-segment** distance in display pixels (a click can lie on the drawn edge of one curve yet be
+nearest a sampled *vertex* of a neighbour — segments are what the eye sees), and selects the single
+nearest within a threshold. One event, one selection, by construction.
 
-**The picked trajectory was offset from the bead.** The reveal drew `y_um`/`x_um` — the
-**drift-corrected** positions — while the base "Bead Trajectories" layer draws `y_um_raw`/`x_um_raw`,
-the raw positions that sit on the actual beads. Drift correction subtracts the centre-of-mass motion,
-so the corrected path is shifted, and the highlight traced that shift instead of the bead. It now
-prefers the raw coords, exactly as the base layer does, so it lands on the bead it highlights.
-
-**The picked trajectory was too bold and buried the detail.** Its width was `0.12 / mpp` — inverse
-pixel size — so at a fine pixel size it ballooned (mpp 0.05 → 2.4 px). It is now a thin fixed width in
-pixel units (`_PICKED_TRACK_WIDTH_PX`, the one knob), so it stays a thin trace at any magnification and
-the eye goes to the pulsing ring.
+Also from the audit:
+- **Ambiguity is refused, not guessed.** Where the two nearest curves are within a few pixels of each
+  other (the convergence zone near the origin), it does not pick an effectively-arbitrary track — it
+  asks for a click farther along a curve. Honest beats confidently-wrong.
+- **The two MSD plots now behave the same.** The standalone plot used to re-fire a selection when the
+  already-selected curve was re-clicked; the consolidated panel did not. Both now suppress it.
+- Clicks outside the axes, in empty space (beyond the radius), or with a non-left button are ignored.
 ### Notes
-- The debounce collapse is unit-tested (N picks from one click → one selection on the nearest line);
-  the real "one click = one track" behaviour needs confirmation at a viewer, as does the trajectory
-  now sitting on the bead. The re-entrancy guard's tests still pass — they cover a different failure
-  that also exists.
-- **Session loading is separately broken** (loading a saved session does not restore the working
-  state) and blocks fast verification — reported, not yet diagnosed; it needs the specific symptom and
-  a session folder to debug.
+- Tested through the **real matplotlib event path** — an actual figure with an actual `MouseEvent`
+  processed by the canvas callbacks, which is the coverage the audit noted was missing. One press
+  yields at most one selection; a convergence-zone click does not cascade. Twelve focused tests in
+  total (segment distance, empty space, outside-axes, re-click, ambiguity refusal, real events).
+- The `pick_event`-based mechanism (`_debounce_picks`, `_on_pick`, `_pick_pixel_distance`) is gone;
+  the removal is recorded in `test_nothing_was_dropped`'s deliberate list.
+- Deferred from the audit (larger, follow-up): consolidating both MSD render modes behind one
+  `MSDSelectionController` (it recommends this as the durable architecture), and having the
+  SelectionService own the accepted selection rather than the UI setting it provisionally. The
+  immediate bug is fixed within matplotlib, as the audit concluded it could be.
 

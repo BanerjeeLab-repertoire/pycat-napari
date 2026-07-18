@@ -10,75 +10,93 @@ the window (non-blocking) like the temperature/QC plots.
 import numpy as np
 
 
-# ── One click is ONE selection, even where the curves converge ───────────────────────────────
+# ── One click is ONE selection, even where hundreds of curves converge ───────────────────────
 #
-# matplotlib fires a ``pick_event`` for EVERY artist whose pick-radius (``set_picker``) contains the
-# click. MSD curves all fan out from near the origin, so a single click there lands within the pick
-# radius of dozens of lines — and without this, each fires its own selection + reveal. That is the
-# "one click loops through many tracks" report: the plot did not re-enter itself, it received dozens
-# of genuine picks from one press, and the queued selections drained (visibly, in the terminal) long
-# after the window was closed.
+# The MSD spaghetti plot draws every trajectory as its own ``Line2D``, and the curves all fan out
+# from near the origin. The first fix gave each line ``set_picker(5)`` and tried to collapse the
+# resulting flood of ``pick_event``s — matplotlib fires one PER line whose 5px radius contains the
+# click — with a zero-delay-timer debounce. **That debounce is intrinsically fragile:** it assumes
+# every ``pick_event`` from one press arrives before ``QTimer.singleShot(0)`` fires, which is not a
+# safe contract. Depending on redraws and queued Qt/napari callbacks the resolve can run *between*
+# groups of picks, so one click still resolves several tracks. (Its unit tests passed only because
+# they drove the resolver synchronously — they never reproduced the real interleaving.)
 #
-# The 1.6.83 re-entrancy guard could not catch this — the picks are not re-entrancy, they are real,
-# separate events. But every pick from one click carries the SAME ``mouseevent``, so they are batched
-# by it and only the line CLOSEST to the click (in pixels) is acted on, once, on the next event-loop
-# tick.
+# So the mechanism is replaced, not patched. **matplotlib fires exactly ONE ``button_press_event``
+# per physical click.** The lines are made non-pickable; a single canvas-level handler scans the
+# visible curves once, ranks them by point-to-SEGMENT distance in display pixels (a click can be
+# nearest a segment of one curve yet nearest a *vertex* of another — segments are what the eye sees),
+# and selects the single nearest within a threshold. There is nothing to debounce because there is
+# one event. And where two curves are within an ambiguity margin it does NOT guess — it asks for a
+# click farther along the curve, rather than pick an effectively-arbitrary track near the origin.
 
-def _pick_pixel_distance(artist, mouseevent):
-    """Squared pixel distance from the click to an artist's nearest vertex. Pixels, so it is correct
-    on a log-log MSD plot where data-coordinate distance would be meaningless."""
+def _segment_distance_px(line, mx, my):
+    """Minimum distance in DISPLAY pixels from ``(mx, my)`` to ``line``'s polyline (point-to-SEGMENT).
+
+    Pixels, through the artist's transform, so it is correct on a log-log MSD plot. Segment distance,
+    not vertex distance, because a click can sit right on the drawn edge of one curve while being
+    closer to a sampled *point* of a neighbour — vertex distance would then select the wrong track.
+    """
     try:
-        xd, yd = artist.get_data()
-        pts = artist.get_transform().transform(
-            np.column_stack([np.asarray(xd, float), np.asarray(yd, float)]))
-        mx, my = getattr(mouseevent, 'x', None), getattr(mouseevent, 'y', None)
-        if mx is None or my is None:
-            return 0.0
-        return float(np.min((pts[:, 0] - mx) ** 2 + (pts[:, 1] - my) ** 2))
+        xd, yd = line.get_data()
+        xd = np.asarray(xd, float); yd = np.asarray(yd, float)
+        if xd.size == 0:
+            return float('inf')
+        pts = line.get_transform().transform(np.column_stack([xd, yd]))
+        if len(pts) == 1:
+            return float(np.hypot(pts[0, 0] - mx, pts[0, 1] - my))
+        p, q = pts[:-1], pts[1:]                       # segment endpoints
+        seg = q - p
+        click = np.array([mx, my], float)
+        denom = np.maximum(np.sum(seg * seg, axis=1), 1e-12)
+        t = np.clip(np.sum((click - p) * seg, axis=1) / denom, 0.0, 1.0)
+        proj = p + t[:, None] * seg                    # nearest point on each segment
+        return float(np.min(np.hypot(proj[:, 0] - mx, proj[:, 1] - my)))
     except Exception:
         return float('inf')
 
 
-def _defer_once(fn):
-    """Run ``fn`` on the next Qt event-loop tick; synchronously if there is no Qt (headless)."""
-    try:
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(0, fn)
-    except Exception:
-        fn()
+def _connect_nearest_curve_click(fig, ax, line_to_tid, state, apply_selection, *,
+                                 radius_px=8.0, ambiguity_px=3.0, notify=None):
+    """Connect ONE ``button_press_event`` that selects the single nearest curve. Returns the cid.
 
+    No ``pick_event``, no debounce — one event per click. Ranks ``line_to_tid`` by
+    ``_segment_distance_px`` and:
 
-def _debounce_picks(line_to_tid, apply_to_best):
-    """A pick handler that collapses one click's many pick_events into ONE, on the closest line.
-
-    ``apply_to_best(artist, tid)`` does the real work (restyle + fire the selection callback). Picks
-    are accumulated while a resolve is pending, then the nearest is chosen once — so a click in the
-    convergence zone selects the single track under the cursor, not the whole bundle.
+    * ignores clicks outside ``ax`` or beyond ``radius_px`` (empty space);
+    * refuses to guess when the two nearest are within ``ambiguity_px`` of each other — it ``notify``s
+      the user to click a less crowded spot instead of picking an arbitrary track;
+    * suppresses re-selecting the already-selected line (``state['prev']``);
+    * otherwise calls ``apply_selection(line, tid)`` exactly once.
     """
-    batch = {'mouseevent': None, 'artists': [], 'pending': False}
-
-    def _resolve():
-        batch['pending'] = False
-        artists, me = batch['artists'], batch['mouseevent']
-        batch['artists'] = []
-        if not artists:
+    def _on_click(event):
+        if event.inaxes is not ax or getattr(event, 'button', 1) != 1:
             return
-        best = min(artists, key=lambda a: _pick_pixel_distance(a, me))
-        tid = line_to_tid.get(best)
-        if tid is not None:
-            apply_to_best(best, tid)
-
-    def _on_pick(event):
-        if event.artist not in line_to_tid:
+        mx, my = getattr(event, 'x', None), getattr(event, 'y', None)
+        if mx is None or my is None or not line_to_tid:
             return
-        if not batch['pending']:                 # first pick of this click — open a batch
-            batch['mouseevent'] = getattr(event, 'mouseevent', None)
-            batch['artists'] = []
-            batch['pending'] = True
-            _defer_once(_resolve)
-        batch['artists'].append(event.artist)
+        ranked = sorted(((_segment_distance_px(ln, mx, my), tid, ln)
+                         for ln, tid in line_to_tid.items()), key=lambda r: r[0])
+        best_d, best_tid, best_ln = ranked[0]
+        if best_d > radius_px:
+            return                                     # clicked empty space
+        if len(ranked) > 1 and (ranked[1][0] - best_d) < ambiguity_px:
+            if notify is not None:
+                notify("Several tracks overlap here — click farther along a curve to pick one.")
+            return                                     # too ambiguous to choose honestly
+        if state.get('prev') is best_ln:
+            return                                     # already selected — no new selection
+        apply_selection(best_ln, best_tid)
 
-    return _on_pick
+    return fig.canvas.mpl_connect('button_press_event', _on_click)
+
+
+def _default_notify(message):
+    """Surface an ambiguity hint, headless-safe."""
+    try:
+        from pycat.utils.notify import show_info
+        show_info(message)
+    except Exception:
+        print(f"[PyCAT VPT] {message}")
 
 
 def _show(fig, interactive):
@@ -225,7 +243,8 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
                         alpha=0.18, lw=0.8, zorder=1)
         if _pickable:
-            ln.set_picker(5)     # generous pick radius for thin faint lines
+            # NOT pickable — selection is one canvas button_press, nearest-curve. See the note above
+            # `_connect_nearest_curve_click` for why per-line pick_event cannot be made reliable here.
             _line_to_tid[ln] = int(tid)
         _tid_to_line[int(tid)] = ln
 
@@ -408,14 +427,9 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         _state = {'prev': None}
 
         def _apply_pick(ln, tid):
+            # The handler already ruled out a re-click of the selected line, so this only ever runs
+            # for a NEW selection: restyle the previous, emphasise this one, fire once.
             prev = _state['prev']
-            if prev is ln:
-                # same line re-picked — still fire the callback, no redraw needed
-                try:
-                    on_pick_track(tid)
-                except Exception:
-                    pass
-                return
             if prev is not None and prev in _line_to_tid:
                 prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
                 prev.set_zorder(1)
@@ -428,9 +442,10 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
             except Exception as _e:
                 print(f"[PyCAT VPT] pick callback failed: {_e}")
 
-        # Debounced: one click near the convergence zone hits many lines; act on the closest, once.
+        # One button_press per click -> the single nearest curve. No pick_event, no debounce.
         try:
-            fig.canvas.mpl_connect('pick_event', _debounce_picks(_line_to_tid, _apply_pick))
+            _connect_nearest_curve_click(fig, ax, _line_to_tid, _state, _apply_pick,
+                                         notify=_default_notify)
         except Exception:
             pass
 
@@ -557,8 +572,8 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
             g = g.sort_values('lag_s')
             (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
                             alpha=0.18, lw=0.8)
-            if pickable:
-                ln.set_picker(5)
+            # NOT pickable: the panel selects via one canvas button_press (nearest curve), not
+            # per-line pick_event. See `_connect_nearest_curve_click`.
             tid_to_line[int(tid)] = ln
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
                 label=f"individual tracks (n={n_all})")
@@ -746,10 +761,8 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                 line_registry['blit_highlight'] = _pblit_highlight
 
             def _apply_pick(artist, tid):
+                # New selection only — the handler already suppressed a re-click of the same line.
                 prev = _pstate['prev']
-                if prev is artist:
-                    # Already the selected track: nothing to restyle and nothing to re-select.
-                    return
                 if prev is not None and prev in _line_to_tid:
                     try:
                         prev.set_color('#4c72b0'); prev.set_alpha(0.18)
@@ -767,9 +780,10 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
                     on_pick_track(tid)
                 except Exception as _e:
                     print(f"[PyCAT VPT] consolidated pick callback failed: {_e}")
-            # Debounced: collapse one click's many picks (convergent curves) to the closest track.
+            # One button_press per click -> the single nearest curve in the MSD subplot (axes[0,0]).
             try:
-                fig.canvas.mpl_connect('pick_event', _debounce_picks(_line_to_tid, _apply_pick))
+                _connect_nearest_curve_click(fig, _msd_ax, _line_to_tid, _pstate, _apply_pick,
+                                             notify=_default_notify)
             except Exception:
                 pass
         # Live toggle: a button that closes this figure and opens separate windows.

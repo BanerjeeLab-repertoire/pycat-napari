@@ -64,6 +64,15 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.100 — the MSD plot's `_on_pick` (per-line pick_event handler) was removed with its whole
+    # mechanism. An audit found the pick_event-plus-debounce approach intrinsically fragile (it
+    # assumed all of a click's pick_events arrive before a zero-delay timer — not a safe contract),
+    # so one click still cycled through many tracks. Replaced by a single canvas `button_press_event`
+    # handler (`_connect_nearest_curve_click`) that fires once per click and selects the nearest
+    # curve — there is nothing to debounce. `_on_pick` has no successor by name; the capability moved
+    # to `_connect_nearest_curve_click` + `_apply_pick`.
+    'analysis_plots.py::_on_pick',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.
