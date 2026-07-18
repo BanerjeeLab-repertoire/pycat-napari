@@ -1,3 +1,17 @@
+## [1.6.116] - 2026-07-18
+### Fixed — **Closing PyCAT after a CZI now returns the terminal (force a clean exit).**
+Headless mode (1.6.115) was not enough: something in the napari/Qt + BioFormats-JVM combination still
+keeps the process alive at teardown — the window closes but the terminal never comes back. It cannot
+be reproduced outside the GUI (a plain script exits fine), so rather than keep chasing which Java/Qt
+thread refuses to die, PyCAT now forces a clean termination at the app's quit point: **once a CZI has
+started the JVM**, `QApplication.aboutToQuit` flushes the streams and calls `os._exit(0)`. This only
+arms in a CZI session (the JVM-start path) — every other session exits normally — and it runs after
+other quit handlers, so it is the last thing before the process would otherwise hang.
+### Notes
+- **Needs a viewer:** confirm closing PyCAT after opening the streaming `.czi` returns the prompt.
+- Keeps the 1.6.115 headless start (good practice regardless) and the scrubbing findings from
+  1.6.113–115 (the stutters are inherent BioFormats seek latency).
+
 ## [1.6.115] - 2026-07-18
 ### Fixed — **Closing PyCAT after opening a CZI no longer hangs the terminal.**
 Long-standing: after opening a streaming CZI, closing PyCAT left the process alive — the window shut

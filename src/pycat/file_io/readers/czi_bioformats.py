@@ -46,6 +46,7 @@ _OME_MAVEN = "https://artifacts.openmicroscopy.org/artifactory/maven"
 _BIOFORMATS_ENDPOINT = "ome:formats-gpl:8.1.1"
 
 _JVM_STARTED = False
+_EXIT_HOOK_INSTALLED = False
 
 
 def bioformats_available() -> bool:
@@ -95,6 +96,40 @@ def _ensure_jvm():
             scyjava.config.endpoints.append(_BIOFORMATS_ENDPOINT)
         scyjava.start_jvm()
     _JVM_STARTED = True
+    _install_forced_exit_on_quit()
+
+
+def _install_forced_exit_on_quit():
+    """Guarantee the process TERMINATES when the user closes PyCAT after opening a CZI.
+
+    Even headless, the BioFormats JVM leaves non-daemon Java threads that survive shutdown inside the
+    napari/Qt process — the window closes but the terminal never returns (a plain script exits fine,
+    which is why this only bites in the GUI). Rather than chase which Java/Qt thread refuses to die,
+    force a clean exit at the app's quit point: once a CZI has started the JVM, `QApplication`'s
+    ``aboutToQuit`` (fired after the user closes the last window, after other quit handlers) flushes
+    the streams and ``os._exit(0)``. Only reached in a CZI session, where the alternative is a hang.
+    """
+    try:
+        from PyQt5.QtWidgets import QApplication
+    except Exception:
+        return
+    app = QApplication.instance()
+    if app is None:                              # headless / script — it exits cleanly on its own
+        return
+    global _EXIT_HOOK_INSTALLED
+    if _EXIT_HOOK_INSTALLED:
+        return
+    _EXIT_HOOK_INSTALLED = True
+
+    def _force_exit():
+        import os, sys
+        try:
+            sys.stdout.flush(); sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(0)
+
+    app.aboutToQuit.connect(_force_exit)
 
 
 def _attach_thread():
