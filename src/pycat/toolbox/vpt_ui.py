@@ -1594,7 +1594,8 @@ class VideoParticleTrackingUI:
             except Exception:
                 pass
         self.viewer.add_tracks(
-            tl[['track_id', 'frame', 'y', 'x']].values, name=name, **add_kwargs)
+            tl[['track_id', 'frame', 'y', 'x']].values, name=name,
+            tail_width=self._BASE_TRACK_TAIL_WIDTH, **add_kwargs)
         try:
             self._add_pickable_bead_points(tracks, _img_layer, mpp)
         except Exception as _e:
@@ -1702,9 +1703,12 @@ class VideoParticleTrackingUI:
         except Exception:
             pass
 
-    # Width of the picked-track highlight line, in DATA (pixel) units — NOT scaled by pixel size, so
-    # it stays a thin trace at any magnification. The one knob to tune the highlight's weight by eye.
-    _PICKED_TRACK_WIDTH_PX = 0.4
+    # Line widths for the two trajectory layers, in napari Tracks `tail_width` units (screen pixels, so
+    # they DON'T balloon as you zoom to the bead — the earlier Shapes `edge_width` was in data units and
+    # did). The base "Bead Trajectories" width the user found right; the picked track is 2× it, bold
+    # enough to stand out while still thin enough to read the trajectory's detail.
+    _BASE_TRACK_TAIL_WIDTH = 2.0
+    _PICKED_TRACK_TAIL_WIDTH = 2.0 * _BASE_TRACK_TAIL_WIDTH
 
     # The pulsing ring was removed (1.6.104). It oscillated the Points layer's opacity/size on a
     # QTimer, but a per-frame ring is only present on the bead's own frame, so away from that frame
@@ -1740,40 +1744,67 @@ class VideoParticleTrackingUI:
                 if name in self.viewer.layers:
                     self.viewer.layers.remove(name)      # incl. the old layer name
             if path.shape[0] >= 2:
-                # ── The RING is the emphasis; the path is context ──────────────
+                # ── The picked track is a Tracks layer, 2× the base width ──────
                 #
-                # This traces the picked track over the Bead Trajectories layer. It
-                # is a second copy, and it is NOT offset from the first: both take
-                # their scale from the image layer (`[1.0, sc_y, sc_x]`), which is
-                # the one source of truth, so they land on each other exactly.
+                # A second Tracks copy of the picked path, drawn over "Bead Trajectories" and NOT
+                # offset from it: both take their scale from the image layer (`[1.0, sc_y, sc_x]`), the
+                # one source of truth, so they land on each other exactly. Using the SAME layer type as
+                # the base is the point — its `tail_width` is in screen pixels, so at the deep
+                # zoom-to-bead the line stays a fixed weight instead of ballooning the way the old
+                # Shapes `edge_width` (data units) did and burying the trajectory detail. "2× bolder
+                # than the base" is then literal: `_PICKED_TRACK_TAIL_WIDTH == 2 · base`.
                 #
-                # It stays a separate overlay rather than recolouring the track
-                # inside the Tracks layer. napari does expose `color_by`, so that
-                # is possible now — but it would mean borrowing a layer's display
-                # state to mean "selected", which is the `selected_label` mistake
-                # `pycat.utils.selection_overlay` exists to undo: a user who has
-                # coloured their tracks by velocity would silently lose it on a
-                # plot click.
+                # It stays a separate overlay rather than recolouring the base Tracks layer: borrowing
+                # a layer's display state to mean "selected" is the `selected_label` mistake
+                # `pycat.utils.selection_overlay` exists to undo — a user who coloured their tracks by
+                # velocity would silently lose it on a plot click.
                 #
-                # Secondary on purpose, and THIN. `edge_width` was `0.12 / mpp` — inverse pixel
-                # size — so at a fine pixel size it ballooned (mpp 0.05 → 2.4 px) and buried the
-                # detail under a fat orange line. It is a highlight, not a headline: a small fixed
-                # width in data (pixel) units, so it stays a thin trace whatever the pixel size, and
-                # the eye goes to the ring. `_PICKED_TRACK_WIDTH_PX` is the one knob if it needs
-                # tuning by eye.
-                kw = dict(name=hl_line, shape_type='path',
-                          edge_color='#ff8c00', face_color='transparent',
-                          edge_width=self._PICKED_TRACK_WIDTH_PX,
-                          opacity=0.55, scale=[sc_y, sc_x])
-                try:
-                    self.viewer.add_shapes([path], **kw)
-                except Exception:
-                    # Older napari: edge_width may need to be a scalar list.
-                    kw['edge_width'] = float(self._PICKED_TRACK_WIDTH_PX)
-                    self.viewer.add_shapes([path], **kw)
+                # `tail_length`/`head_length` span the whole track so it is fully drawn at ANY frame
+                # (a napari Tracks layer otherwise shows only a short tail near the current frame — at
+                # the bead's first frame that would be almost nothing).
+                self._draw_picked_track_layer(hl_line, path, frames, sc_y, sc_x)
             self._add_bead_ring(hl_start, path, frames, mpp, sc_y, sc_x)
         except Exception:
             pass
+
+    # Solid-orange colormap name for the picked-track Tracks overlay. napari Tracks colour by a
+    # feature via a REGISTERED colormap name (a Colormap object is rejected), so a flat two-stop orange
+    # ramp is registered once; with one track_id the whole track maps to that single colour.
+    _PICKED_COLORMAP = 'pycat_picked_orange'
+
+    def _ensure_picked_colormap(self):
+        try:
+            from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
+            if self._PICKED_COLORMAP not in AVAILABLE_COLORMAPS:
+                AVAILABLE_COLORMAPS[self._PICKED_COLORMAP] = Colormap(
+                    [[1.0, 0.549, 0.0, 1.0], [1.0, 0.549, 0.0, 1.0]],
+                    name=self._PICKED_COLORMAP)
+            return self._PICKED_COLORMAP
+        except Exception:
+            return None
+
+    def _draw_picked_track_layer(self, name, path, frames, sc_y, sc_x):
+        """The picked track as a Tracks layer at 2× the base width — see `_draw_picked_track`.
+
+        Falls back to a thin Shapes path only if `add_tracks` is unavailable (older napari), so the
+        highlight is never lost even when the preferred layer type is not there.
+        """
+        import numpy as _np
+        f = _np.asarray(frames, float)
+        data = _np.column_stack([_np.zeros(len(f)), f, path[:, 0], path[:, 1]])
+        span = max(1, int(f.max() - f.min()) + 1)
+        kw = dict(name=name, tail_width=self._PICKED_TRACK_TAIL_WIDTH,
+                  tail_length=span, head_length=span, scale=[1.0, sc_y, sc_x])
+        cmap = self._ensure_picked_colormap()
+        if cmap is not None:
+            kw['colormap'] = cmap
+        try:
+            self.viewer.add_tracks(data, **kw)
+        except Exception:
+            self.viewer.add_shapes(
+                [path], name=name, shape_type='path', edge_color='#ff8c00',
+                face_color='transparent', edge_width=0.2, opacity=0.7,
+                scale=[sc_y, sc_x])
 
     def _add_bead_ring(self, name, path, frames, mpp, sc_y, sc_x):
         """The ring itself: per-frame when the viewer has a time axis, else flat.

@@ -127,6 +127,12 @@ class _Viewer:
         self.added.append(kw.get('name'))
         return layer
 
+    def add_tracks(self, data, **kw):
+        layer = type('_T', (), {'name': kw.get('name'), 'data': data})()
+        self.layers.append(layer)
+        self.added.append(kw.get('name'))
+        return layer
+
 
 def _tracks():
     import pandas as pd

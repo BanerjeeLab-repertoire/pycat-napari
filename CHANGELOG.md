@@ -1,3 +1,23 @@
+## [1.6.105] - 2026-07-18
+### Changed — **The picked-track highlight is a Tracks layer at 2× the base width.**
+From the viewer: after zooming to the bead, the picked-track line was still too thick to read the
+trajectory's detail. The cause was a unit mismatch — the highlight was a Shapes path whose width is in
+**data units**, so it ballooned as the new zoom-to-bead magnified the view, while the base "Bead
+Trajectories" layer (a napari Tracks layer) has its width in **screen pixels** and stays constant.
+
+- **The picked track is now a Tracks layer**, the same type as the base, so its `tail_width` is in
+  screen pixels and no longer fattens at deep zoom. The width is exactly **2× the base**
+  (`_PICKED_TRACK_TAIL_WIDTH = 2 · _BASE_TRACK_TAIL_WIDTH`, both new constants) — bold enough to stand
+  out, thin enough to read the detail — which is what the user asked for by eye.
+- **Still orange, still a separate overlay.** It colours via a registered flat-orange colormap
+  (`#ff8c00`) rather than recolouring the base layer, so a user's own track colouring is never
+  clobbered by a pick. `tail_length`/`head_length` span the whole track so it draws fully at any
+  frame, including the bead's first frame. Falls back to a thin Shapes path only if `add_tracks` is
+  unavailable.
+### Notes
+- Headless-tested: the picked track is a Tracks layer at 2× the base width, orange, and spans its full
+  frame range. **The zoom-stable feel is UI-coupled** — confirm the line reads well at the zoom-to-bead.
+
 ## [1.6.104] - 2026-07-18
 ### Changed — **A VPT plot click now goes to the bead; the pulse is gone.**
 From the viewer, on the picked track: the opacity slider oscillated continuously with no visible glow,

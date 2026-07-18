@@ -130,6 +130,11 @@ class _Viewer:
         self.layers.append(l)
         return l
 
+    def add_tracks(self, data, **kw):
+        l = _Layer(data, **kw)
+        self.layers.append(l)
+        return l
+
 
 def _hub(viewer):
     from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
@@ -262,3 +267,52 @@ def test_NO_pulse_timer_is_armed_by_a_pick(immediate_qtimer):
 
     running = [t for t in immediate_qtimer if t.started and not t.stopped]
     assert running == [], f'{len(running)} timers armed — the pulse was not removed'
+
+
+# ── the picked track: same layer type as the base, 2× its width (1.6.105) ─────
+#
+# The overlay was a Shapes path with a data-unit `edge_width`, which ballooned at the deep
+# zoom-to-bead and buried the trajectory detail. It is a Tracks layer now — same type as the base
+# "Bead Trajectories", so its width is in screen pixels and stays put across zoom — at 2× the base
+# width so it stands out while still reading as a fine line. (Viewer feedback.)
+
+def test_the_picked_track_width_is_TWICE_the_base(immediate_qtimer):
+    from pycat.toolbox.vpt_ui import VideoParticleTrackingUI as V
+    assert V._PICKED_TRACK_TAIL_WIDTH == 2.0 * V._BASE_TRACK_TAIL_WIDTH
+
+
+def test_the_picked_track_is_a_TRACKS_layer_at_the_picked_width(immediate_qtimer):
+    """Not a Shapes path (data-unit width that balloons on zoom) — a Tracks layer, `tail_width` in
+    screen pixels, so the deep zoom-to-bead does not fatten it over the detail."""
+    v = _Viewer(ndim=3)
+    hub = _hub(v)
+    hub._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
+    track = v.layers['Picked track']
+    assert 'tail_width' in track.kw, 'the picked track is not a Tracks layer'
+    assert track.kw['tail_width'] == hub._PICKED_TRACK_TAIL_WIDTH
+
+
+def test_the_picked_track_is_ORANGE(immediate_qtimer):
+    """The user confirmed the orange; a Tracks layer colours via a registered colormap name."""
+    v = _Viewer(ndim=3)
+    _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
+    track = v.layers['Picked track']
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+    name = track.kw.get('colormap')
+    assert name in AVAILABLE_COLORMAPS, f'picked-track colormap {name!r} is not registered'
+    # a flat orange ramp — first stop is #ff8c00
+    stop = AVAILABLE_COLORMAPS[name].colors[0]
+    assert tuple(round(float(c), 2) for c in stop[:3]) == (1.0, 0.55, 0.0)
+
+
+def test_the_picked_track_spans_the_WHOLE_track_at_any_frame(immediate_qtimer):
+    """`tail_length`/`head_length` cover the track's frame span, so it is fully drawn even at the
+    bead's first frame (a default Tracks layer would show almost nothing there)."""
+    v = _Viewer(ndim=3)
+    _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
+    track = v.layers['Picked track']
+    span = int(_FRAMES.max() - _FRAMES.min()) + 1
+    assert track.kw['tail_length'] >= span and track.kw['head_length'] >= span
