@@ -1859,6 +1859,31 @@ class VideoParticleTrackingUI:
         except Exception:
             pass
 
+    def restore_session_view(self):
+        """Rebuild the clickable VPT view from restored dataframes, after a session load.
+
+        The method is reopened with the data repository already populated (``vpt_tracks`` etc. restored
+        by the loader), so this redraws what a fresh **Compute MSD & Viscosity** would: the trajectory
+        + pickable layers, and the MSD/moduli plots. It reuses ``_on_rheology`` — the exact handler the
+        Compute button runs, which reads ``vpt_tracks`` from the repository — so there is no second,
+        divergent render path. Returns True if it rebuilt anything.
+
+        The slow part of VPT (detection + linking) produced ``vpt_tracks`` and is NOT redone; recomputing
+        the MSD from the restored tracks is seconds. Parameters come back at their defaults (the frame
+        interval auto-fills from the source metadata); a user who needs the session's exact bead radius/
+        temperature can set them and re-Compute.
+        """
+        try:
+            tracks = self._dr().get('vpt_tracks')
+            if tracks is None or getattr(tracks, 'empty', True):
+                return False
+            self._rebuild_track_layers(tracks)
+            self._on_rheology()               # reads vpt_tracks, computes MSD, draws the plots
+            return True
+        except Exception as exc:
+            print(f"[PyCAT VPT] session view restore failed: {exc}")
+            return False
+
     def _reveal_track_in_viewer(self, track_id):
         """Plot -> data brushing: clicking a track in the MSD plot marks that exact
         bead in the napari viewer — traces its trajectory, and surfaces its row.

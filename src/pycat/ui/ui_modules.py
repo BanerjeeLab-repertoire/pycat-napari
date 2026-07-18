@@ -1778,6 +1778,30 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         self._add_widget_to_layout_or_dock(plot_widget, layout, separate_widget, "Plotting Widget")
 
 
+# ── Session restore: which method to reopen, and how to rebuild its view ─────────────────────
+#
+# `active_method` in the manifest is the UI class name that was open when the session was saved. On
+# load, `_on_load` maps it to the `_switch_to_*` method that reopens it. A session saved before
+# `active_method` was recorded has none, so the method is inferred from a signature dataframe instead.
+_SESSION_METHOD_SWITCH = {
+    'VideoParticleTrackingUI': '_switch_to_vpt_analysis',
+    'CondensateAnalysisUI': '_switch_to_condensate_analysis',
+    'InVitroFluorUI': '_switch_to_invitro_fluor_analysis',
+    'TimeSeriesInVitroFluorUI': '_switch_to_ts_invitro_fluor_analysis',
+    'FRAPUI': '_switch_to_frap_analysis',
+    'DropletFusionUI': '_switch_to_fusion_analysis',
+    'TemperatureDependentUI': '_switch_to_temperature_analysis',
+    'FDCurveUI': '_switch_to_fd_curve_analysis',
+    'InVitroBFUI': '_switch_to_invitro_bf_analysis',
+    'ZStackSegmentationUI': '_switch_to_zstack_analysis',
+}
+
+# A restored dataframe that identifies the method, for sessions predating `active_method`.
+_SESSION_METHOD_BY_DATA = {
+    'vpt_tracks': 'VideoParticleTrackingUI',
+}
+
+
 class AnalysisMethodsUI(BaseUIClass):
     """
     A user interface (UI) class designed to manage and switch between different analysis
@@ -4461,23 +4485,35 @@ class MenuManager:
             for p, reason in result["skipped"]:
                 print(f"[PyCAT Session] Skipped {p.name}: {reason}")
 
-            # If a VPT tracks table was restored, rebuild its trajectory layers so
-            # the session comes back to a clickable/brushable state (the VPT panel
-            # must be open — that is where the rebuild helper lives).
+            # ── Reopen the analysis method and rebuild its VIEW, not just the data ──────────
+            #
+            # Restoring the dataframes into the repository is not "restoring the session": the user
+            # expects the method they were in to reopen with its plots/tables/layers, not an empty
+            # panel. So reopen the recorded method (or, for a session saved before the method was
+            # recorded, infer it from the restored data) and ask it to rebuild its view. Switching
+            # methods PRESERVES the data repository, so the reopened method sees the restored data.
             try:
-                if 'vpt_tracks' in result["loaded_dfs"]:
-                    _vpt = getattr(self, 'current_analysis_ui', None)
-                    if _vpt is not None and hasattr(_vpt, '_rebuild_track_layers'):
-                        _vpt._rebuild_track_layers(result["loaded_dfs"]['vpt_tracks'])
-                        napari_show_info(
-                            "VPT tracks restored — click 'Compute MSD & "
-                            "Viscosity' in the VPT panel to regenerate the plots.")
+                _active = result.get('active_method')
+                if not _active:
+                    for _dkey, _cls in _SESSION_METHOD_BY_DATA.items():
+                        if _dkey in result["loaded_dfs"]:
+                            _active = _cls
+                            break
+                _switch = _SESSION_METHOD_SWITCH.get(_active)
+                if _switch is not None:
+                    getattr(self.central_manager.analysis_methods_ui, _switch)()
+                    _cur = getattr(self.central_manager.analysis_methods_ui,
+                                   'current_analysis_ui', None)
+                    if _cur is not None and hasattr(_cur, 'restore_session_view') \
+                            and _cur.restore_session_view():
+                        napari_show_info(f"Session restored — the analysis view was rebuilt.")
                     else:
-                        napari_show_info(
-                            "VPT tracks restored to the session. Open the Video "
-                            "Particle Tracking method to rebuild and view them.")
+                        napari_show_info("Session data restored; reopen the analysis "
+                                         "method to rebuild its view.")
+                elif _active:
+                    napari_show_info(f"Session data restored. Reopen '{_active}' to rebuild its view.")
             except Exception as _ve:
-                print(f"[PyCAT Session] VPT layer rebuild skipped: {_ve}")
+                print(f"[PyCAT Session] method reopen/restore failed: {_ve}")
 
             # Clicking Load LOADS and then CLOSES — the completion is reported by the toast above, so
             # the dialog has done its job. Cancel is the only way to dismiss WITHOUT loading. (Before,

@@ -90,3 +90,45 @@ def test_load_session_passes_the_managers_file_io(monkeypatch):
         'load_session no longer accepts central_manager — the lazy source-image path is unreachable '
         'again and a large stack will OOM the load'
     )
+
+
+# ── auto-restore: reopen the method + rebuild its view ───────────────────────────
+
+def test_load_session_SURFACES_the_recorded_active_method(tmp_path):
+    """The loader hands the caller the method to reopen, so a load lands back at the working view."""
+    import json
+    (tmp_path / 'pycat_session.json').write_text(json.dumps({
+        'manifest_version': 3, 'active_method': 'VideoParticleTrackingUI',
+        'source_image': {'path': None}, 'layers': [], 'dataframes': [],
+    }), encoding='utf-8')
+
+    class _DI:
+        data_repository = {}
+    result = sl.load_session(tmp_path, _Viewer(), _DI())
+    assert result['active_method'] == 'VideoParticleTrackingUI'
+
+
+def test_a_manifest_without_active_method_returns_None(tmp_path):
+    """Back-compat: a session saved before the method was recorded has none — the caller infers it."""
+    import json
+    (tmp_path / 'pycat_session.json').write_text(json.dumps({
+        'manifest_version': 2, 'source_image': {'path': None},
+        'layers': [], 'dataframes': [],
+    }), encoding='utf-8')
+
+    class _DI:
+        data_repository = {}
+    assert sl.load_session(tmp_path, _Viewer(), _DI())['active_method'] is None
+
+
+def test_the_method_REGISTRY_wires_VPT_correctly():
+    from pycat.ui import ui_modules
+    assert ui_modules._SESSION_METHOD_SWITCH['VideoParticleTrackingUI'] == '_switch_to_vpt_analysis'
+    # a session predating active_method infers VPT from its tracks table
+    assert ui_modules._SESSION_METHOD_BY_DATA['vpt_tracks'] == 'VideoParticleTrackingUI'
+
+
+def test_VPT_ui_has_a_restore_hook():
+    """The reopened method must expose `restore_session_view` for the loader to call."""
+    from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
+    assert hasattr(VideoParticleTrackingUI, 'restore_session_view')

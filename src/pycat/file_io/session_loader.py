@@ -449,8 +449,14 @@ def load_session(
         if progress_callback:
             progress_callback(i + 1, n_total)
 
+    # The analysis method the session was in (if the manifest recorded it), so the caller can reopen
+    # it and rebuild its view. Absent for sessions saved before this was recorded — the caller infers
+    # it from the restored data instead.
+    active_method = (_manifest or {}).get('active_method')
+
     return dict(
         loaded_layers=loaded_layers,
         loaded_dfs=loaded_dfs,
         skipped=skipped,
+        active_method=active_method,
     )

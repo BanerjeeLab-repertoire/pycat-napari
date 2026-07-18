@@ -1,27 +1,27 @@
-## [1.6.102] - 2026-07-18
-### Fixed — **Session load: the source image no longer OOMs, and the dialog closes on load (viewer-reported).**
-Loading a session reported **"0 layers"** and the terminal showed `Unable to allocate 5.79 GiB for an
-array with shape (1000, 1080, 1440) float32`. The source is a long time-series, and
-`_load_source_image_into_viewer` was reading it **whole** with `tifffile.imread` because its lazy
-opener (`open_image_auto`, frame-by-frame) was unreachable — it looked for `file_io` on
-`data_instance.central_manager`, which the loaded `BaseDataClass` does not carry, so it silently fell
-to the eager read and ran out of memory. That failure is what left the session with no layers.
+## [1.6.103] - 2026-07-18
+### Added — **Session auto-restore: a load reopens the analysis method and rebuilds its view.**
+Loading a session restored the dataframes into the repository but left an empty panel — the user had
+to reopen the method and re-Compute by hand. Now a load lands back at the working state.
 
-`file_io` is now passed in by the caller (`load_session(..., central_manager=…)`), so the lazy opener
-is used. The fallbacks are lazy too: a memory-mapped read (no full allocation) before, only as a last
-resort, the eager read.
-
-**The Load dialog now closes on load.** Clicking Load loaded but left the dialog open, so the user had
-to click Cancel to dismiss it — reading as "did it even work?". Load now loads and closes (the toast
-reports what happened); Cancel is the only way to dismiss without loading.
+- **The active method is recorded on save.** The manifest gains `active_method` (the open analysis
+  UI's class name), written by `write_session_outputs`.
+- **The loader surfaces it**, and `_on_load` reopens that method via its `_switch_to_*` handler.
+  Switching methods **preserves the data repository**, so the reopened method sees the restored data.
+  A session saved before this was recorded has no `active_method`; the method is then inferred from a
+  signature dataframe (`vpt_tracks` → VPT), so existing sessions restore too.
+- **The reopened method rebuilds its view.** `VideoParticleTrackingUI.restore_session_view` rebuilds
+  the trajectory + pickable layers and calls `_on_rheology` — the exact handler the **Compute MSD &
+  Viscosity** button runs, which reads `vpt_tracks` from the repository — so the MSD/moduli plots come
+  back through the one real render path, not a divergent copy. The slow part of VPT (detection +
+  linking) is not redone; recomputing the MSD from the restored tracks is seconds.
 ### Notes
-- The lazy wiring is tested headlessly (given a `file_io`, the lazy opener is used and the eager read
-  is never reached; without one, memmap precedes any full allocation). That the lazy layer displays
-  and scrubs still needs a viewer.
-- **Not fixed here — the larger restoration:** the session still does not reopen the analysis method or
-  rebuild its plots/tables. The manifest does not record which method was active, and the VPT
-  track-layer rebuild only fires when the VPT panel is already open. So the dataframes come back but
-  the working view does not. That is a real feature (record the active method; reopen it; have it
-  rebuild from the restored data), needs design + viewer verification, and is the next session-load
-  piece.
+- Headless-tested: the manifest records/surfaces `active_method`, back-compat returns None (inferred
+  from data), the method registry wires VPT correctly, and the restore hook exists. **The end-to-end
+  reopen → rebuild → plots is UI-coupled and needs a viewer** — this is the part to confirm: load the
+  session and check the VPT method reopens with its tracks clickable and its plots drawn.
+- Parameters return at their defaults (frame interval auto-fills from the source metadata); a user who
+  needs the session's exact bead radius/temperature sets them and re-Computes. Restoring the exact
+  recorded parameters is a later refinement.
+- Only VPT has a `restore_session_view` so far; other methods reopen (data preserved) and show a
+  "reopen to rebuild" toast until they gain the same hook — additive, method by method.
 

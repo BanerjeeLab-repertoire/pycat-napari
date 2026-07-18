@@ -342,6 +342,26 @@ def _save_layer(central_manager, data, layer_type: str, save_name: str, safe_nam
         with atomic_write(f"{save_name}_{safe_name}.npz") as _tmp:
             np.savez_compressed(_tmp, data=np.asarray(data))
 
+def _write_session_manifest(session_dir, central_manager, source_path,
+                            manifest_layers, manifest_dfs, stem):
+    """Write the restore manifest, recording the OPEN ANALYSIS METHOD alongside the data.
+
+    The source image is REFERENCED by path, never copied. ``active_method`` — the UI class currently
+    open — is what lets Load Session reopen that method and rebuild its view (plots/tables), instead of
+    dropping the restored dataframes into an empty panel.
+    """
+    from pycat.file_io import session_manifest as _sm
+    _cur = getattr(getattr(central_manager, 'analysis_methods_ui', None),
+                   'current_analysis_ui', None)
+    active_method = _cur.__class__.__name__ if _cur is not None else None
+    _sm.write_manifest(
+        session_dir, source_path=source_path,
+        data_repository=central_manager.active_data_class.data_repository,
+        layer_entries=manifest_layers, dataframe_entries=manifest_dfs,
+        extra={'stem': stem, 'active_method': active_method})
+    print(f"[PyCAT] Session saved to {session_dir}")
+
+
 def write_session_outputs(central_manager, layers_by_name, selected_layers,
                           selected_dataframes, dataframes, file_metadata,
                           save_name, session_dir, source_path, stem):
@@ -446,18 +466,10 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
             debug_log("file_io: metadata JSON export failed", _mde)
 
         # Write the session manifest so Load Session can restore this state.
-        # The source image is REFERENCED by path, never copied.
         try:
             if session_dir is not None:
-                _dr = central_manager.active_data_class.data_repository
-                _sm.write_manifest(
-                    session_dir,
-                    source_path=source_path,
-                    data_repository=_dr,
-                    layer_entries=manifest_layers,
-                    dataframe_entries=manifest_dfs,
-                    extra={'stem': stem})
-                print(f"[PyCAT] Session saved to {session_dir}")
+                _write_session_manifest(session_dir, central_manager, source_path,
+                                        manifest_layers, manifest_dfs, stem)
         except Exception as _me:
             debug_log("file_io: session manifest write failed", _me)
 
