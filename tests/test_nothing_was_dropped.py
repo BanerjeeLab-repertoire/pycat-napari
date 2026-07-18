@@ -73,6 +73,25 @@ _DELIBERATE = {
     # to `_connect_nearest_curve_click` + `_apply_pick`.
     'analysis_plots.py::_on_pick',
 
+    # 1.6.106 — session load moved OFF the Qt thread. `load_session` was one 149-line function that
+    # read/decoded every file AND created the napari layers in one loop — so it could not be run on a
+    # worker (layer creation off the main thread is a crash). It is split: `_read_session_payload`
+    # (pure decode + CSV reads, no viewer — the slow half that now runs on a QThread) and
+    # `_apply_session_payload` (the `viewer.add_*` + repository writes, on the caller's thread).
+    # `load_session` is now the thin orchestrator that runs the read via `qt_worker.run_with_progress`
+    # and applies the result. Nothing was dropped — the whole body moved into the two helpers, and the
+    # synchronous round trip is pinned by `test_session_load_threading` and the existing
+    # `test_session_load_lazy_image` suite.
+    'session_loader.py::load_session',
+
+    # 1.6.106 — `_prog`, the inline progress-callback closure in `_open_session_loader._on_load`, was
+    # removed. It drove an in-dialog QProgressBar from the (blocked) main thread — the bar the 1.6.81/82
+    # rollout added, which advanced while the window still said "Not Responding". The worker now owns a
+    # modal QProgressDialog that keeps the window painting, so a second in-dialog bar would be two bars
+    # for one operation (the UX trap the roadmap flagged); the inline bar and its `_prog` driver are
+    # retired together.
+    'ui_modules.py::_prog',
+
     # 1.6.104 — the picked-bead PULSE was removed. `_pulse_layer` armed a QTimer that oscillated the
     # ring's size/opacity to draw the eye. But the ring is per-frame — present only on the bead's own
     # frame — so scrubbing away from that frame left NOTHING to pulse while the opacity slider churned

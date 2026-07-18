@@ -4349,6 +4349,7 @@ class MenuManager:
         result = load_session(
             chosen['dir'], self.central_manager.viewer,
             self.central_manager.active_data_class,
+            central_manager=self.central_manager, use_worker=True,
         )
         napari_show_info(
             f"Restored session '{chosen['name']}': "
@@ -4359,7 +4360,7 @@ class MenuManager:
         """Open a folder browser to select a PyCAT output directory and reload."""
         from PyQt5.QtWidgets import (QFileDialog, QDialog, QVBoxLayout,
                                       QListWidget, QPushButton, QLabel,
-                                      QHBoxLayout, QCheckBox, QProgressBar,
+                                      QHBoxLayout, QCheckBox,
                                       QAbstractItemView)
         from pathlib import Path
         from napari.utils.notifications import (
@@ -4419,12 +4420,10 @@ class MenuManager:
         group_list.selectAll()
         vl.addWidget(group_list)
 
-        prog_bar    = QProgressBar(); prog_bar.setVisible(False)
         status_lbl  = QLabel("")
         status_lbl.setWordWrap(True)
 
         status_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
-        vl.addWidget(prog_bar)
         vl.addWidget(status_lbl)
 
         btn_row    = QHBoxLayout()
@@ -4444,33 +4443,26 @@ class MenuManager:
                 napari_show_warning("No images selected.")
                 return
 
-            all_files = [
-                info for stem, files in groups.items()
-                if stem in selected_stems
-                for info in files
-            ]
-            n = len(all_files)
-            prog_bar.setMaximum(n); prog_bar.setValue(0)
-            prog_bar.setVisible(True); load_btn.setEnabled(False)
+            load_btn.setEnabled(False)
+            status_lbl.setText("Loading session…")
 
             data_instance = self.central_manager.active_data_class
 
-            def _prog(done, total):
-                prog_bar.setValue(done)
-                status_lbl.setText(f"Loading {done}/{total}…")
-
-            # `stems=selected_stems` — the fix. These were computed above, used to size the
-            # progress bar, and then **thrown away**: `load_session(folder, ...)` re-scanned the
-            # whole folder, so selecting two images out of eight loaded all eight. The bar carried
-            # the tell — its maximum was the SELECTED count while the load reported over ALL files.
+            # ── Off the Qt thread, behind a modal progress dialog ──────────────────────────────
+            #
+            # `use_worker=True` runs the read/decode on a QThread while a modal QProgressDialog keeps
+            # the window painting — the "Python is not responding" freeze otherwise (the 1.6.81/82
+            # bars made the wait visible, not shorter). The worker owns that dialog, so the inline
+            # `prog_bar` is retired here: two bars for one operation is the UX trap the roadmap
+            # flagged. `stems=selected_stems` loads exactly the user's selection (the folder re-scan
+            # used to ignore it and load all eight of eight).
             result = load_session(
                 folder, self.central_manager.viewer,
-                data_instance, progress_callback=_prog,
-                stems=selected_stems,
-                central_manager=self.central_manager,
+                data_instance, stems=selected_stems,
+                central_manager=self.central_manager, use_worker=True,
             )
 
-            prog_bar.setVisible(False); load_btn.setEnabled(True)
+            load_btn.setEnabled(True)
             n_layers = len(result["loaded_layers"])
             n_dfs    = len(result["loaded_dfs"])
             n_skip   = len(result["skipped"])

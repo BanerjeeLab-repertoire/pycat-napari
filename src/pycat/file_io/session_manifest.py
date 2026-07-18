@@ -245,9 +245,13 @@ def discover_sessions(folder, max_depth=1):
     return found
 
 
-def restore_dataframes_from_manifest(manifest, folder, data_repository):
-    """Load each dataframe file recorded in the manifest back into the repo.
-    Returns the dict of restored {key: DataFrame}."""
+def read_dataframes_from_manifest(manifest, folder):
+    """Read each dataframe file recorded in the manifest. Returns ``{key: DataFrame}``.
+
+    Pure I/O — it does NOT store into any repository, so it is safe to call **off the Qt thread**
+    (the session loader reads the CSVs on a worker and stores them on the main thread). The reading
+    is the slow part; the storing is a dict write.
+    """
     folder = Path(folder)
     out = {}
     for entry in (manifest.get('dataframes') or []):
@@ -259,9 +263,15 @@ def restore_dataframes_from_manifest(manifest, folder, data_repository):
         if not fpath.exists():
             continue
         try:
-            df = pd.read_csv(fpath)
-            data_repository[key] = df
-            out[key] = df
+            out[key] = pd.read_csv(fpath)
         except Exception:
             continue
+    return out
+
+
+def restore_dataframes_from_manifest(manifest, folder, data_repository):
+    """Load each dataframe file recorded in the manifest back into the repo.
+    Returns the dict of restored {key: DataFrame}."""
+    out = read_dataframes_from_manifest(manifest, folder)
+    data_repository.update(out)
     return out

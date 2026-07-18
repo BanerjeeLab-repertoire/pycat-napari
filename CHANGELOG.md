@@ -1,3 +1,37 @@
+## [1.6.106] - 2026-07-18
+### Changed — **Session load runs off the Qt thread — no more "Not Responding".**
+Loading a session lagged the UI (you reported it; Windows shows "Python is not responding" on a longer
+one) because `load_session` did its slow work — `tifffile.imread` per derived layer, `pd.read_csv` per
+table — on the Qt main thread. The 1.6.81/82 progress bars made that wait *visible* without making it
+*shorter*. This is the other half: the read moves to a worker thread while a modal dialog keeps the
+window painting.
+
+- **`load_session` is split into a read half and an apply half.** `_read_session_payload` does the
+  decode and the CSV reads and touches **no viewer** (structurally — it has no viewer parameter), so it
+  is safe to run on a `QThread`. `_apply_session_payload` creates the napari layers and writes the data
+  repository, always on the caller's thread — because `viewer.add_*` off the main thread is a crash,
+  not a freeze. `load_session` orchestrates the two via `pycat.utils.qt_worker.run_with_progress`.
+- **The UI wiring** (`_open_session_loader`, and the quick "restore latest" path) passes
+  `use_worker=True`. The worker owns a modal `QProgressDialog`; the old in-dialog progress bar is
+  retired so there aren't two bars for one operation. Headless callers and tests default to
+  `use_worker=False` (synchronous) and are unaffected — `run_with_progress` also falls back to
+  synchronous when there is no running Qt app.
+- **`qt_worker.run_with_progress`** (new, `pycat/utils/qt_worker.py`) runs a function on a `QThread` and
+  returns its value **on the caller's thread**, re-raising exceptions there so existing `try/except`
+  still works. It deliberately refuses a callback/future API so nobody is tempted to create a layer in
+  the worker. Two subtle bugs in the pattern it replaces are fixed in it: a fast worker finishing before
+  `exec_()` is entered (deadlock), and a signal-to-plain-function running the slot on the worker thread
+  (off-main widget touch). Both were headlessly tested.
+### Notes
+- Headless-tested: the read half takes no viewer and decodes into a payload; the apply half is the only
+  half that calls `viewer.add_*`; the synchronous round trip is unchanged; the worker helper's deadlock
+  and thread-affinity fixes. **The off-thread feel needs a viewer** — confirm a real multi-file session
+  restore no longer says "Not Responding" and the modal progress dialog advances while the window stays
+  responsive.
+- This also stages `load_session` (was 149 lines, over the complexity ceiling) into per-phase helpers —
+  the prerequisite the roadmap called out either way. The same `qt_worker` helper now exists to move the
+  per-widget `materialize_stack` freezes off-thread next (the other half of the same fix).
+
 ## [1.6.105] - 2026-07-18
 ### Changed — **The picked-track highlight is a Tracks layer at 2× the base width.**
 From the viewer: after zooming to the bead, the picked-track line was still too thick to read the
