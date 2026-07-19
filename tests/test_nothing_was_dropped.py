@@ -128,6 +128,30 @@ _DELIBERATE = {
     'vpt_ui.py::_add_tracking',
     'vpt_ui.py::_add_microrheology',
 
+    # 1.6.138 — the napari-facing layer/overlay/reveal methods MOVED from vpt_ui.py into
+    # `vpt/napari_adapter.py` as `_VptNapariMixin` (vpt_ui decomposition, step 3). Behaviour-preserving
+    # move; bodies unchanged. (`_on_click` is the nested pick handler defined inside
+    # `_add_pickable_bead_points`, so it moved with it.) They exist now as `napari_adapter.py::<name>`.
+    'vpt_ui.py::_add_pickable_bead_points',
+    'vpt_ui.py::_reveal_track_in_viewer',
+    'vpt_ui.py::_on_click',
+
+    # 1.6.138 — the track-table methods MOVED from vpt_ui.py into `vpt/table_adapter.py` as
+    # `_VptTableMixin` (vpt_ui decomposition, step 3). Behaviour-preserving move; bodies unchanged.
+    # (`_on_row` / `_closeEvent` are nested handlers defined inside `_show_per_track_table`, so they
+    # moved with it.) They exist now as `table_adapter.py::<name>`.
+    'vpt_ui.py::_show_per_track_table',
+    'vpt_ui.py::_highlight_track_in_table',
+    'vpt_ui.py::_select_track',
+    'vpt_ui.py::_on_row',
+    'vpt_ui.py::_closeEvent',
+
+    # 1.6.138 — the MSD-plot methods MOVED from vpt_ui.py into `vpt/msd_adapter.py` as `_VptMsdMixin`
+    # (vpt_ui decomposition, step 3). Behaviour-preserving move; bodies unchanged. They exist now as
+    # `msd_adapter.py::<name>`.
+    'vpt_ui.py::_highlight_track_in_plot',
+    'vpt_ui.py::_update_tracklen_hist',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

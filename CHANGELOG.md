@@ -1,3 +1,34 @@
+## [1.6.138] - 2026-07-19
+### Changed — **vpt_ui decomposition, step 3: three more adapter modules — `vpt_ui.py` 1778 → 1139 lines (2458 → 1139 overall, −54%).**
+The rest of the decomposition. Three more responsibility groups moved out of `vpt_ui.py` into the `vpt/`
+package as behaviour-preserving mixins, taking the file from the panels-step 1778 to **1139 lines — a
+54% reduction from the original 2458**, more than double the ≥25% target. `vpt_ui.py` is now close to
+construction, wiring, and composition only.
+
+- **`vpt/napari_adapter.py`** (`_VptNapariMixin`) — the napari-facing layer/overlay/reveal methods:
+  Tracks/Points layer build, the picked-bead ring, reveal + navigate + camera, session-view restore.
+- **`vpt/table_adapter.py`** (`_VptTableMixin`) — the track-table methods: per-track table build,
+  row↔entity, table selection callback.
+- **`vpt/msd_adapter.py`** (`_VptMsdMixin`) — the MSD-plot methods: per-track highlight/hit-testing,
+  track-length histogram, plot selection callback.
+### Notes
+- **Behaviour-preserving moves, not rewrites** — every method body is byte-for-byte unchanged; only the
+  module changed, and `VideoParticleTrackingUI` composes the four mixins. Verified up front that each
+  moved group uses only `self` + imports (zero module-level `vpt_ui` names), and each new module copies
+  `vpt_ui`'s import block verbatim, so no name can be missing.
+- **Every pre-existing VPT/selection/brushing test passes unmodified.** Only the two bookkeeping ratchets
+  were updated as designed: the drop guard's `_DELIBERATE` records the moved functions (it keys by
+  filename, and nested pick/row/close handlers moved with their parents), and the `vpt_ui.py` ceiling is
+  lowered to **1139**. Full `pytest -m core` green.
+- **Deliberately NOT rewritten here:** formalising the msd/table adapters as standalone `SelectionView`s
+  (`view_id`/`apply_selection`/`close`) covered by the shared contract suite is the interaction-layer §8
+  *rewrite*, out of scope for a move. The MSD brushing stays its registry-based model. **In-app
+  verification of the live VPT widget is still needed** (no headless test exercises the constructed
+  widget — the VPT tests instantiate a bare subclass).
+- Files: `src/pycat/toolbox/vpt_ui.py`, `src/pycat/toolbox/vpt/napari_adapter.py`,
+  `src/pycat/toolbox/vpt/table_adapter.py`, `src/pycat/toolbox/vpt/msd_adapter.py`,
+  `tests/test_nothing_was_dropped.py`, `tests/test_complexity_budget.py`.
+
 ## [1.6.137] - 2026-07-19
 ### Changed — **vpt_ui decomposition, step 2: the panel builders MOVE out — `vpt_ui.py` 2458 → 1778 lines (−28%).**
 The measurable win the external audit asked for: it charged that the new abstractions were being added
