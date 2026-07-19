@@ -1,3 +1,37 @@
+## [1.6.135] - 2026-07-19
+### Added — **Comparative phenotyping inc 3: cross-condition figures on the consolidated table, replicate-honest by construction.**
+The visible payoff of the arc: figures that compare conditions, built on increment 2's consolidated long
+table. Existing `comparative_stats.py` already carried the honest replicate-level testing; this completes
+`comparative_figures.py` to the increment-3 contract — three figure types, each returning
+`(Figure, summary_df)` so the numbers behind a figure are always inspectable.
+
+- **`condition_comparison`** — the superplot: objects (light) + per-unit means (dark) + a box/violin per
+  condition. **Descriptive by default** — a p-value appears only when `test=True`, and then it comes from
+  `compare_conditions` (replicate-level, named, refusing loudly below the minimum).
+- **`dose_response`** — measurement vs a numeric condition field; unit means ± SEM (over units, not
+  objects) at each dose.
+- **`measurement_matrix`** — the new figure type: a small-multiples grid, one condition-comparison panel
+  per measurement, for scanning several at once.
+- **`aggregate_to_unit`** — the anti-pseudoreplication step, generalised to multi-field conditions/units;
+  the biological unit is **declared** (`unit_cols`), defaulting to the image when no replicate is named,
+  never inferred from data shape.
+- Every summary frame reports **n at each level** (`n_objects`, `n_units`) and the unit-level SEM —
+  deliberately NOT the object-level SEM, which is the pseudoreplicated lie the module refuses.
+### Notes
+- **Pseudoreplication, refused by construction — and proven, not commented:** the headline test builds
+  450 objects from 3 replicates and asserts the reported n is 3 and the error bar is *materially wider*
+  than the naive object-level SEM (measured ~8×). Other `core` tests: the condition effect is recovered;
+  a requested test names its unit; a condition with too few units gets a stated refusal, not a p-value.
+- **Part D (brushing) is blocked on prerequisites, deliberately not faked:** routing a click to the
+  `SelectionService` needs (1) the consolidated table to carry a resolvable entity id per object row (an
+  increment-2 extension) and (2) the deferred cohort/typed-target `SelectionState` (interaction-layer
+  §3/§4). Per the spec, selection is left unwired with the seam documented rather than built as a second
+  path. The figures already show the single-vs-cohort distinction visually. A **UI entry point** (read
+  the consolidated CSV, render) is the remaining viewer-coupled follow-on.
+- With Parts A–C done, **comparative-phenotyping increment 3's library is complete**; heatmap/PCA/
+  clustering profiling is deliberately declined per the spec. Full `pytest -m core` green.
+- Files: `src/pycat/utils/comparative_figures.py`, `tests/test_comparative_figures_inc3.py`.
+
 ## [1.6.134] - 2026-07-19
 ### Added — **Comparative phenotyping inc 2: the batch emits one tidy `consolidated_long.csv` — the keystone comparative output.**
 The `ConsolidatedLongWriter` (the long-format assembler that melts each image's per-object tables and

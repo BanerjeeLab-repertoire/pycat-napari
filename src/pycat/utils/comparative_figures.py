@@ -9,6 +9,18 @@ would contradict what the picture shows; here they agree by construction.
 
 Static matplotlib (Agg-safe, renders headlessly). Interactive brushing and a PyQtGraph render are a
 later increment — they need a viewer, and this ships the part that can be verified without one.
+
+── Selection / brushing (increment-3 Part D): blocked on prerequisites, deliberately NOT faked ──
+Routing a click on a comparative plot to the `SelectionService` needs two things this layer does not
+yet have, and the spec is explicit that a second selection path must not be built to work around them:
+  1. the consolidated long table would have to carry a resolvable **entity id** per object row (it
+     carries `image_stem`/`object_id`, not the global entity id the `SelectionService` speaks) — an
+     increment-2 extension, not this module's to invent;
+  2. clicking a replicate/condition marker selects a **cohort**, which needs the typed/cohort-target
+     `SelectionState` extension that is still deferred (interaction-layer roadmap §3/§4).
+So selection is left unwired here, with the seam noted, rather than routed through a bespoke path that
+the interaction layer would then have to unpick. The figures already make the honest single-vs-cohort
+distinction *visually* (objects light, unit means dark); wiring the click is the follow-on.
 """
 
 from __future__ import annotations
@@ -121,3 +133,184 @@ def dose_response_figure(long_df, measurement, *, dose_col, replicate_col,
     ax.legend(loc='best', fontsize=8, frameon=False)
     fig.tight_layout()
     return fig
+
+
+# ── The increment-3 spec API: (Figure, summary_df), a declared unit, n at every level ──────────
+#
+# The figure functions above return only a Figure. The spec's contract is (Figure, summary_df): the
+# numbers behind every figure must be inspectable, never figure-only. These wrap the proven internals,
+# generalise the condition/unit to MULTIPLE fields (genotype × dose), default the biological unit to
+# the image when no replicate is declared, and are **descriptive by default** — a p-value appears only
+# when `test=True` is asked for, and then it comes from `compare_conditions` (replicate-level, named,
+# refusing loudly below the minimum). The summary frame reports n at all three levels.
+
+_DEFAULT_UNIT_COLS = ('image_stem',)          # the biological unit is the image unless one is declared
+
+
+def _measurement_slice(long_df, measurement, value_col='value'):
+    df = pd.DataFrame(long_df)
+    if 'measurement' in df.columns:
+        df = df[df['measurement'] == measurement]
+    df = df.copy()
+    df[value_col] = pd.to_numeric(df.get(value_col), errors='coerce')
+    return df.dropna(subset=[value_col])
+
+
+def _composite(df, cols):
+    """Several condition (or unit) fields joined into ONE label, so grouping is field-count-agnostic."""
+    cols = [c for c in (cols or []) if c in df.columns]
+    if not cols:
+        return pd.Series(['all'] * len(df), index=df.index)
+    return df[cols].astype(str).agg(' | '.join, axis=1)
+
+
+def aggregate_to_unit(long_df, *, measurement, unit_cols, condition_cols, value_col='value'):
+    """One value per biological unit (condition × unit) — the anti-pseudoreplication step, generalised
+    to multi-field conditions/units. Returns ``[condition, unit, unit_value]``."""
+    df = _measurement_slice(long_df, measurement, value_col)
+    df = df.assign(condition=_composite(df, condition_cols),
+                   unit=_composite(df, unit_cols))
+    return (df.groupby(['condition', 'unit'])[value_col].mean()
+              .reset_index().rename(columns={value_col: 'unit_value'}))
+
+
+def _condition_summary(objs, units, order=None):
+    """Per-condition descriptive numbers AT THE UNIT LEVEL: n_objects, n_units, mean, std, and the
+    unit-level SEM (std of unit means / sqrt(n_units)) — deliberately NOT the object-level SEM, which
+    is the pseudoreplicated lie this whole module exists to refuse."""
+    rows = []
+    for cond in (order or sorted(units['condition'].unique())):
+        ov = objs.loc[objs['condition'] == cond, 'value'].to_numpy()
+        uv = units.loc[units['condition'] == cond, 'unit_value'].to_numpy()
+        std = float(np.std(uv, ddof=1)) if uv.size > 1 else float('nan')
+        rows.append(dict(
+            condition=cond, n_objects=int(ov.size), n_units=int(uv.size),
+            mean=float(np.mean(uv)) if uv.size else float('nan'), std_units=std,
+            sem_units=(std / np.sqrt(uv.size)) if uv.size > 1 else float('nan')))
+    return pd.DataFrame(rows)
+
+
+def _run_unit_test(long_df, measurement, condition_cols, unit_cols, parametric):
+    """Run the honest replicate-level test on the composite condition/unit, returning the
+    ``ComparisonResult``. Reuses `compare_conditions`, so the refusal-below-minimum is inherited."""
+    df = _measurement_slice(long_df, measurement)
+    df = df.assign(_cond=_composite(df, condition_cols), _unit=_composite(df, unit_cols))
+    df['measurement'] = measurement
+    return compare_conditions(df, measurement, condition_col='_cond', replicate_col='_unit',
+                              parametric=parametric)
+
+
+def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None, kind='box',
+                         show_objects=True, show_units=True, test=False, parametric=False,
+                         order=None, ax=None):
+    """Superplot per condition + the inspectable summary. **Descriptive by default** (no p-value unless
+    ``test=True``). Returns ``(Figure, summary_df)``; the summary carries n at every level and, when a
+    test is run, its name/p-value or its stated refusal."""
+    import matplotlib
+    if ax is None:
+        matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    unit_cols = list(unit_cols) if unit_cols else list(_DEFAULT_UNIT_COLS)
+    objs = _measurement_slice(long_df, measurement)
+    objs = objs.assign(condition=_composite(objs, condition_cols))
+    units = aggregate_to_unit(long_df, measurement=measurement, unit_cols=unit_cols,
+                              condition_cols=condition_cols)
+    conditions = order or sorted(objs['condition'].unique())
+    summary = _condition_summary(objs, units, order=conditions)
+
+    result = _run_unit_test(long_df, measurement, condition_cols, unit_cols, parametric) if test else None
+    summary.attrs['test'] = None if result is None else result.test
+    summary.attrs['p_value'] = None if result is None else result.p_value
+    summary.attrs['inferential'] = bool(result and result.inferential)
+    summary.attrs['note'] = '' if result is None else result.note
+    summary.attrs['unit_cols'] = unit_cols
+
+    fig = ax.figure if ax is not None else plt.figure(figsize=(1.6 * len(conditions) + 2, 4.5))
+    ax = ax or fig.add_subplot(111)
+    rng = np.random.default_rng(0)
+    for i, cond in enumerate(conditions):
+        ov = objs.loc[objs['condition'] == cond, 'value'].to_numpy()
+        uv = units.loc[units['condition'] == cond, 'unit_value'].to_numpy()
+        if show_objects and ov.size:
+            ax.scatter(np.full(ov.size, i) + rng.uniform(-0.12, 0.12, ov.size), ov,
+                       s=6, color='#c7d3e8', alpha=0.5, zorder=1)
+        if ov.size and kind in ('box', 'violin'):
+            (ax.violinplot(ov, positions=[i], widths=0.6, showextrema=False) if kind == 'violin'
+             else ax.boxplot(ov, positions=[i], widths=0.5, showfliers=False,
+                             medianprops=dict(color='#34495e'), zorder=2))
+        if show_units and uv.size:
+            ax.scatter(np.full(uv.size, i), uv, s=70, color='#c0392b', edgecolor='white',
+                       linewidth=0.8, zorder=3, label='unit mean' if i == 0 else None)
+    ax.set_xticks(range(len(conditions)))
+    ax.set_xticklabels(conditions, rotation=20, ha='right')
+    ax.set_xlabel(' | '.join(condition_cols) if isinstance(condition_cols, (list, tuple)) else condition_cols)
+    ax.set_ylabel(measurement)
+    ax.legend(loc='best', fontsize=8, frameon=False)
+    _title = f"{measurement} — unit: {'|'.join(unit_cols)}"
+    if result is not None:
+        _title += (f" — {result.test}: p={result.p_value:.3g}" if result.inferential
+                   else " — NO TEST (see summary.note)")
+    ax.set_title(_title, fontsize=9, loc='left')
+    fig.tight_layout()
+    return fig, summary
+
+
+def dose_response(long_df, *, measurement, dose_col, condition_cols=None, unit_cols=None, ax=None):
+    """Measurement vs a numeric condition field: unit means ± SEM (over units, not objects) at each
+    dose. Returns ``(Figure, summary_df)`` — the per-dose n and mean±SEM behind the curve."""
+    import matplotlib
+    if ax is None:
+        matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    unit_cols = list(unit_cols) if unit_cols else list(_DEFAULT_UNIT_COLS)
+    units = aggregate_to_unit(long_df, measurement=measurement, unit_cols=unit_cols,
+                              condition_cols=[dose_col])
+    units = units.assign(_dose=pd.to_numeric(units['condition'], errors='coerce')).dropna(subset=['_dose'])
+
+    summary = (units.groupby('_dose')['unit_value'].agg(['mean', 'std', 'size'])
+               .reset_index().rename(columns={'_dose': dose_col, 'size': 'n_units'}))
+    summary['sem_units'] = summary['std'] / np.sqrt(summary['n_units'].clip(lower=1))
+
+    fig = ax.figure if ax is not None else plt.figure(figsize=(5, 4))
+    ax = ax or fig.add_subplot(111)
+    ax.errorbar(summary[dose_col], summary['mean'], yerr=summary['sem_units'].fillna(0),
+                marker='o', capsize=3, color='#34495e', zorder=2, label='unit mean ± SEM')
+    ax.scatter(units['_dose'], units['unit_value'], s=30, color='#c0392b', alpha=0.6, zorder=1)
+    ax.set_xlabel(dose_col)
+    ax.set_ylabel(measurement)
+    ax.set_title(f"{measurement} dose–response (n over units: {'|'.join(unit_cols)})",
+                 fontsize=9, loc='left')
+    ax.legend(loc='best', fontsize=8, frameon=False)
+    fig.tight_layout()
+    return fig, summary
+
+
+def measurement_matrix(long_df, *, measurements, condition_cols, unit_cols=None, kind='box'):
+    """A small-multiples grid: one condition-comparison panel per measurement, for scanning several at
+    once. Returns ``(Figure, summary_df)`` — the per-(measurement, condition) numbers stacked."""
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    measurements = list(measurements)
+    n = len(measurements)
+    ncol = min(3, n) or 1
+    nrow = int(np.ceil(n / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.5 * ncol, 3.8 * nrow), squeeze=False)
+
+    summaries = []
+    for k, meas in enumerate(measurements):
+        ax = axes[k // ncol][k % ncol]
+        _, s = condition_comparison(long_df, measurement=meas, condition_cols=condition_cols,
+                                    unit_cols=unit_cols, kind=kind, ax=ax)
+        s = s.copy()
+        s.insert(0, 'measurement', meas)
+        summaries.append(s)
+    for k in range(n, nrow * ncol):                 # blank any unused cells
+        axes[k // ncol][k % ncol].axis('off')
+
+    fig.tight_layout()
+    combined = pd.concat(summaries, ignore_index=True) if summaries else pd.DataFrame()
+    return fig, combined
