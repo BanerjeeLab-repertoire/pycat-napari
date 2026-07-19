@@ -48,7 +48,7 @@ import numpy as np
 from pycat.utils.general_utils import debug_log
 
 
-BACKENDS = ('matplotlib', 'seaborn', 'plotly')
+BACKENDS = ('matplotlib', 'seaborn', 'plotly', 'pyqtgraph')
 
 
 def available_backends():
@@ -81,6 +81,12 @@ def available_backends():
                 "the identity is visible even without the click.")
     except Exception as exc:
         status['plotly'] = (False, f'plotly is not installed: {exc}')
+
+    from pycat.utils.plot_backend_pyqtgraph import pyqtgraph_available
+    if pyqtgraph_available():
+        status['pyqtgraph'] = (True, '')
+    else:
+        status['pyqtgraph'] = (False, 'pyqtgraph is not installed: pip install pycat-napari[pyqtgraph]')
 
     return status
 
@@ -143,7 +149,17 @@ def scatter(df, x_col, y_col, *, backend='matplotlib', ax=None, hue=None, **kwar
     Returns ``(figure, artist, ok, message)``. **``ok`` is False when the points cannot be trusted
     to map to rows**, and brushing must not be wired — because a click that lands on the wrong
     object is worse than one that does nothing.
+
+    For ``backend='pyqtgraph'`` the first element is a Qt ``PlotWidget`` (not a matplotlib figure) and
+    the second a ``ScatterPlotItem`` — the same 4-tuple shape, and the same row-order guarantee.
     """
+    if backend == 'pyqtgraph':
+        from pycat.utils.plot_backend_pyqtgraph import pyqtgraph_available, pyqtgraph_scatter
+        if not pyqtgraph_available():
+            return None, None, False, ("pyqtgraph is not installed — the interactive backend needs "
+                                       "it (pip install pycat-napari[pyqtgraph]).")
+        return pyqtgraph_scatter(df, x_col, y_col, hue=hue, title=kwargs.get('title'))
+
     import matplotlib.pyplot as plt
 
     if ax is None:

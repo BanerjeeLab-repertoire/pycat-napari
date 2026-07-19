@@ -1,3 +1,31 @@
+## [1.6.122] - 2026-07-18
+### Added — **PyQtGraph 'explore' plot backend, built on the SelectionView contract.**
+A fourth plot backend (alongside matplotlib/seaborn/plotly): a native-Qt interactive scatter. napari
+is Qt, so a click is a Qt signal in the same event loop — no WebEngine bridge, low latency at large N.
+matplotlib stays the export/publication backend; this is the interactive *explore* one.
+
+- **`scatter(df, x_col, y_col, backend='pyqtgraph')`** returns a `PlotWidget` + `ScatterPlotItem`
+  whose points map **1:1 to df rows in order** — it runs the same `_verify_row_order` guard the other
+  backends do and REFUSES (`ok=False`) rather than wire a click that could land on the wrong object.
+  `hue` colours per group but keeps ONE scatter item in row order (never the seaborn split-into-artists
+  trap). `'pyqtgraph'` is in `BACKENDS` and `available_backends()`; the seam degrades with a message,
+  not a crash, when the extra is absent.
+- **Brushing is a proper `SelectionView`** (`PyQtGraphScatterView`): a click emits one command
+  (`source_view`), an inbound selection highlights the matching points on a *separate overlay* item
+  (O(1), not a recolour of N) under the `ProgrammaticGuard`, and `register_view` pushes current state
+  on open. It passes the **same shared adapter contract** the table and the reference view pass — no
+  second selection path. Camera-follow stays opt-in (the VPT-P3 no-loop lesson).
+- **Optional dependency** `pip install pycat-napari[pyqtgraph]`; imported lazily, so PyCAT still
+  imports and runs headlessly without it (the headless-import contract holds).
+### Notes
+- Rebuilt on `main` against the interaction-layer contract rather than merging the stale
+  `pyqtgraph-backend` branch (which predated `SelectionView` and used the old bare-callback API — the
+  exact rewrite the spec's ordering was meant to avoid). That branch is now superseded.
+- Headless-tested: availability, backend registration, graceful absence, row-order 1:1, hue single-
+  artist; and with Qt: the scatter maps to rows, an inbound selection highlights the overlay, and the
+  adapter passes the SelectionView contract. Core: 1018 passed. **A live interactive click is worth a
+  viewer once a UI opts a panel into this backend** — nothing uses it by default yet.
+
 ## [1.6.121] - 2026-07-18
 ### Added — **Interaction layer 5: a `SelectionView` adapter contract.**
 Linked views used to be bare callbacks with no shared contract, so each re-invented apply / suppress /
