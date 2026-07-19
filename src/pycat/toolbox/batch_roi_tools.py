@@ -148,7 +148,7 @@ def multi_otsu_foreground_bbox(
     return (y0, y1, x0, x1)
 
 
-@tags_layer('multi_otsu', role='mask',
+@tags_layer('multi_otsu', role='mask', inputs=('image',),
             summary='Multi-Otsu cell mask (valid on fluorescence, NOT brightfield)',
             target='cell')
 def multi_otsu_cell_mask(

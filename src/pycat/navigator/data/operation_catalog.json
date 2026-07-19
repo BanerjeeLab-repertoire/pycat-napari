@@ -4,6 +4,9 @@
     {
       "aliases": [],
       "function": "fft_bandpass",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "fft_bandpass_tools",
       "op": "bandpass",
@@ -17,6 +20,9 @@
     {
       "aliases": [],
       "function": "detect_beads_stack",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "bead_detect",
@@ -30,6 +36,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "best_slice",
@@ -43,6 +50,7 @@
     {
       "aliases": [],
       "function": "bf_background_subtract",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_bg_subtract",
@@ -56,6 +64,7 @@
     {
       "aliases": [],
       "function": "bf_enhance_contrast",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_contrast",
@@ -69,6 +78,7 @@
     {
       "aliases": [],
       "function": "bf_flat_field_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_flatfield",
@@ -82,6 +92,7 @@
     {
       "aliases": [],
       "function": "bf_halo_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_halo",
@@ -95,6 +106,9 @@
     {
       "aliases": [],
       "function": "segment_bf_condensates",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_segment",
@@ -108,6 +122,9 @@
     {
       "aliases": [],
       "function": "subtract_background",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bg_subtract",
@@ -121,6 +138,7 @@
     {
       "aliases": [],
       "function": "bg_removal_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "bg_subtract_3d",
@@ -134,6 +152,7 @@
     {
       "aliases": [],
       "function": "apply_background_subtraction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bg_subtract_clear",
@@ -147,6 +166,9 @@
     {
       "aliases": [],
       "function": "apply_bilateral_filter",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bilateral",
@@ -160,6 +182,7 @@
     {
       "aliases": [],
       "function": "custom_binary_closing",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_close",
@@ -173,6 +196,7 @@
     {
       "aliases": [],
       "function": "binary_morph_operation",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_morph",
@@ -186,6 +210,7 @@
     {
       "aliases": [],
       "function": "custom_binary_opening",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_open",
@@ -199,6 +224,9 @@
     {
       "aliases": [],
       "function": "cellpose_segmentation",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "cellpose",
@@ -212,6 +240,7 @@
     {
       "aliases": [],
       "function": "cellpose_segmentation_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "cellpose_3d",
@@ -227,6 +256,9 @@
         "equalize_adapthist"
       ],
       "function": "_register_ui_operations",
+      "inputs": [
+        "image"
+      ],
       "kind": "ui",
       "module": "tag_registry",
       "op": "clahe",
@@ -240,6 +272,9 @@
     {
       "aliases": [],
       "function": "clean_detect",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "clean_spot_detection_tools",
       "op": "clean",
@@ -253,6 +288,7 @@
     {
       "aliases": [],
       "function": "opencv_contour_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "contour_filter",
@@ -266,6 +302,7 @@
     {
       "aliases": [],
       "function": "refine_labels_with_contours",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "contour_refine",
@@ -279,6 +316,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "cropped",
@@ -294,6 +332,9 @@
         "difference_of_gaussians"
       ],
       "function": "dog_blob_enhance_2d",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dog",
@@ -307,6 +348,7 @@
     {
       "aliases": [],
       "function": "dog_blob_enhance_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dog_3d",
@@ -322,6 +364,7 @@
         "pixel_reassignment"
       ],
       "function": "deblur_by_pixel_reassignment",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dpr",
@@ -335,6 +378,7 @@
     {
       "aliases": [],
       "function": "drift_correct_com",
+      "inputs": [],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "drift_correct",
@@ -348,6 +392,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "expand_labels",
@@ -361,6 +406,7 @@
     {
       "aliases": [],
       "function": "extend_mask_to_edges",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "extend_edges",
@@ -374,6 +420,9 @@
     {
       "aliases": [],
       "function": "felzenszwalb_segmentation_and_merging",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "felzenszwalb",
@@ -387,6 +436,9 @@
     {
       "aliases": [],
       "function": "fz_segmentation_and_binarization",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "felzenszwalb_binary",
@@ -400,6 +452,7 @@
     {
       "aliases": [],
       "function": "soft_foreground_suppression",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "fg_suppress",
@@ -413,6 +466,7 @@
     {
       "aliases": [],
       "function": "apply_flatfield_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "flatfield",
@@ -426,6 +480,9 @@
     {
       "aliases": [],
       "function": "gabor_filter_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gabor",
@@ -439,6 +496,7 @@
     {
       "aliases": [],
       "function": "gabor_filter_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gabor_3d",
@@ -452,6 +510,9 @@
     {
       "aliases": [],
       "function": "gaussian_smooth_2d",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gaussian",
@@ -465,6 +526,7 @@
     {
       "aliases": [],
       "function": "gaussian_smooth_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gaussian_3d",
@@ -480,6 +542,7 @@
         "user_drawn"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "hand_drawn",
@@ -493,6 +556,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "hand_painted",
@@ -506,6 +570,7 @@
     {
       "aliases": [],
       "function": "erode_host_mask",
+      "inputs": [],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "host_erode",
@@ -519,6 +584,9 @@
     {
       "aliases": [],
       "function": "segment_host_condensate",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "host_segment",
@@ -534,6 +602,7 @@
         "binarize"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "im2bw",
@@ -547,6 +616,7 @@
     {
       "aliases": [],
       "function": "background_inpainting_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "inpaint",
@@ -560,6 +630,9 @@
     {
       "aliases": [],
       "function": "invert_image",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "invert",
@@ -573,6 +646,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "label_mask",
@@ -586,6 +660,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "labels_to_mask",
@@ -599,6 +674,9 @@
     {
       "aliases": [],
       "function": "local_contrast_normalize",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "local_contrast",
@@ -612,6 +690,9 @@
     {
       "aliases": [],
       "function": "local_thresholding_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "local_threshold",
@@ -627,6 +708,9 @@
         "laplacian_of_gaussian"
       ],
       "function": "apply_laplace_of_gauss_filter",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "log",
@@ -640,6 +724,7 @@
     {
       "aliases": [],
       "function": "apply_laplace_of_gauss_enhancement",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "log_enhance",
@@ -655,6 +740,7 @@
         "mask_logic_merge"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "mask_merge",
@@ -668,6 +754,7 @@
     {
       "aliases": [],
       "function": "cell_mask_stretching",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "mask_stretch",
@@ -681,6 +768,7 @@
     {
       "aliases": [],
       "function": "merge_mean_color",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "merge_mean_color",
@@ -694,6 +782,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "morph_gaussian",
@@ -707,6 +796,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "multi_merge",
@@ -720,6 +810,9 @@
     {
       "aliases": [],
       "function": "multi_otsu_cell_mask",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "batch_roi_tools",
       "op": "multi_otsu",
@@ -733,6 +826,7 @@
     {
       "aliases": [],
       "function": "compute_optical_density",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "optical_density",
@@ -746,6 +840,7 @@
     {
       "aliases": [],
       "function": "peak_and_edge_enhancement_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "peak_edge",
@@ -759,6 +854,7 @@
     {
       "aliases": [],
       "function": "pre_process_image",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "preprocess",
@@ -772,6 +868,7 @@
     {
       "aliases": [],
       "function": "puncta_refinement_filtering_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "puncta_filter",
@@ -785,6 +882,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "relabel",
@@ -798,6 +896,7 @@
     {
       "aliases": [],
       "function": "apply_rescale_intensity",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rescale",
@@ -811,6 +910,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "rf_classifier",
@@ -824,6 +924,7 @@
     {
       "aliases": [],
       "function": "ridge_enhance",
+      "inputs": [],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "ridge",
@@ -837,6 +938,9 @@
     {
       "aliases": [],
       "function": "rb_gaussian_background_removal",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rolling_ball",
@@ -850,6 +954,7 @@
     {
       "aliases": [],
       "function": "compute_rolling_ball_background",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rolling_ball_bg",
@@ -863,6 +968,7 @@
     {
       "aliases": [],
       "function": "assess_and_split_touching",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "split_assessed",
@@ -876,6 +982,7 @@
     {
       "aliases": [],
       "function": "split_touching_objects",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "split_watershed",
@@ -889,6 +996,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "stardist",
@@ -902,6 +1010,9 @@
     {
       "aliases": [],
       "function": "segment_subcellular_objects",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "subcellular_segment",
@@ -915,6 +1026,7 @@
     {
       "aliases": [],
       "function": "segment_subcellular_objects_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "subcellular_segment_3d",
@@ -928,6 +1040,7 @@
     {
       "aliases": [],
       "function": "enhance_stack",
+      "inputs": [],
       "kind": "toolbox",
       "module": "temporal_enhancement_tools",
       "op": "temporal_enhance",
@@ -941,6 +1054,9 @@
     {
       "aliases": [],
       "function": "tone_map",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "tone_map",
@@ -954,6 +1070,7 @@
     {
       "aliases": [],
       "function": "compute_topology_envelope",
+      "inputs": [],
       "kind": "toolbox",
       "module": "topology_tools",
       "op": "topology_envelope",
@@ -967,6 +1084,7 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "two_layer_merge",
@@ -980,6 +1098,7 @@
     {
       "aliases": [],
       "function": "upscale_image_interp",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "upscale",
@@ -993,6 +1112,7 @@
     {
       "aliases": [],
       "function": "detect_chromatin_voids",
+      "inputs": [],
       "kind": "toolbox",
       "module": "topology_tools",
       "op": "void_detect",
@@ -1006,6 +1126,7 @@
     {
       "aliases": [],
       "function": "apply_watershed_labeling",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "watershed",
@@ -1019,6 +1140,7 @@
     {
       "aliases": [],
       "function": "opencv_watershed_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "watershed_cv",
@@ -1032,6 +1154,9 @@
     {
       "aliases": [],
       "function": "wbns_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "wbns",

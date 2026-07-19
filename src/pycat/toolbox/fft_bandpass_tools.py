@@ -83,7 +83,7 @@ def fft_annular_mask(shape: tuple, low_radius: float, high_radius: float) -> np.
 # Bandpass filter
 # ---------------------------------------------------------------------------
 
-@tags_layer('bandpass', role='preprocessed',
+@tags_layer('bandpass', role='preprocessed', inputs=('image',),
             summary='FFT bandpass filter')
 def fft_bandpass(image: np.ndarray, low_cutoff: float, high_cutoff: float) -> np.ndarray:
     """

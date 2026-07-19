@@ -63,7 +63,7 @@ _K_BOLTZMANN = 1.38064852e-23
 # 1-2. Host condensate segmentation + interface erosion
 # ---------------------------------------------------------------------------
 
-@tags_layer('host_segment', role='mask',
+@tags_layer('host_segment', role='mask', inputs=('image',),
             summary='Host condensate segmentation for VPT', target='condensate')
 def segment_host_condensate(
     host_image: np.ndarray,
@@ -1788,7 +1788,7 @@ def _choose_detection_tier(*, n_frames, t_ser, t_gpu, workers, gpu_ok, pool_ok) 
     return min(options, key=lambda kv: kv[1])[0]
 
 
-@tags_layer('bead_detect', role='overlay',
+@tags_layer('bead_detect', role='overlay', inputs=('image',),
             summary='Bead detection across a stack (blob LoG)', target='bead')
 def detect_beads_stack(
     bead_stack: np.ndarray,

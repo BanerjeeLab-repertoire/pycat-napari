@@ -82,7 +82,7 @@ def contrast_cascade_bands(image, n_bands=4, method='percentile',
     return bands
 
 
-@tags_layer('tone_map', role='preprocessed',
+@tags_layer('tone_map', role='preprocessed', inputs=('image',),
             summary='Tone mapping (log/gamma)')
 def tone_map(image, method='log', clip_limit=0.003):
     """Compress a high-dynamic-range image into one viewable image.
@@ -100,7 +100,7 @@ def tone_map(image, method='log', clip_limit=0.003):
 # Part 2 — brightness-invariant features
 # ---------------------------------------------------------------------------
 
-@tags_layer('local_contrast', role='preprocessed',
+@tags_layer('local_contrast', role='preprocessed', inputs=('image',),
             summary='Local contrast normalisation')
 def local_contrast_normalize(image, sigma=15.0, mode='divide'):
     """Normalise each pixel relative to its LOCAL surround, so dim structures

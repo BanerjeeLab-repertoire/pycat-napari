@@ -1,3 +1,43 @@
+## [1.6.126] - 2026-07-18
+### Added — **OperationSpec increment 2: `inputs` on the decorator — the operation vocabulary is now a GRAPH.**
+Increment 1 defined `OperationSpec` as a typed, drift-guarded view over the `@tags_layer` registry and
+deferred the richer fields with an explicit rule: *a field nothing checks is exactly the drift this
+effort exists to prevent.* Increment 2 adds the first of those fields — `inputs`, the layer
+role(s)/target(s) an operation **consumes** — **with the validation that makes it real**. Together with
+the existing `produces`, `inputs` turns the flat list of 79 operations into a directed graph
+(`op_a.produces → op_b.inputs`). Increments 3–5 (batch composition, subsystem generation, runnability
+gating) all need that graph. Additive; no behaviour change.
+
+- **`@tags_layer(inputs=…)`** (`utils/tag_registry.py`) — optional, drawn from the **same** `ROLES` /
+  `TARGETS` vocabularies (never a third one); an unregistered input value is a hard error at import,
+  exactly as an unregistered tag already is. An operation that declares nothing is a *root* (it loads
+  or creates a layer from a file). `_register_ui_operations()` gained the same ability.
+- **`OperationSpec.inputs: tuple[str, ...] = ()`** (`navigator/operation_spec.py`) — populated from the
+  registry in `iter_operation_specs()`, added to `operation_catalog.json` (regenerated), and covered by
+  the existing drift guard (`test_catalog_fields_match_the_live_declaration` now also compares `inputs`,
+  so a declared-vs-snapshot divergence fails like any other field).
+- **`tests/navigator/test_operation_graph.py`** — the validation: no dangling edges (every declared
+  role input is produced by some op or is the root role `image`), vocabulary agreement, traversability
+  from the roots (an unreachable input-bearing op is *reported*, not failed), a real op→op edge exists,
+  and a **downward-only coverage floor** (≥ 23 ops declare `inputs`) so the declarations populate
+  incrementally without silently regressing.
+- **Annotated the unambiguous image-consuming tranche (23 ops):** the filters that consume an image and
+  return one (`bandpass`, `dog`, `log`, `rolling_ball`, `gaussian`, `bilateral`, `gabor`, `invert`,
+  `wbns`, `bg_subtract`, `tone_map`, `local_contrast`, `clahe`) and the primary segmenters/detectors
+  that consume an image (`cellpose`, `subcellular_segment`, `local_threshold`, `felzenszwalb`,
+  `felzenszwalb_binary`, `multi_otsu`, `clean`, `bead_detect`, `bf_segment`, `host_segment`) — all
+  `inputs=('image',)`.
+### Notes
+- **Staged population is deliberate.** The remaining ~56 ops (label-editors, merges, ambiguous-input
+  ops) are **not** annotated: declaring an input you had to guess is drift with extra steps. The ratchet
+  floor captures progress; later work raises it. `batch_step_registry._STEP_MAP` was left untouched — it
+  names workflow steps, not layer operations, and has zero overlap with the catalog (composition is
+  increment 3).
+- No `parameters` / `batchable` / `requirements` in this increment. Full `pytest -m core` green.
+- Files: `utils/tag_registry.py`, `navigator/operation_spec.py`, `navigator/op_catalog.py`,
+  `navigator/data/operation_catalog.json`, the 8 annotated toolbox modules,
+  `tests/navigator/test_operation_graph.py`, `tests/navigator/test_operation_spec_matches_catalog.py`.
+
 ## [1.6.125] - 2026-07-18
 ### Added — **Cross-route workflow-equivalence matrix: the same workflow must give the same numbers through every route.**
 The strongest recommendation from the external architecture audit: stop adding isolated per-route

@@ -73,7 +73,7 @@ class TagCollision(ImportError):
 
 def register_operation(op: str, *, role: str, summary: str,
                        target: str | None = None, produces: str | None = None,
-                       aliases: tuple = ()):
+                       aliases: tuple = (), inputs: tuple = ()):
     """Declare an operation in the vocabulary. **Raises on a duplicate.**
 
     Parameters
@@ -86,6 +86,12 @@ def register_operation(op: str, *, role: str, summary: str,
     produces : the role of the OUTPUT, if different from ``role``.
     aliases : other names that mean the same thing, so a query can find it either way. **An alias
         cannot be a registered op** — that would be the collision this class exists to prevent.
+    inputs : the layer role(s)/target(s) this operation CONSUMES — the edges that turn the flat
+        vocabulary into a graph (``op_a.produces -> op_b.inputs``). Values are drawn from the SAME
+        ``ROLES`` / ``TARGETS`` vocabularies, never a third one. **Optional:** an operation that
+        declares nothing is a *root* — it loads or creates a layer from a file, not from another
+        layer. Absent is honest; a guessed input is drift with extra steps, so declare only what is
+        unambiguous (OperationSpec increment 2).
     """
     op = str(op).strip().lower()
 
@@ -105,6 +111,16 @@ def register_operation(op: str, *, role: str, summary: str,
             f"tag was rejected by the validator.")
     if target is not None and target not in TARGETS:
         raise ValueError(f"target '{target}' is not one of {TARGETS}")
+
+    # An input must be a REGISTERED role or target — the same refusal an unregistered tag gets. A
+    # free string here is exactly the degeneracy the vocabulary exists to prevent, one layer deeper.
+    inputs = tuple(str(i).strip().lower() for i in inputs)
+    for value in inputs:
+        if value not in ROLES and value not in TARGETS:
+            raise ValueError(
+                f"input '{value}' (declared by '{op}') is not a registered role {ROLES} or "
+                f"target {TARGETS}. `inputs` draws on the SAME vocabulary as `role`/`target` — "
+                f"there is no third one. A guessed input is worse than none; leave it undeclared.")
 
     if op in _OPERATIONS:
         existing = _OPERATIONS[op]
@@ -127,6 +143,7 @@ def register_operation(op: str, *, role: str, summary: str,
         op=op, role=role, summary=summary, target=target,
         produces=produces or role,
         aliases=tuple(str(a).strip().lower() for a in aliases),
+        inputs=inputs,
         registered_by=None,      # filled in by the decorator
     )
     return op
@@ -134,7 +151,7 @@ def register_operation(op: str, *, role: str, summary: str,
 
 def tags_layer(op: str, *, role: str, summary: str,
                target: str | None = None, produces: str | None = None,
-               aliases: tuple = ()):
+               aliases: tuple = (), inputs: tuple = ()):
     """Decorator: **an operation declares its own tag, on the function that performs it.**
 
     ::
@@ -155,7 +172,7 @@ def tags_layer(op: str, *, role: str, summary: str,
     """
     def _decorate(fn):
         register_operation(op, role=role, summary=summary, target=target,
-                           produces=produces, aliases=aliases)
+                           produces=produces, aliases=aliases, inputs=inputs)
         _OPERATIONS[op.strip().lower()]['registered_by'] = (
             f"{fn.__module__}.{fn.__qualname__}")
 
@@ -306,8 +323,11 @@ def _register_ui_operations():
 
     _UI_OPS = [
         # ---- filtering (ui_filtering_mixin) --------------------------------------------------
+        # A row may carry a 6th element, `inputs` — the role(s)/target(s) it consumes (the graph
+        # edges). Most UI ops leave it off (roots, or their input role is not yet unambiguous);
+        # CLAHE is a plain image→image filter, so it declares `('image',)`.
         ('clahe', 'preprocessed', 'Contrast-limited adaptive histogram equalisation', None,
-         ('equalize_adapthist',)),
+         ('equalize_adapthist',), ('image',)),
         ('im2bw', 'mask', 'Binarise at a threshold', None, ('binarize',)),
         ('best_slice', 'preprocessed', 'Select the best-focused slice of a stack', None, ()),
         ('morph_gaussian', 'preprocessed', 'Morphological Gaussian filter', None, ()),
@@ -341,9 +361,12 @@ def _register_ui_operations():
         ('cropped', 'image', 'Cropped to a region', None, ()),
     ]
 
-    for op, role, summary, target, aliases in _UI_OPS:
+    for row in _UI_OPS:
+        op, role, summary, target, aliases = row[:5]
+        inputs = row[5] if len(row) > 5 else ()
         try:
-            register_operation(op, role=role, summary=summary, target=target, aliases=aliases)
+            register_operation(op, role=role, summary=summary, target=target,
+                               aliases=aliases, inputs=inputs)
             _OPERATIONS[op]['registered_by'] = 'pycat.utils.tag_registry (UI operation)'
         except TagCollision:
             # Already registered by a toolbox function -- that is fine and correct.

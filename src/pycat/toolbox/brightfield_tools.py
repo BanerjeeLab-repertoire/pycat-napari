@@ -314,7 +314,7 @@ def _watershed_split(binary, min_diameter_px, split_touching, _skfeat, _skseg):
         return sk.measure.label(binary)
 
 
-@tags_layer('bf_segment', role='labels',
+@tags_layer('bf_segment', role='labels', inputs=('image',),
             summary='Brightfield condensate segmentation (DARK objects)', target='condensate')
 def segment_bf_condensates(
     enhanced_image: np.ndarray,

@@ -454,6 +454,7 @@ def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
             "role": spec.role,
             "produces": spec.produces,
             "target": spec.target,
+            "inputs": list(spec.inputs),
             "summary": spec.summary,
             "aliases": list(spec.aliases),
             "module": prov["module"],

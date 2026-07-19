@@ -79,8 +79,8 @@ def test_no_stale_layer_ops_in_the_catalog():
 
 
 def test_catalog_fields_match_the_live_declaration():
-    """A decorator whose ``role``/``produces``/``target`` changed without regeneration → this fails,
-    naming the field."""
+    """A decorator whose ``role``/``produces``/``target``/``inputs`` changed without regeneration →
+    this fails, naming the field."""
     live, catalog = _live(), _catalog()
     mismatches = []
     for op in sorted(set(live) & set(catalog)):
@@ -90,6 +90,11 @@ def test_catalog_fields_match_the_live_declaration():
                                   ("target", spec.target)):
             if (entry.get(field) or None) != (live_value or None):
                 mismatches.append(f"{op}.{field}: catalog={entry.get(field)!r} live={live_value!r}")
+        # `inputs` is a list in the snapshot, a tuple live — compare order-preserving as tuples so a
+        # declared-vs-snapshot divergence on the graph edges fails like any other field.
+        if tuple(entry.get("inputs") or ()) != tuple(spec.inputs):
+            mismatches.append(
+                f"{op}.inputs: catalog={entry.get('inputs')!r} live={list(spec.inputs)!r}")
     assert not mismatches, (
         f"{len(mismatches)} catalog field(s) disagree with the live decorator:\n  "
         + "\n  ".join(mismatches)

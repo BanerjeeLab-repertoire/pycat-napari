@@ -54,9 +54,12 @@ class OperationSpec:
     produces: str                # output role (defaults to `role`)
     aliases: tuple[str, ...]     # other names that resolve to this op
     registered_by: str | None    # module.qualname of the implementing fn (or the UI-op registrar)
-    # increment-1 stops here. Later increments ADD (all Optional, default None), WITH their
-    # validation — do NOT add them speculatively now:
-    #   inputs, parameters, contexts, batchable, requirements
+    # increment 2 ADDS `inputs` — the role(s)/target(s) the op consumes — WITH its validation
+    # (tests/navigator/test_operation_graph.py). Together with `produces` it makes the vocabulary a
+    # directed graph. Default () keeps every existing consumer and the catalog comparison working.
+    inputs: tuple[str, ...] = ()
+    # Later increments ADD (with THEIR validation — do NOT add speculatively):
+    #   parameters, contexts, batchable, requirements
 
 
 def _discover_tag_modules() -> list[str]:
@@ -128,5 +131,6 @@ def iter_operation_specs() -> list[OperationSpec]:
             produces=entry.get("produces", entry["role"]),
             aliases=tuple(entry.get("aliases", ())),
             registered_by=entry.get("registered_by"),
+            inputs=tuple(entry.get("inputs", ())),
         ))
     return specs
