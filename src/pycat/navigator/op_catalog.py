@@ -467,6 +467,7 @@ def build_catalog_document(path: Optional[str] = None) -> dict:
             "produces": spec.produces,
             "target": spec.target,
             "inputs": list(spec.inputs),
+            "requirements": list(spec.requirements),
             "summary": spec.summary,
             "aliases": list(spec.aliases),
             "module": prov["module"],

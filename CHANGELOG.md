@@ -1,3 +1,40 @@
+## [1.6.129] - 2026-07-19
+### Added — **OperationSpec increment 5: `requirements` — runnability gating with a stated reason. (The OperationSpec arc is complete.)**
+The last field of the OperationSpec roadmap. Increment 2's `inputs` said which *layers* an operation
+consumes; increment 5 adds `requirements` — the *data/environment* preconditions it needs to be runnable
+at all: a 3D z-stack, a time axis, a calibrated pixel size, two channels, a GPU. Declared on
+`@tags_layer` from a controlled vocabulary, **with the validation that makes it real** — so a consumer
+can gate an operation **before** the click and **say why** ("needs a 3D z-stack"), instead of letting it
+fail at run time.
+
+- **`tag_registry.REQUIREMENTS`** — a controlled name→reason map (the single source of the requirement
+  vocabulary and its human-readable phrasing). `@tags_layer(requirements=…)` accepts values from it;
+  an unregistered requirement is a hard error at import, like an unregistered tag.
+- **`OperationSpec.requirements`** — surfaced, snapshotted into `operation_catalog.json` (regenerated),
+  and covered by the drift guard / regeneration check.
+- **`operation_spec.runnability(spec, available)`** → `(can_run, reason)`, plus `unmet_requirements()`
+  — the gating helpers. `reason` names, in human terms, exactly what is missing, so the UI can grey the
+  operation out with an explanation. `inputs` remain the *layer* preconditions (the Capability
+  machinery); `requirements` are the *environmental* ones — the two are complementary.
+- **`tests/navigator/test_operation_requirements.py`** — the validation: vocabulary agreement, every
+  requirement carries a reason, gating returns `(False, "needs …")` when unmet and `(True, "")` once
+  satisfied, and a **downward-only coverage floor** (≥ 8 ops).
+- **Annotated the unambiguous tranche (8 ops):** the 3D ops need a z-stack (`gaussian_3d`, `gabor_3d`,
+  `dog_3d`, `bg_subtract_3d`, `cellpose_3d`, `subcellular_segment_3d`), the temporal ops need a time
+  axis (`temporal_enhance`, `drift_correct`).
+### Notes
+- **The OperationSpec roadmap is now complete** (increments 1–5): a typed, drift-guarded spec that is a
+  graph (`inputs`/`produces`), against which batch replay is auditable (`_STEP_OPERATIONS`), that the
+  Navigator is *generated from* (increment 4), and that now carries runnability gating. Wiring the gate
+  into actual UI widgets, and the separate `tag_resolver` binding table, remain as follow-on consumers —
+  noted, not built here.
+- Staged population per the increment-2 discipline; a guessed requirement is worse than none. No
+  behaviour change. Full `pytest -m core` green.
+- Files: `src/pycat/utils/tag_registry.py`, `src/pycat/navigator/operation_spec.py`,
+  `src/pycat/navigator/op_catalog.py`, `src/pycat/navigator/data/operation_catalog.json`, the 4
+  annotated toolbox modules, `tests/navigator/test_operation_requirements.py`,
+  `tests/navigator/test_operation_spec_matches_catalog.py`.
+
 ## [1.6.128] - 2026-07-19
 ### Changed — **OperationSpec increment 4: flip the Navigator catalog from validate-against-the-spec to GENERATE-from-the-spec.**
 The payoff increment 1 was built for. Increment 1 made the operation catalog a *validated* committed

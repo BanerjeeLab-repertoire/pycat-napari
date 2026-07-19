@@ -203,14 +203,14 @@ def gaussian_smooth_2d(image: np.ndarray, sigma: float) -> np.ndarray:
     return ndi.gaussian_filter(np.asarray(image).astype(np.float32), sigma=sigma)
 
 
-@tags_layer('gaussian_3d', role='preprocessed',
+@tags_layer('gaussian_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D (tri-planar) Gaussian smoothing')
 def gaussian_smooth_3d_pseudo(volume: np.ndarray, sigma: float) -> np.ndarray:
     """Pseudo-3D (tri-planar) Gaussian smoothing of a (Z, H, W) volume."""
     return pseudo3d_tri_planar_filter(volume, gaussian_smooth_2d, sigma=sigma)
 
 
-@tags_layer('gabor_3d', role='preprocessed',
+@tags_layer('gabor_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D (tri-planar) Gabor texture filter')
 def gabor_filter_3d_pseudo(volume: np.ndarray) -> np.ndarray:
     """
@@ -238,7 +238,7 @@ def dog_blob_enhance_2d(image: np.ndarray, sigma_lo: float = 2.0, sigma_hi: floa
     return (enhanced / mx if mx > 0 else enhanced).astype(np.float32)
 
 
-@tags_layer('dog_3d', role='preprocessed',
+@tags_layer('dog_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D difference-of-Gaussians blob enhancement')
 def dog_blob_enhance_3d_pseudo(volume: np.ndarray, sigma_lo: float = 2.0,
                                sigma_hi: float = 3.2) -> np.ndarray:

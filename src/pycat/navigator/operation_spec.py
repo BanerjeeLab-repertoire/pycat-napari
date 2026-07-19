@@ -58,8 +58,12 @@ class OperationSpec:
     # (tests/navigator/test_operation_graph.py). Together with `produces` it makes the vocabulary a
     # directed graph. Default () keeps every existing consumer and the catalog comparison working.
     inputs: tuple[str, ...] = ()
+    # increment 5 ADDS `requirements` — the data/environment preconditions the op needs to be RUNNABLE
+    # (a z-stack, a time axis, a pixel size), from the controlled tag_registry.REQUIREMENTS vocabulary
+    # — WITH its validation (tests/navigator/test_operation_requirements.py). See `runnability()` below.
+    requirements: tuple[str, ...] = ()
     # Later increments ADD (with THEIR validation — do NOT add speculatively):
-    #   parameters, contexts, batchable, requirements
+    #   parameters, contexts, batchable
 
 
 def _discover_tag_modules() -> list[str]:
@@ -132,5 +136,42 @@ def iter_operation_specs() -> list[OperationSpec]:
             aliases=tuple(entry.get("aliases", ())),
             registered_by=entry.get("registered_by"),
             inputs=tuple(entry.get("inputs", ())),
+            requirements=tuple(entry.get("requirements", ())),
         ))
     return specs
+
+
+# ── Runnability gating (increment 5) ───────────────────────────────────────────────────────────
+# `inputs` are LAYER preconditions, checked against what layers exist (the Capability machinery in
+# capabilities.py / contracts.py). `requirements` are DATA/ENVIRONMENT preconditions — is there a time
+# axis? a z-stack? a calibrated pixel size? a GPU? — checked against a set of facts the caller knows
+# about the current session. These helpers turn that check into a stated reason a UI can show, which is
+# the whole point of declaring the field: gate the operation *before* the click, and say why.
+
+def unmet_requirements(spec: "OperationSpec", available) -> tuple[str, ...]:
+    """The declared requirements of ``spec`` that ``available`` does not satisfy, in declared order.
+
+    ``available`` is any container of requirement names the session currently provides (e.g.
+    ``{'z_stack', 'pixel_size'}``). Empty result ⇒ the operation is runnable.
+    """
+    have = set(available or ())
+    return tuple(req for req in spec.requirements if req not in have)
+
+
+def runnability(spec: "OperationSpec", available) -> tuple[bool, str]:
+    """``(can_run, reason)`` for ``spec`` given the ``available`` facts.
+
+    ``reason`` is empty when runnable; otherwise it names, in human terms, what is missing — e.g.
+    *"needs a 3D z-stack"* — so a consumer can grey the operation out **with an explanation** instead
+    of failing at run time. The phrasing comes from ``tag_registry.REQUIREMENTS``, the single source of
+    the requirement vocabulary and its reasons.
+    """
+    from pycat.utils.tag_registry import REQUIREMENTS
+
+    missing = unmet_requirements(spec, available)
+    if not missing:
+        return True, ""
+    reasons = [REQUIREMENTS.get(req, req) for req in missing]
+    if len(reasons) == 1:
+        return False, f"needs {reasons[0]}"
+    return False, "needs " + ", ".join(reasons[:-1]) + f" and {reasons[-1]}"

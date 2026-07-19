@@ -91,7 +91,7 @@ def _enhance_frame(frame, ball_radius, norm_max=None, clahe_ref=None):
 # Temporal enhancement strategies
 # ---------------------------------------------------------------------------
 
-@tags_layer('temporal_enhance', role='preprocessed',
+@tags_layer('temporal_enhance', role='preprocessed', requirements=('time_axis',),
             summary='Temporally-aware contrast enhancement (DESTROYS intensity trends)')
 def enhance_stack(stack, ball_radius, method='pooled_stats', window=2,
                   progress_cb=None):

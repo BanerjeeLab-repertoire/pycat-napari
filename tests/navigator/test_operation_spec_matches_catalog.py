@@ -95,11 +95,15 @@ def test_catalog_fields_match_the_live_declaration():
                                   ("target", spec.target)):
             if (entry.get(field) or None) != (live_value or None):
                 mismatches.append(f"{op}.{field}: catalog={entry.get(field)!r} live={live_value!r}")
-        # `inputs` is a list in the snapshot, a tuple live — compare order-preserving as tuples so a
-        # declared-vs-snapshot divergence on the graph edges fails like any other field.
+        # `inputs`/`requirements` are lists in the snapshot, tuples live — compare order-preserving so
+        # a declared-vs-snapshot divergence on the graph edges or the gating fails like any other field.
         if tuple(entry.get("inputs") or ()) != tuple(spec.inputs):
             mismatches.append(
                 f"{op}.inputs: catalog={entry.get('inputs')!r} live={list(spec.inputs)!r}")
+        if tuple(entry.get("requirements") or ()) != tuple(spec.requirements):
+            mismatches.append(
+                f"{op}.requirements: catalog={entry.get('requirements')!r} "
+                f"live={list(spec.requirements)!r}")
     assert not mismatches, (
         f"{len(mismatches)} catalog field(s) disagree with the live decorator:\n  "
         + "\n  ".join(mismatches)

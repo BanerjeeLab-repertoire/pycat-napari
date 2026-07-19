@@ -2287,7 +2287,7 @@ def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
     return df
 
 
-@tags_layer('drift_correct', role='overlay',
+@tags_layer('drift_correct', role='overlay', requirements=('time_axis',),
             summary='Common-mode drift correction of tracks')
 def drift_correct_com(tracks_df: pd.DataFrame, mode: str = 'com',
                       immobile_fraction: float = 0.25) -> pd.DataFrame:

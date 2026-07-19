@@ -1,5 +1,10 @@
 # Roadmap — OperationSpec increments 2–5 (the follow-up)
 
+> **STATUS (2026-07-19): COMPLETE.** All five increments shipped — inc 1 (1.6.68), inc 2 `inputs`/graph
+> (1.6.126), inc 3 batch-step composition (1.6.127), inc 4 generate the Navigator catalog (1.6.128),
+> inc 5 `requirements`/runnability gating (1.6.129). Remaining follow-on *consumers* (not part of this
+> roadmap): wiring the runnability gate into UI widgets, and the separate `tag_resolver` binding table.
+
 **Date:** 2026-07-18 · **Tree:** 1.6.121 · Companion to `operation_spec.py` (increment 1, shipped
 1.6.68). Increment 1 deliberately stopped at *validate-first, generate-nothing*; this maps the path it
 promised. Grounded in a fresh survey of the actual registries.

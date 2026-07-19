@@ -59,6 +59,24 @@ ROLES = tuple(sorted(_CORE_VALUES['role']))
 TARGETS = tuple(sorted(_CORE_VALUES['target']))
 
 
+# ── THE RUNNABILITY REQUIREMENTS (OperationSpec increment 5) ────────────────────────────────
+#
+# `inputs` (increment 2) says which LAYERS an operation consumes; `requirements` says what the
+# DATA/ENVIRONMENT must provide for it to be runnable at all — a precondition beyond any layer. Each
+# maps to a **human-readable reason**, because the point of declaring it is that the UI can grey the
+# operation out and SAY WHY ("needs a 3D z-stack") instead of letting the user click it and hit an
+# error. A controlled vocabulary, for the same reason `op` is: a free-string requirement is one the UI
+# cannot render and nothing can check.
+REQUIREMENTS: dict[str, str] = {
+    'z_stack':      'a 3D z-stack',
+    'time_axis':    'a time axis (a stack of frames over time)',
+    'pixel_size':   'a calibrated pixel size (microns per pixel)',
+    'two_channels': 'two image channels',
+    'gpu':          'a CUDA-capable GPU',
+}
+REQUIREMENT_NAMES = tuple(sorted(REQUIREMENTS))
+
+
 _OPERATIONS: dict[str, dict] = {}
 
 
@@ -73,7 +91,8 @@ class TagCollision(ImportError):
 
 def register_operation(op: str, *, role: str, summary: str,
                        target: str | None = None, produces: str | None = None,
-                       aliases: tuple = (), inputs: tuple = ()):
+                       aliases: tuple = (), inputs: tuple = (),
+                       requirements: tuple = ()):
     """Declare an operation in the vocabulary. **Raises on a duplicate.**
 
     Parameters
@@ -92,6 +111,10 @@ def register_operation(op: str, *, role: str, summary: str,
         declares nothing is a *root* — it loads or creates a layer from a file, not from another
         layer. Absent is honest; a guessed input is drift with extra steps, so declare only what is
         unambiguous (OperationSpec increment 2).
+    requirements : what the DATA/ENVIRONMENT must provide for this op to be runnable, beyond any layer
+        — values from the controlled ``REQUIREMENTS`` vocabulary (``z_stack``, ``time_axis``, …). It
+        exists so a consumer can gate the op with a STATED REASON ("needs a 3D z-stack") instead of
+        letting it fail at run time. Optional; declare only unambiguous preconditions (increment 5).
     """
     op = str(op).strip().lower()
 
@@ -122,6 +145,17 @@ def register_operation(op: str, *, role: str, summary: str,
                 f"target {TARGETS}. `inputs` draws on the SAME vocabulary as `role`/`target` — "
                 f"there is no third one. A guessed input is worse than none; leave it undeclared.")
 
+    # A requirement must be in the controlled REQUIREMENTS vocabulary — else the UI has no reason to
+    # show and nothing can check it, the same degeneracy an unregistered tag would be.
+    requirements = tuple(str(r).strip().lower() for r in requirements)
+    for value in requirements:
+        if value not in REQUIREMENTS:
+            raise ValueError(
+                f"requirement '{value}' (declared by '{op}') is not one of "
+                f"{REQUIREMENT_NAMES}. A requirement must be in the controlled vocabulary so a "
+                f"consumer can render its reason and gate on it; add it to REQUIREMENTS (with its "
+                f"human-readable reason) if it is genuinely new, don't free-string it here.")
+
     if op in _OPERATIONS:
         existing = _OPERATIONS[op]
         raise TagCollision(
@@ -144,6 +178,7 @@ def register_operation(op: str, *, role: str, summary: str,
         produces=produces or role,
         aliases=tuple(str(a).strip().lower() for a in aliases),
         inputs=inputs,
+        requirements=requirements,
         registered_by=None,      # filled in by the decorator
     )
     return op
@@ -151,7 +186,7 @@ def register_operation(op: str, *, role: str, summary: str,
 
 def tags_layer(op: str, *, role: str, summary: str,
                target: str | None = None, produces: str | None = None,
-               aliases: tuple = (), inputs: tuple = ()):
+               aliases: tuple = (), inputs: tuple = (), requirements: tuple = ()):
     """Decorator: **an operation declares its own tag, on the function that performs it.**
 
     ::
@@ -172,7 +207,8 @@ def tags_layer(op: str, *, role: str, summary: str,
     """
     def _decorate(fn):
         register_operation(op, role=role, summary=summary, target=target,
-                           produces=produces, aliases=aliases, inputs=inputs)
+                           produces=produces, aliases=aliases, inputs=inputs,
+                           requirements=requirements)
         _OPERATIONS[op.strip().lower()]['registered_by'] = (
             f"{fn.__module__}.{fn.__qualname__}")
 
@@ -364,9 +400,10 @@ def _register_ui_operations():
     for row in _UI_OPS:
         op, role, summary, target, aliases = row[:5]
         inputs = row[5] if len(row) > 5 else ()
+        requirements = row[6] if len(row) > 6 else ()
         try:
             register_operation(op, role=role, summary=summary, target=target,
-                               aliases=aliases, inputs=inputs)
+                               aliases=aliases, inputs=inputs, requirements=requirements)
             _OPERATIONS[op]['registered_by'] = 'pycat.utils.tag_registry (UI operation)'
         except TagCollision:
             # Already registered by a toolbox function -- that is fine and correct.
