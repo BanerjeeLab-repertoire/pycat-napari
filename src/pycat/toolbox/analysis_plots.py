@@ -250,8 +250,10 @@ def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
             except Exception as _e:
                 print(f"[PyCAT VPT] pick callback failed: {_e}")
         try:
-            _connect_nearest_curve_click_coords(fig, ax, tid_to_coords, state, _apply,
-                                                notify=_default_notify)
+            _cid = _connect_nearest_curve_click_coords(fig, ax, tid_to_coords, state, _apply,
+                                                       notify=_default_notify)
+            if line_registry is not None:
+                line_registry['click_cid'] = _cid
         except Exception:
             pass
 
@@ -504,32 +506,131 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     return _show(fig, interactive)
 
 
-def _draw_centered_tracks(ax, tracks_df, max_tracks=400):
-    """Draw every trajectory translated so it starts at (0,0) at its first frame,
-    overlaid on one x–y axes. The fan-out from the origin shows the spatial spread
-    of the ensemble; for Brownian motion the cloud is isotropic and grows with
-    time. Draws onto a supplied Axes (so it can be a subplot or its own window)."""
+#: The faint base style for an un-selected centered trajectory (restored on demote).
+_CENTERED_BASE = dict(color='#4c72b0', alpha=0.15, lw=0.7, zorder=1)
+#: The emphasised style for the selected centered trajectory.
+_CENTERED_HL = dict(color='#ff8c00', alpha=1.0, lw=2.0, zorder=5)
+
+
+def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
+                          registry=None, on_pick_track=None):
+    """Draw every trajectory translated so it starts at (0,0), overlaid on one x–y
+    axes — the fan-out from the origin shows the ensemble's spatial spread. Now a
+    full brushing peer of the MSD panel (it was inert before):
+
+    only_tids : if given, draw EXACTLY these ids (no sampling) — the bucket pager.
+    registry : if given, filled with ``lines``/``coords``/``canvas`` +
+        ``promote``/``demote`` so another view can emphasise a centered path here.
+    on_pick_track : if given, clicking near a path selects that track everywhere.
+    """
+    lines = {}                 # {tid: Line2D} — one real artist per drawn track
+    coords = {}                # {tid: (N,2)} centered geometry — hit-testing + promote
+
+    def _centered_xy(tid):
+        g = tracks_df[tracks_df['track_id'] == tid].sort_values('frame')
+        if len(g) < 2:
+            return None
+        x = g['x_um'].values.astype(float)
+        y = g['y_um'].values.astype(float)
+        return np.column_stack([x - x[0], y - y[0]])
+
     if tracks_df is None or not len(tracks_df):
         ax.text(0.5, 0.5, "No tracks", ha='center', va='center')
+        if registry is not None:
+            registry['lines'] = lines; registry['coords'] = coords
         return
     tids = tracks_df['track_id'].unique()
     tids = tids[tids >= 0]
-    if len(tids) > max_tracks:
+    if only_tids is not None:
+        _want = set(int(t) for t in only_tids)
+        tids = np.array([t for t in tids if int(t) in _want])
+    elif len(tids) > max_tracks:
         rng = np.random.default_rng(0)
         tids = rng.choice(tids, max_tracks, replace=False)
     for tid in tids:
-        g = tracks_df[tracks_df['track_id'] == tid].sort_values('frame')
-        if len(g) < 2:
+        xy = _centered_xy(int(tid))
+        if xy is None:
             continue
-        x = g['x_um'].values.astype(float)
-        y = g['y_um'].values.astype(float)
-        ax.plot(x - x[0], y - y[0], color='#4c72b0', alpha=0.15, lw=0.7)
+        (ln,) = ax.plot(xy[:, 0], xy[:, 1], **_CENTERED_BASE)
+        lines[int(tid)] = ln
+        coords[int(tid)] = xy
     ax.set_aspect('equal', adjustable='datalim')
     ax.axhline(0, color='0.7', lw=0.6); ax.axvline(0, color='0.7', lw=0.6)
     ax.set_xlabel("Δx from start (µm)")
     ax.set_ylabel("Δy from start (µm)")
     ax.set_title("Centered trajectories (origin at t=0)", fontweight='bold')
     ax.grid(True, alpha=0.15)
+
+    # Promote a track not drawn (other bucket / sampled out) so a selection still
+    # lands; demote restores the faint base. Mirrors the MSD overlay's promote/demote.
+    def _promote(tid):
+        tid = int(tid)
+        ln = lines.get(tid)
+        if ln is not None:
+            return ln
+        xy = coords.get(tid)
+        if xy is None:
+            xy = _centered_xy(tid)
+            if xy is None:
+                return None
+            coords[tid] = xy
+        (ln,) = ax.plot(xy[:, 0], xy[:, 1], **_CENTERED_BASE)
+        lines[tid] = ln
+        return ln
+
+    def _demote(tid):
+        ln = lines.get(int(tid))
+        if ln is None:
+            return False
+        try:
+            ln.set(**_CENTERED_BASE)
+        except Exception:                            # broad-ok: a restyle failure must not wedge selection
+            pass
+        return True
+
+    if registry is not None:
+        registry['lines'] = lines
+        registry['coords'] = coords
+        registry['promote'] = _promote
+        registry['demote'] = _demote
+        registry.setdefault('state', {'prev': None})
+        try:
+            registry['canvas'] = ax.figure.canvas
+        except Exception:                            # broad-ok: no canvas yet (Agg/headless) → None
+            registry['canvas'] = None
+
+    if on_pick_track is not None and coords:
+        _state = registry.get('state') if registry is not None else {'prev': None}
+
+        def _apply(tid):
+            # Self-highlight the clicked centered path, THEN emit — the service
+            # suppresses a view's OWN receive, so it must light its own click (the MSD
+            # `_apply` pattern; that asymmetry is why MSD self-lit and centered did not).
+            tid = int(tid)
+            prev = _state.get('prev')
+            if prev != tid:
+                if prev is not None:
+                    _demote(prev)
+                ln = _promote(tid)
+                if ln is not None:
+                    try:
+                        ln.set(**_CENTERED_HL)
+                    except Exception:                # broad-ok: restyle is best-effort
+                        pass
+                _state['prev'] = tid
+                try:
+                    ax.figure.canvas.draw_idle()
+                except Exception:                    # broad-ok: draw is best-effort
+                    pass
+            on_pick_track(tid)
+
+        try:
+            _cid = _connect_nearest_curve_click_coords(
+                ax.figure, ax, coords, _state, _apply, notify=_default_notify)
+            if registry is not None:
+                registry['click_cid'] = _cid
+        except Exception:                            # broad-ok: click wiring is best-effort (no canvas headless)
+            pass
 
 
 def _draw_van_hove(ax, tracks_df, lag_frames=1, frame_interval_s=1.0, bins=60):
@@ -589,7 +690,8 @@ def _draw_van_hove(ax, tracks_df, lag_frames=1, frame_interval_s=1.0, bins=60):
 
 
 def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
-                   max_spaghetti=400, line_registry=None, pickable=False):
+                   max_spaghetti=400, line_registry=None, pickable=False,
+                   only_tids=None):
     """Draw the MSD spaghetti + ensemble mean + fit onto a supplied Axes (the
     consolidated-panel version). If line_registry is given it is populated with
     {track_id: Line2D} (and, when pickable, each line is given a pick radius) so
@@ -597,13 +699,23 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
     standalone plot. The background is ONE ``LineCollection`` and a selection is an OVERLAY (Gap 4);
     the registry carries ``coords`` (geometry for hit-testing + overlays) so ``plot_vpt_panel`` wires
     the same brushing via ``_msd_overlay_hooks``. ``line_registry['lines']`` starts empty (overlays are
-    added on selection)."""
+    added on selection).
+
+    only_tids : if given, draw EXACTLY these track ids (every one, no
+        representative sampling) — the results-dock bucket pager passes a slice so
+        the user can page through all data. The ensemble mean + fit stay the full
+        set's (they are the reference the bucket is read against)."""
     tid_to_line = {}          # overlays (selected / promoted); registry 'lines'
     tid_to_coords = {}        # {tid: (N, 2) array} — geometry for hit-testing + overlays
     if per_track_df is not None and len(per_track_df):
         tids = per_track_df['track_id'].unique()
         n_all = len(tids)
-        if n_all > max_spaghetti:
+        _bucket_n = None
+        if only_tids is not None:
+            _want = set(int(t) for t in only_tids)
+            pdf = per_track_df[per_track_df['track_id'].isin(_want)]
+            _bucket_n = int(pdf['track_id'].nunique()) if len(pdf) else 0
+        elif n_all > max_spaghetti:
             rng = np.random.default_rng(0)
             shown = set(rng.choice(tids, max_spaghetti, replace=False))
             pdf = per_track_df[per_track_df['track_id'].isin(shown)]
@@ -618,8 +730,9 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
             _bg = LineCollection([tid_to_coords[t] for t in tid_to_coords],
                                  colors='#4c72b0', linewidths=0.8, alpha=0.18, zorder=1)
             ax.add_collection(_bg)
-        ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
-                label=f"individual tracks (n={n_all})")
+        _lbl = (f"tracks in this bucket (n={_bucket_n} of {n_all})"
+                if _bucket_n is not None else f"individual tracks (n={n_all})")
+        ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0, label=_lbl)
     if line_registry is not None:
         line_registry['lines'] = tid_to_line
         line_registry['coords'] = tid_to_coords

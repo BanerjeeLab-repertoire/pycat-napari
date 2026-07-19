@@ -59,7 +59,11 @@ from pycat.toolbox.vpt.table_adapter import _VptTableMixin
 from pycat.toolbox.vpt.msd_adapter import _VptMsdMixin
 
 
-class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin, _VptNapariMixin):
+from pycat.toolbox.vpt.results_dock import _VptResultsDockMixin
+
+
+class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin,
+                              _VptNapariMixin, _VptResultsDockMixin):
     def __init__(self, viewer, central_manager):
         self.viewer          = viewer
         self.central_manager = central_manager
@@ -99,12 +103,14 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin, _Vp
         return service
 
     def _ensure_selection_views(self):
-        """Register VPT's three views as subscribers, once per service."""
+        """Register VPT's views as subscribers, once per service. The centered-
+        trajectory panel is the fourth view (added with the results dock)."""
         service = self._selection()
         if getattr(self, '_sel_views_for', None) is not service:
             service.subscribe('vpt.image', self._on_selection_image)
             service.subscribe('vpt.plot', self._on_selection_plot)
             service.subscribe('vpt.table', self._on_selection_table)
+            service.subscribe('vpt.centered', self._on_selection_centered)
             self._sel_views_for = service
         return service
 
@@ -1063,57 +1069,50 @@ class VideoParticleTrackingUI(_VptPanelsMixin, _VptMsdMixin, _VptTableMixin, _Vp
                       + "Accuracy still depends on the input MSD: fragmented or "
                       "noisy trajectories degrade G'/G'' just as they degrade "
                       "the viscosity fit, so confirm the MSD is clean first.")
-            # Consolidated by default; the checkbox lets the user prefer separate
-            # pop-out windows (each resizable, and the MSD one gets click-to-reveal
-            # brushing via the standalone interactive plot).
+        except Exception as e:
+            print(f"[PyCAT] VPT plots failed: {e}")
+
+        # ── Present the results ────────────────────────────────────────────────
+        # Combined dock by default (2×2 figure + per-track table + bucket pager in
+        # one persistent widget, so brushing highlight targets stay alive); the
+        # `_plots_consolidated` checkbox opts out to pop-out windows + the table
+        # dialog. Its own try so a plotting failure above still shows the table;
+        # `ptc`/`mod` read defensively in case they were not computed.
+        try:
+            from pycat.toolbox.analysis_plots import (
+                plot_msd_trajectories, plot_vpt_panel)
+            _ptc = ptc if 'ptc' in dir() else None
+            _mod = mod if 'mod' in dir() else None
+            _ptm = self._build_per_track_metrics(tracks, _ptc)
+            self._dr()['vpt_per_track_metrics'] = _ptm
+
             _consolidated = True
             if hasattr(self, '_plots_consolidated'):
                 _consolidated = self._plots_consolidated.isChecked()
             if _consolidated:
-                # Register the consolidated MSD panel's lines so table/image
-                # selections can highlight a curve here too, and route its picks
-                # through the dispatcher (consolidated-mode brushing).
-                self._msd_line_registry = {}
-                plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
-                               frame_interval_s=self._frame_dt.value(),
-                               van_hove_lag=1, consolidated=True,
-                               interactive=True,
-                               line_registry=self._msd_line_registry,
-                               on_pick_track=lambda tid: self._select_track(tid, source='plot'))
+                self._show_vpt_results(_ptc, msd_df, fit, _mod, tracks, _ptm,
+                                       self._frame_dt.value(), van_hove_lag=1)
             else:
-                # Separate windows: use the interactive MSD plot (with brushing)
-                # + the standalone spread/moduli windows. Route picks through the
-                # linked-selection dispatcher and register the line map so
-                # image/table selections can highlight the curve too.
+                # Separate windows: the interactive MSD plot (with brushing) + the
+                # standalone spread/moduli windows + the standalone table dialog.
                 self._msd_line_registry = {}
                 _render_mode = ('all' if (hasattr(self, '_plots_draw_all')
                                           and self._plots_draw_all.isChecked())
                                 else 'auto')
                 plot_msd_trajectories(
-                    ptc, msd_df, fit,
+                    _ptc, msd_df, fit,
                     title="VPT MSD (per-track + ensemble)",
                     interactive=True,
                     on_pick_track=lambda tid: self._select_track(tid, source='plot'),
                     line_registry=self._msd_line_registry,
                     render_mode=_render_mode)
-                plot_vpt_panel(ptc, msd_df, fit, mod, tracks_df=tracks,
+                plot_vpt_panel(_ptc, msd_df, fit, _mod, tracks_df=tracks,
                                frame_interval_s=self._frame_dt.value(),
                                van_hove_lag=1, consolidated=False,
                                interactive=True)
+                self._show_per_track_table(_ptm)
         except Exception as e:
-            print(f"[PyCAT] VPT plots failed: {e}")
-
-        # Per-track results table — one row per track, click a row to highlight
-        # that track everywhere (row -> MSD curve + image bead) via the linked
-        # selection dispatcher. Non-modal so it stays open alongside the plots.
-        # Shown BEFORE the modal summary dialog below (which blocks until closed).
-        try:
-            _ptc_for_tbl = ptc if 'ptc' in dir() else None
-            _ptm = self._build_per_track_metrics(tracks, _ptc_for_tbl)
-            self._dr()['vpt_per_track_metrics'] = _ptm
-            self._show_per_track_table(_ptm)
-        except Exception as e:
-            print(f"[PyCAT VPT] per-track table failed: {e}")
+            print(f"[PyCAT VPT] results presentation failed: {e}")
 
         try:
             from pycat.ui.ui_utils import show_dataframes_dialog

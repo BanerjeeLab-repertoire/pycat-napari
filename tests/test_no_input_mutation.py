@@ -86,6 +86,8 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         '_msd_overlay_hooks',     # 1.6.120 — populates the same line_registry + the overlay/coords
                                   # DICTS (the shared brushing state), extracted from the two above so
                                   # both MSD renderers brush from one implementation. No numpy arrays.
+        '_draw_centered_tracks',  # 1.6.141 — same contract: fills the caller's `registry` DICT (lines/
+                                  # coords/promote/demote) so the centered panel brushes like the MSD one.
         # 1.6.67 — complexity-ratchet split. `dr` here is the DATA REPOSITORY (a dict results are
         # stored into), NOT a caller image/mask array. Writing `dr[key] = ...` is the contract, as
         # everywhere else in the codebase. It was closure-scoped before the `_on_dynamic` split

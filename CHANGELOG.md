@@ -1,3 +1,41 @@
+## [1.6.141] - 2026-07-19
+### Added — **VPT results are now one combined dock with full four-way brushing and a bucket pager.**
+The Video Particle Tracking results used to surface as three disconnected top-level things — the 2×2
+figure in pyplot windows, the per-track table in a standalone `QDialog`, and only the histogram as a real
+dock — and only the MSD plot actually brushed the others. This replaces that with **one dockable widget**
+(`toolbox/vpt/results_dock.py`, `_VptResultsDockMixin`): the 2×2 figure canvas on the left, the per-track
+table on the right (a horizontal splitter), driven the default way; the `_plots_consolidated` checkbox
+still opts out to the old pop-out windows + table dialog.
+
+- **The combined dock is also the brushing fix.** The table→plot / image→plot highlights were silently
+  no-op'ing against dead canvases because the old pyplot/`QDialog` surfaces were disposable and took their
+  `_msd_line_registry` / `_track_table_registry` with them when they closed. Embedding the figure canvas
+  and the table in one persistent dock keeps the highlight targets alive.
+- **Image → everywhere now works regardless of the active napari layer.** The bead-click picker was a
+  *layer* callback, so napari only delivered it when "Bead Picker" was the active layer — the usual case
+  (image/Tracks layer selected) left image→plot/table dead. Added a **viewer-level** pick
+  (`_install_viewer_bead_pick`) that fires whatever layer is active, resolving the **nearest** bead on the
+  current frame within a pixel radius (`_nearest_bead_tid`) — napari's exact-hit `get_value` never lands
+  on one of hundreds of thousands of tiny dense beads, which is why bead picking looked dead.
+- **Centered trajectories are a real fourth SelectionView** (`vpt.centered`). `_draw_centered_tracks` now
+  keeps a per-track line/coords map with promote/demote and a click hit-tester, so clicking a centered
+  path selects that track everywhere, and a selection from any other view emphasises its centered path
+  (promoting one off the current page on demand). It was inert before.
+- **Bucket pager** — the MSD spaghetti and centered panels cap how many tracks they draw (the spread stops
+  changing past ~100). A `◀ Prev / Next ▶` pager with a live bucket-size spinbox pages through literal
+  slices of tracks (no representative sampling), so **every track is on a plot on some page**; page 0 is
+  the representative ensemble. A selection survives page turns (re-applied on the new page's artists).
+
+### Notes
+- **Needs your in-app verification** (viewer-coupled — headless-green only): open a VPT result and confirm
+  (1) the combined dock lays out figure-left / table-right; (2) clicking a bead reveals it AND highlights
+  the table row + MSD curve + centered path, from any active layer; (3) clicking a table row, an MSD
+  curve, or a centered trajectory brushes all the others; (4) the pager steps through buckets and the
+  highlight persists across pages.
+- `analysis_plots` gains `only_tids` on `_draw_msd_into` / `_draw_centered_tracks` (draw an exact slice,
+  no sampling) and a registry/hit-test on the centered panel; the pop-out path is unchanged.
+- Full `pytest -m core` green; ratchets (complexity, drop-guard, exception budget, silent-fallbacks) green.
+
 ## [1.6.140] - 2026-07-19
 ### Changed — **Reliability adoption: the two zero-bar widgets now run off the Qt thread through the operation runner.**
 Completes the reliability spec's Part 2 — the proof adoption. The two analyses whose slow work is the

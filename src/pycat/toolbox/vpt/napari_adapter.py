@@ -114,6 +114,79 @@ class _VptNapariMixin:
         except Exception:
             pass
         self._bead_picker_layer = layer
+        # A layer-level callback only fires when the picker layer is ACTIVE — but the
+        # user is usually on the image or Tracks layer, so a bead click never reached
+        # the hub and image→plot/table brushing looked dead. Also install a
+        # viewer-level pick that works whatever layer is selected: it hit-tests the
+        # picker layer's points directly and only acts when a bead is under the cursor.
+        self._install_viewer_bead_pick()
+
+    def _install_viewer_bead_pick(self):
+        """Select a track by clicking a bead REGARDLESS of the active layer.
+
+        napari dispatches layer ``mouse_drag_callbacks`` only to the active layer, so
+        the per-layer picker above is silent unless the user first selects "Bead
+        Picker". This viewer-level callback fires on every click, queries the picker
+        layer's ``get_value`` (a data lookup, independent of which layer is active),
+        and selects the track only when a bead is actually under the cursor — so an
+        empty-space click or a pan is untouched. Installed once per viewer."""
+        if getattr(self, '_viewer_pick_installed', False):
+            return
+
+        def _on_viewer_click(viewer, event):
+            if self._selection().is_busy:
+                return
+            layer = getattr(self, '_bead_picker_layer', None)
+            if layer is None or not getattr(layer, 'visible', True):
+                return
+            tid = self._nearest_bead_tid(layer, event)
+            if tid is None:
+                return                               # click not near any bead — leave it alone
+            self._select_track(tid, source='image')
+
+        try:
+            self.viewer.mouse_drag_callbacks.append(_on_viewer_click)
+            self._viewer_pick_installed = True
+        except Exception:                            # broad-ok: viewer teardown / missing callback list
+            pass
+
+    def _nearest_bead_tid(self, layer, event, radius_px=25.0):
+        """Track id of the bead NEAREST the click (within ``radius_px`` image pixels)
+        on the current frame — a tolerant "click near a bead" hit test.
+
+        napari's Points ``get_value`` only returns a point the cursor sits exactly on;
+        with hundreds of thousands of tiny, dense beads that essentially never hits, so
+        image→everywhere looked dead (``idx=None``). This searches the picker layer's
+        own point data instead. Bead coords are ``y_um/mpp`` → the data frame is pixels,
+        so the radius is in pixels."""
+        import numpy as _np
+        data = getattr(layer, 'data', None)
+        if data is None:
+            return None
+        data = _np.asarray(data, float)
+        tids = getattr(self, '_bead_picker_tids', None)
+        if data.size == 0 or tids is None or len(tids) != len(data):
+            return None
+        try:
+            pos = _np.asarray(layer.world_to_data(event.position), float)
+        except Exception:                            # broad-ok: fall back to the raw world position
+            pos = _np.asarray(event.position, float)
+        if data.shape[1] >= 3:                       # (T, Y, X) — restrict to the click's frame
+            mask = data[:, 0].astype(int) == int(round(pos[0]))
+            if not mask.any():
+                return None
+            pts = data[mask][:, -2:]; cand = _np.asarray(tids)[mask]
+        else:
+            pts = data[:, -2:]; cand = _np.asarray(tids)
+        click = pos[-2:]
+        d = _np.hypot(pts[:, 0] - click[0], pts[:, 1] - click[1])
+        j = int(_np.argmin(d))
+        if d[j] > radius_px:
+            return None                              # nearest bead is too far — not a bead click
+        try:
+            return int(cand[j])
+        except Exception:                            # broad-ok: non-int tid → no selection
+            return None
 
     def _rebuild_track_layers(self, tracks, name="Bead Trajectories"):
         """(Re)build the napari Tracks layer + the pickable Points layer from a
