@@ -1,3 +1,41 @@
+## [1.6.132] - 2026-07-19
+### Added — **Progress, part 2: the ANALYSIS half — tool-level `progress_callback` for the two zero-bar widgets.**
+The materialization half of the progress work shipped in 1.6.81/82/107 (decoding a lazy stack shows a
+bar and runs off-thread). This is the different problem the roadmap parked: two widgets whose slow work
+is **the analysis itself**, which had **nothing on screen** during a multi-second run — the verified gap
+(`contrast_cascade_ui` and `fd_curve_ui` each had zero `QProgressBar` and zero tool-side progress).
+Because the slowness is the computation, a bar alone would have nothing to drive it, so the tool
+functions report progress first.
+
+- **Part A — tool-side `progress_callback`** (the `materialize_stack` signature, so `PhasedProgress`
+  composes; `None` is a complete no-op):
+  - `contrast_cascade_tools.cascade_rf_segment` reports at its three **stage** boundaries (build
+    features → train → predict). Each stage is one opaque call, so stage-level progress is honest — a
+    per-pixel bar would fake a granularity the work doesn't have.
+  - `fd_curve_tools.detect_all_rips` reports **per half-cycle** — the real countable loop, where each
+    iteration runs a WLC fit and is the slow part.
+- **Part B — the two widgets** now build a real **`QProgressBar`** (never a `QLabel`: `setValue`
+  repaints synchronously and moves on a busy thread, `setText` does not) and drive it from the tool
+  callback via `PhasedProgress`.
+- **Part E — a sibling ratchet** (`tests/test_progress_analysis_half.py`, AST-based so it runs headless):
+  the slow tool entry points must accept `progress_callback`, and the two widgets must construct a
+  `QProgressBar` driven from that callback. A future zero-feedback slow widget fails here.
+### Notes
+- **Part D sweep — clean.** Every existing progress indicator in the app is already a `QProgressBar`,
+  not a `QLabel` — the many `setRange(0, 0)` sites (brightfield / condensate-physics / in-vitro runners)
+  are *honestly indeterminate* bars for single-opaque-call steps, which the spec explicitly permits. So
+  the "a status label is not a progress reporter" hazard does not exist in the tree; no conversion was
+  needed. **Part C** (converting per-cell/per-object *core* runners from indeterminate to determinate)
+  is identified follow-on: each needs its own tool-side `progress_callback`, and the current
+  indeterminate bars are correct for the single-call steps.
+- **Same honest limit as part 1:** this makes the wait **visible, not shorter**. Off-thread execution of
+  the analysis is a separate, larger change.
+- **In-app verification (viewer-coupled):** the *moving-bar* behaviour of the two widgets is confirmed
+  structurally (tool callbacks fire correctly, verified headlessly; bars constructed + wired, verified by
+  AST), but the visible bar during a real Cascade-RF segmentation / rip-fit wants an in-app glance.
+- Files: `src/pycat/toolbox/contrast_cascade_tools.py`, `contrast_cascade_ui.py`, `fd_curve_tools.py`,
+  `fd_curve_ui.py`, `tests/test_progress_analysis_half.py`.
+
 ## [1.6.131] - 2026-07-19
 ### Added — **Filtering-defaults sensitivity harness, increment 3: the partition-coefficient camera-offset default (a LIVE inverter, pinned).**
 Increment 1 built the harness and proved it on two fixed inverters; increment 2 added the segmentation

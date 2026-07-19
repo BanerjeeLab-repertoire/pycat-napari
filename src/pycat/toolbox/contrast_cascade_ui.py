@@ -9,7 +9,7 @@ import napari
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton,
     QSpinBox, QComboBox, QWidget, QSizePolicy,
 )
 
@@ -155,15 +155,23 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         if sname not in [l.name for l in viewer.layers]:
             napari_show_warning("Add and paint a scribble layer first."); return
         from pycat.toolbox.contrast_cascade_tools import cascade_rf_segment
+        from pycat.ui.ui_utils import PhasedProgress
         data = np.asarray(viewer.layers[iname].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
         scr = np.asarray(viewer.layers[sname].data)
         if scr.ndim == 3:
             scr = scr.max(axis=0)
+        # One bar across the RF's three stages (features/train/predict), driven by the tool callback.
+        pp = PhasedProgress(cascade_progress, phases=[("Cascade RF", 1.0)])
+        pp.start_phase(0)
         try:
-            pred = cascade_rf_segment(img2d, scr, object_diameter=obj_d.value())
+            pred = cascade_rf_segment(img2d, scr, object_diameter=obj_d.value(),
+                                      progress_callback=pp.callback)
         except Exception as e:
+            cascade_progress.setVisible(False)
             napari_show_warning(f"Cascade RF failed: {e}"); return
+        pp.finish()
+        cascade_progress.setVisible(False)
         viewer.add_labels(pred.astype(np.int32), name="Cascade RF classes")
         napari_show_info(f"Cascade RF done — classes {sorted(np.unique(pred))} "
                          "(as painted: 1=body, 2=fiber, 3=background).")
@@ -206,6 +214,13 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         napari_show_info(f"Diagnostic: {n_growth} sharp-dim (growth-like), "
                          f"{n_focus} blurry-dim (below-focus-like). "
                          "Confirm below-focus with a z-stack.")
+
+    # ── The Cascade RF is the slow step: features → train → predict, seconds on a real image ──
+    # A real QProgressBar (not a QLabel — setValue repaints synchronously, so it moves even while
+    # the Qt thread is busy in the fit; a QLabel's setText would never paint until the loop ended).
+    cascade_progress = QProgressBar()
+    cascade_progress.setVisible(False)
+    outer.addWidget(cascade_progress)
 
     band_btn.clicked.connect(_on_bands)
     tone_btn.clicked.connect(_on_tone)

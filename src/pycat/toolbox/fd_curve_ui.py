@@ -23,7 +23,7 @@ from napari.utils.notifications import (
 )
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox, QFormLayout,
-    QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QComboBox, QScrollArea,
+    QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QComboBox, QProgressBar, QScrollArea,
     QSizePolicy,
 )
 from PyQt5.QtCore import Qt
@@ -361,19 +361,31 @@ class FDCurveUI:
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_rips)
         form.addRow(btn)
+        # Rip detection runs a WLC fit per half-cycle — the slow part. A real QProgressBar (repaints
+        # synchronously on setValue, so it moves while the Qt thread is busy in the fit loop; a QLabel
+        # would not paint until the loop ended).
+        self._rips_progress = QProgressBar()
+        self._rips_progress.setVisible(False)
+        form.addRow(self._rips_progress)
         layout.addWidget(grp)
 
     def _on_rips(self):
         from pycat.toolbox.fd_curve_tools import detect_all_rips, TERRA_REPEAT_NT
+        from pycat.ui.ui_utils import PhasedProgress
         seg = self._dr().get('fd_segments')
         if seg is None:
             napari_show_warning("Segment the cycles first (Step 2)."); return
+        pp = PhasedProgress(self._rips_progress, phases=[("Detecting rips", 1.0)])
+        pp.start_phase(0)
         rips = detect_all_rips(
             seg, which='stretches',
+            progress_callback=pp.callback,
             min_force_drop_pN=self._min_drop.value(),
             kuhn_length_nm=self._kuhn.value(),
             stretch_modulus_pN=self._ss_mod.value(),
             rise_nm_per_nt=self._rise.value())
+        pp.finish()
+        self._rips_progress.setVisible(False)
         self._dr()['fd_rips'] = rips
 
         self._record('fd_rips', {
