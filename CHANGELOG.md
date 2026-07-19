@@ -1,3 +1,44 @@
+## [1.6.125] - 2026-07-18
+### Added — **Cross-route workflow-equivalence matrix: the same workflow must give the same numbers through every route.**
+The strongest recommendation from the external architecture audit: stop adding isolated per-route
+tests and start asserting that a canonical workflow produces the **same numbers** through headless call,
+batch replay, and session reload. PyCAT exposes each operation through several routes, each of which
+assembles its parameters independently — and a disagreement is the highest-severity class of bug PyCAT
+can have (the same analysis silently yielding different numbers depending on how it was launched). This
+is not hypothetical: batch preprocessing once passed a *normalised* image where the interactive path
+passed **raw counts**, and the rolling-ball radius is not scale-invariant. This generalises the test
+written for that one step into a matrix.
+
+- **`tests/route_equivalence.py`** — the reusable harness. `run_all_routes(workflow)` drives a workflow
+  through each route; `assert_routes_agree(...)` compares each route against a reference and **names
+  which route diverged and by how much**. A route that cannot be driven headlessly is declared an
+  `Unavailable` **documented gap** — and the harness fails if a gap closes or a route vanishes without
+  the record being updated, so nothing is skipped silently. Comparators default to **exact** equality.
+- **`tests/test_route_equivalence.py`** — three canonical workflows, distinct data shapes:
+  1. **Rolling-ball background removal** (the known-divergence scale-semantics path) — runs all three
+     routes and they are **bit-identical**. Both headless and batch reduce to the same toolbox call on
+     the same *raw counts*; if the batch replay ever reverts to normalising first, this names it.
+  2. **Puncta detection + measurement** — headless ≈ session (the per-object table survives Save &
+     Clear → reopen unchanged). Batch is a **declared gap**: its replay needs a cellpose cell mask
+     upstream (torch), absent in the headless `core` env.
+  3. **VPT tracks → MSD → viscosity** — headless ≈ session, plus an **end-to-end check that the chain
+     recovers the known Stokes–Einstein viscosity** (η = kT/6πRD; true D=0.05 → η recovered within
+     15% on the noisy synthetic chain). Batch is a declared gap: VPT/MSD replay steps are deliberate
+     skip-stubs (time-series, not per-image).
+- Adding a fourth workflow is one `Workflow(...)` entry.
+### Notes
+- **Finding (minor, not fixed here — test-only spec):** a session-restored DataFrame comes back with an
+  extra `Unnamed: 0` column — `write_session_outputs` writes the DataFrame index into the CSV, which
+  reloads as a phantom column. The scientific numbers are untouched (the harness compares the named
+  columns), but the schema gains a column across a save/load. Logged for a future writer fix
+  (`to_csv(index=False)`); it is not a numeric divergence.
+- **Justified tolerance:** the session route is a *decimal* (CSV) serialization, so a float64 can return
+  differing in its last bit (~1 ULP, ~2e-16). That is the text format's precision, not a route
+  computing a different number, so the DataFrame comparator allows 1-ULP-scale (rtol 1e-12, atol 1e-15)
+  — far below any scientific significance. The array routes (rolling-ball) are compared **exactly**.
+- No production code changed. If a real divergence is ever found, it is a finding to report with its own
+  spec — not something to absorb by loosening a tolerance.
+
 ## [1.6.124] - 2026-07-18
 ### Fixed — **Tag discovery: kill the stale TEST loader (the "registry regressed" false alarm) and carry a declared `produces` onto the layer.**
 An external audit reported the operation registry had *regressed* — "only 42 of ~100 operations
