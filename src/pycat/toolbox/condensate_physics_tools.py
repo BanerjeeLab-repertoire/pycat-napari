@@ -61,7 +61,7 @@ import numpy as np
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops as _bbox_cols
 from pycat.utils.general_utils import debug_log
-from pycat.utils.math_utils import robust_focus_energy
+from pycat.utils.math_utils import robust_focus_energy, resolve_frame_mask
 import pandas as pd
 
 # Notifications via the shim: keeps the physics importable with no GUI stack (1.5.378).
@@ -1749,30 +1749,40 @@ def apply_bleach_correction(
 #   4. Per-frame flags: is_blurry, is_bleached, cause
 
 
-def _frame_entropy(frame: np.ndarray, n_bins: int = 64) -> float:
+def _frame_entropy(frame: np.ndarray, n_bins: int = 64, mask: np.ndarray = None) -> float:
     """
     Shannon entropy of the pixel intensity distribution of one frame.
     Uses n_bins histogram bins; higher entropy = more information content.
     Normalised to [0, log2(n_bins)] so values are comparable across bit depths.
+
+    ``mask`` : optional boolean array — entropy over the masked pixels only. The
+    pixels are EXTRACTED (never zero-filled), so no artificial peak is added at 0.
+    ``mask=None`` is byte-identical to whole-frame.
     """
-    counts, _ = np.histogram(frame.ravel(), bins=n_bins,
+    vals = frame.ravel() if mask is None else frame[mask]
+    counts, _ = np.histogram(vals, bins=n_bins,
                                range=(0.0, 1.0), density=False)
     p = counts / (counts.sum() + 1e-12)
     p = p[p > 0]
     return float(-np.sum(p * np.log2(p)))
 
 
-def _frame_gradient_energy(frame: np.ndarray) -> float:
+def _frame_gradient_energy(frame: np.ndarray, mask: np.ndarray = None) -> float:
     """
     Mean Sobel gradient magnitude — measures average edge strength.
     High = sharp edges (in focus); low = blurry (out of focus / drift).
     More noise-resistant than Laplacian variance for dim frames.
+
+    ``mask`` : optional boolean array. The Sobel gradient is computed on the FULL
+    real frame (so no fake edge is created at the mask boundary), then the magnitude
+    is aggregated over the masked pixels only. ``mask=None`` is byte-identical.
     """
     gy = ndimage.sobel(frame, axis=0)
     gx = ndimage.sobel(frame, axis=1)
+    mag = np.sqrt(gy**2 + gx**2)
     # Robust mean edge strength: an out-of-plane speck cannot hijack the argmax. See
     # `robust_focus_energy` — clean frames are unaffected, debris is trimmed.
-    return robust_focus_energy(np.sqrt(gy**2 + gx**2))
+    return robust_focus_energy(mag if mask is None else mag[mask])
 
 
 def _fit_linear_trend(values: np.ndarray) -> dict:
@@ -1790,6 +1800,7 @@ def analyse_frame_quality(
     entropy_bins: int = 64,
     bleach_r2_min: float = 0.70,
     drift_slope_threshold: float = -0.02,
+    mask: np.ndarray = None,
 ) -> dict:
     """
     Comprehensive per-frame quality analysis distinguishing photobleaching
@@ -1805,6 +1816,12 @@ def analyse_frame_quality(
     bleach_r2_min : minimum R² for exponential fit to declare bleaching
     drift_slope_threshold : normalised linear slope below which entropy/
         Laplacian trends are called drift (negative = declining sharpness)
+    mask : optional focus region — a single (H, W) boolean applied to every frame,
+        or a (T, H, W) per-frame stack. When given, the three FOCUS metrics
+        (Laplacian variance, entropy, gradient energy) are scored over the masked
+        region ONLY, so a LARGE out-of-plane structure (which `robust_focus_energy`'s
+        trimming cannot reach) no longer decides "best frame". Mean intensity stays
+        whole-frame (it feeds bleaching, not focus). `mask=None` is byte-identical.
 
     Returns
     -------
@@ -1837,13 +1854,17 @@ def analyse_frame_quality(
     mean_int, lap_var, entropy, grad_en = [], [], [], []
     for t in range(n_frames):
         frame = stack[t].astype(np.float32)
-        mean_int.append(float(frame.mean()))
-        lap      = ndimage.laplace(frame)
+        fm = resolve_frame_mask(mask, t, frame.shape)   # None → whole-frame
+        mean_int.append(float(frame.mean()))            # whole-frame: feeds bleaching, not focus
+        lap      = ndimage.laplace(frame)               # computed on the FULL frame (no fake edges)
         # Robust Laplacian variance: a bright out-of-plane speck's few large-magnitude
         # pixels no longer dominate the spread, so 'best frame' is the sample, not the dust.
-        lap_var.append(float(robust_focus_energy((lap - lap.mean())**2)))
-        entropy.append(_frame_entropy(frame, entropy_bins))
-        grad_en.append(_frame_gradient_energy(frame))
+        # With a mask, the spread is taken over the masked pixels only (the SPATIAL layer).
+        lap_m = lap if fm is None else lap[fm]
+        lap_var.append(float(robust_focus_energy((lap_m - lap_m.mean())**2))
+                       if lap_m.size else 0.0)
+        entropy.append(_frame_entropy(frame, entropy_bins, mask=fm))
+        grad_en.append(_frame_gradient_energy(frame, mask=fm))
 
     mean_int = np.array(mean_int)
     lap_var  = np.array(lap_var)

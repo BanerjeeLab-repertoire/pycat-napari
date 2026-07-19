@@ -896,24 +896,28 @@ measurement path. The machinery exists; the concept does not.
 selected as the intensity source for a measurement without an explicit override, and the
 override is recorded in the result's ``Measurement`` assumptions.
 
-.. rubric:: Focus selection must not pick the sharpest DEBRIS
+.. rubric:: Focus selection must not pick the sharpest DEBRIS — ✅ RESOLVED (two layers)
 
-``analyse_frame_quality`` / ``bf_analyse_frame_quality`` score focus over the **whole frame**.
-Sharp debris, dust on the coverslip, or a bright out-of-plane object will score *higher* than a
-correctly-focused condensate — so the "best frame" can be the one where the junk is sharpest.
+**This shipped in two complementary layers, not one big fix.**
 
-**Where:** the focus metrics in ``condensate_physics_tools`` (``analyse_frame_quality``) and
-``brightfield_tools`` (``bf_analyse_frame_quality``), plus the Frame Quality / Focus QC tool in
-``general_image_tools``.
+* **Statistical layer (small debris) — RESOLVED in 1.6.91.** Every whole-frame focus/quality metric
+  (Brenner, Tenengrad, Laplacian variance, normalised variance, gradient energy) now aggregates through
+  ``math_utils.robust_focus_energy``, a trimmed mean that drops the top ~1% of per-pixel magnitudes. A
+  *small* out-of-plane speck can no longer hijack the "best frame"; a clean frame's chosen index is
+  unchanged. This defends against debris up to ~1% of frame area.
 
-**The fix:** compute focus **inside a biologically relevant mask** (the cell mask, or a
-segmentation of the objects of interest), and use more than one metric — a single Brenner
-gradient is exactly what debris maximises. Report the focus score *per compartment*, not just
-per frame.
+* **Spatial layer (large debris) — RESOLVED in 1.6.142.** Trimming cannot reach a *large* out-of-plane
+  structure. ``bf_analyse_focus_series`` and ``analyse_frame_quality`` gained an optional ``mask=`` (a
+  single ``(H, W)`` region or a ``(T, H, W)`` per-frame stack); when supplied, the focus metrics are
+  scored **inside the biological region only** (masked pixels extracted, never zero-filled, so the mask
+  boundary adds no artificial edge). ``mask=None`` is byte-identical to the previous whole-frame
+  behaviour. ``bf_focus_metric`` already accepted a mask; the series scorers now thread it. Callers pass
+  a mask where one is genuinely in hand (no fabrication).
 
-**Acceptance:** on a synthetic stack with an in-focus condensate and a sharper piece of
-out-of-plane debris, whole-frame focus scoring picks the debris frame; mask-restricted scoring
-picks the condensate frame.
+**Acceptance (met):** ``tests/test_focus_debris.py`` — on a stack with an in-focus condensate and a
+LARGE (≥8%, above the trim) sharper out-of-plane speck, whole-frame scoring picks the debris frame and
+mask-restricted scoring picks the condensate frame, for both scorers; a clean stack picks the same frame
+masked or not; and the trim layer defeats small debris independently of any mask.
 
 .. rubric:: Audit the 115 filtering defaults (two already shown to invert the result)
 

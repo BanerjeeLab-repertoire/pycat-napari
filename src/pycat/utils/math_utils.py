@@ -54,6 +54,31 @@ def robust_focus_energy(per_pixel, trim_fraction=0.01):
     return float(kept.mean()) if kept.size else float(values.mean())
 
 
+def resolve_frame_mask(mask, t, shape):
+    """The per-frame boolean mask for a focus scorer — the SPATIAL debris layer that
+    complements ``robust_focus_energy``'s statistical (trimming) layer.
+
+    Trimming defends against *small* debris; a LARGE out-of-plane structure is only
+    handled by scoring inside the region you care about. ``mask`` may be:
+
+    * ``None`` → ``None`` (score the whole frame — byte-identical to the pre-mask path),
+    * a single ``(H, W)`` array applied to every frame, or
+    * a ``(T, H, W)`` stack → frame ``t``.
+
+    Returned as a boolean array (``!= 0``). Raises on a shape mismatch — a wrong mask
+    is worse than whole-frame, so it must fail loudly rather than silently mis-score.
+    """
+    if mask is None:
+        return None
+    m = np.asarray(mask)
+    fm = m[t] if m.ndim == 3 else m
+    fm = fm != 0
+    if fm.shape != tuple(shape):
+        raise ValueError(
+            f"focus mask {fm.shape} does not match the frame {tuple(shape)}")
+    return fm
+
+
 def remove_outliers_iqr(data):
     """
     Remove outliers from a dataset using the Interquartile Range (IQR) method. This method

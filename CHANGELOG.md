@@ -1,3 +1,31 @@
+## [1.6.142] - 2026-07-19
+### Added — **Focus selection: close the spatial debris layer (optional `mask=` on the focus-series scorers).**
+Completes the "best frame must not be the sharpest DEBRIS" rubric. The **statistical** layer already
+shipped (1.6.91): `math_utils.robust_focus_energy` trims the top ~1% of per-pixel magnitudes, so a
+*small* out-of-plane speck cannot hijack the chosen frame. This adds the **spatial** layer for the two
+focus-series scorers, for the case trimming cannot reach — a *large* out-of-plane structure.
+
+- `bf_analyse_focus_series` (`brightfield_tools`) and `analyse_frame_quality` (`condensate_physics_tools`)
+  gain an optional **`mask=`** — a single `(H, W)` boolean applied to every frame, or a `(T, H, W)`
+  per-frame stack. When supplied, the focus metrics (Brenner/Tenengrad/normalised variance;
+  Laplacian variance/entropy/gradient energy) are scored **inside the masked region only**.
+- **Masked pixels are extracted, never zero-filled** — a zero-fill outside the mask would create a
+  high-gradient artefact at the boundary that inflates every metric. Gradients/Laplacians are computed on
+  the full real frame, then aggregated over masked pixels.
+- **`mask=None` is byte-identical** to the previous whole-frame behaviour; a full-True mask reduces to
+  exactly the whole-frame numbers (pinned in the test). Mean intensity stays whole-frame (it feeds
+  bleaching detection, not focus).
+- New shared helper `math_utils.resolve_frame_mask` (per-frame mask, raises on shape mismatch — a wrong
+  mask is worse than whole-frame, so it fails loudly). `_frame_entropy` / `_frame_gradient_energy` gained
+  a `mask=` too. The trim layer is kept **on top of** the mask — they are complementary, not alternatives.
+- **No caller fabricates a mask.** The frame-QC UIs run on a raw stack with no biological mask in hand, so
+  they pass `None`; the capability is there for a caller that genuinely has a region.
+
+`tests/test_focus_debris.py` (new, `core`): a deliberately adversarial fixture (debris ≥8% of the frame,
+above the 1% trim, sharper per-pixel than the condensate) proves `mask=None` picks the debris frame and
+`mask=` picks the condensate — for both scorers; a clean stack picks the same frame either way; the trim
+layer defeats small debris independently; a wrong-shaped mask raises. Full `pytest -m core` green.
+
 ## [1.6.141] - 2026-07-19
 ### Added — **VPT results are now one combined dock with full four-way brushing and a bucket pager.**
 The Video Particle Tracking results used to surface as three disconnected top-level things — the 2×2
