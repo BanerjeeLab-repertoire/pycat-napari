@@ -1,3 +1,35 @@
+## [1.6.124] - 2026-07-18
+### Fixed — **Tag discovery: kill the stale TEST loader (the "registry regressed" false alarm) and carry a declared `produces` onto the layer.**
+An external audit reported the operation registry had *regressed* — "only 42 of ~100 operations
+register," "`log` is missing," "duplicate registration is not rejected." **Three of those four findings
+were artefacts of a defect in the test, not the product.** `tests/test_tag_registry.py` reimplemented
+operation discovery with a hardcoded list of **11** module names inside `except Exception: pass`, missed
+**7** decorated modules, counted 42 instead of the real **79**, and swallowed the import failures that
+would have said why. Meanwhile `operation_spec._populate_registry()` already AST-discovers every
+`@tags_layer` module correctly — the test had a second, worse loader.
+
+- **Fix 1 (the real defect).** The tag tests now discover through the one mechanism —
+  `_populate_registry()` — and an unimportable decorated module is a **loud failure**, not a quiet
+  undercount. The `>= 50` floor is ratcheted to the live count (**79**). Routed both
+  `test_tag_registry.py` and `test_tag_resolver.py` through it; deleted their private loaders. The four
+  reported failures pass **with no product change** — the proof that findings 1–3 were test artefacts.
+- **Fix 2 (the one genuine gap).** `layer_tag_hook` already copies a known op's declared `target` onto
+  the layer (so `role=labels, target=cell` finds Cellpose output). It now also honours a declared
+  `produces`: an op that **declares** it makes a mask is tagged `role=mask` even when the returned
+  array's values happen to look like labels — the declaration is definitional, the data-shape is a
+  guess, and declared beats inferred.
+### Added
+- An **end-to-end** acceptance test (`operation → layer → tags → resolver`) over six canonical ops —
+  `cellpose`, `watershed`, `log`, `dog`, `rolling_ball`, `mask_merge` — each found by a query written in
+  its *declared* semantics. `mask_merge` is fed labels-like data on purpose, so only the declared
+  `produces='mask'` makes the `role=mask` query match.
+### Notes
+- **The record, stated plainly:** the "42 operations / missing `log` / no `TagCollision`" findings were a
+  stale test loader. The registry holds 79 operations, `log` is present (in `image_processing_tools`,
+  alias `laplacian_of_gaussian`), and `register_operation` does raise `TagCollision`. No operations were
+  added to "fix" the count — that would have created the real collision the audit wrongly reported.
+- Files: `src/pycat/utils/layer_tag_hook.py`, `tests/test_tag_registry.py`, `tests/test_tag_resolver.py`.
+
 ## [1.6.123] - 2026-07-18
 ### Changed — **Retrofit the linked-selection dock to the SelectionView contract.**
 Continuing the Gap 5 retrofit (the table and the new pyqtgraph backend already conform): the dock's

@@ -258,6 +258,18 @@ def _wrap(viewer, original, layer_type):
                 entry = get_operation(op)
                 if entry and entry.get('target'):
                     tag_layer(layer, 'target', entry['target'], source='derived')
+                # ── A DECLARED `produces` beats the inferred role ────────────────
+                #
+                # The role above is read from the DATA (a 0/1 array is a mask, more values are
+                # labels). But an op that DECLARES it makes a mask makes a mask even when its
+                # array happens to look like labels — the declaration is definitional, the
+                # data-shape is a guess. So a declared `produces` that differs from the inferred
+                # role overwrites it (`source='derived'`, beating the `'inferred'` write above);
+                # a user override, which does not exist yet at creation, is still never touched
+                # because it would be `source='user_set'`.
+                produces = entry.get('produces') if entry else None
+                if produces and produces != role:
+                    tag_layer(layer, 'role', produces, source='derived', overwrite=True)
 
         except Exception as exc:
             # A tagging failure must NEVER stop a layer being added. The user's data comes first.

@@ -33,17 +33,29 @@ def _registry():
     return pytest.importorskip("pycat.utils.tag_registry")
 
 
+# ── The registry must hold at least this many operations ──────────────────────────────────
+# A FLOOR, ratcheted at the live count (the number `_populate_registry` yields today). It exists
+# so a genuine regression — a decorated module that stops importing, a decorator deleted — fails
+# instead of quietly undercounting. If you ADD operations, raise this to the new count; it only
+# ever moves up, the same downward-only discipline the complexity budget uses.
+_OPERATION_FLOOR = 79
+
+
 def _load_tagged_modules():
-    """Import every module that declares tags, so the registry is populated."""
-    import importlib
-    for name in ('image_processing_tools', 'segmentation_tools', 'label_and_mask_tools',
-                 'brightfield_tools', 'clean_spot_detection_tools', 'vpt_tools',
-                 'topology_tools', 'zstack_segmentation_tools', 'fft_bandpass_tools',
-                 'temporal_enhancement_tools', 'contrast_cascade_tools'):
-        try:
-            importlib.import_module(f'pycat.toolbox.{name}')
-        except Exception:
-            pass
+    """Populate the registry through the **one** real discovery mechanism.
+
+    Not a hand-kept import list. A stale list is exactly the defect that made an external audit
+    report a "regressed" registry: `tests` reimplemented discovery with 11 hardcoded module names
+    inside ``except Exception: pass``, missed 7 decorated modules, counted 42 instead of 79, and
+    swallowed the import failures that would have said why. `_populate_registry` AST-discovers
+    every ``@tags_layer`` module and returns what it could not import — and here an unimportable
+    module is a **loud failure**, never a quiet omission.
+    """
+    from pycat.navigator.operation_spec import _populate_registry
+    skipped = _populate_registry()
+    assert not skipped, (
+        "tag discovery could not import a decorated module (a real regression, not an undercount):"
+        "\n  " + "\n  ".join(f"{module}: {exc!r}" for module, exc in skipped))
 
 
 @pytest.mark.core
@@ -53,9 +65,10 @@ def test_the_vocabulary_is_populated():
     _load_tagged_modules()
 
     operations = registry.list_operations()
-    assert len(operations) >= 50, (
-        f"only {len(operations)} operations are registered. The toolbox has ~100 image and mask "
-        f"transforms — if the registry is nearly empty, the decorators are not being reached."
+    assert len(operations) >= _OPERATION_FLOOR, (
+        f"only {len(operations)} operations are registered, below the floor of {_OPERATION_FLOOR}. "
+        f"A decorated module stopped importing or a decorator was dropped — this is a regression, "
+        f"not the old under-counting loader (which is gone)."
     )
 
 

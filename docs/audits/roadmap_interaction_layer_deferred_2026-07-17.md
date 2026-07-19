@@ -110,6 +110,25 @@ interaction-layer spec; also serves the complexity ratchet.
 
 **Prerequisite:** interaction-layer spec (the contract tests are the safety net for the refactor).
 
+## 8. Convert MSD-plot brushing to a `SelectionView` class (retrofit tail)
+**The idea:** every other view that plugs into the dispatcher as a discrete widget is now a
+`SelectionView` (`view_id` / `apply_selection(state)` / `close()`): the brushable table + the
+pyqtgraph scatter (both emit + receive) and the linked-selection dock (receive-only). The one holdout
+is the MSD spaghetti plot, which still brushes through the **registry-based** `_msd_overlay_hooks`
+model (`lines` / `coords` / `promote` / `demote_line` / `promoted` entries on `ax`) rather than a
+`SelectionView` wrapper.
+
+**Why deferred:** the MSD overlay code was **just rewritten** for the LineCollection + overlay model
+in interaction-layer Gap 4 (1.6.120). It works and is well tested — clicking a curve promotes it to an
+overlay `Line2D`, demoting removes only the overlay, coords-based hit-testing survives log axes.
+Wrapping it in a `SelectionView` class now would churn freshly-landed code for **uniformity, not a
+bug or a missing capability** — there is no behaviour it can't do today. Convert it when there is an
+independent reason to touch that file (e.g. §7's `vpt_ui.py` decomposition, which would compose an
+`MSDPlotAdapter` anyway), so the churn buys something.
+
+**Prerequisite:** none blocking; best folded into §7 (`MSDPlotAdapter` is the natural landing site).
+**Status:** retrofit otherwise complete as of 1.6.123 (table + pyqtgraph + dock conform).
+
 ---
 
 ## Recommended order when picking these up
