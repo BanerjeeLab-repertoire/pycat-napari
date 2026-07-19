@@ -1,3 +1,22 @@
+## [1.6.123] - 2026-07-18
+### Changed — **Retrofit the linked-selection dock to the SelectionView contract.**
+Continuing the Gap 5 retrofit (the table and the new pyqtgraph backend already conform): the dock's
+`LinkedSelectionWidget` is now a `SelectionView` — `view_id`, `apply_selection(state)` (renamed from
+`_on_selection`, alias kept), and a `close()` that **unsubscribes** and then Qt-closes. It is a
+*receive-only* view (it renders the selected object's crop but never emits a command), so it needs no
+programmatic guard.
+
+- **Fixes a small lingering-subscription gap**: the outer wrapper's `close()` only removed the dock
+  widget; the deferred subscription lived on (held weakly, so eventually GC'd, but never explicitly
+  dropped). The wrapper now closes the widget, which unsubscribes.
+### Notes
+- Headless-tested: the widget satisfies the `SelectionView` protocol, applying a selection emits no
+  command (receive-only), and `close()` unsubscribes. Existing dock tests green.
+- Retrofit status: the emitting adapters (**table**, **pyqtgraph**) and the receive-only **dock** now
+  conform to and are tested against the shared contract. The MSD-plot brushing works correctly but is
+  registry/handler-based (rewritten in 1.6.120); formalizing it as a `SelectionView` class is a larger
+  restructure of just-rewritten code — deferred rather than churned.
+
 ## [1.6.122] - 2026-07-18
 ### Added — **PyQtGraph 'explore' plot backend, built on the SelectionView contract.**
 A fourth plot backend (alongside matplotlib/seaborn/plotly): a native-Qt interactive scatter. napari

@@ -123,24 +123,42 @@ class LinkedSelectionWidget(QWidget):
         layout.addStretch(1)
         self._set_enabled(False)
 
-    # ── the dispatcher ────────────────────────────────────────────────────────────────────
+    # ── the dispatcher (this is a SelectionView — Gap 5) ──────────────────────────────────
+    view_id = _VIEW_ID
+
     def subscribe(self, service):
         """Hear about selections. The **deferred** half: this reads pixels, so a drag across a
         scatter updates it once, on the point the user stopped on (increment 4's debounce)."""
         if service is None:
             return self
+        self._service = service
         try:
-            service.subscribe_deferred(_VIEW_ID, self._on_selection)
+            service.subscribe_deferred(_VIEW_ID, self.apply_selection)
         except Exception as exc:
             debug_log('linked selection: could not subscribe to the dispatcher', exc)
         return self
 
-    def _on_selection(self, selection):
+    def apply_selection(self, state):
+        """SelectionView.apply_selection — show the selected object's crop. **Receive-only**: this
+        view reads pixels but never emits a command, so it needs no programmatic guard."""
         if self._pinned:
             return          # the user asked to keep looking at this one
-        ref = self._ref_for(selection)
+        ref = self._ref_for(state)
         if ref is not None:
             self.show_ref(ref)
+
+    _on_selection = apply_selection      # back-compat alias for existing callers/tests
+
+    def close(self):
+        """SelectionView.close — unsubscribe so a closed dock stops being driven, then Qt-close.
+        (The outer wrapper only removed the dock widget; the deferred subscription used to linger.)"""
+        try:
+            svc = getattr(self, '_service', None)
+            if svc is not None:
+                svc.unsubscribe(_VIEW_ID)
+        except Exception as exc:
+            debug_log('linked selection: could not unsubscribe on close', exc)
+        return super().close()
 
     def _ref_for(self, selection):
         """The `ObjectRef` behind a `Selection`.
@@ -247,6 +265,11 @@ class LinkedSelectionDock:
         return self.widget
 
     def close(self):
+        try:
+            if self.widget is not None:
+                self.widget.close()          # SelectionView.close: unsubscribe + Qt-close
+        except Exception as exc:
+            debug_log('linked selection: could not close the widget', exc)
         try:
             if self._dock is not None:
                 self.viewer.window.remove_dock_widget(self._dock)

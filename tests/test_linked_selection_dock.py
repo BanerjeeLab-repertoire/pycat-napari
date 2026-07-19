@@ -239,3 +239,28 @@ def test_the_dock_is_usable_with_NO_viewer(qapp):
     widget.show_ref(_ref())
     assert not widget.reveal_button.isEnabled(), "Reveal is meaningless with no viewer"
     widget.reveal()          # must not raise
+
+
+def test_the_dock_is_a_RECEIVE_ONLY_SelectionView_that_unsubscribes_on_close(qapp):
+    """Gap 5: the dock satisfies the SelectionView protocol (view_id / apply_selection / close). It is
+    RECEIVE-ONLY — it renders a selection but never emits — so applying one emits no command; and
+    close() unsubscribes, which the outer wrapper's close used to miss."""
+    from pycat.utils.selection_service import (
+        SelectionService, SelectionState, SelectionView)
+
+    service = SelectionService(defer=lambda fn: fn(), debounce=lambda fn: fn())
+    widget = _widget(qapp, _Viewer())
+    widget.subscribe(service)
+
+    assert isinstance(widget, SelectionView)
+    assert widget.view_id == 'linked_selection_dock'
+
+    emitted = []
+    service.subscribe('probe', lambda st: emitted.append(st.source_view))
+    widget.apply_selection(SelectionState(selected=frozenset({'no/such/entity/0/0'}),
+                                          primary='no/such/entity/0/0'))
+    assert emitted == [], "the dock emitted a command — it must be receive-only"
+
+    widget.close()
+    assert 'linked_selection_dock' not in service._deferred_subscribers, (
+        "close() did not unsubscribe — a closed dock would still be driven")
