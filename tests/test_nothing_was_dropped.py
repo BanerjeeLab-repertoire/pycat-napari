@@ -115,6 +115,19 @@ _DELIBERATE = {
     # follow_selection case — this was only VPT's now-unused copy.
     'vpt_ui.py::_follow_enabled',
 
+    # 1.6.137 — the five pure-layout PANEL BUILDERS MOVED from vpt_ui.py into `vpt/panels.py` as the
+    # `_VptPanelsMixin` (vpt_ui decomposition, step 2). Nothing was dropped: the method bodies are
+    # byte-for-byte unchanged; they just live in the module vpt_ui now COMPOSES instead of implementing.
+    # (`setup_ui` — the top-level construction/composition + the pixel-size gate install — deliberately
+    # STAYS in vpt_ui.py; only the pieces it composes moved.) The guard keys by FILENAME, so a move
+    # reads as a vanish from the old file — these record it. The functions still exist as
+    # `panels.py::<name>`. vpt_ui.py: 2458 -> 1778 lines.
+    'vpt_ui.py::_build_per_track_metrics',
+    'vpt_ui.py::_add_host_segmentation',
+    'vpt_ui.py::_add_bead_detection',
+    'vpt_ui.py::_add_tracking',
+    'vpt_ui.py::_add_microrheology',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

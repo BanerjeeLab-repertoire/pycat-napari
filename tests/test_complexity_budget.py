@@ -141,7 +141,9 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    "toolbox/vpt_ui.py": 2458,
+    # vpt_ui.py: lowered 2458 -> 1778 after the panel builders moved to vpt/panels.py (decomposition
+    # step 2). The ratchet moving DOWN is the point — the file cannot grow back to where it was.
+    "toolbox/vpt_ui.py": 1778,
     "ui/ui_modules.py": 5573,
     "file_io/file_io.py": 2805,
     "batch_step_registry.py": 1663,

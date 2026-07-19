@@ -1,3 +1,33 @@
+## [1.6.137] - 2026-07-19
+### Changed — **vpt_ui decomposition, step 2: the panel builders MOVE out — `vpt_ui.py` 2458 → 1778 lines (−28%).**
+The measurable win the external audit asked for: it charged that the new abstractions were being added
+*beside* the concentration points rather than absorbing them, and set as its success metric that one
+concentration point becomes **materially smaller**. This does it for `vpt_ui.py`, the audit's named
+first target — a **28% reduction, past the ≥25% goal**.
+
+- The five pure-layout panel builders (`_add_bead_detection`, `_add_tracking`, `_add_microrheology`,
+  `_add_host_segmentation`, `_build_per_track_metrics`) moved into a new **`toolbox/vpt/panels.py`** as
+  the `_VptPanelsMixin`. `VideoParticleTrackingUI` now *composes* them (inherits the mixin) instead of
+  implementing them — the file is closer to construction-and-wiring only.
+- **Behaviour-preserving move, not a rewrite:** the method bodies are byte-for-byte unchanged; only the
+  module they live in changed. `setup_ui` (the top-level construction/composition **and** the
+  pixel-size-gate install) deliberately **stays** in `vpt_ui.py`, per the spec's rule that the file
+  retains composition — which also keeps the pixel-size-gate contract satisfied in place.
+### Notes
+- **Every pre-existing VPT/selection/brushing test passes unmodified** — the move changed no behaviour.
+  Only the two *bookkeeping* ratchets were updated as designed: the drop guard's `_DELIBERATE` records
+  the five moves (it keys by filename, so a move reads as a vanish), and the per-file ceiling for
+  `vpt_ui.py` is **lowered 2458 → 1778** (the ratchet moving down). Full `pytest -m core` green.
+- **The remaining three adapter modules (napari / table / msd) are NOT in this release.** The line
+  target is already met by this one extraction, and the first extraction surfaced a real, subtle failure
+  (a length-reporting method and its pixel-size gate split across the two files) that was invisible until
+  the full suite ran — proof that these need verification between steps, and that the *live VPT widget*
+  (not exercised by any headless test — the VPT tests instantiate a bare subclass) needs an in-app check
+  before more surgery. The napari/table/msd extractions, and formalising the msd/table adapters as
+  `SelectionView`s (the deferred interaction-layer §8 rewrite), are the follow-on.
+- Files: `src/pycat/toolbox/vpt_ui.py`, `src/pycat/toolbox/vpt/__init__.py`,
+  `src/pycat/toolbox/vpt/panels.py`, `tests/test_nothing_was_dropped.py`, `tests/test_complexity_budget.py`.
+
 ## [1.6.136] - 2026-07-19
 ### Added — **Per-file line ratchets on the four concentration points (vpt_ui decomposition, step 1).**
 Step 1 of the `vpt_ui.py` decomposition spec, and the part the spec itself flags as the
