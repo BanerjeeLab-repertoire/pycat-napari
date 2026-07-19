@@ -144,6 +144,32 @@ def records_from_data_repository(repo, object_tables=DEFAULT_OBJECT_TABLES):
     return records
 
 
+def records_from_output_dir(output_dir, image_stem, object_tables=DEFAULT_OBJECT_TABLES):
+    """``(object_type, dataframe)`` records read from an image's per-image batch output folder.
+
+    Reads ``<stem>_<key>.csv`` (``<stem>_cell_df.csv``, ``<stem>_puncta_df.csv``) — the files the replay
+    steps already wrote — so the consolidated writer STREAMS from disk rather than holding each image's
+    data repository open. Absent, empty, or unreadable files are skipped (an image that produced no
+    objects simply contributes no rows). Pure: point it at a temp dir in a test.
+    """
+    import pathlib
+    out = pathlib.Path(output_dir)
+    records = []
+    for key in object_tables:
+        csv = out / f"{image_stem}_{key}.csv"
+        if not csv.exists():
+            continue
+        try:
+            df = pd.read_csv(csv)
+        except Exception as exc:
+            _warn(f"Consolidated table: could not read {csv.name}: {exc}")
+            continue
+        if not df.empty:
+            object_type = key[:-3] if key.endswith('_df') else key
+            records.append((object_type, df))
+    return records
+
+
 class ConsolidatedLongWriter:
     """Append each image's long rows to one CSV, holding no other image in memory.
 

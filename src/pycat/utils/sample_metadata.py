@@ -166,6 +166,23 @@ class SampleMetadataResolver:
                       'none')
         return SampleMetadata(fields=merged, source=winner, field_sources=field_sources)
 
+    def condition_field_names(self):
+        """The sorted union of condition field names this resolver can supply — sheet columns, in-app
+        tag keys, and the ``{field}`` placeholders in the filename pattern.
+
+        Known before any pixels are read, which is what lets the consolidated table fix its column
+        schema up front and stream-append each image safely.
+        """
+        import re
+        names = set()
+        for fields in self._sheet.values():
+            names.update(fields.keys())
+        for fields in self._in_app.values():
+            names.update(fields.keys())
+        if self._pattern:
+            names.update(re.findall(r'\{(\w+)\}', self._pattern))
+        return sorted(names)
+
     def warn_unmatched_sheet_rows(self):
         """After a batch, warn about sheet rows no image used — a likely filename typo, not a crash."""
         unused = set(self._sheet) - self._matched_stems

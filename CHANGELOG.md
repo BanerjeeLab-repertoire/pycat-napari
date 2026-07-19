@@ -1,3 +1,34 @@
+## [1.6.134] - 2026-07-19
+### Added — **Comparative phenotyping inc 2: the batch emits one tidy `consolidated_long.csv` — the keystone comparative output.**
+The `ConsolidatedLongWriter` (the long-format assembler that melts each image's per-object tables and
+attaches condition + provenance columns) shipped with unit tests, but **nothing called it from the batch
+loop** — so the arc's keystone deliverable was unbuilt: a study across N images was still N per-image
+folders a scientist joins by hand. This wires it in.
+
+- **`batch_processor.BatchWorker.run`** now streams a top-level `consolidated_long.csv`: after each
+  image is processed it reads that image's already-written per-image CSVs (`<stem>_cell_df.csv`,
+  `<stem>_puncta_df.csv`), melts them to long rows, and appends them with the image's condition
+  (WT/dose/replicate…, from increment 1's resolver) and provenance (pycat version) on every row. Holds
+  no other image in memory (streaming append), with a schema fixed up front from the condition-field
+  vocabulary so a column can never drift mid-batch.
+- **Additive:** the consolidated table sits *alongside* the existing per-image folders and removes
+  nothing; an image that produced no object tables contributes no rows; conditions are blank (never
+  guessed) when no metadata source is configured.
+- New Qt-free helpers: `consolidated_table.records_from_output_dir` (read an image's per-image CSVs
+  back as `(object_type, df)` records — the streaming-from-disk source) and
+  `SampleMetadataResolver.condition_field_names` (the field vocabulary, known before any pixels are
+  read, that fixes the CSV schema).
+### Notes
+- With this, **comparative-phenotyping increment 2 is complete** — the long/tidy table the grouped
+  stats and faceting of increments 3–4 join on. (Increments 3–4's *library* code exists; their UI
+  surfaces remain, tracked as follow-on.)
+- Tests (`core`, headless): the per-image reader reads/skips correctly; the field vocabulary unions
+  sheet + pattern; two images stream into one long table with conditions and provenance per row; an
+  empty image adds no rows; the batch loop's wiring is AST-verified (`batch_processor` is Qt-bound).
+  Full `pytest -m core` green.
+- Files: `src/pycat/batch_processor.py`, `src/pycat/utils/consolidated_table.py`,
+  `src/pycat/utils/sample_metadata.py`, `tests/test_consolidated_batch_wiring.py`.
+
 ## [1.6.133] - 2026-07-19
 ### Added — **Comparative phenotyping inc 1, Parts B & C: wire the condition/metadata resolver into batch + session persistence.**
 Increment 1's Part A — the `SampleMetadataResolver` (attach a condition like "WT replicate 2 at 10 µM"
