@@ -35,6 +35,7 @@ import numpy as np
 
 from pycat.utils.measurement import Parameter, ParameterSource
 from pycat.utils.notify import show_warning as _warn
+from pycat.utils.errors import ScientificAssumptionError, UnsupportedFormatError
 
 
 # Gas constant in the units ΔG is reported in. kcal/mol is the manuscript convention (the roadmap's
@@ -243,7 +244,8 @@ def build_calibration(intensities, concentrations, acquisition: AcquisitionFinge
     I = np.asarray(intensities, dtype=float).ravel()
     C = np.asarray(concentrations, dtype=float).ravel()
     if I.size != C.size or I.size < 3:
-        raise ValueError("a calibration needs at least 3 paired (intensity, concentration) points")
+        raise ScientificAssumptionError(
+            "a calibration needs at least 3 paired (intensity, concentration) points")
 
     slope, intercept = np.polyfit(I, C, 1)
     fit = slope * I + intercept
@@ -300,7 +302,8 @@ def delta_g_transfer(c_dense, c_dilute, temperature_K: float, *,
     if units not in _R:
         raise ValueError(f"units must be one of {sorted(_R)}, got {units!r}")
     if temperature_K < _MIN_PLAUSIBLE_TEMPERATURE_K:
-        raise ValueError(f"temperature_K={temperature_K} is below {_MIN_PLAUSIBLE_TEMPERATURE_K} K — "
+        raise ScientificAssumptionError(
+            f"temperature_K={temperature_K} is below {_MIN_PLAUSIBLE_TEMPERATURE_K} K — "
                          f"this looks like Celsius passed as Kelvin; aqueous biology is ~273-373 K")
 
     def _val_sigma(x):
@@ -311,7 +314,8 @@ def delta_g_transfer(c_dense, c_dilute, temperature_K: float, *,
     cd, sd = _val_sigma(c_dense)
     cl, sl = _val_sigma(c_dilute)
     if cd <= 0 or cl <= 0:
-        raise ValueError(f"non-positive concentration (dense={cd}, dilute={cl}) — ΔG is undefined; "
+        raise ScientificAssumptionError(
+            f"non-positive concentration (dense={cd}, dilute={cl}) — ΔG is undefined; "
                          f"a saturated or over-subtracted phase cannot be turned into a free energy")
 
     RT = _R[units] * float(temperature_K)
@@ -342,7 +346,7 @@ def load_curve(path) -> CalibrationCurve:
         blob = json.load(fh)
     schema = blob.pop('schema', None)
     if schema != 'pycat.calibration/1':
-        raise ValueError(f"unrecognised calibration schema {schema!r} — cannot load safely")
+        raise UnsupportedFormatError(f"unrecognised calibration schema {schema!r} — cannot load safely")
     acq = blob.pop('acquisition', {}) or {}
     return CalibrationCurve(acquisition=AcquisitionFingerprint(**acq), **blob)
 

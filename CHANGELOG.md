@@ -1,3 +1,42 @@
+## [1.6.139] - 2026-07-19
+### Added — **Reliability: typed failures + an exception ratchet + one operation runner.**
+The two reliability findings the audit flagged as unchanged across revisions — broad exception handling
+and per-widget background execution — addressed as **ratchets + one shared mechanism**, not a sweep.
+
+**Part 1 — typed failures + the exception ratchet.**
+- **`utils/errors.py`** — a small `PyCATError` family (`UnsupportedFormatError`,
+  `MetadataUnavailableError`, `InvalidCalibrationError`, `ScientificAssumptionError`,
+  `OptionalDependencyError`, `LayerResolutionError`), exactly the failures the code already
+  distinguishes. `ScientificAssumptionError`/`UnsupportedFormatError` also subclass `ValueError`, so
+  existing `except ValueError` callers keep working while new code can catch the family.
+- **`tests/test_exception_budget.py`** — a per-package ratchet on un-annotated `except Exception`, at
+  today's counts (1222 total across the tree), that only decreases. A deliberate handler annotates itself
+  `# broad-ok: <reason>` (mandatory reason) and drops out of the count. This stops the measured growth at
+  zero cost — the complexity budget's principle, applied to swallows.
+- **First scientific conversions:** the `calibration.py` ΔG/curve gates (non-positive concentration,
+  Celsius-as-Kelvin, too-few-points, bad schema) now raise typed errors that **name the assumption**,
+  instead of a bare `ValueError`. `test_calibration.py` passes unmodified (the typed errors are
+  `ValueError` subclasses).
+
+**Part 2 — one operation runner.**
+- **`utils/operation_runner.py`** on top of the existing `qt_worker` (no second threading mechanism):
+  `execute(fn, progress=, on_result=, on_error=, cancellation=, generation=)` standardizes worker
+  policy, **main-thread marshalling** of the result, **stale-result suppression** (a generation counter,
+  so a slow result cannot overwrite a newer request), cooperative **cancellation** at progress
+  boundaries, and **typed error transport** to `on_error`. Fully headless-tested (`run_with_progress`
+  runs synchronously with no event loop): result delivered on the caller's thread, progress forwarded
+  verbatim, a superseded result discarded, cancel stops the work, a typed error reaches `on_error`.
+### Notes
+- **The 2-widget adoption is NOT in this release** (deliberately). Routing the two zero-bar widgets'
+  slow analyses through the runner moves them *off* the Qt thread behind `run_with_progress`'s modal
+  dialog — which supersedes the *on-thread inline bar* progress-part-2 (1.6.132) added, and so conflicts
+  with that spec's inline-bar ratchet. Resolving that (inline bar vs modal dialog) is a UX decision and
+  the off-thread behaviour needs an in-app check, so the adoption is held for that pass. The runner is
+  proven by its tests; adopting it is the demonstration.
+- Full `pytest -m core` green.
+- Files: `src/pycat/utils/errors.py`, `src/pycat/utils/operation_runner.py`,
+  `src/pycat/utils/calibration.py`, `tests/test_exception_budget.py`, `tests/test_operation_runner.py`.
+
 ## [1.6.138] - 2026-07-19
 ### Changed — **vpt_ui decomposition, step 3: three more adapter modules — `vpt_ui.py` 1778 → 1139 lines (2458 → 1139 overall, −54%).**
 The rest of the decomposition. Three more responsibility groups moved out of `vpt_ui.py` into the `vpt/`
