@@ -124,6 +124,55 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
     )
 
 
+# ── Per-file ratchet on the CONCENTRATION POINTS ─────────────────────────────────────────────
+#
+# The count/absolute ratchets above bound individual functions. They do NOT stop a god-file growing by
+# adding more medium functions — and an audit measured exactly that: across two revisions, while the new
+# abstractions (SelectionService, OperationSpec, the plot backends, the scene stack) were added BESIDE
+# these files, every one grew or held:
+#
+#     ui_modules.py         5555 -> 5573   (+18)
+#     file_io.py            2787 -> 2805   (+18)
+#     batch_step_registry   1613 -> 1663   (+50)
+#     vpt_ui.py             2458 -> 2458   ( 0)
+#
+# So each concentration point gets a whole-FILE line ceiling, set at today's value. **The ratchet only
+# moves DOWN:** a decomposition that moves responsibility out lowers the number here; nothing may raise
+# it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
+# of the vpt_ui decomposition spec.
+_FILE_LINE_CEILINGS = {
+    "toolbox/vpt_ui.py": 2458,
+    "ui/ui_modules.py": 5573,
+    "file_io/file_io.py": 2805,
+    "batch_step_registry.py": 1663,
+}
+
+
+@pytest.mark.core
+def test_the_concentration_points_do_not_GROW():
+    """**A per-file ratchet on the god-files.** The function ratchets do not stop a file growing by
+    accretion of medium methods — which is precisely the additive-not-replacing drift the audit
+    measured. This bounds the whole file, at today's size, moving only down.
+
+    To pass after a legitimate extraction: **lower the ceiling** to the new count. To pass after adding
+    code: move something out, don't raise the number.
+    """
+    over = []
+    for rel, ceiling in sorted(_FILE_LINE_CEILINGS.items()):
+        path = _SOURCE / rel
+        if not path.exists():
+            over.append(f"{rel}: MISSING — the ratchet points at a file that no longer exists")
+            continue
+        n = len(path.read_text(encoding='utf-8', errors='ignore').splitlines())
+        if n > ceiling:
+            over.append(f"{rel}: {n} lines (ceiling {ceiling}, +{n - ceiling})")
+    assert not over, (
+        "a concentration point grew past its ceiling:\n  " + "\n  ".join(over)
+        + "\n\n**Move a responsibility OUT** (into an adapter/helper module), don't raise the number — "
+          "the ceiling is a ratchet that only goes down. A new abstraction added BESIDE the god-file "
+          "instead of absorbing code is the exact 'additive, not replacing' drift this guards against.")
+
+
 @pytest.mark.core
 def test_nothing_exceeds_the_ABSOLUTE_longest_function():
     """**660 lines is already indefensible. It is not a licence to write 700.**"""

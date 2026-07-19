@@ -1,3 +1,25 @@
+## [1.6.136] - 2026-07-19
+### Added — **Per-file line ratchets on the four concentration points (vpt_ui decomposition, step 1).**
+Step 1 of the `vpt_ui.py` decomposition spec, and the part the spec itself flags as the
+highest-value/lowest-cost: an external audit measured that while the new abstractions
+(`SelectionService`, `OperationSpec`, the plot backends, the scene stack) were added, the god-files grew
+or held **beside** them — `ui_modules.py` +18, `file_io.py` +18, `batch_step_registry.py` +50,
+`vpt_ui.py` flat. The architecture is real but so far additive. `test_complexity_budget.py` now carries a
+**whole-file line ceiling per concentration point**, set at today's value, that only ever moves DOWN — so
+a new abstraction added beside a god-file instead of absorbing code fails the build. This stops the
+measured drift immediately, at zero refactoring cost.
+### Notes
+- Ceilings (today's values): `vpt_ui.py` 2458, `ui_modules.py` 5573, `file_io.py` 2805,
+  `batch_step_registry.py` 1663. Lower one after a real extraction; never raise one.
+- **The extractions (spec steps 2–5) are NOT in this release.** They are behaviour-preserving *moves* of
+  responsibility out of `vpt_ui.py` into a `vpt/` adapter package — but its `_build_*` UI-construction
+  methods are not exercised by any headless test (the VPT tests instantiate a bare subclass that skips
+  `__init__`), so a moved-but-broken panel would pass import + the AST/method tests yet fail only in the
+  live widget. That makes each extraction viewer-coupled work needing in-app verification, done one at a
+  time — flagged rather than shipped blind.
+- Test-only, no production change. Full `pytest -m core` green.
+- Files: `tests/test_complexity_budget.py`.
+
 ## [1.6.135] - 2026-07-19
 ### Added — **Comparative phenotyping inc 3: cross-condition figures on the consolidated table, replicate-honest by construction.**
 The visible payoff of the arc: figures that compare conditions, built on increment 2's consolidated long
