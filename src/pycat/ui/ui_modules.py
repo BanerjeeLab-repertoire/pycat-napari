@@ -4674,10 +4674,28 @@ class MenuManager:
             file_io_methods_dict = {
                 'Open Image (auto-detect 2D / stack)': (self.central_manager.file_io.open_image_auto, {}),
                 'Add Image / Mask (keep current)': (self.central_manager.file_io.add_image_or_mask, {}),
+                'Switch Position / Scene (multi-position files)': (self._open_scene_switcher, {}),
                 'Load Previous Session Results': (self._open_session_loader, {}),
                 'Save and Clear': (self.central_manager.file_io.save_and_clear_all, {'viewer': self.viewer})
             }
             self._add_actions_to_menu(file_io_methods_dict, self.file_menu)
+
+    def _open_scene_switcher(self, *args, **kwargs):
+        """Open (or re-focus) the multi-position scene switcher dock.
+
+        A multi-position acquisition loads ONE position at a time; this dock changes which one in
+        place. Held on the instance so re-opening re-uses the one dock rather than stacking another.
+        """
+        try:
+            dock = getattr(self, '_scene_switcher_dock', None)
+            if dock is None:
+                from pycat.ui.scene_switcher import SceneSwitcherDock
+                dock = SceneSwitcherDock(self.viewer, self.central_manager)
+                self._scene_switcher_dock = dock
+            dock.show()
+        except Exception as exc:
+            from pycat.utils.general_utils import debug_log
+            debug_log('ui_modules: could not open the scene switcher', exc)
 
     def _open_image_add(self, *args, **kwargs):
         """Open an image WITHOUT clearing the current session — adds its layers

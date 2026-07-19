@@ -670,3 +670,87 @@ class _LazyArraySource:
 # ``_LazyArraySource`` wraps whatever it is given, and was verified to behave **identically** on
 # every indexing pattern napari uses on a (T, Y, X) layer — ``stack[t]``, ``stack[t, :, :]``,
 # ``stack[t0:t1]``.
+
+
+class _SceneStack:
+    """**Lazy (T, Y, X) wrapper for ONE scene of a multi-scene acquisition.**
+
+    A multi-position CZI/IMS/OME-TIFF holds several *scenes* (positions/wells). The loader used to
+    materialise **every selected scene at once** — the exact load-everything memory profile the
+    streaming work removed elsewhere. This wrapper holds the reader and a **pinned scene**, and reads
+    each plane **from that scene, on demand**.
+
+    ── Why the scene is re-pinned on every read ────────────────────────────────────────────────
+    A structured reader (BioIO ``BioImage``) is **stateful**: ``set_scene`` mutates which position it
+    reads, and the reader is shared (the reader cache). So a plane read for this wrapper's scene must
+    set the scene *immediately before* the read, or a plane from another position could be served — a
+    **silently wrong image**, the headline hazard of position switching. ``read_plane(scene=…)`` does
+    exactly that (set-scene then read one plane) under the reader's lock, so this wrapper passes its
+    pinned scene on *every* frame read rather than trusting the reader's current state.
+
+    ── Why there is no cross-scene cache to go stale ───────────────────────────────────────────
+    Switching position builds a **fresh** wrapper for the new scene (the switcher replaces the layer's
+    ``data``). Nothing is cached across scenes here, so a stale previous-position plane cannot exist by
+    construction — stronger than clearing a shared cache and hoping the clear is never missed.
+
+    ── The contract (the same duck type every wrapper here satisfies) ─────────────────────────
+    ``.shape`` / ``.dtype`` (float32) / ``.ndim``; ``__getitem__`` returns ``[0, 1]`` float32 reading
+    exactly the indexed frame(s); ``__array__`` **refuses** (``test_no_eager_reads``). It reads through
+    the **structured** ``read_plane`` path (no ``path=`` — the TIFF fast path indexes by page and would
+    ignore the scene, a stale-scene trap), so it works for any reader BioIO exposes ``set_scene`` on.
+    """
+
+    def __init__(self, image, scene, n_t, H, W, dtype, channel_idx=0, z=0, plane_reader=None):
+        self._image = image
+        self._scene = scene                       # the scene NAME (matches image.scenes + the layer tag)
+        self._ci = int(channel_idx)
+        self._z = int(z)
+        self._src_dtype = np.dtype(dtype) if dtype is not None else None
+        self.dtype = np.dtype('float32')
+        self.ndim = 3
+        self.shape = (int(n_t), int(H), int(W))
+        # Injected for tests; defaults to the real scene-pinning single-plane reader.
+        self._plane_reader = plane_reader
+
+    @property
+    def scene(self):
+        """The scene (position) this wrapper is pinned to — the value the layer is tagged with."""
+        return self._scene
+
+    def _read(self, t):
+        reader = self._plane_reader
+        if reader is None:
+            from pycat.file_io.image_reader import read_plane
+            reader = read_plane
+        # No `path=`: force the structured, scene-respecting path. `read_plane` sets the scene then
+        # reads ONE (Y, X) plane; it returns RAW values, so normalise to the [0, 1] contract here,
+        # exactly as the sibling wrappers do.
+        arr = np.asarray(reader(self._image, scene=self._scene, t=int(t), c=self._ci, z=self._z))
+        return to_unit_float32(arr, self._src_dtype or arr.dtype)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            t_idx, spatial = idx[0], idx[1:]
+        else:
+            t_idx, spatial = idx, ()
+
+        if isinstance(t_idx, slice):
+            t_range = range(*t_idx.indices(self.shape[0]))
+            frames = (np.stack([self._read(t) for t in t_range], axis=0) if len(t_range)
+                      else np.empty((0,) + self.shape[1:], np.float32))
+            return frames[(slice(None),) + spatial] if spatial else frames
+        if isinstance(t_idx, (list, tuple, np.ndarray)):
+            frames = np.stack([self._read(int(t)) for t in t_idx], axis=0)
+            return frames[(slice(None),) + spatial] if spatial else frames
+
+        arr = self._read(t_idx)                   # scalar index → one frame (the fast, common path)
+        return arr[spatial] if spatial else arr
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __array__(self, dtype=None):
+        """**Refuse.** See `pycat.file_io.lazy_guard` — an implicit full read is never meant, and for a
+        multi-scene file it would materialise a whole position."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)

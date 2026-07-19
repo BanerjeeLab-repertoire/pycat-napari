@@ -1859,7 +1859,14 @@ class FileIOClass:
         if reader_has_structure:
             image = _struct.image
 
-            # ── Multi-position (scene) detection ───────────────────────
+            # ── Multi-position (scene) detection — load ONE position at a time ──────────
+            #
+            # Materialising several scenes at once is the load-everything memory profile the
+            # streaming work removed everywhere else. So a multi-position file now loads exactly ONE
+            # scene, lazily; the scene switcher changes position in place afterwards (no reopen). The
+            # existing dialog still asks which position — we honour the first choice and default to
+            # scene 0 — and the memory footgun (several scenes overlaid) is gone rather than kept
+            # beside the new default.
             scenes = _struct.scenes
             scenes_to_load = [image.current_scene] if scenes else [None]
             if len(scenes) > 1:
@@ -1869,14 +1876,12 @@ class FileIOClass:
                     scene_dicts,
                     title=f"Multi-Position Acquisition Detected ({len(scenes)} scenes)",
                 )
-                if selected_idx:
-                    scenes_to_load = [scenes[i] for i in selected_idx]
-                    napari_show_info(
-                        f"Opening {len(scenes_to_load)} of {len(scenes)} "
-                        f"detected scene(s)."
-                    )
-                else:
-                    scenes_to_load = [image.current_scene]
+                chosen = selected_idx[0] if selected_idx else 0
+                image.set_scene(scenes[chosen])          # pin the reader to the chosen position
+                scenes_to_load = [scenes[chosen]]
+                napari_show_info(
+                    f"Opening position {chosen + 1} of {len(scenes)} ('{scenes[chosen]}'). "
+                    f"Use the scene switcher to change position.")
 
             self.central_manager.active_data_class.update_metadata(image)
             # Also store the normalised metadata record for the metadata widget and results export.
@@ -1907,11 +1912,15 @@ class FileIOClass:
         channels_to_load = list(range(n_c)) if not reader_has_structure else None
         H = W = n_t = n_z = None
 
+        self._current_scene = None          # tagged onto lazy layers; only set for multi-scene files
         for scene in scenes_to_load:
             scene_suffix = ''
-            if reader_has_structure and len(scenes_to_load) > 1:
-                image.set_scene(scene)
+            # A real scene name only for a genuine multi-position file (`len(scenes) > 1`); a
+            # single-scene file keeps scene=None here, so it is tagged and named exactly as before.
+            if reader_has_structure and scene is not None and len(scenes) > 1:
+                image.set_scene(scene)                   # re-pin (idempotent) so dims/reads are this scene
                 scene_suffix = f" [{scene}]"
+                self._current_scene = scene
 
             if reader_has_structure:
                 n_t = getattr(image.dims, 'T', 1)
@@ -1997,6 +2006,8 @@ class FileIOClass:
                         f"{n_t} timepoints × {n_z} z-slices, "
                         f"{H}×{W}px → '{layer_name}' ({_lazy_backing_label(_wrapper)})")
 
+        self._current_scene = None          # don't let a scene leak onto a later, unrelated load
+
         self._finalise_stack_load(H, W, microns_per_pixel,
                                   list(range(n_c)),
                                   n_t if reader_has_structure else n_frames,
@@ -2044,6 +2055,13 @@ class FileIOClass:
             _layer.metadata['pycat_image_source'] = _src
         except Exception as _e:
             debug_log("file_io: could not attach ImageSource to generic stack layer", _e)
+        # Record WHICH position this layer holds (multi-scene files only; None is a no-op), so results
+        # and exports carry the scene and the switcher can identify and re-tag it.
+        try:
+            from pycat.file_io.scenes import tag_scene_layer
+            tag_scene_layer(_layer, getattr(self, '_current_scene', None))
+        except Exception as _se:
+            debug_log("file_io: could not tag the layer with its scene", _se)
         if info_msg:
             _si(info_msg)
         return _layer

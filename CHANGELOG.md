@@ -1,3 +1,43 @@
+## [1.6.130] - 2026-07-19
+### Added — **Multi-scene switcher: load one position at a time, lazily, and switch in place.**
+A multi-position acquisition (CZI/IMS/OME-TIFF) used to load **every selected scene into memory at
+once** — the load-everything profile the streaming work removed everywhere else, with no way to change
+position without reopening. Now a multi-position file loads **exactly one scene, lazily**, and a dock
+switches position in place.
+
+- **`_SceneStack`** (`file_io/lazy_sources.py`) — the lazy (T, Y, X) wrapper for one scene. Reads one
+  plane at a time from its **pinned** scene, refuses `__array__`, and — the headline hazard — re-pins
+  the scene on **every** read, so a shared stateful reader can never serve a frame from another
+  position. Switching builds a fresh wrapper, so no plane cache is shared across scenes: a stale
+  previous-position frame cannot exist by construction.
+- **`file_io/scenes.py`** (new, Qt-free) — `build_scene_stack`, `tag_scene_layer`/`scene_of` (scene
+  identity as a queryable tag, joinable to the comparative-phenotyping sample metadata — a position is
+  often a condition), `list_scenes`/`scene_index`.
+- **Routing** (`file_io._open_stack_generic`) — a multi-position file now loads **one** scene (the
+  first chosen, default scene 0) and tags each lazy layer with its position. **Single-scene files are
+  untouched.** The several-scenes-overlaid memory footgun is gone rather than kept beside the default.
+- **Per-scene calibration** (`data/data_modules.update_metadata`) — reads the **currently selected**
+  scene's pixel size, not a fixed scene 0, so a switch cannot silently mis-scale (a position can
+  legitimately differ).
+- **The switcher dock** (`ui/scene_switcher.py`, new) — a position dropdown (File menu → "Switch
+  Position / Scene"). Switching rebinds every scene layer to a fresh `_SceneStack` for the new position,
+  warms the first (slow) frame **off the Qt thread** (`run_with_progress`, no "Not Responding"),
+  re-reads per-scene calibration, re-tags the layers, and **stamps derived layers with the position
+  they were computed on** so a mask from position 1 cannot masquerade as belonging to position 2.
+### Notes
+- Headless-tested (Qt-free foundation): `_SceneStack` contract + one-plane read + scene-provenance
+  (`test_scene_stack.py`), the scene helpers + per-scene metadata (`test_scenes.py`), and the switcher's
+  `switch_to` rebind/re-tag/stale-derived logic (`test_scene_switcher.py`, `run_with_progress` runs
+  synchronously with no event loop). The AST eager-read guard auto-covers the new wrapper. Full
+  `pytest -m core` green.
+- **Needs in-app verification** (viewer-coupled, cannot be checked headlessly): opening a real
+  multi-position file loads one position; the File-menu switcher changes it in place without a freeze or
+  a stale frame. Held for that verification before release.
+- Files: `src/pycat/file_io/lazy_sources.py`, `src/pycat/file_io/scenes.py`,
+  `src/pycat/file_io/file_io.py`, `src/pycat/data/data_modules.py`, `src/pycat/ui/scene_switcher.py`,
+  `src/pycat/ui/ui_modules.py`, `tests/test_scene_stack.py`, `tests/test_scenes.py`,
+  `tests/test_scene_switcher.py`.
+
 ## [1.6.129] - 2026-07-19
 ### Added — **OperationSpec increment 5: `requirements` — runnability gating with a stated reason. (The OperationSpec arc is complete.)**
 The last field of the OperationSpec roadmap. Increment 2's `inputs` said which *layers* an operation

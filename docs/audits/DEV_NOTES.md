@@ -1357,3 +1357,48 @@ dtype, dimension order, pixel size, scenes, and a **checksum of the pixels** —
 0 different — while a loader read the *entire scene* to fetch *one plane*. ***The freeze was invisible
 to it by construction.*** `test_one_plane_reads_one_plane` is the answer, and it measures **peak
 allocation**, because bytes-read is blind to the page cache and to memory-mapping.
+
+---
+
+## OPEN: multi-scene switcher — BUILT + headless-tested, awaiting in-app verification (needs generated multi-position data) (2026-07-19, 1.6.130)
+
+**Status: the whole feature is implemented and every headless-testable part is green. The viewer-coupled
+behaviour cannot be verified here — and verifying it needs a multi-position CZI/IMS test file that Gable
+must generate (or point at one on the acquisition machines). Do NOT release until that pass is done.**
+
+### What shipped (spec `claude_code_spec_scene_switcher_2026-07-18.md`, all four parts)
+- **`_SceneStack`** (`file_io/lazy_sources.py`) — lazy (T,Y,X) wrapper for ONE scene; re-pins its scene
+  on every read, so a shared stateful reader can never serve a frame from another position. Switching
+  builds a fresh wrapper → no cross-scene plane cache → no stale frame by construction.
+- **`file_io/scenes.py`** (new, Qt-free) — `build_scene_stack`, `tag_scene_layer`/`scene_of`,
+  `list_scenes`/`scene_index`.
+- **Routing** (`file_io._open_stack_generic`) — a multi-position file loads exactly ONE scene, lazily,
+  and tags each layer with its position. Single-scene files untouched.
+- **Per-scene calibration** (`data_modules.update_metadata`) — reads the CURRENT scene, not scene 0.
+- **Switcher dock** (`ui/scene_switcher.py`, new; File menu → "Switch Position / Scene") — dropdown
+  rebinds layers in place, off-thread first read (`run_with_progress`), re-reads calibration, stamps
+  derived layers with the position they were computed on.
+
+### What is headless-tested (green)
+`test_scene_stack.py` (wrapper contract, one-plane read, scene provenance/anti-stale),
+`test_scenes.py` (helpers + per-scene metadata), `test_scene_switcher.py` (rebind/re-tag/stale-derived —
+`run_with_progress` runs synchronously with no event loop). The AST eager-read guard auto-covers the new
+wrapper. Full `-m core` green at 1.6.130.
+
+### What NEEDS in-app verification — and the DATA required
+**Gable must generate/point at a genuine multi-position file** (a CZI or IMS with ≥2 scenes; ideally two
+positions with *different* pixel sizes to exercise the per-scene calibration re-read). Then check:
+1. Opening it loads ONE position, lazily and fast; the layer name shows `[position]` and carries a
+   `scene` tag.
+2. File menu → "Switch Position / Scene" opens the dock; the dropdown lists the positions.
+3. Switching shows a progress dialog (no "Not Responding"), shows the NEW position's pixels (NOT a stale
+   frame), and updates the pixel size if the positions differ.
+4. A mask/labels computed on the old position gets tagged `computed_on_scene` + a warning.
+
+### The most likely thing to need a fix (runtime-dependent, un-verifiable here)
+**Reader discovery** in `SceneSwitcherWidget._reader_for`: it looks for the scenes-capable reader among
+the layer's retained `metadata['pycat_image_source'].readers` (the generic loader retains `(reader,dask)`
+tuples), falling back to re-opening the file via `open_image`. If the dropdown shows NO positions on a
+real multi-scene file, the retained object is not the `BioImage` — capture what IS retained
+(`type(...)`, `hasattr(set_scene/scenes)`) and wire `_reader_for` to it. That single fact is what a real
+file will settle. Then update `roadmap.rst` (the multi-scene rubric) to RESOLVED.
