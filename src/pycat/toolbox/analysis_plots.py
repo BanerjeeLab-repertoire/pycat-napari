@@ -59,6 +59,28 @@ def _segment_distance_px(line, mx, my):
         return float('inf')
 
 
+def _segment_distance_px_coords(xy, transform, mx, my):
+    """Same point-to-SEGMENT distance in display pixels, but from raw ``(x, y)`` DATA arrays + a
+    transform instead of a ``Line2D``. This is what lets the background collapse into ONE
+    ``LineCollection`` while hit-testing stays exact: the arrays, not artists, are the geometry."""
+    try:
+        xy = np.asarray(xy, float)
+        if xy.shape[0] == 0:
+            return float('inf')
+        pts = transform.transform(xy)
+        if len(pts) == 1:
+            return float(np.hypot(pts[0, 0] - mx, pts[0, 1] - my))
+        p, q = pts[:-1], pts[1:]
+        seg = q - p
+        click = np.array([mx, my], float)
+        denom = np.maximum(np.sum(seg * seg, axis=1), 1e-12)
+        t = np.clip(np.sum((click - p) * seg, axis=1) / denom, 0.0, 1.0)
+        proj = p + t[:, None] * seg
+        return float(np.min(np.hypot(proj[:, 0] - mx, proj[:, 1] - my)))
+    except Exception:
+        return float('inf')
+
+
 # How close (display pixels) two clicks must be to count as "the same spot" for cycling.
 _CYCLE_TOLERANCE_PX = 6.0
 
@@ -115,6 +137,45 @@ def _connect_nearest_curve_click(fig, ax, line_to_tid, state, apply_selection, *
     return fig.canvas.mpl_connect('button_press_event', _on_click)
 
 
+def _connect_nearest_curve_click_coords(fig, ax, tid_to_coords, state, apply_selection, *,
+                                        radius_px=8.0, notify=None):
+    """The coords version of :func:`_connect_nearest_curve_click` — identical cycling behaviour, but
+    the candidates are ``{tid: (x, y) array}`` (a ``LineCollection`` background has no per-track
+    artist to pick). Calls ``apply_selection(tid)`` — the caller draws the overlay for that track."""
+    cycle = {'pos': None, 'cands': [], 'idx': -1}
+
+    def _on_click(event):
+        if event.inaxes is not ax or getattr(event, 'button', 1) != 1:
+            return
+        mx, my = getattr(event, 'x', None), getattr(event, 'y', None)
+        if mx is None or my is None or not tid_to_coords:
+            return
+        transform = ax.transData
+        near = sorted((d, tid) for d, tid in
+                      ((_segment_distance_px_coords(xy, transform, mx, my), tid)
+                       for tid, xy in tid_to_coords.items())
+                      if d <= radius_px)
+        if not near:
+            return
+        same_spot = (cycle['pos'] is not None
+                     and abs(mx - cycle['pos'][0]) <= _CYCLE_TOLERANCE_PX
+                     and abs(my - cycle['pos'][1]) <= _CYCLE_TOLERANCE_PX)
+        if same_spot and len(cycle['cands']) > 1:
+            cycle['idx'] = (cycle['idx'] + 1) % len(cycle['cands'])
+        elif same_spot:
+            return
+        else:
+            cycle['pos'] = (mx, my)
+            cycle['cands'] = near
+            cycle['idx'] = 0
+            if notify is not None and len(near) > 1:
+                notify(f"{len(near)} tracks overlap here — click again to cycle through them.")
+        _d, tid = cycle['cands'][cycle['idx']]
+        apply_selection(int(tid))
+
+    return fig.canvas.mpl_connect('button_press_event', _on_click)
+
+
 def _default_notify(message):
     """Surface an ambiguity hint, headless-safe."""
     try:
@@ -122,6 +183,90 @@ def _default_notify(message):
         show_info(message)
     except Exception:
         print(f"[PyCAT VPT] {message}")
+
+
+def _msd_overlay_hooks(ax, fig, per_track_df, tid_to_line, tid_to_coords,
+                       on_pick_track, line_registry):
+    """Selection overlays for an MSD spaghetti axes whose background is a ``LineCollection``.
+
+    Shared by the standalone plot and the consolidated panel so Gap-4 rendering is implemented once.
+    ``tid_to_line`` holds the current OVERLAY lines (selected / promoted); ``tid_to_coords`` the
+    geometry for every drawn track (hit-testing + drawing overlays). Registers a coords-based click
+    hit-tester and exposes ``promote`` / ``demote_line`` so a linked-selection dispatcher can highlight
+    a curve from another view — including one that was NOT in the representative sample (it is pulled
+    from ``per_track_df`` on demand). The background collection is never touched.
+    """
+    promoted = set()
+
+    def _promote(tid):
+        tid = int(tid)
+        existing = tid_to_line.get(tid)
+        if existing is not None:
+            return existing
+        xy = tid_to_coords.get(tid)
+        if xy is None:
+            if per_track_df is None or 'track_id' not in getattr(per_track_df, 'columns', ()):
+                return None
+            g = per_track_df[per_track_df['track_id'] == tid]
+            if not len(g):
+                return None
+            g = g.sort_values('lag_s')
+            xy = np.column_stack([np.asarray(g['lag_s'], float), np.asarray(g['msd_um2'], float)])
+            tid_to_coords[tid] = xy          # so it is hit-testable too
+        (ln,) = ax.plot(xy[:, 0], xy[:, 1], color='#4c72b0', alpha=0.18, lw=0.8, zorder=1)
+        tid_to_line[tid] = ln
+        promoted.add(tid)
+        return ln
+
+    def _demote(line):
+        tid = next((t for t, l in tid_to_line.items() if l is line), None)
+        if tid is None:
+            return False
+        try:
+            line.remove()
+        except Exception:
+            pass
+        tid_to_line.pop(tid, None)
+        promoted.discard(tid)
+        return True
+
+    state = {'prev': None}
+    if on_pick_track is not None and tid_to_coords:
+        def _apply(tid):
+            prev = state['prev']
+            if prev is not None:
+                _demote(prev)                # drop the previous overlay
+            ln = _promote(int(tid))
+            if ln is not None:
+                ln.set_color('#ff8c00'); ln.set_alpha(1.0)
+                ln.set_linewidth(2.2); ln.set_zorder(5)
+            state['prev'] = ln
+            try:
+                fig.canvas.draw_idle()       # one collection + a couple overlays — cheap
+            except Exception:
+                pass
+            try:
+                on_pick_track(int(tid))
+            except Exception as _e:
+                print(f"[PyCAT VPT] pick callback failed: {_e}")
+        try:
+            _connect_nearest_curve_click_coords(fig, ax, tid_to_coords, state, _apply,
+                                                notify=_default_notify)
+        except Exception:
+            pass
+
+    if line_registry is not None:
+        try:
+            line_registry['lines'] = tid_to_line       # current overlays (dispatcher highlights here)
+            line_registry['coords'] = tid_to_coords
+            line_registry['canvas'] = fig.canvas
+            line_registry['state'] = state
+            line_registry['promote'] = _promote
+            line_registry['demote_line'] = _demote
+            line_registry['promoted'] = promoted
+        except Exception:
+            pass
+    return {'promote': _promote, 'demote_line': _demote, 'state': state, 'promoted': promoted}
 
 
 def _show(fig, interactive):
@@ -258,20 +403,11 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     #   render_mode='auto'  → fidelity-targeted sample (default; fast + faithful)
     #   render_mode='all'   → draw every track (progressive, opt-out)
     #   max_tracks=N        → draw a random N (explicit override of the sample)
-    _line_to_tid = {}
-    _tid_to_line = {}
+    _line_to_tid = {}          # empty: the background is a LineCollection, not per-track artists
+    _tid_to_line = {}          # OVERLAYS (selected / promoted focus curves) live here — registry 'lines'
+    _tid_to_coords = {}        # {tid: (N, 2) array} — the geometry for hit-testing and overlays
     _pickable = on_pick_track is not None
     _fidelity_note = None
-
-    def _draw_one_track(tid, g):
-        g = g.sort_values('lag_s')
-        (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
-                        alpha=0.18, lw=0.8, zorder=1)
-        if _pickable:
-            # NOT pickable — selection is one canvas button_press, nearest-curve. See the note above
-            # `_connect_nearest_curve_click` for why per-line pick_event cannot be made reliable here.
-            _line_to_tid[ln] = int(tid)
-        _tid_to_line[int(tid)] = ln
 
     if per_track_df is not None and len(per_track_df):
         all_tids = per_track_df['track_id'].unique()
@@ -290,22 +426,29 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         else:  # 'auto' — fidelity-targeted representative sample
             shown, _, _fid = representative_track_sample(
                 per_track_df, target_fidelity=target_fidelity)
-            if len(shown) < n_all:
-                _fidelity_note = _fid
-            else:
-                _fidelity_note = None
+            _fidelity_note = _fid if len(shown) < n_all else None
 
         _groups = {int(tid): g for tid, g in
                    per_track_df[per_track_df['track_id'].isin(shown)].groupby('track_id')}
         _order = [int(t) for t in shown if int(t) in _groups]
 
-        # For a small/auto sample (~100 lines) synchronous drawing is instant;
-        # only the 'all' opt-out on a big set needs progressive streaming.
-        _FIRST_BATCH = 200
-        _BATCH = 200
-        _BATCH_MS = 30
-        for tid in _order[:_FIRST_BATCH]:
-            _draw_one_track(tid, _groups[tid])
+        # ── ONE LineCollection for the whole background ────────────────────────────────────
+        #
+        # Hundreds of individual Line2D artists are slow to draw and force a per-artist style restore
+        # on every selection change; the background is a single artist instead, and a selection is
+        # drawn as an OVERLAY line on top (see `_promote_track`). Hit-testing reads the coordinate
+        # ARRAYS (`_tid_to_coords`), not artists, so collapsing the background costs nothing for
+        # interaction — and no progressive streaming is needed, since a collection of even tens of
+        # thousands of segments is a single artist.
+        for tid in _order:
+            g = _groups[tid].sort_values('lag_s')
+            _tid_to_coords[int(tid)] = np.column_stack(
+                [np.asarray(g['lag_s'], float), np.asarray(g['msd_um2'], float)])
+        if _tid_to_coords:
+            from matplotlib.collections import LineCollection
+            _bg = LineCollection([_tid_to_coords[t] for t in _order if t in _tid_to_coords],
+                                 colors='#4c72b0', linewidths=0.8, alpha=0.18, zorder=1)
+            ax.add_collection(_bg)          # autolim=True (default) folds the collection into dataLim
 
         # Legend label: report the TRUE track count, how many are shown, and — for
         # the auto sample — the measured band fidelity, so the sample is honest
@@ -321,51 +464,6 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
         if on_pick_track is not None:
             _lbl += " — click a track to reveal it"
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0, label=_lbl)
-
-        # Stream any remaining tracks (only non-empty for 'all'/large max_tracks)
-        # on a Qt timer so the UI stays live; synchronous fallback otherwise.
-        _rest = _order[_FIRST_BATCH:]
-        if _rest:
-            _drew_progressively = False
-            if interactive:
-                try:
-                    from PyQt5.QtCore import QTimer
-                    _idx = {'i': 0}
-                    _timer = QTimer()
-
-                    def _tick():
-                        i = _idx['i']
-                        batch = _rest[i:i + _BATCH]
-                        if not batch:
-                            _timer.stop()
-                            try:
-                                cb = getattr(fig.canvas, '_pycat_recapture_bg', None)
-                                if cb is not None:
-                                    cb()
-                            except Exception:
-                                pass
-                            try:
-                                fig.canvas.draw_idle()
-                            except Exception:
-                                pass
-                            return
-                        for tid in batch:
-                            _draw_one_track(tid, _groups[tid])
-                        _idx['i'] = i + _BATCH
-                        try:
-                            fig.canvas.draw_idle()
-                        except Exception:
-                            pass
-
-                    _timer.timeout.connect(_tick)
-                    _timer.start(_BATCH_MS)
-                    fig._pycat_spaghetti_timer = _timer   # keep a ref (no GC)
-                    _drew_progressively = True
-                except Exception:
-                    _drew_progressively = False
-            if not _drew_progressively:
-                for tid in _rest:
-                    _draw_one_track(tid, _groups[tid])
 
     # solid ensemble mean with SEM band
     if ensemble_msd_df is not None and len(ensemble_msd_df):
@@ -394,148 +492,14 @@ def plot_msd_trajectories(per_track_df, ensemble_msd_df=None, fit=None,
     ax.legend(fontsize=8, loc='upper left')
     fig.tight_layout()
 
-    # Plot -> data brushing: clicking a per-track line calls back with its
-    # track_id (the VPT UI uses this to highlight the track in napari and centre
-    # the viewer). The last-picked line is emphasised so the selection is visible
-    # on the plot too.
+    # ── Plot -> data brushing: click a curve to select its track ───────────────────────────
     #
-    # SPEED: a spaghetti plot has hundreds of lines, so a full-figure redraw on
-    # every pick (canvas.draw_idle) is what made selection lag. Instead we BLIT:
-    # capture the axes background once, and on each selection restore that
-    # background and redraw ONLY the two lines that changed (the previously- and
-    # newly-highlighted track). That is O(1) in the number of tracks.
-    _blit = {'bg': None, 'canvas': fig.canvas, 'ax': ax}
-
-    def _capture_bg(*_a):
-        try:
-            _blit['bg'] = fig.canvas.copy_from_bbox(ax.bbox)
-        except Exception:
-            _blit['bg'] = None
-    # Let the progressive draw-in timer refresh the cached background once all
-    # batches are drawn, so picking is fast over the full (streamed-in) set.
-    try:
-        fig.canvas._pycat_recapture_bg = _capture_bg
-    except Exception:
-        pass
-
-    def _blit_highlight(new_line, prev_line):
-        """Restore the cached background and re-draw only the changed lines."""
-        canvas = _blit['canvas']
-        bg = _blit['bg']
-        try:
-            if bg is None:
-                _capture_bg()
-                bg = _blit['bg']
-            if bg is not None:
-                canvas.restore_region(bg)
-                for _ln in (prev_line, new_line):
-                    if _ln is not None:
-                        ax.draw_artist(_ln)
-                canvas.blit(ax.bbox)
-                canvas.flush_events()
-            else:
-                canvas.draw_idle()   # fallback if background capture failed
-        except Exception:
-            try:
-                canvas.draw_idle()
-            except Exception:
-                pass
-
-    # Re-capture the background whenever the figure is redrawn (resize, pan, zoom,
-    # first draw) so the cached bitmap stays valid.
-    try:
-        fig.canvas.mpl_connect('draw_event', _capture_bg)
-    except Exception:
-        pass
-
-    if on_pick_track is not None and _line_to_tid:
-        _state = {'prev': None}
-
-        def _apply_pick(ln, tid):
-            # The handler already ruled out a re-click of the selected line, so this only ever runs
-            # for a NEW selection: restyle the previous, emphasise this one, fire once.
-            prev = _state['prev']
-            if prev is not None and prev in _line_to_tid:
-                prev.set_color('#4c72b0'); prev.set_alpha(0.18); prev.set_linewidth(0.8)
-                prev.set_zorder(1)
-            ln.set_color('#ff8c00'); ln.set_alpha(1.0); ln.set_linewidth(2.2)
-            ln.set_zorder(5)
-            _state['prev'] = ln
-            _blit_highlight(ln, prev)
-            try:
-                on_pick_track(tid)
-            except Exception as _e:
-                print(f"[PyCAT VPT] pick callback failed: {_e}")
-
-        # One button_press per click -> the single nearest curve. No pick_event, no debounce.
-        try:
-            _connect_nearest_curve_click(fig, ax, _line_to_tid, _state, _apply_pick,
-                                         notify=_default_notify)
-        except Exception:
-            pass
-
-    # ── A track selected from another view but NOT in the representative sample ─────────────
-    #
-    # The spaghetti plot draws a fidelity-targeted subset, so a track picked in the TABLE that was
-    # not sampled has no artist to highlight. Promote it on demand — draw its curve and add it to the
-    # maps so the highlight path finds it — and demote (remove) it when it is deselected. The sample
-    # lines are never removed; only promoted focus curves are. Bounded rendering, full brushing.
-    _promoted = set()
-
-    def _promote_track(tid):
-        """Draw a non-sampled track's curve on demand and return its Line2D (or None if the track has
-        no data / no per-track frame). A track already drawn is returned as-is, not redrawn."""
-        tid = int(tid)
-        existing = _tid_to_line.get(tid)
-        if existing is not None:
-            return existing
-        if per_track_df is None or 'track_id' not in getattr(per_track_df, 'columns', ()):
-            return None
-        g = per_track_df[per_track_df['track_id'] == tid]
-        if not len(g):
-            return None
-        g = g.sort_values('lag_s')
-        (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0', alpha=0.18, lw=0.8, zorder=1)
-        _tid_to_line[tid] = ln
-        if _pickable:
-            _line_to_tid[ln] = tid
-        _promoted.add(tid)
-        return ln
-
-    def _demote_line(line):
-        """Remove ``line`` from the plot IFF it is a promoted focus curve — never a sample line.
-        Returns True if it removed something (so the caller does a full redraw, not a blit)."""
-        tid = _line_to_tid.get(line)
-        if tid is None:
-            tid = next((t for t, l in _tid_to_line.items() if l is line), None)
-        if tid is None or tid not in _promoted:
-            return False
-        try:
-            line.remove()
-        except Exception:
-            pass
-        _tid_to_line.pop(tid, None)
-        _line_to_tid.pop(line, None)
-        _promoted.discard(tid)
-        return True
-
-    # Expose the track_id -> Line2D map + canvas so a linked-selection dispatcher
-    # can highlight a curve when the selection comes from another view.
-    # `blit_highlight` lets the dispatcher redraw only the changed lines too,
-    # instead of a second full-figure redraw. `state` is SHARED with the pick
-    # handler's `_state` so a plot-pick and a dispatcher-driven highlight track
-    # the same "previously highlighted line" (no stale double-highlight).
-    if line_registry is not None:
-        try:
-            line_registry['lines'] = _tid_to_line
-            line_registry['canvas'] = fig.canvas
-            line_registry['state'] = _state if (on_pick_track is not None and _line_to_tid) else {'prev': None}
-            line_registry['blit_highlight'] = _blit_highlight
-            line_registry['promote'] = _promote_track
-            line_registry['demote_line'] = _demote_line
-            line_registry['promoted'] = _promoted
-        except Exception:
-            pass
+    # The background is ONE LineCollection, so there is no per-track artist to pick or restyle. Hit-
+    # testing is on the coordinate ARRAYS (`_tid_to_coords`); a selection is drawn as a single OVERLAY
+    # Line2D on top (`_promote_track`), and the background collection is never touched — so a redraw is
+    # one collection plus a couple of overlays. That is cheap, and it needs no blit bookkeeping.
+    _msd_overlay_hooks(ax, fig, per_track_df, _tid_to_line, _tid_to_coords,
+                       on_pick_track, line_registry)
 
     return _show(fig, interactive)
 
@@ -630,8 +594,12 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
     consolidated-panel version). If line_registry is given it is populated with
     {track_id: Line2D} (and, when pickable, each line is given a pick radius) so
     the consolidated panel supports the same table↔plot brushing as the
-    standalone plot."""
-    tid_to_line = {}
+    standalone plot. The background is ONE ``LineCollection`` and a selection is an OVERLAY (Gap 4);
+    the registry carries ``coords`` (geometry for hit-testing + overlays) so ``plot_vpt_panel`` wires
+    the same brushing via ``_msd_overlay_hooks``. ``line_registry['lines']`` starts empty (overlays are
+    added on selection)."""
+    tid_to_line = {}          # overlays (selected / promoted); registry 'lines'
+    tid_to_coords = {}        # {tid: (N, 2) array} — geometry for hit-testing + overlays
     if per_track_df is not None and len(per_track_df):
         tids = per_track_df['track_id'].unique()
         n_all = len(tids)
@@ -643,15 +611,18 @@ def _draw_msd_into(ax, per_track_df, ensemble_msd_df=None, fit=None,
             pdf = per_track_df
         for tid, g in pdf.groupby('track_id'):
             g = g.sort_values('lag_s')
-            (ln,) = ax.plot(g['lag_s'], g['msd_um2'], color='#4c72b0',
-                            alpha=0.18, lw=0.8)
-            # NOT pickable: the panel selects via one canvas button_press (nearest curve), not
-            # per-line pick_event. See `_connect_nearest_curve_click`.
-            tid_to_line[int(tid)] = ln
+            tid_to_coords[int(tid)] = np.column_stack(
+                [np.asarray(g['lag_s'], float), np.asarray(g['msd_um2'], float)])
+        if tid_to_coords:
+            from matplotlib.collections import LineCollection
+            _bg = LineCollection([tid_to_coords[t] for t in tid_to_coords],
+                                 colors='#4c72b0', linewidths=0.8, alpha=0.18, zorder=1)
+            ax.add_collection(_bg)
         ax.plot([], [], color='#4c72b0', alpha=0.5, lw=1.0,
                 label=f"individual tracks (n={n_all})")
     if line_registry is not None:
         line_registry['lines'] = tid_to_line
+        line_registry['coords'] = tid_to_coords
         line_registry.setdefault('state', {'prev': None})
     if ensemble_msd_df is not None and len(ensemble_msd_df):
         e = ensemble_msd_df.sort_values('lag_s')
@@ -787,78 +758,13 @@ def plot_vpt_panel(per_track_df, ensemble_msd_df=None, fit=None, moduli_df=None,
         # Register the canvas so external (table/image) selections can redraw.
         if line_registry is not None:
             line_registry['canvas'] = fig.canvas
-        # Plot→other brushing from the consolidated MSD panel.
+        # Plot→other brushing from the consolidated MSD panel — the SAME overlay hooks the standalone
+        # plot uses (Gap 4). The background is one LineCollection; selection is an overlay; a track
+        # brushed in from the table that isn't in the sample is promoted from `per_track_df`.
         if _pickable:
-            _lines = _reg.get('lines', {})
-            _line_to_tid = {ln: tid for tid, ln in _lines.items()}
-            _pstate = {'prev': None}
-            _msd_ax = axes[0, 0]
-            # BLIT: the panel is a 2×2 grid, so a full-figure redraw on each pick
-            # is even more expensive than the single-plot case. Cache the MSD
-            # subplot's background and redraw only the changed lines within it.
-            _pblit = {'bg': None}
-
-            def _pcapture(*_a):
-                try:
-                    _pblit['bg'] = fig.canvas.copy_from_bbox(_msd_ax.bbox)
-                except Exception:
-                    _pblit['bg'] = None
-
-            def _pblit_highlight(new_line, prev_line):
-                try:
-                    if _pblit['bg'] is None:
-                        _pcapture()
-                    bg = _pblit['bg']
-                    if bg is not None:
-                        fig.canvas.restore_region(bg)
-                        for _ln in (prev_line, new_line):
-                            if _ln is not None:
-                                _msd_ax.draw_artist(_ln)
-                        fig.canvas.blit(_msd_ax.bbox)
-                        fig.canvas.flush_events()
-                    else:
-                        fig.canvas.draw_idle()
-                except Exception:
-                    try:
-                        fig.canvas.draw_idle()
-                    except Exception:
-                        pass
-
-            try:
-                fig.canvas.mpl_connect('draw_event', _pcapture)
-            except Exception:
-                pass
-            # Share state + blit with the dispatcher so image/table→plot is fast too.
-            if line_registry is not None:
-                line_registry['state'] = _pstate
-                line_registry['blit_highlight'] = _pblit_highlight
-
-            def _apply_pick(artist, tid):
-                # New selection only — the handler already suppressed a re-click of the same line.
-                prev = _pstate['prev']
-                if prev is not None and prev in _line_to_tid:
-                    try:
-                        prev.set_color('#4c72b0'); prev.set_alpha(0.18)
-                        prev.set_linewidth(0.8); prev.set_zorder(1)
-                    except Exception:
-                        pass
-                try:
-                    artist.set_color('#ff8c00'); artist.set_alpha(1.0)
-                    artist.set_linewidth(2.2); artist.set_zorder(5)
-                    _pstate['prev'] = artist
-                    _pblit_highlight(artist, prev)
-                except Exception:
-                    pass
-                try:
-                    on_pick_track(tid)
-                except Exception as _e:
-                    print(f"[PyCAT VPT] consolidated pick callback failed: {_e}")
-            # One button_press per click -> the single nearest curve in the MSD subplot (axes[0,0]).
-            try:
-                _connect_nearest_curve_click(fig, _msd_ax, _line_to_tid, _pstate, _apply_pick,
-                                             notify=_default_notify)
-            except Exception:
-                pass
+            _msd_overlay_hooks(axes[0, 0], fig, per_track_df,
+                               _reg.get('lines', {}), _reg.get('coords', {}),
+                               on_pick_track, _reg)
         # Live toggle: a button that closes this figure and opens separate windows.
         try:
             from matplotlib.widgets import Button

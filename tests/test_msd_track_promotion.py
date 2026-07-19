@@ -1,20 +1,22 @@
-"""**A track selected from the table must be showable even when it isn't in the MSD sample.**
+"""**The MSD spaghetti background is ONE LineCollection; selection is drawn as overlays.**
 
-`plot_msd_trajectories` draws a fidelity-targeted representative SUBSET (~100 of N), so a track picked
-in the table that wasn't sampled has no artist to highlight — the bidirectional brushing quietly
-can't reach it. Interaction-layer Gap 3: the plot exposes `promote(tid)` to draw that track's curve on
-demand, and `demote_line` to remove it when it's deselected — and it never removes a SAMPLE line, only
-a promoted focus curve. Bounded rendering, full brushing.
+Interaction-layer Gap 4: hundreds of individual `Line2D` are slow and force a per-artist restyle on
+every selection. The background representative curves collapse into a single `LineCollection`, and a
+selection (or a track brushed in from the table — Gap 3) is drawn as an OVERLAY `Line2D` on top. The
+background collection is never touched. Hit-testing reads the coordinate ARRAYS, so this costs nothing
+for interaction.
 
-These drive the real `plot_msd_trajectories` headlessly (Agg) and exercise the promote/demote hooks it
-registers.
+These drive the real `plot_msd_trajectories` headlessly (Agg) and check the artist structure + the
+promote/demote hooks it registers.
 """
 
 import matplotlib
 matplotlib.use("Agg")
 
+import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.collections import LineCollection
 
 pytestmark = pytest.mark.core
 
@@ -28,56 +30,79 @@ def _per_track_df(n_tracks=_N, n_lags=5):
 
 
 def _draw():
-    """Draw with max_tracks=2 so only 2 of the 6 tracks are sampled — the rest are promotable."""
+    """max_tracks=2 → only 2 of the 6 tracks are in the background; the rest are promotable."""
     from pycat.toolbox.analysis_plots import plot_msd_trajectories
     reg = {}
-    plot_msd_trajectories(_per_track_df(), interactive=False, on_pick_track=lambda t: None,
-                          line_registry=reg, max_tracks=2)
-    return reg
+    fig = plot_msd_trajectories(_per_track_df(), interactive=False, on_pick_track=lambda t: None,
+                                line_registry=reg, max_tracks=2)
+    return fig, reg
+
+
+def _collections(fig):
+    return [c for c in fig.axes[0].collections if isinstance(c, LineCollection)]
 
 
 def _a_missing_tid(reg):
-    return next(t for t in range(1, _N + 1) if t not in reg['lines'])
+    return next(t for t in range(1, _N + 1) if t not in reg['coords'])
 
 
-def test_only_the_sample_is_drawn_up_front():
-    reg = _draw()
-    assert len(reg['lines']) == 2, "max_tracks=2 should draw exactly two sample lines"
-    assert reg['promoted'] == set()
+def test_the_background_is_ONE_LineCollection_not_N_lines():
+    fig, reg = _draw()
+    assert len(_collections(fig)) == 1, "the background should be exactly one LineCollection"
+    assert reg['lines'] == {}, "no overlays should exist before any selection"
+    assert len(reg['coords']) == 2, "both sampled tracks' geometry should be captured"
 
 
-def test_a_NON_SAMPLED_track_is_promoted_on_demand():
-    reg = _draw()
+def test_selecting_a_track_adds_ONE_overlay_and_leaves_the_collection_UNTOUCHED():
+    fig, reg = _draw()
+    before = _collections(fig)
+    tid = next(iter(reg['coords']))
+    ln = reg['promote'](tid)
+    assert ln is not None and tid in reg['lines']
+    assert _collections(fig) == before, "drawing a selection overlay altered the background collection"
+
+
+def test_a_NON_SAMPLED_track_promotes_from_the_full_frame():
+    fig, reg = _draw()
     tid = _a_missing_tid(reg)
     ln = reg['promote'](tid)
     assert ln is not None
-    assert tid in reg['lines'] and tid in reg['promoted'], "promotion did not add the track"
+    assert tid in reg['lines'] and tid in reg['coords'], "a non-sampled track was not promoted"
 
 
-def test_promoting_a_SAMPLED_track_returns_its_existing_line():
-    reg = _draw()
-    tid = next(iter(reg['lines']))
-    before = reg['lines'][tid]
-    assert reg['promote'](tid) is before
-    assert tid not in reg['promoted'], "a sampled track was wrongly marked as a promoted focus curve"
-
-
-def test_demote_removes_a_PROMOTED_curve():
-    reg = _draw()
-    tid = _a_missing_tid(reg)
-    line = reg['promote'](tid)
-    assert reg['demote_line'](line) is True
-    assert tid not in reg['lines'] and tid not in reg['promoted']
-
-
-def test_demote_NEVER_removes_a_sample_line():
-    reg = _draw()
-    tid = next(iter(reg['lines']))
-    sample_line = reg['lines'][tid]
-    assert reg['demote_line'](sample_line) is False
-    assert tid in reg['lines'], "a representative-sample line was removed"
+def test_demote_removes_the_overlay_but_NOT_the_collection():
+    fig, reg = _draw()
+    tid = next(iter(reg['coords']))
+    ln = reg['promote'](tid)
+    coll = _collections(fig)
+    assert reg['demote_line'](ln) is True
+    assert tid not in reg['lines']
+    assert _collections(fig) == coll, "demote removed the background collection, not just the overlay"
 
 
 def test_promoting_a_track_with_no_data_returns_None():
-    reg = _draw()
+    fig, reg = _draw()
     assert reg['promote'](9999) is None
+
+
+def test_the_log_axes_still_FRAME_the_data():
+    """A LineCollection does not autoscale like a Line2D on log axes — check the framing survived."""
+    fig, reg = _draw()
+    ax = fig.axes[0]
+    xy = np.vstack(list(reg['coords'].values()))
+    xlo, xhi = ax.get_xlim(); ylo, yhi = ax.get_ylim()
+    assert xlo <= xy[:, 0].min() and xhi >= xy[:, 0].max(), "x-axis clipped the track data"
+    assert ylo <= xy[:, 1].min() and yhi >= xy[:, 1].max(), "y-axis clipped the track data"
+
+
+def test_coords_hit_test_is_point_to_SEGMENT_in_display_pixels():
+    """The array-based hit-tester (no per-line artist) must give the same point-to-segment distance
+    the Line2D version does — an identity transform makes display px == data units here."""
+    from matplotlib.transforms import IdentityTransform
+    from pycat.toolbox.analysis_plots import _segment_distance_px_coords
+    t = IdentityTransform()
+    seg = np.array([[0.0, 0.0], [10.0, 0.0]])          # a horizontal segment
+    assert _segment_distance_px_coords(seg, t, 5.0, 0.0) == pytest.approx(0.0)   # on the line
+    assert _segment_distance_px_coords(seg, t, 5.0, 4.0) == pytest.approx(4.0)   # perpendicular
+    assert _segment_distance_px_coords(seg, t, 13.0, 4.0) == pytest.approx(5.0)  # past the end (3,4)
+    assert _segment_distance_px_coords(np.empty((0, 2)), t, 1.0, 1.0) == float('inf')

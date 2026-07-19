@@ -73,6 +73,14 @@ _DELIBERATE = {
     # to `_connect_nearest_curve_click` + `_apply_pick`.
     'analysis_plots.py::_on_pick',
 
+    # 1.6.120 — the MSD spaghetti background became ONE LineCollection and selection an OVERLAY
+    # (interaction-layer Gap 4). `_render_consolidated` (the VPT panel) shrank because its bespoke
+    # blit + apply-pick + connect were replaced by a call to the shared `_msd_overlay_hooks`, which the
+    # standalone `plot_msd_trajectories` also uses — so the panel and the standalone brush identically
+    # from ONE implementation instead of two divergent copies. Nothing was dropped; the logic moved
+    # into `_msd_overlay_hooks` (+ the coords hit-tester `_connect_nearest_curve_click_coords`).
+    'analysis_plots.py::_render_consolidated',
+
     # 1.6.106 — session load moved OFF the Qt thread. `load_session` was one 149-line function that
     # read/decoded every file AND created the napari layers in one loop — so it could not be run on a
     # worker (layer creation off the main thread is a crash). It is split: `_read_session_payload`

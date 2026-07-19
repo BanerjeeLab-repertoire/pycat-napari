@@ -1,3 +1,31 @@
+## [1.6.120] - 2026-07-18
+### Changed — **Interaction layer 4: MSD spaghetti background is one `LineCollection`; selection is an overlay.**
+Hundreds of individual `Line2D` are slow to draw and force a per-artist style restore on every
+selection. Both MSD renderers — the standalone `plot_msd_trajectories` and the consolidated panel's
+`_draw_msd_into` — now draw the representative background as a **single `LineCollection`**, and a
+selection (or a track brushed in from the table, Gap 3) is drawn as an **overlay `Line2D`** on top.
+The background collection is never touched.
+
+- **Hit-testing is on the coordinate ARRAYS**, not per-line artists (`_connect_nearest_curve_click_coords`
+  + `_segment_distance_px_coords`), so collapsing the background costs nothing for interaction — same
+  nearest-curve + click-to-cycle behaviour as before.
+- **One implementation, shared:** the new `_msd_overlay_hooks` sets up promote/demote + the click
+  hit-tester for BOTH renderers, so the standalone plot and the consolidated panel brush identically
+  instead of from two divergent copies (the panel's bespoke blit + apply-pick + connect are gone).
+  With one background artist a redraw is cheap, so selection uses a plain `draw_idle` — no blit
+  bookkeeping. VPT's `_highlight_track_in_plot` was already overlay-aware (1.6.119) and needs no change.
+### Notes
+- Headless-tested: the background is exactly one `LineCollection` (not N `Line2D`); selecting a track
+  adds one overlay and leaves the collection untouched; demote removes only the overlay; a non-sampled
+  track promotes from the full frame; the log axes still frame the data (the `LineCollection`/log
+  autoscale pitfall is checked); and the coords hit-tester matches the Line2D point-to-segment
+  geometry. Consolidated-panel path smoke-checked end-to-end. **The live feel needs a viewer:** confirm
+  clicking/​table-selecting a track in both the standalone and consolidated MSD plots still highlights
+  correctly and feels responsive.
+- Completes the interaction-layer spec's structural gaps (1=state 1.6.118, 3=promotion 1.6.119, 4=this;
+  2=honest hit-testing was 1.6.100). Gap 5 (the `SelectionView` adapter contract, which lets the
+  pyqtgraph backend be built correctly) remains as a separate pass.
+
 ## [1.6.119] - 2026-07-18
 ### Added — **Interaction layer 3: a track selected from the table shows even if it isn't in the MSD sample.**
 The MSD spaghetti plot draws a fidelity-targeted representative subset (~100 of N), so a track picked

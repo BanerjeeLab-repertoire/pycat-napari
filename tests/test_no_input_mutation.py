@@ -83,6 +83,9 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         'plot_msd_trajectories',  # `line_registry` is a registry — a dict the caller wants filled
         '_draw_msd_into',         # ditto, and the name says "into"
         'plot_vpt_panel',         # ditto
+        '_msd_overlay_hooks',     # 1.6.120 — populates the same line_registry + the overlay/coords
+                                  # DICTS (the shared brushing state), extracted from the two above so
+                                  # both MSD renderers brush from one implementation. No numpy arrays.
         # 1.6.67 — complexity-ratchet split. `dr` here is the DATA REPOSITORY (a dict results are
         # stored into), NOT a caller image/mask array. Writing `dr[key] = ...` is the contract, as
         # everywhere else in the codebase. It was closure-scoped before the `_on_dynamic` split
