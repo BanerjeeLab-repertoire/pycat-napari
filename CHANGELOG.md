@@ -1,3 +1,36 @@
+## [1.6.127] - 2026-07-19
+### Added — **OperationSpec increment 3: declare the batch-step → operation composition, so replay is auditable against the vocabulary.**
+Increment 2 made the operation vocabulary a graph. Increment 3 connects the **batch replayer** to it.
+The increment-2 survey measured a key fact: `batch_step_registry._STEP_MAP` (68 workflow steps) and the
+operation catalog (79 layer ops) have **zero name overlap** — a *step* is a workflow stage
+(`condensate_segmentation`), an *operation* is a layer-producing transform (`subcellular_segment`). That
+is correct design, not drift, so the two vocabularies are **not merged**. The honest relationship is
+**composition**: a step *invokes* one or more operations. That mapping cannot be inferred, so it is now
+**declared** and **drift-guarded** — rename an operation and the build breaks here instead of replay
+silently breaking at run time. This is the prerequisite for ever *generating* batch steps.
+
+- **`_STEP_OPERATIONS`** in `batch_step_registry.py` — the declared step → operation-ids map, placed
+  next to `_STEP_MAP` (declared at the code, not a side table). Public accessors `step_operations(name)`
+  and `all_step_operations()`. Each mapping was **verified** against the step's replay function (its
+  toolbox imports → the op that function declares), never guessed.
+- **`tests/navigator/test_batch_step_composition.py`** — the validation: every declared op exists in
+  the operation vocabulary (catalog layer ops ∪ curated measure ops), every declared step is a real
+  `_STEP_MAP` key, no empty declarations, ids are a deduplicated lower-case set, and a **downward-only
+  coverage floor** (≥ 10 steps mapped). Undeclared steps are *reported*, not hidden.
+- **Declared the unambiguous tranche (10 steps):** `preprocessing`→`preprocess`, `upscaling`→`upscale`,
+  `calibration_correction`→`flatfield`/`bg_subtract_clear`, `auto_crop_roi`→`multi_otsu`,
+  `cellpose_segmentation`→`cellpose`/`stardist`, `condensate_segmentation` & `ivf_segmentation`→
+  `mask_stretch`/`subcellular_segment`, `bf_condensate_segmentation` & `ivbf_segmentation`→`bf_segment`,
+  `ivf_size_distribution`→`invitro.size_distribution` (a measure op).
+### Notes
+- **Staged population, deliberately** (the increment-2 discipline). Steps that invoke only an *untagged*
+  composite (e.g. `background_removal`'s rolling-ball path has no op id) or only file I/O
+  (`open_image`, `save_and_clear`) are **left undeclared**, not mapped to a guess — a guessed mapping is
+  drift with extra steps. The ratchet floor captures progress; later work raises it. `_STEP_MAP` and the
+  catalog remain separate vocabularies by design (composition, not merger).
+- No behaviour change. Full `pytest -m core` green.
+- Files: `src/pycat/batch_step_registry.py`, `tests/navigator/test_batch_step_composition.py`.
+
 ## [1.6.126] - 2026-07-18
 ### Added — **OperationSpec increment 2: `inputs` on the decorator — the operation vocabulary is now a GRAPH.**
 Increment 1 defined `OperationSpec` as a typed, drift-guarded view over the `@tags_layer` registry and

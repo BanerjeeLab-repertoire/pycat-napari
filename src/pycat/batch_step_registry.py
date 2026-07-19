@@ -1576,6 +1576,56 @@ _STEP_MAP = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Batch step → operation COMPOSITION  (OperationSpec increment 3)
+# ---------------------------------------------------------------------------
+# A batch step and a catalog operation are DIFFERENT abstraction levels: a step
+# is a workflow stage (`condensate_segmentation`), an operation is a
+# layer-producing transform (`subcellular_segment`). Measured: `_STEP_MAP` and
+# the op catalog have ZERO name overlap — that is correct design, not drift, so
+# the two vocabularies are NOT merged. The honest relationship is *composition*:
+# a step INVOKES one or more catalog/measure operations. That mapping cannot be
+# inferred (a step's replay function calls whatever it calls), so it is DECLARED
+# here, next to the steps, and drift-guarded against the live operation vocabulary
+# (tests/navigator/test_batch_step_composition.py): rename an op and the build
+# breaks instead of replay silently breaking.
+#
+# Each value is the tuple of operation ids the step invokes, verified against the
+# step's replay function (its toolbox imports → the op that function declares).
+# Only steps whose invoked ops are UNAMBIGUOUS are declared — staged population,
+# the same discipline as OperationSpec increment 2. A step that also calls an
+# UNtagged helper (a composite with no op id) declares only its registered ops;
+# a step invoking no catalog/measure op (file I/O, save/clear, skip-stubs) is left
+# out rather than declared empty. Later work raises the coverage floor.
+_STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
+    'preprocessing':            ('preprocess',),
+    'upscaling':                ('upscale',),
+    'calibration_correction':   ('bg_subtract_clear', 'flatfield'),
+    'auto_crop_roi':            ('multi_otsu',),
+    'cellpose_segmentation':    ('cellpose', 'stardist'),
+    'condensate_segmentation':  ('mask_stretch', 'subcellular_segment'),
+    'ivf_segmentation':         ('mask_stretch', 'subcellular_segment'),
+    'bf_condensate_segmentation': ('bf_segment',),
+    'ivbf_segmentation':        ('bf_segment',),
+    'ivf_size_distribution':    ('invitro.size_distribution',),   # a MEASURE op
+}
+
+
+def step_operations(step_name: str) -> tuple[str, ...]:
+    """The catalog/measure operation ids a batch step invokes, or () if undeclared.
+
+    The declared composition (see ``_STEP_OPERATIONS``). ``()`` means either the step invokes no
+    registered operation (file I/O, save/clear, a skip-stub) or its mapping is not yet declared —
+    the coverage guard, not this accessor, distinguishes the two.
+    """
+    return _STEP_OPERATIONS.get(step_name, ())
+
+
+def all_step_operations() -> dict:
+    """The whole declared step → operations composition (a copy)."""
+    return {k: tuple(v) for k, v in _STEP_OPERATIONS.items()}
+
+
 def register_all_steps(bp: "BatchProcessor"):
     # A duplicate key in _STEP_MAP is silently swallowed by Python (the later
     # entry wins), which makes it a latent trap: someone implements a real
