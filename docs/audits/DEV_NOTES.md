@@ -1402,3 +1402,29 @@ tuples), falling back to re-opening the file via `open_image`. If the dropdown s
 real multi-scene file, the retained object is not the `BioImage` — capture what IS retained
 (`type(...)`, `hasattr(set_scene/scenes)`) and wire `_reader_for` to it. That single fact is what a real
 file will settle. Then update `roadmap.rst` (the multi-scene rubric) to RESOLVED.
+
+---
+
+## FINDINGS: filter_sensitivity increment 3 survey — live scale risks NOT yet pinned (2026-07-19, 1.6.131)
+
+Increment 3 added `partition.client_enrichment.background` (offset; K collapses from 30 to 5.83 at a
+500-count pedestal with the default `background=0.0` — warned but still returned) as a validated harness
+case. The survey also turned up two LIVE scale risks that were **not** added — they are the same scale
+shape already covered by `segmentation.local_ring_geometry`, and they are user-facing px controls rather
+than hidden constants, so they are findings to report, not new machinery. Recorded here so a future pass
+does not re-discover them from scratch:
+
+- **`segmentation.min_spot_radius=2` (scale).** Doubles as a DoG sigma AND a `min_area = ceil(pi*r^2)`
+  (~13 px) size gate; `is_undersized = area < min_area` drops puncta below it from the **reported
+  count**. It is raw pixels and NOT derived from the measured/pixel-size-aware value (unlike
+  `ball_radius`), so at a coarser pixel size a real punctum spanning <13 px is silently dropped. Only
+  *partially* guarded: `_report_refinement_drops` surfaces the drop reasons and warns "check
+  min_spot_radius against the pixel size" when ≥80% are dropped — but the count itself is still biased
+  and a reader of just the number wouldn't know. A proper fix would derive the floor from the pixel size
+  (like `ball_radius`); that is a production change with its own spec, not a test-only harness case.
+- **`partition.client_enrichment_per_condensate` `shell_px=5` (scale).** A fixed-px local dilute ring
+  around each object → the dilute reference is sampled at a pixel-size-dependent standoff; unguarded.
+  Same scale shape; a fix would scale the ring to the object (as `local_ring_geometry` did).
+
+~35-110 other filter defaults remain; the audit's view stands — they are not equal, and the next
+increment is another prioritisation call, not a sweep.

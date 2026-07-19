@@ -1,3 +1,32 @@
+## [1.6.131] - 2026-07-19
+### Added — **Filtering-defaults sensitivity harness, increment 3: the partition-coefficient camera-offset default (a LIVE inverter, pinned).**
+Increment 1 built the harness and proved it on two fixed inverters; increment 2 added the segmentation
+SNR (offset) and ring-geometry (scale) cases and correctly excluded `bleach_r2_min`. Increment 3 is the
+next prioritisation call. The survey of the remaining ~37 candidate defaults found **no new *fixed*
+inverter** — but it found a **live** one worth pinning, and several non-cases worth recording so the next
+pass doesn't re-litigate them.
+
+- **`partition.client_enrichment.background` (offset sensitivity) — ADDED.** The partition coefficient
+  K = (dense − bg)/(dilute − bg) is exact at any camera pedestal *provided the offset is supplied*. The
+  **default `background=0.0`** asserts there is none, so a real pedestal sits in both terms and drags K
+  toward 1 — measured on a true K of 30: **30 / 15.5 / 5.83 / 2.38** at pedestals 0/100/500/2000, a 12×
+  error on a flagship condensate metric. The function *warns* but still returns the wrong number, so
+  this is the **first case whose negative control is the current default**, not a removed form: the
+  positive control supplies the offset and recovers K at every pedestal; the negative drives the same
+  real function with the default 0.0 and the harness catches the inversion (both controls exercise the
+  real `client_enrichment` — no reimplementation).
+### Notes
+- **Non-cases recorded** (in the registry comment + `DEV_NOTES.md`) so they aren't re-evaluated:
+  `segmentation.min_spot_radius=2` and `client_enrichment_per_condensate shell_px=5` are **live scale
+  risks** but the same scale shape already covered by `local_ring_geometry` (reported as findings, a
+  production fix is separate work); `max_area_fraction=0.25` is **safe by construction** (a fraction of
+  cell area → scale-invariant); `kurtosis_threshold=-3.0` is **inert** (excess kurtosis has a −2 floor,
+  so `< −3` never fires); `estimate_object_size_px_brightfield` is **dead/unwired** (excluded like
+  `defocus_r2_max`).
+- Test-only, no production behaviour changed. Fixture reused: `fixtures_synthetic.partition_scene`
+  (known K). Full `pytest -m core` green.
+- Files: `tests/filter_sensitivity.py`, `tests/test_filter_sensitivity.py`, `docs/audits/DEV_NOTES.md`.
+
 ## [1.6.130] - 2026-07-19
 ### Added — **Multi-scene switcher: load one position at a time, lazily, and switch in place.**
 A multi-position acquisition (CZI/IMS/OME-TIFF) used to load **every selected scene into memory at
