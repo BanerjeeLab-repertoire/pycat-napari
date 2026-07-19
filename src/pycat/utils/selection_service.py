@@ -39,6 +39,8 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import weakref
+from contextlib import contextmanager
+from typing import Protocol, runtime_checkable
 
 from pycat.utils.general_utils import debug_log
 
@@ -332,6 +334,74 @@ class SelectionService:
         """Full reset (no dispatch) — the lifecycle drop, e.g. on a data switch. For Escape's
         keep-the-pins clear that DOES notify views, use ``clear_selection``."""
         self._state = SelectionState()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# The view-adapter contract — every linked view behaves the same, and can be tested the same
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+
+@runtime_checkable
+class SelectionView(Protocol):
+    """**What a linked view must be**, so the dispatcher can drive any of them the same way.
+
+    Subscribers used to be bare callbacks with no shared contract, so each view re-invented apply /
+    suppress / cleanup and they drifted. A ``SelectionView`` is the small contract instead:
+
+    * ``view_id`` — names the view, so the service can skip it when propagating its own action
+      (echo-suppression);
+    * ``apply_selection(state)`` — render a :class:`SelectionState`. This is a **programmatic** update,
+      so it must NOT emit a command back (guard it with :class:`ProgrammaticGuard`);
+    * ``close()`` — disconnect mpl cids / Qt signals and unsubscribe, so a closed view stops being
+      driven and stops driving.
+
+    A new adapter (e.g. the pyqtgraph plot backend) is built against THIS, and verified with
+    :func:`assert_selection_view_contract` — not the old bare-callback API.
+    """
+    view_id: str
+
+    def apply_selection(self, state: SelectionState) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class ProgrammaticGuard:
+    """A re-entrancy flag for the **primary** echo defence: while a view applies a selection
+    *programmatically* (``selectRow``, moving a marker, restyling a curve), the change signals that
+    fires must not be read as a fresh user action and emit a new command.
+
+    ``with guard.applying(): <render>`` raises the flag; the view's OUTBOUND handler checks
+    ``guard.is_applying`` and bails. This is the review's §5 rule; the service's ``source_view``
+    suppression stays as the second line of defence. Re-entrant (depth-counted) so nested applies are
+    safe.
+    """
+
+    def __init__(self):
+        self._depth = 0
+
+    @property
+    def is_applying(self) -> bool:
+        return self._depth > 0
+
+    @contextmanager
+    def applying(self):
+        self._depth += 1
+        try:
+            yield
+        finally:
+            self._depth -= 1
+
+
+def register_view(service, view):
+    """Subscribe a :class:`SelectionView` and immediately push the CURRENT state, so a view opened
+    while something is already selected reflects it (a fresh plot should show the active selection,
+    not a blank one). The initial apply is programmatic, so it emits no command. Returns ``view``."""
+    service.subscribe(view.view_id, view.apply_selection)
+    try:
+        view.apply_selection(service.state)
+    except Exception as exc:
+        debug_log(f'selection: view "{getattr(view, "view_id", "?")}" failed its initial apply', exc)
+    return view
 
 
 def _qt_defer(fn):

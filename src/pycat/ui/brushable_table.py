@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import QAbstractItemView, QTableView
 
 from pycat.utils.entity_ref import ENTITY_ID_COLUMN, has_entity_ids, linkability_of
 from pycat.utils.general_utils import debug_log
-from pycat.utils.selection_service import Selection
+from pycat.utils.selection_service import ProgrammaticGuard, Selection, register_view
 
 
 def entity_row_map(df):
@@ -62,7 +62,7 @@ class BrushableTable:
         self.view_id = str(view_id)
         self._rows = entity_row_map(df)
         self._ids = {row: eid for eid, row in self._rows.items()}
-        self._applying = False
+        self._guard = ProgrammaticGuard()      # primary echo defence — see SelectionView / Gap 5
 
         self.proxy = QSortFilterProxyModel(table_view)
         if model is not None:
@@ -90,12 +90,14 @@ class BrushableTable:
     def _connect(self):
         try:
             self.view.selectionModel().selectionChanged.connect(self._on_selection_changed)
-            self.service.subscribe(self.view_id, self._on_service_selection)
+            # register_view subscribes `apply_selection` AND pushes the current state, so a table
+            # opened while something is already selected highlights that row from the start.
+            register_view(self.service, self)
         except Exception as exc:
             debug_log('brushable_table: could not wire the table to the service', exc)
 
     def _on_selection_changed(self, *_args):
-        if self._applying or self.service.is_busy:
+        if self._guard.is_applying or self.service.is_busy:
             return
         eid = self.selected_entity_id()
         if eid is None:
@@ -117,10 +119,12 @@ class BrushableTable:
             debug_log('brushable_table: could not read the selected row', exc)
             return None
 
-    # ── inbound: something else selected ──────────────────────────────────────────────────
-    def _on_service_selection(self, selection):
+    # ── inbound: something else selected (SelectionView.apply_selection) ───────────────────
+    def apply_selection(self, state):
+        """Render a selection state: highlight the row for the selected entity (if this table holds
+        it). A programmatic update — guarded so the `selectRow` below does not bounce a command back."""
         row = None
-        for eid in selection.entity_ids:
+        for eid in state.entity_ids:
             row = self._rows.get(str(eid))
             if row is not None:
                 break
@@ -131,13 +135,10 @@ class BrushableTable:
             proxy_index = self.proxy.mapFromSource(self.proxy.sourceModel().index(row, 0))
             if not proxy_index.isValid():
                 return      # filtered out of view
-            # `_applying` on top of the service's own guard: `selectRow` emits synchronously, and
-            # this handler runs *inside* the service's propagation.
-            self._applying = True
-            try:
+            # The guard on top of the service's own busy flag: `selectRow` emits `selectionChanged`
+            # synchronously, and this runs *inside* the service's propagation.
+            with self._guard.applying():
                 self.view.selectRow(proxy_index.row())
-            finally:
-                self._applying = False
         except Exception as exc:
             debug_log('brushable_table: could not highlight the selected row', exc)
 
@@ -151,12 +152,14 @@ class BrushableTable:
         except Exception as exc:
             debug_log('brushable_table: could not scroll to the selection', exc)
 
-    def detach(self):
-        """Stop the dispatcher driving this table (its dialog closed)."""
+    def close(self):
+        """Stop the dispatcher driving this table (its dialog closed) — SelectionView.close()."""
         try:
             self.service.unsubscribe(self.view_id)
         except Exception as exc:
             debug_log('brushable_table: could not detach', exc)
+
+    detach = close       # back-compat alias for existing callers
 
 
 def make_brushable(table_view, df, service, view_id, *, model=None):

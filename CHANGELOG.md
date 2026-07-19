@@ -1,3 +1,28 @@
+## [1.6.121] - 2026-07-18
+### Added — **Interaction layer 5: a `SelectionView` adapter contract.**
+Linked views used to be bare callbacks with no shared contract, so each re-invented apply / suppress /
+cleanup and they drifted. This adds the contract, its mechanism, and a reusable test — the piece the
+pyqtgraph plot backend should be built against.
+
+- **`SelectionView` protocol** (`selection_service.py`): `view_id`, `apply_selection(state)`, `close()`.
+- **`ProgrammaticGuard`** — the *primary* echo defence: `with guard.applying(): <render>` marks a
+  programmatic update, and the view's outbound handler checks `is_applying` and bails, so rendering a
+  selection never emits a new command (the service's `source_view` suppression stays as the second
+  line). Re-entrant.
+- **`register_view(service, view)`** subscribes the view AND pushes the current state, so a view opened
+  while something is already selected reflects it — the initial apply is programmatic (emits nothing).
+- **A reusable contract** (`tests/selection_view_contract.py`): programmatic apply emits no command, a
+  user action emits exactly one, an unknown entity is safe, and `close()` unsubscribes. A reference
+  adapter and the **retrofitted `BrushableTable`** (now a `SelectionView`: `apply_selection` + `close`,
+  using the shared guard + `register_view`) both pass it. `detach()` stays as a back-compat alias.
+### Notes
+- Headless-tested: the guard is re-entrant, `register_view` pushes current state without bouncing a
+  command, and both the reference adapter and the real Qt `BrushableTable` pass the shared contract.
+  All existing selection/brushing tests green.
+- Completes the interaction-layer spec's mechanism. Remaining, additive: retrofit the other views (MSD
+  plot, VPT handlers, napari overlay, dock) to the protocol, then build/merge the pyqtgraph backend
+  adapter against this contract.
+
 ## [1.6.120] - 2026-07-18
 ### Changed — **Interaction layer 4: MSD spaghetti background is one `LineCollection`; selection is an overlay.**
 Hundreds of individual `Line2D` are slow to draw and force a per-artist style restore on every
