@@ -1,3 +1,26 @@
+## [1.6.140] - 2026-07-19
+### Changed — **Reliability adoption: the two zero-bar widgets now run off the Qt thread through the operation runner.**
+Completes the reliability spec's Part 2 — the proof adoption. The two analyses whose slow work is the
+computation (Cascade RF segmentation in `contrast_cascade_ui`, per-half-cycle rip fitting in
+`fd_curve_ui`) now run through `OperationRunner` on a worker thread behind `run_with_progress`'s modal
+progress dialog, and create their layer / show their tables back on the main thread via `on_result`. A
+failure is transported to a `napari_show_warning` via `on_error`. **Responsive, not merely visible** —
+no "Not Responding" during a multi-second segment or fit.
+
+- This **supersedes the on-thread inline `QProgressBar`** those widgets got in progress-part-2 (1.6.132):
+  the modal dialog (driven by the same tool `progress_callback`, forwarded by the runner) is now the
+  progress indicator, so the inline bars were removed. `test_progress_analysis_half.py` is updated to
+  ratchet the stronger guarantee — each widget must route its slow analysis through `OperationRunner`
+  (a regression to a direct on-thread call fails), while the tool entry points still accept
+  `progress_callback` (unchanged).
+### Notes
+- Only these **two** widgets were converted (the spec's "prove the runner, then migrate incrementally").
+- **Needs an in-app glance** (viewer-coupled): confirm the modal dialog appears and the UI stays
+  responsive during a real Cascade-RF segmentation / rip fit, and the result lands correctly.
+- Full `pytest -m core` green.
+- Files: `src/pycat/toolbox/contrast_cascade_ui.py`, `src/pycat/toolbox/fd_curve_ui.py`,
+  `tests/test_progress_analysis_half.py`.
+
 ## [1.6.139] - 2026-07-19
 ### Added — **Reliability: typed failures + an exception ratchet + one operation runner.**
 The two reliability findings the audit flagged as unchanged across revisions — broad exception handling

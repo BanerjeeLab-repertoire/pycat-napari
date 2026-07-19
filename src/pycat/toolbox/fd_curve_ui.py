@@ -361,62 +361,58 @@ class FDCurveUI:
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_rips)
         form.addRow(btn)
-        # Rip detection runs a WLC fit per half-cycle — the slow part. A real QProgressBar (repaints
-        # synchronously on setValue, so it moves while the Qt thread is busy in the fit loop; a QLabel
-        # would not paint until the loop ended).
-        self._rips_progress = QProgressBar()
-        self._rips_progress.setVisible(False)
-        form.addRow(self._rips_progress)
+        # Rip-detection progress now shows in the operation runner's modal dialog (it runs off the Qt
+        # thread), so no inline bar is needed here.
         layout.addWidget(grp)
 
     def _on_rips(self):
         from pycat.toolbox.fd_curve_tools import detect_all_rips, TERRA_REPEAT_NT
-        from pycat.ui.ui_utils import PhasedProgress
+        from pycat.utils.operation_runner import OperationRunner
         seg = self._dr().get('fd_segments')
         if seg is None:
             napari_show_warning("Segment the cycles first (Step 2)."); return
-        pp = PhasedProgress(self._rips_progress, phases=[("Detecting rips", 1.0)])
-        pp.start_phase(0)
-        rips = detect_all_rips(
-            seg, which='stretches',
-            progress_callback=pp.callback,
-            min_force_drop_pN=self._min_drop.value(),
-            kuhn_length_nm=self._kuhn.value(),
-            stretch_modulus_pN=self._ss_mod.value(),
-            rise_nm_per_nt=self._rise.value())
-        pp.finish()
-        self._rips_progress.setVisible(False)
-        self._dr()['fd_rips'] = rips
 
-        self._record('fd_rips', {
-            'na_type': self._na_type.currentText(),
-            'min_force_drop_pN': self._min_drop.value(),
-            'n_rips': int(len(rips))})
+        def _done(rips):
+            # Back on the MAIN thread: store, record, show the tables, announce.
+            self._dr()['fd_rips'] = rips
+            self._record('fd_rips', {
+                'na_type': self._na_type.currentText(),
+                'min_force_drop_pN': self._min_drop.value(),
+                'n_rips': int(len(rips))})
+            try:
+                from pycat.ui.ui_utils import show_dataframes_dialog
+                if len(rips):
+                    med_force = rips['rupture_force_pN'].median()
+                    med_nt = rips['n_nucleotides'].median()
+                    overview = pd.DataFrame([{
+                        'n_rips': len(rips),
+                        'median rupture force (pN)': round(med_force, 2),
+                        'median ΔLc (nm)': round(rips['delta_Lc_um'].median() * 1000, 2),
+                        'median nucleotides released': round(med_nt, 1),
+                        'TERRA (UUAGGG)x10 full contour (nt)': TERRA_REPEAT_NT * 10,
+                    }])
+                    show_dataframes_dialog("FD Rip Analysis",
+                                           [('Overview', overview),
+                                            ('Per-rip', rips.round(4))])
+                else:
+                    show_dataframes_dialog("FD Rip Analysis",
+                                           [('Result', pd.DataFrame([{'message': 'No rips detected above threshold.'}]))])
+            except Exception:  # broad-ok: the dialog is a convenience; a display glitch must not lose the result
+                pass
+            napari_show_info(
+                f"Detected {len(rips)} rips across all stretches."
+                + (f" Median rupture force {rips['rupture_force_pN'].median():.1f} pN."
+                   if len(rips) else " Try lowering the min force drop."))
 
-        try:
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            if len(rips):
-                med_force = rips['rupture_force_pN'].median()
-                med_nt = rips['n_nucleotides'].median()
-                overview = pd.DataFrame([{
-                    'n_rips': len(rips),
-                    'median rupture force (pN)': round(med_force, 2),
-                    'median ΔLc (nm)': round(rips['delta_Lc_um'].median() * 1000, 2),
-                    'median nucleotides released': round(med_nt, 1),
-                    'TERRA (UUAGGG)x10 full contour (nt)': TERRA_REPEAT_NT * 10,
-                }])
-                show_dataframes_dialog("FD Rip Analysis",
-                                       [('Overview', overview),
-                                        ('Per-rip', rips.round(4))])
-            else:
-                show_dataframes_dialog("FD Rip Analysis",
-                                       [('Result', pd.DataFrame([{'message': 'No rips detected above threshold.'}]))])
-        except Exception:
-            pass
-        napari_show_info(
-            f"Detected {len(rips)} rips across all stretches."
-            + (f" Median rupture force {rips['rupture_force_pN'].median():.1f} pN."
-               if len(rips) else " Try lowering the min force drop."))
+        # Off the Qt thread via the ONE operation runner: a WLC fit per half-cycle runs on a worker
+        # behind a modal progress dialog (detect_all_rips' per-cycle progress_callback drives it).
+        _parent = getattr(getattr(getattr(self, 'viewer', None), 'window', None), '_qt_window', None)
+        OperationRunner().execute(
+            detect_all_rips, seg, which='stretches',
+            min_force_drop_pN=self._min_drop.value(), kuhn_length_nm=self._kuhn.value(),
+            stretch_modulus_pN=self._ss_mod.value(), rise_nm_per_nt=self._rise.value(),
+            on_result=_done, on_error=lambda exc: napari_show_warning(f"Rip detection failed: {exc}"),
+            parent=_parent, title='Detecting rips', text='Fitting each half-cycle…')
 
     def _on_export(self):
         from PyQt5.QtWidgets import QFileDialog

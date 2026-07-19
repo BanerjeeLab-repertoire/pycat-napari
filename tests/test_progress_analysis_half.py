@@ -71,30 +71,20 @@ def test_the_slow_tool_entrypoints_accept_a_progress_callback():
         "progress during the computation:\n  " + "\n  ".join(missing))
 
 
-def test_the_analysis_widgets_construct_a_real_QProgressBar():
-    """A `QProgressBar` (repaints synchronously on `setValue`), never a `QLabel` (whose `setText` a
-    blocked event loop never paints). This asserts the bar exists in each slow-analysis widget."""
-    missing = []
-    for module in sorted(_PROGRESS_WIDGETS):
-        tree = ast.parse((_TOOLBOX / module).read_text(encoding='utf-8', errors='ignore'))
-        builds_bar = any(
-            (getattr(node.func, 'id', None) == 'QProgressBar')
-            for node in ast.walk(tree) if isinstance(node, ast.Call))
-        if not builds_bar:
-            missing.append(module)
-    assert not missing, (
-        "these slow-analysis widgets do not construct a QProgressBar (a QLabel is not a progress "
-        "reporter on a busy Qt thread):\n  " + "\n  ".join(missing))
+def test_the_analysis_widgets_run_OFF_THREAD_via_the_operation_runner():
+    """**The reliability upgrade (1.6.139) supersedes the inline bar.** Progress part 2 made the wait
+    *visible* with an on-thread bar; the operation runner makes the UI *responsive* by running the slow
+    analysis on a worker behind a modal progress dialog (driven by the same tool `progress_callback`),
+    marshalling the result back to the main thread.
 
-
-def test_the_bar_is_DRIVEN_by_the_tool_callback_not_faked():
-    """A bar that is not fed the tool's `progress_callback` is decoration. Each widget must route the
-    callback through `PhasedProgress` — the piece that maps `callback(done, total)` onto the bar."""
-    undriven = []
+    So each of these widgets must route its slow analysis through `OperationRunner` — a strictly
+    stronger guarantee than an on-thread bar, and a regression to a direct on-thread call fails here."""
+    not_off_thread = []
     for module in sorted(_PROGRESS_WIDGETS):
         src = (_TOOLBOX / module).read_text(encoding='utf-8', errors='ignore')
-        if not ('PhasedProgress' in src and 'progress_callback=' in src):
-            undriven.append(module)
-    assert not undriven, (
-        "these widgets construct a bar but do not drive it from the tool's progress_callback via "
-        "PhasedProgress — a bar with nothing driving it is worse than none:\n  " + "\n  ".join(undriven))
+        if 'OperationRunner' not in src:
+            not_off_thread.append(module)
+    assert not not_off_thread, (
+        "these slow-analysis widgets no longer run their analysis off the Qt thread via "
+        "`OperationRunner` — a direct on-thread call freezes the window even with a bar:\n  "
+        + "\n  ".join(not_off_thread))
