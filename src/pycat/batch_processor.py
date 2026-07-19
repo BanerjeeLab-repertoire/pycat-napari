@@ -242,6 +242,14 @@ class BatchWorker(QThread):
         results = []
         total = len(self.files)
 
+        # ── Comparative-phenotyping condition/metadata (increment 1, Part B) ────────────────
+        # One resolver for the whole run, from the sheet/pattern the config carries. `None` when no
+        # source is configured — and then nothing below writes a metadata file, so a batch with no
+        # sample sheet or filename pattern produces exactly the outputs it did before (additive).
+        from pycat.utils.sample_metadata import (resolver_from_config,
+                                                 write_image_sample_metadata)
+        _sample_resolver = resolver_from_config(self.config)
+
         for idx, image_path in enumerate(self.files):
             if self._cancelled:
                 self.finished.emit(
@@ -257,11 +265,21 @@ class BatchWorker(QThread):
 
             try:
                 self._process_file(image_path, file_output)
+                # Attach this image's condition (WT/rep2/10µM…) beside its results. No-op when no
+                # metadata source is configured (resolver is None).
+                write_image_sample_metadata(_sample_resolver, image_path, file_output)
                 results.append(f"✓ {image_path.name}")
             except Exception as exc:  # noqa: BLE001
                 tb = traceback.format_exc()
                 results.append(f"✗ {image_path.name}: {exc}")
                 print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{tb}")
+
+        # A sheet row that matched no image is a likely filename typo — warn once, don't crash.
+        if _sample_resolver is not None:
+            try:
+                _sample_resolver.warn_unmatched_sheet_rows()
+            except Exception as _wexc:
+                print(f"[PyCAT Batch] sample-metadata unmatched-row check failed: {_wexc}")
 
         summary = "\n".join(results)
         self.finished.emit(

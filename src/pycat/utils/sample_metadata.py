@@ -202,3 +202,55 @@ def tags_from_manifest(manifest) -> dict:
     if not isinstance(tags, dict):
         return {}
     return {str(k): dict(v) for k, v in tags.items() if isinstance(v, dict)}
+
+
+# ── Batch: attach the resolved condition to a per-image output ────────────────
+
+def write_image_sample_metadata(resolver, image_path, output_dir):
+    """Write ``<stem>_sample_metadata.json`` for one image's batch output; return its path or ``None``.
+
+    Part B of the condition/metadata model. The batch loop calls this per image **when a metadata
+    source (a sheet or a filename pattern) is configured** — the file records the resolved condition
+    ``fields`` and which ``source`` supplied each, so increment 2's consolidated table can join on it.
+
+    ``resolver=None`` (no source configured) is a **no-op returning None** — the additivity guarantee:
+    a batch with no metadata source writes exactly the files it wrote before. An image that matches
+    nothing still writes a file with ``source='none'`` / ``fields={}``, because the user asked for
+    metadata and "this image matched no row" is an answer, not silence.
+    """
+    if resolver is None:
+        return None
+    import json
+    import pathlib
+    meta = resolver.for_image(image_path)
+    out = pathlib.Path(output_dir) / f"{pathlib.Path(str(image_path)).stem}_sample_metadata.json"
+    payload = {
+        'fields': dict(meta.fields),
+        'source': meta.source,
+        'field_sources': dict(getattr(meta, 'field_sources', {}) or {}),
+    }
+    try:
+        out.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
+    except Exception as exc:
+        _warn(f"Sample metadata: could not write {out.name}: {exc}")
+        return None
+    return out
+
+
+def resolver_from_config(config):
+    """A ``SampleMetadataResolver`` from a batch ``config`` dict, or ``None`` if no source is set.
+
+    Reads ``sample_sheet_path`` / ``sample_filename_pattern`` (the keys the batch UI would populate).
+    Returning ``None`` when neither is present is what keeps a metadata-less batch byte-unchanged.
+    """
+    if not isinstance(config, dict):
+        return None
+    sheet = config.get('sample_sheet_path')
+    pattern = config.get('sample_filename_pattern')
+    if not sheet and not pattern:
+        return None
+    try:
+        return SampleMetadataResolver(sheet_path=sheet, filename_pattern=pattern)
+    except Exception as exc:
+        _warn(f"Sample metadata: could not build the resolver: {exc}")
+        return None

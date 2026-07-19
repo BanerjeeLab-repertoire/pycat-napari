@@ -1,3 +1,35 @@
+## [1.6.133] - 2026-07-19
+### Added — **Comparative phenotyping inc 1, Parts B & C: wire the condition/metadata resolver into batch + session persistence.**
+Increment 1's Part A — the `SampleMetadataResolver` (attach a condition like "WT replicate 2 at 10 µM"
+to an image from a sample sheet / filename pattern / in-app tag, behind one API) — shipped earlier, but
+its two integration points were never wired: the resolver was only consumed by the consolidated table
+(increment 2), never by the batch loop or the session manifest as the spec specified. This closes that.
+
+- **Part B — batch** (`batch_processor.BatchWorker.run`): builds one resolver per run from the config
+  (`sample_sheet_path` / `sample_filename_pattern`, the keys the batch UI populates) and writes a
+  `<stem>_sample_metadata.json` beside each image's results recording the resolved `fields` + which
+  `source` supplied each. **Strictly additive:** with no source configured the resolver is `None` and
+  nothing is written — a metadata-less batch produces exactly the files it did before. An unmatched
+  sheet row warns once (a likely filename typo), never crashes.
+- **Part C — session** (`writers._write_session_manifest` + `session_loader`): an in-app condition tag
+  placed in the data repository is carried into the manifest on Save & Clear and restored into the
+  repository on Load Session, so a tagged image comes back tagged. **Back-compat both ways:** an
+  untagged session's manifest is byte-identical to before, and a manifest written before the field loads
+  as "no tag".
+- New Qt-free helpers in `utils/sample_metadata.py`: `write_image_sample_metadata` (the per-image
+  writer, a no-op when the resolver is `None`) and `resolver_from_config`.
+### Notes
+- **The condition/metadata model is now fully realized** across all three attach paths and both
+  integration points — the prerequisite the consolidated table (inc 2) and comparative figures (inc 3)
+  join on. This resolves the one PARTIAL item from the spec audit (Parts B/C were unwired).
+- Tests (`core`, headless): the per-image writer records/omits correctly and is a no-op without a
+  source; the batch loop's wiring is AST-verified (batch_processor is Qt-bound); an in-app tag
+  round-trips through Save → Load; an untagged session stays back-compatible. No behaviour change when
+  no metadata source is configured. Full `pytest -m core` green.
+- Files: `src/pycat/utils/sample_metadata.py`, `src/pycat/batch_processor.py`,
+  `src/pycat/file_io/writers.py`, `src/pycat/file_io/session_loader.py`,
+  `tests/test_sample_metadata_wiring.py`.
+
 ## [1.6.132] - 2026-07-19
 ### Added — **Progress, part 2: the ANALYSIS half — tool-level `progress_callback` for the two zero-bar widgets.**
 The materialization half of the progress work shipped in 1.6.81/82/107 (decoding a lazy stack shows a

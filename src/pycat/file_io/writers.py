@@ -354,11 +354,26 @@ def _write_session_manifest(session_dir, central_manager, source_path,
     _cur = getattr(getattr(central_manager, 'analysis_methods_ui', None),
                    'current_analysis_ui', None)
     active_method = _cur.__class__.__name__ if _cur is not None else None
+
+    _extra = {'stem': stem, 'active_method': active_method}
+    # Comparative-phenotyping condition/metadata (increment 1, Part C): if the user tagged images
+    # in-app, those tags live in the data repository — carry them into the manifest so they travel
+    # with the session. Absent → `_extra` is unchanged, so an untagged session's manifest is
+    # byte-identical to before (back-compat both ways).
+    try:
+        from pycat.utils.sample_metadata import tags_to_manifest_extra
+        _tags = central_manager.active_data_class.data_repository.get('sample_metadata')
+        if _tags:
+            _extra.update(tags_to_manifest_extra(_tags))
+    except Exception as _sme:
+        from pycat.utils.general_utils import debug_log
+        debug_log('writers: could not attach sample_metadata to the manifest', _sme)
+
     _sm.write_manifest(
         session_dir, source_path=source_path,
         data_repository=central_manager.active_data_class.data_repository,
         layer_entries=manifest_layers, dataframe_entries=manifest_dfs,
-        extra={'stem': stem, 'active_method': active_method})
+        extra=_extra)
     print(f"[PyCAT] Session saved to {session_dir}")
 
 

@@ -343,6 +343,16 @@ def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None
         except Exception:
             pass
 
+        # In-app condition/metadata tags (comparative phenotyping inc 1, Part C). Restored so a
+        # tagged session comes back tagged; a manifest written before this field yields {} → no-op.
+        try:
+            from pycat.utils.sample_metadata import tags_from_manifest
+            _tags = tags_from_manifest(_manifest)
+            if _tags:
+                payload['sample_metadata'] = _tags
+        except Exception:
+            pass
+
         # Manifest dataframes — READ only (the slow CSV reads); stored on the main thread.
         try:
             from pycat.file_io import session_manifest as _sm
@@ -438,6 +448,13 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
     try:
         if data_instance is not None and payload.get('acquisition'):
             data_instance.data_repository.update(payload['acquisition'])
+    except Exception:
+        pass
+
+    # 2b) In-app condition/metadata tags — back into the repository so a resolver can read them.
+    try:
+        if data_instance is not None and payload.get('sample_metadata'):
+            data_instance.data_repository['sample_metadata'] = payload['sample_metadata']
     except Exception:
         pass
 
