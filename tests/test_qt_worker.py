@@ -166,6 +166,11 @@ def test_the_worker_thread_is_CLEANED_UP(qtbot):
 def test_materialize_off_thread_DECODES_and_returns_the_array(monkeypatch):
     """It runs `materialize_stack` (headless: synchronously) and returns its result — the array the
     caller then hands to analysis, on the caller's thread."""
+    # `pycat.file_io.file_io` imports PyQt5 at module scope (its QDialog subclasses), and
+    # `materialize_off_thread` decodes through it — so this test needs Qt importable even though the
+    # code path it exercises is the synchronous headless one. Skip cleanly on a no-Qt runner rather
+    # than failing the headless core suite.
+    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 
@@ -180,6 +185,7 @@ def test_materialize_off_thread_PASSES_kwargs_and_a_progress_callback(monkeypatc
     """`dtype=` (and any other kwarg) reach `materialize_stack`, and it always gets a callable
     `progress_callback` — a lazy decoder calls it per frame and must not get `None`."""
     import numpy as np
+    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 
@@ -203,6 +209,7 @@ def test_materialize_off_thread_PASSES_kwargs_and_a_progress_callback(monkeypatc
 def test_materialize_off_thread_survives_a_viewer_with_no_qt_window(monkeypatch):
     """The `viewer=` is only for parenting the dialog. A fake viewer (or one whose `window` chain is
     absent) must not break the decode — the parent just resolves to None."""
+    pytest.importorskip("PyQt5", reason="materialize_off_thread imports file_io, which needs PyQt5")
     import pycat.file_io.file_io as fio
     from pycat.utils.qt_worker import materialize_off_thread
 
