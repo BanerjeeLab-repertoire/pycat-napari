@@ -31,8 +31,8 @@ from .modules import build_registry
 from .loader import (build_registry_from_workbook, data_available,
                      load_pipelines, load_question_tree, load_raw_modules,
                      load_tag_vocab, Pipeline, QNode, RawModule)
-from .op_catalog import (build_operation_registry, catalog_available,
-                         load_operation_catalog)
+from .op_catalog import (build_catalog_document, build_operation_registry,
+                         catalog_available, load_operation_catalog)
 from .planner import ContextGap, Plan, Planner, PlanStep, default_selection_policy
 from .adapters import (InMemoryLayerResolver, LayerBinding, LayerResolverProtocol,
                        SessionLayer, capability_to_query)
@@ -54,7 +54,8 @@ __all__ = [
     "build_registry_from_workbook", "data_available", "load_pipelines",
     "load_question_tree", "load_raw_modules", "load_tag_vocab",
     "Pipeline", "QNode", "RawModule",
-    "build_operation_registry", "catalog_available", "load_operation_catalog",
+    "build_catalog_document", "build_operation_registry", "catalog_available",
+    "load_operation_catalog",
     "HybridQuestionEngine", "ScientificTree", "TreeState",
     "InMemoryLayerResolver", "LayerBinding", "LayerResolverProtocol",
     "SessionLayer", "capability_to_query",

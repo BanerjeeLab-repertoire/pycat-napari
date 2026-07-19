@@ -1,3 +1,35 @@
+## [1.6.128] - 2026-07-19
+### Changed — **OperationSpec increment 4: flip the Navigator catalog from validate-against-the-spec to GENERATE-from-the-spec.**
+The payoff increment 1 was built for. Increment 1 made the operation catalog a *validated* committed
+snapshot; increments 2–3 turned the vocabulary into a graph and made batch replay auditable against it.
+Increment 4 does the flip on the lowest-risk consumer — the **Navigator catalog** — as a proven-safe
+change: the operation set is now **generated from the live spec** (`iter_operation_specs()` → the
+`@tags_layer`/UI decorators) instead of read from the committed `operation_catalog.json`. The decorators
+are the runtime source of truth; the JSON becomes a reviewable, shippable *artifact*, no longer
+authoritative at run time — the Navigator builds correctly even if the file is absent. One subsystem
+only, to prove the pattern before touching UI or batch.
+
+- **`build_catalog_document()`** (`navigator/op_catalog.py`) — new: builds the catalog document purely
+  from the live spec, no file write. `regenerate_operation_catalog()` is now a thin writer over it.
+- **`build_operation_registry(from_spec=True)`** — the flip: the Navigator's layer ops are generated
+  from `build_catalog_document()` by default. `from_spec=False` still builds from the committed file (an
+  escape hatch for tooling); the two are **equal by construction**, so this is not a behaviour change.
+- **The drift guard becomes a regeneration check.** `test_operation_spec_matches_catalog.py` now asserts
+  the committed JSON *equals* `build_catalog_document()` exactly — stronger than the field-by-field
+  checks (it also catches provenance/ordering/field-set drift), and it proves the committed artifact is
+  the generation and nothing else. The granular coverage/field tests are kept because they name *what*
+  diverged. A new test proves the registry generated from the spec is identical to the one built from
+  the file.
+### Notes
+- **No behaviour change and no JSON churn:** the committed `operation_catalog.json` already equalled the
+  regeneration (it was regenerated in increment 2), so the flip changed the *source of truth*, not the
+  numbers. Full `pytest -m core` green.
+- Scope held to one subsystem per the roadmap — batch (`_STEP_MAP`) and UI are untouched. The remaining
+  increment is **5** (`requirements`/runnability gating, wiring the spec to `capabilities.py`), plus the
+  separate binding-table effort.
+- Files: `src/pycat/navigator/op_catalog.py`, `src/pycat/navigator/__init__.py`,
+  `tests/navigator/test_operation_spec_matches_catalog.py`.
+
 ## [1.6.127] - 2026-07-19
 ### Added — **OperationSpec increment 3: declare the batch-step → operation composition, so replay is auditable against the vocabulary.**
 Increment 2 made the operation vocabulary a graph. Increment 3 connects the **batch replayer** to it.
