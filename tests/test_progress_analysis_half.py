@@ -33,6 +33,17 @@ _TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'tool
 _SLOW_TOOL_ENTRYPOINTS = {
     ('contrast_cascade_tools.py', 'cascade_rf_segment'),   # features → train → predict (3 stages)
     ('fd_curve_tools.py', 'detect_all_rips'),              # a WLC fit per half-cycle (the real loop)
+    ('feature_analysis_tools.py', 'cell_analysis_func'),   # part C: per-cell contour/morph loop
+    ('feature_analysis_tools.py', 'puncta_analysis_func'), # part C: per-cell puncta loop
+}
+
+#: Part C — the core cell/condensate runners whose per-object loop is now a determinate bar. Each must
+#: drive its compute through `run_with_progress` (the modal, off-thread runner), so the countable loop
+#: shows honest progress and the window stays responsive. A regression to a direct on-thread call — which
+#: leaves the multi-second analysis with nothing on screen — fails here.
+_DETERMINATE_RUNNERS = {
+    ('feature_analysis_tools.py', 'run_cell_analysis_func'),
+    ('feature_analysis_tools.py', 'run_puncta_analysis_func'),
 }
 
 #: The widgets that run those slow analyses — each must build a real QProgressBar and drive it from the
@@ -69,6 +80,27 @@ def test_the_slow_tool_entrypoints_accept_a_progress_callback():
     assert not missing, (
         "slow analysis entry points must accept `progress_callback(done, total)` so a widget can show "
         "progress during the computation:\n  " + "\n  ".join(missing))
+
+
+def test_the_core_runners_drive_a_DETERMINATE_bar_off_thread():
+    """**Part C.** The cell/condensate runners loop per object, so their progress is genuinely
+    measurable. Each must route its compute through `run_with_progress` (the modal, off-thread runner)
+    so the countable loop shows a determinate bar and the window stays responsive — a direct on-thread
+    call leaves a multi-second analysis with nothing on screen."""
+    missing = []
+    for module, runner in sorted(_DETERMINATE_RUNNERS):
+        tree = ast.parse((_TOOLBOX / module).read_text(encoding='utf-8', errors='ignore'))
+        func = _function(tree, runner)
+        if func is None:
+            missing.append(f"{module}::{runner}() not found")
+            continue
+        calls = {getattr(c.func, 'id', None) or getattr(c.func, 'attr', None)
+                 for c in ast.walk(func) if isinstance(c, ast.Call)}
+        if 'run_with_progress' not in calls:
+            missing.append(f"{module}::{runner}() does not route its compute through run_with_progress")
+    assert not missing, (
+        "these core runners no longer drive a determinate off-thread bar over their per-object loop:\n  "
+        + "\n  ".join(missing))
 
 
 def test_the_analysis_widgets_run_OFF_THREAD_via_the_operation_runner():

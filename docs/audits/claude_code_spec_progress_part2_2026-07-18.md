@@ -1,5 +1,15 @@
 # Claude Code spec — Progress, part 2: the ANALYSIS half (tool-level progress)
 
+> **✅ STATUS — DONE.** Parts A/B/D/E shipped in **1.6.132** (tool `progress_callback` for the two
+> zero-bar widgets + `QProgressBar` wiring + sweep + ratchet), then upgraded to the off-thread modal
+> runner in **1.6.140** (which superseded the inline bars — responsive, not merely visible). **Part C**
+> shipped in **1.6.171**: `cell_analysis_func` / `puncta_analysis_func` gain a batched `progress_callback`
+> (`None` = no-op, result byte-identical — pinned), and `run_cell_analysis_func` / `run_puncta_analysis_func`
+> route their compute through `run_with_progress` (the modal off-thread runner) so the countable per-cell
+> loop drives a determinate bar. `test_progress_analysis_half.py` ratchets both the callback and the
+> routing; `test_analysis_progress_callback.py` is the functional proof. Honest limit unchanged: the wait
+> is VISIBLE and the window responsive, not shorter — the modal-bar advance needs an in-app glance.
+
 **Date:** 2026-07-18 · **Target tree:** 1.6.121 · Verified against the 1.6.121 tree. The
 materialization half of the progress work shipped (1.6.81/82, all 14 sites, ratcheted). This is the
 **different problem** the roadmap parked: widgets whose slow work is *the analysis itself*, which

@@ -1,3 +1,29 @@
+## [1.6.171] - 2026-07-20
+### Added — **Progress part 2, Part C: determinate bars over the core cell/condensate per-object loops.**
+The analysis half of the progress work (1.6.132) covered the two zero-bar widgets and was upgraded to the
+off-thread modal runner in 1.6.140. Part C is the piece left: the **core cell and condensate analyzers**,
+whose per-cell loops make progress genuinely measurable, ran with **nothing on screen** during a
+multi-second analysis.
+- `cell_analysis_func` (per-cell contour/morphology loop) and `puncta_analysis_func` (per-cell puncta
+  loop) gain `progress_callback(done, total)` — the `materialize_stack` signature, so `PhasedProgress` /
+  the modal runner drive it; **`None` is a complete no-op**, so headless and batch callers are byte-
+  identical (pinned in a test that compares the result with and without a callback). Batched to ~100
+  updates so a repaint-per-cell can't dominate the runtime it reports.
+- `run_cell_analysis_func` / `run_puncta_analysis_func` now run their compute through
+  `run_with_progress` — the **modal, off-thread** runner (the 1.6.140 pattern) — so the countable loop
+  shows a **determinate** bar and the window stays responsive; the napari layers are added back on the
+  main thread. Headless (no QApplication) it runs synchronously with a no-op progress, so batch/tests are
+  unchanged.
+- `puncta_analysis_func`'s per-cell stat-writing block was extracted to `_store_cell_puncta_stats`
+  (behaviour-preserving — the no-op-identity test covers it) to keep the loop within the review-length
+  budget rather than raise the ceiling.
+- Ratchet: `tests/test_progress_analysis_half.py` now lists the two tool functions (must accept
+  `progress_callback`) and the two runners (must route through `run_with_progress`); a regression to a
+  zero-feedback on-thread call fails. Functional proof in `tests/test_analysis_progress_callback.py`.
+- **Honest limit** (same as part 1): this makes the wait VISIBLE and the window responsive, not the
+  analysis shorter. **Needs an in-app glance** (viewer-coupled): confirm the modal bar advances during a
+  real cell / condensate analysis and the result lands correctly.
+
 ## [1.6.170] - 2026-07-20
 ### Added — **Cohort selection: the histogram-bin and aggregate-row emitters — the two deferred targets.**
 The `Cohort` selection target and `select_cohort` shipped in 1.6.151, with the comparative box/violin group

@@ -355,7 +355,7 @@ def calculate_image_features(image, data_instance, roi_mask=None):
 
 # Cell and puncta analysis functions
 
-def cell_analysis_func(image, cell_masks, omission_mask, data_instance):
+def cell_analysis_func(image, cell_masks, omission_mask, data_instance, progress_callback=None):
     """
     Analyzes segmented cells in a greyscale image by calculating various intensity and shape statistics
     for each cell. It leverages a binary mask to identify cell regions and performs statistical analysis
@@ -407,21 +407,30 @@ def cell_analysis_func(image, cell_masks, omission_mask, data_instance):
         omission_contour_mask = opencv_contour_func(binary_omission_mask).astype(bool)
 
     labeled_cells = np.zeros_like(cell_masks)
-    for label in unique_labels:
+    # A determinate bar over the per-cell contour/morph loop — the countable work the roadmap named.
+    # `progress_callback(done, total)` matches `materialize_stack`'s signature so `PhasedProgress` /
+    # the modal runner compose; None is a complete no-op (headless/batch unchanged). Batched to ~100
+    # updates so a repaint-per-cell can't dominate the runtime it reports.
+    _total = len(unique_labels)
+    _stride = max(1, _total // 100)
+    for _i, label in enumerate(unique_labels):
         # Convert the cell mask to binary for processing
         binary_cell_masks = (cell_masks == label).astype(bool)
 
-        # Apply contour detection to the binary cell mask 
+        # Apply contour detection to the binary cell mask
         cell_contour_mask = opencv_contour_func(binary_cell_masks, min_area)
-        
+
         # Apply morphological operations to refine cell contours
         cell_contour_mask = binary_morph_operation(cell_contour_mask, iterations=7, element_size=2, element_shape='Diamond', mode='Opening')
 
         # Apply the omission mask to the cell contour mask if provided
         if omission_mask is not None:
             cell_contour_mask = cell_contour_mask & ~omission_contour_mask
-        
+
         labeled_cells[cell_contour_mask] = label
+
+        if progress_callback is not None and (_i % _stride == 0 or _i + 1 == _total):
+            progress_callback(_i + 1, _total)
 
     # Calculate estimates of the background noise
     img_bg_noise = np.std(image[labeled_cells == 0]) # std dev of the 'backgroud' as an estimate
@@ -576,8 +585,16 @@ def run_cell_analysis_func(mask_layer, omit_mask_layer, image_layer, data_instan
     if omission_mask is not None and omission_mask.shape != cell_masks.shape:
         omission_mask = None  # silently drop mismatched omission mask
     
-    # Perform cell analysis and retrieve the labeled cell masks and cell statistics
-    labeled_cell_masks, cell_df = cell_analysis_func(_image_for_analysis, cell_masks, omission_mask, data_instance)
+    # Perform cell analysis on a WORKER thread behind a determinate modal bar (driven by the tool's
+    # per-cell `progress_callback`), then add the layer back HERE on the main thread — the compute is
+    # pure and must not touch napari off-thread. Headless (no QApplication) `run_with_progress` runs it
+    # synchronously with a no-op progress, so batch/tests are byte-identical.
+    from pycat.utils.qt_worker import run_with_progress
+    _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
+    labeled_cell_masks, cell_df = run_with_progress(
+        lambda progress: cell_analysis_func(_image_for_analysis, cell_masks, omission_mask,
+                                            data_instance, progress_callback=progress),
+        title='Cell Analysis', text='Analysing cells…', parent=_parent)
 
     # Add the labeled cell masks to the viewer for visualization
     _labeled_layer = viewer.add_labels(labeled_cell_masks, name='Labeled Cell Mask')
@@ -633,7 +650,50 @@ def _finalise_puncta_table(puncta_prop_list, data_instance):
     return puncta_df
 
 
-def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance):
+def _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
+                             cell_xor_puncta_mask, cell_mask_holder):
+    """Compute one cell's puncta and dilute-phase ('nucleoplasm') statistics and write them onto that
+    cell's ``cell_df`` row, storing the frame back. Each value is coerced NaN → 0 (an absent measurement
+    is 0, not a hole a later population mean would trip on). Behaviour-preserving — lifted verbatim out of
+    ``puncta_analysis_func``'s per-cell loop so the loop stays within the review-length budget."""
+    mpp = data_instance.data_repository['microns_per_pixel_sq']
+
+    puncta_total_int = (df['intensity_mean'] * df['area']).sum()
+    num_puncta = np.max(labeled_puncta)
+    puncta_int_dist_mean = df['intensity_mean'].mean()
+
+    # Dilute phase (cell minus puncta)
+    cell_xor_puncta_int_mean = np.mean(image[cell_xor_puncta_mask])
+    cell_xor_puncta_int_std = np.std(image[cell_xor_puncta_mask])
+    cell_xor_puncta_int_total = cell_xor_puncta_int_mean * np.sum(cell_xor_puncta_mask)
+
+    stats = {
+        'puncta_micron_area_mean': df['area'].mean() * mpp,
+        'puncta_micron_area_std': df['area'].std() * mpp,
+        'puncta_ellipticity_mean': df['ellipticity'].mean(),
+        'puncta_intensity_total': puncta_total_int,
+        'puncta_intensity_dist_mean': puncta_int_dist_mean,
+        'number_of_puncta': num_puncta,
+        'cell_xor_puncta_int_mean': cell_xor_puncta_int_mean,
+        'cell_xor_puncta_int_std': cell_xor_puncta_int_std,
+        'cell_xor_puncta_int_total': cell_xor_puncta_int_total,
+        'cell_xor_puncta_area': np.sum(cell_xor_puncta_mask) * mpp,
+        'snr_test': puncta_int_dist_mean / cell_xor_puncta_int_std,        # mean puncta int / dilute std
+        'partition_test': puncta_int_dist_mean / cell_xor_puncta_int_mean,  # from mean intensities
+        'partition_test_total_int': puncta_total_int / cell_xor_puncta_int_total,  # from total intensities
+        'spark_score': puncta_total_int / np.sum(image[cell_mask_holder]),
+        'puncta_classifier': 1 if num_puncta > 0 else 0,
+    }
+
+    cell_df = data_instance.get_data('cell_df')
+    row = cell_df['label'] == label
+    for col, val in stats.items():
+        cell_df.loc[row, col] = val if not np.isnan(val) else 0
+    data_instance.set_data('cell_df', cell_df)
+    return cell_df
+
+
+def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, progress_callback=None):
     """
     Analyzes sub-cellular objects within segmented cells, calculating properties of puncta such as area, intensity,
     and shape metrics. It associates puncta with their respective cells, computes various statistics
@@ -668,9 +728,16 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance):
     # Define the properties to measure for each object and create an empty list to store additional properties
     properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'eccentricity', 'perimeter', 'bbox')
     puncta_prop_list = []
-    
+
+    # A determinate bar over the per-cell puncta loop (the countable work). `progress_callback(done,
+    # total)` uses the shared signature so the modal runner / PhasedProgress drive it; None is a no-op,
+    # so headless and batch callers are unchanged. Batched to ~100 updates to keep repaints off the
+    # critical path.
+    _cell_labels = np.unique(labeled_cells)[1:]  # Skip the background label (0)
+    _total = len(_cell_labels)
+    _stride = max(1, _total // 100)
     # Iterate over each labeled cell to analyze puncta within
-    for label in np.unique(labeled_cells)[1:]:  # Skip the background label (0)
+    for _i, label in enumerate(_cell_labels):
         # Create a binary mask for the current cell
         cell_mask_holder = np.zeros_like(labeled_cells)
         cell_mask_holder[labeled_cells == label] = 1
@@ -699,49 +766,16 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance):
         df['micron area'] = df['area'] * data_instance.data_repository['microns_per_pixel_sq']
         df['cell label'] = label
 
-        # Compute and add cell-specific puncta statistics to the DataFrame
-        puncta_total_int = (df['intensity_mean'] * df['area']).sum()
-        num_puncta = np.max(labeled_puncta)
-        puncta_area_mean = df['area'].mean() * data_instance.data_repository['microns_per_pixel_sq']
-        puncta_area_std = df['area'].std() * data_instance.data_repository['microns_per_pixel_sq']
-        puncta_int_dist_mean = df['intensity_mean'].mean()
-        mean_ellipticity = df['ellipticity'].mean()
-
-        # Calculate 'nucleoplasm' (dilute phase) statistics excluding puncta
-        cell_xor_puncta_int_mean = np.mean(image[cell_xor_puncta_mask])
-        cell_xor_puncta_area = np.sum(cell_xor_puncta_mask) * data_instance.data_repository['microns_per_pixel_sq']
-        cell_xor_puncta_int_std = np.std(image[cell_xor_puncta_mask])
-        cell_xor_puncta_int_total = cell_xor_puncta_int_mean * np.sum(cell_xor_puncta_mask)
-        snr_test = puncta_int_dist_mean / cell_xor_puncta_int_std # SNR calculated as mean puncta int/ std of dilute phase
-        partition_test = puncta_int_dist_mean / cell_xor_puncta_int_mean # Partition coefficient from mean intensities
-        partition_test_total_int = puncta_total_int / cell_xor_puncta_int_total # Standard partition coefficient from total intensities
-
-        # Calculate total cell intensity and compute the spark score
-        cell_total_int = np.sum(image[cell_mask_holder])
-        spark_score = puncta_total_int / cell_total_int
-
-        cell_df = data_instance.get_data('cell_df') # Retrieve the cell DataFrame from the data instance
-        # Update the cell DataFrame with puncta statistics for the current cell
-        cell_df.loc[cell_df['label'] == label, 'puncta_micron_area_mean'] = puncta_area_mean if not np.isnan(puncta_area_mean) else 0
-        cell_df.loc[cell_df['label'] == label, 'puncta_micron_area_std'] = puncta_area_std if not np.isnan(puncta_area_std) else 0
-        cell_df.loc[cell_df['label'] == label, 'puncta_ellipticity_mean'] = mean_ellipticity if not np.isnan(mean_ellipticity) else 0
-        cell_df.loc[cell_df['label'] == label, 'puncta_intensity_total'] = puncta_total_int if not np.isnan(puncta_total_int) else 0
-        cell_df.loc[cell_df['label'] == label, 'puncta_intensity_dist_mean'] = puncta_int_dist_mean if not np.isnan(puncta_int_dist_mean) else 0
-        cell_df.loc[cell_df['label'] == label, 'number_of_puncta'] = num_puncta if not np.isnan(num_puncta) else 0
-        cell_df.loc[cell_df['label'] == label, 'cell_xor_puncta_int_mean'] = cell_xor_puncta_int_mean if not np.isnan(cell_xor_puncta_int_mean) else 0
-        cell_df.loc[cell_df['label'] == label, 'cell_xor_puncta_int_std'] = cell_xor_puncta_int_std if not np.isnan(cell_xor_puncta_int_std) else 0
-        cell_df.loc[cell_df['label'] == label, 'cell_xor_puncta_int_total'] = cell_xor_puncta_int_total if not np.isnan(cell_xor_puncta_int_total) else 0
-        cell_df.loc[cell_df['label'] == label, 'cell_xor_puncta_area'] = cell_xor_puncta_area if not np.isnan(cell_xor_puncta_area) else 0
-        cell_df.loc[cell_df['label'] == label, 'snr_test'] = snr_test if not np.isnan(snr_test) else 0
-        cell_df.loc[cell_df['label'] == label, 'partition_test'] = partition_test if not np.isnan(partition_test) else 0
-        cell_df.loc[cell_df['label'] == label, 'partition_test_total_int'] = partition_test_total_int if not np.isnan(partition_test_total_int) else 0
-        cell_df.loc[cell_df['label'] == label, 'spark_score'] = spark_score if not np.isnan(spark_score) else 0
-        cell_df.loc[cell_df['label'] == label, 'puncta_classifier'] = 1 if num_puncta > 0 else 0
-        # Store the updated cell_df back into the data class
-        data_instance.set_data('cell_df', cell_df)
+        # Compute this cell's puncta + dilute-phase statistics and write them onto its cell_df row.
+        # Extracted to a helper so the per-cell loop stays within the review-length budget.
+        _store_cell_puncta_stats(data_instance, label, df, labeled_puncta, image,
+                                 cell_xor_puncta_mask, cell_mask_holder)
 
         # Append the puncta properties DataFrame to a list for later concatenation
         puncta_prop_list.append(df)
+
+        if progress_callback is not None and (_i % _stride == 0 or _i + 1 == _total):
+            progress_callback(_i + 1, _total)
 
     _finalise_puncta_table(puncta_prop_list, data_instance)
 
@@ -808,8 +842,15 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     if labeled_cells.shape != puncta_masks.shape:
         raise ValueError("Cell and puncta masks must have the same shape.")
 
-    # Perform puncta analysis
-    cell_labeled_puncta = puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance)
+    # Perform puncta analysis on a WORKER thread behind a determinate modal bar (driven by the tool's
+    # per-cell `progress_callback`); the viewer layers below are added on the main thread. Headless it
+    # runs synchronously with a no-op progress, so batch/tests are byte-identical.
+    from pycat.utils.qt_worker import run_with_progress
+    _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
+    cell_labeled_puncta = run_with_progress(
+        lambda progress: puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance,
+                                              progress_callback=progress),
+        title='Condensate Analysis', text='Analysing condensates…', parent=_parent)
 
     # Update the viewer with new layers showing the results of the puncta analysis
     #
