@@ -914,6 +914,187 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
     return out
 
 
+def _classify_fast_template_refs(df, strictness, variant):
+    """Reference statistics for fast-template classification, computed over the REAL beads only (so
+    ring/hot/noise detections do not skew them): the NCC realness floor, the singlet intensity, the
+    aggregate mass/amplitude gates (p99.3 mass just below the top cluster so a true aggregate stays
+    stable frame-to-frame; p50 amplitude so it must also be bright), and the dim/out-of-focus cutoffs
+    scaled by ``strictness``. Returned as a dict the per-bead pass reads."""
+    ncc = df['ncc'].to_numpy(dtype=float)
+    amp = df['amplitude'].to_numpy(dtype=float)
+    ii = df['integrated_intensity'].to_numpy(dtype=float)
+    snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
+           else np.full(len(df), np.nan))
+
+    # Real-vs-garbage: absolute NCC floor. The template is built FROM the real beads, so genuine beads
+    # match it well; rings/hot/noise do not. 0.55 (not 0.50) reduces frame-to-frame flicker of dim
+    # detections whose NCC hovers at the floor.
+    NCC_FLOOR = 0.55
+    is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
+
+    # Hot-pixel reject variant: a HARSHER acceptance test on suspect pixels, not a flat veto — a real
+    # bead drifting over a hot/dead pixel must still be accepted if it brings genuine template evidence.
+    if variant == 'hot_pixel_reject' and 'on_hot_pixel' in df.columns:
+        HOT_NCC_FLOOR = 0.75
+        on_hot = df['on_hot_pixel'].fillna(False).to_numpy(dtype=bool)
+        harsh_ok = ~on_hot | (np.isfinite(ncc) & (ncc >= HOT_NCC_FLOOR))
+        is_real = is_real & harsh_ok
+
+    rii = ii[is_real & np.isfinite(ii)]
+    ramp = amp[is_real & np.isfinite(amp)]
+    rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
+    if len(rii) >= 10:
+        singlet_int = float(np.median(rii[rii <= np.median(rii)]))
+        mass_hi = float(np.percentile(rii, 99.3))
+        amp_hi = float(np.percentile(ramp, 50))     # must also be bright
+    else:
+        singlet_int = float(np.median(rii)) if len(rii) else np.nan
+        mass_hi = np.inf; amp_hi = np.inf
+
+    # Dim / out-of-focus threshold: a low-amplitude percentile scaled by strictness (default 1.0 → 25th
+    # pct, tuned for viscous samples where most beads stay in focus). A low-SNR detection is dim-like too.
+    s = float(strictness) if strictness and strictness > 0 else 1.0
+    dim_pct = None
+    if len(ramp) >= 10:
+        dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
+        amp_dim = float(np.percentile(ramp, dim_pct))
+    else:
+        amp_dim = -np.inf
+    if len(rsnr) >= 10:
+        snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
+        snr_dim = float(np.percentile(rsnr, snr_pct))
+    else:
+        snr_dim = -np.inf
+
+    # High-NCC guard against out_of_plane flicker: a bright, well-matched bead near the moving dim line
+    # must never be demoted to yellow purely on a wobbling per-frame SNR percentile.
+    return dict(ncc=ncc, amp=amp, ii=ii, snr=snr, has_snr=('snr' in df),
+                is_real=is_real, singlet_int=singlet_int, mass_hi=mass_hi, amp_hi=amp_hi,
+                amp_dim=amp_dim, snr_dim=snr_dim, ncc_floor=NCC_FLOOR,
+                ncc_singlet_guard=0.80, dim_pct=dim_pct)
+
+
+def _classify_fast_template(df, strictness, variant):
+    """Fast-mode (template-scorer) classification into four tiers, for large Airy-disk beads where a real
+    single bead is BRIGHT and high-mass:
+
+      rejected  : poor template match (NCC below the floor) — Airy-ring fragments, hot pixels, noise;
+                  DROPPED entirely (never become points).
+      aggregate : BRIGHT and COMPACT and HIGH-MASS (top mass tail AND high amplitude) — requiring BOTH
+                  is what separates a true aggregate from an out-of-focus blob (high-mass but dim).
+      ambiguous : high-mass but dim/diffuse (out of focus) — too uncertain to call; flagged honestly.
+      singlet   : every other well-matched real bead (the large majority).
+    """
+    R = _classify_fast_template_refs(df, strictness, variant)
+    ii, amp, snr, ncc = R['ii'], R['amp'], R['snr'], R['ncc']
+    is_real, singlet_int, has_snr = R['is_real'], R['singlet_int'], R['has_snr']
+    mass_hi, amp_hi, amp_dim, snr_dim = R['mass_hi'], R['amp_hi'], R['amp_dim'], R['snr_dim']
+    NCC_SINGLET_GUARD = R['ncc_singlet_guard']
+
+    n_units, classes = [], []
+    for k in range(len(df)):
+        if not is_real[k]:
+            n_units.append(np.nan); classes.append('rejected'); continue
+        I, A = ii[k], amp[k]
+        S = snr[k] if has_snr else np.nan
+        C = ncc[k]
+        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
+        n_units.append(nu)
+        high_mass = np.isfinite(I) and I >= mass_hi
+        bright = np.isfinite(A) and A >= amp_hi
+        # Require the AMPLITUDE to actually be low — a low per-frame SNR alone must NOT demote a bead
+        # whose amplitude is fine (that was the flicker source); SNR is only a secondary confirmation.
+        amp_low = np.isfinite(A) and A <= amp_dim
+        snr_low = np.isfinite(S) and S <= snr_dim
+        is_dim = amp_low or (snr_low and amp_low)
+        well_matched = np.isfinite(C) and C >= NCC_SINGLET_GUARD   # immune to the dim gate (anti-flicker)
+        if high_mass and bright:
+            classes.append('aggregate')
+        elif is_dim and not high_mass and not well_matched:
+            classes.append('out_of_plane')
+        elif high_mass and not bright:
+            classes.append('ambiguous')
+        else:
+            classes.append('singlet')
+    df['n_units_est'] = n_units
+    df['bead_class'] = classes
+    # DROP rejected detections entirely — a marked point should be a real bead.
+    df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
+    df['singlet'] = df['bead_class'] == 'singlet'
+    # Record the thresholds actually used, so results are reproducible and the regime is auditable.
+    df.attrs['classify_thresholds'] = {
+        'mode': 'fast_template',
+        'ncc_floor': float(R['ncc_floor']),
+        'ncc_singlet_guard': float(NCC_SINGLET_GUARD),
+        'aggregate_mass_percentile': 99.3,
+        'aggregate_amp_percentile': 50.0,
+        'aggregate_mass_hi': float(mass_hi),
+        'aggregate_amp_hi': float(amp_hi),
+        'dim_amp_percentile': float(R['dim_pct']) if R['dim_pct'] is not None else None,
+        'strictness': float(strictness),
+    }
+    return df
+
+
+def _classify_gaussian_fit(df, sigma_outlier_factor, aggregate_intensity_factor):
+    """Gaussian-fit-mode classification (fast_fit / precise / legacy), reached when a Gaussian fit
+    produced ``sigma_mean`` + ``r_squared``. Focus is judged by the fitted SIGMA, which is
+    SNR-independent — NOT by R² (R² measures how well the model explains the VARIANCE, so at low SNR it
+    collapses even for a perfectly in-focus bead: a true sigma-1.0 bead scores R² 0.24 at SNR 3 and 0.99
+    at SNR 53, so an R² gate flagged DIM in-focus beads as out-of-plane. ``defocus_r2_max`` is retained
+    in the caller's signature for back-compat and is no longer used)."""
+    # Restrict the singlet reference stats to beads with finite fit metrics (else NaN/failed fits
+    # pollute the reference medians).
+    valid = (
+        np.isfinite(df['integrated_intensity']) &
+        np.isfinite(df['sigma_mean']) &
+        np.isfinite(df['r_squared'])
+    )
+
+    # Robust singlet reference = lower-half median (biases the reference toward singlets; aggregates are
+    # the bright minority).
+    ref = df.loc[valid, 'integrated_intensity']
+    if len(ref) >= 4:
+        singlet_int = float(np.median(ref[ref <= ref.median()]))
+    elif len(ref) > 0:
+        singlet_int = float(ref.median())
+    else:
+        singlet_int = np.nan
+    sig = df.loc[valid, 'sigma_mean']
+    singlet_sigma = float(np.median(sig[sig <= sig.median()])) if len(sig) >= 4 else \
+        (float(sig.median()) if len(sig) > 0 else np.nan)
+
+    amp = df.loc[valid, 'amplitude']
+    singlet_amp = float(np.median(amp[amp <= amp.median()])) if len(amp) >= 4 else \
+        (float(amp.median()) if len(amp) > 0 else np.nan)
+
+    n_units, classes = [], []
+    for _, r in df.iterrows():
+        I = r['integrated_intensity']; s = r['sigma_mean']
+        r2 = r['r_squared']; A = r['amplitude']
+        if not np.isfinite(I) or not np.isfinite(r2):
+            n_units.append(np.nan); classes.append('unfit'); continue
+        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
+        n_units.append(nu)
+        oversized = (np.isfinite(s) and np.isfinite(singlet_sigma)
+                     and s > sigma_outlier_factor * singlet_sigma)
+        brighter = np.isfinite(nu) and nu >= aggregate_intensity_factor
+        # Defocus signature: enlarged spot whose PEAK amplitude is depressed relative to a singlet
+        # (photons spread over a wider area), i.e. NOT a true aggregate. Sigma (not R²) is the focus test.
+        dim_peak = (np.isfinite(A) and np.isfinite(singlet_amp)
+                    and singlet_amp > 0 and A < 0.7 * singlet_amp)
+        if brighter and not dim_peak:
+            classes.append('aggregate')
+        elif oversized and dim_peak:
+            classes.append('out_of_plane')
+        else:
+            classes.append('singlet')
+    df['n_units_est'] = n_units
+    df['bead_class'] = classes
+    df['singlet'] = df['bead_class'] == 'singlet'
+    return df
+
+
 def classify_beads(beads_df: pd.DataFrame,
                    aggregate_intensity_factor: float = 1.6,
                    defocus_r2_max: float = 0.85,
@@ -976,250 +1157,12 @@ def classify_beads(beads_df: pd.DataFrame,
             df[c] = [] if c != 'singlet' else []
         return df
 
-    # Fast-mode classification: when the fast template scorer was used, we have
-    # ncc / snr / symmetry / integrated_intensity but no Gaussian r_squared.
-    # Classify from those instead: a singlet matches the template well (high
-    # ncc), is symmetric, and has near-singlet integrated intensity; an
-    # aggregate is much brighter; a poor template match (low ncc/symmetry) that
-    # isn't brighter is treated as out-of-plane/unfit.
+    # Fast-template mode: the template scorer produced ncc/snr/symmetry but no Gaussian r_squared.
     if 'r_squared' not in df.columns and 'ncc' in df.columns:
-        # Fast-mode classification, calibrated for large (non-diffraction-limited)
-        # Airy-disk beads where a real single bead is BRIGHT and high-mass.
-        #
-        # Four tiers:
-        #   rejected     : poor template match (ncc below a floor) — these are
-        #                  Airy-ring fragments, hot pixels, and noise. DROPPED
-        #                  entirely (never become points), not just labelled.
-        #   aggregate    : a real bead that is BRIGHT and COMPACT and HIGH-MASS
-        #                  (top mass tail AND high amplitude). Requiring BOTH is
-        #                  what separates a true aggregate from an out-of-focus
-        #                  blob (which is high-mass but DIM/diffuse).
-        #   ambiguous    : high-mass but dim/diffuse (out of focus) — too
-        #                  uncertain to call singlet or aggregate; flagged so the
-        #                  software is honest about not knowing.
-        #   singlet      : every other well-matched real bead (the large majority).
-        ncc = df['ncc'].to_numpy(dtype=float)
-        amp = df['amplitude'].to_numpy(dtype=float)
-        ii = df['integrated_intensity'].to_numpy(dtype=float)
-        snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
-               else np.full(len(df), np.nan))
+        return _classify_fast_template(df, strictness, variant)
 
-        # Real-vs-garbage: absolute NCC floor. The template is built FROM the
-        # real beads, so genuine beads match it well; rings/hot/noise do not.
-        # 0.55 (rather than 0.50) reduces frame-to-frame flicker: dim detections
-        # whose NCC hovers right at the floor were dropping in and out between
-        # frames as their score wobbled; a slightly firmer floor keeps that
-        # borderline-noise population consistently rejected.
-        NCC_FLOOR = 0.55
-        is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
-
-        # Hot-pixel reject variant: on a FIXED sensor hot pixel, apply a HARSHER
-        # acceptance test instead of a flat veto — a real bead can drift over a
-        # hot/dead pixel and must still be accepted if it brings genuine template
-        # evidence. A bare hot pixel is a flat/spiky single pixel that matches the
-        # bead PSF template poorly (low NCC), so a raised NCC floor on suspect
-        # pixels drops the naked hot pixel while a bead passing over (high NCC)
-        # survives. Baseline is untouched (no 'on_hot_pixel' column there).
-        if variant == 'hot_pixel_reject' and 'on_hot_pixel' in df.columns:
-            HOT_NCC_FLOOR = 0.75   # stricter than the 0.55 baseline floor
-            on_hot = df['on_hot_pixel'].fillna(False).to_numpy(dtype=bool)
-            # A detection on a hot pixel must clear the higher floor to be real.
-            harsh_ok = ~on_hot | (np.isfinite(ncc) & (ncc >= HOT_NCC_FLOOR))
-            is_real = is_real & harsh_ok
-
-        # References computed over REAL beads only (so garbage doesn't skew them).
-        rii = ii[is_real & np.isfinite(ii)]
-        ramp = amp[is_real & np.isfinite(amp)]
-        rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
-        if len(rii) >= 10:
-            singlet_int = float(np.median(rii[rii <= np.median(rii)]))
-            # Aggregate mass gate at p99.3 (not p99.5): p99.5 landed INSIDE the
-            # top mass cluster, so a genuine aggregate whose mass fluctuates a
-            # few percent frame-to-frame kept crossing it and flickered
-            # red/green. p99.3 sits just BELOW that cluster, so the handful of
-            # true aggregates stay solidly above it every frame (stable class).
-            mass_hi = float(np.percentile(rii, 99.3))
-            amp_hi = float(np.percentile(ramp, 50))     # must also be bright
-        else:
-            singlet_int = float(np.median(rii)) if len(rii) else np.nan
-            mass_hi = np.inf; amp_hi = np.inf
-
-        # Dim / out-of-focus (YELLOW) threshold. Dim detections — low amplitude
-        # relative to the population — are most likely beads drifting out of the
-        # focal plane; they belong in the out_of_plane (yellow) bin, not called
-        # singlets. The cutoff is a low-amplitude percentile scaled by
-        # `strictness`: strictness=1.0 (default, tuned for viscous samples
-        # ~3 Pa·s and above, where beads move slowly) uses the 25th percentile;
-        # higher strictness pushes more borderline-dim detections to yellow,
-        # lower strictness (opt-in for less viscous / faster samples) keeps more
-        # as singlets. In a viscous sample most beads stay in focus, so the dim
-        # tail is genuinely out-of-plane; in a fast/low-viscosity sample beads
-        # cross the plane quickly and a stricter dim gate would wrongly bin real
-        # beads, hence the exposed control.
-        s = float(strictness) if strictness and strictness > 0 else 1.0
-        if len(ramp) >= 10:
-            dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
-            amp_dim = float(np.percentile(ramp, dim_pct))
-        else:
-            amp_dim = -np.inf
-        # A low-SNR detection is also out-of-focus-like (weak, diffuse peak).
-        if len(rsnr) >= 10:
-            snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
-            snr_dim = float(np.percentile(rsnr, snr_pct))
-        else:
-            snr_dim = -np.inf
-
-        # High-NCC guard against out_of_plane flicker. The out_of_plane (yellow)
-        # class is meant for genuinely dim / defocused beads — but a per-frame
-        # amplitude/SNR percentile will always bin ~the lowest quarter as dim,
-        # and when the whole population is uniformly low-quality a BRIGHT,
-        # well-matched bead sitting near that moving line flips singlet<->yellow
-        # frame-to-frame (verified: a bead at amp~163, ncc~0.95 read out_of_plane
-        # ~24% of frames purely from the SNR percentile wobbling). NCC is the
-        # template match built FROM the real beads, so a high NCC is strong
-        # evidence of a real in-focus bead regardless of a noisy per-frame SNR.
-        # A bead with NCC at/above this guard is never demoted to out_of_plane.
-        NCC_SINGLET_GUARD = 0.80
-
-        n_units, classes = [], []
-        for k in range(len(df)):
-            if not is_real[k]:
-                n_units.append(np.nan); classes.append('rejected'); continue
-            I, A = ii[k], amp[k]
-            S = snr[k] if 'snr' in df else np.nan
-            C = ncc[k]
-            nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
-            n_units.append(nu)
-            high_mass = np.isfinite(I) and I >= mass_hi
-            bright = np.isfinite(A) and A >= amp_hi
-            # Dim / out-of-focus. Require the AMPLITUDE to actually be low — a
-            # low per-frame SNR alone must NOT demote a bead whose amplitude is
-            # fine (that was the flicker source). SNR is now only a secondary
-            # confirmation: it can push a bead that is ALREADY amplitude-dim into
-            # the yellow bin, but it can't drag a bright bead there on its own.
-            amp_low = np.isfinite(A) and A <= amp_dim
-            snr_low = np.isfinite(S) and S <= snr_dim
-            is_dim = amp_low or (snr_low and amp_low)
-            # High-NCC well-matched beads are immune to the dim gate (anti-flicker).
-            well_matched = np.isfinite(C) and C >= NCC_SINGLET_GUARD
-            if high_mass and bright:
-                classes.append('aggregate')          # bright + compact + heavy
-            elif is_dim and not high_mass and not well_matched:
-                classes.append('out_of_plane')        # YELLOW: dim / out of focus
-            elif high_mass and not bright:
-                classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
-            else:
-                classes.append('singlet')             # the large majority
-        df['n_units_est'] = n_units
-        df['bead_class'] = classes
-        # DROP rejected detections entirely — a marked point should be a real
-        # bead (rings/hot pixels/noise never become points).
-        df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
-        df['singlet'] = df['bead_class'] == 'singlet'
-        # Record the (otherwise hard-coded) classification thresholds actually
-        # used, so results are reproducible and the regime is auditable (#11).
-        df.attrs['classify_thresholds'] = {
-            'mode': 'fast_template',
-            'ncc_floor': float(NCC_FLOOR),
-            'ncc_singlet_guard': float(NCC_SINGLET_GUARD),
-            'aggregate_mass_percentile': 99.3,
-            'aggregate_amp_percentile': 50.0,
-            'aggregate_mass_hi': float(mass_hi),
-            'aggregate_amp_hi': float(amp_hi),
-            'dim_amp_percentile': float(locals().get('dim_pct')) if locals().get('dim_pct') is not None else None,
-            'strictness': float(strictness),
-        }
-        return df
-
-
-    # ── Gaussian-fit-mode classification (fast_fit / precise / legacy) ────────
-    # This branch is reached when a Gaussian fit produced sigma_mean + r_squared
-    # (the fast-template branch above returns before here). Restrict the singlet
-    # reference statistics to beads with finite fit metrics — without this mask
-    # the reference medians would be polluted by NaN/failed fits (and 'valid'
-    # was previously undefined here, crashing every Gaussian-fit call).
-    valid = (
-        np.isfinite(df['integrated_intensity']) &
-        np.isfinite(df['sigma_mean']) &
-        np.isfinite(df['r_squared'])
-    )
-
-    # Robust singlet reference = median of reasonably-fit beads. Use the lower
-    # half of the intensity distribution to bias the reference toward singlets
-    # (aggregates are the bright minority).
-    ref = df.loc[valid, 'integrated_intensity']
-    if len(ref) >= 4:
-        singlet_int = float(np.median(ref[ref <= ref.median()]))
-    elif len(ref) > 0:
-        singlet_int = float(ref.median())
-    else:
-        singlet_int = np.nan
-    sig = df.loc[valid, 'sigma_mean']
-    singlet_sigma = float(np.median(sig[sig <= sig.median()])) if len(sig) >= 4 else         (float(sig.median()) if len(sig) > 0 else np.nan)
-
-    # Reference peak amplitude of a singlet (lower-half median, like intensity)
-    amp = df.loc[valid, 'amplitude']
-    singlet_amp = float(np.median(amp[amp <= amp.median()])) if len(amp) >= 4 else \
-        (float(amp.median()) if len(amp) > 0 else np.nan)
-
-    n_units, classes = [], []
-    for _, r in df.iterrows():
-        I = r['integrated_intensity']; s = r['sigma_mean']
-        r2 = r['r_squared']; A = r['amplitude']
-        if not np.isfinite(I) or not np.isfinite(r2):
-            n_units.append(np.nan); classes.append('unfit'); continue
-        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
-        n_units.append(nu)
-        oversized = (np.isfinite(s) and np.isfinite(singlet_sigma)
-                     and s > sigma_outlier_factor * singlet_sigma)
-        brighter = np.isfinite(nu) and nu >= aggregate_intensity_factor
-        # Defocus signature: enlarged spot whose PEAK amplitude is depressed
-        # relative to a singlet (photons spread over a wider area), i.e. NOT a
-        # true aggregate.
-        #
-        # ── The R² clause is REMOVED, because R² measures SNR, not focus ────────
-        #
-        # This used to be `oversized and (dim_peak or r2 < defocus_r2_max)`, with the
-        # comment "poor R² reinforces it". It does not. R² measures how well the model
-        # explains the VARIANCE, and at low SNR the noise dominates the variance — so R²
-        # collapses even when the shape is perfect.
-        #
-        # Measured on a bead that is PERFECTLY IN FOCUS (true sigma 1.0) at every
-        # brightness, with only the SNR changing:
-        #
-        #     amplitude  SNR   mean R²   flagged "defocused" (R² < 0.85)?
-        #        10       3     0.236    **YES**
-        #        20       7     0.532    **YES**
-        #        40      13     0.817    **YES**
-        #        80      27     0.947    no
-        #       160      53     0.986    no
-        #
-        # **A dim IN-FOCUS bead was called out_of_plane. The same bead, brighter, was
-        # not.** The classifier was sorting by brightness, not by focus — which is exactly
-        # the inverted-classifier behaviour observed on the real bead data, and a direct
-        # contributor to the ~15 % dropout of stable, in-focus beads that fragments the
-        # tracks and corrupts the viscosity.
-        #
-        # SIGMA is the SNR-independent measure of focus, because it is a property of the
-        # SHAPE rather than of how well the model explains the variance. Verified: a fitted
-        # sigma of 1.00 at every SNR from 3 to 53 for an in-focus bead, and 2.49–2.50 for a
-        # genuinely defocused one. The `oversized` test below is already sigma-based and
-        # correct; the R² clause only ADDED false positives, so it is gone.
-        #
-        # `defocus_r2_max` is retained in the signature for backward compatibility and is
-        # no longer used. It is not a focus measure and should not be reintroduced.
-        dim_peak = (np.isfinite(A) and np.isfinite(singlet_amp)
-                    and singlet_amp > 0 and A < 0.7 * singlet_amp)
-        if brighter and not dim_peak:
-            classes.append('aggregate')
-        elif oversized and dim_peak:
-            classes.append('out_of_plane')
-        else:
-            classes.append('singlet')
-    df['n_units_est'] = n_units
-    df['bead_class'] = classes
-    df['singlet'] = df['bead_class'] == 'singlet'
-    return df
+    # Gaussian-fit mode (fast_fit / precise / legacy): sigma_mean + r_squared are present.
+    return _classify_gaussian_fit(df, sigma_outlier_factor, aggregate_intensity_factor)
 
 
 def _bead_source_descriptor(bead_stack):

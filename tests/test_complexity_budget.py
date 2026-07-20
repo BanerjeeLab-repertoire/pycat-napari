@@ -82,7 +82,13 @@ _LONG_FUNCTION_LIMIT = 120
 # test (`test_partition_local_characterization`) capturing the exact per-droplet + aggregate outputs
 # across all five reporting branches BEFORE the split and asserting them unchanged after. No number
 # moved. Count 134 → 133.
-_MAX_LONG_FUNCTIONS = 133
+# 132. (2026-07-20) `classify_beads` (vpt_tools), the 306-line bead classifier, was split into its two
+# independent branches — `_classify_fast_template` (+ its `_classify_fast_template_refs` reference-stats
+# phase) and `_classify_gaussian_fit` — leaving `classify_beads` a 68-line empty-guard + dispatch. Pinned
+# byte-identical by `test_classify_beads_characterization` (the categorical `bead_class` labels, the
+# `n_units_est` estimates, the dropped-rejected row count, and the recorded thresholds, captured on both
+# branches BEFORE the split and asserted unchanged after). Count 133 → 132.
+_MAX_LONG_FUNCTIONS = 132
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

@@ -1,3 +1,18 @@
+## [1.6.173] - 2026-07-20
+### Changed — **classify_beads decomposed into its two classifier branches (306 → 68 lines), byte-identical.**
+The VPT bead classifier fused two independent classifiers — a fast-template branch (ncc/snr/amplitude,
+for large Airy-disk beads) and a Gaussian-fit branch (sigma/r²) — plus an empty guard into one 306-line
+body. At that length the two schemes' interleaved thresholds are unreviewable. Split into named helpers:
+- `_classify_fast_template` (+ its `_classify_fast_template_refs` reference-statistics phase — the NCC
+  realness floor, singlet intensity, aggregate mass/amplitude gates, and dim/out-of-focus cutoffs);
+- `_classify_gaussian_fit` (the sigma-based branch, R²-is-not-focus rationale preserved);
+- `classify_beads` is now a 68-line empty-guard + dispatch on which metrics are present.
+- **Behaviour-preserving, pinned as such.** `tests/test_classify_beads_characterization.py` captured the
+  exact per-bead `bead_class` labels (the categorical output flips on any threshold drift), the
+  `n_units_est` estimates, the dropped-rejected row count, and the recorded `classify_thresholds` on BOTH
+  branches before the split and asserts them unchanged after. No number moved. Complexity ratchet 133 →
+  132; truncation guard allowlisted with reason.
+
 ## [1.6.172] - 2026-07-20
 ### Changed — **partition_coefficient_local decomposed by phase (394 → 109 lines), proven byte-identical.**
 The local-annulus partition-coefficient measurement — a 394-line science function whose per-droplet loop,

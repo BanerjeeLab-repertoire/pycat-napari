@@ -94,6 +94,13 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         # hoisted this worker-setup to module level and made `dr` a parameter — same writes, same
         # behavior; only the scope changed, which is what exposed it to this static check.
         '_start_dynamic_worker',
+        # 1.6.173 — complexity-ratchet split of `classify_beads`. The `df` these two helpers write into is
+        # `classify_beads`'s OWN private copy (`df = beads_df.copy()` at the top of the dispatcher), not a
+        # caller's array — the copy is made before dispatch and each helper is called on it exactly once.
+        # Same writes, same behaviour as the pre-split single function; only the scope changed, which is
+        # what exposed it to this static check. (The public entry point still copies, so callers are safe.)
+        '_classify_fast_template',
+        '_classify_gaussian_fit',
     }
 
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"

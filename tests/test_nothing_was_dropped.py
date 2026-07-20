@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
+    # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
+    # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was
+    # removed: both classifiers and their rationale MOVED into the named helpers, and a byte-identity
+    # characterization test (`test_classify_beads_characterization`) pins both branches' exact labels,
+    # estimates, row counts and thresholds unchanged across the split.
+    'vpt_tools.py::classify_beads',
+
     # 1.6.172 — `partition_coefficient_local` (the 394-line local-annulus Kp measurement) was split BY
     # PHASE into pure helpers — `_pc_check_input` (intensity-provenance gate), `_pc_camera_floor`
     # (pedestal / dark-reference / extracellular), `_pc_estimate_gap` (interface-width annulus offset),
