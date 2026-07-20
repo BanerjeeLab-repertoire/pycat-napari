@@ -1,3 +1,31 @@
+## [1.6.166] - 2026-07-20
+### Added — **PyCAT Validation Suite: a standing per-release regression benchmark, with the first baseline recorded.**
+The test suite answers *"did anything break?"* per commit. At PyCAT's release cadence (often several
+versions a day) that misses the question that catches slow degradation: *"is segmentation quality on our
+canonical cases the same as it was ten releases ago?"* A change can keep every test green while moving Dice
+from 0.94 to 0.89, and nobody notices until a result looks wrong months later.
+
+- New **`benchmarks/`** (outside `tests/`, so it never runs on the per-change loop): `cases.py` — a fixed,
+  seeded canonical case set (puncta, condensate/partition, cells) with **constructed** ground truth (never
+  produced by a PyCAT run, so the suite cannot track a drifting method as "stable"); `run_suite.py` —
+  measures each case against ground truth via `benchmark_tools` (Dice/IoU, matched-detection F1,
+  object-count error, derived measurements like the partition coefficient, and runtime) and **appends** one
+  record per version to `results.jsonl` (append-only — it diffs cleanly and never rewrites history).
+- **`compare_to_baseline`** fails on a metric moving beyond a **declared, justified** tolerance in the
+  *worse* direction (Dice ±0.02 covers seeded-RNG variation; a >5% partition-coefficient move is real),
+  **reports — never fails on — an improvement** (an unexplained improvement often means the case or ground
+  truth changed), and treats runtime as **advisory** (machines vary). Tolerances are never tuned to make a
+  run pass — a metric beyond tolerance is a finding.
+- **The first baseline is recorded** in `benchmarks/results.jsonl` (v1.6.166): puncta Dice 0.953, partition
+  coefficient recovered at 5.0, cells Dice 1.0 — the deliverable that makes future cross-release comparison
+  possible. Run it with `python -m benchmarks.run_suite <version>` (documented in `benchmarks/README.md`);
+  a new `benchmark` pytest marker is registered.
+- New **`tests/test_validation_suite.py`** (`core`, machinery only — the metric gate itself runs
+  deliberately, not per-commit): the suite runs end-to-end and writes a well-formed record; a case is
+  deterministic under its seed; the comparator flags an injected regression, reports an improvement without
+  failing, and treats a higher count-error as a regression while runtime stays advisory; and the results
+  file is strictly append-only.
+
 ## [1.6.165] - 2026-07-20
 ### Added — **Measurement Reliability Index: every reported number carries a decomposable reliability score.**
 The roadmap's unifying construct, buildable now that all its inputs exist — imaging QC, biological

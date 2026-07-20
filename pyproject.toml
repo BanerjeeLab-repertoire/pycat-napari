@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.165"
+version = "1.6.166"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -292,6 +292,7 @@ qt_api = "pyqt5"
 markers = [
     "core: pure scientific kernels - no napari, no Qt, no GPU. Must pass headlessly.",
     "integration: requires napari/Qt/file-IO/GPU.",
+    "benchmark: standing per-release validation suite; run deliberately, not on every commit (see benchmarks/).",
 ]
 
 [tool.black]
