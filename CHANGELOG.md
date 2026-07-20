@@ -1,3 +1,27 @@
+## [1.6.179] - 2026-07-20
+### Added — **FilterStore: the active analytical population, provably separate from selection.**
+Two questions were tangled: *which entities am I examining?* (selection — transient attention) and *which
+entities are in the active analysed population?* (filter). `SelectionState` answered the first; nothing
+held the second as explicit state, so filtering happened inside individual analyses and a plot click could
+surprise a user by changing results. New **`utils/filter_store.py`**:
+- `Filter` (a NAMED restriction — `predicate` + `members` + `source` + `active`) and `FilterStore`
+  (`set_filter` / `clear` / `population` / `is_active`) on its OWN change channel, reading and writing no
+  selection state. `population()` is `None` when no filter is active — None means everything, never
+  confused with an empty population.
+- **The isolation invariant is the whole point, and it is enforced:** a filter change leaves
+  `SelectionState` untouched and a selection change leaves the filter untouched (pinned both directions),
+  plus a grep-level contract that no selection handler calls `set_filter` — a brush/click is attention,
+  not a population change.
+- `resolve_render_tier` — the four-tier emphasis resolver (excluded < filtered-in < selected < pinned)
+  adapters call; `filtered_result_note` — a filtered result records its predicate + counts so it is never
+  mistaken for an unfiltered one; `filter_table` — restrict to `population()`, never silently, input never
+  mutated.
+- Comparative-phenotyping "condition" is deliberately NOT merged into `FilterStore` here (noted for a
+  future deliberate unification).
+- Tests (`core`): `tests/test_filter_store.py` — population API, both isolation directions, the four tiers,
+  the honest filtered-result note, `filter_table`, and no-implicit-filtering. The thin UI integration
+  (per-adapter tier rendering + an explicit filter control) is the follow-on; the mechanism is delivered.
+
 ## [1.6.178] - 2026-07-20
 ### Added — **Feature Explorer: one legible card per measurement, aggregated from existing sources.**
 The measurement platform (ontology, reliability/MRI, stability, redundancy, provenance) computed a lot but
