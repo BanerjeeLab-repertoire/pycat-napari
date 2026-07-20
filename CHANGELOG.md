@@ -1,3 +1,24 @@
+## [1.6.178] - 2026-07-20
+### Added — **Feature Explorer: one legible card per measurement, aggregated from existing sources.**
+The measurement platform (ontology, reliability/MRI, stability, redundancy, provenance) computed a lot but
+had no single pane that made it legible. New **`utils/feature_explorer.py`** — `FeatureCard` +
+`build_feature_card(table, key, *, context)`:
+- pulls a measurement's definition / equation / units / caveats (ontology), reliability grade + worst-first
+  reasons (MRI), stability verdict, correlated-with columns (the redundancy report), provenance summary,
+  and a value distribution (mini-histogram);
+- **aggregates, never recomputes** — every field is read from `context` (whatever ran) and degrades to
+  `None` when its source is absent; only the distribution is derived, from the column itself. A card with
+  just a definition, or just a distribution, is a correct (honest) card;
+- mutates nothing.
+- Thin dock (`ui/feature_explorer_dock.py`): a searchable column list + the card panel + a mini-histogram
+  that reuses the 1.6.170 cohort emitter (`attach_histogram_brushing`), so a bin click selects those
+  objects. All content comes from `build_feature_card`; the dock is a shell.
+- Tests (`core`): `tests/test_feature_explorer.py` — a full card when all sources are present, a partial
+  card with no ontology entry, per-source degradation with nothing fabricated, a distribution that matches
+  an independent histogram, a correlated-with list that matches the redundancy report, the no-mutation
+  contract, and an AST guard that the dock wires the assembler + the cohort histogram. (Live rendering
+  needs an in-app glance.)
+
 ## [1.6.177] - 2026-07-20
 ### Added — **Feature redundancy analysis: find near-duplicate feature columns, report them, never drop them.**
 PyCAT emits wide feature tables where several columns track the same underlying quantity (`area`,
