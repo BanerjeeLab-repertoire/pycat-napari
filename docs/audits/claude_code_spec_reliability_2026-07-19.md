@@ -1,5 +1,7 @@
 # Claude Code spec — Typed failures where it matters + one operation runner
 
+> **✅ STATUS — DONE, shipped in 1.6.139 + 1.6.140** (stamped 2026-07-20 from a CHANGELOG cross-reference). Part 1 (typed errors + exception ratchet + calibration conversions) and Part 2 (shared operation runner) 1.6.139; 2-widget adoption 1.6.140.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. Addresses the two
 reliability findings the external audit flagged as unchanged across revisions: broad exception
 handling, and per-widget background execution. Both are scoped as **ratchets and one shared

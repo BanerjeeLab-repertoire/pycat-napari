@@ -1,5 +1,7 @@
 # Claude Code spec — Explicit operation context (retire the stack walk)
 
+> **✅ STATUS — DONE, shipped in 1.6.155** (stamped 2026-07-20 from a CHANGELOG cross-reference). `operation_context`/`active_operation` in `tag_registry.py`, hook resolution order, runner re-establish, `test_operation_context.py`.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Replaces the
 layer-tag hook's stack-inspection mechanism with an explicit context. The external audit classified
 `_op_from_stack` as *"clever… but more fragile than explicit execution context"* and *"transitional

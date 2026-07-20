@@ -1,5 +1,7 @@
 # Claude Code spec — QC: scan-acquisition aberrations (confocal & spinning disk)
 
+> **✅ STATUS — DONE, shipped in 1.6.157** (stamped 2026-07-20 from a CHANGELOG cross-reference). `scan_qc_tools.py` (shear/bidirectional/disk/crosstalk), `run_scan_qc`, biological-QC composition, tests.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Adds a QC
 category the module does not cover: artifacts produced by the **acquisition geometry itself** rather
 than by the optics or the sample. The motivating case is Gable's: on a laser-scanning confocal, a

@@ -1,5 +1,7 @@
 # Claude Code spec — OperationSpec increment 2: `inputs`, and the operation GRAPH
 
+> **✅ STATUS — DONE, shipped in 1.6.126** (stamped 2026-07-20 from a CHANGELOG cross-reference). `@tags_layer(inputs=)`, `OperationSpec.inputs`, the operation graph, `test_operation_graph.py`, 23-op tranche.
+
 **Date:** 2026-07-18 · **Target tree:** 1.6.121 · Verified against the 1.6.121 tree. Adds the first of
 the fields increment 1 deferred — **with the validation that makes it real**, per that increment's own
 rule. Turns the flat operation vocabulary into a graph, which every later increment needs. Additive;

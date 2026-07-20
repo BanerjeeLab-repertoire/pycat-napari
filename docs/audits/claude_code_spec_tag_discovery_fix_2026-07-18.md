@@ -1,5 +1,7 @@
 # Claude Code spec — Tag registry: fix the TEST discovery defect + propagate `target` to layers
 
+> **✅ STATUS — DONE, shipped in 1.6.124** (stamped 2026-07-20 from a CHANGELOG cross-reference). Killed the stale hardcoded test loader (ratchet to 79), `produces`-honoring in `layer_tag_hook`, e2e acceptance test.
+
 **Date:** 2026-07-18 · **Target tree:** 1.6.121 · Verified against the 1.6.121 tree. An external audit
 reported four failing tag/resolver tests and concluded the operation registry had *regressed* — that
 canonical operations were "missing," that duplicate registration was "not rejected," and that "only 42

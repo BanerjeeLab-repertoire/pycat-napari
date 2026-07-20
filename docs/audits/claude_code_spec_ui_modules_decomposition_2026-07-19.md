@@ -1,5 +1,7 @@
 # Claude Code spec — Decompose `ui_modules.py`: verification FIRST, then `MenuManager`
 
+> **✅ STATUS — DONE, shipped in 1.6.148 + 1.6.149** (stamped 2026-07-20 from a CHANGELOG cross-reference). Phase 1 verification net (`test_menu_contract.py`, 25 menus/111 actions) 1.6.148; Phase 2 `MenuManager` extraction 5572 → 3268 (1.6.149).
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Third and last
 concentration point, after `vpt_ui.py` (2458 → 1138, −54%) and `file_io.py`. **This one is different
 and must be approached differently** — the codebase's own ratchet file argues *against* naively

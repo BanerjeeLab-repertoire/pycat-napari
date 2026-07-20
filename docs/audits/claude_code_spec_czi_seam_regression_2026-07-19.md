@@ -1,5 +1,7 @@
 # Claude Code spec — Turn the CZI seam defect into a measurable regression test
 
+> **✅ STATUS — DONE, shipped in 1.6.153** (stamped 2026-07-20 from a CHANGELOG cross-reference). `file_io/czi_seam.py` + `test_czi_seam.py`; opt-in real-file assertion + diagnostics script. Spec is a measurement, delivered.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. The one prior-audit
 priority that has been carried across **three consecutive audits without being closed**. Both external
 reviews said the same thing: the CZI work is *"architecturally improved but not fully validated against

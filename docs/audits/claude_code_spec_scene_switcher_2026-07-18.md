@@ -1,5 +1,7 @@
 # Claude Code spec — Multi-scene switcher (load one position at a time, lazily)
 
+> **✅ STATUS — DONE, shipped in 1.6.130** (stamped 2026-07-20 from a CHANGELOG cross-reference). `_SceneStack`, `file_io/scenes.py`, `ui/scene_switcher.py`, per-scene calibration, tests.
+
 **Date:** 2026-07-18 · **Target tree:** 1.6.121 · Verified against the 1.6.121 tree. Follow-up to the
 context-aware opener, parked in `roadmap.rst` as needing "its own focused pass so it doesn't
 destabilise the loader." That pass is now safe: the file-I/O decomposition is complete and the CZI

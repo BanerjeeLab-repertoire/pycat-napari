@@ -1,5 +1,7 @@
 # Claude Code spec — Slim the distribution: stop shipping ~25 MB per release
 
+> **✅ STATUS — DONE, shipped in 1.6.145** (stamped 2026-07-20 from a CHANGELOG cross-reference). sdist 20.6 → 1.76 MB, wheel 2.7 → 1.83 MB; logo/`.DS_Store` cleanup; `test_distribution_size.py` ratchet.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. PyPI enforces a
 **total project size** quota, and PyCAT is consuming it at roughly 25 MB per release across ~130
 releases. The dominant cause is documentation assets shipped inside the source distribution. Touches

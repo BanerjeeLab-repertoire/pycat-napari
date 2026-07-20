@@ -1,5 +1,7 @@
 # Claude Code spec — Route equivalence: expand the matrix to the canonical workflows
 
+> **✅ STATUS — DONE, shipped in 1.6.159** (stamped 2026-07-20 from a CHANGELOG cross-reference). Matrix grown 3 → 6 workflows (cellpose, colocalization, time-series condensate) + `compare_metadata`; no divergence found.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. The
 cross-route equivalence matrix shipped at **three** workflows by design ("not the fifteen an audit
 proposed — three that genuinely run will grow"). Growing it is the highest-value reproducibility work

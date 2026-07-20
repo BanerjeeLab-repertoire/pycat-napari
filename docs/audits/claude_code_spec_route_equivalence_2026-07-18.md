@@ -1,5 +1,7 @@
 # Claude Code spec — Cross-route workflow equivalence matrix
 
+> **✅ STATUS — DONE, shipped in 1.6.125** (stamped 2026-07-20 from a CHANGELOG cross-reference). Cross-route equivalence matrix harness + first three workflows; no divergence found.
+
 **Date:** 2026-07-18 · **Target tree:** 1.6.121 · Verified against the 1.6.121 tree. The strongest
 recommendation from the external architecture audit: stop adding isolated tests and start asserting
 that the SAME workflow produces the SAME numbers through every route PyCAT offers. Test-only; no

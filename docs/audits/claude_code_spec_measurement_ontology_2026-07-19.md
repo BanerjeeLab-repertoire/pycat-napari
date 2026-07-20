@@ -1,5 +1,7 @@
 # Claude Code spec — Measurement ontology: definition, equation, units, reference
 
+> **✅ STATUS — DONE, shipped in 1.6.154** (stamped 2026-07-20 from a CHANGELOG cross-reference). `measurement_ontology.py` (12 entries), units-agreement test, comparative-figures consumer.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Builds the
 structured measurement registry the roadmap describes: *"Today these live in scattered docstrings. A
 structured ontology makes Methods-section and figure-legend generation nearly automatic — directly

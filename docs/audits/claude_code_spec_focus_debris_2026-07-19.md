@@ -1,5 +1,7 @@
 # Claude Code spec — Focus selection: close the last debris gap (mask threading)
 
+> **✅ STATUS — DONE, shipped in 1.6.142** (stamped 2026-07-20 from a CHANGELOG cross-reference). Optional `mask=` on `bf_analyse_focus_series` + `analyse_frame_quality`; `resolve_frame_mask`; `test_focus_debris.py`.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. **This item is
 much smaller than the roadmap implies** — most of the debris defense already shipped. This spec covers
 only the verified remainder. Touches `brightfield_tools.py` and `condensate_physics_tools.py`.

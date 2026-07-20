@@ -1,5 +1,7 @@
 # Claude Code spec — Decompose `vpt_ui.py`: make the new contracts ABSORB the old code
 
+> **✅ STATUS — DONE, shipped in 1.6.136–138** (stamped 2026-07-20 from a CHANGELOG cross-reference). `vpt_ui.py` 2458 → 1138 (−54%) across 1.6.136 (ratchets)/137/138; target ≥25% exceeded.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. This spec exists
 to answer the central charge of the external audit: *"New clean abstractions may become additional
 layers wrapped around the same large procedural centers rather than replacing responsibilities inside

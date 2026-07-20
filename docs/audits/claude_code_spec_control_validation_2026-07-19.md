@@ -1,5 +1,7 @@
 # Claude Code spec — Positive/negative control validation workflow
 
+> **✅ STATUS — DONE, shipped in 1.6.156** (stamped 2026-07-20 from a CHANGELOG cross-reference). `control_validation.py` (`validate_against_controls`, `recommend_parameters` refusal case), UI entry, tests.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Extends the
 existing benchmarking harness with the control-comparison workflow the roadmap describes. This is the
 "does my segmentation actually work on my data?" question, answered with the user's own controls

@@ -1,5 +1,7 @@
 # Claude Code spec — Lightweight catalog discovery + consume `OperationSpec` in the UI
 
+> **✅ STATUS — DONE, shipped in 1.6.143** (stamped 2026-07-20 from a CHANGELOG cross-reference). Import-free `iter_operation_specs(live=False)`, `resolve_operation`, run-button gating, tests.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. Addresses two
 linked audit findings: catalog availability is coupled to importing heavyweight science modules, and
 the `OperationSpec` fields that now exist are not yet consumed by the interfaces that should use them.

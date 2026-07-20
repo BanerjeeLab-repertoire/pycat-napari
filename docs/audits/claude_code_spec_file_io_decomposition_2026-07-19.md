@@ -1,5 +1,7 @@
 # Claude Code spec — Decompose `file_io.py`: the second concentration point
 
+> **✅ STATUS — DONE, shipped in 1.6.146 + 1.6.147** (stamped 2026-07-20 from a CHANGELOG cross-reference). `file_io.py` 2805 → 1670 (1.6.146) → 1633 (1.6.147, lazy wrapper + exception annotation); decomposition closed.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Second
 refactoring target after the `vpt_ui.py` decomposition succeeded (2458 → 1138, −54%, well past its 25%
 goal). Same method, same safety-net discipline. Behaviour-preserving; **no new features.**

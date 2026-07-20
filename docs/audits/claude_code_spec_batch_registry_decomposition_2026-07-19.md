@@ -1,5 +1,7 @@
 # Claude Code spec — Decompose `batch_step_registry.py`: the fourth concentration point
 
+> **✅ STATUS — DONE, shipped in 1.6.150** (stamped 2026-07-20 from a CHANGELOG cross-reference). `batch_step_registry.py` 1663 → 432 lines (−74%); `batch.steps` package + `test_batch_step_map.py` drift guard.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. The one tracked
 concentration point never addressed — and the only one that **grew** across the audit window
 (1613 → 1663). Behaviour-preserving; no new features. Lower risk than `ui_modules.py` because the

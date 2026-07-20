@@ -1,5 +1,7 @@
 # Claude Code spec — Comparative phenotyping increment 3: cross-condition figures
 
+> **✅ STATUS — DONE, shipped in 1.6.135 + 1.6.144** (stamped 2026-07-20 from a CHANGELOG cross-reference). Cross-condition figure library (Parts A–C) shipped 1.6.135; Part D brushing + Step-2 UI entry point 1.6.144; unit-marker cohort emit 1.6.151.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.133 · Verified against the 1.6.133 tree. The visible
 payoff of the comparative-phenotyping arc: figures that compare conditions, built on the consolidated
 long table. **PREREQUISITES (both met):** increment 1 (`sample_metadata.py`, wired into batch + session

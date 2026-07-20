@@ -1,5 +1,7 @@
 # Claude Code spec — Filter sensitivity increment 4: the puncta refinement gate cluster
 
+> **✅ STATUS — DONE, shipped in 1.6.158** (stamped 2026-07-20 from a CHANGELOG cross-reference). Local/global SNR validated, kurtosis inertness pinned, `test_filter_sensitivity_puncta_cluster.py`.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Continues the
 filter-defaults sensitivity programme (increments 1–3 shipped; the harness records its own next step:
 *"~35–110 other defaults remain… they are not equal, and the next increment is prioritisation"*).
