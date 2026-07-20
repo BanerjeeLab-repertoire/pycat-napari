@@ -335,12 +335,43 @@ def finalize_entity_table(table, operation_id, *, source_path=None, frame=None, 
     spec = entity_spec_for(operation_id)
     if spec is None or table is None:
         return table
-    if ENTITY_ID_COLUMN in getattr(table, 'columns', ()):
-        return table
-    return stamp_entity_ids(
+    already_stamped = ENTITY_ID_COLUMN in getattr(table, 'columns', ())
+    stamped = table if already_stamped else stamp_entity_ids(
         table, entity_type=spec.entity_type, source_path=source_path, operation_id=operation_id,
         labels_layer=labels_layer, frame=frame, label_column=spec.label_column,
         parent_column=spec.parent_column, frame_column=spec.frame_column)
+    # Identity and LOCATION are registered together from one record — the chokepoint that closes the
+    # "identity can carry stale location" divergence. Additive; never costs the caller their table.
+    if not already_stamped:
+        populate_registry(stamped, source_path=source_path, operation_id=operation_id)
+    return stamped
+
+
+def populate_registry(table, *, registry=None, source_path=None, operation_id=None):
+    """Populate the entity registry from a STAMPED table — one row → one `EntityRecord` binding the id to
+    its CURRENT location (bbox / layer id / frame / source), provenance, and dataset. Called at the same
+    finalization point that stamps identity, so the two are generated together and cannot drift. Rows
+    without an id are skipped; unstamped tables do nothing. Never raises — the registry is a convenience."""
+    from pycat.utils.entity_registry import EntityLocation, EntityRecord, default_registry
+    reg = registry if registry is not None else default_registry()
+    try:
+        if table is None or ENTITY_ID_COLUMN not in getattr(table, 'columns', ()):
+            return reg
+        dataset = dataset_id_for(source_path)
+        src = str(source_path) if source_path is not None else None
+        for _, row in table.iterrows():
+            eid = row.get(ENTITY_ID_COLUMN)
+            if not eid:
+                continue
+            ref = ObjectRef.from_row(row, source_path=source_path)
+            reg.register(EntityRecord(
+                entity_id=str(eid),
+                location=EntityLocation(bbox=ref.bbox, layer_id=row.get(LAYER_ID_COLUMN),
+                                        frame=ref.frame, source=src),
+                provenance=operation_id, dataset=dataset))
+    except Exception as exc:  # broad-ok: registry population is additive; it must never break the analysis result
+        debug_log('entity_ref: could not populate the entity registry', exc)
+    return reg
 
 
 def _register_default_entity_specs():

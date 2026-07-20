@@ -1,3 +1,23 @@
+## [1.6.197] - 2026-07-20
+### Added — **Entity registry populated at the identity chokepoint: id → current location, from one record.**
+The registry authority shipped in 1.6.189 but nothing populated it (it was dependency-gated on the
+auto-identity-stamping chokepoint, now landed in 1.6.196). This closes the "a row can carry correct identity
+with **stale** location" divergence *at the source*: identity and location are now registered together from
+one record at the same finalization point that stamps the id.
+
+- New shared **`default_registry()`** in `utils/entity_registry.py` — the process-wide authority a view
+  resolves location through, instead of caching bbox/layer/frame off whatever table it was handed.
+- New **`entity_ref.populate_registry(table)`** — one stamped row → one `EntityRecord` binding the id to its
+  current `EntityLocation` (bbox / layer id / frame / source), provenance, and dataset. It runs
+  automatically inside `finalize_entity_table`, so **every chokepoint-stamped table also registers its
+  rows** — identity and location co-generated (per-row frames included), never crossed. Additive and
+  guarded: it never costs the caller their table, and an unstamped table registers nothing.
+- New tests in **`tests/test_auto_identity_stamping.py`** (`core`): the chokepoint populates the registry
+  with matching id + location; per-row frames resolve to records with their own frame (no divergence); an
+  unstamped table registers nothing; and the shared default registry resolves a chokepoint-stamped row.
+- **Remaining** (noted in the spec): routing `SelectionService` navigation through `resolve(id)` so views
+  consult the registry as the location authority — a consumer-side change on the brushing/selection path.
+
 ## [1.6.196] - 2026-07-20
 ### Added — **Automatic entity-identity stamping via the result-finalization chokepoint.**
 Manual `stamp_entity_ids` reached only **3 of many** object-producing paths; every new analysis was one

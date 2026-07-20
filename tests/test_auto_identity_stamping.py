@@ -143,3 +143,54 @@ def test_the_runner_leaves_a_non_dataframe_and_undeclared_result_alone():
     with operation_context('an_undeclared_op'):
         runner.execute(lambda: _cell_table(), on_result=lambda r: got.update(df=r))
     assert ENTITY_ID_COLUMN not in got['df'].columns           # undeclared → not stamped
+
+
+# ── The registry is populated at the SAME chokepoint — one record → id + location ────────────────
+def test_finalize_populates_the_registry_with_id_and_location():
+    """The divergence closes at the source: stamping a table also registers each row's id → its CURRENT
+    location, from one record, so a view holding only the id can resolve where to show it."""
+    from pycat.utils.entity_registry import EntityRegistry
+    from pycat.utils.entity_ref import populate_registry
+
+    # A table carrying location columns (bbox, frame) — as a real object table does.
+    table = pd.DataFrame({'label': [1, 2], 'frame': [3, 5],
+                          'bbox': [(0, 0, 4, 4), (10, 10, 14, 14)], 'area': [16.0, 16.0]})
+    stamped = finalize_entity_table(table, 'measure_region_props')
+    reg = EntityRegistry()
+    populate_registry(stamped, registry=reg, operation_id='measure_region_props')
+
+    assert len(reg) == 2
+    eid0 = stamped[ENTITY_ID_COLUMN].iloc[0]
+    rec = reg.resolve(eid0)
+    assert rec is not None and rec.provenance == 'measure_region_props'
+    assert rec.location.bbox == (0, 0, 4, 4) and rec.location.frame == 3     # location co-generated with the id
+
+
+def test_identity_and_location_do_not_diverge_per_row():
+    """Per-row frames flow into the registry too: two same-track rows at different frames resolve to
+    records with their OWN frame — identity and location generated together, never crossed."""
+    from pycat.utils.entity_registry import EntityRegistry
+    from pycat.utils.entity_ref import populate_registry
+
+    tracks = pd.DataFrame({'track_id': [1, 1], 'frame': [0, 7], 'bbox': [(0, 0, 2, 2), (0, 0, 2, 2)]})
+    stamped = finalize_entity_table(tracks, 'vpt_tracks')
+    reg = EntityRegistry()
+    populate_registry(stamped, registry=reg)
+    r0 = reg.resolve(stamped[ENTITY_ID_COLUMN].iloc[0])
+    r1 = reg.resolve(stamped[ENTITY_ID_COLUMN].iloc[1])
+    assert r0.location.frame == 0 and r1.location.frame == 7
+
+
+def test_an_unstamped_table_registers_nothing():
+    from pycat.utils.entity_registry import EntityRegistry
+    from pycat.utils.entity_ref import populate_registry
+    reg = EntityRegistry()
+    populate_registry(pd.DataFrame({'area': [1.0, 2.0]}), registry=reg)   # no _pycat_entity_id
+    assert len(reg) == 0
+
+
+def test_the_default_registry_resolves_a_chokepoint_stamped_row():
+    from pycat.utils.entity_registry import default_registry
+    stamped = finalize_entity_table(_cell_table(), 'cell_analysis', frame=2)
+    eid = stamped[ENTITY_ID_COLUMN].iloc[0]
+    assert default_registry().resolve(eid) is not None       # the chokepoint populated the shared authority

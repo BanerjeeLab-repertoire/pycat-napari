@@ -81,3 +81,14 @@ class EntityRegistry:
 
     def __contains__(self, entity_id) -> bool:
         return str(entity_id) in self._records
+
+
+# The shared authority. Populated automatically at the identity-stamping chokepoint (see
+# ``entity_ref.populate_registry``), so a view holding only an id resolves its CURRENT location through
+# this one registry rather than caching bbox/layer/frame off whatever table it was handed.
+_DEFAULT_REGISTRY = EntityRegistry()
+
+
+def default_registry() -> EntityRegistry:
+    """The process-wide entity registry the finalization chokepoint populates and views resolve through."""
+    return _DEFAULT_REGISTRY

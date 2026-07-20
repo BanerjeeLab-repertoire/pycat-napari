@@ -1,10 +1,14 @@
-> **🟡 STATUS — the authority DONE, shipped in 1.6.189; the wiring REMAINS (dependency-gated).**
-> `utils/entity_registry.py` — `EntityRecord` (id + `EntityLocation` + provenance + dataset in ONE record)
-> and `EntityRegistry` (register / resolve / update_location / invalidate_dataset), with honest `None`
-> misses. `tests/test_entity_registry.py` incl. the divergence test. **Remaining:** populate the registry
-> at the identity-stamping finalization point (one record → id + registry entry) and route `SelectionService`
-> navigation through `resolve` — both depend on the auto-identity-stamping chokepoint mechanism (only §C1
-> shipped) and benefit from the dataset-UUID spec, so they sequence after those, per this spec's Cautions.
+> **🟡 STATUS — authority DONE (1.6.189); population at the chokepoint DONE (1.6.197); SelectionService
+> routing REMAINS.** `utils/entity_registry.py` — `EntityRecord` (id + `EntityLocation` + provenance +
+> dataset in ONE record), `EntityRegistry` (register / resolve / update_location / invalidate_dataset) with
+> honest `None` misses, and now a shared `default_registry()`. The **population wiring** landed once the
+> auto-identity-stamping chokepoint existed (1.6.196): `entity_ref.populate_registry` runs at
+> `finalize_entity_table`, so every chokepoint-stamped row registers its id → current location from ONE
+> record (identity + location co-generated, per-row frames included). `tests/test_auto_identity_stamping.py`
+> pins population; `tests/test_entity_registry.py` pins the authority + divergence test. **Remaining:** route
+> `SelectionService` navigation through `resolve(id)` so views consult the registry as the location
+> authority instead of reading columns off whatever table they hold — a consumer-side change on the
+> brushing/selection resolution path, left as the next increment.
 
 # Claude Code spec — Entity registry: separate identity from location resolution
 
