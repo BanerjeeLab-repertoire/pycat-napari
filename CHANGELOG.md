@@ -1,3 +1,20 @@
+## [1.6.186] - 2026-07-20
+### Added — **Analysis-aware kymographs — a line-scan over time paired with the measurements PyCAT computes.**
+A roadmap capability with no implementation. New **`toolbox/kymograph_tools.py`**:
+- `kymograph(stack, line, *, axis='time'|'depth', width_px, reduce, pixel_size_um, frame_interval_s)` — samples
+  intensity along a line in every frame and stacks the profiles into a (position × time/depth) image. The
+  stack is read with **`materialize_stack`, never `np.asarray`** — a lazy time-series `__array__` returns
+  frame 0 only, and a kymograph is the worst place to hit that landmine (guarded by a test). Axes are
+  labelled in µm / seconds only when calibrated, px / frame otherwise, and the `units` field says which;
+  the averaging-band width is recorded.
+- `colocalization_kymograph` — two channels' kymographs + the **per-time-slice Pearson** (the existing
+  coloc metric); `object_property_kymograph` — a tracked object's property vs time from the per-object
+  table.
+- Tests (`core`): `tests/test_kymograph.py` — band velocity recovered from the slope, the lazy-stack
+  guard, calibrated vs px/frame labels, per-slice Pearson matches an independent computation, a
+  shrinking-diameter trend, and wide-band noise reduction without a slope shift. FRAP / phase-boundary
+  variants and the draw-line UI are noted follow-ons.
+
 ## [1.6.185] - 2026-07-20
 ### Added — **Measurement ontology populated: Tier 2 geometry/intensity entries (transcribed, not invented).**
 The ontology's machinery was well-built but Tier 2 (common `regionprops`-derived geometry/intensity) was
