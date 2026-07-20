@@ -1,3 +1,25 @@
+## [1.6.198] - 2026-07-20
+### Added — **Resolution routes through the entity registry: views ask the one authority where an object is now.**
+Completes the entity-registry spec. The registry authority (1.6.189) was populated at the identity
+chokepoint (1.6.197); now the **consumer side** consults it. A view carries only the entity id and resolves
+its *current* location through the registry, instead of trusting the bbox/frame/layer baked into the ref at
+wiring time — which can go stale after a re-crop, a layer re-add, or a frame reindex. This closes the "a
+row can carry correct identity with **stale** location" divergence end to end.
+
+- New **`object_ref.location_from_registry(ref)`** — refreshes a ref's `EntityLocation` (bbox / frame /
+  layer id / source) from `default_registry()` when the entity is known there. Both **`resolve_in_viewer`**
+  (interactive navigation) and **`resolve_offline`** (batch crop) call it first, so an `update_location`
+  propagates to every subsequent resolution — no per-view stale cache to chase. Per field, a registry
+  `None` leaves the ref's own value in place; the registry may even supply a bbox the ref lacked.
+- **Honest fallbacks** (the "a wrong location is worse than an admitted missing one" contract): a ref with
+  no `entity_id`, or an entity the registry does not know (dataset closed / never registered), is returned
+  unchanged — the ref's last-known location is used, never an invented one.
+- New **`tests/test_selection_registry_routing.py`** (`core`): a stale ref is refreshed from the registry;
+  an `update_location` propagates to resolution; an unknown/no-id ref is untouched; a registry `None` field
+  leaves the ref's own value; and **`resolve_offline` crops the registry's current location, not the stale
+  bbox** baked into the ref (the divergence test at the consumer side). The existing brushing and
+  selection-service suites pass unchanged.
+
 ## [1.6.197] - 2026-07-20
 ### Added — **Entity registry populated at the identity chokepoint: id → current location, from one record.**
 The registry authority shipped in 1.6.189 but nothing populated it (it was dependency-gated on the

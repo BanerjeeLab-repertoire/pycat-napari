@@ -1,5 +1,10 @@
-> **🟡 STATUS — authority DONE (1.6.189); population at the chokepoint DONE (1.6.197); SelectionService
-> routing REMAINS.** `utils/entity_registry.py` — `EntityRecord` (id + `EntityLocation` + provenance +
+> **✅ STATUS — COMPLETE. Authority (1.6.189) + population at the chokepoint (1.6.197) + resolution routing
+> (1.6.198).** `object_ref.location_from_registry` refreshes a ref's location from the registry, and both
+> `resolve_in_viewer` (interactive) and `resolve_offline` (batch) call it first — so a view carrying only
+> the id follows the object's CURRENT location and an `update_location` propagates to every subsequent
+> navigation; unknown-id / no-id fall back to the ref's own last-known location (never invented).
+> `tests/test_selection_registry_routing.py` pins the divergence at the consumer side.
+> `utils/entity_registry.py` — `EntityRecord` (id + `EntityLocation` + provenance +
 > dataset in ONE record), `EntityRegistry` (register / resolve / update_location / invalidate_dataset) with
 > honest `None` misses, and now a shared `default_registry()`. The **population wiring** landed once the
 > auto-identity-stamping chokepoint existed (1.6.196): `entity_ref.populate_registry` runs at
