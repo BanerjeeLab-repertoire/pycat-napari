@@ -1,3 +1,31 @@
+## [1.6.153] - 2026-07-20
+### Added — **CZI seam regression test: turn the reported mosaic discontinuity into a measurable number.**
+The one prior-audit priority carried across three consecutive audits without closing — because *"a visual
+bug with no measurement is a bug that cannot be closed."* Both reviews said the CZI work was
+"architecturally improved but not validated against the reported defect" (a left-side column
+discontinuity from a mis-assembled mosaic tile). `test_czi_bioformats_reader.py` had no seam assertion, so
+CI could not notice the defect returning — or tell whether it was already gone. This is the measurement.
+**It measures the seam; it does not fix it.**
+
+- New **`file_io/czi_seam.py`** (pure numpy, `core`): `column_seam_score(frame, x)` — a boundary's step
+  as a z-score against its NEIGHBOURS (normalized, not an absolute threshold, since absolute pixel steps
+  vary with sample/exposure), and `persistent_seam_columns(frames)` — the columns anomalous on a MAJORITY
+  of frames. That many-frame test is the key insight: real image structure moves frame to frame, a tile
+  seam does not, so a boundary anomalous at a *fixed* column on *every* frame is a seam, not content.
+- New **`tests/test_czi_seam.py`** (`core`): a clean synthetic mosaic scores no seam (the metric doesn't
+  cry wolf); a deliberately offset mosaic scores high at *exactly* the injected boundary; the seam is
+  persistent across frames while structure is not; and the score is normalized (a 20× contrast frame
+  still scores no seam). Plus an **opt-in real-file assertion** — gated on `PYCAT_CZI_SEAM_FILE`, it reads
+  frames through PyCAT's real CZI path and asserts no persistent seam. (The large real file cannot live in
+  the repo; this is the only thing that confirms the *reported* defect is gone — run it with the file.)
+- New **`scripts/czi_diagnostics.py`** (run-once, not CI): the measurements the audits asked for — read
+  latency under forward/random/alternating access, cache hit-rate + planes cached, a staleness read-back
+  check, and per-boundary seam scores for a frame sample.
+
+Full `pytest -m core` green (1132). **Note:** the CI assertions prove the metric works and the synthetic
+defect is caught; **the reported defect can only be closed by running the opt-in test / the diagnostics
+script against the real file** — the number then either closes it or reopens it as a fix-spec with evidence.
+
 ## [1.6.152] - 2026-07-19
 ### Added — **Biological QC: an object-level QC layer — flag biological outliers, never filter them.**
 PyCAT's imaging QC answers *"can I trust this image?"* (saturation, focus, SNR, drift). Nothing answered
