@@ -1,3 +1,33 @@
+## [1.6.165] - 2026-07-20
+### Added — **Measurement Reliability Index: every reported number carries a decomposable reliability score.**
+The roadmap's unifying construct, buildable now that all its inputs exist — imaging QC, biological
+plausibility, parameter sensitivity, benchmark agreement, control separation, and calibration validity.
+**This is composition, not new science:** every factor comes from a module that already measures it;
+inventing a new heuristic here would be unvalidated and would undermine the score.
+
+- New **`utils/reliability.py`** (`core`, pure): a frozen `ReliabilityScore` (value 0..1, grade, per-factor
+  `contributions`, worst-first `reasons`, and an explicit `missing` list) and `reliability(measurement_key,
+  *, image_qc, object_flags, calibration, sensitivity, benchmark)` composing the available signals.
+- **Five honesty rules, enforced and tested.** (1) **An unmeasured factor is never treated as passing** —
+  it goes in `missing` and does not contribute (silently assuming "fine" would make every score
+  optimistic). (2) The score is **decomposable** — `value` is the product of the `contributions`. (3)
+  `reasons` are **worst-first** and concrete. (4) **Missing core evidence (QC or calibration) caps the
+  grade below `high`** — absence of evidence is not evidence of reliability. (5) A **refused calibration is
+  a hard override to `unreliable`** — a number computed under an invalid calibration is not a weak
+  measurement, it is not a measurement.
+- **Stated aggregation:** the product of factor scores (each 0..1), explainable in a Methods section — not
+  a tuned ML-ish blend. Adapters read each factor from its own module (`_score_qc` from `run_full_qc`,
+  `_score_object_flags` from `biological_qc`, `_score_calibration` from `check_calibration_validity`,
+  `_score_sensitivity` from `measurement_stability.stability_factor`, `_score_benchmark`). Scored for the
+  partition/concentration/ΔG family first; `format_with_reliability` extends the `Parameter` display
+  (`K_p = 4.2 (reliability: moderate)`).
+- Reliability is **reported, never a silent filter** — the user decides (the biological-QC contract).
+- New **`tests/test_reliability.py`** (`core`): a fully clean measurement scores `high`; **each factor
+  degraded individually lowers the score and names itself** (one case per factor); missing core factors cap
+  the grade and are listed (a supplied-but-all-`na` factor counts as missing, not passing); the value
+  decomposes as the product of contributions; reasons are worst-first; and a **refused calibration scores
+  `unreliable`, not merely low.**
+
 ## [1.6.164] - 2026-07-20
 ### Added — **Explicit 2D / 3D / time-series condensate modes: refuse the volume-fraction approximation, label everything.**
 `invitro_fluor_ui` already prints *"area fraction=… (2D projection, not a volume fraction)"* — but that
