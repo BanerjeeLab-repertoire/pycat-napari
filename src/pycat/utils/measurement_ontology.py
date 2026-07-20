@@ -187,6 +187,48 @@ MEASUREMENTS: dict[str, MeasurementDef] = {m.key: m for m in (
          caveats=('Un-merged blinks shrink this artificially — one molecule localized repeatedly reads as '
                   'many near-coincident points.',),
          emitted=False),
+    # ── Tier 2: common geometry / intensity (regionprops-derived) ──────────────────────────────────
+    _def(key='area', display_name='Area',
+         definition="The projected area of the object — its pixel count, scaled by the pixel size when "
+                    "calibrated (scikit-image regionprops `area`).",
+         equation='A = N_pixels × (pixel size)²',
+         units='µm²',
+         interpretation='Object size in the image plane.',
+         caveats=('µm² ONLY when a pixel size is set; px² otherwise — the value is calibration-dependent.',
+                  'A 2D projected area, not a volume.')),
+    _def(key='equivalent_diameter', display_name='Equivalent diameter',
+         definition="The diameter of a circle with the same area as the object (scikit-image "
+                    "`equivalent_diameter_area`).",
+         equation='d_eq = √(4A / π)',
+         units='µm',
+         interpretation='A single size scale for a roughly round object.',
+         caveats=('µm only when a pixel size is set; px otherwise.',)),
+    _def(key='eccentricity', display_name='Eccentricity',
+         definition="The eccentricity of the ellipse with the same second moments as the object "
+                    "(scikit-image `eccentricity`).",
+         equation='e = √(1 − b² / a²),  a,b = major/minor semi-axes',
+         units='dimensionless',
+         interpretation='0 = circle, →1 = increasingly elongated.'),
+    _def(key='solidity', display_name='Solidity',
+         definition="The fraction of the object's convex hull that the object fills (scikit-image "
+                    "`solidity`).",
+         equation='solidity = area / convex_area',
+         units='dimensionless',
+         interpretation='1 = convex/compact; lower = concave or ragged.'),
+    _def(key='intensity_mean', display_name='Mean intensity',
+         definition="The mean pixel intensity over the object.",
+         equation='Ī = (1/N) Σ_i I_i  over the object pixels',
+         units='a.u.',
+         interpretation='Average signal; comparable across objects only within one identically-acquired '
+                        'image.',
+         caveats=('Arbitrary units — inherits every offset and gain in the acquisition; not comparable '
+                  'across images without a calibration.',)),
+    _def(key='intensity_total', display_name='Integrated intensity',
+         definition="The sum of pixel intensities over the object — total signal (mean × area).",
+         equation='I_total = Σ_i I_i  over the object pixels',
+         units='a.u.',
+         interpretation='Total content; sensitive to both concentration and size.',
+         caveats=('Arbitrary units; an un-subtracted background scales with area and inflates it.',)),
 )}
 
 

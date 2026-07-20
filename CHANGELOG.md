@@ -1,3 +1,17 @@
+## [1.6.185] - 2026-07-20
+### Added — **Measurement ontology populated: Tier 2 geometry/intensity entries (transcribed, not invented).**
+The ontology's machinery was well-built but Tier 2 (common `regionprops`-derived geometry/intensity) was
+absent, so the Feature Explorer / figure labels / reliability captions showed `None` for the most-emitted
+columns. Added six entries, each transcribed from scikit-image / the code with a real equation and units:
+- `area` (`A = N_px × pixel_size²`), `equivalent_diameter` (`√(4A/π)`), `eccentricity`
+  (`√(1 − b²/a²)`), `solidity` (`area/convex_area`), `intensity_mean`, `intensity_total`.
+- **Units honesty:** the size entries carry `µm²`/`µm` with the caveat that the value is px²/px when no
+  pixel size is set (calibration-dependent, not asserted); the intensity entries are `a.u.` with the
+  offset/gain caveat. Every entry has a definition + equation + units (the well-formed guard), and every
+  emitted key appears as a real column in the source (the no-orphan guard) — so the registry cannot fill
+  with aspirational or blank claims. (Tier 1 scientific measurements were already present.)
+- Transcribe-never-invent honoured: no reference is attached without the equation it supports.
+
 ## [1.6.184] - 2026-07-20
 ### Added — **SMLM / localization-table analysis — load, normalize to µm, feed the spatial stats that exist.**
 The lab has super-resolution instruments and had no localization-table analysis — but the hard part (the
