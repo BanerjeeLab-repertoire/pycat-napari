@@ -3263,6 +3263,6 @@ class FibrilAnalysisUI(AnalysisMethodsUI):
 
 
 
-# MenuManager (+ its session maps and file-drop filter) moved to pycat.ui.menu_manager in 1.6.149;
-# re-exported so `from pycat.ui.ui_modules import MenuManager` keeps working.
-from pycat.ui.menu_manager import MenuManager  # noqa: E402,F401
+# MenuManager + its session maps and file-drop filter moved to menu_manager (1.6.149); ALL re-exported.
+from pycat.ui.menu_manager import (  # noqa: E402,F401
+    MenuManager, _SESSION_METHOD_SWITCH, _SESSION_METHOD_BY_DATA, _FileDropFilter)

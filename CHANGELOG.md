@@ -1,3 +1,26 @@
+## [1.6.199] - 2026-07-20
+### Fixed — **Session loader: the freeze fix is confirmed complete; the `ui_modules` session-map re-export is completed.**
+Following up the session-loader spec's last open item (Bug 2, "the freeze"): the staged off-thread load is
+**already implemented and tested**, so this closes the spec and fixes a related latent fragility surfaced
+while verifying it.
+
+- **The freeze fix (Part C) is done and Qt-free-tested.** `load_session` is split into
+  `_read_session_payload` (the slow decode — `tifffile.imread` per layer, `pd.read_csv` per table — which
+  **takes no viewer, so it structurally cannot create a layer**) and `_apply_session_payload` (the only
+  half that calls `viewer.add_*`, on the caller thread). `load_session(use_worker=True)` runs the read on a
+  worker via the tested `qt_worker.run_with_progress`; both "Load Session" handlers pass it. The read/apply
+  split rides the tested main-thread-marshalling contract rather than unverified threading, and
+  `tests/test_session_load_threading.py` pins it (reader takes no viewer / decodes into a payload / applier
+  is the only half that adds layers / `load_session` round-trips unchanged). The spec STATUS is updated to
+  COMPLETE.
+- **Completed the `ui_modules` re-export.** `_SESSION_METHOD_SWITCH` / `_SESSION_METHOD_BY_DATA` /
+  `_FileDropFilter` moved to `menu_manager` in the 1.6.149 decomposition, and the re-export comment promised
+  they stayed importable from `ui_modules` — but the import line brought only `MenuManager`, leaving
+  `ui_modules._SESSION_METHOD_SWITCH` resolvable **only by full-suite import order** (so
+  `test_the_method_REGISTRY_wires_VPT_correctly` passed in the suite but failed in isolation). The re-export
+  now includes all three, honoring the documented promise and making the test order-independent; the
+  complexity ratchet is respected (`ui_modules.py` stays at its ceiling).
+
 ## [1.6.198] - 2026-07-20
 ### Added — **Resolution routes through the entity registry: views ask the one authority where an object is now.**
 Completes the entity-registry spec. The registry authority (1.6.189) was populated at the identity
