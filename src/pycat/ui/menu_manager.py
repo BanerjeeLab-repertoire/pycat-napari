@@ -2124,8 +2124,7 @@ class MenuManager:
         image_processing_actions = {
             'Pre-Process Image': (self.central_manager.toolbox_functions_ui._add_pre_process, {'separate_widget': True}),
             'Reference / Background Subtraction': (self.central_manager.toolbox_functions_ui._add_run_reference_subtraction, {'separate_widget': True}),
-            # General techniques promoted out of single-method pipelines:
-            'Image Registration (subpixel)': (self.central_manager.toolbox_functions_ui._add_image_registration, {'separate_widget': True}),
+            'Image Registration (subpixel)': (self.central_manager.toolbox_functions_ui._add_image_registration, {'separate_widget': True}),  # general techniques promoted out of single-method pipelines
             'Photobleach Correction': (self.central_manager.toolbox_functions_ui._add_bleach_correction, {'separate_widget': True}),
             'Detrend Stack (drift / bleaching)': (self.central_manager.toolbox_functions_ui._add_detrend_stack, {'separate_widget': True}),
             'Pipeline Step Diagnostics': (self.central_manager.toolbox_functions_ui._add_pipeline_diagnostics, {'separate_widget': True}),
@@ -2133,6 +2132,7 @@ class MenuManager:
             'Foreground Suppression Tuner': (self.central_manager.toolbox_functions_ui._add_foreground_suppression_tuner, {'separate_widget': True}),
             'Temporal Enhancement Optimizer': (self.central_manager.toolbox_functions_ui._add_temporal_enhancement_optimizer, {'separate_widget': True}),
             'Segmentation Benchmark': (self.central_manager.toolbox_functions_ui._add_segmentation_benchmark, {'separate_widget': True}),
+            'Control Validation (positive/negative)': (self.central_manager.toolbox_functions_ui._add_control_validation, {'separate_widget': True}),
             'Segmentation Speed Comparison': (self.central_manager.toolbox_functions_ui._add_segmentation_speed_comparison, {'separate_widget': True}),
             'Chromatin Topology Map': (self.central_manager.toolbox_functions_ui._add_chromatin_topology, {'separate_widget': True}),
             'Nucleolus / Void Estimator': (self.central_manager.toolbox_functions_ui._add_nucleolus_void_estimator, {'separate_widget': True}),

@@ -73,6 +73,7 @@
    "Foreground Suppression Tuner",
    "Temporal Enhancement Optimizer",
    "Segmentation Benchmark",
+   "Control Validation (positive/negative)",
    "Segmentation Speed Comparison",
    "Chromatin Topology Map",
    "Nucleolus / Void Estimator",

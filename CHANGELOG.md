@@ -1,3 +1,38 @@
+## [1.6.156] - 2026-07-20
+### Added — **Positive/negative control validation: "does my segmentation actually work on my data?", answered with the user's own controls.**
+`benchmark_tools` scores candidates against a ground truth *within one image*. It cannot answer the
+question a reviewer asks: does the method detect the objects in a **positive control** (known to contain
+them) *and* detect **nothing** in a matched **negative control** (untransfected, no-primary, dye-only)? A
+segmentation can score well on ground truth and still fire on empty fields — the false-positive rate on a
+negative control is the number that tells a reviewer the detections are real.
+
+- New **`toolbox/control_validation.py`** (`core`, pure): `validate_against_controls(positive, negative,
+  method, param_grid)` sweeps one method across a parameter grid on BOTH controls with identical settings
+  and returns a per-setting DataFrame (`ControlResult`: n_positive, n_negative, false_positive_rate,
+  positive_density, separation, verdict + a **stated reason**). Scoring **reuses `benchmark_tools`**
+  (`_labelled`, `basic_metrics`) — no parallel implementation to drift.
+- **`recommend_parameters`** returns the setting that maximizes positive detection **subject to the
+  negative control staying near zero** — not the most detections outright. **When no setting separates the
+  two, it returns `None` and warns with the reason** — *"no parameter set distinguishes your positive from
+  your negative control"* is a real finding about the ASSAY, not the software. A least-bad setting is never
+  returned in its place (that would launder an assay problem into a software recommendation).
+- **Honest edge handling:** mismatched acquisition between the two controls (exposure/gain/laser, via the
+  calibration module's `AcquisitionFingerprint`) **warns loudly** — an intensity comparison across
+  mismatched exposures is meaningless. Counts are **density-normalized** (objects/µm²) through a real pixel
+  size so different field sizes are comparable; without a pixel size the density is left NaN, never faked
+  to 1.0 (the pixel-size gate). The negative control's expected count is **user-declared** (default 0), not
+  assumed zero — a legitimate autofluorescence baseline is not flagged as false positives.
+- **Report artifact** (`control_report_figure`): detections vs the swept parameter for both controls on one
+  axis, the recommended operating point marked and its separation stated — the supplementary figure behind
+  *"parameters were chosen to maximize detection in positive controls while yielding <1% detections in
+  matched negative controls."*
+- **UI:** Toolbox → Image Processing → **Control Validation (positive/negative)** — pick the positive and
+  negative image layers, sweep a threshold, see the recommendation (or the refusal) and the report figure.
+- New **`tests/test_control_validation.py`** (`core`, synthetic): a recommendation recovers ~N objects with
+  ~0 false positives; **the refusal case** (indistinguishable controls → `None` + reason — the most
+  important test); mismatched acquisition warns; density is field-size independent; and a declared
+  non-empty negative baseline is honored rather than flagged.
+
 ## [1.6.155] - 2026-07-20
 ### Fixed — **Explicit operation context: off-thread execution was silently degrading layer op tags from definitional to guessed.**
 The layer-tag hook attributes each new layer to the operation that made it. Its mechanism —
