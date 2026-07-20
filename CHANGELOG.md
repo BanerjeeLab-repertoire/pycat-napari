@@ -1,3 +1,23 @@
+## [1.6.190] - 2026-07-20
+### Added — **Persistent dataset identity: a durable UUID + cheap fingerprint (path becomes a location).**
+Dataset identity was the file PATH, which breaks on move / remount / cross-platform / copy / temp-cache —
+and can resolve to the WRONG dataset if two files share a path. New **`utils/dataset_identity.py`**:
+- `DatasetIdentity` (uuid + original_path + fingerprint) and `DatasetFingerprint` (size, mtime, ome_uuid,
+  partial_hash); `DatasetRegistry.mint_or_recognise(path)` — exact-path hit reuses the UUID; a path miss
+  that **fingerprint-matches** an existing dataset reuses THAT UUID with the updated path (identity
+  survives a move); no match → a fresh UUID. Persisted to a small JSON sidecar so the same file gets the
+  same UUID across sessions.
+- **Cheap and honest:** `bounded_partial_hash` samples head + interior + tail (reads kilobytes, never the
+  whole multi-GB file — measured in a test); the OME UUID is authoritative when present; a borderline
+  match (same size, different bytes) becomes a **NEW dataset, never a merge** (merging two datasets'
+  identities is far worse than a fresh UUID).
+- Tests (`core`): `tests/test_dataset_identity.py` — same file → same UUID, moved file recognised keeps its
+  UUID, borderline is new, OME UUID authoritative, the bounded-read measurement, and cross-instance
+  persistence.
+- The integration — routing `entity_ref.dataset_id_for` through the registry so `dataset_id` becomes the
+  UUID (which changes what every entity id embeds and needs a one-time migration of old path-based session
+  ids) — is the deliberate follow-on; this ships the mechanism.
+
 ## [1.6.189] - 2026-07-20
 ### Added — **Entity registry: resolve an entity id to its CURRENT location through one authority.**
 A row carried an opaque `_pycat_entity_id` for equality AND separate location columns (bbox, layer id,
