@@ -37,6 +37,7 @@ _FLAG_WORDS = {
     'qc_shape_outlier':         'unusual morphology',
     'qc_intensity_outlier':     'unusual intensity',
     'qc_containment_violation': 'outside parent object',
+    'qc_scan_shear':            'motion-sheared (scan artifact)',
 }
 
 
@@ -129,18 +130,26 @@ def flag_containment_violations(child_table, parent_labels, *,
 
 
 def biological_qc(table, labels, *, parent_labels=None, id_col='label',
-                  size_column='area', intensity_column='intensity_mean', k=3.5) -> pd.DataFrame:
+                  size_column='area', intensity_column='intensity_mean', k=3.5,
+                  scan_shear_flags=None) -> pd.DataFrame:
     """The aggregator: return ``table`` with the boolean flag columns present for the data it has, a
     ``qc_flags`` summary string per object (the observations, joined), and a per-flag count report on
     ``result.attrs['qc_report']``. **Never removes a row** — the returned frame has the same length as
     the input. Flags a column only when the data to compute it is present, so a table without shape
-    columns simply carries no shape flag rather than a fabricated one."""
+    columns simply carries no shape flag rather than a fabricated one.
+
+    ``scan_shear_flags`` : an optional ``pd.Series`` (indexed by label id, True = motion-sheared) from
+    ``scan_qc_tools.scan_shear_flags``. When given, motion-shear observations flow into the same flag
+    columns and summary — an acquisition-geometry artifact composing with the biological flags, still
+    flagged not filtered, so a condition comparison can be recomputed excluding motion-corrupted objects."""
     df = table.copy()
 
     flags = {}
     if labels is not None and id_col in df.columns:
         edge = flag_edge_touching(labels)
         flags['qc_edge_touching'] = df[id_col].map(edge).fillna(False).astype(bool)
+    if scan_shear_flags is not None and id_col in df.columns:
+        flags['qc_scan_shear'] = df[id_col].map(scan_shear_flags).fillna(False).astype(bool)
     if size_column in df.columns:
         flags['qc_size_outlier'] = flag_size_outliers(df, column=size_column, k=k)
     if any(c in df.columns for c in ('eccentricity', 'solidity')):

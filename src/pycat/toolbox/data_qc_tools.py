@@ -1365,13 +1365,18 @@ def _not_applicable(name, why):
 
 def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
-                is_zstack=False, n_source_frames=None):
+                is_zstack=False, n_source_frames=None,
+                labels=None, modality=None, line_time_s=None):
     """Run every applicable metric and return an ordered list of result dicts.
 
     n_source_frames : if `data` is an evenly-spaced SUBSAMPLE of a longer time series (QC caps a long
         movie at `QC_MAX_FRAMES` to bound memory), pass the ORIGINAL frame count so the report can say
         so honestly — QC assessed N of M frames, and a high-frequency vibration check saw a lower
         sampling rate. None means `data` is the whole thing.
+    labels, modality, line_time_s : optional inputs for the scan-acquisition-artifact checks
+        (`scan_qc_tools`). They are **gated by modality** and only appended when a modality is given —
+        scan shear on a widefield image is noise, so when `modality` is None the scan checks are reported
+        `na` with the reason, never guessed from pixels.
     """
     a = np.asarray(data)
     is_stack = a.ndim == 3 and a.shape[0] > 1
@@ -1467,6 +1472,19 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
         # broken. Pass `channels=[ch1, ch2, ...]` and it gives a verdict.
         qc_chromatic(n_channels, channels=channels),
     ]
+
+    # ── Scan-acquisition-geometry artifacts (gated by modality; never guessed from pixels) ──────
+    # Only appended when a modality is supplied. scan_qc_tools does its own per-modality gating and
+    # reports `na` with a reason for the checks that do not apply — so the report shows the whole family
+    # (greyed where inapplicable) rather than silently omitting it. Scan checks read a single 2D frame.
+    if modality is not None:
+        try:
+            from pycat.toolbox.scan_qc_tools import run_scan_qc
+            scan_frame = a[0] if is_stack else a
+            results += run_scan_qc(scan_frame, labels=labels, modality=modality,
+                                   line_time_s=line_time_s, pixel_um=pixel_um)
+        except Exception as _exc:  # broad-ok: an optional add-on QC family must never break the core QC report
+            debug_log('run_full_qc: scan-QC checks failed', _exc)
 
     # ── Be honest when QC assessed a SAMPLE, not the whole movie ────────────────
     #

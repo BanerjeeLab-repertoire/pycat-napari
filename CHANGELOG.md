@@ -1,3 +1,45 @@
+## [1.6.157] - 2026-07-20
+### Added — **QC for scan-acquisition aberrations: per-object motion shear, bidirectional phase, disk pattern, pinhole crosstalk.**
+`data_qc_tools` covers saturation/focus/SNR/drift/vibration/aberration — every check asks about the image
+as a whole or the optics. **None asked "was this OBJECT distorted by the way the pixels were collected?"**
+The motivating case: on a laser-scanning confocal, a *mobile* condensate is torn/sheared because it moves
+during the raster, while a *stable* one in the same frame is clean — so the same image contains trustworthy
+and untrustworthy objects, and every existing whole-frame QC check passes it.
+
+- New **`toolbox/scan_qc_tools.py`** (`core`, synthetic-tested):
+  - **`qc_scan_shear`** (per object) — fits each object's intensity-weighted column centroid against row
+    index (the slow-scan axis); a mobile object's centroid drifts systematically with row. **The in-frame
+    control is the method:** each object's slope is compared against the others in the SAME frame, not a
+    fixed global threshold (which varies with sample/scan-speed/zoom). If objects shear together it is
+    **stage drift / sample flow**, not per-object motion, and is reported as such. An elongated tilted
+    static object (whose centroid slope is morphology) is reported **`ambiguous`**, never confidently
+    called motion; objects too small to fit a slope are `na`. A **velocity is reported only when the line
+    time is known** — otherwise an honest px/row, never converted with an assumed line time.
+  - **`qc_bidirectional_phase`** — cross-correlates odd-row vs even-row sub-images; a lateral offset is a
+    bidirectional-scan comb artifact (a scanner phase-calibration problem).
+  - **`qc_disk_pattern`** — spinning-disk pinhole striping as a **detrended** spectral peak. It reuses
+    `qc_vibration`'s recorded lesson: a low-frequency vignetting gradient reads as periodic striping unless
+    removed first, so the field is detrended before the spectral test.
+  - **`qc_pinhole_crosstalk`** — elevated local background around bright objects vs distant background;
+    warns that partition coefficients and enrichment ratios (what it most corrupts) will be biased.
+- **Gated by modality, never guessed from pixels** (`run_scan_qc`): scan shear applies only to a
+  point-scanner, disk pattern only to a spinning disk; on the wrong modality — or an unknown one — each
+  reports `na` with the reason (a confident wrong verdict is worse than "not assessed"). Wired into
+  `run_full_qc` behind optional `labels` / `modality` / `line_time_s` (appended only when a modality is
+  given).
+- **Per-object shear flags compose with biological QC** — `scan_shear_flags` returns a per-label Series
+  that `biological_qc(..., scan_shear_flags=)` folds into the same flag columns and summary. Flag, never
+  filter — so a condition comparison can be recomputed excluding motion-corrupted objects.
+- **Metadata**: `metadata_extract` now carries `acquisition_mode` / `line_time_s` / `dwell_time_s` /
+  `pinhole_um`, filled opportunistically and format-agnostically from the raw block (`None` unless a raw
+  key plausibly names it and the value parses — a guessed scan mode is exactly what the gating refuses).
+- New **`tests/test_scan_qc.py`** (`core`, synthetic — no microscope): the measured slope recovers the
+  injected displacement-per-line; **one stable + one sheared object in a single frame flag exactly one**
+  (the motivating case); uniform shear → drift, not per-object motion; a tilted elongated static object is
+  `ambiguous`, not motion; bidirectional offset recovered; disk periodicity detected while a smooth
+  vignette is not (the detrending test); a crosstalk halo raises the metric and a clean field does not;
+  gating returns `na` with a reason on unknown modality; and the shear flag composes with biological QC.
+
 ## [1.6.156] - 2026-07-20
 ### Added — **Positive/negative control validation: "does my segmentation actually work on my data?", answered with the user's own controls.**
 `benchmark_tools` scores candidates against a ground truth *within one image*. It cannot answer the

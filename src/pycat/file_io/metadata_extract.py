@@ -195,7 +195,71 @@ def _empty_common(file_path):
         'camera_name': None,
         'acquisition_start_time': None,
         'n_frames': None,
+        # ── Scan-acquisition geometry (for the scan-aberration QC checks) ────────────────────────
+        # None means "not recorded" — never guessed. A laser-scanning confocal builds a frame one line
+        # at a time (line_time/dwell set the per-row timing that motion-shears a mobile object); a
+        # spinning disk exposes the whole field through a rotating pinhole array (pinhole size + disk
+        # period). These gate which scan-artifact checks even apply. Populated only where a format
+        # exposes them (see `_fill_scan_acquisition_fields`), which most currently do not.
+        'acquisition_mode': None,   # 'point-scanning' | 'spinning-disk' | 'widefield' | None
+        'line_time_s': None,        # seconds per scanned line (point-scanning)
+        'dwell_time_s': None,       # per-pixel dwell time (point-scanning)
+        'pinhole_um': None,         # pinhole diameter (confocal / spinning disk)
     }
+
+
+#: Raw-metadata key fragments (case-insensitive substring) → the curated scan field they fill. Formats
+#: dump wildly different key names into the raw OME/CZI/IMS block; this reads the common ones without a
+#: per-format parser. A value is taken only if the curated field is still None (never overwrites a
+#: format-specific extractor that already set it) and parses as the expected type.
+_SCAN_RAW_HINTS = {
+    'line_time_s': ('linetime', 'line_time', 'lineduration', 'timeperline'),
+    'dwell_time_s': ('dwelltime', 'dwell_time', 'pixeldwell', 'pixeltime'),
+    'pinhole_um': ('pinholesize', 'pinhole_um', 'pinholediameter', 'pinhole'),
+}
+#: Substrings that identify the acquisition mode in a raw value or key.
+_MODE_HINTS = (
+    ('spinning', 'spinning-disk'), ('spinningdisk', 'spinning-disk'), ('csu', 'spinning-disk'),
+    ('point', 'point-scanning'), ('laser scan', 'point-scanning'), ('lsm', 'point-scanning'),
+    ('confocal', 'point-scanning'), ('widefield', 'widefield'), ('wide-field', 'widefield'),
+)
+
+
+def _fill_scan_acquisition_fields(result):
+    """Opportunistically fill the scan-geometry fields from the raw block, format-agnostically. Honest by
+    construction: a field stays None unless a raw key plausibly names it AND the value parses — a guessed
+    scan mode is exactly what the QC gating refuses (a wrong-modality check gives a confident wrong answer)."""
+    try:
+        common = result.get('common', {})
+        raw = result.get('raw', {}) if isinstance(result.get('raw'), dict) else {}
+
+        def _as_float_um_or_s(v):
+            try:
+                return float(str(v).split()[0])
+            except (TypeError, ValueError, IndexError):
+                return None
+
+        for field, fragments in _SCAN_RAW_HINTS.items():
+            if common.get(field) is not None:
+                continue
+            for k, v in raw.items():
+                kl = str(k).lower()
+                if any(f in kl for f in fragments):
+                    fv = _as_float_um_or_s(v)
+                    if fv is not None and fv > 0:
+                        common[field] = fv
+                        break
+
+        if common.get('acquisition_mode') is None:
+            blob = ' '.join(f"{k}={v}" for k, v in raw.items()).lower()
+            blob += ' ' + str(common.get('modality') or '').lower()
+            for frag, mode in _MODE_HINTS:
+                if frag in blob:
+                    common['acquisition_mode'] = mode
+                    break
+    except Exception as _exc:  # broad-ok: opportunistic metadata probe over arbitrary raw keys; a parse failure must never break metadata extraction
+        debug_log('metadata_extract: could not fill scan-acquisition fields', _exc)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -805,9 +869,10 @@ def extract_metadata(file_path, reader=None, image=None, width_px=None):
     """
     ext = os.path.splitext(file_path)[1].lower() if file_path else ''
     if ext == '.ims':
-        return extract_ims_metadata(file_path, reader=reader, width_px=width_px)
+        return _fill_scan_acquisition_fields(
+            extract_ims_metadata(file_path, reader=reader, width_px=width_px))
     if image is not None:
-        return extract_reader_metadata(file_path, image=image)
+        return _fill_scan_acquisition_fields(extract_reader_metadata(file_path, image=image))
     if ext in ('.tif', '.tiff'):
         # Prefer tifffile for plain TIFFs (reads baseline tags the structured reader skips).
         result = extract_tiff_metadata(file_path)
@@ -820,9 +885,9 @@ def extract_metadata(file_path, reader=None, image=None, width_px=None):
                     result['common']['pixel_size_source'] = from_reader['common']['pixel_size_source']
             except Exception:
                 pass
-        return result
+        return _fill_scan_acquisition_fields(result)
     # Fallback: try the structured reader for anything else (czi, lif, nd2, ...).
-    return extract_reader_metadata(file_path, image=image)
+    return _fill_scan_acquisition_fields(extract_reader_metadata(file_path, image=image))
 
 
 # ---------------------------------------------------------------------------
