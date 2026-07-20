@@ -1101,14 +1101,11 @@ class MenuManager:
         """
         from PyQt5.QtWidgets import QInputDialog
         from napari.utils.notifications import show_info as napari_show_info
+        from pycat.file_io.session_loader import session_picker_labels, load_session
 
         chosen = sessions[0]
         if len(sessions) > 1:
-            labels = [
-                f"{s['name']}  —  {s['n_layers']} layer(s), {s['n_dataframes']} table(s)"
-                f"{'  ' + s['created'] if s['created'] else ''}"
-                for s in sessions
-            ]
+            labels = session_picker_labels(sessions)
             label, ok = QInputDialog.getItem(
                 None, "Load Session",
                 f"{len(sessions)} sessions found in {folder.name}. Which one?",
@@ -1117,7 +1114,11 @@ class MenuManager:
                 return
             chosen = sessions[labels.index(label)]
 
-        from pycat.file_io.session_loader import load_session
+        # A session REPLACES the workspace (clears first, guarded — see clear_before_session_load); abort
+        # the load if the user declines to discard existing work.
+        from pycat.file_io.session import clear_before_session_load
+        if not clear_before_session_load(self.central_manager.viewer, self.central_manager):
+            return
         result = load_session(
             chosen['dir'], self.central_manager.viewer,
             self.central_manager.active_data_class,
@@ -1139,7 +1140,8 @@ class MenuManager:
             show_info as napari_show_info,
             show_warning as napari_show_warning,
         )
-        from pycat.file_io.session_loader import scan_output_folder, load_session
+        from pycat.file_io.session_loader import (
+            scan_output_folder, load_session, session_load_messages)
         from pycat.file_io.session_manifest import discover_sessions
 
         folder = QFileDialog.getExistingDirectory(
@@ -1215,6 +1217,12 @@ class MenuManager:
                 napari_show_warning("No images selected.")
                 return
 
+            # A session REPLACES the workspace (clears first, guarded — see clear_before_session_load).
+            from pycat.file_io.session import clear_before_session_load
+            if not clear_before_session_load(self.central_manager.viewer, self.central_manager):
+                status_lbl.setText("Load cancelled — current workspace kept.")
+                return
+
             load_btn.setEnabled(False)
             status_lbl.setText("Loading session…")
 
@@ -1235,17 +1243,9 @@ class MenuManager:
             )
 
             load_btn.setEnabled(True)
-            n_layers = len(result["loaded_layers"])
-            n_dfs    = len(result["loaded_dfs"])
-            n_skip   = len(result["skipped"])
-            status_lbl.setText(
-                f"Loaded {n_layers} layer(s), {n_dfs} table(s)"
-                + (f", {n_skip} skipped." if n_skip else ".")
-            )
-            napari_show_info(
-                f"Session reloaded: {n_layers} layers, {n_dfs} DataFrames"
-                + (f" ({n_skip} skipped — see terminal)." if n_skip else ".")
-            )
+            _status_text, _info_text = session_load_messages(result)
+            status_lbl.setText(_status_text)
+            napari_show_info(_info_text)
             for p, reason in result["skipped"]:
                 print(f"[PyCAT Session] Skipped {p.name}: {reason}")
 

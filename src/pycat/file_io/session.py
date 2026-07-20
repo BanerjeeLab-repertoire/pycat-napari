@@ -166,11 +166,34 @@ def _auto_clear_before_load(viewer, central_manager):
     return True
 
 
+def clear_before_session_load(viewer, central_manager) -> bool:
+    """Clear the workspace before a session load REPLACES it — returns True to proceed, False to abort.
+
+    A session is a DOCUMENT, not an overlay: loading it replaces the current workspace instead of stacking
+    onto it. On an EMPTY workspace there is nothing to clear and nothing to confirm — proceed. With layers
+    present, treat them as possibly-unsaved work and route through ``clear_all_without_saving`` (the same
+    guarded discard prompt the Clear button uses); if the user cancels, return False so the caller ABORTS
+    the load and leaves the current state untouched. Shared by both "Load Session" handlers so the
+    replace-not-stack rule lives in ONE place.
+    """
+    try:
+        has_layers = len(getattr(viewer, 'layers', ()) or ()) > 0
+    except Exception:      # broad-ok: a missing/odd viewer means nothing to clear — proceed with the load
+        has_layers = False
+    if not has_layers:
+        return True
+    return clear_all_without_saving(viewer, central_manager, confirm=True) is not False
+
+
 def clear_all_without_saving(viewer, central_manager, confirm=True):
     """
     Clear all layers and data without saving, resetting the workspace to the
     beginning-of-workflow (startup) state. If `confirm` is True, asks for
     explicit confirmation first and warns that all unsaved data will be lost.
+
+    Returns ``True`` if the workspace was cleared, ``False`` if the user cancelled the confirmation — so a
+    caller that clears-before-doing-something-else (e.g. Load Session) can abort when the user declines,
+    rather than proceeding to discard the current workspace anyway.
     """
     from qtpy.QtWidgets import QMessageBox
 
@@ -182,6 +205,7 @@ def clear_all_without_saving(viewer, central_manager, confirm=True):
             "NOTHING will be saved. All unsaved data will be lost.\n\nContinue?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply != QMessageBox.Yes:
-            return
+            return False
     _clear_everything(viewer, central_manager)
     print("[PyCAT] Workspace cleared without saving.")
+    return True

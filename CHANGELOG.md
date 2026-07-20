@@ -1,3 +1,46 @@
+## [1.6.194] - 2026-07-20
+### Added — **Feature families: an organizing schema over the measurement layer.**
+Measurements were emitted as a **flat** list of columns — `area`, `intensity_mean`, `viscosity`,
+`ripley_l_max` all in one undifferentiated row, with no indication that the first is cheap geometry and the
+last a material-state measurement requiring a fit. This adds the grouping the Feature Explorer, redundancy
+analysis, and any "export only the geometry columns" action all want. **Purely additive — no emitted table
+or existing ontology consumer changes.**
+- `measurement_ontology.py`: new `FeatureFamily` str-enum (Geometry, Intensity, Partition, Material-state,
+  Spatial, Colocalization, Topology, QC — a small, stable, canonical-order set), and `MeasurementDef` gains
+  a `family` field **defaulting to `None`** (so nothing that reads the ontology breaks). The 22 populated
+  ontology entries are assigned their family.
+- New `utils/feature_families.py`: `classify_column(name)` resolves a column's family **ontology-first**
+  (authoritative), then a **curated substring fallback** (a labelled guess), else `None` — and returns the
+  `source` (`'ontology'` | `'inferred'` | `None`) so a guessed grouping is **never mistaken for a defined
+  one**. `family_for_column` is the family-only accessor; `group_columns_by_family(columns)` partitions a
+  table's columns into families in canonical order with an Ungrouped (`None`) bucket **last** — and drops
+  nothing (the union of buckets equals the input). A genuinely ambiguous column stays Ungrouped, because a
+  wrong family is more misleading than an absent one.
+- Tests (`core`): `tests/test_feature_families.py` — additive default, every ontology family returned and
+  marked `'ontology'`, substring fallback marked `'inferred'`, ambiguous → `None`/Ungrouped, canonical
+  order preserved, nothing dropped, and str-enum JSON serialization. This is a *view* over existing
+  columns; it does not reorganize the ontology module or the emitted tables.
+
+## [1.6.193] - 2026-07-20
+### Fixed — **Loading a session now REPLACES the workspace instead of stacking onto it.**
+Loading a saved session used to load its layers/tables *on top of* whatever was already open
+(`session_loader` called `open_image_auto(clear_first=False)`), so the previous dataset's layers, tables,
+and identity references lingered underneath the restored one — two sessions coexisting in one workspace. A
+session is a DOCUMENT, not an overlay: loading it now clears first.
+- Both "Load Session" handlers in `ui/menu_manager.py` (the single-session picker `_load_discovered_session`
+  and the multi-stem folder loader `_on_load`) now call `clear_all_without_saving(...)` **before**
+  `load_session(...)`.
+- The clear is **guarded, never silent**: if the workspace has layers it prompts (the same discard warning
+  the Clear button uses), and `clear_all_without_saving` now **returns `True`/`False`** (cleared / user
+  cancelled) so the handler ABORTS the load when the user declines — their current, possibly-unsaved work is
+  never discarded without a yes. On an empty workspace there is nothing to clear and nothing to confirm.
+- Tests (`core`): `tests/test_session_clear_load.py` — the return-contract (cancel → `False`, no clear;
+  confirm → `True`, clears; `confirm=False` → clears unprompted) and an AST guard that **every**
+  `load_session` caller clears first (Qt-bound handlers, verified structurally).
+- Not addressed here (honest follow-on): the method-widget-reset-on-clear polish and the
+  `session_persist_settings` spec (whose premise is stale — pixel size already persists via the session
+  manifest); documented in their spec status blocks rather than implemented redundantly.
+
 ## [1.6.192] - 2026-07-20
 ### Changed — **The two FigureSpec systems merged behind one canonical spec; significance now rendered.**
 `utils/figure_spec.py::FigureSpec` and `utils/figure_publication.py::FigureSpec` overlapped but differed —

@@ -232,6 +232,35 @@ def scan_output_folder(folder: Path) -> dict[str, list[dict]]:
     return groups
 
 
+def session_picker_labels(sessions) -> list:
+    """One-line labels for the multi-session picker: name + layer/table counts + creation date.
+
+    Pure formatting over the discovered-session dicts — lives here (next to `discover_sessions`) rather
+    than in the Qt menu handler so the presentation of a session summary has one home.
+    """
+    return [
+        f"{s['name']}  —  {s['n_layers']} layer(s), {s['n_dataframes']} table(s)"
+        f"{'  ' + s['created'] if s['created'] else ''}"
+        for s in sessions
+    ]
+
+
+def session_load_messages(result) -> tuple:
+    """`(status line, notification line)` summarising a completed load — layer/table counts and skips.
+
+    Byte-identical to the strings the folder loader showed inline; extracted so the count/skip formatting
+    is not duplicated across the two "Load Session" handlers.
+    """
+    n_layers = len(result["loaded_layers"])
+    n_dfs = len(result["loaded_dfs"])
+    n_skip = len(result["skipped"])
+    status = (f"Loaded {n_layers} layer(s), {n_dfs} table(s)"
+              + (f", {n_skip} skipped." if n_skip else "."))
+    info = (f"Session reloaded: {n_layers} layers, {n_dfs} DataFrames"
+            + (f" ({n_skip} skipped — see terminal)." if n_skip else "."))
+    return status, info
+
+
 def _os_exists(p):
     try:
         import os
