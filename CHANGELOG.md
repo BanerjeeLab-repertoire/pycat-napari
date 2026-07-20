@@ -1,3 +1,29 @@
+## [1.6.161] - 2026-07-20
+### Added — **Per-feature provenance: attach the workflow chain to each measurement, not just the session.**
+`batch_processor` records a complete, replayable workflow — but that chain is attached to the *session*,
+not the *measurement*. A 40-column table with a 12-step workflow gives no way to know that
+`partition_coefficient` depended on steps 3, 5 and 9 but not on the fibril segmentation in step 7. A table
+opened in six months carries its values but not the route to them, and reproducibility is the manuscript's
+central claim.
+
+- New **`utils/feature_provenance.py`** (`core`, pure): a frozen `FeatureProvenance` (feature, operation_id,
+  input_layers, step_indices, parameters, software, acquisition) **composed from existing sources — never a
+  second recording mechanism** that would drift from `batch_processor`. `software_versions()` and
+  `acquisition_from_metadata()` capture the environment and `metadata_extract` fields automatically.
+- **"All steps" is not provenance.** `trace_step_indices` walks the layer LINEAGE backward and reports only
+  the steps that actually produced the feature's ancestors — so a feature from one workflow branch does NOT
+  claim an independent branch's steps. When the lineage cannot discriminate (the layer is unrecorded), it
+  returns `None` with a reason, never a useless "everything". **Absent beats guessed**, consistent with the
+  layer-tag hook's `derived`/`inferred` distinction.
+- **Surfaces** (Part D): a sidecar `<name>_provenance.json` keyed by column (not 40 unreadable extra CSV
+  columns) via `write_provenance_sidecar`; the consolidated long table already carries `operation_id` among
+  its provenance columns; and a `describe_provenance` "where did this number come from?" query that reads
+  the chain. Capturing provenance never touches a computed value.
+- New **`tests/test_feature_provenance.py`** (`core`): the discrimination test (a two-branch workflow — a
+  branch-A feature does not list branch-B's steps); an unrecorded lineage → `None` + reason, not "all
+  steps"; fields composed not fabricated (underivable → absent); software/acquisition captured
+  automatically; and the sidecar round-trips keyed by column.
+
 ## [1.6.160] - 2026-07-20
 ### Added — **Per-measurement parameter stability: "if I nudge this parameter, does the number I report change?"**
 `benchmark_tools` sweeps a parameter and compares the resulting **masks** (Dice/IoU/F1). It does not report
