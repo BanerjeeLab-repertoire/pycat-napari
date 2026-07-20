@@ -1,3 +1,16 @@
+## [1.6.188] - 2026-07-20
+### Fixed — **Entity identity: `stamp_entity_ids` now derives the frame PER ROW (auto-identity §C1).**
+`stamp_entity_ids` took a scalar `frame` and stamped every row with it — correct for a single-frame table,
+but for a multi-frame table (a tracked-object / time-series table where the same label recurs across
+frames as DIFFERENT entities) it collapsed those distinct entities onto ONE id. Added `frame_column=`: when
+present, identity derives its frame per row from that column; when absent, the scalar `frame` is used
+exactly as before (back-compat). This is the concrete Part C1 fix from the auto-identity-stamping spec.
+- Tests (`core`): `tests/test_entity_ref.py` — the same label in different frames now yields distinct ids
+  (four (label, frame) pairs → four ids); a single-frame table with no frame_column is unchanged.
+- The larger auto-identity mechanism — stamping automatically at the operation-runner finalization
+  chokepoint driven by an `EntitySpec` on the `OperationSpec` (so coverage grows by declaration, not by
+  new stamping calls) — is the architectural remainder tracked in the spec.
+
 ## [1.6.187] - 2026-07-20
 ### Added — **Plot/view lifecycle: SelectionService self-defense so subscriptions do not accumulate.**
 A long session accumulated matplotlib figures and `SelectionService` subscriptions, and every selection

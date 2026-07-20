@@ -224,7 +224,7 @@ _PARENT_COLUMNS = ('cell_label', 'cell label', 'parent_id')
 
 def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
                      labels_layer=None, frame=None, label_column='label',
-                     parent_column=None):
+                     parent_column=None, frame_column=None):
     """**Give every row in an object table a name.** Returns the same df, with the hidden columns.
 
     Called at the table-building chokepoints. Additive and total: a df that cannot be stamped (no
@@ -234,6 +234,12 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
 
     ``parent_column`` is looked up automatically among the names the codebase uses; it matters for
     puncta, whose labels restart per cell (see `make_entity_id`).
+
+    ``frame_column`` gives identity its frame **PER ROW** for a multi-frame table (a tracked-object or
+    time-series table where the same label recurs across frames as DIFFERENT entities). When it is absent
+    the scalar ``frame`` is used for every row — correct only for a genuinely single-frame table. Stamping
+    a whole time-series with one reference frame (the old behaviour) collapsed distinct entities onto one
+    id; a real ``frame_column`` fixes that.
 
     ``labels_layer`` is optional and usually absent here on purpose — the output labels layer is
     typically created *after* the table (see `attach_layer_id`). In batch there is no viewer at all,
@@ -251,12 +257,18 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
                 parents = df[name]
                 break
 
+        # Per-row frame when a frame_column is present (a multi-frame table); else the scalar `frame`.
+        per_frame = df[frame_column].to_numpy() if (frame_column and frame_column in df.columns) else None
+
+        def _frame_at(i):
+            return per_frame[i] if per_frame is not None else frame
+
         if parents is None:
-            values = [entity_id_column(dataset, operation_id, entity_type, frame, label)
-                      for label in df[label_column]]
+            values = [entity_id_column(dataset, operation_id, entity_type, _frame_at(i), label)
+                      for i, label in enumerate(df[label_column])]
         else:
-            values = [entity_id_column(dataset, operation_id, entity_type, frame, label, parent)
-                      for label, parent in zip(df[label_column], parents)]
+            values = [entity_id_column(dataset, operation_id, entity_type, _frame_at(i), label, parent)
+                      for i, (label, parent) in enumerate(zip(df[label_column], parents))]
         df[ENTITY_ID_COLUMN] = values
 
         layer_id = None

@@ -175,6 +175,34 @@ def test_an_UNSTAMPABLE_table_is_left_ALONE_and_FLAGGED_not_half_marked():
     assert linkability_of(stamped) == LINKED_BY_IDENTITY
 
 
+def test_frame_column_gives_identity_PER_ROW_not_one_reference_frame():
+    """A multi-frame table (the same label recurring across frames as DIFFERENT entities) must derive its
+    frame per row from ``frame_column`` — stamping the whole series with one scalar frame collapses
+    distinct entities onto one id."""
+    from pycat.utils.entity_ref import ENTITY_ID_COLUMN, stamp_entity_ids
+
+    df = pd.DataFrame({'label': [1, 1, 2, 2], 'frame': [0, 1, 0, 1]})
+    out = stamp_entity_ids(df.copy(), entity_type='bead', source_path='m.tif',
+                           operation_id='bead_detect', frame_column='frame')
+    ids = list(out[ENTITY_ID_COLUMN])
+    # label 1 at frame 0 and label 1 at frame 1 are DIFFERENT entities → different ids
+    assert ids[0] != ids[1], "same label in different frames got the same id — frame is not per-row"
+    assert ids[2] != ids[3]
+    assert len(set(ids)) == 4, "four (label, frame) pairs must yield four distinct entity ids"
+
+
+def test_without_frame_column_the_scalar_frame_is_used_unchanged():
+    """Back-compat: a single-frame table with no frame_column stamps every row with the scalar frame,
+    exactly as before."""
+    from pycat.utils.entity_ref import ENTITY_ID_COLUMN, stamp_entity_ids
+
+    df = pd.DataFrame({'label': [1, 2, 3]})
+    a = stamp_entity_ids(df.copy(), entity_type='cell', source_path='a.tif', frame=0)
+    b = stamp_entity_ids(df.copy(), entity_type='cell', source_path='a.tif', frame=0)
+    assert list(a[ENTITY_ID_COLUMN]) == list(b[ENTITY_ID_COLUMN])   # deterministic, unchanged
+    assert len(set(a[ENTITY_ID_COLUMN])) == 3                        # three labels → three ids
+
+
 def test_a_ref_built_from_a_stamped_table_resolves_to_ITS_OWN_layer():
     """**This closes the loop increment 1 opened.** Increment 1 made `resolve_in_viewer` honour
     `source_layer_id`; nothing filled it, so every ref still took the announced guess. Now the table
