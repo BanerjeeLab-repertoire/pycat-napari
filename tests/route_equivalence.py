@@ -57,11 +57,15 @@ class Workflow:
     - ``documented_gaps``: ``{route_name: reason}`` — the routes that cannot run here, declared.
     """
 
-    def __init__(self, name, *, routes, compare, documented_gaps=None):
+    def __init__(self, name, *, routes, compare, documented_gaps=None, compare_metadata=None):
         self.name = name
         self.routes = dict(routes)
         self.compare = compare
         self.documented_gaps = dict(documented_gaps or {})
+        # Optional SECOND comparator for scientifically-important metadata (schema, units, NaN policy,
+        # tags). The audit's sharpest point: "two routes can produce numerically similar arrays while
+        # differing in scientifically important metadata." Existing workflows pass None and are unaffected.
+        self.compare_metadata = compare_metadata
 
 
 def run_all_routes(workflow):
@@ -93,6 +97,8 @@ def assert_routes_agree(workflow, results, *, reference='headless'):
         f"{workflow.name}: the reference route {reference!r} did not run ({ref.reason}).")
 
     # 3) Every other route that ran must AGREE with the reference — naming who diverged, by how much.
+    #    Both the numeric comparator AND (when declared) the metadata comparator must pass: a route that
+    #    emits the right numbers with the wrong schema/units/NaN policy is still a divergence.
     diverged = []
     for route, value in results.items():
         if route == reference or isinstance(value, Unavailable):
@@ -100,6 +106,10 @@ def assert_routes_agree(workflow, results, *, reference='headless'):
         agree, detail = workflow.compare(ref, value)
         if not agree:
             diverged.append(f"route {route!r} diverged from {reference!r}: {detail}")
+        if workflow.compare_metadata is not None:
+            meta_agree, meta_detail = workflow.compare_metadata(ref, value)
+            if not meta_agree:
+                diverged.append(f"route {route!r} metadata diverged from {reference!r}: {meta_detail}")
     assert not diverged, f"{workflow.name}: " + "; ".join(diverged)
 
 
@@ -145,6 +155,46 @@ def compare_dataframes(columns, *, rtol=0.0, atol=0.0):
         if worst_col is not None:
             return False, f"column {worst_col!r} max|delta|={worst_delta:g}"
         return True, f"{len(columns)} columns exact over {len(ref)} rows"
+    return _cmp
+
+
+def compare_frame_metadata(columns, *, units_column=None):
+    """Compare the scientifically-important METADATA of two result frames — beyond the numbers.
+
+    Checks, for the named ``columns``: they are present in both in the SAME relative order (a reordered
+    schema is a divergence a reader would not notice from spot-checking values); the dtype KIND matches
+    (an int column vs a float column is a route casting differently); and the **NaN pattern** is identical
+    (a route emitting 0.0 where another emits NaN is a real divergence the audit called out explicitly).
+    When ``units_column`` is given, the set of unit strings must match too — a route that drops or renames
+    a units column changes what the numbers MEAN."""
+    def _cmp(ref, other):
+        ref_order = [c for c in ref.columns if c in columns]
+        other_order = [c for c in other.columns if c in columns]
+        if ref_order != other_order:
+            return False, f"column order/presence differs: {ref_order} vs {other_order}"
+        for col in columns:
+            if col not in ref.columns or col not in other.columns:
+                return False, f"column {col!r} missing from one route"
+            ref_numeric = ref[col].dtype.kind in 'fiu'
+            other_numeric = other[col].dtype.kind in 'fiu'
+            # An int-vs-float cast is a real route divergence; an object-vs-CSV-string difference on a text
+            # column is serialization noise, so the dtype-kind check applies only when either side is numeric.
+            if (ref_numeric or other_numeric) and ref[col].dtype.kind != other[col].dtype.kind:
+                return False, (f"column {col!r} dtype kind {ref[col].dtype.kind} vs "
+                               f"{other[col].dtype.kind} — a route cast differently")
+            # NaN policy is a numeric-column concern; a string column's "policy" is its unit set (below).
+            if ref_numeric and other_numeric:
+                ref_nan = np.isnan(np.asarray(ref[col].values, dtype=np.float64))
+                other_nan = np.isnan(np.asarray(other[col].values, dtype=np.float64))
+                if not np.array_equal(ref_nan, other_nan):
+                    return False, (f"column {col!r} NaN pattern differs ({int(ref_nan.sum())} vs "
+                                   f"{int(other_nan.sum())} NaNs) — a route emits a number where another emits NaN")
+        if units_column is not None:
+            ru = set(ref[units_column]) if units_column in ref.columns else None
+            ou = set(other[units_column]) if units_column in other.columns else None
+            if ru != ou:
+                return False, f"units column {units_column!r} differs: {ru} vs {ou}"
+        return True, f"schema/dtype/NaN{'/units' if units_column else ''} agree over {len(columns)} columns"
     return _cmp
 
 

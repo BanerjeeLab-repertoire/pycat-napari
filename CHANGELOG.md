@@ -1,3 +1,34 @@
+## [1.6.159] - 2026-07-20
+### Added — **Route equivalence increment A: the matrix grows from three to six canonical workflows, plus metadata comparison.**
+The cross-route equivalence matrix asserts the same workflow yields the same numbers through every route it
+can run (headless / batch replay / session reload) — a divergence is the highest-severity reproducibility
+bug PyCAT can have (the rolling-ball precedent: batch once passed a normalised image where interactive
+passed raw counts). It shipped at three workflows by design; this adds the next three, the audit's
+"beginning of the most important validation program in PyCAT." **Test-only; no divergence was found.**
+
+- **Cellpose segmentation** (headless ≈ batch ≈ session) — the most-used path and the most parameter
+  surface. Genuinely drives all three routes (torch present); the batch route runs the REAL
+  `replay_cellpose_segmentation`, so it proves the batch replay reads the recorded diameter and resolves
+  the right layer rather than falling back to defaults. Gated on cellpose being importable (the
+  optional-dependency skip pattern) rather than weakening the assertion.
+- **Colocalization** (headless ≈ session; batch a documented gap) — two-channel input exercising channel
+  assignment (m1 = ch1-over-ch2 ≠ m2), driven through the real Manders and Pearson functions. Batch is a
+  declared gap: no colocalization step exists in the replay registry.
+- **Time-series condensate partition** (headless ≈ session; batch a documented gap) — a per-frame partition
+  series over a stack through the real `client_enrichment`. Batch is a declared gap: a time-series is not a
+  per-image batch step (same class as the VPT/MSD skip-stub).
+- **Beyond the arrays — metadata comparison** (`compare_metadata` on `Workflow`, `compare_frame_metadata`):
+  the two new DataFrame workflows now also compare schema (column order), dtype kind, **NaN policy** (a
+  route emitting 0.0 where another emits NaN is a real divergence), and the **units column** — because two
+  routes can produce numerically similar tables while differing in scientifically important metadata.
+  Existing workflows pass `None` and are unaffected. Layer-tag/provenance comparison is a noted next step,
+  deferred (the routes return arrays/frames, not tagged layers).
+- The batch **gaps are declared, not skipped silently** — the harness still fails if a gap closes or a
+  route vanishes without the matrix docstring being updated. Two fixture bugs surfaced and were fixed
+  during construction (a division-by-zero from equal dilute/pedestal backgrounds, and a shared RNG that
+  advanced between a route's reference call and its session re-call) — both in the test fixtures, not
+  production. Test-only.
+
 ## [1.6.158] - 2026-07-20
 ### Validated — **Filter sensitivity increment 4: the puncta refinement gate cluster (no new inverter; one gate added, one confirmed inert).**
 The puncta refinement gate applies `kurtosis_threshold=-3.0, local_snr_threshold=1.0,
