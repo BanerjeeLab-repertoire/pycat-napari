@@ -163,3 +163,37 @@ class DatasetRegistry:
 
     def __len__(self):
         return len(self._by_uuid)
+
+
+# ── the process-wide registry + the integration entry point ─────────────────────────────────────
+
+_DEFAULT_REGISTRY = None
+
+
+def default_registry() -> "DatasetRegistry":
+    """The process-wide dataset registry, persisted to a user-writable sidecar (``~/.pycat/
+    dataset_registry.json``) so a dataset keeps its UUID across sessions. Created lazily; falls back to an
+    in-memory registry if the sidecar directory cannot be created."""
+    global _DEFAULT_REGISTRY
+    if _DEFAULT_REGISTRY is None:
+        store = None
+        try:
+            d = os.path.join(os.path.expanduser('~'), '.pycat')
+            os.makedirs(d, exist_ok=True)
+            store = os.path.join(d, 'dataset_registry.json')
+        except Exception:      # broad-ok: no writable config dir → fall back to an in-memory registry
+            store = None
+        _DEFAULT_REGISTRY = DatasetRegistry(store_path=store)
+    return _DEFAULT_REGISTRY
+
+
+def uuid_for_path(path):
+    """The durable UUID for a **readable** dataset file, or ``None`` when the path is absent/unreadable (the
+    caller then falls back to the path as a location-id — backward-compatible). Cheap on a repeat: a
+    known path returns its UUID without re-fingerprinting."""
+    try:
+        if path and os.path.isfile(str(path)):
+            return default_registry().mint_or_recognise(str(path)).uuid
+    except Exception:      # broad-ok: a durable id is optional — an unreadable file falls back to its path
+        return None
+    return None

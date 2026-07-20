@@ -1,3 +1,21 @@
+## [1.6.191] - 2026-07-20
+### Changed — **Identity integration: `dataset_id_for` now returns a durable UUID for a readable file.**
+Wires the dataset-identity registry (1.6.190) into entity identity: `dataset_id_for(path)` resolves a
+**readable** file to its persistent UUID (surviving a move/remount/cross-platform, via the fingerprint
+registry) instead of embedding the fragile PATH in every entity id. An absent or unreadable path — a test
+fixture, a batch replay of a relocated file, a registry outage — falls back to the path string, so it is
+**backward-compatible**: nothing that stamped a non-existent path changes, and a durable id never costs
+the caller their table (any failure degrades to the path).
+- `dataset_identity.default_registry()` is the process-wide registry (persisted to `~/.pycat/
+  dataset_registry.json`, so a dataset keeps its UUID across sessions); `uuid_for_path()` is the
+  readable-file → UUID entry point `dataset_id_for` routes through, cheap on a repeat (a known path returns
+  its UUID without re-fingerprinting).
+- Tests (`core`): `tests/test_dataset_identity.py` — a readable file's dataset id is a durable UUID and is
+  stable; an absent path keeps the path-as-id (back-compat). Full core green.
+- Follow-on: migrating OLD path-based session ids to UUIDs on load (rewrites ids in saved dataframes), and
+  populating the entity registry / routing SelectionService navigation at the stamping chokepoint — the
+  deeper wiring these mechanisms now enable.
+
 ## [1.6.190] - 2026-07-20
 ### Added — **Persistent dataset identity: a durable UUID + cheap fingerprint (path becomes a location).**
 Dataset identity was the file PATH, which breaks on move / remount / cross-platform / copy / temp-cache —

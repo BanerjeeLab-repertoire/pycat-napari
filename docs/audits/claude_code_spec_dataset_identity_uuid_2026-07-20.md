@@ -1,4 +1,12 @@
-> **🟡 STATUS — the mechanism DONE, shipped in 1.6.190; the `dataset_id_for` re-routing REMAINS.**
+> **✅ STATUS — mechanism (1.6.190) + `dataset_id_for` integration (1.6.191) DONE.** `dataset_id_for` now
+> resolves a READABLE file to its durable UUID via `dataset_identity.uuid_for_path` / `default_registry`
+> (persisted to `~/.pycat/dataset_registry.json`); an absent/unreadable path falls back to the path string
+> (backward-compatible). `tests/test_dataset_identity.py` covers the routing + the fallback. **Remaining
+> (smaller follow-on):** the one-time migration of OLD path-based session ids to UUIDs on load (rewrites
+> ids in saved dataframes) — the fresh-load path is durable now; only pre-1.6.191 saved sessions carry
+> path-based ids.
+>
+> (superseded) The mechanism-only status: **🟡 the `dataset_id_for` re-routing REMAINS.**
 > `utils/dataset_identity.py` — `DatasetIdentity` / `DatasetFingerprint`, `bounded_partial_hash` (head +
 > interior + tail, never the whole file), `compute_fingerprint`, `fingerprints_match` (OME UUID
 > authoritative; else size AND partial-hash; a borderline size-only match is NOT a match), and a persistent

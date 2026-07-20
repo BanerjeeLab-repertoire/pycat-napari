@@ -200,12 +200,24 @@ def source_path_of(data_instance) -> str | None:
 
 
 def dataset_id_for(source_path) -> str:
-    """The dataset's identity. **The file it came from**, which is the thing that is actually stable.
+    """The dataset's identity — a **durable UUID** for a readable file, else the path.
 
-    Not the layer: layers are closed, renamed and re-derived; the acquisition on disk is not. A
-    table produced in batch has no layer at all and still has this.
+    The file it came from is the stable thing (not the layer: layers close/rename/re-derive; the
+    acquisition on disk does not). But the PATH breaks on move/remount/cross-platform, so a readable file
+    is resolved to a persistent UUID (``dataset_identity`` registry) that survives a move. An absent or
+    unreadable path (a test fixture, a batch replay of a relocated file, a registry outage) falls back to
+    the path string — **backward-compatible**: nothing that stamped a non-existent path changes.
     """
-    return str(source_path) if source_path else UNKNOWN
+    if not source_path:
+        return UNKNOWN
+    try:
+        from pycat.utils.dataset_identity import uuid_for_path
+        u = uuid_for_path(source_path)
+        if u:
+            return u
+    except Exception:                # broad-ok: a durable id is a convenience; never cost the caller their table
+        pass
+    return str(source_path)
 
 
 def entity_id_column(dataset_id, operation_id, entity_type, frame, label, parent=None) -> str:

@@ -107,6 +107,26 @@ def test_fingerprints_match_rules():
     assert fingerprints_match(base, diff_hash) is False         # same size, different hash → not a match
 
 
+def test_dataset_id_for_routes_a_readable_file_through_the_uuid_registry(tmp_path, monkeypatch):
+    """The integration: `dataset_id_for` returns a durable UUID for a readable file (not the fragile
+    path), and the same file returns the same id."""
+    from pycat.utils import dataset_identity as di
+    from pycat.utils.entity_ref import dataset_id_for
+    monkeypatch.setattr(di, '_DEFAULT_REGISTRY', di.DatasetRegistry())   # in-memory; don't touch ~/.pycat
+    p = _write(tmp_path / 'ds.tif', b'BYTES' * 500)
+    did = dataset_id_for(p)
+    assert did != str(p), "a readable file's dataset id must be a durable UUID, not the path"
+    assert dataset_id_for(p) == did, "same file → same durable id"
+
+
+def test_dataset_id_for_falls_back_to_the_path_for_an_absent_file():
+    """Backward-compatible: a non-existent path (a test fixture, a relocated batch file) keeps the
+    path-as-id — nothing that stamped a missing path changes."""
+    from pycat.utils.entity_ref import dataset_id_for, UNKNOWN
+    assert dataset_id_for('Z:/nope/missing_9137.tif') == 'Z:/nope/missing_9137.tif'
+    assert dataset_id_for(None) == UNKNOWN
+
+
 def test_persistence_across_registry_instances(tmp_path):
     store = tmp_path / 'registry.json'
     p = _write(tmp_path / 'a.tif', b'DATA' * 800)
