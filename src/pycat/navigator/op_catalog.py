@@ -459,7 +459,7 @@ def build_catalog_document(path: Optional[str] = None) -> dict:
         pass
 
     operations = []
-    for spec in iter_operation_specs():
+    for spec in iter_operation_specs(live=True):   # the GENERATOR reads the live decorators, never the JSON
         prov = _provenance_from_registered_by(spec.registered_by)
         operations.append({
             "op": spec.id,

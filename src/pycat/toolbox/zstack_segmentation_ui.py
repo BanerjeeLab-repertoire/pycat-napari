@@ -184,6 +184,9 @@ def _add_zstack_bg_removal(ui, layout):
     form.addRow(pseudo3d_cb)
 
     prog, run = _run_btn(form, "\u25b6  Remove Background (3D)")
+    from pycat.ui.operation_gating import gate_run_button
+    gate_run_button(run, ('z_stack',), getattr(ui, 'central_manager', None),
+                    getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
         from pycat.toolbox.zstack_segmentation_tools import bg_removal_3d
@@ -259,6 +262,9 @@ def _add_zstack_cell_seg(ui, layout):
     form.addRow("Min Z-link IoU:", iou_sp)
 
     prog, run = _run_btn(form, "\u25b6  Segment Cells (3D)")
+    from pycat.ui.operation_gating import gate_run_button
+    gate_run_button(run, ('z_stack',), getattr(ui, 'central_manager', None),
+                    getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
         from pycat.toolbox.zstack_segmentation_tools import cellpose_segmentation_3d
@@ -345,6 +351,9 @@ def _add_zstack_condensate_seg(ui, layout):
     form.addRow("Z-link connectivity:", conn_sp)
 
     prog, run = _run_btn(form, "\u25b6  Segment Condensates (3D)")
+    from pycat.ui.operation_gating import gate_run_button
+    gate_run_button(run, ('z_stack',), getattr(ui, 'central_manager', None),
+                    getattr(ui, 'viewer', None), base_tooltip="Load a 3D z-stack to enable this.")
 
     def _on_run():
         from pycat.toolbox.zstack_segmentation_tools import segment_subcellular_objects_3d

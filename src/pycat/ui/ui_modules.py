@@ -4568,12 +4568,16 @@ class MenuManager:
                 return f"{v:.4g}"
             return str(v)
 
+        from pycat.batch_step_registry import step_operations
         for i, step in enumerate(steps, 1):
             name = step.get('step', '?')
             ts = step.get('timestamp', '')
             params = step.get('params', {}) or {}
             top = QTreeWidgetItem([f"{i}.  {name}", ts])
             tree.addTopLevelItem(top)
+            _ops = step_operations(name)   # the step's declared op composition — auditable replay in the UI
+            if _ops:
+                top.addChild(QTreeWidgetItem(["operations", ", ".join(_ops)]))
             # Primary params first, debug snapshots last.
             primary = [(k, v) for k, v in params.items() if k not in _debug_keys]
             debug   = [(k, v) for k, v in params.items() if k in _debug_keys]
@@ -4585,16 +4589,10 @@ class MenuManager:
         tree.expandToDepth(0)  # show steps collapsed; user expands to see params
 
         btn_row = QHBoxLayout()
-        expand_btn = QPushButton("Expand all")
-        expand_btn.clicked.connect(tree.expandAll)
-        collapse_btn = QPushButton("Collapse all")
-        collapse_btn.clicked.connect(lambda: tree.collapseAll())
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dialog.accept)
-        btn_row.addWidget(expand_btn)
-        btn_row.addWidget(collapse_btn)
+        for _lbl, _fn in [("Expand all", tree.expandAll), ("Collapse all", tree.collapseAll)]:
+            _b = QPushButton(_lbl); _b.clicked.connect(_fn); btn_row.addWidget(_b)
         btn_row.addStretch(1)
-        btn_row.addWidget(close_btn)
+        _close = QPushButton("Close"); _close.clicked.connect(dialog.accept); btn_row.addWidget(_close)
         layout.addLayout(btn_row)
 
         dialog.exec_()

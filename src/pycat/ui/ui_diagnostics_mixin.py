@@ -383,6 +383,10 @@ class _DiagnosticsWidgetsMixin:
 
         run_btn = QPushButton("\u25b6  Run competition")
         run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        from pycat.ui.operation_gating import gate_run_button
+        gate_run_button(run_btn, ('time_axis',), getattr(self, 'central_manager', None),
+                        getattr(self, 'viewer', None),
+                        base_tooltip="Load a time-series (frames over time) to enable this.")
         def _run():
             import numpy as np
             from napari.utils.notifications import show_info, show_warning

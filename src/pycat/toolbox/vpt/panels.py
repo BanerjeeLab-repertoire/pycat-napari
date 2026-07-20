@@ -479,6 +479,10 @@ class _VptPanelsMixin:
         btn = QPushButton("▶  Link Trajectories")
         btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         btn.clicked.connect(self._on_link)
+        from pycat.ui.operation_gating import gate_run_button
+        gate_run_button(btn, ('time_axis',), getattr(self, 'central_manager', None),
+                        getattr(self, 'viewer', None),
+                        base_tooltip="Load a time-series (frames over time) to enable linking.")
         form.addRow(self._track_prog); from pycat.ui.field_status import button_with_circle as _bwc
         form.addRow(_bwc(btn))
 

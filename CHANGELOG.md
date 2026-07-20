@@ -1,3 +1,51 @@
+## [1.6.143] - 2026-07-19
+### Changed — **Lightweight operation catalog: discovery no longer imports science modules; runnability reaches the Run buttons.**
+Two linked findings. **Finding 1 — discovery is decoupled from implementation imports.**
+`iter_operation_specs(live=False)` (the new default) builds the full `OperationSpec` catalog by reading
+the generated `operation_catalog.json` — **without importing a single science module**. A missing
+optional/specialist dependency (`pywavelets`, a GPU library) no longer makes a third of the operation
+vocabulary undiscoverable; the operation is *listed*, and only fails — precisely, for that one op — when
+it is actually run.
+
+- `live=True` keeps the import-and-introspect path; the catalog GENERATOR (`build_catalog_document`) and
+  the regeneration/drift guard now pin `live=True` explicitly (a generator that read its own output would
+  be circular). The drift guard is what keeps the JSON faithful to the live decorators, so reading the
+  artefact is safe.
+- `OperationSpec` gains `module` + `function` (the executor coordinates, populated in both paths).
+  `resolve_operation(spec)` imports the implementation **at call time** and raises a precise
+  `OptionalDependencyError` naming the missing dependency for that operation. `module_importable(spec)`
+  and `operation_availability(spec, available, check_module=…)` compose the requirement gate with an
+  optional import probe.
+
+**Finding 2 — consume the existing `OperationSpec` fields in the live UI.**
+- **Run-button gating.** New `ui/operation_gating.py`: `session_facts(central_manager, viewer)` derives
+  the available facts (`z_stack`/`time_axis`/`pixel_size`/`two_channels`/`gpu`) from the same predicates
+  the tools already use (`has_time_axis`, `has_real_pixel_size`, `gpu_available`, the layer `axis_order`
+  tag, `n_channels`); `gate_run_button(button, requirements, …)` disables the button with the stated
+  reason (*"needs a 3D z-stack"*) and re-checks as layers change. **Fail-open** — any gating error leaves
+  the button enabled. Wired into the five requirement-declaring ops that have a Run button: the three
+  z-stack 3D tools (Remove Background / Segment Cells / Segment Condensates), VPT Link Trajectories, and
+  the Temporal Enhancement competition. *(The other three requirement-declaring ops — `dog_3d`,
+  `gabor_3d`, `gaussian_3d` — are internal tri-planar pipeline helpers with no UI button of their own, so
+  they are covered only by the headless `operation_availability` API, not a widget.)*
+- **Batch audit.** The recorded-steps dialog now shows each step's declared operation composition
+  (`step_operations`), so replay is auditable in the UI, not only in tests.
+- **Layer-input filtering** (spec's item 2) is already served by the existing tag-based `binding`
+  mechanism in `create_layer_dropdown`, which resolves layers by `role`/`target` exactly as `inputs`
+  would — no change needed.
+- Per the spec, **no new `requirements` values** were added; `module_importable` is surfaced through the
+  availability API, not the per-op vocabulary.
+
+New tests (`core`): `tests/navigator/test_lightweight_catalog.py` (import-free discovery, lazy resolver
+with precise errors, availability) and `tests/test_operation_gating.py` (session facts, disable-with-
+reason, fail-open). Full `pytest -m core` green (1102 passed).
+
+### Notes
+- **Needs your in-app verification** (viewer-coupled): open a 2D image and confirm the three "…(3D)"
+  Run buttons in the Z-Stack tool are disabled with a "needs a 3D z-stack" tooltip, and enable when a
+  z-stack is loaded; likewise VPT "Link Trajectories" and the Temporal Enhancement "Run competition"
+  button on a single frame vs a time-series.
+
 ## [1.6.142] - 2026-07-19
 ### Added — **Focus selection: close the spatial debris layer (optional `mask=` on the focus-series scorers).**
 Completes the "best frame must not be the sharpest DEBRIS" rubric. The **statistical** layer already
