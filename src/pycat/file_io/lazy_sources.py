@@ -28,6 +28,7 @@ import numpy as np
 
 # Local application imports
 from pycat.file_io.stack_access import to_unit_float32
+from pycat.file_io.readers.ims_reader import _suppress_ims_chunk_prints  # for _ZarrTYX (Qt-free)
 
 
 def resolve_ome_file_set(primary_path):
@@ -754,3 +755,45 @@ class _SceneStack:
         multi-scene file it would materialise a whole position."""
         from pycat.file_io.lazy_guard import refuse_implicit_full_read
         refuse_implicit_full_read(self)
+
+
+# ── _ZarrTYX: IMS zarr (T,C,1,Y,X) presented as (T,Y,X) — moved from file_io.py, 1.6.146 ──
+
+class _ZarrTYX:
+    """
+    Thin wrapper presenting an IMS zarr array's z_full[:, c, 0, :, :] as a
+    (T, Y, X) array that satisfies napari's requirements without dask.
+    Suppresses the per-chunk debug prints from imaris_ims_file_reader.
+    """
+    def __init__(self, z, c, suppress_ctx=None):
+        self._z   = z
+        self._c   = c
+        self._ctx = suppress_ctx or _suppress_ims_chunk_prints
+        T, _, _, Y, X = z.shape
+        self.shape = (T, Y, X)
+        self.dtype = np.dtype('float32')
+        self.ndim  = 3
+
+    def __getitem__(self, idx):
+        if isinstance(idx, tuple):
+            t_idx, spatial = idx[0], idx[1:]
+        else:
+            t_idx, spatial = idx, (slice(None), slice(None))
+        with self._ctx():
+            raw = self._z[t_idx, self._c, 0]
+        # `[0, 1]` from the SOURCE dtype (`self._z.dtype`) — not raw counts. See `to_unit_float32`.
+        arr = to_unit_float32(raw, getattr(self._z, 'dtype', None))
+        if arr.ndim == 2:
+            return arr[spatial]
+        return arr[(slice(None),) + spatial]
+
+    def __array__(self, dtype=None):
+        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
+        from pycat.file_io.lazy_guard import refuse_implicit_full_read
+        refuse_implicit_full_read(self)
+
+    def __len__(self):
+        return self.shape[0]
+
+    # `transpose()` is deliberately ABSENT — it used to return frame 0 as (1, Y, X) for any
+    # requested axes. See `_TiffPageStack` for the full reasoning.

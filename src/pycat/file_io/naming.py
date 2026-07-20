@@ -30,7 +30,7 @@ def _lazy_contrast_limits(lazy_layer, prefetched=None):
         plane = _np.asarray(plane)
         lo, hi = float(plane.min()), float(plane.max())
         return (lo, hi) if hi > lo else None
-    except Exception:
+    except Exception:  # broad-ok: metadata probe — absent/unreadable input → None, never a wrong value
         return None
 
 
@@ -50,7 +50,7 @@ def _tiff_pixel_size_um(file_path):
     """
     try:
         import tifffile
-    except Exception:
+    except Exception:  # broad-ok: metadata probe — absent/unreadable input → None, never a wrong value
         return None
     try:
         with tifffile.TiffFile(file_path) as t:
@@ -85,7 +85,7 @@ def _tiff_pixel_size_um(file_path):
             if not (1e-4 < microns_per_pixel < 1e4):
                 return None
             return microns_per_pixel
-    except Exception:
+    except Exception:  # broad-ok: metadata probe — absent/unreadable input → None, never a wrong value
         return None
 
 
@@ -102,7 +102,7 @@ def _ome_pixel_size_um(file_path):
     try:
         import tifffile
         import re as _re
-    except Exception:
+    except Exception:  # broad-ok: metadata probe — absent/unreadable input → None, never a wrong value
         return None
     try:
         with tifffile.TiffFile(file_path) as t:
@@ -129,7 +129,7 @@ def _ome_pixel_size_um(file_path):
             if not (1e-4 < um < 1e4):
                 return None
             return um
-    except Exception:
+    except Exception:  # broad-ok: metadata probe — absent/unreadable input → None, never a wrong value
         return None
 
 

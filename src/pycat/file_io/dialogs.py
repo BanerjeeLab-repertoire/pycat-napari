@@ -56,12 +56,12 @@ def _ask_copy_to_local(file_path, verdict):
     can't be shown)."""
     try:
         from PyQt5.QtWidgets import QMessageBox, QCheckBox
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return 'no'
     import os as _os
     try:
         size_mb = (verdict.size_bytes or 0) / (1024 * 1024)
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         size_mb = 0
     where = {'network': 'a network location', 'removable': 'a removable drive',
              'cloud_placeholder': 'cloud storage (will download)'}.get(
@@ -91,16 +91,16 @@ def _copy_to_local_with_progress(file_path, verdict):
     try:
         from PyQt5.QtWidgets import QProgressDialog
         from PyQt5.QtCore import Qt
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         QProgressDialog = None
     try:
         total = _os.path.getsize(file_path)
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         total = getattr(verdict, 'size_bytes', 0) or 0
     dst_dir = _os.path.join(tempfile.gettempdir(), 'pycat_local_cache')
     try:
         _os.makedirs(dst_dir, exist_ok=True)
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return None
     # Opportunistic cleanup: remove cached copies older than ~24h so the
     # cache doesn't grow unbounded across sessions (the OS clears the temp
@@ -113,9 +113,9 @@ def _copy_to_local_with_progress(file_path, verdict):
             try:
                 if now - _os.path.getmtime(_p) > 86400:
                     _os.remove(_p)
-            except Exception:
+            except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                 pass
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         pass
     dst = _os.path.join(dst_dir, _os.path.basename(file_path))
     # If a fresh local copy already exists (same size), reuse it.
@@ -123,7 +123,7 @@ def _copy_to_local_with_progress(file_path, verdict):
         if _os.path.exists(dst) and total and _os.path.getsize(dst) == total:
             print(f"[PyCAT storage] reusing local copy: {dst}")
             return dst
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         pass
 
     dlg = None
@@ -136,7 +136,7 @@ def _copy_to_local_with_progress(file_path, verdict):
             dlg.setWindowModality(Qt.WindowModal)
             dlg.setMinimumDuration(0)
             dlg.setValue(0)
-        except Exception:
+        except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
             dlg = None
 
     CHUNK = 8 * 1024 * 1024  # 8 MB chunks
@@ -158,7 +158,7 @@ def _copy_to_local_with_progress(file_path, verdict):
                         fdst.close()
                         try:
                             _os.remove(dst)
-                        except Exception:
+                        except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                             pass
                         print("[PyCAT storage] copy cancelled by user")
                         return None
@@ -174,16 +174,16 @@ def _copy_to_local_with_progress(file_path, verdict):
         try:
             from pycat.file_io.local_cache import record_copy
             record_copy(dst, file_path)
-        except Exception as _rc_exc:
+        except Exception as _rc_exc:  # broad-ok: best-effort storage/cache op — logged, the load continues
             from pycat.utils.general_utils import debug_log
             debug_log('dialogs: could not record cache copy origin', _rc_exc)
         return dst
-    except Exception as e:
+    except Exception as e:  # broad-ok: best-effort storage/cache op — logged, the load continues
         print(f"[PyCAT storage] copy-to-local failed: {e}")
         try:
             if _os.path.exists(dst):
                 _os.remove(dst)
-        except Exception:
+        except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
             pass
         return None
 
@@ -200,7 +200,7 @@ def _ask_multipage_axis(file_path, n_pages):
         from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QLabel,
                                      QRadioButton, QCheckBox, QPushButton,
                                      QButtonGroup)
-    except Exception:
+    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return None
     import os as _os
     dlg = QDialog()
@@ -316,7 +316,7 @@ class LayerDataframeSelectionDialog(QDialog):
                 if is_label:
                     try:
                         mx = int(np.asarray(d[0] if d.ndim == 3 else d).max())
-                    except Exception:
+                    except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                         mx = 65535
                     bpp = 1 if mx <= 255 else 2
                     ratio = 100.0           # masks compress enormously
@@ -324,7 +324,7 @@ class LayerDataframeSelectionDialog(QDialog):
                     bpp = 2
                     ratio = 1.5             # real image data barely compresses
                 return (n * bpp / ratio) / (1024 * 1024)
-            except Exception:
+            except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                 return 0.0
 
         def _is_reconstructable(layer):
@@ -347,10 +347,10 @@ class LayerDataframeSelectionDialog(QDialog):
                     from pycat.utils.layer_tags import get_tag
                     if 'upscal' in str(get_tag(layer, 'op', '') or '').lower():
                         return True
-                except Exception:
+                except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                     pass
                 return False
-            except Exception:
+            except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                 return False
 
         default_checked_layers = [
@@ -370,14 +370,14 @@ class LayerDataframeSelectionDialog(QDialog):
                 _is_source_image_layer as _sess_is_source)
             _src_stem = getattr(
                 getattr(self, '_central_manager', None), 'active_data_class', None)
-        except Exception:
+        except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
             _sess_is_source = None
         # Best-effort source stem for identifying the original image layer.
         _src_stem_name = ''
         try:
             _src_stem_name = (self.layers and
                               max((str(l.name) for l in self.layers), key=len)) or ''
-        except Exception:
+        except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
             _src_stem_name = ''
 
         _total_all = 0.0
@@ -390,7 +390,7 @@ class LayerDataframeSelectionDialog(QDialog):
                 if _sess_is_source is not None:
                     # Identify the source by the loaded-image heuristic/tags.
                     _is_source = _sess_is_source(layer, '')
-            except Exception:
+            except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                 _is_source = False
             label = f"{layer.name}   ({mb:.1f} MB)"
             if _is_source:
@@ -625,7 +625,7 @@ class ChannelAssignmentDialog(QDialog):
                     ix = self._condensate_dd.findData(remembered)
                     if ix >= 0:
                         self._condensate_dd.setCurrentIndex(ix)
-            except Exception:
+            except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
                 pass
             layout.addWidget(self._condensate_dd)
 

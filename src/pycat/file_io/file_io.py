@@ -53,6 +53,7 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButto
 from PyQt5.QtGui import QFont
 from pycat.file_io.dialogs import ChannelAssignmentDialog, LayerDataframeSelectionDialog  # moved from here, 1.6.146
 from pycat.file_io.stack_openers import _StackOpenersMixin  # format openers moved out, 1.6.146
+from pycat.file_io.lazy_sources import _ZarrTYX  # moved out 1.6.146; re-exported  # noqa: F401
 from pycat.file_io.naming import (_lazy_contrast_limits, _tiff_pixel_size_um,  # moved out 1.6.146; re-exported
                                  _ome_pixel_size_um, _lazy_backing_label)  # noqa: F401
 # StackLoadCancelled moved to the typed-signal module (utils/errors.py) in 1.6.146; re-exported here so
@@ -177,44 +178,6 @@ def derive_layer_name(base_file_name, file_path=None, channel_infos=None,
     return ("Mask Layer" if is_mask else "Fluorescence Image")
 
 
-class _ZarrTYX:
-    """
-    Thin wrapper presenting an IMS zarr array's z_full[:, c, 0, :, :] as a
-    (T, Y, X) array that satisfies napari's requirements without dask.
-    Suppresses the per-chunk debug prints from imaris_ims_file_reader.
-    """
-    def __init__(self, z, c, suppress_ctx=None):
-        self._z   = z
-        self._c   = c
-        self._ctx = suppress_ctx or _suppress_ims_chunk_prints
-        T, _, _, Y, X = z.shape
-        self.shape = (T, Y, X)
-        self.dtype = np.dtype('float32')
-        self.ndim  = 3
-
-    def __getitem__(self, idx):
-        if isinstance(idx, tuple):
-            t_idx, spatial = idx[0], idx[1:]
-        else:
-            t_idx, spatial = idx, (slice(None), slice(None))
-        with self._ctx():
-            raw = self._z[t_idx, self._c, 0]
-        # `[0, 1]` from the SOURCE dtype (`self._z.dtype`) — not raw counts. See `to_unit_float32`.
-        arr = to_unit_float32(raw, getattr(self._z, 'dtype', None))
-        if arr.ndim == 2:
-            return arr[spatial]
-        return arr[(slice(None),) + spatial]
-
-    def __array__(self, dtype=None):
-        """**Refuse.** See `pycat.file_io.lazy_guard` — this has cost three bugs."""
-        from pycat.file_io.lazy_guard import refuse_implicit_full_read
-        refuse_implicit_full_read(self)
-
-    def __len__(self):
-        return self.shape[0]
-
-    # `transpose()` is deliberately ABSENT — it used to return frame 0 as (1, Y, X) for any
-    # requested axes. See `_TiffPageStack` for the full reasoning.
 
 
 # ── The lazy TIFF wrappers moved to `lazy_sources.py` ───────────────────────────────────────

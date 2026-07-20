@@ -90,7 +90,7 @@ class _StackOpenersMixin:
         microns_per_pixel = 1.0
         try:
             microns_per_pixel = _ims_pixel_size_um(reader, W) or 1.0
-        except Exception as _e:
+        except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
             debug_log("file_io: IMS pixel-size read failed, using 1.0 µm/px", _e)
 
         # Extract and store the full normalised metadata record (IMS metadata
@@ -100,7 +100,7 @@ class _StackOpenersMixin:
             from pycat.file_io.metadata_extract import extract_metadata
             md = extract_metadata(file_path, reader=reader, width_px=W)
             self.central_manager.active_data_class.data_repository['file_metadata'] = md
-        except Exception as _e:
+        except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
             debug_log("file_io: IMS metadata extraction failed", _e)
 
         channels_to_load = list(range(n_c))
@@ -203,7 +203,7 @@ class _StackOpenersMixin:
                         # still loads — the user gets a warning with the likely cause.
                         try:
                             channel_data = lazy_tyx[0]
-                        except (KeyError, OSError, Exception) as _probe_err:
+                        except (KeyError, OSError, Exception) as _probe_err:  # broad-ok: format-open failure surfaced to the user; the open aborts gracefully
                             from napari.utils.notifications import show_warning as _sw
                             _sw(
                                 f"IMS: could not pre-read the first frame of "
@@ -231,7 +231,7 @@ class _StackOpenersMixin:
                     _layer = self.viewer.add_image(lazy_tyx, **_add_kwargs)
                     try:
                         _layer.metadata['pycat_image_source'] = _img_source
-                    except Exception as _e:
+                    except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                         debug_log("file_io: could not attach ImageSource to TYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS {_ch_label}{pos_suffix}: {n_t} frames "
@@ -246,7 +246,7 @@ class _StackOpenersMixin:
                     if channel_idx == 0 and pos_path == file_path:
                         try:
                             channel_data = lazy_zyx[0]
-                        except (KeyError, OSError, Exception) as _probe_err:
+                        except (KeyError, OSError, Exception) as _probe_err:  # broad-ok: format-open failure surfaced to the user; the open aborts gracefully
                             from napari.utils.notifications import show_warning as _sw
                             _sw(
                                 f"IMS: could not pre-read the first z-slice of "
@@ -264,7 +264,7 @@ class _StackOpenersMixin:
                     _layer = self.viewer.add_image(lazy_zyx, **_add_kwargs)
                     try:
                         _layer.metadata['pycat_image_source'] = _img_source
-                    except Exception as _e:
+                    except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                         debug_log("file_io: could not attach ImageSource to ZYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS z-stack {_ch_label}{pos_suffix}: "
@@ -289,7 +289,7 @@ class _StackOpenersMixin:
                     try:
                         _plane0 = (channel_data if (channel_idx == 0 and pos_path == file_path)
                                    else lazy_tzyx[0, 0])
-                    except Exception:
+                    except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
                         _plane0 = None
                     _clim = _lazy_contrast_limits(lazy_tzyx, prefetched=_plane0)
                     _add_kwargs = dict(name=layer_name, colormap=_ch_colormap)
@@ -298,7 +298,7 @@ class _StackOpenersMixin:
                     _layer = self.viewer.add_image(lazy_tzyx, **_add_kwargs)
                     try:
                         _layer.metadata['pycat_image_source'] = _img_source
-                    except Exception as _e:
+                    except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                         debug_log("file_io: could not attach ImageSource to TZYX layer", _e)
                     napari_show_info(
                         f"Lazy-loaded IMS T-Z stack {_ch_label}{pos_suffix}: "
@@ -425,7 +425,7 @@ class _StackOpenersMixin:
                 from pycat.file_io.metadata_extract import extract_metadata
                 _md = extract_metadata(file_path, image=image)
                 self.central_manager.active_data_class.data_repository['file_metadata'] = _md
-            except Exception as _mde:
+            except Exception as _mde:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                 debug_log("file_io: metadata extraction failed", _mde)
         else:
             scenes_to_load = [None]
@@ -585,16 +585,16 @@ class _StackOpenersMixin:
             try:
                 px = image.physical_pixel_sizes
                 microns_per_pixel = float(px.Y) if px.Y else 1.0
-            except Exception as _pe:
+            except Exception as _pe:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                 debug_log("file_io: CZI physical pixel size unavailable", _pe)
             self.central_manager.active_data_class.update_metadata(image)
             try:
                 from pycat.file_io.metadata_extract import extract_metadata
                 _md = extract_metadata(file_path, image=image)
                 self.central_manager.active_data_class.data_repository['file_metadata'] = _md
-            except Exception as _mde:
+            except Exception as _mde:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                 debug_log("file_io: CZI metadata extraction failed", _mde)
-        except Exception as _e:
+        except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
             debug_log("file_io: CZI metadata via libCZI failed (using BioFormats dims only)", _e)
 
         # Open the BioFormats reader OFF the main thread (setId parses every frame offset) so the
@@ -604,7 +604,7 @@ class _StackOpenersMixin:
         _n_frames = None
         try:
             _n_frames = int(getattr(image.dims, 'T', 0) or 0) if image is not None else None
-        except Exception:
+        except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
             _n_frames = None
         _frames_txt = f"{_n_frames:,} frames" if _n_frames else "all frames"
         napari_show_info(f"Indexing CZI via BioFormats — one-time parse of {_frames_txt}; then it scrubs.")
@@ -617,7 +617,7 @@ class _StackOpenersMixin:
         except StackLoadCancelled:
             napari_show_info("CZI open cancelled.")
             return
-        except Exception as _e:
+        except Exception as _e:  # broad-ok: format-open failure surfaced to the user; the open aborts gracefully
             napari_show_warning(f"BioFormats could not open this CZI:\n{_e}")
             debug_log("file_io: BioFormats CZI open failed", _e)
             return
@@ -631,7 +631,7 @@ class _StackOpenersMixin:
         for channel_idx in range(n_c):
             try:
                 _ch_info = extract_channel_info(image, channel_idx) if image is not None else None
-            except Exception:
+            except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
                 _ch_info = None
             if not _ch_info:
                 _ch_info = {'layer_name': f'C{channel_idx}', 'bucket': 'unknown'}
@@ -644,7 +644,7 @@ class _StackOpenersMixin:
             # lazy stack (→ __array__, which REFUSES) to auto-estimate — see the IMS path.
             try:
                 _plane0 = lazy[0]
-            except Exception as _pe:
+            except Exception as _pe:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                 debug_log("file_io: CZI first-frame prefetch failed", _pe)
                 _plane0 = None
             _clim = _lazy_contrast_limits(lazy, prefetched=_plane0)
@@ -654,11 +654,11 @@ class _StackOpenersMixin:
             _layer = self.viewer.add_image(lazy, **_add)
             try:
                 _layer.projection_mode = 'none'   # show the current frame, not a mean projection
-            except Exception:
+            except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
                 pass
             try:
                 _layer.metadata['pycat_image_source'] = _img_source
-            except Exception as _e:
+            except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
                 debug_log("file_io: could not attach ImageSource to CZI layer", _e)
             napari_show_info(
                 f"Lazy-loaded CZI {_ch_label}: {n_t} frames {H}×{W}px via BioFormats "

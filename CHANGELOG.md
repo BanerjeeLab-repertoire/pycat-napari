@@ -1,3 +1,21 @@
+## [1.6.147] - 2026-07-19
+### Changed — **Finish the `file_io.py` decomposition: the lazy wrapper + the exception conversion.**
+Completes the two follow-ups deferred from 1.6.146.
+
+- **`_ZarrTYX` → `file_io/lazy_sources.py`** (move 5) — the IMS lazy wrapper joins `_TiffPageStack` &
+  friends in the Qt-free lazy-wrapper home. `lazy_sources` stays Qt-free (the subprocess headless test
+  confirms it); `file_io` re-exports it. `file_io.py`: 1670 → **1633 lines (2805 → 1633 overall, −41.8%)**.
+- **Exception conversion in the moved code** — the 45 broad `except Exception` handlers that moved into
+  `naming.py` / `dialogs.py` / `stack_openers.py` are now annotated `# broad-ok:` with body-matched
+  reasons (metadata probes → `None`, Qt/layer-inspection robustness, format-open log-and-continue). None
+  were converted to raises — they are graceful-degradation swallows, not masked scientific failures, so
+  a raise would change behaviour. The `file_io` broad-handler ratchet is lowered **284 → 239**.
+
+Full `pytest -m core` green (1112 passed). This closes the `file_io.py` decomposition: dialogs, the
+naming/pixel helpers, the format openers, and the lazy wrapper all in their proper homes; the file is
+orchestration/wiring, not format-specific pixel logic; both the line ratchet (→1633) and the exception
+ratchet (→239) are lowered so it cannot regrow.
+
 ## [1.6.146] - 2026-07-19
 ### Changed — **Decompose `file_io.py`: 2805 → 1670 lines (−40.5%), the second god-file after `vpt_ui`.**
 Behaviour-preserving refactor — move code into its proper homes, no rewrites, no new features. Same

@@ -179,6 +179,10 @@ _DELIBERATE = {
     'file_io.py::_open_stack_generic',
     'file_io.py::_open_czi_streaming',
 
+    # 1.6.146 — the `_ZarrTYX` lazy IMS wrapper MOVED to `file_io/lazy_sources.py` (decomposition, move
+    # 5), joining `_TiffPageStack` & friends in the Qt-free lazy-wrapper home. `file_io` re-exports it.
+    'file_io.py::_ZarrTYX',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

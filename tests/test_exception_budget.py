@@ -35,7 +35,9 @@ _BUDGET = {
     'batch_step_registry.py': 5,
     'central_manager.py': 2,
     'data': 3,
-    'file_io': 284,
+    'file_io': 239,   # 284 -> 239: 45 broad handlers in the decomposed code (naming/dialogs/openers)
+                      # annotated `# broad-ok:` with body-matched reasons (metadata probes, UI
+                      # robustness, format-open log-and-continue) during the 1.6.146 decomposition.
     'navigator': 1,
     'run_pycat.py': 30,
     'toolbox': 514,
