@@ -1,3 +1,20 @@
+## [1.6.187] - 2026-07-20
+### Added — **Plot/view lifecycle: SelectionService self-defense so subscriptions do not accumulate.**
+A long session accumulated matplotlib figures and `SelectionService` subscriptions, and every selection
+broadcast walks the subscriber list — an unbounded list is the lag source. The service already held
+bound-method subscribers WEAKLY (a closed dock's method dies) and dropped dead handles on broadcast; this
+adds the self-defense the leak finding demands, and makes it testable:
+- `subscriber_count(*, include_deferred=True)` — the count of LIVE subscribers (dead weak handles pruned
+  first), so a test can assert it returns to baseline across open/close cycles;
+- `_prune_dead()` — a proactive sweep dropping subscribers whose weak handle has died (a view that closed
+  without unsubscribing), so liveness does not have to wait for the next broadcast.
+- Tests (`core`): `tests/test_selection_lifecycle.py` — the leak test (50 open→dispose cycles return to
+  baseline), a closed view's bound method is pruned from the count, a broadcast never calls a
+  garbage-collected subscriber, idempotent double-unsubscribe, and the deferred channel counted/pruned too.
+- The per-view `dispose()` (disconnect canvas callbacks + close the figure) is the UI half; the
+  weak-method design already covers the closed-dock subscription leak, and this is the service-level safety
+  net that catches a missed one.
+
 ## [1.6.186] - 2026-07-20
 ### Added — **Analysis-aware kymographs — a line-scan over time paired with the measurements PyCAT computes.**
 A roadmap capability with no implementation. New **`toolbox/kymograph_tools.py`**:

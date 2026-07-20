@@ -210,6 +210,25 @@ class SelectionService:
         self._deferred_subscribers.pop(str(view_id), None)
         return self
 
+    def _prune_dead(self):
+        """Drop any subscriber whose weak handle has died — a view (a Qt dock's bound method) that closed
+        without unsubscribing. The broadcast already prunes inline; this is the proactive sweep so a
+        liveness check does not have to wait for the next selection."""
+        for registry in (self._subscribers, self._deferred_subscribers):
+            for vid in [v for v, handle in list(registry.items()) if handle() is None]:
+                registry.pop(vid, None)
+
+    def subscriber_count(self, *, include_deferred=True) -> int:
+        """The number of LIVE subscribers — dead weak handles are pruned first, so this reflects what a
+        broadcast would actually call. The leak test asserts this returns to baseline across open/close
+        cycles: a plot view that leaks its subscription (a missed ``dispose``/``unsubscribe`` on a closure
+        it holds strongly) shows up here as a count that grows with the number of cycles."""
+        self._prune_dead()
+        n = len(self._subscribers)
+        if include_deferred:
+            n += len(self._deferred_subscribers)
+        return n
+
     @property
     def selected(self):
         """The current selection as a back-compat object (reads like the old ``Selection``), or
