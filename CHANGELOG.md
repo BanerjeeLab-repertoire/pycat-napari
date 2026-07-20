@@ -1,3 +1,31 @@
+## [1.6.164] - 2026-07-20
+### Added — **Explicit 2D / 3D / time-series condensate modes: refuse the volume-fraction approximation, label everything.**
+`invitro_fluor_ui` already prints *"area fraction=… (2D projection, not a volume fraction)"* — but that
+honesty lives in a transient napari message while the number travels into tables, the consolidated long
+table, and figures with no qualifier. A projected area fraction is not a volume fraction (their ratio
+depends on object size/shape/axial overlap), and the same workflow is applied to 2D fields, z-stacks, and
+time series where some measurements valid in one are meaningless in another.
+
+- New **`toolbox/condensate_modes.py`** (`core`, pure): a `CondensateMode` enum (`FIELD_2D` / `ZSTACK_3D` /
+  `TIMESERIES`) and `resolve_condensate_mode` — declared or derived from the data, **never silently guessed
+  for an ambiguous 3D array** (z-stack vs time series have different valid measurements, so it refuses and
+  points at the loader's disambiguation rather than guessing).
+- **Refuse rather than convert:** `volume_fraction` returns `nan` **with a stated reason** in 2D (a single
+  plane cannot measure it, and converting the projected fraction needs assumptions — mono-disperse spheres,
+  no axial overlap — the data cannot support), and the true value from voxels in 3D. **The 2D numbers are
+  unchanged — this is labelling and gating, not recomputation.**
+- **The qualifier travels:** `attach_mode_column` stamps a `condensate_mode` column on every emitted table,
+  so a projected fraction is never mistaken for a volume fraction downstream. The projection caveat is
+  already data in the measurement ontology (queryable, renderable in a figure footnote), not only a UI
+  string.
+- **Time-series independence:** `mark_timeseries_as_unit` declares a per-frame series ONE biological unit,
+  so the comparative-figures replicate aggregation (`aggregate_to_unit`) collapses it to one rather than
+  counting each frame as an independent replicate — reusing the existing pseudoreplication machinery.
+- New **`tests/test_condensate_modes.py`** (`core`, synthetic): the 2D volume-fraction refusal (NaN +
+  reason); a 3D z-stack of known spheres whose true volume fraction differs materially from the projected
+  area fraction; ambiguous-3D refusal; the mode column on tables; the ontology caveat; and a 20-frame
+  series aggregating to one unit.
+
 ## [1.6.163] - 2026-07-20
 ### Added — **Background-mode guardrail: turn the partition-coefficient docstring reasoning into a check at the moment the mistake would be made.**
 `client_enrichment` already supported three background treatments (scalar offset, signal-free-region mask,
