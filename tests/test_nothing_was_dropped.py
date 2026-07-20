@@ -163,6 +163,14 @@ _DELIBERATE = {
     'file_io.py::_is_reconstructable',
     'file_io.py::_on_discard',
 
+    # 1.6.146 — pure pixel-size / lazy-label helpers MOVED to `file_io/naming.py` (decomposition, move 3),
+    # now headlessly testable. `file_io` re-exports them, so every call site + importer still works.
+    # (`derive_layer_name`/`_clean_filename_token` deliberately stayed — two tests AST-parse them by path.)
+    'file_io.py::_lazy_contrast_limits',
+    'file_io.py::_tiff_pixel_size_um',
+    'file_io.py::_ome_pixel_size_um',
+    'file_io.py::_lazy_backing_label',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.
