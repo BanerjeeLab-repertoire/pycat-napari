@@ -74,7 +74,15 @@ _LONG_FUNCTION_LIMIT = 120
 # coverage: its 4 existing numerical tests (test_msd_drift / test_msd_min_track_length /
 # test_vpt_viscosity_chain / test_route_equivalence) passed UNMODIFIED, proving no number changed. No
 # floating-point operation was reassociated and nothing was "improved" while moving. Count 135 → 134.
-_MAX_LONG_FUNCTIONS = 134
+# 133. (2026-07-20) `partition_coefficient_local` (invitro_tools), the 394-line local-annulus Kp
+# measurement, was split BY PHASE into pure helpers — input-validity (`_pc_check_input`), camera-floor
+# determination (`_pc_camera_floor`), the interface-width gap (`_pc_estimate_gap`), the per-droplet
+# measurement loop (`_pc_measure_droplets`), and the reporting verdict (`_pc_verdict`) — dropping the
+# function to 109 lines. A SCIENCE function, so the split was pinned by a byte-identity characterization
+# test (`test_partition_local_characterization`) capturing the exact per-droplet + aggregate outputs
+# across all five reporting branches BEFORE the split and asserting them unchanged after. No number
+# moved. Count 134 → 133.
+_MAX_LONG_FUNCTIONS = 133
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

@@ -864,6 +864,261 @@ def estimate_csat_lever_rule(
     )
 
 
+def _pc_check_input(image_layer):
+    """Is this image a valid input for an INTENSITY measurement? Returns ``(ok, why)`` — ``ok=False``
+    means REFUSE (Kp is a ratio of intensities, meaningful only where pixel values still relate to photon
+    count); a non-empty ``why`` with ``ok=True`` is an advisory to surface.
+
+    Several routine preprocessing steps destroy the intensity relation — which is what they are FOR — and
+    nothing else stopped their output being fed here. Measured on a field with a TRUE Kp of 30: min-max
+    normalised → 130, white top-hat → 199 (dilute removed → ~0), top-hat+LoG → −12 (LoG is signed), CLAHE
+    → 65 (measures the algorithm). The signal is in the PROVENANCE, not the pixels — a background-
+    subtracted image looks like one with a dark background — so the operations record what they did and
+    this checks. ``image_layer=None`` proceeds unchecked (nothing to check against)."""
+    if image_layer is None:
+        return True, ''
+    try:
+        from pycat.utils.intensity_semantics import (IntensitySemantics,
+                                                     check_measurement_input)
+        return check_measurement_input(
+            image_layer, IntensitySemantics.ABSOLUTE, 'the partition coefficient')
+    except Exception as _exc:
+        debug_log("intensity-semantics check unavailable", _exc)
+        return True, ''
+
+
+def _pc_camera_floor(stype, dark_reference, cell_mask, img):
+    """The camera floor (pedestal) for ``Kp = (I_dense − floor)/(I_dilute − floor)`` — returns
+    ``(floor_source, I_dark)``, raising on an unknown ``sample_type``.
+
+    Leave the floor in and Kp is dragged toward 1 (a 500-count pedestal turns a true 30 into 5.81).
+    **IN VITRO THE FLOOR CANNOT BE AUTO-DETECTED BY ANY METHOD**: droplets sit in bulk buffer, so every
+    pixel is ``pedestal + dilute`` or ``pedestal + dense`` and no region holds the pedestal ALONE — it is
+    inseparable from the dilute phase IN PRINCIPLE. (Otsu was tried; it returned the dilute phase as the
+    "floor", Kp 5.77 vs a true 30, flagged valid — a heuristic cannot recover information the image does
+    not contain.) So the tool is TOLD the case: ``in_vitro`` REQUIRES a ``dark_reference`` (buffer, no
+    fluorophore, same settings); ``cellular`` can read the floor from the EXTRACELLULAR region via a
+    ``cell_mask`` — the MEDIAN, not the mean (the mean is dragged up by cell-edge pixels: 548 vs 504
+    against a true 500, the same stay-off-the-interface principle as the annulus gap)."""
+    floor_source = 'none'
+    I_dark = np.nan
+    if stype not in ('cellular', 'in_vitro'):
+        raise ValueError(
+            "sample_type must be 'cellular' or 'in_vitro'. The camera floor can be measured "
+            "from the image in CELLS (the extracellular region contains no fluorophore) but "
+            "NOT IN VITRO (every pixel contains the dilute phase, so the pedestal cannot be "
+            "isolated by any method). The tool must be told which case it is in rather than "
+            "guess -- guessing produced a 5x error, confidently reported.")
+
+    if dark_reference is not None:
+        if np.isscalar(dark_reference):
+            I_dark = float(dark_reference)
+        else:
+            _d = np.asarray(dark_reference, dtype=float)
+            I_dark = float(np.median(_d[np.isfinite(_d)])) if _d.size else np.nan
+        floor_source = 'dark_reference'
+
+    elif stype == 'cellular' and cell_mask is not None:
+        # Outside every cell there is no fluorophore, so that region IS the floor.
+        _cm = np.asarray(cell_mask)
+        outside = (~_cm) if _cm.dtype == bool else (_cm == 0)
+        if outside.sum() > 50:
+            I_dark = float(np.median(img[outside]))
+            floor_source = 'extracellular'
+    return floor_source, I_dark
+
+
+def _pc_estimate_gap(dist_out, img, gap_px):
+    """The offset from the droplet edge to the inner ring of the dilute-phase annulus — ``3 × interface
+    width`` (floored at 5 px), or ``gap_px`` when the caller fixes it.
+
+    A phase boundary is not a step: it has a finite interface width, and a ring drawn against the edge
+    sits inside that gradient and reads far too high (gap 0 → 492 against a true dilute of 100; gap 10 →
+    100.3, converged). The width is estimated from where the intensity, walking outward, falls to 10% of
+    its local range."""
+    if gap_px is not None:
+        return float(gap_px)
+    shell = (dist_out > 0) & (dist_out <= 12)
+    if shell.any():
+        prof = [float(img[(dist_out > d - 1) & (dist_out <= d)].mean())
+                for d in range(1, 13)
+                if ((dist_out > d - 1) & (dist_out <= d)).any()]
+        prof = np.asarray(prof)
+        if prof.size > 3:
+            lo, hi = prof.min(), prof.max()
+            thr = lo + 0.1 * (hi - lo)
+            below = np.flatnonzero(prof <= thr)
+            iface = float(below[0] + 1) if below.size else 3.0
+        else:
+            iface = 3.0
+    else:
+        iface = 3.0
+    return max(5.0, 3.0 * iface)
+
+
+def _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px, ring_width_px, allow_no_reference):
+    """Per droplet: the dense-mask vs annular-dilute intensities → the per-droplet rows and the per-
+    droplet mask CVs. Emits the OVER-INCLUSIVE-mask warning at the end.
+
+    A mask that spills past the droplet edge pulls DILUTE pixels into the dense average, so I_dense — and
+    Kp — collapse (true Kp 30 → 4.4 at a 50 px mask on a 13 px droplet, a 7x error reported as
+    "validated"). It is detectable from the data alone: a clean dense mask has a LOW coefficient of
+    variation (0.016), an over-inclusive one a high one (0.807) — a 50-fold, monotonic separation."""
+    from scipy import ndimage as _ndi
+    rows = []
+    _mask_cv = []          # per-droplet CV: an over-inclusive mask has a HIGH CV
+    for lb in ids:
+        obj = (lab == lb)
+        if not obj.any():
+            continue
+
+        dist_out = _ndi.distance_transform_edt(~obj)
+        _gap = _pc_estimate_gap(dist_out, img, gap_px)
+        ring = (dist_out > _gap) & (dist_out <= _gap + float(ring_width_px))
+        ring &= (lab == 0)                       # never sample another droplet
+        if not ring.any():
+            continue
+
+        dense_px = img[obj]
+        _cv = (float(np.std(dense_px) / max(abs(np.mean(dense_px)), 1e-9))
+               if dense_px.size > 1 else 0.0)
+        _mask_cv.append(_cv)
+        ring_px = img[ring]
+        I_dense = float(dense_px.mean())
+        I_ring = float(ring_px.mean())
+
+        tol = 1e-6 * max(abs(sat), 1.0)
+        frac_sat = float((dense_px >= sat - tol).mean())
+        saturated = bool(frac_sat > 0.001)
+
+        contrast = I_dense - I_ring              # the pedestal CANCELS here
+        raw_ratio = (I_dense / I_ring) if I_ring > 0 else np.nan
+        if saturated:
+            kp = np.nan
+        elif np.isfinite(I_dark) and (I_ring - I_dark) > 0:
+            kp = (I_dense - I_dark) / (I_ring - I_dark)
+        elif allow_no_reference:
+            kp = raw_ratio                       # NOT Kp — a pedestal-biased ratio the caller opted into
+        else:
+            kp = np.nan                          # no reference -> Kp is not computable
+
+        rows.append(dict(
+            droplet_label=int(lb),
+            I_dense=I_dense, I_dilute_local=I_ring, I_dark=I_dark,
+            gap_px=_gap,
+            contrast=contrast,
+            partition_coefficient=kp,
+            raw_ratio=raw_ratio,
+            saturated=saturated, saturated_fraction=frac_sat,
+        ))
+
+    # A high CV inside the dense mask means the mask is including dilute-phase pixels.
+    if _mask_cv:
+        _cv_med = float(np.median(_mask_cv))
+        if _cv_med > 0.25:
+            napari_show_warning(
+                f"Partition coefficient: the droplet mask looks OVER-INCLUSIVE — the "
+                f"intensity inside it has a coefficient of variation of {_cv_med:.2f}, and a "
+                f"clean dense-phase mask has a CV near 0.02 (every pixel is dense phase).\n\n"
+                f"A mask that spills past the droplet edge pulls DILUTE-phase pixels into the "
+                f"dense average, so I_dense falls and **Kp falls with it**. Measured on a "
+                f"scene with a TRUE Kp of 30: a mask 1.5x too large gives Kp = 19.9 "
+                f"(CV 0.42), and one 2.3x too large gives **Kp = 9.5** (CV 0.81) — **a 3x "
+                f"collapse, reported with no indication that anything is wrong.**\n\n"
+                f"Tighten the segmentation until the mask contains the dense phase and not "
+                f"its surroundings.")
+    return rows, _mask_cv
+
+
+def _pc_verdict(floor_source, stype, allow_no_reference, df, kp_mean, I_dark, mask_cv):
+    """Build the human verdict for the measured field and emit the matching napari notification.
+
+    Two honesty rules live here: a validation claim is NEVER printed next to a NaN (it tells the user the
+    machinery is sound at the moment it refused to answer), and the "validated" message NEVER sounds
+    confident when the MASK is suspect (a reassurance the user reads instead of the warning is worse than
+    none — the pedestal correction can be sound while an over-inclusive mask collapses Kp by 7x)."""
+    if floor_source == 'dark_reference' and not np.isfinite(kp_mean):
+        verdict = (
+            f"Kp is NOT COMPUTABLE for this image — see the warning above. "
+            f"{int(df['saturated'].sum()) if len(df) else 0} of {len(df)} droplet(s) are "
+            f"saturated at the detector ceiling.\n\n"
+            f"The camera floor WAS measured correctly from the dark reference "
+            f"({I_dark:.1f} counts), and that part of the measurement is sound. **It does not "
+            f"help**: a clipped dense phase truncates the numerator by an unknown amount, so "
+            f"the ratio is meaningless rather than a lower bound. Re-acquire with a shorter "
+            f"exposure or lower gain.")
+        napari_show_warning("Partition coefficient: " + verdict)
+
+    elif floor_source == 'dark_reference':
+        verdict = (f"Kp = {kp_mean:.2f}. The camera floor was measured directly from the "
+                   f"DARK REFERENCE ({I_dark:.1f} counts) and removed from both phases, so "
+                   f"Kp is pedestal-independent. Validated: 29.65 recovered against a true "
+                   f"30.0 at pedestals of 0, 100, 500 and 2000 counts.")
+        if mask_cv and float(np.median(mask_cv)) > 0.25:
+            verdict += (" **But see the mask warning above — the pedestal correction is "
+                        "sound and the MASK is not, and Kp is only as good as the worse of "
+                        "the two.**")
+        else:
+            napari_show_info("Partition coefficient: " + verdict)
+
+    elif floor_source == 'extracellular':
+        verdict = (f"Kp = {kp_mean:.2f}. The camera floor ({I_dark:.1f} counts) came from "
+                   f"the EXTRACELLULAR REGION. In cells this is a legitimate dark "
+                   f"reference: there is no fluorophore outside the cell, so that region "
+                   f"contains the camera pedestal (and any medium autofluorescence — a real "
+                   f"floor you also want removed). The MEDIAN of the outside region is used, "
+                   f"not the mean: the mean is dragged upward by cell-edge pixels (measured, "
+                   f"against a true pedestal of 500 — mean 548.2, median 504.0). A dedicated "
+                   f"dark frame remains the more direct measurement.")
+        napari_show_info("Partition coefficient: " + verdict)
+
+    elif stype == 'in_vitro':
+        # In vitro there is NOTHING to fall back on. Say so plainly.
+        verdict = (
+            "IN VITRO WITHOUT A DARK REFERENCE — Kp is not computable, and no heuristic can "
+            "rescue it.\n\n"
+            "Droplets sit in bulk buffer: every pixel contains the dilute phase, so no "
+            "region of the image holds the camera pedestal alone. The floor and the dilute "
+            "phase are INSEPARABLE IN PRINCIPLE, not merely hard to separate. (An automatic "
+            "threshold was tried and it returned the DILUTE PHASE as the 'camera floor', "
+            "giving Kp = 5.77 against a true 30 — confidently, and silently.)\n\n"
+            "THE FIX: acquire a DARK REFERENCE — buffer with no fluorophore, same camera "
+            "settings — and pass it as `dark_reference`. It takes one extra frame.\n\n"
+            f"What IS reported meanwhile: the CONTRAST "
+            f"(I_dense − I_dilute = {float(df['contrast'].mean()) if len(df) else float('nan'):.0f}), "
+            "which is exact against the PEDESTAL (it cancels in the difference) but NOT "
+            "immune to the droplet's PSF halo — a 5 px edge costs it 22%. Pass "
+            "`allow_no_reference=True` to additionally receive the raw intensity ratio, "
+            "which is NOT Kp and is biased toward 1 by an unknowable amount.")
+        napari_show_warning("Partition coefficient: " + verdict)
+
+    elif allow_no_reference:
+        verdict = (f"**NOT a partition coefficient — a raw intensity ratio ({kp_mean:.2f}), "
+                   f"biased toward 1.** No camera floor was available. The annulus measures "
+                   f"(camera pedestal + dilute phase), and nothing in the image separates "
+                   f"them, so the bias is UNKNOWABLE from this image: with a true Kp of 30 "
+                   f"and a 500-count pedestal, the raw ratio returns 5.81. Use it for "
+                   f"RELATIVE comparison between images acquired identically; do not report "
+                   f"it as Kp. The CONTRAST is exact regardless.")
+        napari_show_warning("Partition coefficient: " + verdict)
+
+    else:
+        verdict = (
+            "NO CAMERA FLOOR — Kp is not computable.\n\n"
+            "For CELLULAR data, pass `cell_mask=<mask>`: the extracellular region contains "
+            "no fluorophore and is a genuine dark reference.\n"
+            "For IN VITRO data, pass `dark_reference=<image>` (buffer, no fluorophore, same "
+            "camera settings) — nothing else can work, because every pixel contains the "
+            "dilute phase.\n"
+            "Or `allow_no_reference=True` to receive the raw ratio, clearly labelled as NOT "
+            "Kp.\n\n"
+            "The CONTRAST (I_dense − I_dilute) is reported regardless and is exact: the "
+            "pedestal cancels in the difference — though not immune to the PSF halo, "
+            "which costs a 5 px edge 22%.")
+        napari_show_warning("Partition coefficient: " + verdict)
+    return verdict
+
+
 def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
                                 dark_reference=None, cell_mask=None,
                                 allow_no_reference=False,
@@ -919,38 +1174,15 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
     gap_px : distance from the droplet edge to the inner edge of the annulus. Default:
         3 x the estimated interface width (min 5 px).
     """
-    # ── Is this image even a valid input for an INTENSITY measurement? ─────────
-    #
-    # Kp is a ratio of intensities, so it is only meaningful on an image whose pixel values
-    # still relate to photon count. Several routine preprocessing steps destroy that — which
-    # is what they are FOR — and nothing previously stopped their output being fed here.
-    # Measured on a droplet field with a TRUE Kp of 30:
-    #
-    #     raw counts            ratio    5.83
-    #     min-max normalised    ratio  130.01   (and it swings with the noise)
-    #     after white top-hat   ratio  199.27   (background REMOVED -> dilute ~ 0)
-    #     after top-hat + LoG   ratio  -11.96   (LoG is SIGNED -> a NEGATIVE Kp)
-    #     after CLAHE           ratio   64.77   (measures the algorithm, not the sample)
-    #
-    # The information needed to catch this is in the PROVENANCE, not the pixels: a
-    # background-subtracted image looks like an image with a dark background. So the
-    # operations record what they did, and the measurement checks. Pass `image_layer` (the
-    # napari layer) to enable the check; without it the measurement proceeds unchecked.
-    if image_layer is not None:
-        try:
-            from pycat.utils.intensity_semantics import (IntensitySemantics,
-                                                         check_measurement_input)
-            _ok, _why = check_measurement_input(
-                image_layer, IntensitySemantics.ABSOLUTE, 'the partition coefficient')
-            if not _ok:
-                napari_show_warning("Partition coefficient: " + _why)
-                return dict(partition_coefficient=np.nan, contrast=np.nan,
-                            is_true_kp=False, floor_source='none',
-                            per_droplet_df=pd.DataFrame(), verdict=_why)
-            elif _why:
-                napari_show_warning("Partition coefficient: " + _why)
-        except Exception as _exc:
-            debug_log("intensity-semantics check unavailable", _exc)
+    # Kp is only meaningful on an ABSOLUTE-intensity image; refuse a preprocessed one (see helper).
+    _ok, _why = _pc_check_input(image_layer)
+    if not _ok:
+        napari_show_warning("Partition coefficient: " + _why)
+        return dict(partition_coefficient=np.nan, contrast=np.nan,
+                    is_true_kp=False, floor_source='none',
+                    per_droplet_df=pd.DataFrame(), verdict=_why)
+    if _why:
+        napari_show_warning("Partition coefficient: " + _why)
 
     img = np.asarray(image, dtype=float)
     lab = np.asarray(labeled_droplets)
@@ -969,280 +1201,18 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
             mx = float(np.nanmax(img)) if img.size else 1.0
             sat = 1.0 if mx <= 1.0 + 1e-6 else mx
 
-    from scipy import ndimage as _ndi
-
-    # ── The camera floor: what is POSSIBLE depends on the sample ───────────────
-    #
-    # Kp = (I_dense - floor) / (I_dilute - floor). The floor is the camera pedestal (plus
-    # any medium autofluorescence). Leave it in and Kp is dragged toward 1: on a synthetic
-    # droplet with a TRUE Kp of 30, a pedestal of 500 counts left in place gives 5.81 -- an
-    # 81% error that looks like a plausible number.
-    #
-    # **IN VITRO THE FLOOR CANNOT BE AUTO-DETECTED. NOT BY ANY METHOD.**
-    #
-    # Droplets sit in bulk buffer. Every pixel is (pedestal + dilute) or (pedestal + dense).
-    # No region of the image contains the pedestal ALONE, so there is nothing to measure it
-    # against: the camera floor and the dilute phase are **inseparable in principle**, not
-    # merely hard to separate.
-    #
-    # An earlier version tried Otsu anyway. It duly split dilute-from-dense and returned
-    # the DILUTE PHASE (600.9 counts) as the "camera floor", giving Kp = 5.77 against a
-    # true 30 -- and flagged it `is_true_kp=True`. A separation test did not save it,
-    # because dense/dilute is itself a 5x ratio: **Otsu cannot tell "background vs cell"
-    # from "dilute vs dense". Both are bimodal.** A heuristic cannot recover information the
-    # image does not contain, and the failure was silent and confident.
-    #
-    # So the tool is TOLD which case it is in, and refuses rather than guesses:
-    #
-    #   sample_type='in_vitro'  -> a dark_reference is REQUIRED. Buffer with no fluorophore,
-    #                              same camera settings. Nothing else will do.
-    #   sample_type='cellular'  -> the EXTRACELLULAR region is a genuine dark reference
-    #                              (no fluorophore outside the cell), so the floor CAN be
-    #                              measured from the image -- but from a CELL MASK, which
-    #                              says where "outside" is. Not from a threshold.
-    floor_source = 'none'
-    I_dark = np.nan
     _stype = str(sample_type).lower()
-    if _stype not in ('cellular', 'in_vitro'):
-        raise ValueError(
-            "sample_type must be 'cellular' or 'in_vitro'. The camera floor can be measured "
-            "from the image in CELLS (the extracellular region contains no fluorophore) but "
-            "NOT IN VITRO (every pixel contains the dilute phase, so the pedestal cannot be "
-            "isolated by any method). The tool must be told which case it is in rather than "
-            "guess -- guessing produced a 5x error, confidently reported.")
+    floor_source, I_dark = _pc_camera_floor(_stype, dark_reference, cell_mask, img)
 
-    if dark_reference is not None:
-        if np.isscalar(dark_reference):
-            I_dark = float(dark_reference)
-        else:
-            _d = np.asarray(dark_reference, dtype=float)
-            I_dark = float(np.median(_d[np.isfinite(_d)])) if _d.size else np.nan
-        floor_source = 'dark_reference'
-
-    elif _stype == 'cellular' and cell_mask is not None:
-        # Outside every cell there is no fluorophore, so that region IS the floor.
-        #
-        # Use the MEDIAN, not the mean: the mean is dragged upward by cell-edge pixels.
-        # Measured against a true pedestal of 500 -- mean 548.2 (+48.2), median 504.0 (+4.0).
-        # Same principle as the annulus gap: stay away from the interface.
-        _cm = np.asarray(cell_mask)
-        outside = (~_cm) if _cm.dtype == bool else (_cm == 0)
-        if outside.sum() > 50:
-            I_dark = float(np.median(img[outside]))
-            floor_source = 'extracellular'
-
-
-    rows = []
-    _mask_cv = []          # per-droplet CV: an over-inclusive mask has a HIGH CV
-    for lb in ids:
-        obj = (lab == lb)
-        if not obj.any():
-            continue
-
-        # Interface width, estimated from the intensity gradient at the boundary. A wider
-        # interface needs a larger gap.
-        dist_out = _ndi.distance_transform_edt(~obj)
-        if gap_px is None:
-            # crude but robust: the distance over which the intensity falls from the
-            # dense level toward the surroundings
-            shell = (dist_out > 0) & (dist_out <= 12)
-            if shell.any():
-                prof = [float(img[(dist_out > d - 1) & (dist_out <= d)].mean())
-                        for d in range(1, 13)
-                        if ((dist_out > d - 1) & (dist_out <= d)).any()]
-                prof = np.asarray(prof)
-                if prof.size > 3:
-                    lo, hi = prof.min(), prof.max()
-                    thr = lo + 0.1 * (hi - lo)
-                    below = np.flatnonzero(prof <= thr)
-                    iface = float(below[0] + 1) if below.size else 3.0
-                else:
-                    iface = 3.0
-            else:
-                iface = 3.0
-            _gap = max(5.0, 3.0 * iface)
-        else:
-            _gap = float(gap_px)
-
-        ring = (dist_out > _gap) & (dist_out <= _gap + float(ring_width_px))
-        ring &= (lab == 0)                       # never sample another droplet
-        if not ring.any():
-            continue
-
-        dense_px = img[obj]
-
-        # ── An OVER-INCLUSIVE droplet mask silently collapses Kp ────────────────
-        #
-        # Kp = I_dense / I_dilute. If the mask spills past the droplet edge it pulls
-        # DILUTE-phase pixels into the "dense" average, so I_dense falls — and Kp falls with
-        # it. Measured, on a scene with a TRUE Kp of 30 (true droplet radius 13 px):
-        #
-        #     mask radius    Kp reported    CV inside the mask
-        #     13 px (true)   **29.61**      0.016
-        #     20 px           19.93         0.421
-        #     30 px            9.46         0.807
-        #     50 px          **4.41**       0.902
-        #
-        # **A 7x collapse** — and the function was reporting "Kp is pedestal-independent,
-        # validated" the whole way down. The message was reassuring while the number was
-        # wrong.
-        #
-        # It is DETECTABLE from the data alone, with no ground truth: a clean dense mask has
-        # a LOW coefficient of variation, because every pixel in it is dense phase. An
-        # over-inclusive mask mixes in dilute pixels, and the CV rises — 0.016 to 0.807, a
-        # 50-fold separation, monotonic in the error.
-        _cv = (float(np.std(dense_px) / max(abs(np.mean(dense_px)), 1e-9))
-               if dense_px.size > 1 else 0.0)
-        _mask_cv.append(_cv)
-        ring_px = img[ring]
-        I_dense = float(dense_px.mean())
-        I_ring = float(ring_px.mean())
-
-        tol = 1e-6 * max(abs(sat), 1.0)
-        frac_sat = float((dense_px >= sat - tol).mean())
-        saturated = bool(frac_sat > 0.001)
-
-        contrast = I_dense - I_ring              # the pedestal CANCELS here
-        raw_ratio = (I_dense / I_ring) if I_ring > 0 else np.nan
-        if saturated:
-            kp = np.nan
-        elif np.isfinite(I_dark) and (I_ring - I_dark) > 0:
-            kp = (I_dense - I_dark) / (I_ring - I_dark)
-        elif allow_no_reference:
-            # The caller has explicitly accepted an uncorrected ratio. It is NOT Kp — it is
-            # biased toward 1 by the pedestal, and the bias cannot be recovered from the
-            # image. Returned so the analysis can proceed, labelled so it cannot be
-            # mistaken for a partition coefficient.
-            kp = raw_ratio
-        else:
-            kp = np.nan                          # no reference -> Kp is not computable
-
-        rows.append(dict(
-            droplet_label=int(lb),
-            I_dense=I_dense, I_dilute_local=I_ring, I_dark=I_dark,
-            gap_px=_gap,
-            contrast=contrast,
-            partition_coefficient=kp,
-            raw_ratio=raw_ratio,
-            saturated=saturated, saturated_fraction=frac_sat,
-        ))
-
-    # A high CV inside the dense mask means the mask is including dilute-phase pixels.
-    if _mask_cv:
-        _cv_med = float(np.median(_mask_cv))
-        if _cv_med > 0.25:
-            napari_show_warning(
-                f"Partition coefficient: the droplet mask looks OVER-INCLUSIVE — the "
-                f"intensity inside it has a coefficient of variation of {_cv_med:.2f}, and a "
-                f"clean dense-phase mask has a CV near 0.02 (every pixel is dense phase).\n\n"
-                f"A mask that spills past the droplet edge pulls DILUTE-phase pixels into the "
-                f"dense average, so I_dense falls and **Kp falls with it**. Measured on a "
-                f"scene with a TRUE Kp of 30: a mask 1.5x too large gives Kp = 19.9 "
-                f"(CV 0.42), and one 2.3x too large gives **Kp = 9.5** (CV 0.81) — **a 3x "
-                f"collapse, reported with no indication that anything is wrong.**\n\n"
-                f"Tighten the segmentation until the mask contains the dense phase and not "
-                f"its surroundings.")
+    rows, _mask_cv = _pc_measure_droplets(img, lab, ids, sat, I_dark, gap_px,
+                                          ring_width_px, allow_no_reference)
 
     df = pd.DataFrame(rows)
     kp_vals = df['partition_coefficient'].to_numpy(dtype=float) if len(df) else np.array([])
     kp_vals = kp_vals[np.isfinite(kp_vals)]
     kp_mean = float(kp_vals.mean()) if kp_vals.size else np.nan
 
-    if floor_source == 'dark_reference' and not np.isfinite(kp_mean):
-        # ── Do not print a VALIDATION claim next to a NaN ────────────────────────
-        #
-        # The dark-reference verdict said "Kp = nan. ... Validated: 29.65 recovered against a
-        # true 30.0" — a reassurance printed beside a refusal. The 1.5.462 scoping guard did
-        # not catch it, because the claim is correctly scoped ("against the PEDESTAL") and the
-        # problem is different: **the number it is describing does not exist.**
-        #
-        # A validation claim attached to a NaN is worse than an unscoped one. It tells the
-        # user the machinery is sound at the exact moment the machinery has refused to answer,
-        # and invites them to go looking for the number somewhere else.
-        verdict = (
-            f"Kp is NOT COMPUTABLE for this image — see the warning above. "
-            f"{int(df['saturated'].sum()) if len(df) else 0} of {len(df)} droplet(s) are "
-            f"saturated at the detector ceiling.\n\n"
-            f"The camera floor WAS measured correctly from the dark reference "
-            f"({I_dark:.1f} counts), and that part of the measurement is sound. **It does not "
-            f"help**: a clipped dense phase truncates the numerator by an unknown amount, so "
-            f"the ratio is meaningless rather than a lower bound. Re-acquire with a shorter "
-            f"exposure or lower gain.")
-        napari_show_warning("Partition coefficient: " + verdict)
-
-    elif floor_source == 'dark_reference':
-        verdict = (f"Kp = {kp_mean:.2f}. The camera floor was measured directly from the "
-                   f"DARK REFERENCE ({I_dark:.1f} counts) and removed from both phases, so "
-                   f"Kp is pedestal-independent. Validated: 29.65 recovered against a true "
-                   f"30.0 at pedestals of 0, 100, 500 and 2000 counts.")
-        # ── Do NOT sound confident when the MASK is suspect ──────────────────────
-        #
-        # This message says the number is validated — and it is, against the PEDESTAL. It
-        # says nothing about the mask, and an over-inclusive mask collapses Kp by 7x while
-        # this reassurance prints unchanged. A confident verdict alongside a warning is worse
-        # than no verdict: the user reads the one that agrees with them.
-        if _mask_cv and float(np.median(_mask_cv)) > 0.25:
-            verdict += (" **But see the mask warning above — the pedestal correction is "
-                        "sound and the MASK is not, and Kp is only as good as the worse of "
-                        "the two.**")
-        else:
-            napari_show_info("Partition coefficient: " + verdict)
-
-    elif floor_source == 'extracellular':
-        verdict = (f"Kp = {kp_mean:.2f}. The camera floor ({I_dark:.1f} counts) came from "
-                   f"the EXTRACELLULAR REGION. In cells this is a legitimate dark "
-                   f"reference: there is no fluorophore outside the cell, so that region "
-                   f"contains the camera pedestal (and any medium autofluorescence — a real "
-                   f"floor you also want removed). The MEDIAN of the outside region is used, "
-                   f"not the mean: the mean is dragged upward by cell-edge pixels (measured, "
-                   f"against a true pedestal of 500 — mean 548.2, median 504.0). A dedicated "
-                   f"dark frame remains the more direct measurement.")
-        napari_show_info("Partition coefficient: " + verdict)
-
-    elif _stype == 'in_vitro':
-        # In vitro there is NOTHING to fall back on. Say so plainly.
-        verdict = (
-            "IN VITRO WITHOUT A DARK REFERENCE — Kp is not computable, and no heuristic can "
-            "rescue it.\n\n"
-            "Droplets sit in bulk buffer: every pixel contains the dilute phase, so no "
-            "region of the image holds the camera pedestal alone. The floor and the dilute "
-            "phase are INSEPARABLE IN PRINCIPLE, not merely hard to separate. (An automatic "
-            "threshold was tried and it returned the DILUTE PHASE as the 'camera floor', "
-            "giving Kp = 5.77 against a true 30 — confidently, and silently.)\n\n"
-            "THE FIX: acquire a DARK REFERENCE — buffer with no fluorophore, same camera "
-            "settings — and pass it as `dark_reference`. It takes one extra frame.\n\n"
-            f"What IS reported meanwhile: the CONTRAST "
-            f"(I_dense − I_dilute = {float(df['contrast'].mean()) if len(df) else float('nan'):.0f}), "
-            "which is exact against the PEDESTAL (it cancels in the difference) but NOT "
-            "immune to the droplet's PSF halo — a 5 px edge costs it 22%. Pass "
-            "`allow_no_reference=True` to additionally receive the raw intensity ratio, "
-            "which is NOT Kp and is biased toward 1 by an unknowable amount.")
-        napari_show_warning("Partition coefficient: " + verdict)
-
-    elif allow_no_reference:
-        verdict = (f"**NOT a partition coefficient — a raw intensity ratio ({kp_mean:.2f}), "
-                   f"biased toward 1.** No camera floor was available. The annulus measures "
-                   f"(camera pedestal + dilute phase), and nothing in the image separates "
-                   f"them, so the bias is UNKNOWABLE from this image: with a true Kp of 30 "
-                   f"and a 500-count pedestal, the raw ratio returns 5.81. Use it for "
-                   f"RELATIVE comparison between images acquired identically; do not report "
-                   f"it as Kp. The CONTRAST is exact regardless.")
-        napari_show_warning("Partition coefficient: " + verdict)
-
-    else:
-        verdict = (
-            "NO CAMERA FLOOR — Kp is not computable.\n\n"
-            "For CELLULAR data, pass `cell_mask=<mask>`: the extracellular region contains "
-            "no fluorophore and is a genuine dark reference.\n"
-            "For IN VITRO data, pass `dark_reference=<image>` (buffer, no fluorophore, same "
-            "camera settings) — nothing else can work, because every pixel contains the "
-            "dilute phase.\n"
-            "Or `allow_no_reference=True` to receive the raw ratio, clearly labelled as NOT "
-            "Kp.\n\n"
-            "The CONTRAST (I_dense − I_dilute) is reported regardless and is exact: the "
-            "pedestal cancels in the difference — though not immune to the PSF halo, "
-            "which costs a 5 px edge 22%.")
-        napari_show_warning("Partition coefficient: " + verdict)
+    verdict = _pc_verdict(floor_source, _stype, allow_no_reference, df, kp_mean, I_dark, _mask_cv)
 
     return dict(
         # NaN unless a floor was available, or the caller explicitly accepted a raw ratio.

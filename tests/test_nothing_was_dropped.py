@@ -64,6 +64,16 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.172 — `partition_coefficient_local` (the 394-line local-annulus Kp measurement) was split BY
+    # PHASE into pure helpers — `_pc_check_input` (intensity-provenance gate), `_pc_camera_floor`
+    # (pedestal / dark-reference / extracellular), `_pc_estimate_gap` (interface-width annulus offset),
+    # `_pc_measure_droplets` (the per-droplet loop + over-inclusive-mask warning) and `_pc_verdict` (the
+    # six-branch reporting chain) — dropping it 393 → 108 lines. Nothing was removed: every line and its
+    # rationale MOVED into a named helper, and a byte-identity characterization test
+    # (`test_partition_local_characterization`) captured the exact outputs across all branches BEFORE the
+    # split and asserts them unchanged after (no number moved).
+    'invitro_tools.py::partition_coefficient_local',
+
     # 1.6.168 — science_function_split: `fit_anomalous_diffusion` (the 394-line MSD/α fit behind
     # viscosity) was split BY COMPUTATIONAL PHASE into pure helpers — `_lag_window_gate`,
     # `_fit_msd_powerlaw`, `_assess_msd_identifiability`, `_classify_msd_motion`, `_package_msd_result` —

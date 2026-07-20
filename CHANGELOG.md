@@ -1,3 +1,24 @@
+## [1.6.172] - 2026-07-20
+### Changed — **partition_coefficient_local decomposed by phase (394 → 109 lines), proven byte-identical.**
+The local-annulus partition-coefficient measurement — a 394-line science function whose per-droplet loop,
+camera-floor logic, and six-branch verdict chain were fused into one body — is exactly what the
+complexity budget warns about: at that length a silent failure path is invisible. Split into pure,
+named phase helpers, none over 90 lines:
+- `_pc_check_input` — the ABSOLUTE-intensity provenance gate (a preprocessed image makes Kp meaningless);
+- `_pc_camera_floor` — the pedestal (`dark_reference` / extracellular median), with the "in vitro cannot
+  be auto-detected by any method" refusal;
+- `_pc_estimate_gap` — the interface-width annulus offset;
+- `_pc_measure_droplets` — the per-droplet dense-vs-annulus measurement + the over-inclusive-mask CV
+  warning;
+- `_pc_verdict` — the reporting chain, including the two honesty rules (no validation claim next to a
+  NaN; no confident "validated" when the mask is suspect).
+- **Behaviour-preserving, and pinned as such.** A new byte-identity characterization test
+  (`tests/test_partition_local_characterization.py`) captured the exact per-droplet and aggregate outputs
+  across all five reporting branches (dark reference, extracellular, in-vitro-no-reference, raw-ratio,
+  empty) plus the invalid-sample-type raise **before** the split, at `rel=1e-9`, and asserts them
+  unchanged after — no floating-point operation was reassociated, no number moved. The complexity ratchet
+  drops 134 → 133 (`_MAX_LONG_FUNCTIONS`), the win locked in downward.
+
 ## [1.6.171] - 2026-07-20
 ### Added — **Progress part 2, Part C: determinate bars over the core cell/condensate per-object loops.**
 The analysis half of the progress work (1.6.132) covered the two zero-bar widgets and was upgraded to the
