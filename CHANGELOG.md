@@ -1,3 +1,32 @@
+## [1.6.154] - 2026-07-20
+### Added — **Measurement ontology: what each measurement MEANS, machine-readable and guarded against drift.**
+`utils/measurement.py` already models a measurement's *value* (`Parameter`: units, uncertainty, source).
+This adds the missing *definitional* side — what a measurement means, the equation behind it, and where it
+comes from — the metadata a Methods section or figure legend needs, which today lives only in scattered
+docstrings. **Additive: no computation changes.**
+
+- New **`utils/measurement_ontology.py`** (`core`, pure): a frozen `MeasurementDef` (key, display_name,
+  definition, equation, units, interpretation, caveats, reference, doi) and `MEASUREMENTS` — a registry
+  seeded with 12 entries that are scientific *claims* (partition_coefficient, client_enrichment,
+  delta_g_transfer, viscosity, D_um2_per_s, alpha, mobile_fraction, t_half, manders_m1/m2, pearson,
+  projected_area_fraction). Plus `describe(key)` and `units_for(key)`.
+- **Transcribed, never invented.** Every definition/equation/units is transcribed from an existing PyCAT
+  docstring or the code itself. A `reference` is set only where the citation is certain (only `viscosity`,
+  → Stokes–Einstein); unsourced fields are left `None` for a domain expert — *a wrong equation or DOI in a
+  registry destined for a Methods section is worse than an absent one.* Keys are the EMITTED column names
+  (`D_um2_per_s` not "diffusion_coefficient"; `projected_area_fraction`, flagged as a 2D projection proxy,
+  not a true volume fraction).
+- New **`tests/test_measurement_ontology.py`** (`core`): the load-bearing **units-agreement** test —
+  constructs the real emitter (`delta_g_transfer(10, 1, 298)` → a `Parameter`) and asserts its emitted
+  units equal the ontology's, so a units claim cannot silently drift from the code. Plus: every
+  `emitted=True` key must appear in `src/pycat` (no aspirational entries), every `reference` must carry an
+  equation (no orphan citations), and every entry is well-formed.
+- **Consumer:** `comparative_figures.condition_comparison` now attaches the measurement's display name,
+  units, definition, and caveats to the returned `summary.attrs`, and labels the y-axis
+  `"{display_name} ({units})"` when the ontology knows the measurement — so a figure reads its own legend.
+- **Deliberately NOT** Methods-section generation or a Measurement Reliability Index (both build on this),
+  and NOT a duplication of scikit-image's `regionprops` geometry docs (plain geometry is delegated there).
+
 ## [1.6.153] - 2026-07-20
 ### Added — **CZI seam regression test: turn the reported mosaic discontinuity into a measurable number.**
 The one prior-audit priority carried across three consecutive audits without closing — because *"a visual

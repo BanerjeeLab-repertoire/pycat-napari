@@ -319,6 +319,15 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
     summary.attrs['note'] = '' if result is None else result.note
     summary.attrs['unit_cols'] = unit_cols
 
+    # Attach the measurement's definition/units/caveats when the ontology knows this measurement, so a
+    # figure legend or Methods section can read them off the summary frame instead of a scattered docstring.
+    from pycat.utils.measurement_ontology import describe
+    _mdef = describe(measurement)
+    summary.attrs['measurement_display_name'] = _mdef.display_name if _mdef else measurement
+    summary.attrs['measurement_units'] = _mdef.units if _mdef else None
+    summary.attrs['measurement_definition'] = _mdef.definition if _mdef else None
+    summary.attrs['measurement_caveats'] = list(_mdef.caveats) if _mdef else []
+
     fig = ax.figure if ax is not None else plt.figure(figsize=(1.6 * len(conditions) + 2, 4.5))
     ax = ax or fig.add_subplot(111)
     rng = np.random.default_rng(0)
@@ -353,7 +362,7 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
     ax.set_xticks(range(len(conditions)))
     ax.set_xticklabels(conditions, rotation=20, ha='right')
     ax.set_xlabel(' | '.join(condition_cols) if isinstance(condition_cols, (list, tuple)) else condition_cols)
-    ax.set_ylabel(measurement)
+    ax.set_ylabel(f"{_mdef.display_name} ({_mdef.units})" if _mdef else measurement)
     ax.legend(loc='best', fontsize=8, frameon=False)
     _title = f"{measurement} — unit: {'|'.join(unit_cols)}"
     if result is not None:
