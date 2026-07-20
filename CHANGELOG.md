@@ -1,3 +1,25 @@
+## [1.6.189] - 2026-07-20
+### Added — **Entity registry: resolve an entity id to its CURRENT location through one authority.**
+A row carried an opaque `_pycat_entity_id` for equality AND separate location columns (bbox, layer id,
+frame, source) generated independently — so it could carry correct identity with STALE location. New
+**`utils/entity_registry.py`** closes that divergence:
+- `EntityRecord` binds an entity's id, `EntityLocation` (bbox/layer/frame/source), provenance, and dataset
+  in ONE record, so identity and location cannot be generated separately and drift apart.
+- `EntityRegistry` — `register` / `resolve(id) → EntityRecord | None` / `update_location(id, …)` /
+  `invalidate_dataset(uuid)`. A view holds only the id and resolves location through this authority, so a
+  location change (a labels layer re-added, a re-crop, a frame reindex) is seen by every view at once, with
+  no stale local cache to send it to the wrong place.
+- **Resolution fails HONESTLY:** `resolve` returns `None` for an unknown id or a closed dataset — a view
+  shows "cannot locate" rather than navigating to a guessed, wrong place (a wrong target is worse than an
+  admitted miss).
+- Tests (`core`): `tests/test_entity_registry.py` — register/resolve round-trip, unknown → None, the
+  divergence test (`update_location` changes every subsequent resolve), `invalidate_dataset` → honest miss,
+  identity+location in one record, re-register replaces.
+- Additive: the location columns stay (tables remain standalone-readable) as a registry-backed cache.
+  Wiring the registry's population into the identity-stamping finalization chokepoint and routing
+  `SelectionService` navigation through `resolve` depends on the auto-identity-stamping mechanism + the
+  dataset-UUID work; this ships the authority they will populate.
+
 ## [1.6.188] - 2026-07-20
 ### Fixed — **Entity identity: `stamp_entity_ids` now derives the frame PER ROW (auto-identity §C1).**
 `stamp_entity_ids` took a scalar `frame` and stamped every row with it — correct for a single-frame table,
