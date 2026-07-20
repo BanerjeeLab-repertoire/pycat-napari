@@ -1,3 +1,31 @@
+## [1.6.196] - 2026-07-20
+### Added — **Automatic entity-identity stamping via the result-finalization chokepoint.**
+Manual `stamp_entity_ids` reached only **3 of many** object-producing paths; every new analysis was one
+forgotten call away from silent row-position linking, and `operation_id` was a hard-coded string (an
+interactive/batch divergence risk). Identity is now applied by **declaration** at a chokepoint, so coverage
+grows by declaring a spec — not by scattering more stamping calls.
+
+- New in **`utils/entity_ref.py`**: a frozen **`EntitySpec`** (entity_type + label/parent/frame columns), a
+  declaration registry (`register_entity_spec` / `entity_spec_for`), and **`finalize_entity_table(table,
+  operation_id)`** — the chokepoint. If the operation declares a spec, it stamps identity **and** location
+  in one pass with the operation's real id; an undeclared operation is returned untouched (honestly
+  row-position-linked); it is **idempotent**, so the automatic path and a manual call never double-stamp.
+- **`operation_runner.execute` calls it automatically** on a DataFrame result, driven by the operation
+  captured from `operation_context` (1.6.155) — so `operation_id` comes from the declaration/context, **not
+  a hard-coded string**. A non-DataFrame result or an undeclared operation passes through unchanged; a
+  finalization failure never costs the caller their result.
+- **The 3 manual sites migrated** (cell / puncta / region props) to the declaration with **byte-identical
+  ids** (proven by a parametrized equivalence test), and the top previously-unstamped producers
+  (**condensate, tracks, colocalized objects**) now gain identity by declaration. Tracks declare
+  `frame_column='frame'`, so a multi-frame table stamps each row with its **own** frame (the per-row-frame
+  fix, 1.6.188, now flowing through the chokepoint).
+- The entity-id **scheme is unchanged** (it is validated) — only *where and how reliably* it is applied.
+- New **`tests/test_auto_identity_stamping.py`** (`core`): a declared operation is stamped automatically;
+  `operation_id` flows from the declaration (same rows under two ops → different ids); per-row frames;
+  identity + location co-generated; undeclared → untouched; the migrated sites are byte-identical; a
+  previously-unstamped producer gains identity by declaring; idempotency; and the runner stamps at
+  finalization (and leaves non-DataFrame/undeclared results alone).
+
 ## [1.6.195] - 2026-07-20
 ### Fixed — **headless-CI regressions: `core` tests must not pull in Qt.**
 Six `core` tests passed locally (where PyQt5/qtpy are installed) but failed on the headless `core` CI

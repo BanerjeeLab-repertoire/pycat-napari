@@ -23,6 +23,21 @@ import inspect
 import threading
 
 
+def _finalize_entities(result, operation_id):
+    """Auto-stamp entity identity on a DataFrame result when its operation declares entities. Non-DataFrame
+    results and undeclared operations pass through unchanged. Identity is a convenience — a failure here
+    NEVER costs the caller their result."""
+    if operation_id is None or not hasattr(result, 'columns'):
+        return result
+    try:
+        from pycat.utils.entity_ref import finalize_entity_table
+        return finalize_entity_table(result, operation_id)
+    except Exception as exc:  # broad-ok: identity finalization must never break the operation's result transport
+        from pycat.utils.general_utils import debug_log
+        debug_log('operation_runner: entity finalization failed', exc)
+        return result
+
+
 class CancellationToken:
     """A cooperative cancel signal. The runner checks it where progress fires; set it with `cancel()`."""
 
@@ -112,6 +127,14 @@ class OperationRunner:
 
         if gen != self._generation:
             return None                          # a newer request superseded this one — discard silently
+
+        # ── The identity-stamping chokepoint ────────────────────────────────────
+        # Every operation's object table passes through here on the main thread. If the operation in effect
+        # DECLARES how its rows are identified (register_entity_spec), stamp identity + location by DEFAULT —
+        # so a new analysis is identified without a per-function stamp_entity_ids call. Undeclared → untouched
+        # (honestly row-position-linked); idempotent, so a manually-stamped table is not double-stamped.
+        result = _finalize_entities(result, captured_op)
+
         if on_result is not None:
             with operation_context(captured_op):  # re-establish the caller's op so a layer made here is tagged definitionally
                 on_result(result)                # MAIN thread: run_with_progress has returned to the caller

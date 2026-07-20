@@ -1,11 +1,13 @@
-> **🟡 STATUS — Part C1 (per-row frames) DONE, shipped in 1.6.188; the chokepoint mechanism REMAINS.**
-> `stamp_entity_ids` gained `frame_column=` so a multi-frame table derives identity's frame PER ROW instead
-> of stamping every row with one reference frame (the concrete bug); scalar `frame` is unchanged when no
-> frame_column is given (`tests/test_entity_ref.py`). **Remaining (the architectural core):** Part A/B —
-> declare `EntitySpec.produces_entities` on the `OperationSpec` and stamp automatically at the
-> `operation_runner` finalization chokepoint (with `operation_id` from the spec, not a hard-coded string),
-> so coverage grows by declaration; and Part C's identity+location co-generation. That is a multi-file
-> change to the operation/result infrastructure and warrants its own focused pass.
+> **✅ STATUS — DONE (chokepoint shipped in 1.6.196; Part C1 per-row frames shipped 1.6.188).**
+> `EntitySpec` + a declaration registry (`register_entity_spec` / `entity_spec_for`) and the
+> `finalize_entity_table` chokepoint live in `utils/entity_ref.py`; `operation_runner.execute` calls it
+> automatically on a DataFrame result, driven by the operation captured from `operation_context` — so
+> `operation_id` comes from the declaration, not a hard-coded string. The 3 manual sites (cell / puncta /
+> region props) migrated to the declaration with byte-identical ids, and the top previously-unstamped
+> producers (condensate, tracks, colocalized objects) now gain identity by declaration. `finalize` is
+> idempotent (no double-stamp) and co-generates identity + location in one pass; per-row frames work.
+> `tests/test_auto_identity_stamping.py` pins all of it. **Follow-on:** wiring the `entity_registry` at this
+> same chokepoint (populate a record → id + registry entry) is the remaining `entity_registry`-spec item.
 
 # Claude Code spec — Automatic entity-identity stamping via result finalization
 

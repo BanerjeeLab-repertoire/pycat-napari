@@ -293,6 +293,73 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
     return df
 
 
+# ── Automatic stamping via declaration (the finalization chokepoint) ─────────────────────────────
+#
+# Manual `stamp_entity_ids` reaches only the 3 sites that remember to call it; every new analysis is one
+# forgotten call away from silent row-position linking. The fix is to make an operation DECLARE how its
+# rows are identified, once, and stamp automatically at the result-finalization chokepoint — so coverage
+# grows by DECLARATION, not by scattering more stamping calls. `operation_id` comes from the declaration,
+# not a hard-coded string at the call site, which is the interactive/batch divergence the audit named.
+@dataclasses.dataclass(frozen=True)
+class EntitySpec:
+    """How an operation's object-table rows are identified. Declared once per operation via
+    ``register_entity_spec``; the finalization chokepoint reads it to stamp identity + location together."""
+    entity_type: str
+    label_column: str = 'label'
+    parent_column: "str | None" = None      # None → auto-detect among the known parent-column spellings
+    frame_column: "str | None" = None        # None → single-frame (scalar frame); set for multi-frame tables
+
+
+_ENTITY_SPECS: dict = {}
+
+
+def register_entity_spec(operation_id, spec):
+    """Declare that ``operation_id`` produces the entities described by ``spec``. Idempotent."""
+    _ENTITY_SPECS[str(operation_id)] = spec
+    return spec
+
+
+def entity_spec_for(operation_id):
+    """The `EntitySpec` declared for ``operation_id``, or ``None`` (an undeclared operation stays honestly
+    row-position-linked — never silently mis-stamped)."""
+    return _ENTITY_SPECS.get(str(operation_id)) if operation_id is not None else None
+
+
+def finalize_entity_table(table, operation_id, *, source_path=None, frame=None, labels_layer=None):
+    """**The identity chokepoint.** If ``operation_id`` declares an `EntitySpec`, stamp the table's identity
+    AND location in one pass, using the operation's real id and the declared columns. An operation that
+    declares nothing is returned untouched (honestly row-position-linked). **Idempotent** — a table already
+    carrying ``_pycat_entity_id`` is returned unchanged, so the automatic runner path and a manual call can
+    never double-stamp. This is what lets a new producer gain identity by declaring a spec, not by adding a
+    stamping call."""
+    spec = entity_spec_for(operation_id)
+    if spec is None or table is None:
+        return table
+    if ENTITY_ID_COLUMN in getattr(table, 'columns', ()):
+        return table
+    return stamp_entity_ids(
+        table, entity_type=spec.entity_type, source_path=source_path, operation_id=operation_id,
+        labels_layer=labels_layer, frame=frame, label_column=spec.label_column,
+        parent_column=spec.parent_column, frame_column=spec.frame_column)
+
+
+def _register_default_entity_specs():
+    """Declare the highest-value object-producing operations (increment 1). The three existing manual sites
+    (cell / puncta / region props) migrate to these declarations — identical output, sourced from one place
+    — and the top previously-unstamped producers (condensate, tracks, colocalized objects) now gain identity
+    by declaration. Parent columns are left None where the codebase auto-detects the spelling (puncta emit
+    ``'cell label'`` with a space); frame_column is set only for genuinely multi-frame tables (tracks)."""
+    register_entity_spec('cell_analysis', EntitySpec('cell', label_column='label'))
+    register_entity_spec('puncta_analysis', EntitySpec('punctum', label_column='label'))
+    register_entity_spec('measure_region_props', EntitySpec('mask_object', label_column='label'))
+    register_entity_spec('condensate_analysis', EntitySpec('condensate', label_column='label'))
+    register_entity_spec('vpt_tracks', EntitySpec('bead', label_column='track_id', frame_column='frame'))
+    register_entity_spec('object_colocalization', EntitySpec('colocalized_object', label_column='label'))
+
+
+_register_default_entity_specs()
+
+
 def attach_layer_id(df, labels_layer):
     """Fill in ``_pycat_layer_id`` once the labels layer actually **exists**.
 

@@ -25,7 +25,7 @@ Date
 import os
 import numpy as np
 
-from pycat.utils.entity_ref import attach_layer_id, source_path_of, stamp_entity_ids
+from pycat.utils.entity_ref import attach_layer_id, finalize_entity_table, source_path_of
 from pycat.utils.object_ref import normalise_bbox_columns
 import pandas as pd
 import skimage as sk
@@ -505,10 +505,9 @@ def cell_analysis_func(image, cell_masks, omission_mask, data_instance, progress
     # The labels-layer id is NOT set here on purpose: `run_cell_analysis_func` creates
     # 'Labeled Cell Mask' *after* this function returns, so the layer these labels belong to does
     # not exist yet. It is attached there, once it does.
-    final_df = stamp_entity_ids(
-        final_df, entity_type='cell',
+    final_df = finalize_entity_table(
+        final_df, 'cell_analysis',
         source_path=source_path_of(data_instance),
-        operation_id='cell_analysis',
         frame=data_instance.data_repository.get('reference_frame'))
 
     return labeled_cells, final_df
@@ -641,10 +640,9 @@ def _finalise_puncta_table(puncta_prop_list, data_instance):
     layer whose numbers mean something else. See `run_puncta_analysis_func`.
     """
     puncta_df = pd.concat(puncta_prop_list, ignore_index=True)
-    puncta_df = stamp_entity_ids(
-        puncta_df, entity_type='punctum',
+    puncta_df = finalize_entity_table(
+        puncta_df, 'puncta_analysis',
         source_path=source_path_of(data_instance),
-        operation_id='puncta_analysis',
         frame=data_instance.data_repository.get('reference_frame'))
     data_instance.set_data('puncta_df', puncta_df)
     return puncta_df
