@@ -1,3 +1,36 @@
+## [1.6.152] - 2026-07-19
+### Added — **Biological QC: an object-level QC layer — flag biological outliers, never filter them.**
+PyCAT's imaging QC answers *"can I trust this image?"* (saturation, focus, SNR, drift). Nothing answered
+*"can I trust this object?"* — yet the most common analysis errors are object-level and pass imaging QC
+perfectly: a cell truncated by the field edge, an oversegmented nucleus, a condensate outside its cell,
+an object of extreme size or intensity. Each silently biases a population statistic.
+
+New **`toolbox/biological_qc_tools.py`** (headless, `core`-testable):
+- `flag_edge_touching(labels, border_px=)` — objects whose mask reaches the field edge (truncated →
+  area/shape/total-intensity wrong). The one flag stated **definitively** — it's a measurement artefact.
+- `flag_size_outliers` / `flag_shape_outliers` / `flag_intensity_outliers` — **robust (median/MAD)**
+  outlier detection, so the outliers can't corrupt the estimator that finds them; `k` is a declared
+  parameter recorded on the result.
+- `flag_containment_violations(child_table, parent_labels)` — a child whose centroid is outside any
+  parent object (a condensate not in a cell is usually a segmentation error).
+- `biological_qc(table, labels, parent_labels=)` — returns the table with the flag columns + a per-object
+  `qc_flags` summary string + a per-flag count report on `.attrs['qc_report']`.
+
+**The cardinal rule: flag, never filter.** Excluding objects is the user's explicit decision — the
+no-silent-gates contract, and the exact failure the filter-sensitivity programme exists to catch. Flags
+are worded as **observations** ("touches image border", "unusual size"), never verdicts ("bad cell") — a
+mitotic or dead cell is real data. `biological_qc` **never removes a row** (pinned in a test).
+
+Tests (`core`): `tests/test_biological_qc.py` — the injected-outliers-only detection, the **cry-wolf**
+test (a clean population flags nothing), the **MAD-robustness** test (added outliers don't move the
+inliers — what mean/SD gets wrong), containment, and the flag-don't-filter row-count contract. Full
+`pytest -m core` green (1132).
+
+**Deferred** (Part B, honest friction): surfacing the flags in the consolidated long table and the QC
+report. The flags need a **label mask** at compute time, which the consolidated table's stream-from-CSV
+path does not carry, so the computation must be wired upstream where the mask exists; the QC-report
+section lands in the 1760-line `data_qc_tools`. The module is the reusable core those integrations consume.
+
 ## [1.6.151] - 2026-07-19
 ### Added — **Cohort selection: a GROUP as a typed selection target, so histogram bins / box-violin groups / aggregates select honestly.**
 The top deferred-interaction item, and the prerequisite comparative-phenotyping increment 3 was blocked
