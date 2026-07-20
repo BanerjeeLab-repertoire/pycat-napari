@@ -1,5 +1,17 @@
 # Claude Code spec — Cohort & typed selection targets
 
+> **✅ STATUS — DONE.** Parts A/B (the `Cohort` target + `select_cohort` + `SelectionState.cohort`) and the
+> comparative box/violin group emitter shipped in **1.6.151**. The two deferred emitters — histogram bin
+> and aggregate row — shipped in **1.6.170** as `utils/cohort_targets.py` (`bin_cohort`,
+> `aggregate_cohort`, `attach_histogram_brushing`, `select_aggregate_row`, `cohort_dock_label`): pure,
+> GUI-free membership logic (bin membership matches the drawn range exactly, last bin closed;
+> aggregate row = the contributing set with "summarizes N objects") that rides the real `SelectionService`
+> — `select_cohort` fills `selected`, so the overlay highlights every member for free, and selection≠filter
+> is pinned. `tests/test_cohort_targets.py`. These are the reusable emitters the shipped comparative case
+> established; attaching them to a live brushable histogram / aggregate-table dock is follow-on when those
+> surfaces are built (none exists in the tree today — the emitters are the increment the spec asked to land
+> first: *"land bins/groups/aggregates first"*).
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. The top item on
 the deferred-interaction roadmap (`roadmap_interaction_layer_deferred_2026-07-17.md`, recommended
 pickup order #1: *"unlocks histogram/box/heat-map brushing and makes aggregates honest — the most

@@ -1,3 +1,27 @@
+## [1.6.170] - 2026-07-20
+### Added — **Cohort selection: the histogram-bin and aggregate-row emitters — the two deferred targets.**
+The `Cohort` selection target and `select_cohort` shipped in 1.6.151, with the comparative box/violin group
+emitter; the histogram-bin and aggregate-row emitters were the clean follow-ons deferred with it. New
+**`utils/cohort_targets.py`** delivers them as pure, GUI-free membership logic (the part that must be
+correct, tested without a matplotlib event loop — exactly as the comparative emitter is):
+- `bin_cohort(values, entity_ids, bin_index, bin_edges, …)` — the cohort of entities whose value falls in
+  a histogram bin, membership matching the drawn range **exactly** (half-open bins, the **last bin closed**
+  so the maximum lands in it, as matplotlib does), carrying the range as the definition
+  (`"area ∈ [12, 18) µm²"`) so a dock can say *why* the objects are grouped.
+- `aggregate_cohort(members, …)` — an aggregate row's contributing set, with the count stated
+  (*"summarizes N objects"*), never one arbitrary member.
+- `attach_histogram_brushing(…)` — wires a drawn histogram so a bar-click emits the bin cohort (returns an
+  `emit_bin`/`apply_selection` handle, testable headless); `select_aggregate_row(…)` emits an aggregate
+  row's cohort; `cohort_dock_label(…)` is the "N objects · why" caption.
+- **Additive + selection≠filter**, both pinned: `select_cohort` fills `selected` with the members, so a
+  cohort-unaware overlay highlights every member for free, and no emitter mutates the DataFrame or the
+  analysed population. Tests: `tests/test_cohort_targets.py` (bin membership vs an independent recompute
+  over every bin, last-bin-closed, aggregate count, round-trip through the real `SelectionService`).
+
+These are the reusable emitters the shipped comparative case established; attaching them to a live
+brushable histogram / aggregate-table dock is follow-on when those surfaces are built (none is in the tree
+today — the spec asked to land bins/groups/aggregates first).
+
 ## [1.6.169] - 2026-07-20
 ### Added — **Biological QC Part B: the object-level flags now SURFACE — in the consolidated table and the QC report.**
 The object-level QC module (`biological_qc_tools`, 1.6.152) computed edge/size/shape/intensity/containment
