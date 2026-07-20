@@ -51,7 +51,12 @@ MEASUREMENTS: dict[str, MeasurementDef] = {m.key: m for m in (
          interpretation='>1 = enrichment (preference for the dense phase); ~1 = no preference; '
                         '<1 = exclusion.',
          caveats=('The dilute region is the cell mask AND NOT the dense mask — the same client, dense '
-                  'vs dilute, in one image.',)),
+                  'vs dilute, in one image.',
+                  'The ONLY legitimate background to subtract is the instrument/camera offset (from a '
+                  'signal-free region OUTSIDE the cell, or a dark frame). The dilute phase is NOT '
+                  'background — subtracting "the region outside the condensate" subtracts the '
+                  'denominator from itself and destroys the measurement. An unremoved camera pedestal, '
+                  'conversely, biases K toward 1.',)),
     _def(key='client_enrichment', display_name='Client enrichment',
          definition="The enrichment of a client in the dense phase relative to the dilute phase — the "
                     "partition coefficient, per object or per condition.",

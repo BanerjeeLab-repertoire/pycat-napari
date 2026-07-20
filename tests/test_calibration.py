@@ -225,8 +225,10 @@ def test_curve_AGE_is_measured_from_when_the_standard_was_imaged():
 
 # ── the additive consumer: partition path ─────────────────────────────────────
 
-def test_the_partition_path_is_BYTE_UNCHANGED_without_a_curve():
-    """Additive: no curve, no calibration keys, identical dict to before."""
+def test_the_partition_path_carries_NO_calibration_keys_without_a_curve():
+    """Additive: no curve → no calibration keys leak. The result also carries the background-mode
+    provenance (mode/source/warning, added by the background_mode spec) so the offset choice travels with
+    the measurement — but nothing calibration-related appears without a curve."""
     from pycat.toolbox.partition_enrichment_tools import client_enrichment
 
     img = np.zeros((32, 32), float)
@@ -238,7 +240,9 @@ def test_the_partition_path_is_BYTE_UNCHANGED_without_a_curve():
     assert 'calibration_validity' not in out
     assert 'dense_concentration' not in out
     assert set(out) == {'dense_mean', 'dilute_mean', 'dense_mean_raw', 'dilute_mean_raw',
-                        'background', 'enrichment', 'n_dense_px', 'n_dilute_px'}
+                        'background', 'enrichment', 'n_dense_px', 'n_dilute_px',
+                        'background_mode', 'background_source', 'background_warning'}
+    assert out['background_mode'] == 'none' and out['background_warning'] is None
 
 
 def test_the_calibrated_partition_path_reports_real_units(monkeypatch):

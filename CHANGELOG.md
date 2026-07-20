@@ -1,3 +1,32 @@
+## [1.6.163] - 2026-07-20
+### Added — **Background-mode guardrail: turn the partition-coefficient docstring reasoning into a check at the moment the mistake would be made.**
+`client_enrichment` already supported three background treatments (scalar offset, signal-free-region mask,
+local dilute shell) and its docstring carries careful reasoning — but **nothing surfaced any of it**, so
+every GUI partition coefficient used `background=0.0`. Two consequences: users with a real dark reference
+could not use it (their K biased toward 1), and users who *think* they should subtract "the area outside
+the condensate" had no guidance that doing so destroys the measurement. The second is a mistake a
+well-intentioned user makes naturally, and the code already knows why it is wrong.
+
+- **The guardrail** (`assess_background_region`, wired into `client_enrichment`): when a background region
+  is supplied, its mean is compared against the dilute-phase mean; if the region is not meaningfully darker
+  (it is plausibly dilute phase, not background), a warning fires that states the **consequence** — *"if
+  this region is inside the cell, subtracting it will subtract the dilute phase from itself and DESTROY the
+  partition measurement; a background region must be outside the cell or a dark frame."* It warns, never
+  blocks (the user may have a valid unusual case), reusing the existing napari warning path.
+- **The choice travels with the result:** `client_enrichment` now emits `background_mode`
+  (`none`/`scalar`/`region`), `background_source`, and `background_warning` — so a K computed with a
+  dark-frame offset and one computed raw are distinguishable in the table (and the consolidated long
+  table). A K computed raw and one offset-corrected are different measurements. **Default stays `none`**, so
+  existing workflows are unchanged.
+- **Ontology caveat:** the "dilute phase is NOT background / the only legitimate offset is the instrument
+  offset" reasoning is now a caveat on `partition_coefficient` in the measurement ontology, making it
+  available to figure footnotes.
+- New **`tests/test_background_mode.py`** (`core`, synthetic): each mode produces the expected offset; a
+  dilute-phase "background" region triggers the consequence-stating warning while a genuinely dark region
+  does not; a region offset recovers the true K across a camera pedestal; and the mode/offset/source travel
+  with the result. (`test_calibration` updated for the three new provenance keys — no calibration keys leak
+  without a curve.)
+
 ## [1.6.162] - 2026-07-20
 ### Added — **Analysis presets: "reasonable starting parameters" as a declared, inspectable object that can't smuggle an unaudited default past a user.**
 Sensible defaults are scattered across signatures, docstrings, and the maintainer's head; a new user

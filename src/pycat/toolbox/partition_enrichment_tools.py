@@ -48,6 +48,30 @@ from pycat.utils.notify import show_warning as napari_show_warning
 # Core enrichment computation
 # ---------------------------------------------------------------------------
 
+#: A candidate background region is "suspect" when it is NOT meaningfully darker than the dilute phase —
+#: i.e. its mean is at least this fraction of the dilute mean. Below this it is plausibly signal-free.
+_BACKGROUND_SUSPECT_RATIO = 0.7
+
+
+def assess_background_region(region_mean, dilute_mean, *, ratio=_BACKGROUND_SUSPECT_RATIO):
+    """Is a candidate 'signal-free' background region plausibly signal-free? Returns ``(suspect, message)``.
+
+    The dilute phase is NOT background — subtracting a region that is really dilute phase subtracts the
+    partition measurement's own denominator and destroys it. So when the candidate region's intensity is
+    comparable to the dilute phase (not meaningfully darker), the message states the **consequence**, not
+    merely the observed similarity. It warns; it never blocks — the user may have a legitimate case."""
+    if not (np.isfinite(region_mean) and np.isfinite(dilute_mean)) or dilute_mean <= 0:
+        return False, None
+    if region_mean >= ratio * dilute_mean:
+        return True, (
+            f"The selected background region (mean {region_mean:.4g}) has intensity SIMILAR to the dilute "
+            f"phase (mean {dilute_mean:.4g}). If this region is inside the cell, subtracting it will "
+            f"subtract the dilute phase from itself and DESTROY the partition measurement — a background "
+            f"region must be OUTSIDE the cell, or a dark/blank frame. (The dilute phase is real client "
+            f"signal, not background.)")
+    return False, None
+
+
 def client_enrichment(
     client_image: np.ndarray,
     dense_mask: np.ndarray,
@@ -197,10 +221,34 @@ def client_enrichment(
             "(a signal-free region). If the image genuinely has no offset — because it was "
             "already background-subtracted — this warning can be ignored.")
 
+    # ── The background choice TRAVELS with the result ───────────────────────────
+    #
+    # A K computed with a dark-frame offset and one computed raw are DIFFERENT measurements; a reader must
+    # be able to tell them apart, so the mode/offset/source ride in the table (and hence the consolidated
+    # long table). Derived from the inputs — never a separate recording.
+    if background_mask is not None:
+        background_mode, background_source = 'region', 'signal-free region mask (mean)'
+    elif float(background) != 0.0:
+        background_mode, background_source = 'scalar', 'user scalar offset'
+    else:
+        background_mode, background_source = 'none', 'none (raw means, no offset removed)'
+
+    # ── The guardrail: a "background" region that is really dilute phase would DESTROY the measurement ──
+    # Reuse the existing napari warning machinery; state the CONSEQUENCE, not just the similarity. Also
+    # carried in the result so a headless caller (and a test) sees the same verdict the UI shows.
+    background_warning = None
+    if background_mask is not None:
+        suspect, message = assess_background_region(bg, dilute_raw)
+        if suspect:
+            background_warning = message
+            napari_show_warning("Client enrichment background region — " + message)
+
     result = dict(dense_mean=dense_c, dilute_mean=dilute_c,
                   dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
                   background=bg, enrichment=enrichment,
-                  n_dense_px=n_dense, n_dilute_px=n_dilute)
+                  n_dense_px=n_dense, n_dilute_px=n_dilute,
+                  background_mode=background_mode, background_source=background_source,
+                  background_warning=background_warning)
 
     # ── Optional CALIBRATED path — real units, gated ─────────────────────────
     #
