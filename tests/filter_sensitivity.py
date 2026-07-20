@@ -194,6 +194,25 @@ def assert_scale_invariant(run, *, pixel_sizes, truth, tol, param='microns_per_p
 #   in the batch path"); excluded for the same reason as `defocus_r2_max`. The spec's "brightfield
 #   min_diameter_px class" does not reach production.
 #
+# ── Increment 4 (1.6.158): the puncta refinement gate CLUSTER, swept jointly ──────────────
+#
+# The refinement gate applies `kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0`
+# together, and it decides which puncta EXIST — every downstream count/density/partition/coloc statistic
+# inherits it. Increment 4 swept the cluster for offset, scale, selection-bias, AND the joint kurtosis ×
+# SNR interaction (a two-parameter cliff is invisible to one-at-a-time sweeps). Findings — no new inverter:
+#
+# * `segmentation.global_snr_threshold` — ADDED, OFFSET (validated). The local sibling was added in
+#   increment 2; the global one is the same contrast-to-noise form against the whole-cell background, and
+#   it passes all three signatures. Its selection-bias sweep is the important new result: over the
+#   plausible threshold range, a brightness-spanning population of clearly-real puncta is retained WHOLE,
+#   so the SNR gate does not select for brightness the way an absolute-intensity gate would.
+# * `segmentation.kurtosis_threshold=-3.0` — CONFIRMED INERT, not added (documented-absent, like
+#   `bleach_r2_min`). scipy Fisher (excess) kurtosis has a hard floor of -2, so `kurtosis < -3.0` is
+#   impossible and the gate rejects nothing. It therefore cannot be one arm of an interaction cliff: the
+#   joint grid is flat along the kurtosis axis. An inert gate has no bad control, so it stays out of the
+#   registry — pinned instead by `test_kurtosis_threshold_of_minus_three_can_never_fire`. (Even raised into
+#   a firing range, it keeps real leptokurtic puncta, so the cluster still has no real-population cliff.)
+#
 # ~35-110 other defaults remain. The audit's view stands: they are not equal, and the next increment is
 # another prioritisation call, not a sweep.
 VALIDATED_CASES = (
@@ -238,6 +257,20 @@ VALIDATED_CASES = (
                "punctum (1/1/2) and fixes it for everything larger (1.6.87).",
         'good': 'radii scaled to the object (current)',
         'bad': 'fixed 1/1/2 px rim (removed 1.6.87)',
+    },
+    {
+        'id': 'segmentation.global_snr_threshold',
+        'check': 'offset_invariance',
+        'why': "The global SNR gate rejects when the object's contrast against the whole-CELL background "
+               "is below threshold. Like its local sibling (added in increment 2) it is now contrast-to-"
+               "noise — (object_mean - cell_bg_median) / cell_bg_noise — so the camera pedestal cancels "
+               "and the verdict is the specimen's, not the sensor's. Increment 4 swept it for offset, "
+               "scale, and selection bias on a brightness-spanning population of clearly-real puncta: a "
+               "real population is retained WHOLE across the plausible threshold range, so it does not "
+               "select for brightness (the r2_min shape) the way an absolute-intensity gate would. The "
+               "negative control is the same removed object_mean/bg_std ratio that inverted the local one.",
+        'good': 'contrast-to-noise vs the cell background (current)',
+        'bad': 'object_mean / bg_std (the same un-subtracted ratio, removed 1.6.86)',
     },
     {
         'id': 'partition.client_enrichment.background',

@@ -1,3 +1,31 @@
+## [1.6.158] - 2026-07-20
+### Validated — **Filter sensitivity increment 4: the puncta refinement gate cluster (no new inverter; one gate added, one confirmed inert).**
+The puncta refinement gate applies `kurtosis_threshold=-3.0, local_snr_threshold=1.0,
+global_snr_threshold=1.0` **together**, and it decides which puncta exist — every downstream count,
+density, partition coefficient, and colocalization statistic inherits its decisions. This SNR family
+already produced a proven inverter (the un-subtracted `object_mean/bg_std` ratio, fixed 1.6.86), so it is
+the highest-value untested group. Test-first: a divergence would be a finding, not a tolerance to tune.
+
+- **`local_snr_threshold` / `global_snr_threshold` — validated on all three signatures.** Both are
+  contrast-to-noise (background-subtracted), so they are **offset-invariant** (a camera pedestal cancels)
+  and **scale-free** (a pure intensity ratio carries no pixel units, unlike the ring geometry of increment
+  2's scale case). Swept across the plausible range on a brightness-spanning population of clearly-real
+  puncta, the survivors' mean brightness **does not drift** — no selection bias (the mechanism that made
+  `r2_min` report a mean of 77 against a true 44). `segmentation.global_snr_threshold` is added to
+  `VALIDATED_CASES` (the local sibling was added in increment 2).
+- **`kurtosis_threshold=-3.0` — confirmed INERT, documented-absent.** scipy Fisher (excess) kurtosis has a
+  hard floor of −2, so `kurtosis < -3.0` can never be true and the gate rejects nothing. It therefore
+  **cannot be one arm of a two-parameter interaction cliff** — the joint kurtosis × local_snr grid is flat
+  along the kurtosis axis. An inert gate has no bad control, so (like `bleach_r2_min`) it stays out of the
+  registry, pinned instead by a test that fails if the kurtosis computation ever changes to be able to
+  fire. A **secondary finding** is recorded: pushed into a firing range (e.g. 0.0), the kurtosis gate
+  becomes brightness-selective (a faint object's local patch is less peaked), dropping the dimmest puncta
+  first — which is exactly why the shipped default is set below the −2 floor to be inert.
+- New **`tests/test_filter_sensitivity_puncta_cluster.py`** (`core`, synthetic, drives the real
+  `_snr_conditions` and `stats.kurtosis`): offset, scale, and selection-bias sweeps for both SNR
+  thresholds; the joint kurtosis × SNR interaction grid; and the kurtosis-inertness pin. **Test-only — no
+  production behavior changed.**
+
 ## [1.6.157] - 2026-07-20
 ### Added — **QC for scan-acquisition aberrations: per-object motion shear, bidirectional phase, disk pattern, pinhole crosstalk.**
 `data_qc_tools` covers saturation/focus/SNR/drift/vibration/aberration — every check asks about the image
