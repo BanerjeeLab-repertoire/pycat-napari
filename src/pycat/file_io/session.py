@@ -195,9 +195,8 @@ def clear_all_without_saving(viewer, central_manager, confirm=True):
     caller that clears-before-doing-something-else (e.g. Load Session) can abort when the user declines,
     rather than proceeding to discard the current workspace anyway.
     """
-    from qtpy.QtWidgets import QMessageBox
-
     if confirm:
+        from qtpy.QtWidgets import QMessageBox      # only the confirm path needs Qt (headless-safe otherwise)
         reply = QMessageBox.warning(
             None, "Clear everything without saving?",
             "This resets the workspace to the start of a workflow.\n\n"

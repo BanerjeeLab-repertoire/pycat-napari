@@ -1,3 +1,24 @@
+## [1.6.195] - 2026-07-20
+### Fixed — **headless-CI regressions: `core` tests must not pull in Qt.**
+Six `core` tests passed locally (where PyQt5/qtpy are installed) but failed on the headless `core` CI
+runner, violating the tier's contract ("no napari, no Qt — must pass headlessly"). Both were import-source
+issues, fixed without any behaviour change:
+
+- **`detect_beads_stack` (and its serial-path helpers) imported `iter_frames`/`materialize_stack` from the
+  Qt-laden `file_io`**, which imports PyQt5 at module scope — so the new `test_detect_beads_stack_
+  characterization` (added as the split's safety net) errored with `ModuleNotFoundError: PyQt5` in CI.
+  These streaming helpers are actually *defined* in the headless `stack_access` (`file_io` only re-exports
+  them), so `vpt_tools` now imports them from `stack_access` directly. `detect_beads_stack` no longer
+  imports `file_io` at all (verified), and the detection table is byte-identical (40 detections, same
+  order/coordinates).
+- **`clear_all_without_saving(confirm=False)` imported `qtpy` unconditionally**, so a headless caller (and
+  the `confirm=False` test) crashed without Qt. The import now lives inside the `if confirm:` block — only
+  the path that shows a dialog needs Qt. The two tests that exercise the confirm *dialog* itself now
+  `pytest.importorskip('qtpy')`, so they skip headlessly (as the suite's other Qt tests already do) rather
+  than fail.
+
+Full `pytest -m core` green locally (1395 passed); the headless CI path is now Qt-free for these paths.
+
 ## [1.6.194] - 2026-07-20
 ### Added — **Feature families: an organizing schema over the measurement layer.**
 Measurements were emitted as a **flat** list of columns — `area`, `intensity_mean`, `viscosity`,

@@ -640,7 +640,7 @@ def build_hot_pixel_mask(bead_stack, cv_max=0.12, tstd_max=8.0,
     wired, low-risk (baseline untouched); expect little effect on clean
     fluorescence bead movies.
     """
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
     # Streaming mean/variance (Welford) so we never hold the whole stack.
     mean = None
     M2 = None
@@ -1419,7 +1419,7 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
     """
     import numpy as np
     from scipy.optimize import curve_fit
-    from pycat.file_io.file_io import materialize_stack
+    from pycat.file_io.stack_access import materialize_stack
 
     def _fit_sigma(patch, h):
 
@@ -1734,7 +1734,7 @@ def _choose_detection_tier(*, n_frames, t_ser, t_gpu, workers, gpu_ok, pool_ok) 
 def _bead_first_frame(bead_stack, frame_indices):
     """The first frame to be processed — used by the backend-choice cost/equivalence probes without
     materialising the stack."""
-    from pycat.file_io.file_io import iter_frames as _itf
+    from pycat.file_io.stack_access import iter_frames as _itf
     return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
 
 
@@ -1931,7 +1931,7 @@ def _detect_all_frames(bead_stack, frame_indices, precomputed_coords, template_z
     path detects coords (using the pool's precomputed set when present), (re)builds the PSF template
     threaded across frames, and scores; the precise path runs a Gaussian fit. Progress is reported per
     frame — mapped to the 70→100% tail when the pool pre-detected (which filled the first 70%)."""
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
     rows = []
     done = 0
     for t, frame in iter_frames(bead_stack, indices=frame_indices):
@@ -2039,7 +2039,7 @@ def detect_beads_stack(
         (+ quality columns depending on mode). Schema is compatible with the
         trajectory linkers and classify_beads.
     """
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     # Back-compat: fit_quality=True means the caller wants a real fit.
     if fit_quality and quality_mode == 'fast':

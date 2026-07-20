@@ -16,7 +16,7 @@ pytestmark = pytest.mark.core
 
 def test_clear_returns_False_and_does_NOT_clear_when_the_user_cancels(monkeypatch):
     import pycat.file_io.session as sess
-    import qtpy.QtWidgets as qtw
+    qtw = pytest.importorskip('qtpy.QtWidgets')     # the confirm dialog genuinely needs Qt; skip headless
     cleared = []
     monkeypatch.setattr(sess, '_clear_everything', lambda v, cm: cleared.append(True))
     monkeypatch.setattr(qtw.QMessageBox, 'warning', lambda *a, **k: qtw.QMessageBox.No)
@@ -26,7 +26,7 @@ def test_clear_returns_False_and_does_NOT_clear_when_the_user_cancels(monkeypatc
 
 def test_clear_returns_True_and_clears_when_the_user_confirms(monkeypatch):
     import pycat.file_io.session as sess
-    import qtpy.QtWidgets as qtw
+    qtw = pytest.importorskip('qtpy.QtWidgets')     # the confirm dialog genuinely needs Qt; skip headless
     cleared = []
     monkeypatch.setattr(sess, '_clear_everything', lambda v, cm: cleared.append(True))
     monkeypatch.setattr(qtw.QMessageBox, 'warning', lambda *a, **k: qtw.QMessageBox.Yes)
