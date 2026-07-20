@@ -1,3 +1,34 @@
+## [1.6.155] - 2026-07-20
+### Fixed — **Explicit operation context: off-thread execution was silently degrading layer op tags from definitional to guessed.**
+The layer-tag hook attributes each new layer to the operation that made it. Its mechanism —
+`_op_from_stack`, a walk up the call stack for a decorated function carrying `__pycat_op__` — only fires
+when that function is STILL ON THE STACK as the layer is created. **The off-thread execution shipped in
+1.6.139/140 (`operation_runner`) breaks that:** the compute frame has already returned by the time the
+result callback creates the layer, so the walk finds nothing and the op silently degrades from
+definitional (`source='derived'`) to a name-substring guess (`source='inferred'`) — quietly, and worse as
+more widgets adopt the runner. This replaces the implicit walk with an explicit context; the walk stays as
+a fallback.
+
+- New **`operation_context(op)` / `active_operation()`** in `utils/tag_registry.py` — a `contextvars`
+  context declaring the operation responsible for layers created inside a block. **`contextvars`, not a
+  module global:** a global would leak an op across threads and mis-attribute a layer created on another
+  thread, which is strictly *worse* than an absent tag — it violates the hook's own "an absent tag is
+  honest; a guessed one is a lie" principle. Thread-isolated by default; propagates into `asyncio`.
+- **Hook resolution order** (`layer_tag_hook`) is now explicit → stack walk → name guess → absent. The
+  explicit context is preferred (definitional, `source='derived'`); the stack walk is unchanged as the
+  fallback for un-migrated synchronous paths; name inference still marks itself `source='inferred'`.
+- **`@tags_layer`** now sets `operation_context(op)` around the wrapped call, so every decorated function
+  *synchronously* creating a layer is covered with no call-site change.
+- **`operation_runner.execute`** captures `active_operation()` at call time and re-establishes it around
+  `on_result`, so a layer created in the result callback is attributed to the operation that produced the
+  data — the fix for the concrete breakage. Benefits every current and future runner adoption.
+- New **`tests/test_operation_context.py`** (`core`): the context sets/nests/restores (and restores on an
+  exception); a layer made inside it is `derived`; **a layer made in an `operation_runner` result callback
+  is tagged definitionally** (the regression — it fails on the pre-fix tree); the op does not leak across
+  threads; and the stack walk + name inference are unchanged (fallback intact, a guess still a guess).
+- **Additive and back-compatible** — the stack walk is retained, so no un-migrated path regresses; the
+  `derived` vs `inferred` distinction (a fact vs a guess) is preserved exactly.
+
 ## [1.6.154] - 2026-07-20
 ### Added — **Measurement ontology: what each measurement MEANS, machine-readable and guarded against drift.**
 `utils/measurement.py` already models a measurement's *value* (`Parameter`: units, uncertainty, source).

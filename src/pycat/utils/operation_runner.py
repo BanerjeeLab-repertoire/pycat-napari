@@ -74,6 +74,14 @@ class OperationRunner:
         - ``generation`` — claim explicitly, else the runner claims one; a stale result is discarded.
         """
         from pycat.utils.qt_worker import run_with_progress
+        from pycat.utils.tag_registry import active_operation, operation_context
+
+        # Capture the operation in effect at CALL time (the caller is typically inside an
+        # operation_context — a decorated handler, or an explicit `with`). The compute runs off-thread and
+        # its own context does not survive to the result callback, so we re-establish this captured op
+        # around `on_result` — the fix for the concrete breakage: a layer created in `on_result` is then
+        # attributed definitionally (source='derived') instead of degrading to a name guess.
+        captured_op = active_operation()
 
         gen = generation if generation is not None else self.next_generation()
         _user_progress = progress or (lambda _done, _total: None)
@@ -105,5 +113,6 @@ class OperationRunner:
         if gen != self._generation:
             return None                          # a newer request superseded this one — discard silently
         if on_result is not None:
-            on_result(result)                    # MAIN thread: run_with_progress has returned to the caller
+            with operation_context(captured_op):  # re-establish the caller's op so a layer made here is tagged definitionally
+                on_result(result)                # MAIN thread: run_with_progress has returned to the caller
         return result

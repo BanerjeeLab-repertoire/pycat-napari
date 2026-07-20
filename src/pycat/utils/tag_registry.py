@@ -37,9 +37,54 @@ key          answers
 
 from __future__ import annotations
 
+import contextvars
 import functools
+from contextlib import contextmanager
 
 from pycat.utils.general_utils import debug_log
+
+
+# ── The EXPLICIT operation context — what the stack walk was doing implicitly, said out loud ──
+#
+# The layer-tag hook needs to know which operation is responsible for a layer it sees created. Its
+# original mechanism, ``_op_from_stack``, walked the call stack for a function carrying ``__pycat_op__``
+# — clever, but it only fires when the decorated function is STILL ON THE STACK when the layer is made.
+# Off-thread execution (``operation_runner``, shipped 1.6.139) breaks that: the compute frame has already
+# returned by the time the result callback creates the layer, so the walk finds nothing and the tag
+# silently degrades from definitional (``source='derived'``) to a name-substring guess (``'inferred'``).
+#
+# This is the explicit replacement: an operation declares itself for the duration of a block, and the hook
+# reads it directly. **``contextvars``, not a module global** — a global would leak the op across threads
+# and mis-attribute a layer created on another thread, which is strictly WORSE than an absent tag (it
+# violates the hook's own "an absent tag is honest; a guessed one is a lie" principle). A ``ContextVar`` is
+# thread-isolated by default and propagates into ``asyncio`` correctly.
+_ACTIVE_OP: contextvars.ContextVar = contextvars.ContextVar('pycat_active_op', default=None)
+
+
+@contextmanager
+def operation_context(op):
+    """Declare the operation responsible for every layer created inside this block.
+
+    ::
+
+        with operation_context('cellpose'):
+            labels = run_cellpose(image)
+            viewer.add_labels(labels)      # tagged op='cellpose', source='derived' — definitional
+
+    The layer-tag hook prefers this over the stack walk, so it works for the off-thread / compute-then-
+    add-later cases the stack walk cannot see. Nesting restores the outer op on exit; an exception inside
+    the block still restores correctly (``finally``)."""
+    token = _ACTIVE_OP.set(op)
+    try:
+        yield
+    finally:
+        _ACTIVE_OP.reset(token)
+
+
+def active_operation():
+    """The operation declared by the innermost enclosing ``operation_context``, or ``None``. Thread-local
+    by virtue of ``contextvars`` — an op set on one thread is invisible to another."""
+    return _ACTIVE_OP.get()
 
 
 # ── THE ROLES ARE layer_tags.CORE_VALUES['role']. There is ONE vocabulary. ─────────────────
@@ -212,13 +257,20 @@ def tags_layer(op: str, *, role: str, summary: str,
         _OPERATIONS[op.strip().lower()]['registered_by'] = (
             f"{fn.__module__}.{fn.__qualname__}")
 
-        fn.__pycat_op__ = op.strip().lower()
+        _op = op.strip().lower()
+        fn.__pycat_op__ = _op
 
         @functools.wraps(fn)
         def _wrapped(*args, **kwargs):
-            return fn(*args, **kwargs)
+            # Declare the op for the duration of the call, so any layer this function creates
+            # *synchronously* is attributed definitionally with no call-site change — this covers most
+            # sites and makes the explicit-context migration small. The stack walk stays as the fallback
+            # for un-decorated / cross-thread paths; the runner (operation_runner) carries the context
+            # across the off-thread boundary the stack walk cannot see.
+            with operation_context(_op):
+                return fn(*args, **kwargs)
 
-        _wrapped.__pycat_op__ = op.strip().lower()
+        _wrapped.__pycat_op__ = _op
         return _wrapped
 
     return _decorate
