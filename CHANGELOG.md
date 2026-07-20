@@ -1,3 +1,35 @@
+## [1.6.145] - 2026-07-19
+### Changed — **Slim the distribution: stop shipping ~20 MB of docs/assets per release.**
+PyPI enforces a total project-size quota and PyCAT was consuming it at ~25 MB per release, dominated by
+documentation assets and unreferenced logos bundled into the artifacts. This is **build-config + asset
+deletion only — no source-code change, no behaviour change.**
+
+**Measured, before → after (`python -m build`):**
+- **sdist: ~20.6 MB → 1.76 MB.** Dropped `docs/` (18 MB, mostly a 13 MB screenshot gallery) and
+  `notebooks/` (816 KB) from the sdist `include` — they live in the git repo + the published docs site,
+  and a `pip install` does not need them.
+- **wheel: ~2.7 MB → 1.83 MB.** Deleted four unreferenced logo PNGs from `src/pycat/icons/`
+  (`pycat_logo_1024.png` 572 KB, `pycat_logo-2.png`, `pycat_logo.png`, `pycat_logo_256.png` — ~880 KB
+  total, grep-verified referenced nowhere in code). The two the app actually uses stay
+  (`pycat_mark.png`, `pycat_logo_512.png`; icons now total 206 KB).
+
+- **`.DS_Store`** — untracked the three tracked macOS files and added `**/.DS_Store` to the **wheel**
+  exclusions (the sdist already excluded them, the wheel path did not).
+- **`.xlsx` kept, deliberately.** `src/pycat/navigator/data/*.xlsx` (question tree, module contracts, tag
+  hierarchy) **are read at runtime** by `navigator/loader.py` (`openpyxl.load_workbook` →
+  `load_question_tree`/`load_raw_modules`/…), so they must ship — confirmed by grep, left in place.
+- **Nothing runtime broke:** the built wheel still ships all required data — the 3 `.xlsx`,
+  `navigator/data/operation_catalog.json`, and `utils/layer_bindings.json` (the dropdown-binding table).
+  `run-pycat`'s icons (`pycat_mark`, `pycat_logo_512`) are intact.
+
+`tests/test_distribution_size.py` (new, `core`) is the ratchet: it fails if `docs`/`notebooks` return to
+the sdist, if an unreferenced or oversized icon ships (icons < 250 KB, each referenced or allow-listed),
+if a `.DS_Store` reappears under `src/`, or if the wheel drops its `.DS_Store` exclusion. Full
+`pytest -m core` green.
+
+**Note:** this stops the bleeding but does **not** reclaim quota already consumed by past releases —
+deleting old releases is a separate, manual, irreversible action on the PyPI web UI.
+
 ## [1.6.144] - 2026-07-19
 ### Added — **Comparative phenotyping increment 3: unblock brushing + the UI entry point.**
 The comparative-figures library, superplots, and anti-pseudoreplication stats already shipped; this
