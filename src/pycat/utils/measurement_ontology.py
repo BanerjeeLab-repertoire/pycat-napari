@@ -141,6 +141,22 @@ MEASUREMENTS: dict[str, MeasurementDef] = {m.key: m for m in (
          interpretation='Higher = more of the field is dense phase.',
          caveats=('This is a 2D PROJECTION, not a true volume fraction — the UI already warns "2D '
                   'projection, not a volume fraction". Do not report it as a volume fraction.',)),
+    _def(key='ratio', display_name='Intensity ratio (ratiometric)',
+         definition="The two-channel intensity ratio, background-subtracted first — a proxy for an "
+                    "environment-sensitive quantity (FRET-by-ratio; polarity / viscosity / pH from a "
+                    "ratiometric dye).",
+         equation='ratio = (N − b_N) / (D − b_D)',
+         units='dimensionless',
+         interpretation='Relative between conditions imaged identically; absolute meaning needs a dye '
+                        'calibration.',
+         caveats=('BACKGROUND FIRST: an un-subtracted offset in either channel bends the ratio toward 1.',
+                  'mean-of-ratio and ratio-of-means answer different questions — the per-object table '
+                  'reports both; do not read one without knowing which.',
+                  'Uncorrected BLEED-THROUGH biases the ratio toward 1 — supply a linear coefficient from '
+                  'a single-label control.',
+                  'Where the denominator is near zero the ratio is NaN, not a spike; check the reported '
+                  'thresholded fraction.'),
+         emitted=False),
 )}
 
 

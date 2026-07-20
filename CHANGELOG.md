@@ -1,3 +1,23 @@
+## [1.6.182] - 2026-07-20
+### Added — **Ratiometric / two-channel intensity-ratio analysis — the traps handled, not just the division.**
+Multichannel confocals produce two-channel data and PyCAT can segment the objects, but there was no
+ratiometric module — and a naive `A/B` is riddled with traps. New **`toolbox/ratiometric_tools.py`**:
+- `ratio_image(N, D, *, background_num, background_den, threshold, mask)` → a `RatioResult` (the ratio
+  image with `NaN` where the denominator is too small, the fraction thresholded, and the backgrounds /
+  threshold used); `object_ratios(labels, N, D, …)` → a per-object table.
+- **Background BEFORE ratio, always** — `(N−b_N)/(D−b_D)`; an un-subtracted offset bends the ratio toward
+  1 (the pedestal test proves it). **Low-denominator pixels become `NaN`, not spikes**, and the excluded
+  fraction is reported. **Both summary modes** — `ratio_of_means` (aggregate, robust) and `mean_of_ratio`
+  (per-pixel, heterogeneity-sensitive) — are reported and labelled; neither is silently chosen. An optional
+  **bleed-through coefficient** corrects `D − c·N` (no automatic unmixing); with none supplied the result
+  is flagged uncorrected so the caller can warn.
+- `ratio` registered in the **measurement ontology** with its equation and the background-first,
+  mean-of-ratio, bleed-through, and thresholding caveats.
+- Tests (`core`): `tests/test_ratiometric.py` — known-ratio recovery, the pedestal test, low-denominator →
+  NaN with reported fraction, mean-of-ratio vs ratio-of-means (agree uniform / differ heterogeneous),
+  bleed-through bias-toward-1 + coefficient correction, and the ontology entry. The tagged ratio LAYER and
+  the channel-picker UI are the thin follow-on; the computation is delivered.
+
 ## [1.6.181] - 2026-07-20
 ### Changed — **partition_measurement: background-subtracted assessment extracted (191 → 110 lines), byte-identical.**
 The Kp measurement-with-assumptions builder was dominated by its background-subtracted assessment — the
