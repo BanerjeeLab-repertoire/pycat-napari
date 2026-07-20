@@ -88,7 +88,15 @@ _LONG_FUNCTION_LIMIT = 120
 # byte-identical by `test_classify_beads_characterization` (the categorical `bead_class` labels, the
 # `n_units_est` estimates, the dropped-rejected row count, and the recorded thresholds, captured on both
 # branches BEFORE the split and asserted unchanged after). Count 133 → 132.
-_MAX_LONG_FUNCTIONS = 132
+# 131. (2026-07-20) `fit_size_distribution_mle` (invitro_tools), the 301-line droplet-size-distribution
+# identifier, was split BY PHASE into pure helpers — `_fit_size_models` (per-model MLE + Clauset power-law
+# x_min), `_powerlaw_tail_comparison` (the tail Vuong test + seeded bootstrap goodness-of-fit gate),
+# `_size_distinguishability` (the whole-sample Vuong test) and `_size_verdict` — leaving the function a
+# 92-line orchestrator. Pinned byte-identical by `test_size_distribution_mle_characterization` (selected
+# model, every model's AIC/loglik, power-law x_min + tail test, distinguishability comparison, descriptive
+# moments, on lognormal + gamma samples, captured BEFORE and asserted unchanged after; the bootstrap is
+# seeded so it is deterministic). Count 132 → 131.
+_MAX_LONG_FUNCTIONS = 131
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

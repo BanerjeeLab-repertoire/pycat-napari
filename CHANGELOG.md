@@ -1,3 +1,22 @@
+## [1.6.174] - 2026-07-20
+### Changed — **fit_size_distribution_mle decomposed by phase (301 → 92 lines), proven byte-identical.**
+The droplet-size-distribution identifier fused per-model MLE fitting, a Clauset power-law tail comparison
+(with a seeded parametric bootstrap goodness-of-fit gate), a Vuong distinguishability test, and verdict
+assembly into one 301-line body — a length at which the several statistical tests' interplay is
+unreviewable. Split into pure phase helpers:
+- `_fit_size_models` — per-model MLE (lognormal closed-form; gamma/weibull/exponential via scipy; the
+  power law's Clauset x_min by KS minimisation) → the `models` table + `x_min`;
+- `_powerlaw_tail_comparison` — the tail-only Vuong test that re-fits the best alternative on the SAME
+  tail, gated by an absolute bootstrap KS goodness-of-fit test (so a locally-power-law-like tail of a
+  lognormal/gamma cannot spuriously win);
+- `_size_distinguishability` — the whole-sample Vuong test of best vs runner-up;
+- `_size_verdict` — the human verdict, keeping the power-law claim scoped to its tail.
+- **Behaviour-preserving, pinned as such.** `tests/test_size_distribution_mle_characterization.py`
+  captured the selected model, every model's AIC/log-likelihood, the power-law x_min and its tail test,
+  the distinguishability comparison, and the descriptive moments on lognormal and gamma samples before the
+  split (the bootstrap is `default_rng(0)`-seeded, so the whole function is deterministic) and asserts
+  them unchanged after. No number moved. Complexity ratchet 132 → 131; truncation guard allowlisted.
+
 ## [1.6.173] - 2026-07-20
 ### Changed — **classify_beads decomposed into its two classifier branches (306 → 68 lines), byte-identical.**
 The VPT bead classifier fused two independent classifiers — a fast-template branch (ncc/snr/amplitude,

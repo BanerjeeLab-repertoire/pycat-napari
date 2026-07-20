@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.174 — `fit_size_distribution_mle` (the 301-line droplet-size-distribution identifier) was split
+    # BY PHASE into pure helpers — `_fit_size_models`, `_powerlaw_tail_comparison`,
+    # `_size_distinguishability`, `_size_verdict` — leaving a 92-line orchestrator. Nothing was removed:
+    # every fit, test and its rationale MOVED into a named helper, and a byte-identity characterization
+    # test (`test_size_distribution_mle_characterization`) pins the selected model, every AIC/loglik, the
+    # power-law tail test and the descriptive moments unchanged across the split.
+    'invitro_tools.py::fit_size_distribution_mle',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was
