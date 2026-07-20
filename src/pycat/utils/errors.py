@@ -62,8 +62,22 @@ class LayerResolutionError(PyCATError):
     empty one."""
 
 
+class StackLoadCancelled(Exception):
+    """The user gave up on a long, uninterruptible open (e.g. the BioFormats CZI index parse).
+
+    Raised by ``_run_with_busy_progress`` when its dialog is cancelled. The work cannot actually be
+    stopped (a blocking JVM call), so the worker is DETACHED — the UI is freed immediately and the
+    orphaned thread's result is dropped when it eventually finishes. Callers catch this to abort the
+    load quietly rather than treating it as a read error.
+
+    **Deliberately NOT a ``PyCATError``.** It is a control-flow signal (the user cancelled), not a
+    failure — folding it into the error family would let ``except PyCATError`` swallow a cancellation as
+    if it were a read error, which is exactly the opposite of its meaning. It lives here because this is
+    the typed-signal module, not because it is an error."""
+
+
 __all__ = [
     'PyCATError', 'UnsupportedFormatError', 'MetadataUnavailableError',
     'InvalidCalibrationError', 'ScientificAssumptionError', 'OptionalDependencyError',
-    'LayerResolutionError',
+    'LayerResolutionError', 'StackLoadCancelled',
 ]

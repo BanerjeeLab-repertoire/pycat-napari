@@ -152,6 +152,17 @@ _DELIBERATE = {
     'vpt_ui.py::_highlight_track_in_plot',
     'vpt_ui.py::_update_tracklen_hist',
 
+    # 1.6.146 — the two Qt dialog CLASSES (`LayerDataframeSelectionDialog`, `ChannelAssignmentDialog`)
+    # MOVED from file_io.py into `file_io/dialogs.py` (file_io decomposition, move 2). Their methods
+    # went with them; bodies unchanged. Nothing imported these dialogs externally; `FileIOClass` now
+    # imports them from `dialogs.py`. These method names are unique to the dialogs, so they read as
+    # "vanished" from file_io.py — they exist now as `dialogs.py::<name>`.
+    'file_io.py::get_selections',
+    'file_io.py::initUI',
+    'file_io.py::_est_size_mb',
+    'file_io.py::_is_reconstructable',
+    'file_io.py::_on_discard',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.
