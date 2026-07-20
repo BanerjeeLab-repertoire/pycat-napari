@@ -1,3 +1,36 @@
+## [1.6.144] - 2026-07-19
+### Added — **Comparative phenotyping increment 3: unblock brushing + the UI entry point.**
+The comparative-figures library, superplots, and anti-pseudoreplication stats already shipped; this
+completes the spec's Part D (brushing) and Step 2 (a UI entry point), which were blocked on a missing
+per-object entity id.
+
+- **The unblock — a resolvable `entity_id` in the consolidated table.** Object tables are already stamped
+  with `_pycat_entity_id` by `stamp_entity_ids`, but `melt_object_measurements` dropped it. It is now
+  carried through into a new `entity_id` column (`consolidated_table._CORE_COLS`), so a comparative-figure
+  object row knows the global id the `SelectionService` already speaks — no fabricated id, no second
+  keying scheme. Blank when the source table was never stamped.
+- **Part D — single-entity brushing** (`comparative_figures._attach_object_brushing`, wired into
+  `condition_comparison(..., selection_service=…)`): clicking an object point selects that entity through
+  the EXISTING contract, self-highlighting on emit (the service suppresses a view's own receive) and
+  ringing the matching point when a selection arrives from another view. Qt-free and headless-testable
+  (matplotlib clicks don't fire under Agg, so the wired handlers are exposed on `fig._pycat_brushing`).
+  **Cohort selection** (clicking a unit/condition marker to select the cohort it summarizes) is left as
+  the noted-blocked seam — it needs the typed/cohort-target `SelectionState` still deferred on the
+  interaction-layer roadmap. No second selection path was built, per the spec.
+- **Step 2 — the UI entry point** (`ui/comparative_figures_ui.py`, menu: *Analysis Methods → Comparative
+  Figures (batch consolidated table)*): pick a `consolidated_long.csv`, choose measurement / condition /
+  biological unit / plot kind / optional test, and render the replicate-honest superplot with brushing
+  wired to the shared `SelectionService`, alongside the inspectable summary frame.
+
+New tests (`core`): `tests/test_comparative_brushing.py` (entity-id carry-through, object-click emits the
+entity, a selection rings the point, no brushing without a service, the UI condition-field helper).
+Two consolidated-table schema assertions updated for the new column. Full `pytest -m core` green (1108).
+
+### Notes
+- **Needs your in-app verification** (viewer-coupled): after a batch that wrote `consolidated_long.csv`,
+  open *Analysis Methods → Comparative Figures*, render a superplot, and confirm clicking an object point
+  brushes it in any open object layer (and vice-versa).
+
 ## [1.6.143] - 2026-07-19
 ### Changed — **Lightweight operation catalog: discovery no longer imports science modules; runnability reaches the Run buttons.**
 Two linked findings. **Finding 1 — discovery is decoupled from implementation imports.**

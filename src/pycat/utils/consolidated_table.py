@@ -26,12 +26,18 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pycat.utils.entity_ref import ENTITY_ID_COLUMN
 from pycat.utils.notify import show_warning as _warn
 
 
 # The columns every row carries, in order, after the condition fields. Kept fixed so a streamed CSV
 # has a stable schema regardless of which image is being appended.
-_CORE_COLS = ('object_type', 'object_id', 'measurement', 'value', 'units')
+#
+# ``entity_id`` (increment-3 extension) carries each object's resolvable ``_pycat_entity_id`` — the
+# SAME global id `stamp_entity_ids` already put on the object table — through the melt, so a click on a
+# comparative-figure object point can route through the `SelectionService` (it was dropped before, which
+# is exactly why brushing was blocked). Blank when the source table was never stamped.
+_CORE_COLS = ('object_type', 'object_id', 'entity_id', 'measurement', 'value', 'units')
 _DEFAULT_PROVENANCE_COLS = ('channel', 'frame', 'pixel_size_um', 'pycat_version', 'operation_id')
 
 
@@ -53,11 +59,14 @@ def melt_object_measurements(df, object_type, *, id_col='object_id', value_cols=
 
     ids = (df[id_col] if id_col in df.columns
            else pd.Series(range(len(df)), index=df.index, name=id_col))
+    # The object's global entity id, carried through untouched (blank if the table was never stamped).
+    ent = (df[ENTITY_ID_COLUMN] if ENTITY_ID_COLUMN in df.columns
+           else pd.Series([''] * len(df), index=df.index))
 
     if value_cols is None:
         value_cols = [c for c in df.columns
                       if c != id_col and pd.api.types.is_numeric_dtype(df[c])]
-    value_cols = [c for c in value_cols if c in df.columns]
+    value_cols = [c for c in value_cols if c in df.columns and c != ENTITY_ID_COLUMN]
 
     units = units or {}
     frames = []
@@ -65,6 +74,7 @@ def melt_object_measurements(df, object_type, *, id_col='object_id', value_cols=
         frames.append(pd.DataFrame({
             'object_type': object_type,
             'object_id': ids.values,
+            'entity_id': ent.values,
             'measurement': col,
             'value': pd.to_numeric(df[col], errors='coerce').values,
             'units': units.get(col, ''),

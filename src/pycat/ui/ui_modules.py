@@ -5332,6 +5332,7 @@ class MenuManager:
             # Toolbox → Data Visualization where it was hard to find and conceptually misfiled.
             'Data Quality Control': (self.central_manager.toolbox_functions_ui._add_data_qc, {'separate_widget': True}),
             'Exploratory Analysis': (self.central_manager.analysis_methods_ui._switch_to_general_analysis, {'base_data_repository': self.central_manager.active_data_class.data_repository}),
+            'Comparative Figures (batch consolidated table)': (lambda: __import__('pycat.ui.comparative_figures_ui', fromlist=['f']).open_comparative_figures_dialog(self.central_manager, self.viewer), {}),
         }
         self._add_actions_to_menu(analysis_methods_dict, self.analysis_methods_menu)
 

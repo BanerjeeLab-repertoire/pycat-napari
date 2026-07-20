@@ -81,8 +81,8 @@ def test_the_batch_STREAMS_one_long_table_with_conditions_per_row(tmp_path):
     assert set(out['measurement']) == {'area', 'mean_intensity'}
     assert set(out.loc[out.image_stem == 'cellA', 'genotype']) == {'WT'}
     assert set(out.loc[out.image_stem == 'cellB', 'genotype']) == {'mut'}
-    assert list(out.columns)[:5] == ['image_stem', 'genotype', 'object_type', 'object_id',
-                                     'measurement']
+    assert list(out.columns)[:6] == ['image_stem', 'genotype', 'object_type', 'object_id',
+                                     'entity_id', 'measurement']
     assert set(out['pycat_version']) == {'1.6.test'}                       # provenance per row
 
 

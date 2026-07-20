@@ -39,7 +39,7 @@ def test_melt_gives_ONE_row_per_object_per_measurement():
     long = melt_object_measurements(_wide(2), 'punctum')
     assert len(long) == 4
     assert set(long['measurement']) == {'area', 'intensity'}
-    assert list(long.columns) == ['object_type', 'object_id', 'measurement', 'value', 'units']
+    assert list(long.columns) == ['object_type', 'object_id', 'entity_id', 'measurement', 'value', 'units']
 
 
 def test_units_are_carried_and_UNLISTED_ones_stay_blank():

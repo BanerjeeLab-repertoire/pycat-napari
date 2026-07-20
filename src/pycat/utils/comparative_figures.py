@@ -7,20 +7,19 @@ points) — because the honest test (`comparative_stats.compare_conditions`) run
 points, and the figure should let the eye see that. A p-value annotation that came from the objects
 would contradict what the picture shows; here they agree by construction.
 
-Static matplotlib (Agg-safe, renders headlessly). Interactive brushing and a PyQtGraph render are a
-later increment — they need a viewer, and this ships the part that can be verified without one.
+Static matplotlib (Agg-safe, renders headlessly). A PyQtGraph render is a later increment.
 
-── Selection / brushing (increment-3 Part D): blocked on prerequisites, deliberately NOT faked ──
-Routing a click on a comparative plot to the `SelectionService` needs two things this layer does not
-yet have, and the spec is explicit that a second selection path must not be built to work around them:
-  1. the consolidated long table would have to carry a resolvable **entity id** per object row (it
-     carries `image_stem`/`object_id`, not the global entity id the `SelectionService` speaks) — an
-     increment-2 extension, not this module's to invent;
-  2. clicking a replicate/condition marker selects a **cohort**, which needs the typed/cohort-target
-     `SelectionState` extension that is still deferred (interaction-layer roadmap §3/§4).
-So selection is left unwired here, with the seam noted, rather than routed through a bespoke path that
-the interaction layer would then have to unpick. The figures already make the honest single-vs-cohort
-distinction *visually* (objects light, unit means dark); wiring the click is the follow-on.
+── Selection / brushing (increment-3 Part D) ──
+**Single-entity brushing is now wired** (`_attach_object_brushing`), through the EXISTING
+`SelectionService`: the consolidated table now carries a resolvable `entity_id` per object row (the id
+`stamp_entity_ids` already stamped, carried through the melt instead of dropped), so a click on an
+object point selects that entity everywhere, and a selection from another view rings the matching point.
+No second selection path was built — it routes through the same contract as every other PyCAT view.
+
+**Cohort selection stays the noted-blocked seam:** clicking a replicate/condition marker to select the
+cohort it summarizes needs the typed/cohort-target `SelectionState` still deferred on the
+interaction-layer roadmap (§3/§4). The figures make the single-vs-cohort distinction *visually* (objects
+light, unit means dark); the cohort *click* is the follow-on, deliberately not faked.
 """
 
 from __future__ import annotations
@@ -174,6 +173,82 @@ def aggregate_to_unit(long_df, *, measurement, unit_cols, condition_cols, value_
               .reset_index().rename(columns={value_col: 'unit_value'}))
 
 
+def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_id='comparative'):
+    """Route a click on an object point through the existing ``SelectionService`` — single-entity
+    selection, the increment-3 Part-D wiring, now that the consolidated table carries a resolvable
+    ``entity_id`` per object.
+
+    ``object_points`` is ``[(entity_id, x, y), …]`` in DATA coordinates. Clicking near an object point
+    selects that entity everywhere; a selection arriving from ANOTHER view rings the matching point(s)
+    here. Self-highlight on emit is deliberate — the service suppresses a view's own receive, so the
+    view must paint its own click (the same rule the VPT panels follow).
+
+    **COHORT selection is NOT wired here** (clicking a unit/condition marker to select the cohort it
+    summarizes) — it needs the typed/cohort-target ``SelectionState`` still deferred on the
+    interaction-layer roadmap (§3/§4). Per the spec: single-entity now, no second selection path.
+
+    Returns ``{'emit_nearest', 'apply_selection'}`` so the behaviour is testable without a GUI event
+    loop (matplotlib clicks do not fire under Agg).
+    """
+    from pycat.utils.selection_service import Selection
+
+    pts = [(str(e), float(x), float(y)) for (e, x, y) in object_points if e]
+    state = {'ring': None}
+
+    def _highlight(eids):
+        eids = {str(x) for x in (eids or ())}
+        if state['ring'] is not None:
+            try:
+                state['ring'].remove()
+            except Exception:                        # broad-ok: artist already gone
+                pass
+            state['ring'] = None
+        sel = [(x, y) for e, x, y in pts if e in eids]
+        if sel:
+            xs, ys = zip(*sel)
+            (state['ring'],) = ax.plot(xs, ys, 'o', mfc='none', mec='#ff8c00', mew=2.0,
+                                       ms=12, zorder=5)
+        try:
+            fig.canvas.draw_idle()
+        except Exception:                            # broad-ok: no live canvas (headless) — nothing to redraw
+            pass
+
+    def apply_selection(state_obj):
+        _highlight(getattr(state_obj, 'entity_ids', ()) or ())
+
+    def emit_nearest(x_disp, y_disp, radius_px=14.0):
+        if not pts:
+            return None
+        trans = ax.transData
+        best = None
+        for e, x, y in pts:
+            px, py = trans.transform((x, y))
+            d = ((px - x_disp) ** 2 + (py - y_disp) ** 2) ** 0.5
+            if best is None or d < best[0]:
+                best = (d, e)
+        if best is None or best[0] > radius_px:
+            return None
+        entity_id = best[1]
+        _highlight({entity_id})                      # self-highlight — our own receive is suppressed
+        selection_service.select(Selection(
+            entity_ids=(entity_id,), primary_id=entity_id, mode='selected',
+            source_view=view_id, generation=selection_service.next_generation()))
+        return entity_id
+
+    try:
+        selection_service.subscribe(view_id, apply_selection)
+    except Exception:                                # broad-ok: service without subscribe → no receive wiring
+        pass
+    try:
+        fig.canvas.mpl_connect(
+            'button_press_event',
+            lambda ev: (getattr(ev, 'inaxes', None) is ax and getattr(ev, 'x', None) is not None
+                        and emit_nearest(ev.x, ev.y)))
+    except Exception:                                # broad-ok: no canvas to connect (headless)
+        pass
+    return {'emit_nearest': emit_nearest, 'apply_selection': apply_selection}
+
+
 def _condition_summary(objs, units, order=None):
     """Per-condition descriptive numbers AT THE UNIT LEVEL: n_objects, n_units, mean, std, and the
     unit-level SEM (std of unit means / sqrt(n_units)) — deliberately NOT the object-level SEM, which
@@ -202,10 +277,14 @@ def _run_unit_test(long_df, measurement, condition_cols, unit_cols, parametric):
 
 def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None, kind='box',
                          show_objects=True, show_units=True, test=False, parametric=False,
-                         order=None, ax=None):
+                         order=None, ax=None, selection_service=None):
     """Superplot per condition + the inspectable summary. **Descriptive by default** (no p-value unless
     ``test=True``). Returns ``(Figure, summary_df)``; the summary carries n at every level and, when a
-    test is run, its name/p-value or its stated refusal."""
+    test is run, its name/p-value or its stated refusal.
+
+    ``selection_service`` (optional): route object-point clicks through the existing ``SelectionService``
+    (single-entity brushing — needs the consolidated table's ``entity_id`` column). The brushing handle
+    is stashed on ``fig._pycat_brushing``."""
     import matplotlib
     if ax is None:
         matplotlib.use('Agg', force=False)
@@ -229,12 +308,17 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
     fig = ax.figure if ax is not None else plt.figure(figsize=(1.6 * len(conditions) + 2, 4.5))
     ax = ax or fig.add_subplot(111)
     rng = np.random.default_rng(0)
+    object_points = []                              # (entity_id, x, y) for single-entity brushing
+    _has_eid = 'entity_id' in objs.columns
     for i, cond in enumerate(conditions):
-        ov = objs.loc[objs['condition'] == cond, 'value'].to_numpy()
+        sub = objs.loc[objs['condition'] == cond]
+        ov = sub['value'].to_numpy()
         uv = units.loc[units['condition'] == cond, 'unit_value'].to_numpy()
         if show_objects and ov.size:
-            ax.scatter(np.full(ov.size, i) + rng.uniform(-0.12, 0.12, ov.size), ov,
-                       s=6, color='#c7d3e8', alpha=0.5, zorder=1)
+            xj = np.full(ov.size, i) + rng.uniform(-0.12, 0.12, ov.size)
+            ax.scatter(xj, ov, s=6, color='#c7d3e8', alpha=0.5, zorder=1)
+            if selection_service is not None and _has_eid:
+                object_points.extend(zip(sub['entity_id'].to_numpy(), xj, ov))
         if ov.size and kind in ('box', 'violin'):
             (ax.violinplot(ov, positions=[i], widths=0.6, showextrema=False) if kind == 'violin'
              else ax.boxplot(ov, positions=[i], widths=0.5, showfliers=False,
@@ -253,6 +337,8 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
                    else " — NO TEST (see summary.note)")
     ax.set_title(_title, fontsize=9, loc='left')
     fig.tight_layout()
+    if selection_service is not None and object_points:
+        fig._pycat_brushing = _attach_object_brushing(fig, ax, object_points, selection_service)
     return fig, summary
 
 
