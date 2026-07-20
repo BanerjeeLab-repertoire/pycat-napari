@@ -22,8 +22,20 @@ import pytest
 
 pytestmark = pytest.mark.core
 
-_UI = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui' / 'ui_modules.py'
+_UI_DIR = pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
+#: `MenuManager` lives in `menu_manager.py` since the Phase-2 extraction (1.6.149); before that it was in
+#: `ui_modules.py`. The contract follows the class wherever it is — so this test guards the menu tree
+#: across the very move it exists to make safe, without being edited to point at a new path.
+_UI_CANDIDATES = (_UI_DIR / 'menu_manager.py', _UI_DIR / 'ui_modules.py')
 _SNAPSHOT = pathlib.Path(__file__).resolve().parent / 'menu_contract_snapshot.json'
+
+
+def _menu_source():
+    """The source file that actually defines ``class MenuManager``."""
+    for p in _UI_CANDIDATES:
+        if p.exists() and 'class MenuManager' in p.read_text(encoding='utf-8'):
+            return p
+    raise AssertionError("class MenuManager not found in menu_manager.py or ui_modules.py")
 
 #: The MenuManager methods that build the menu bar. The contract lives entirely in these.
 _BUILDERS = ('_setup_menu_bar', '_add_analysis_methods_to_menu',
@@ -49,7 +61,7 @@ def extract_menu_contract():
     """The menu tree as a list of ``{'menu': title, 'dict': var, 'actions': [labels…]}`` — one entry per
     ``_add_actions_to_menu(<dict>, <menu>)`` call, in source order. Resolved purely from the AST:
     ``<menu>`` → its ``addMenu('title')`` title, ``<dict>`` → its literal string keys (the action labels)."""
-    tree = ast.parse(_UI.read_text(encoding='utf-8'))
+    tree = ast.parse(_menu_source().read_text(encoding='utf-8'))
     mm = next(n for n in ast.walk(tree)
               if isinstance(n, ast.ClassDef) and n.name == 'MenuManager')
 
@@ -105,7 +117,7 @@ def test_setup_menu_bar_still_installs_its_guarded_setup():
     """The 1.5.509 bug class: a guarded install (`try: … except: pass`) whose result silently vanishes.
     The RUNTIME proof (the attribute is actually set) is the Qt-smoke test; here we statically pin that
     `_setup_menu_bar` still ASSIGNS each guard's result attribute, so deleting one is caught headlessly."""
-    tree = ast.parse(_UI.read_text(encoding='utf-8'))
+    tree = ast.parse(_menu_source().read_text(encoding='utf-8'))
     setup = next(n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name == '_setup_menu_bar')
     assigned = {t.attr for node in ast.walk(setup) if isinstance(node, ast.Assign)
@@ -124,6 +136,6 @@ if __name__ == '__main__':
     if '--regenerate' in sys.argv:
         _SNAPSHOT.write_text(json.dumps(extract_menu_contract(), indent=1, ensure_ascii=False) + '\n',
                              encoding='utf-8')
-        print(f"Regenerated {_SNAPSHOT} from {_UI.name}.")
+        print(f"Regenerated {_SNAPSHOT} from {_menu_source().name}.")
     else:
         print("Run with --regenerate to rewrite the committed menu snapshot.")

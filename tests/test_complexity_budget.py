@@ -145,7 +145,12 @@ _FILE_LINE_CEILINGS = {
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
     "toolbox/vpt_ui.py": 1139,
-    "ui/ui_modules.py": 5573,
+    # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
+    # decomposition. The ratchet moves DOWN — it cannot grow back.
+    "ui/ui_modules.py": 3268,
+    # MenuManager's new home, ratcheted at its post-extraction size. Phase-2's internal splits
+    # (napari_menus / grid_view / metadata_dialogs) would lower it further — a later increment.
+    "ui/menu_manager.py": 2344,
     # 2805 -> 1670 (-40.5%) as StackLoadCancelled (errors.py), the two dialogs (dialogs.py), the pure
     # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
     # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.

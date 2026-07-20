@@ -1,3 +1,26 @@
+## [1.6.149] - 2026-07-19
+### Changed — **`ui_modules.py` decomposition, Phase 2: extract `MenuManager`. 5572 → 3268 lines (−41%).**
+With Phase 1's menu-contract net in place, the safe move: `MenuManager` (2164 lines, ~33 methods, 39% of
+the file) is lifted **verbatim** to a new **`src/pycat/ui/menu_manager.py`**, taking its two exclusive
+helpers with it (`_FileDropFilter`, and the two session-restore method maps). `ui_modules.py`
+**re-exports** it, so `from pycat.ui.ui_modules import MenuManager` (CentralManager, the smoke tests)
+keeps working; `menu_manager.py` imports nothing from `ui_modules`, so there is no cycle.
+
+- **The menu-contract snapshot matched, unchanged** — the Phase-1 net (`test_menu_contract.py`, now
+  location-aware so it follows the class) confirms **not one of the 111 actions or 25 menus moved,
+  renamed, or reordered**. That is the guarantee that makes a 2164-line move of an under-tested file
+  safe, and it is exactly what the file was left un-split for the lack of.
+- **`ui_modules.py`: 5572 → 3268 lines (−41%)**, under the ≤3600 target. Line ratchet lowered to 3268;
+  `menu_manager.py` ratcheted at its 2344-line size.
+- Behaviour-preserving: no rewrites, everything re-exported, full `pytest -m core` green (1115).
+- **Not touched** (spec's explicit scope limit): `BaseUIClass`, `ToolboxFunctionsUI`, and the
+  `AnalysisMethodsUI` family — moving those without behavioural tests is the blind refactor the ratchet
+  warns about; a later spec can extend the same net to them.
+
+**Deferred** (clean follow-up): `MenuManager`'s internal split into `ui/menus/{napari_menus,grid_view,
+metadata_dialogs}.py` — that further thins `menu_manager.py` (not `ui_modules.py`, whose target is
+already met) and is its own increment.
+
 ## [1.6.148] - 2026-07-19
 ### Added — **`ui_modules.py` decomposition, Phase 1: the menu-contract verification net (ships before any move).**
 `ui_modules.py` is the file the codebase deliberately left un-split — its own ratchet warns *"a refactor
