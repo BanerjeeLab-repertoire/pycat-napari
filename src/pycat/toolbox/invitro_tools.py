@@ -1226,6 +1226,60 @@ def partition_coefficient_local(image, labeled_droplets, sample_type='cellular',
     )
 
 
+def _partition_background_assumption(dark_reference, background_subtracted, floor, dilute):
+    """The ``background_subtracted`` assumption for a partition measurement — ``(checked, holds, detail)``.
+
+    **The image CANNOT tell whether its floor is a camera pedestal or the dilute phase.** In a partition
+    measurement the dilute phase IS signal (the denominator), so it is not a background to be removed, and
+    a low-Kp system legitimately has a dilute level close to the dense one — a camera pedestal and a
+    genuine dilute phase both produce a floor above zero, and two heuristics failed in both directions
+    (false-alarming every low-Kp image; passing a 500-count pedestal that had dragged Kp 30 → 5.8). So the
+    tool ASKS rather than guesses: a dark reference RESOLVES it (buffer with no fluorophore measures the
+    floor directly, removable from both phases); otherwise the caller states it, and if they do not, the
+    assumption is recorded UNCHECKED rather than silently assumed. The consequence is large and invisible —
+    an unsubtracted pedestal appears in BOTH numerator and denominator and drags Kp toward 1 (true Kp 30 →
+    15.5 / 5.8 / 2.4 at pedestals of 100 / 500 / 2000)."""
+    if dark_reference is not None:
+        # A dark reference is the ONLY thing that separates a camera offset from a genuine dilute phase;
+        # the scope of the validation claim is stated IN the sentence (it covers the PEDESTAL, not the
+        # mask — an over-inclusive mask still collapses Kp by 7x with the correction perfectly sound).
+        _dk = (float(dark_reference) if np.isscalar(dark_reference)
+               else float(np.median(np.asarray(dark_reference, dtype=float))))
+        return True, True, (
+            f'RESOLVED by a dark reference (camera floor = {_dk:.1f} counts). '
+            f'The pedestal is measured directly and removed from both phases, so '
+            f'Kp is pedestal-independent — validated against the PEDESTAL '
+            f'specifically: 29.65 recovered against a true 30.0 at pedestals of 0, '
+            f'100, 500 and 2000 counts.\n\n'
+            f'**That is the only thing it is validated against.** It says nothing '
+            f'about the segmentation: an over-inclusive droplet mask pulls '
+            f'dilute-phase pixels into the dense average and collapses Kp by up to '
+            f'7x, with the pedestal correction still perfectly sound. Use '
+            f'partition_coefficient_local(), which checks the mask as well.')
+    if background_subtracted is None:
+        return False, None, (
+            f'NOT CHECKED — the caller did not say. The image floor (1st '
+            f'percentile) is {floor:.1f} and the dilute phase is {dilute:.1f}, '
+            f'and NOTHING in the image can distinguish a camera pedestal from a '
+            f'genuine dilute phase: both are simply a floor above zero. If the '
+            f'background was not subtracted, Kp is compressed toward 1 — on '
+            f'identical droplets with a true Kp of 30, a pedestal of 500 counts '
+            f'gives Kp = 5.8.\n\nTHE FIX: acquire a DARK REFERENCE — buffer with '
+            f'no fluorophore, same camera settings — and pass it as '
+            f'dark_reference. That measures the camera floor directly and is the '
+            f'only thing that CAN separate it from the dilute phase. In cells, '
+            f'partition_coefficient_local() additionally samples the dilute phase '
+            f'from a LOCAL ANNULUS around each droplet (offset from the edge to '
+            f'clear the interface gradient), which is more defensible than a '
+            f'global percentile on an unevenly illuminated field.')
+    return True, bool(background_subtracted), (
+        'the caller states the background was subtracted'
+        if background_subtracted else
+        f'the caller states the background was NOT subtracted. Kp is '
+        f'compressed toward 1 by the pedestal — it appears in both the '
+        f'numerator and the denominator. This value is not interpretable.')
+
+
 def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
                           saturation_level=None, background_subtracted=None,
                           dark_reference=None):
@@ -1274,91 +1328,10 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
     finite = img[np.isfinite(img)]
     floor = float(np.percentile(finite, 1)) if finite.size else 0.0
 
-    # ── The image CANNOT tell you whether its floor is a pedestal or the dilute phase ──
-    #
-    # This was attempted twice and it does not work, for a reason worth stating: in a
-    # partition measurement the **dilute phase IS signal** — it is the denominator — so it
-    # is not a background to be removed, and a low-Kp system legitimately has a dilute
-    # level close to the dense one. A camera pedestal and a genuine dilute phase produce
-    # the same thing: a floor above zero.
-    #
-    # Both heuristics failed, in both directions:
-    #
-    #   * floor vs the dense/dilute SPAN  -> flagged EVERY low-Kp image (Kp = 3, Kp = 10)
-    #     as having an unsubtracted background, with no pedestal present at all.
-    #   * floor vs the dense-phase CONTRAST -> still false-alarmed at Kp = 3, and PASSED a
-    #     pedestal of 500 counts that had already dragged Kp from 30 to 5.8.
-    #
-    # There is no signature to find, because there is no information in the image that
-    # separates the two. So **ask** instead of guessing: the caller knows whether they
-    # subtracted the background, and if they do not say, the assumption is recorded as
-    # UNCHECKED rather than silently assumed to hold.
-    #
-    # The consequence is worth being blunt about, because it is large and invisible: an
-    # unsubtracted pedestal appears in BOTH the numerator and the denominator of Kp and
-    # drags it toward 1. Measured on identical droplets (true Kp = 30):
-    #
-    #     pedestal    0 -> Kp 30.0
-    #     pedestal  100 -> Kp 15.5
-    #     pedestal  500 -> Kp  5.8
-    #     pedestal 2000 -> Kp  2.4
-    #
-    # **A 12x error that looks like a perfectly plausible number.**
-    if dark_reference is not None:
-        # A dark reference RESOLVES this: buffer with no fluorophore measures the camera
-        # floor directly, so the pedestal can be removed from BOTH phases. This is the
-        # only thing that can separate a camera offset from a genuine dilute phase — the
-        # image alone cannot, because both are simply a floor above zero.
-        bg_checked, bg_holds = True, True
-        _dk = (float(dark_reference) if np.isscalar(dark_reference)
-               else float(np.median(np.asarray(dark_reference, dtype=float))))
-        # ── State the SCOPE inside the claim, not beside it ─────────────────────
-        #
-        # The old text said "Kp is pedestal-independent. Validated: 29.65 recovered against
-        # a true 30.0" — and stopped there. Every word is true, and the scope is the
-        # PEDESTAL and nothing else. It says nothing about the mask, and an over-inclusive
-        # mask collapses Kp by 7x (1.5.459) while this reassurance prints unchanged.
-        #
-        # `partition_coefficient_local` now suppresses its version of this message when the
-        # mask looks bad — **but this copy, in `partition_measurement`, was never touched.**
-        # The correction did not reach it, which is exactly how a true-but-unscoped claim
-        # survives: it gets fixed where you are looking and lives on where you are not.
-        #
-        # So the scope is now IN the sentence. A reader cannot take the reassurance without
-        # also reading what it does not cover.
-        bg_detail = (f'RESOLVED by a dark reference (camera floor = {_dk:.1f} counts). '
-                     f'The pedestal is measured directly and removed from both phases, so '
-                     f'Kp is pedestal-independent — validated against the PEDESTAL '
-                     f'specifically: 29.65 recovered against a true 30.0 at pedestals of 0, '
-                     f'100, 500 and 2000 counts.\n\n'
-                     f'**That is the only thing it is validated against.** It says nothing '
-                     f'about the segmentation: an over-inclusive droplet mask pulls '
-                     f'dilute-phase pixels into the dense average and collapses Kp by up to '
-                     f'7x, with the pedestal correction still perfectly sound. Use '
-                     f'partition_coefficient_local(), which checks the mask as well.')
-    elif background_subtracted is None:
-        bg_checked, bg_holds = False, None
-        bg_detail = (f'NOT CHECKED — the caller did not say. The image floor (1st '
-                     f'percentile) is {floor:.1f} and the dilute phase is {dilute:.1f}, '
-                     f'and NOTHING in the image can distinguish a camera pedestal from a '
-                     f'genuine dilute phase: both are simply a floor above zero. If the '
-                     f'background was not subtracted, Kp is compressed toward 1 — on '
-                     f'identical droplets with a true Kp of 30, a pedestal of 500 counts '
-                     f'gives Kp = 5.8.\n\nTHE FIX: acquire a DARK REFERENCE — buffer with '
-                     f'no fluorophore, same camera settings — and pass it as '
-                     f'dark_reference. That measures the camera floor directly and is the '
-                     f'only thing that CAN separate it from the dilute phase. In cells, '
-                     f'partition_coefficient_local() additionally samples the dilute phase '
-                     f'from a LOCAL ANNULUS around each droplet (offset from the edge to '
-                     f'clear the interface gradient), which is more defensible than a '
-                     f'global percentile on an unevenly illuminated field.')
-    else:
-        bg_checked, bg_holds = True, bool(background_subtracted)
-        bg_detail = ('the caller states the background was subtracted'
-                     if background_subtracted else
-                     f'the caller states the background was NOT subtracted. Kp is '
-                     f'compressed toward 1 by the pedestal — it appears in both the '
-                     f'numerator and the denominator. This value is not interpretable.')
+    # Is the background subtracted? The image cannot tell a pedestal from a genuine dilute phase, so
+    # the assumption is resolved by a dark reference, stated by the caller, or recorded UNCHECKED.
+    bg_checked, bg_holds, bg_detail = _partition_background_assumption(
+        dark_reference, background_subtracted, floor, dilute)
 
     assumptions = [
         Assumption(

@@ -1,3 +1,17 @@
+## [1.6.181] - 2026-07-20
+### Changed — **partition_measurement: background-subtracted assessment extracted (191 → 110 lines), byte-identical.**
+The Kp measurement-with-assumptions builder was dominated by its background-subtracted assessment — the
+argument (and the branching) that the image cannot tell a camera pedestal from a genuine dilute phase (in
+a partition measurement the dilute phase IS the denominator, so it is not a background to remove), so the
+assumption is RESOLVED by a dark reference, stated by the caller, or recorded UNCHECKED rather than
+guessed. That phase moved to `_partition_background_assumption(dark_reference, background_subtracted,
+floor, dilute) → (checked, holds, detail)`, leaving a 110-line builder.
+- **Behaviour-preserving, pinned as such.** `tests/test_partition_measurement_characterization.py` captured
+  which branch fires and the exact `checked`/`holds`/`detail` of the `background_subtracted` assumption
+  across all four inputs (dark reference / not-stated / stated-true / stated-false), plus the other
+  assumptions and the measurement identity, before the split and asserts them unchanged after; the existing
+  `test_claim_scoping` passes unmodified. Complexity ratchet 128 → 127; truncation guard allowlisted.
+
 ## [1.6.180] - 2026-07-20
 ### Changed — **fit_fusion_relaxation decomposed by phase (184 → 90 lines), proven byte-identical.**
 The droplet-fusion relaxation fit fused the single-exponential-plus-drift curve fit, the tau confidence
