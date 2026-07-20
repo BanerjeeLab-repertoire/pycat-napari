@@ -1,3 +1,30 @@
+## [1.6.167] - 2026-07-20
+### Added — **Publication figure refinement: refine the presentation, never re-run the analysis.**
+A PyCAT comparative figure could be produced but not prepared for a journal — no export, no DPI, no vector
+output — so adjusting an axis label or a colour meant re-running the analysis. That is slow and
+scientifically wasteful: the numbers are already correct; only presentation needs work.
+
+- New **`utils/figure_spec.py`** (`core`, Qt-free): separates a figure's **data** (`FigureData`) from a
+  declarative **`FigureSpec`** (title, labels, limits, palette, fonts, size, DPI, n-annotation, caveat
+  footnote). `render(fig_data, spec)` reads the data and applies the presentation; **mutating the spec and
+  re-rendering never recomputes** — the plotted values are stashed on the figure so the contract is
+  checkable.
+- **The ontology supplies the defaults** (the payoff): the y-axis label defaults to *"Partition coefficient
+  (dimensionless)"* (display name + units, no typing), and a measurement's caveats can render as a figure
+  **footnote** — so the 2D-projection-proxy warning travels onto the figure instead of being lost between
+  the analysis and the paper. Both are overridable per figure.
+- **Export** (`export`) writes vector **PDF/SVG with fonts embedded as TEXT** (`pdf.fonttype=42`,
+  `svg.fonttype='none'` — editors can adjust type, not outlines), a high-DPI PNG, the **summary DataFrame**
+  alongside (a figure whose numbers are not saved is irreproducible), and the **spec as JSON** so the figure
+  regenerates identically. **Size presets** (single / 1.5 / double column) are offered as *sizes*, never as
+  journal-compliance claims (requirements vary; unverifiable compliance is worse than sensible defaults).
+  Palettes are colour-blind-safe (Okabe–Ito) by default.
+- New **`tests/test_figure_spec.py`** (`core`, matplotlib Agg): the **refine-never-recompute contract**
+  (changing the spec leaves the plotted values byte-identical); the spec round-trips through JSON; labels
+  and units default from the ontology (and an explicit label overrides); caveats render as a footnote
+  matching the ontology; and export produces vector output with text fonts, a PNG at the requested DPI, the
+  summary CSV, and a regenerating spec JSON.
+
 ## [1.6.166] - 2026-07-20
 ### Added — **PyCAT Validation Suite: a standing per-release regression benchmark, with the first baseline recorded.**
 The test suite answers *"did anything break?"* per commit. At PyCAT's release cadence (often several
