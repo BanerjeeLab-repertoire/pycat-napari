@@ -1,5 +1,12 @@
 # Claude Code spec — Biological QC: a second QC layer at the object level
 
+> **✅ STATUS — DONE.** Part A (the `biological_qc_tools` module + tests) shipped in **1.6.152**. Part B
+> (surface the flags) shipped in **1.6.169**: the consolidated long table gains an additive `qc_flags`
+> column (table-based flags computed there; mask-based flags carried through from an upstream-stamped
+> column), and the QC report gains an object-level `qc_biological_objects` section wired into `run_full_qc`
+> and the QC UI. The flag-never-filters contract is pinned across both surfaces. `tests/test_biological_qc.py`
+> + `tests/test_biological_qc_surfaced.py`.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.144 · Verified against the 1.6.144 tree. Adds the
 object-level QC layer the roadmap describes as *"a second QC layer beyond imaging QC"* — flagging
 biological outliers rather than imaging problems. Additive: flags are reported, never silently

@@ -47,6 +47,27 @@ def _sibling_channels(ui_instance, active_name, active_data):
         return None
 
 
+def _qc_object_table(ui_instance):
+    """The segmented-object table to run object-level biological QC on, or None.
+
+    Prefers the cell table, then puncta — the tables PyCAT's pipelines populate in the data repository.
+    Table-based flags (size / shape / intensity outliers) need only the table, so this alone lets the
+    object-QC section appear; the mask-based flags (edge, containment) are surfaced by the batch /
+    upstream path where the label image lives, and are not guessed at here (a wrong table→mask pairing
+    would fabricate an edge flag). Best-effort: any failure simply means no object section.
+    """
+    try:
+        repo = ui_instance.central_manager.active_data_class.data_repository
+    except Exception as exc:      # broad-ok: object QC is optional — no repository simply means no section
+        debug_log('QC: no data repository for object-level QC', exc)
+        return None
+    for key in ('cell_df', 'puncta_df'):
+        df = repo.get(key)
+        if df is not None and getattr(df, 'empty', True) is False:
+            return df
+    return None
+
+
 def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     """Build the Data QC dashboard widget."""
     outer = QVBoxLayout()
@@ -172,7 +193,12 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 #
                 # The channels are the other 2-D image layers of the same shape in the viewer —
                 # which is exactly what a multi-colour acquisition looks like once loaded.
-                channels=_sibling_channels(ui_instance, name, data))
+                channels=_sibling_channels(ui_instance, name, data),
+                # ── Object-level biological QC (second layer): "can I trust this OBJECT?" ────────
+                # Appended only when the pipeline has produced a segmented-object table. Table-based
+                # flags (size/shape/intensity) surface here; edge/containment ride the batch path where
+                # the label mask lives. Flags are REPORTED, never used to drop an object.
+                object_table=_qc_object_table(ui_instance))
         except Exception as e:
             napari_show_warning(f"QC failed: {e}")
             import traceback; traceback.print_exc(); return

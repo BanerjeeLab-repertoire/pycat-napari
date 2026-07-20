@@ -1,3 +1,30 @@
+## [1.6.169] - 2026-07-20
+### Added — **Biological QC Part B: the object-level flags now SURFACE — in the consolidated table and the QC report.**
+The object-level QC module (`biological_qc_tools`, 1.6.152) computed edge/size/shape/intensity/containment
+flags but exposed them nowhere a scientist would look. Part B wires them into the two places that matter,
+and carries the cardinal contract — **flag, never filter** — through both: no row is ever dropped for
+tripping a flag.
+- **Consolidated long table** gains an additive `qc_flags` column (at the END of the schema, so every
+  existing reader is untouched). `build_image_long_table`/`ConsolidatedLongWriter` compute the
+  table-based flags (size/shape/intensity via robust MAD) from the wide object table, and **carry an
+  upstream-stamped `qc_flags` through untouched** — that is how the mask-based flags (edge/containment),
+  computed where the label image lives, reach the table. A comparison can now be recomputed with and
+  without flagged objects — *"the effect holds when edge-touching cells are excluded"* is a stronger
+  claim than an unqualified one. `qc=False` opts out; QC never breaks the keystone table build (a failure
+  degrades to "no flags", never a lost row).
+- **QC report** gains an object-level section (`qc_biological_objects`), appended by `run_full_qc` when an
+  `object_table=` is supplied, in the same Assessment → Interpretation → Recommendation shape the imaging
+  checks use. It states counts per flag: edge-touching is **definitive** (a truncated object is a
+  measurement artefact — can read POOR); size/shape/intensity are **hints** worded as observations and
+  never escalate past CHECK, because a mitotic or dead cell is real data. The QC UI wires the segmented
+  cell/puncta table into the call so the section appears live; a malformed table degrades gracefully and
+  never breaks the imaging report.
+- Tests (`core`): `tests/test_biological_qc_surfaced.py` — seeded-outlier detection in the consolidated
+  table, the **cry-wolf** clean-population test, the flag-never-drops-a-row contract (QC on/off give the
+  same rows), upstream-flag carry-through, the report section's per-flag counts and definitive-vs-hint
+  status, the empty-table N/A, and AST guards that the batch and QC UI actually wire it. Closes the Part B
+  deferral recorded in 1.6.152.
+
 ## [1.6.168] - 2026-07-20
 ### Changed — **science_function_split: the 394-line MSD/α fit decomposed by phase, proven behaviour-preserving.**
 Companion to the UI-builder split, governed by a stricter rule: **a numerical function may only be split if

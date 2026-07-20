@@ -40,6 +40,19 @@ from pycat.utils.notify import show_warning as _warn
 _CORE_COLS = ('object_type', 'object_id', 'entity_id', 'measurement', 'value', 'units')
 _DEFAULT_PROVENANCE_COLS = ('channel', 'frame', 'pixel_size_um', 'pycat_version', 'operation_id')
 
+# ── Biological-QC observation column (biological_qc Part B) ──────────────────────────────────
+#
+# One per-object ``qc_flags`` string ("touches image border; unusual size"), repeated on each of that
+# object's long rows and blank when the object tripped no flag. It rides at the END of the schema so it
+# is purely additive — every existing reader keyed on ``measurement``/``value`` is untouched, and a
+# comparison can now be recomputed WITH and WITHOUT flagged objects (the scientifically honest use).
+#
+# The flag is an OBSERVATION carried alongside the measurement, never a filter: no row is dropped for
+# tripping it. Table-based flags (size/shape/intensity via robust MAD) are computed from the wide table
+# here; mask-based flags (edge/containment) require the label image and so are carried through when the
+# upstream table already stamped ``qc_flags`` (where the mask lived) or when ``masks`` is supplied.
+_QC_COLS = ('qc_flags',)
+
 
 def melt_object_measurements(df, object_type, *, id_col='object_id', value_cols=None,
                              units=None) -> pd.DataFrame:
@@ -84,15 +97,49 @@ def melt_object_measurements(df, object_type, *, id_col='object_id', value_cols=
     return pd.concat(frames, ignore_index=True)
 
 
+def _object_qc_flags(wide, object_type, id_col, *, labels=None, parent_labels=None, k=3.5):
+    """``{object_id: qc_flags_string}`` for one wide object table — the non-blank observations only.
+
+    Carries an already-computed ``qc_flags`` column through untouched (the upstream analysis stamped it
+    where the label mask lived); otherwise computes the flags it can from the table itself — size, shape
+    and intensity outliers via robust MAD — plus any mask-based flags a supplied ``labels``/
+    ``parent_labels`` affords. **Never raises and never filters:** QC is additive to the table build, so
+    a failure here degrades to "no flags", never to a lost row or a broken batch.
+    """
+    try:
+        wide = pd.DataFrame(wide)
+        if wide.empty:
+            return {}
+        ids = (wide[id_col] if id_col in wide.columns
+               else pd.Series(range(len(wide)), index=wide.index))
+        if 'qc_flags' in wide.columns:
+            flags = wide['qc_flags'].fillna('').astype(str)
+        else:
+            from pycat.toolbox.biological_qc_tools import biological_qc
+            res = biological_qc(wide, labels=labels, parent_labels=parent_labels,
+                                id_col=id_col, k=k)
+            flags = res['qc_flags'].fillna('').astype(str)
+        return {oid: fl for oid, fl in zip(ids.to_numpy(), flags.to_numpy()) if fl}
+    except Exception as exc:      # broad-ok: additive QC must never break the keystone table build
+        _warn(f"Consolidated table: biological QC flags skipped for {object_type}: {exc}")
+        return {}
+
+
 def build_image_long_table(records, *, image_stem, sample_metadata=None, provenance=None,
                            condition_fields=None, provenance_cols=_DEFAULT_PROVENANCE_COLS,
-                           units=None) -> pd.DataFrame:
+                           units=None, masks=None, qc=True, qc_k=3.5) -> pd.DataFrame:
     """One image's full long table: its objects melted, with condition + provenance columns attached.
 
     ``records`` is a list of ``(object_type, wide_df)`` or ``(object_type, wide_df, id_col)``. The
     condition columns come from ``sample_metadata.fields``; ``condition_fields`` fixes their names and
     order so a streamed batch has a stable schema (a field absent for this image is blank, never
     guessed). ``provenance`` is a per-image dict whose values fill ``provenance_cols``.
+
+    ``qc`` (default on) attaches the additive ``qc_flags`` column — a per-object biological-QC
+    observation string, blank when nothing tripped. ``masks`` is an optional ``{object_type: labels}``
+    map that lets the mask-based flags (edge-touching) be computed here; without it, only the
+    table-based flags (size/shape/intensity) and any upstream-stamped ``qc_flags`` are surfaced. ``qc_k``
+    is the robust-MAD threshold, recorded so a reader can see how aggressive the flagging was.
     """
     from pycat.utils.sample_metadata import SampleMetadata
 
@@ -123,12 +170,27 @@ def build_image_long_table(records, *, image_stem, sample_metadata=None, provena
         out[c] = long[c].values if len(long) else []
     for pc in provenance_cols:
         out[pc] = provenance.get(pc, '')
+
+    # ── The additive qc_flags column: one per-object observation string, on each of its rows ──────
+    qc_map = {}
+    if qc:
+        masks = masks or {}
+        for rec in records:
+            object_type, wide = rec[0], rec[1]
+            id_col = rec[2] if len(rec) > 2 else 'object_id'
+            for oid, s in _object_qc_flags(wide, object_type, id_col,
+                                           labels=masks.get(object_type), k=qc_k).items():
+                qc_map[(object_type, oid)] = s
+    out['qc_flags'] = ([qc_map.get((t, oid), '')
+                        for t, oid in zip(out['object_type'], out['object_id'])]
+                       if len(out) else [])
     return out
 
 
 def consolidated_columns(condition_fields, provenance_cols=_DEFAULT_PROVENANCE_COLS):
     """The full, ordered column schema — so the streaming writer and any reader agree."""
-    return (['image_stem'] + list(condition_fields) + list(_CORE_COLS) + list(provenance_cols))
+    return (['image_stem'] + list(condition_fields) + list(_CORE_COLS)
+            + list(provenance_cols) + list(_QC_COLS))
 
 
 #: The per-object measurement tables PyCAT writes to a data repository, keyed ``<type>_df``. Kept an
@@ -189,22 +251,25 @@ class ConsolidatedLongWriter:
     """
 
     def __init__(self, path, condition_fields, *, provenance_cols=_DEFAULT_PROVENANCE_COLS,
-                 units=None):
+                 units=None, qc=True, qc_k=3.5):
         self.path = str(path)
         self.condition_fields = list(condition_fields)
         self.provenance_cols = tuple(provenance_cols)
         self.units = units or {}
+        self.qc = bool(qc)
+        self.qc_k = float(qc_k)
         self._columns = consolidated_columns(self.condition_fields, self.provenance_cols)
         self._header_written = False
         self.n_images = 0
         self.n_rows = 0
 
-    def add_image(self, image_stem, records, *, sample_metadata=None, provenance=None):
+    def add_image(self, image_stem, records, *, sample_metadata=None, provenance=None, masks=None):
         """Melt one image's objects and append them. Returns the number of rows written."""
         table = build_image_long_table(
             records, image_stem=image_stem, sample_metadata=sample_metadata,
             provenance=provenance, condition_fields=self.condition_fields,
-            provenance_cols=self.provenance_cols, units=self.units)
+            provenance_cols=self.provenance_cols, units=self.units,
+            masks=masks, qc=self.qc, qc_k=self.qc_k)
         # Reindex to the fixed schema so append can never drift a column.
         table = table.reindex(columns=self._columns)
 
