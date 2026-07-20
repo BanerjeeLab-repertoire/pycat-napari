@@ -157,6 +157,36 @@ MEASUREMENTS: dict[str, MeasurementDef] = {m.key: m for m in (
                   'Where the denominator is near zero the ratio is NaN, not a spike; check the reported '
                   'thresholded fraction.'),
          emitted=False),
+    # ── SMLM / localization clustering outputs (reported aggregates, not raw columns) ──────────────
+    _def(key='median_localization_precision_nm', display_name='Median localization precision',
+         definition="The median single-molecule localization uncertainty across a localization set — the "
+                    "resolution floor below which apparent clustering is not trustworthy.",
+         equation='σ_loc = median(uncertainty_i)',
+         units='nm',
+         interpretation='Structure at length scales below this is not resolved; treat short-range '
+                        'clustering with caution.',
+         caveats=('This is a FLOOR, not the resolution — the PCF/Ripley analysis over-reports clustering '
+                  'below it because each molecule is a fuzzy blob, not a point.',),
+         emitted=False),
+    _def(key='ripley_l_max', display_name="Ripley's L peak (L(r) − r max)",
+         definition="The maximum of the edge-corrected Ripley's L(r) − r over the tested radii — the "
+                    "strength and scale of spatial clustering of the localizations.",
+         equation='max_r [ L(r) − r ],  L(r) = √(K(r)/π)',
+         units='µm',
+         interpretation='> 0 indicates clustering at the peak radius; ≈ 0 is spatial randomness (CSR).',
+         caveats=('Blink over-counting inflates apparent clustering — temporally merge before trusting '
+                  'the peak (see the median localization precision floor).',),
+         emitted=False),
+    _def(key='nn_median', display_name='Median nearest-neighbour distance',
+         definition="The median distance from each localization to its nearest neighbour — a simple "
+                    "summary of spatial density/clustering.",
+         equation='median_i min_{j≠i} ‖x_i − x_j‖',
+         units='µm',
+         interpretation='Smaller = denser/more clustered. Compare against a CSR expectation for the same '
+                        'density.',
+         caveats=('Un-merged blinks shrink this artificially — one molecule localized repeatedly reads as '
+                  'many near-coincident points.',),
+         emitted=False),
 )}
 
 

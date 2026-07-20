@@ -1,3 +1,24 @@
+## [1.6.184] - 2026-07-20
+### Added — **SMLM / localization-table analysis — load, normalize to µm, feed the spatial stats that exist.**
+The lab has super-resolution instruments and had no localization-table analysis — but the hard part (the
+spatial statistics `ripleys_l` / `pair_correlation_function` / `nearest_neighbour_distance` /
+`local_object_density`) already exists. This is the front door. New **`toolbox/smlm_tools.py`**:
+- `load_localization_table(path, *, format='auto', pixel_size_um=None)` → a µm-normalized
+  `LocalizationSet`. **Units are the whole risk:** detected from the column header (ThunderSTORM's
+  `x [nm]` → µm) and REQUIRED explicitly (`pixel_size_um`) when the columns are bare — never guessed, the
+  same gate images enforce. The same pattern in nm vs µm gives identical downstream stats (pinned).
+- `temporal_merge(locset, *, radius_um, gap_frames)` — collapse a blinking molecule's repeated
+  localizations to one, with `analyze_localizations` **warning that un-merged data OVER-COUNTS density**
+  (never silently merged or not).
+- `analyze_localizations(locset, *, cell_area_um2)` runs the existing Ripley/PCF/NN/density backend and
+  reports the **median localization precision (nm) as the resolution floor** below which clustering is not
+  real.
+- Ontology entries added (`median_localization_precision_nm`, `ripley_l_max`, `nn_median`) with the
+  precision-floor and blink-over-count caveats.
+- Tests (`core`): `tests/test_smlm_tools.py` — nm→µm loading, the ambiguous-units gate, nm/µm identical
+  stats, clustered-vs-random through the loader, temporal-merge reduces the over-count + warns, the
+  precision floor, and the no-x/y-columns error. A points layer + a load UI are the thin follow-on.
+
 ## [1.6.183] - 2026-07-20
 ### Changed — **detect_beads_stack decomposed by pipeline stage (317 → 116 lines); VPT-baseline byte-identical.**
 `detect_beads_stack` is the shared detection stage feeding the whole VPT viscosity chain (the ~8.325

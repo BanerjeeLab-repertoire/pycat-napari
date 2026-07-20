@@ -243,6 +243,8 @@ _KNOWN_UNTAGGED = {
     'blob_log_gpu', 'detect_beads_frame', 'build_hot_pixel_mask',
     'dedup_detections', 'dedup_detections_ring_merge', 'split_bead_populations',
     'compare_detection_variants', 'compare_segmentation_speed',
+    'temporal_merge',                # SMLM blink merge — collapses localizations into a LocalizationSet,
+                                     # not a layer (matches the 'merge' keyword by name only)
     'puncta_refinement_filtering_func_fast',
     'refine_labels_with_contours',
     'pseudo3d_tri_planar_filter',    # the tri-planar MACHINERY; the filters that use it are tagged
