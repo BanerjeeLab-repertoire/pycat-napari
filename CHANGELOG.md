@@ -1,3 +1,27 @@
+## [1.6.177] - 2026-07-20
+### Added — **Feature redundancy analysis: find near-duplicate feature columns, report them, never drop them.**
+PyCAT emits wide feature tables where several columns track the same underlying quantity (`area`,
+`convex_area`, `equivalent_diameter` all track size), silently giving a downstream PCA/classifier four
+copies of "size" four times the weight. Nothing reported it. New **`toolbox/feature_redundancy.py`**:
+- `analyze_redundancy(table, *, method='spearman', threshold=0.95)` → a `RedundancyReport` (the |r| matrix,
+  the redundant-column groups, one chosen representative per group with the reason, the droppable columns,
+  and the excluded columns with reasons).
+- **Spearman by default** — morphometric relationships are often monotonic-but-not-linear (area vs
+  diameter is a square law) and Pearson understates that redundancy.
+- **Transitive clustering, not pairwise dropping** — correlation-distance average-linkage clustering, so
+  A~B, B~C groups all three even when A~C is just under threshold; an order-dependent pairwise drop would
+  not.
+- **The representative is chosen, not arbitrary** — an ontology-defined column beats a derived one, else
+  the most complete (fewest NaNs), else alphabetical; the reason is recorded so the minimal set is
+  reproducible.
+- **Report, never auto-drop** — `minimal_feature_set(report)` is opt-in; the analysis never mutates the
+  caller's table (pinned). Constant / NaN-heavy columns are excluded with a stated reason. The report is
+  labelled dataset-specific (redundancy on one table is not a universal fact).
+- Tests (`core`): `tests/test_feature_redundancy.py` — a known duplicate groups and keeps one; independent
+  columns produce no groups (cry-wolf); transitive clustering; Spearman catches a square law Pearson
+  misses; ontology-preferred representative; constant-column exclusion; minimal-set one-per-group; and the
+  no-mutation contract. Prerequisite for the Feature Explorer.
+
 ## [1.6.176] - 2026-07-20
 ### Changed — **fit_frap_recovery decomposed by phase (206 → 109 lines), proven byte-identical.**
 The FRAP recovery fit fused the hyperbolic curve fit, the normalisation-aware mobile-fraction derivation
