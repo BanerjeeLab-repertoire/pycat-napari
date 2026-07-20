@@ -249,6 +249,48 @@ _DELIBERATE = {
     'ui_modules.py::open_command_palette',
     'ui_modules.py::open_tag_inspector',
 
+    # 1.6.150 — the batch replay handlers + their shared helpers MOVED from batch_step_registry.py into
+    # the pycat.batch.steps package (decomposition, split by name-prefix family). _STEP_MAP stays in
+    # batch_step_registry.py and imports them; route-equivalence + the composition guard prove replay is
+    # unchanged. (_flatten_scalars/_proc are nested helpers that moved with their parent handler.)
+    'batch_step_registry.py::_derive_split_companion_path',
+    'batch_step_registry.py::_flatten_scalars',
+    'batch_step_registry.py::_get_data',
+    'batch_step_registry.py::_ivf_droplet_mask_and_image',
+    'batch_step_registry.py::_load_image',
+    'batch_step_registry.py::_normalize_to_float',
+    'batch_step_registry.py::_proc',
+    'batch_step_registry.py::_raw_counts',
+    'batch_step_registry.py::_resolve_channel_for_layer',
+    'batch_step_registry.py::_resolve_image_layer',
+    'batch_step_registry.py::_save_array',
+    'batch_step_registry.py::_source_path_for_recorded_channel',
+    'batch_step_registry.py::replay_auto_crop_roi',
+    'batch_step_registry.py::replay_bf_cell_segmentation',
+    'batch_step_registry.py::replay_bf_condensate_segmentation',
+    'batch_step_registry.py::replay_bf_preprocess',
+    'batch_step_registry.py::replay_calibration_correction',
+    'batch_step_registry.py::replay_cell_analysis',
+    'batch_step_registry.py::replay_cellpose_segmentation',
+    'batch_step_registry.py::replay_condensate_analysis',
+    'batch_step_registry.py::replay_condensate_segmentation',
+    'batch_step_registry.py::replay_ivbf_preprocess',
+    'batch_step_registry.py::replay_ivbf_segmentation',
+    'batch_step_registry.py::replay_ivf_field_summary',
+    'batch_step_registry.py::replay_ivf_preprocess',
+    'batch_step_registry.py::replay_ivf_segmentation',
+    'batch_step_registry.py::replay_ivf_size_distribution',
+    'batch_step_registry.py::replay_ivf_spatial_metrology',
+    'batch_step_registry.py::replay_measure_line',
+    'batch_step_registry.py::replay_open_image',
+    'batch_step_registry.py::replay_open_stack',
+    'batch_step_registry.py::replay_preprocessing',
+    'batch_step_registry.py::replay_sacf_analysis',
+    'batch_step_registry.py::replay_save_and_clear',
+    'batch_step_registry.py::replay_set_frame_range',
+    'batch_step_registry.py::replay_ts_cellpose_keyframe',
+    'batch_step_registry.py::replay_upscaling',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

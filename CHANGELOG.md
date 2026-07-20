@@ -1,3 +1,27 @@
+## [1.6.150] - 2026-07-19
+### Changed — **Decompose `batch_step_registry.py`: 1663 → 432 lines (−74%), the fourth (and last-tracked) concentration point.**
+The one god-file that had *grown* across the audit window, and the easiest to move safely — flat, no
+classes, 26 replay handlers with the identical `(state, image_path, params, output_dir)` signature,
+grouped by name prefix, and covered by a strong net (route-equivalence exercises batch replay end-to-end;
+the OperationSpec composition guard reads `_STEP_MAP`). Behaviour-preserving move-don't-rewrite.
+
+- The **26 `replay_*` handlers** moved into a new **`pycat.batch.steps`** package, split by prefix family
+  (`io_steps`, `preprocessing_steps`, `segmentation_steps`, `brightfield_steps`, `invitro_steps`,
+  `analysis_steps`), and the **10 shared helpers** into ONE `_common.py` (imported, never duplicated).
+- **`_STEP_MAP` stays in `batch_step_registry.py`** and imports the handlers — the dispatch table must
+  live in one place (it's what the composition guard reads). `register_all_steps` / `step_operations` /
+  `_STEP_MAP` / `_STEP_OPERATIONS` are unchanged; no code imported an individual handler directly, so no
+  re-exports were needed.
+- **`replay_background_removal` deliberately stayed** in `batch_step_registry.py`: `test_batch_matches_the_recording`
+  reads its SOURCE from that file (a white-box scale-logic check), so moving it would break a test the
+  spec forbids editing — the target is met without it.
+- New `tests/test_batch_step_map.py` (`core`): every `_STEP_MAP` entry resolves to a 4-arg callable —
+  catches a bad move instantly. Line ratchet lowered 1663 → 432; the few moved broad handlers annotated
+  `# broad-ok:`. Route-equivalence + the composition guard confirm replay is byte-for-byte unchanged.
+
+Full `pytest -m core` green (1117). With this, all four tracked concentration points are decomposed —
+`vpt_ui` (−54%), `ui_modules` (−41%), `file_io` (−42%), `batch_step_registry` (−74%).
+
 ## [1.6.149] - 2026-07-19
 ### Changed — **`ui_modules.py` decomposition, Phase 2: extract `MenuManager`. 5572 → 3268 lines (−41%).**
 With Phase 1's menu-contract net in place, the safe move: `MenuManager` (2164 lines, ~33 methods, 39% of

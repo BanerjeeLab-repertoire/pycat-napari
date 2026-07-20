@@ -155,7 +155,10 @@ _FILE_LINE_CEILINGS = {
     # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
     # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.
     "file_io/file_io.py": 1670,
-    "batch_step_registry.py": 1663,
+    # 1663 -> 432 (-74%): the replay handlers + shared helpers moved to the pycat.batch.steps package
+    # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
+    # a source-level test) stay. Ratchet moves down only.
+    "batch_step_registry.py": 432,
 }
 
 
