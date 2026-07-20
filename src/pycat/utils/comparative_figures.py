@@ -173,7 +173,8 @@ def aggregate_to_unit(long_df, *, measurement, unit_cols, condition_cols, value_
               .reset_index().rename(columns={value_col: 'unit_value'}))
 
 
-def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_id='comparative'):
+def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_id='comparative',
+                            cohort_markers=None):
     """Route a click on an object point through the existing ``SelectionService`` — single-entity
     selection, the increment-3 Part-D wiring, now that the consolidated table carries a resolvable
     ``entity_id`` per object.
@@ -183,9 +184,12 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
     here. Self-highlight on emit is deliberate — the service suppresses a view's own receive, so the
     view must paint its own click (the same rule the VPT panels follow).
 
-    **COHORT selection is NOT wired here** (clicking a unit/condition marker to select the cohort it
-    summarizes) — it needs the typed/cohort-target ``SelectionState`` still deferred on the
-    interaction-layer roadmap (§3/§4). Per the spec: single-entity now, no second selection path.
+    **COHORT selection is now wired** (the cohort target shipped): ``cohort_markers`` is
+    ``[(x, y, Cohort), …]`` — a condition's unit-mean marker carrying the cohort of that condition's
+    objects. Clicking nearest a cohort marker selects the whole GROUP (``select_cohort``, so a
+    cohort-aware dock can say *"N objects, condition=WT"*); clicking nearest an object point selects the
+    single entity. Nearest-wins between the two. A selection from another view rings its members either
+    way (the cohort's members ride in ``selected``).
 
     Returns ``{'emit_nearest', 'apply_selection'}`` so the behaviour is testable without a GUI event
     loop (matplotlib clicks do not fire under Agg).
@@ -193,6 +197,7 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
     from pycat.utils.selection_service import Selection
 
     pts = [(str(e), float(x), float(y)) for (e, x, y) in object_points if e]
+    cohorts = [(float(x), float(y), coh) for (x, y, coh) in (cohort_markers or [])]
     state = {'ring': None}
 
     def _highlight(eids):
@@ -217,23 +222,32 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
         _highlight(getattr(state_obj, 'entity_ids', ()) or ())
 
     def emit_nearest(x_disp, y_disp, radius_px=14.0):
-        if not pts:
+        if not pts and not cohorts:
             return None
         trans = ax.transData
-        best = None
+        best = None                                  # (dist, kind, payload)
         for e, x, y in pts:
             px, py = trans.transform((x, y))
             d = ((px - x_disp) ** 2 + (py - y_disp) ** 2) ** 0.5
             if best is None or d < best[0]:
-                best = (d, e)
+                best = (d, 'entity', e)
+        for x, y, coh in cohorts:
+            px, py = trans.transform((x, y))
+            d = ((px - x_disp) ** 2 + (py - y_disp) ** 2) ** 0.5
+            if best is None or d < best[0]:
+                best = (d, 'cohort', coh)
         if best is None or best[0] > radius_px:
             return None
-        entity_id = best[1]
-        _highlight({entity_id})                      # self-highlight — our own receive is suppressed
+        _, kind, payload = best
+        if kind == 'cohort':
+            _highlight(payload.members)              # self-highlight every member of the group
+            selection_service.select_cohort(payload, source=view_id)
+            return payload
+        _highlight({payload})                        # self-highlight — our own receive is suppressed
         selection_service.select(Selection(
-            entity_ids=(entity_id,), primary_id=entity_id, mode='selected',
+            entity_ids=(payload,), primary_id=payload, mode='selected',
             source_view=view_id, generation=selection_service.next_generation()))
-        return entity_id
+        return payload
 
     try:
         selection_service.subscribe(view_id, apply_selection)
@@ -309,6 +323,7 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
     ax = ax or fig.add_subplot(111)
     rng = np.random.default_rng(0)
     object_points = []                              # (entity_id, x, y) for single-entity brushing
+    cohort_markers = []                             # (x, y, Cohort) for group (condition) brushing
     _has_eid = 'entity_id' in objs.columns
     for i, cond in enumerate(conditions):
         sub = objs.loc[objs['condition'] == cond]
@@ -326,6 +341,15 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
         if show_units and uv.size:
             ax.scatter(np.full(uv.size, i), uv, s=70, color='#c0392b', edgecolor='white',
                        linewidth=0.8, zorder=3, label='unit mean' if i == 0 else None)
+            # Clicking a unit-mean marker selects the whole CONDITION as a cohort (its member objects,
+            # with the condition as the stated definition) — the box/violin group case of the cohort spec.
+            if selection_service is not None and _has_eid:
+                from pycat.utils.selection_service import Cohort
+                members = frozenset(str(e) for e in sub['entity_id'].to_numpy() if e)
+                if members:
+                    coh = Cohort(members=members, kind='group', source_view='comparative',
+                                 definition=f"{cond} · {len(members)} objects")
+                    cohort_markers.extend((i, float(v), coh) for v in uv)
     ax.set_xticks(range(len(conditions)))
     ax.set_xticklabels(conditions, rotation=20, ha='right')
     ax.set_xlabel(' | '.join(condition_cols) if isinstance(condition_cols, (list, tuple)) else condition_cols)
@@ -337,8 +361,9 @@ def condition_comparison(long_df, *, measurement, condition_cols, unit_cols=None
                    else " — NO TEST (see summary.note)")
     ax.set_title(_title, fontsize=9, loc='left')
     fig.tight_layout()
-    if selection_service is not None and object_points:
-        fig._pycat_brushing = _attach_object_brushing(fig, ax, object_points, selection_service)
+    if selection_service is not None and (object_points or cohort_markers):
+        fig._pycat_brushing = _attach_object_brushing(
+            fig, ax, object_points, selection_service, cohort_markers=cohort_markers)
     return fig, summary
 
 

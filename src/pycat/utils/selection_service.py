@@ -65,6 +65,31 @@ class Selection:
 
 
 @dataclasses.dataclass(frozen=True)
+class Cohort:
+    """**A GROUP as a selection target — carrying the definition that makes it honest.**
+
+    A histogram bin, a box/violin condition, or an aggregate row selects a *set* of entities, not one.
+    Representing that as a bare id-set loses *why* they are grouped; a ``Cohort`` carries the ``members``
+    AND a human-readable ``definition`` ("area ∈ [12.0, 18.0) µm²", "genotype=WT") and a ``kind``, so a
+    view can say *"42 objects, area ∈ [12, 18)"* instead of an anonymous highlight. That is the honesty
+    requirement — the user must be able to see why these objects form a group.
+
+    **A cohort is a SELECTION, not a FILTER.** It is transient attention: it never mutates the DataFrame
+    or changes which objects are analysed. Changing the analysed population is the deferred FilterStore's
+    separate job, and conflating the two is exactly what must not happen here.
+    """
+
+    members: frozenset = frozenset()     # entity ids in the group
+    definition: str = ''                 # human-readable — WHY these objects are grouped
+    kind: str = 'group'                  # 'bin' | 'group' | 'aggregate' | 'filter'
+    source_view: str = ''                # who defined the cohort — skipped when propagating
+
+    @property
+    def n(self) -> int:
+        return len(self.members)
+
+
+@dataclasses.dataclass(frozen=True)
 class SelectionState:
     """**The interaction state — hover, selection, and pins — as ONE immutable value.**
 
@@ -84,6 +109,10 @@ class SelectionState:
     pinned: frozenset = frozenset()
     generation: int = 0
     source_view: str = ''            # who caused THIS state — skipped when propagating (echo guard)
+    # A typed GROUP target (histogram bin, box/violin condition, aggregate row). ADDITIVE: a
+    # cohort-unaware view ignores this and reads `selected` (which `select_cohort` fills with the
+    # members), so it still highlights them; a cohort-aware view reads this for the definition + count.
+    cohort: "Cohort | None" = None
 
     # ── back-compat: the old Selection read interface ─────────────────────────────────────
     @property
@@ -255,17 +284,31 @@ class SelectionService:
 
     # ── state commands (each produces a new state and publishes it) ───────────────────────
     def select_entity(self, entity_id, source=''):
-        """Make ``entity_id`` the whole selection (pins survive)."""
+        """Make ``entity_id`` the whole selection (pins survive). Clears any cohort — a single-entity
+        selection is not a group."""
         return self._publish(dataclasses.replace(
-            self._state, selected=frozenset({entity_id}), primary=entity_id,
+            self._state, selected=frozenset({entity_id}), primary=entity_id, cohort=None,
             generation=self.next_generation(), source_view=source))
 
     def toggle(self, entity_id, source=''):
-        """Add/remove ``entity_id`` from the selection — ctrl-click to build a comparison set."""
+        """Add/remove ``entity_id`` from the selection — ctrl-click to build a comparison set. Clears
+        any cohort (building an ad-hoc set is not the same as selecting a defined group)."""
         sel = set(self._state.selected) ^ {entity_id}
         primary = entity_id if entity_id in sel else next(iter(sel), None)
         return self._publish(dataclasses.replace(
-            self._state, selected=frozenset(sel), primary=primary,
+            self._state, selected=frozenset(sel), primary=primary, cohort=None,
+            generation=self.next_generation(), source_view=source))
+
+    def select_cohort(self, cohort: "Cohort", source=''):
+        """Select a COHORT — a group with a stated definition (a histogram bin, a box/violin condition,
+        an aggregate's contributors). It rides the existing service: same echo-suppression, generation
+        counting, and deferred lane.
+
+        It sets ``selected`` to the members TOO, so a cohort-UNAWARE view degrades gracefully — it reads
+        ``selected`` and highlights every member — while a cohort-aware view reads ``cohort`` for the
+        definition and count. ``primary`` is ``None`` (a group has no single primary). Pins survive."""
+        return self._publish(dataclasses.replace(
+            self._state, selected=frozenset(cohort.members), primary=None, cohort=cohort,
             generation=self.next_generation(), source_view=source))
 
     def hover(self, entity_id, source=''):
@@ -286,9 +329,9 @@ class SelectionService:
             generation=self.next_generation(), source_view=source))
 
     def clear_selection(self, source=''):
-        """Escape's semantics: clear selected + hovered, **keep pins**."""
+        """Escape's semantics: clear selected + hovered + cohort, **keep pins**."""
         return self._publish(dataclasses.replace(
-            self._state, selected=frozenset(), primary=None, hovered=None,
+            self._state, selected=frozenset(), primary=None, hovered=None, cohort=None,
             generation=self.next_generation(), source_view=source))
 
     def _flush_deferred(self):

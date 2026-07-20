@@ -1,3 +1,34 @@
+## [1.6.151] - 2026-07-19
+### Added — **Cohort selection: a GROUP as a typed selection target, so histogram bins / box-violin groups / aggregates select honestly.**
+The top deferred-interaction item, and the prerequisite comparative-phenotyping increment 3 was blocked
+on. A selection could only be a *set of entity ids*, so a histogram bar or a box/violin condition — a
+*group* of objects defined by a range or a label — could not be selected without losing *why* those
+objects belong together. Additive; the existing selection model is unchanged.
+
+- **`Cohort`** (new frozen dataclass in `selection_service.py`): `members` + a human-readable
+  `definition` ("area ∈ [12, 18) µm²", "genotype=WT") + a `kind` (`bin`/`group`/`aggregate`/`filter`).
+  `SelectionState` gains a `cohort` field — **additive**: every existing consumer of
+  `selected`/`hovered`/`pinned` is untouched.
+- **`select_cohort(cohort, source)`** rides the existing service (same echo-suppression, generation
+  counting, deferred lane). It sets `selected` to the members TOO, so a cohort-**unaware** view degrades
+  gracefully — it reads `selected` and highlights every member — while a cohort-aware view reads `cohort`
+  for the definition and count. **The image/labels overlay therefore highlights all members for free**
+  (it already reads `selected`, k points). `clear` / `select_entity` / `toggle` clear the cohort; pins
+  survive.
+- **Comparative-figure groups emit cohorts** (`comparative_figures`): clicking a condition's unit-mean
+  marker selects that whole condition as a cohort ("WT · 8 objects"), while an object point still selects
+  one entity — nearest-wins. This unblocks the increment-3 box/violin case.
+- **A cohort is a SELECTION, not a FILTER** — it never mutates the DataFrame or the analysed population
+  (pinned in a test; the boundary noted in the docstrings). That is the deferred FilterStore's separate job.
+
+New tests (`core`): `tests/test_cohort_selection.py` (round-trip, graceful degradation, echo-suppression,
+clear-keeps-pins, selection≠filter) + a comparative-group cohort test. Full `pytest -m core` green (1124).
+
+**Deferred** (clean follow-ons, the foundation now unlocks them): the histogram-bin emitter and the
+aggregate-table-row emitter ("summarizes N objects" in the dock) — each is its own adapter; the emit
+pattern is established by the comparative case, and rendering already works via the members-in-`selected`
+degradation.
+
 ## [1.6.150] - 2026-07-19
 ### Changed — **Decompose `batch_step_registry.py`: 1663 → 432 lines (−74%), the fourth (and last-tracked) concentration point.**
 The one god-file that had *grown* across the audit window, and the easiest to move safely — flat, no

@@ -76,6 +76,24 @@ def test_no_brushing_wired_without_a_service():
     assert not hasattr(fig, '_pycat_brushing')
 
 
+def test_clicking_a_condition_selects_it_as_a_COHORT():
+    """The cohort-spec's box/violin case: clicking a condition's unit-mean marker selects the whole
+    GROUP — a cohort of that condition's objects, carrying the condition as its definition — while an
+    object point still selects one entity (nearest-wins)."""
+    from pycat.utils.selection_service import SelectionService, Cohort
+    svc = SelectionService(defer=lambda fn: fn(), debounce=lambda fn: fn())
+    got = []
+    svc.subscribe('img', lambda st: got.append(st))
+    fig, _ = condition_comparison(_long(), measurement='area', condition_cols=['condition'],
+                                  unit_cols=['image_stem'], selection_service=svc)
+    ax = fig.axes[0]
+    px, py = ax.transData.transform((0.0, 11.5))       # WT unit-mean marker (r1/r2 means both 11.5)
+    res = fig._pycat_brushing['emit_nearest'](px, py)
+    assert isinstance(res, Cohort) and res.kind == 'group' and res.n == 8 and 'WT' in res.definition
+    # propagated to the other view: cohort carried AND its members ride in `selected` for degradation
+    assert got[-1].cohort is not None and len(got[-1].selected) == 8
+
+
 def test_ui_condition_fields_excludes_the_fixed_schema():
     from pycat.ui.comparative_figures_ui import _condition_fields
     from pycat.utils.consolidated_table import consolidated_columns
