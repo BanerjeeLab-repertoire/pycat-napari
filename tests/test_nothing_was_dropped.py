@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.168 — science_function_split: `fit_anomalous_diffusion` (the 394-line MSD/α fit behind
+    # viscosity) was split BY COMPUTATIONAL PHASE into pure helpers — `_lag_window_gate`,
+    # `_fit_msd_powerlaw`, `_assess_msd_identifiability`, `_classify_msd_motion`, `_package_msd_result` —
+    # dropping it 393 → 98 lines. Nothing was removed: every line MOVED into a named helper, and the
+    # function's 4 numerical tests passed UNMODIFIED (no number changed). The rationale in the deleted
+    # lines lives on in those helpers.
+    'condensate_physics_tools.py::fit_anomalous_diffusion',
+
     # 1.6.100 — the MSD plot's `_on_pick` (per-line pick_event handler) was removed with its whole
     # mechanism. An audit found the pick_event-plus-debounce approach intrinsically fragile (it
     # assumed all of a click's pick_events arrive before a zero-delay timer — not a safe contract),

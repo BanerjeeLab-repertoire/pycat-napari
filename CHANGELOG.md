@@ -1,3 +1,23 @@
+## [1.6.168] - 2026-07-20
+### Changed — **science_function_split: the 394-line MSD/α fit decomposed by phase, proven behaviour-preserving.**
+Companion to the UI-builder split, governed by a stricter rule: **a numerical function may only be split if
+a test can prove the numbers did not change.** `fit_anomalous_diffusion` (`condensate_physics_tools`) — the
+MSD → D/α fit behind every viscosity number, and manuscript-facing — was the ideal first case: it already
+carries 4 tests that assert its recovered values.
+
+- Split **by computational phase** (validate → gate → fit → assess → package), never by line count, into
+  pure helpers: `_lag_window_gate` (the defensible lag band), `_fit_msd_powerlaw` (the non-linear
+  4·D·τ^α + 4σ_loc² refinement), `_assess_msd_identifiability` (the D/α confidence interval),
+  `_classify_msd_motion` (R², fit quality, motion type), and `_package_msd_result`. The function dropped
+  from **393 → 98 lines**, each helper well under the 120-line ceiling.
+- **Every line was MOVED, not rewritten** — no floating-point operation reassociated, nothing "improved"
+  while splitting. The proof: its 4 existing numerical tests (`test_msd_drift`,
+  `test_msd_min_track_length`, `test_vpt_viscosity_chain`, and the route-equivalence viscosity chain)
+  passed **unmodified**, and `test_no_undefined_names` confirmed no local was left unthreaded.
+- The complexity ratchet `_MAX_LONG_FUNCTIONS` is lowered **135 → 134** (the ratchet moving down, which is
+  it working), and a `_DELIBERATE` drop-guard record documents that the 75% shrink is a decomposition, not
+  a truncation. **No numerical output changed anywhere.**
+
 ## [1.6.167] - 2026-07-20
 ### Added — **Publication figure refinement: refine the presentation, never re-run the analysis.**
 A PyCAT comparative figure could be produced but not prepared for a journal — no export, no DPI, no vector

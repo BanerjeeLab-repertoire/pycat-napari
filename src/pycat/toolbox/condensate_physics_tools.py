@@ -508,6 +508,170 @@ def test_confinement(tau, msd):
                 n_lags=int(tau.size), verdict=verdict)
 
 
+def _lag_window_gate(msd_df, max_lag_fit, frame_interval_s, upper_lag_rule, upper_lag_fraction,
+                     upper_lag_fixed_s, min_independent_pairs, confine_to_defensible_bounds):
+    """The reliable-lag-window fit gate for ``fit_anomalous_diffusion`` -- extracted verbatim
+    (science_function_split, no numerical change): filter to lags with enough pairs, compute the defensible
+    ``[lag_lo, lag_hi]`` per the chosen rule, and clip to it (warns, never blocks). Returns
+    ``(df, lag_lo, lag_hi, window_warning)``."""
+    df = msd_df[msd_df['n_pairs'] > 5].copy()
+    if max_lag_fit is not None:
+        df = df.head(max_lag_fit)
+
+    # ── Lag-window fit gate ──────────────────────────────────────────────────
+    window_warning = None
+    lag_lo = lag_hi = None
+    if 'lag_s' in df.columns and len(df):
+        all_lags = df['lag_s'].values.astype(float)
+        # High-frequency cutoff = one frame interval.
+        lag_lo = float(frame_interval_s) if (frame_interval_s and frame_interval_s > 0) \
+            else float(np.min(all_lags))
+        # Low-frequency (upper-lag) cutoff per the chosen rule.
+        max_lag_available = float(np.max(all_lags))
+        rule = (upper_lag_rule or 'fraction').lower()
+        if rule == 'fixed' and upper_lag_fixed_s and upper_lag_fixed_s > 0:
+            lag_hi = float(upper_lag_fixed_s)
+        elif rule == 'min_pairs' and 'n_tracks' in df.columns:
+            ok = df[df['n_tracks'] >= int(min_independent_pairs)]
+            lag_hi = float(ok['lag_s'].max()) if len(ok) else lag_lo
+        else:  # 'fraction' (default)
+            lag_hi = float(upper_lag_fraction) * max_lag_available
+
+        # Sanity + coverage warnings (warn, never block).
+        if lag_hi <= lag_lo:
+            window_warning = (
+                f"Requested lag window collapses (lag_lo={lag_lo:.3g}s ≥ "
+                f"lag_hi={lag_hi:.3g}s). The acquisition is too short, or the "
+                f"upper-lag rule is too strict, to define a fit band. Fitting the "
+                f"full available range instead.")
+            lag_hi = max_lag_available
+        elif lag_hi > max_lag_available + 1e-12:
+            window_warning = (
+                f"Requested upper lag ({lag_hi:.3g}s) exceeds the longest "
+                f"available lag ({max_lag_available:.3g}s): the acquisition "
+                f"duration is too short to reach the low-frequency cutoff, so "
+                f"G(τ)/viscosity may be under-resolved at long lags.")
+            lag_hi = max_lag_available
+
+        if confine_to_defensible_bounds:
+            gated = df[(df['lag_s'] >= lag_lo - 1e-12)
+                       & (df['lag_s'] <= lag_hi + 1e-12)]
+            if len(gated) >= 3:
+                df = gated
+            else:
+                window_warning = (
+                    (window_warning + " ") if window_warning else ""
+                ) + (f"Only {len(gated)} lag(s) fall inside the defensible "
+                     f"window [{lag_lo:.3g}, {lag_hi:.3g}]s — too few to fit; "
+                     f"using the full available range instead.")
+    return df, lag_lo, lag_hi, window_warning
+
+
+def _insufficient_result(lag_lo, lag_hi, window_warning):
+    """The result when fewer than 3 lags survive the gate -- extracted verbatim."""
+    return dict(D_um2_per_s=np.nan, alpha=np.nan, motion_type='unknown',
+                r_squared=np.nan, fit_lags_s=np.array([]),
+                fit_msd=np.array([]), log_log_slope=np.nan,
+                log_log_intercept=np.nan,
+                fit_window_s=(lag_lo, lag_hi),
+                fit_window_warning=window_warning)
+
+
+def _fit_msd_powerlaw(df, tau, msd, fit_localization_offset, D_ll, a_ll):
+    """The non-linear MSD = 4*D*tau^alpha (+4*sigma_loc^2) refinement -- extracted verbatim. Keeps the
+    log-log estimate if the non-linear fit fails. Returns ``(D, alpha, sigma_loc_um, popt, pcov)`` (popt/pcov
+    are None on a failed fit, which is how the identifiability check sees it)."""
+    D, alpha = D_ll, a_ll
+    sigma_loc_um = float('nan')
+    popt = None
+    pcov = None   # so the identifiability check can see a failed fit
+    try:
+        sigma = None
+        if 'msd_sem' in df.columns:
+            sem = df['msd_sem'].values.astype(float)
+            if np.all(np.isfinite(sem)) and np.all(sem > 0):
+                sigma = sem
+        if fit_localization_offset:
+            # Fit MSD = 4·D·τ^α + 4·σ_loc², separating the STATIC LOCALIZATION
+            # ERROR (a constant offset from centroid uncertainty) from real
+            # diffusion. This matters enormously in viscous samples: when the
+            # medium is thick the bead barely moves per frame, so the constant
+            # localization floor can dwarf the real τ-dependent signal. A fit
+            # WITHOUT the offset absorbs that floor into D, inflating D (and thus
+            # deflating Stokes-Einstein viscosity) by a large factor. The offset
+            # term lets D reflect only the genuine time-dependent motion.
+            # Parameter 3 is σ_loc² (µm²); reported back as σ_loc (nm) for the
+            # user to sanity-check against their expected localization precision.
+            # Offset bound matches the reference notebook workflow: the constant
+            # term N = 4·σ_loc² cannot exceed the smallest MSD value, since
+            # MSD = (non-negative diffusion signal) + N. Our fit parameter is
+            # off = N/4, so its upper bound is min(msd)/4.
+            off_max = max(float(np.min(msd)) / 4.0, 1e-9)
+            off0 = min(max(float(np.min(msd)) * 0.25, 1e-9), off_max)
+            popt, pcov = optimize.curve_fit(
+                lambda tt, D_, a_, off_: 4.0 * D_ * tt ** a_ + 4.0 * off_,
+                tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll, off0], sigma=sigma,
+                absolute_sigma=False,
+                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, off_max]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
+            sigma_loc_um = float(np.sqrt(max(popt[2], 0.0)))
+        else:
+            popt, pcov = optimize.curve_fit(
+                lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
+                p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
+                bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
+            D, alpha = float(popt[0]), float(popt[1])
+    except Exception:
+        pass  # keep the log-log estimate if the non-linear fit fails
+    return D, alpha, sigma_loc_um, popt, pcov
+
+
+def _assess_msd_identifiability(popt, pcov):
+    """The 95% CI of D and alpha from the fit covariance -- extracted verbatim. The interval is REPORTED,
+    never reduced to a pass/fail flag (D and alpha are coupled, so no single scalar separates good fits from
+    bad); a wide CI is warned. Returns the identifiability dict."""
+    identifiability = {}
+    try:
+        if pcov is not None and np.all(np.isfinite(pcov)):
+            perr = np.sqrt(np.diag(pcov))
+            for i, name in enumerate(('D_um2_per_s', 'alpha')):
+                val, se = float(popt[i]), float(perr[i])
+                if not np.isfinite(se) or se <= 0:
+                    identifiability[name] = dict(
+                        value=val, identifiable=False,
+                        reason='the covariance is singular — the parameter is unconstrained')
+                    continue
+                lo, hi = val - 1.96 * se, val + 1.96 * se
+                rel = (hi - lo) / max(abs(val), 1e-12)
+                identifiability[name] = dict(
+                    value=val, se=se, ci=(float(lo), float(hi)),
+                    relative_ci_width=float(rel))
+    except Exception as _exc:
+        debug_log('MSD: could not assess identifiability', _exc)
+
+    # A CI spanning more than half the value is worth flagging in the log — NOT as a
+    # pass/fail verdict, but so it is not missed.
+    _wide = [k for k, v in identifiability.items()
+             if v.get('relative_ci_width', 0.0) > 0.5]
+    if _wide:
+        _detail = "; ".join(
+            f"{k} = {identifiability[k]['value']:.4g} "
+            f"[95% CI {identifiability[k]['ci'][0]:.4g} to "
+            f"{identifiability[k]['ci'][1]:.4g}]"
+            for k in _wide if 'ci' in identifiability[k])
+        napari_show_warning(
+            f"MSD fit: {', '.join(_wide)} has a WIDE confidence interval. {_detail}.\n\n"
+            f"D and alpha are strongly coupled in MSD = 4·D·tau^alpha: a larger alpha trades "
+            f"against a smaller D and fits almost as well, so a short lag window cannot "
+            f"separate them. R² stays high regardless (measured: R² RISES from 0.958 to "
+            f"0.973 as the window shrinks from 30 lags to 4, while the scatter in D grows "
+            f"6-fold).\n\n"
+            f"**Viscosity is computed from D. An unidentifiable D is an unidentifiable "
+            f"viscosity.** Use more lags, or report the interval alongside the value.")
+    return identifiability
+
+
 def fit_anomalous_diffusion(
     msd_df: pd.DataFrame,
     max_lag_fit: int = None,
@@ -576,64 +740,12 @@ def fit_anomalous_diffusion(
         fit_window_s    : (lag_lo, lag_hi) the defensible window used
         fit_window_warning : str or None — set when data can't cover the window
     """
-    df = msd_df[msd_df['n_pairs'] > 5].copy()
-    if max_lag_fit is not None:
-        df = df.head(max_lag_fit)
-
-    # ── Lag-window fit gate ──────────────────────────────────────────────────
-    window_warning = None
-    lag_lo = lag_hi = None
-    if 'lag_s' in df.columns and len(df):
-        all_lags = df['lag_s'].values.astype(float)
-        # High-frequency cutoff = one frame interval.
-        lag_lo = float(frame_interval_s) if (frame_interval_s and frame_interval_s > 0) \
-            else float(np.min(all_lags))
-        # Low-frequency (upper-lag) cutoff per the chosen rule.
-        max_lag_available = float(np.max(all_lags))
-        rule = (upper_lag_rule or 'fraction').lower()
-        if rule == 'fixed' and upper_lag_fixed_s and upper_lag_fixed_s > 0:
-            lag_hi = float(upper_lag_fixed_s)
-        elif rule == 'min_pairs' and 'n_tracks' in df.columns:
-            ok = df[df['n_tracks'] >= int(min_independent_pairs)]
-            lag_hi = float(ok['lag_s'].max()) if len(ok) else lag_lo
-        else:  # 'fraction' (default)
-            lag_hi = float(upper_lag_fraction) * max_lag_available
-
-        # Sanity + coverage warnings (warn, never block).
-        if lag_hi <= lag_lo:
-            window_warning = (
-                f"Requested lag window collapses (lag_lo={lag_lo:.3g}s ≥ "
-                f"lag_hi={lag_hi:.3g}s). The acquisition is too short, or the "
-                f"upper-lag rule is too strict, to define a fit band. Fitting the "
-                f"full available range instead.")
-            lag_hi = max_lag_available
-        elif lag_hi > max_lag_available + 1e-12:
-            window_warning = (
-                f"Requested upper lag ({lag_hi:.3g}s) exceeds the longest "
-                f"available lag ({max_lag_available:.3g}s): the acquisition "
-                f"duration is too short to reach the low-frequency cutoff, so "
-                f"G(τ)/viscosity may be under-resolved at long lags.")
-            lag_hi = max_lag_available
-
-        if confine_to_defensible_bounds:
-            gated = df[(df['lag_s'] >= lag_lo - 1e-12)
-                       & (df['lag_s'] <= lag_hi + 1e-12)]
-            if len(gated) >= 3:
-                df = gated
-            else:
-                window_warning = (
-                    (window_warning + " ") if window_warning else ""
-                ) + (f"Only {len(gated)} lag(s) fall inside the defensible "
-                     f"window [{lag_lo:.3g}, {lag_hi:.3g}]s — too few to fit; "
-                     f"using the full available range instead.")
+    df, lag_lo, lag_hi, window_warning = _lag_window_gate(
+        msd_df, max_lag_fit, frame_interval_s, upper_lag_rule, upper_lag_fraction,
+        upper_lag_fixed_s, min_independent_pairs, confine_to_defensible_bounds)
 
     if len(df) < 3:
-        return dict(D_um2_per_s=np.nan, alpha=np.nan, motion_type='unknown',
-                    r_squared=np.nan, fit_lags_s=np.array([]),
-                    fit_msd=np.array([]), log_log_slope=np.nan,
-                    log_log_intercept=np.nan,
-                    fit_window_s=(lag_lo, lag_hi),
-                    fit_window_warning=window_warning)
+        return _insufficient_result(lag_lo, lag_hi, window_warning)
 
     tau = df['lag_s'].values.astype(float)
     msd = df['msd_um2'].values.astype(float)
@@ -647,142 +759,24 @@ def fit_anomalous_diffusion(
     # few independent tracks, no longer count as much as precise short-lag ones.
     D_ll = float(np.exp(log_intercept) / 4.0)
     a_ll = float(log_slope)
-    D, alpha = D_ll, a_ll
-    sigma_loc_um = float('nan')
-    pcov = None   # so the identifiability check below can see a failed fit
-    try:
-        sigma = None
-        if 'msd_sem' in df.columns:
-            sem = df['msd_sem'].values.astype(float)
-            if np.all(np.isfinite(sem)) and np.all(sem > 0):
-                sigma = sem
-        if fit_localization_offset:
-            # Fit MSD = 4·D·τ^α + 4·σ_loc², separating the STATIC LOCALIZATION
-            # ERROR (a constant offset from centroid uncertainty) from real
-            # diffusion. This matters enormously in viscous samples: when the
-            # medium is thick the bead barely moves per frame, so the constant
-            # localization floor can dwarf the real τ-dependent signal. A fit
-            # WITHOUT the offset absorbs that floor into D, inflating D (and thus
-            # deflating Stokes-Einstein viscosity) by a large factor. The offset
-            # term lets D reflect only the genuine time-dependent motion.
-            # Parameter 3 is σ_loc² (µm²); reported back as σ_loc (nm) for the
-            # user to sanity-check against their expected localization precision.
-            # Offset bound matches the reference notebook workflow: the constant
-            # term N = 4·σ_loc² cannot exceed the smallest MSD value, since
-            # MSD = (non-negative diffusion signal) + N. Our fit parameter is
-            # off = N/4, so its upper bound is min(msd)/4.
-            off_max = max(float(np.min(msd)) / 4.0, 1e-9)
-            off0 = min(max(float(np.min(msd)) * 0.25, 1e-9), off_max)
-            popt, pcov = optimize.curve_fit(
-                lambda tt, D_, a_, off_: 4.0 * D_ * tt ** a_ + 4.0 * off_,
-                tau, msd,
-                p0=[max(D_ll, 1e-9), a_ll, off0], sigma=sigma,
-                absolute_sigma=False,
-                bounds=([1e-12, 0.05, 0.0], [1e6, 3.0, off_max]), maxfev=10000)
-            D, alpha = float(popt[0]), float(popt[1])
-            sigma_loc_um = float(np.sqrt(max(popt[2], 0.0)))
-        else:
-            popt, pcov = optimize.curve_fit(
-                lambda tt, D_, a_: 4.0 * D_ * tt ** a_, tau, msd,
-                p0=[max(D_ll, 1e-9), a_ll], sigma=sigma, absolute_sigma=False,
-                bounds=([1e-12, 0.05], [1e6, 3.0]), maxfev=10000)
-            D, alpha = float(popt[0]), float(popt[1])
-    except Exception:
-        pass  # keep the log-log estimate if the non-linear fit fails
 
-    # ── Can the data DETERMINE D and alpha? ─────────────────────────────────────
-    #
-    # The covariance was being discarded (`popt, _ = curve_fit(...)`), and it is the only
-    # thing here that knows whether the lag window CONSTRAINS the parameters. R² cannot: it
-    # measures how well the curve fits the lags you HAVE.
-    #
-    # **D and alpha are strongly coupled in MSD = 4·D·τ^α** — a larger α trades against a
-    # smaller D and fits almost as well. On a short lag window that trade-off is
-    # unconstrained. Measured, with a true D = 0.05 µm²/s and α = 1.0, 10 % noise, over 30
-    # realisations:
-    #
-    #     lag window     D (sd)              alpha (sd)      mean R²
-    #     30 lags        0.0496 (0.0035)     0.99 (0.08)     0.958
-    #     12 lags        0.0495 (0.0025)     1.06 (0.13)     0.968
-    #     6 lags         0.0539 (0.0110)     1.17 (0.35)     0.969
-    #     4 lags         0.0561 (0.0224)     1.14 (0.40)     **0.973**
-    #
-    # **The scatter in D grows 6×, the scatter in α grows 5× — and R² goes UP.**
-    #
-    # Viscosity is computed from D (Stokes-Einstein). **An unidentifiable D is an
-    # unidentifiable viscosity**, and it was being reported as a single confident number.
-    identifiability = {}
-    try:
-        if pcov is not None and np.all(np.isfinite(pcov)):
-            perr = np.sqrt(np.diag(pcov))
-            for i, name in enumerate(('D_um2_per_s', 'alpha')):
-                val, se = float(popt[i]), float(perr[i])
-                if not np.isfinite(se) or se <= 0:
-                    identifiability[name] = dict(
-                        value=val, identifiable=False,
-                        reason='the covariance is singular — the parameter is unconstrained')
-                    continue
-                lo, hi = val - 1.96 * se, val + 1.96 * se
-                rel = (hi - lo) / max(abs(val), 1e-12)
-                # ── REPORT the interval; do NOT reduce it to a pass/fail flag ────
-                #
-                # I tried twice to turn this into a binary "identifiable" verdict, and both
-                # attempts were wrong in instructive ways.
-                #
-                # The textbook test (CI wider than the value itself) is far too lenient: on a
-                # 4-lag window D came out at 0.051 with a CI of [0.035, 0.067] — a ±32 %
-                # interval, useless for reporting a viscosity, and it passes comfortably.
-                #
-                # Tightening the threshold to 0.5 made it WORSE, not better: the flag then
-                # fired on 30-lag fits (5 % judged identifiable) more often than on 4-lag
-                # fits (30 %). The relative CI width across lag windows came out
-                # NON-MONOTONIC — 0.66, 0.46, 0.55, 1.65 for 30, 12, 6 and 4 lags. **It is
-                # not a clean function of the lag window**, because D and alpha are coupled
-                # and the trade-off between them shifts with the window in a way a single
-                # scalar does not capture. No threshold on this quantity separates good fits
-                # from bad ones, and choosing one to make the table look right would be
-                # fitting the metric to the answer.
-                #
-                # What IS true and checkable: the CI is honest at long windows and
-                # OVER-CONFIDENT at short ones. Checked against ground truth over 50
-                # realisations — how often does the reported 95 % CI actually contain the
-                # true D?
-                #
-                #     lag window    coverage of the true D
-                #     30 lags       100 %
-                #     12 lags        98 %
-                #     6 lags       **84 %**
-                #     4 lags       **78 %**
-                #
-                # So the interval is reported, with its coverage caveat, and the user decides.
-                # A number with an honest interval is more useful than a flag with a
-                # dishonest threshold.
-                identifiability[name] = dict(
-                    value=val, se=se, ci=(float(lo), float(hi)),
-                    relative_ci_width=float(rel))
-    except Exception as _exc:
-        debug_log('MSD: could not assess identifiability', _exc)
+    D, alpha, sigma_loc_um, popt, pcov = _fit_msd_powerlaw(
+        df, tau, msd, fit_localization_offset, D_ll, a_ll)
 
-    # A CI spanning more than half the value is worth flagging in the log — NOT as a
-    # pass/fail verdict (see above), but so it is not missed.
-    _wide = [k for k, v in identifiability.items()
-             if v.get('relative_ci_width', 0.0) > 0.5]
-    if _wide:
-        _detail = "; ".join(
-            f"{k} = {identifiability[k]['value']:.4g} "
-            f"[95% CI {identifiability[k]['ci'][0]:.4g} to "
-            f"{identifiability[k]['ci'][1]:.4g}]"
-            for k in _wide if 'ci' in identifiability[k])
-        napari_show_warning(
-            f"MSD fit: {', '.join(_wide)} has a WIDE confidence interval. {_detail}.\n\n"
-            f"D and alpha are strongly coupled in MSD = 4·D·tau^alpha: a larger alpha trades "
-            f"against a smaller D and fits almost as well, so a short lag window cannot "
-            f"separate them. R² stays high regardless (measured: R² RISES from 0.958 to "
-            f"0.973 as the window shrinks from 30 lags to 4, while the scatter in D grows "
-            f"6-fold).\n\n"
-            f"**Viscosity is computed from D. An unidentifiable D is an unidentifiable "
-            f"viscosity.** Use more lags, or report the interval alongside the value.")
+    identifiability = _assess_msd_identifiability(popt, pcov)
 
+    r2, msd_fit, tau_fit, motion_type, fit_quality, confinement = _classify_msd_motion(
+        D, alpha, sigma_loc_um, tau, msd)
+
+    return _package_msd_result(
+        D, alpha, motion_type, r2, fit_quality, confinement, sigma_loc_um, tau_fit, msd_fit,
+        a_ll, log_intercept, lag_lo, lag_hi, window_warning, identifiability)
+
+
+def _classify_msd_motion(D, alpha, sigma_loc_um, tau, msd):
+    """The fitted curve, R^2, fit-quality, and motion-type classification for fit_anomalous_diffusion --
+    extracted verbatim (science_function_split, no numerical change). Returns
+    (r2, msd_fit, tau_fit, motion_type, fit_quality, confinement)."""
     tau_fit = tau
     _off = (sigma_loc_um ** 2) if np.isfinite(sigma_loc_um) else 0.0
     msd_fit = 4 * D * tau_fit ** alpha + 4 * _off
@@ -878,6 +872,12 @@ def fit_anomalous_diffusion(
             "fits with a spuriously small exponent and reports as 'subdiffusion'. That "
             "is a wall, not viscoelasticity. Check the probe is sampling the bulk.")
 
+    return r2, msd_fit, tau_fit, motion_type, fit_quality, confinement
+
+
+def _package_msd_result(D, alpha, motion_type, r2, fit_quality, confinement, sigma_loc_um, tau_fit,
+                        msd_fit, a_ll, log_intercept, lag_lo, lag_hi, window_warning, identifiability):
+    """Assemble the fit_anomalous_diffusion result dict -- extracted verbatim (no numerical change)."""
     return dict(
         # The interval the data actually supports. Viscosity is computed from D — an
         # unidentifiable D is an unidentifiable viscosity, and it must not be reported as a

@@ -67,7 +67,14 @@ _LONG_FUNCTION_LIMIT = 120
 # extracting a contiguous widget block into a helper, dropping the count 147 → 135. No science function
 # was touched. The ceiling is lowered to the genuine new value (135) — the ratchet moving DOWN, which is
 # it working; it is never raised to grandfather offenders.
-_MAX_LONG_FUNCTIONS = 135
+# 134. (2026-07-20, science_function_split) `fit_anomalous_diffusion` (condensate_physics_tools), the
+# 394-line MSD/α fit behind viscosity, was split BY COMPUTATIONAL PHASE into pure helpers — the lag-window
+# gate, the non-linear power-law fit, the identifiability CI, the motion-type classification, and result
+# packaging — dropping the function to 98 lines. This is a SCIENCE function, so the split was governed by
+# coverage: its 4 existing numerical tests (test_msd_drift / test_msd_min_track_length /
+# test_vpt_viscosity_chain / test_route_equivalence) passed UNMODIFIED, proving no number changed. No
+# floating-point operation was reassociated and nothing was "improved" while moving. Count 135 → 134.
+_MAX_LONG_FUNCTIONS = 134
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
