@@ -1731,6 +1731,250 @@ def _choose_detection_tier(*, n_frames, t_ser, t_gpu, workers, gpu_ok, pool_ok) 
     return min(options, key=lambda kv: kv[1])[0]
 
 
+def _bead_first_frame(bead_stack, frame_indices):
+    """The first frame to be processed — used by the backend-choice cost/equivalence probes without
+    materialising the stack."""
+    from pycat.file_io.file_io import iter_frames as _itf
+    return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
+
+
+def _choose_detection_backend(bead_stack, frame_indices, n_frames, *, quality_mode, use_gpu, parallel,
+                              n_workers, host_mask, min_sigma, max_sigma, num_sigma, threshold, variant):
+    """Pick the detection execution tier for THIS stack and return ``(tier, gpu_on, src_desc, max_workers)``.
+
+    No fixed preference order — each candidate (GPU / CPU-process-pool / serial) is COSTED and the cheapest
+    wins (see `_choose_detection_tier`). The GPU equivalence guard runs whenever the GPU is a candidate,
+    even if the pool ends up winning — "never trust a mismatching GPU" is a correctness rule, memoised so
+    it is free. The pool is a candidate only for the fast path on multi-frame stacks whose variant does not
+    need per-detection sigma / a stack-level mask. **Path OUTCOME is behaviour: the equivalence guards pin
+    that GPU/pool/serial produce identical blobs.**"""
+    # Is the GPU a CANDIDATE?
+    gpu_ok = False
+    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
+        try:
+            from pycat.toolbox.gpu_utils import gpu_available
+            gpu_ok = bool(gpu_available())
+        except Exception:
+            gpu_ok = False
+        if gpu_ok:
+            gpu_ok = gpu_matches_cpu(
+                lambda: _bead_first_frame(bead_stack, frame_indices),
+                min_sigma=min_sigma, max_sigma=max_sigma,
+                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+
+    # Is the POOL a candidate? Ring-merge needs per-detection sigma (not carried by the worker) and
+    # hot-pixel reject filters against a stack-level mask, so both stay serial.
+    src_desc = _bead_source_descriptor(bead_stack) if quality_mode == 'fast' else None
+    try:
+        import os as _os
+        max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+    except Exception:
+        max_workers = 1
+    pool_ok = (quality_mode == 'fast'
+               and variant not in ('ring_merge', 'hot_pixel_reject')
+               and parallel in ('auto', 'cpu', 'process')
+               and src_desc is not None and max_workers >= 2
+               and bool(n_frames) and n_frames > 1)
+
+    # An explicit request is the caller telling us which tier they want; only 'auto' must justify itself.
+    if use_gpu in ('gpu', True, 'true') and gpu_ok:
+        tier = 'gpu'
+    elif parallel in ('cpu', 'process') and pool_ok:
+        tier = 'pool'
+    elif not gpu_ok and not pool_ok:
+        tier = 'serial'
+    else:
+        _t_ser, _t_gpu = _frame_costs_s(
+            _bead_first_frame(bead_stack, frame_indices), gpu_ok=gpu_ok, min_sigma=min_sigma,
+            max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+        tier = _choose_detection_tier(
+            n_frames=n_frames, t_ser=_t_ser, t_gpu=_t_gpu, workers=max_workers,
+            gpu_ok=gpu_ok, pool_ok=pool_ok)
+        debug_log(
+            f'VPT tier: {tier} for {n_frames} x {tuple(getattr(bead_stack, "shape", ()))[-2:]} '
+            f'(serial {_t_ser*1000:.0f} ms/frame'
+            + (f', GPU {_t_gpu*1000:.0f} ms/frame' if _t_gpu else '')
+            + (f', pool ~{_t_ser/_pool_speedup(max_workers)*1000:.0f} ms/frame + '
+               f'{_pool_spawn_cost_s():.1f} s spawn' if pool_ok else '') + ')', None)
+    return tier, (tier == 'gpu'), src_desc, max_workers
+
+
+def _pool_predetect(src_desc, frame_indices, n_frames, max_workers, *, min_sigma, max_sigma, num_sigma,
+                    threshold, host_mask, merge_radius_px, progress_callback):
+    """Detect coordinates for every frame on a process pool, or ``None`` on any failure (→ serial fallback).
+    Reports progress DURING detection (the expensive phase), mapped to the first 70% of the bar so the
+    subsequent cheap scoring loop continues from there rather than restarting at 0."""
+    try:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
+                          num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+        idxs = (list(frame_indices) if frame_indices is not None else list(range(n_frames)))
+        tasks = [(t, src_desc, True, det_kwargs, merge_radius_px) for t in idxs]
+        precomputed_coords = {}
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            _n_par = len(tasks)
+            futures = [ex.submit(_detect_frame_worker, task) for task in tasks]
+            _done_par = 0
+            for fut in as_completed(futures):
+                t, coords = fut.result()
+                precomputed_coords[t] = coords
+                _done_par += 1
+                if progress_callback is not None and _n_par:
+                    progress_callback(int(_done_par / _n_par * 0.70 * max(1, n_frames)),
+                                      max(1, n_frames))
+        return precomputed_coords
+    except Exception:
+        return None      # pickling / worker crash / non-picklable host_mask → serial detection
+
+
+def _fast_frame_rows(frame, t, coords, template_z, *, template_mode, template_type, half, subpixel,
+                     microns_per_pixel, nominal_area, hot_mask):
+    """The fast-path scoring for one frame: (re)build the PSF template as needed, score the coords, and
+    build the per-bead rows. Returns ``(rows, template_z)`` — template_z threads across frames so the
+    per_stack template is built once."""
+    if template_z is None or template_mode == 'per_frame':
+        if template_type == 'airy':
+            template_z = build_airy_template(half)
+        else:
+            tz, _h = build_bead_template(frame, coords, half=half)
+            if tz is not None:
+                template_z = tz
+    scored = score_beads_template(frame, coords, template_z, half=half, subpixel=subpixel)
+    rows = []
+    for i, b in enumerate(scored):
+        _row = {
+            'frame': t, 'object_id': i,
+            'y_um': float(b['y']) * microns_per_pixel,
+            'x_um': float(b['x']) * microns_per_pixel,
+            'area_um2': nominal_area,
+            'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
+            'amplitude': b['amplitude'],
+            'integrated_intensity': b['integrated_intensity']}
+        # Flag a detection on a fixed sensor hot pixel so the classifier applies a HARSHER acceptance
+        # test there (not a flat reject — a real bead can drift over a hot/dead pixel).
+        if hot_mask is not None:
+            yi = int(round(b['y'])); xi = int(round(b['x']))
+            if 0 <= yi < hot_mask.shape[0] and 0 <= xi < hot_mask.shape[1]:
+                _row['on_hot_pixel'] = bool(hot_mask[yi, xi])
+        rows.append(_row)
+    return rows, template_z
+
+
+def _precise_frame_rows(beads, t, *, microns_per_pixel, nominal_area):
+    """The Gaussian-fit-path rows for one frame — area from the fitted sigmas when finite, else nominal."""
+    rows = []
+    for i, b in enumerate(beads):
+        if np.isfinite(b.get('sigma_x', np.nan)) and np.isfinite(b.get('sigma_y', np.nan)):
+            area = float(np.pi * b['sigma_x'] * b['sigma_y'] * microns_per_pixel ** 2)
+        else:
+            area = nominal_area
+        rows.append({
+            'frame': t, 'object_id': i,
+            'y_um': float(b['y']) * microns_per_pixel,
+            'x_um': float(b['x']) * microns_per_pixel,
+            'area_um2': area,
+            'sigma_x': b['sigma_x'], 'sigma_y': b['sigma_y'],
+            'sigma_mean': b['sigma_mean'], 'amplitude': b['amplitude'],
+            'integrated_intensity': b['integrated_intensity'],
+            'r_squared': b['r_squared']})
+    return rows
+
+
+def _assemble_detections(rows, *, quality_mode, strictness, variant, exclude_aggregates,
+                         recover_out_of_plane):
+    """Build the detection DataFrame from the per-frame rows, classify the beads, and apply the optional
+    class filters. 'baseline' is the 1.5.329-validated classifier (recovers ~8.325 through TrackMate); the
+    variant is recorded on the frame for auditability. An empty run returns the correct empty schema."""
+    if not rows:
+        cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']
+        if quality_mode == 'fast':
+            cols += ['ncc', 'snr', 'symmetry', 'amplitude',
+                     'integrated_intensity', 'n_units_est', 'bead_class', 'singlet']
+        else:
+            cols += ['sigma_x', 'sigma_y', 'sigma_mean', 'amplitude',
+                     'integrated_intensity', 'r_squared', 'n_units_est', 'bead_class', 'singlet']
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(rows)
+    df = classify_beads(df, strictness=strictness, variant=variant)
+    df.attrs['detection_variant'] = variant
+    if exclude_aggregates:
+        df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
+    if not recover_out_of_plane:
+        df = df[df['bead_class'] != 'out_of_plane'].reset_index(drop=True)
+    return df
+
+
+def _bead_hot_mask(bead_stack, variant, progress_callback):
+    """The fixed-sensor hot-pixel mask for the ``hot_pixel_reject`` variant, built ONCE from the stack's
+    temporal statistics (scene-independent), or ``None``. A build failure degrades to no mask, never a
+    crash — the reject is an opt-in robustness variant, not the detection itself."""
+    if variant != 'hot_pixel_reject':
+        return None
+    try:
+        hot_mask = build_hot_pixel_mask(bead_stack)
+        _n_hot = int(hot_mask.sum()) if hot_mask is not None else 0
+        if progress_callback is None:
+            print(f"[PyCAT VPT] hot_pixel_reject: flagged {_n_hot} fixed "
+                  f"sensor pixels from temporal statistics.")
+        return hot_mask
+    except Exception as _e:
+        print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
+        return None
+
+
+def _detect_all_frames(bead_stack, frame_indices, precomputed_coords, template_z, *, quality_mode,
+                       variant, gpu_on, template_mode, template_type, half, subpixel, microns_per_pixel,
+                       nominal_area, hot_mask, min_sigma, max_sigma, num_sigma, threshold, host_mask,
+                       merge_radius_px, fit_window, progress_callback, n_frames):
+    """Stream the stack one frame at a time and build the per-bead rows for the whole movie. The fast
+    path detects coords (using the pool's precomputed set when present), (re)builds the PSF template
+    threaded across frames, and scores; the precise path runs a Gaussian fit. Progress is reported per
+    frame — mapped to the 70→100% tail when the pool pre-detected (which filled the first 70%)."""
+    from pycat.file_io.file_io import iter_frames
+    rows = []
+    done = 0
+    for t, frame in iter_frames(bead_stack, indices=frame_indices):
+        if quality_mode == 'fast':
+            if precomputed_coords is not None and t in precomputed_coords:
+                coords = precomputed_coords[t]
+            elif variant == 'ring_merge':
+                coords, _sig = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=gpu_on, return_sigma=True)
+                coords = dedup_detections_ring_merge(
+                    coords, frame, sigmas=_sig, base_radius_px=merge_radius_px)
+            else:
+                coords = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=gpu_on)
+                if merge_radius_px:
+                    coords = dedup_detections(coords, frame, merge_radius_px)
+            _frows, template_z = _fast_frame_rows(
+                frame, t, coords, template_z, template_mode=template_mode,
+                template_type=template_type, half=half, subpixel=subpixel,
+                microns_per_pixel=microns_per_pixel, nominal_area=nominal_area, hot_mask=hot_mask)
+            rows.extend(_frows)
+        else:
+            beads = detect_beads_frame(
+                frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+                fit_quality=True, fit_window=fit_window,
+                fast_fit=(quality_mode == 'fast_fit'))
+            rows.extend(_precise_frame_rows(beads, t, microns_per_pixel=microns_per_pixel,
+                                            nominal_area=nominal_area))
+        done += 1
+        if progress_callback is not None:
+            if precomputed_coords is not None:
+                _val = int(0.70 * n_frames + (done / max(1, n_frames)) * 0.30 * n_frames)
+                progress_callback(min(_val, n_frames), n_frames)
+            else:
+                progress_callback(done, n_frames)
+    return rows
+
+
 @tags_layer('bead_detect', role='overlay', inputs=('image',),
             summary='Bead detection across a stack (blob LoG)', target='bead')
 def detect_beads_stack(
@@ -1820,236 +2064,35 @@ def detect_beads_stack(
             pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
-    # ── Tier selection ───────────────────────────────────────────────────────
-    # No fixed preference order — each tier is costed for THIS stack and the
-    # cheapest wins. See the note above `_choose_detection_tier` for the
-    # measurements that killed the old "GPU > CPU-parallel > serial" rule.
     _variant = (detection_variant or 'baseline').lower()
 
-    def _frame0():
-        from pycat.file_io.file_io import iter_frames as _itf
-        return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
+    # Choose the execution tier (GPU / process-pool / serial), costed for this stack; the equivalence
+    # guards pin that all three produce identical blobs.
+    _tier, gpu_on, _src_desc, _max_workers = _choose_detection_backend(
+        bead_stack, frame_indices, n_frames, quality_mode=quality_mode, use_gpu=use_gpu,
+        parallel=parallel, n_workers=n_workers, host_mask=host_mask, min_sigma=min_sigma,
+        max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, variant=_variant)
 
-    # Is the GPU a CANDIDATE? The equivalence guard still runs whenever it is —
-    # even if the pool ends up winning — because "never trust a mismatching GPU"
-    # is a correctness rule, not a performance one, and the memo makes it free.
-    gpu_ok = False
-    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
-        try:
-            from pycat.toolbox.gpu_utils import gpu_available
-            gpu_ok = bool(gpu_available())
-        except Exception:
-            gpu_ok = False
-        if gpu_ok:
-            # Memoised per process on (build, LoG params) — a cache hit costs one
-            # dict lookup and does not touch frame 0; a miss still runs the full
-            # double-detect once. See `gpu_matches_cpu`.
-            gpu_ok = gpu_matches_cpu(
-                _frame0, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+    _hot_mask = _bead_hot_mask(bead_stack, _variant, progress_callback)
 
-    # Is the POOL a candidate? Ring-merge needs per-detection sigma from blob_log
-    # (which the worker path does not carry) and hot-pixel reject filters coords
-    # against a stack-level mask, so both stay serial.
-    _src_desc = _bead_source_descriptor(bead_stack) if quality_mode == 'fast' else None
-    try:
-        import os as _os
-        _max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
-    except Exception:
-        _max_workers = 1
-    pool_ok = (quality_mode == 'fast'
-               and _variant not in ('ring_merge', 'hot_pixel_reject')
-               and parallel in ('auto', 'cpu', 'process')
-               and _src_desc is not None and _max_workers >= 2
-               and bool(n_frames) and n_frames > 1)
-
-    # An explicit request is the caller telling us which tier they want; only
-    # 'auto' has to justify itself against the others.
-    if use_gpu in ('gpu', True, 'true') and gpu_ok:
-        _tier = 'gpu'
-    elif parallel in ('cpu', 'process') and pool_ok:
-        _tier = 'pool'
-    elif not gpu_ok and not pool_ok:
-        _tier = 'serial'
-    else:
-        _t_ser, _t_gpu = _frame_costs_s(
-            _frame0(), gpu_ok=gpu_ok, min_sigma=min_sigma, max_sigma=max_sigma,
-            num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
-        _tier = _choose_detection_tier(
-            n_frames=n_frames, t_ser=_t_ser, t_gpu=_t_gpu, workers=_max_workers,
-            gpu_ok=gpu_ok, pool_ok=pool_ok)
-        debug_log(
-            f'VPT tier: {_tier} for {n_frames} x {tuple(getattr(bead_stack, "shape", ()))[-2:]} '
-            f'(serial {_t_ser*1000:.0f} ms/frame'
-            + (f', GPU {_t_gpu*1000:.0f} ms/frame' if _t_gpu else '')
-            + (f', pool ~{_t_ser/_pool_speedup(_max_workers)*1000:.0f} ms/frame + '
-               f'{_pool_spawn_cost_s():.1f} s spawn' if pool_ok else '') + ')', None)
-
-    gpu_on = (_tier == 'gpu')
-    # Hot-pixel reject: build the fixed-sensor-pixel mask ONCE from the stack's
-    # temporal statistics (scene-independent), then drop detections landing on
-    # those pixels. Needs all frames, so it's a stack-level pre-pass.
-    _hot_mask = None
-    if _variant == 'hot_pixel_reject':
-        try:
-            _hot_mask = build_hot_pixel_mask(bead_stack)
-            _n_hot = int(_hot_mask.sum()) if _hot_mask is not None else 0
-            if progress_callback is None:
-                print(f"[PyCAT VPT] hot_pixel_reject: flagged {_n_hot} fixed "
-                      f"sensor pixels from temporal statistics.")
-        except Exception as _e:
-            print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
-            _hot_mask = None
     precomputed_coords = None
     if _tier == 'pool':
-        try:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
-                              num_sigma=num_sigma, threshold=threshold,
-                              host_mask=host_mask)
-            idxs = (list(frame_indices) if frame_indices is not None
-                    else list(range(n_frames)))
-            tasks = [(t, _src_desc, True, det_kwargs, merge_radius_px)
-                     for t in idxs]
-            precomputed_coords = {}
-            with ProcessPoolExecutor(max_workers=_max_workers) as ex:
-                _n_par = len(tasks)
-                futures = [ex.submit(_detect_frame_worker, task)
-                           for task in tasks]
-                _done_par = 0
-                for fut in as_completed(futures):
-                    t, coords = fut.result()
-                    precomputed_coords[t] = coords
-                    _done_par += 1
-                    # Report progress DURING parallel detection — the
-                    # expensive phase. as_completed fires as each frame
-                    # finishes, so the bar advances smoothly instead of
-                    # sitting at 0 until the (cheap) scoring loop runs.
-                    # Parallel detection is phase 1 of 2 → map it to the
-                    # first 70% of the bar so the subsequent scoring loop
-                    # continues from there instead of restarting at 0
-                    # (avoids the bar hitting 100% twice).
-                    if progress_callback is not None and _n_par:
-                        progress_callback(
-                            int(_done_par / _n_par * 0.70 * max(1, n_frames)),
-                            max(1, n_frames))
-        except Exception:
-            # Any failure (pickling, worker crash, host_mask not picklable)
-            # → fall back to serial detection below.
-            precomputed_coords = None
+        precomputed_coords = _pool_predetect(
+            _src_desc, frame_indices, n_frames, _max_workers, min_sigma=min_sigma,
+            max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+            merge_radius_px=merge_radius_px, progress_callback=progress_callback)
 
-    done = 0
-    for t, frame in iter_frames(bead_stack, indices=frame_indices):
-        if quality_mode == 'fast':
-            if precomputed_coords is not None and t in precomputed_coords:
-                # Coords already found in parallel; frame still needed for
-                # template building + scoring (both cheap).
-                coords = precomputed_coords[t]
-            else:
-                if _variant == 'ring_merge':
-                    coords, _sig = detect_beads_frame(
-                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                        num_sigma=num_sigma, threshold=threshold,
-                        host_mask=host_mask, use_gpu=gpu_on, return_sigma=True)
-                    # Ring-merge: sigma-scaled radius, merge dim ring fragments
-                    # into bright centres, keep two bright beads as two.
-                    coords = dedup_detections_ring_merge(
-                        coords, frame, sigmas=_sig,
-                        base_radius_px=merge_radius_px)
-                else:
-                    coords = detect_beads_frame(
-                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                        num_sigma=num_sigma, threshold=threshold,
-                        host_mask=host_mask, use_gpu=gpu_on)
-                    # Baseline de-dup (fixed radius, keep brightest per cluster).
-                    if merge_radius_px:
-                        coords = dedup_detections(coords, frame, merge_radius_px)
-            if template_z is None or template_mode == 'per_frame':
-                if template_type == 'airy':
-                    # Analytic Airy (Bessel J1) template — matches beads that
-                    # show a resolved ring, so a bead is one object not several.
-                    template_z = build_airy_template(half)
-                else:
-                    tz, _h = build_bead_template(frame, coords, half=half)
-                    if tz is not None:
-                        template_z = tz
-            scored = score_beads_template(frame, coords, template_z,
-                                          half=half, subpixel=subpixel)
-            for i, b in enumerate(scored):
-                _row = {
-                    'frame': t, 'object_id': i,
-                    'y_um': float(b['y']) * microns_per_pixel,
-                    'x_um': float(b['x']) * microns_per_pixel,
-                    'area_um2': nominal_area,
-                    'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
-                    'amplitude': b['amplitude'],
-                    'integrated_intensity': b['integrated_intensity']}
-                # Flag detections sitting on a fixed sensor hot pixel so the
-                # classifier can apply a HARSHER acceptance test there (not a flat
-                # reject — a real bead can drift over a hot/dead pixel and should
-                # still be accepted if it brings real PSF/template evidence).
-                if _hot_mask is not None:
-                    yi = int(round(b['y'])); xi = int(round(b['x']))
-                    if 0 <= yi < _hot_mask.shape[0] and 0 <= xi < _hot_mask.shape[1]:
-                        _row['on_hot_pixel'] = bool(_hot_mask[yi, xi])
-                rows.append(_row)
-        else:
-            beads = detect_beads_frame(
-                frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
-                fit_quality=True, fit_window=fit_window,
-                fast_fit=(quality_mode == 'fast_fit'))
-            for i, b in enumerate(beads):
-                if np.isfinite(b.get('sigma_x', np.nan)) and np.isfinite(b.get('sigma_y', np.nan)):
-                    area = float(np.pi * b['sigma_x'] * b['sigma_y']
-                                 * microns_per_pixel ** 2)
-                else:
-                    area = nominal_area
-                rows.append({
-                    'frame': t, 'object_id': i,
-                    'y_um': float(b['y']) * microns_per_pixel,
-                    'x_um': float(b['x']) * microns_per_pixel,
-                    'area_um2': area,
-                    'sigma_x': b['sigma_x'], 'sigma_y': b['sigma_y'],
-                    'sigma_mean': b['sigma_mean'], 'amplitude': b['amplitude'],
-                    'integrated_intensity': b['integrated_intensity'],
-                    'r_squared': b['r_squared']})
-        done += 1
-        if progress_callback is not None:
-            # If parallel pre-detection ran, it consumed the first 70% of the
-            # bar; the scoring loop here fills the remaining 70→100%. Otherwise
-            # (pure serial) the scoring loop IS the whole operation → 0→100%.
-            if precomputed_coords is not None:
-                _val = int(0.70 * n_frames + (done / max(1, n_frames)) * 0.30 * n_frames)
-                progress_callback(min(_val, n_frames), n_frames)
-            else:
-                progress_callback(done, n_frames)
+    rows = _detect_all_frames(
+        bead_stack, frame_indices, precomputed_coords, template_z, quality_mode=quality_mode,
+        variant=_variant, gpu_on=gpu_on, template_mode=template_mode, template_type=template_type,
+        half=half, subpixel=subpixel, microns_per_pixel=microns_per_pixel, nominal_area=nominal_area,
+        hot_mask=_hot_mask, min_sigma=min_sigma, max_sigma=max_sigma, num_sigma=num_sigma,
+        threshold=threshold, host_mask=host_mask, merge_radius_px=merge_radius_px,
+        fit_window=fit_window, progress_callback=progress_callback, n_frames=n_frames)
 
-    if not rows:
-        cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']
-        if quality_mode == 'fast':
-            cols += ['ncc', 'snr', 'symmetry', 'amplitude',
-                     'integrated_intensity', 'n_units_est', 'bead_class', 'singlet']
-        else:
-            cols += ['sigma_x', 'sigma_y', 'sigma_mean', 'amplitude',
-                     'integrated_intensity', 'r_squared', 'n_units_est',
-                     'bead_class', 'singlet']
-        return pd.DataFrame(columns=cols)
-
-    df = pd.DataFrame(rows)
-    # ── Detection-variant staging ────────────────────────────────────────────
-    # 'baseline' = the 1.5.329-validated classifier (recovers ~8.325 through
-    # TrackMate). New variants are OPT-IN and additive so the validated path
-    # stays selectable and a revert is a clean single-arg change. The variant is
-    # recorded on the frame for auditability and downstream comparison.
-    df = classify_beads(df, strictness=strictness, variant=_variant)
-    df.attrs['detection_variant'] = _variant
-
-    if exclude_aggregates:
-        df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
-    if not recover_out_of_plane:
-        df = df[df['bead_class'] != 'out_of_plane'].reset_index(drop=True)
-    return df
+    return _assemble_detections(
+        rows, quality_mode=quality_mode, strictness=strictness, variant=_variant,
+        exclude_aggregates=exclude_aggregates, recover_out_of_plane=recover_out_of_plane)
 
 
 # ---------------------------------------------------------------------------

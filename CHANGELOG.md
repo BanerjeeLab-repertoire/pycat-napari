@@ -1,3 +1,23 @@
+## [1.6.183] - 2026-07-20
+### Changed — **detect_beads_stack decomposed by pipeline stage (317 → 116 lines); VPT-baseline byte-identical.**
+`detect_beads_stack` is the shared detection stage feeding the whole VPT viscosity chain (the ~8.325
+baseline through TrackMate), and the most scientifically load-bearing function in VPT — so it was
+GUARD-ANCHORED, not merely characterized. Split by pipeline stage into pure/worker helpers:
+- `_choose_detection_backend` — the GPU / CPU-process-pool / serial tier selection (each costed for the
+  stack; the equivalence guards pin that all three produce identical blobs);
+- `_pool_predetect` — the process-pool coordinate pre-detection with its progress mapping;
+- `_bead_hot_mask` — the hot-pixel-reject sensor mask;
+- `_detect_all_frames` — the per-frame streaming loop, calling `_fast_frame_rows` (template + scoring) and
+  `_precise_frame_rows` (Gaussian fit);
+- `_assemble_detections` — the DataFrame build, `classify_beads`, and class filters.
+- **Detection numerics, path outcomes, and output ORDER are untouched** (downstream linking is
+  order-sensitive). The existing VPT equivalence guards (`test_vpt_gpu_equivalence`,
+  `test_vpt_parallel_equivalence`, and the memo) pass unmodified, and a new serial-path characterization
+  (`tests/test_detect_beads_stack_characterization.py`) pins the exact detection table — coordinates,
+  order-sensitive hash, area, counts — on a seeded synthetic stack (the GPU-equivalence test skips without
+  a GPU, so the serial path is now guarded on every machine). Revert is a clean single-function rollback
+  if the baseline ever regresses. Complexity ratchet 127 → 126; truncation guard allowlisted.
+
 ## [1.6.182] - 2026-07-20
 ### Added — **Ratiometric / two-channel intensity-ratio analysis — the traps handled, not just the division.**
 Multichannel confocals produce two-channel data and PyCAT can segment the objects, but there was no

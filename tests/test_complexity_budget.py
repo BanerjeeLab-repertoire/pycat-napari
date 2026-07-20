@@ -124,7 +124,16 @@ _LONG_FUNCTION_LIMIT = 120
 # `test_partition_measurement_characterization` (which branch fires and the exact checked/holds/detail of
 # the assumption across all four inputs, plus the other assumptions + measurement identity); the existing
 # `test_claim_scoping` passes unmodified. Count 128 → 127.
-_MAX_LONG_FUNCTIONS = 127
+# 126. (2026-07-20) `detect_beads_stack` (vpt_tools), the 317-line VPT detection stage feeding the whole
+# viscosity chain, was split BY PIPELINE STAGE — `_choose_detection_backend` (GPU/pool/serial tier),
+# `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames` (the per-frame loop) with `_fast_frame_rows` /
+# `_precise_frame_rows`, and `_assemble_detections` — leaving a 116-line orchestrator. This is the
+# VALIDATED detection path (~8.325 through TrackMate), so it is GUARD-ANCHORED: the existing VPT
+# equivalence guards (`test_vpt_gpu_equivalence`, `test_vpt_parallel_equivalence`, the memo) pass
+# unmodified, and a new serial-path characterization (`test_detect_beads_stack_characterization`) pins the
+# exact detection table — coordinates, order, area, counts — on a seeded synthetic stack. No number moved.
+# Count 127 → 126.
+_MAX_LONG_FUNCTIONS = 126
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

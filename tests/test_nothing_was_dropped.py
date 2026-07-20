@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.183 — `detect_beads_stack` (the 317-line VPT detection stage) was split BY PIPELINE STAGE into
+    # `_choose_detection_backend`, `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames`
+    # (+ `_fast_frame_rows` / `_precise_frame_rows`) and `_assemble_detections`, leaving a 116-line
+    # orchestrator. Nothing was removed: every stage MOVED into a named helper. Guard-anchored — the
+    # existing VPT equivalence guards pass unmodified and a serial-path characterization
+    # (`test_detect_beads_stack_characterization`) pins the exact detection table across the split.
+    'vpt_tools.py::detect_beads_stack',
+
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line
     # body. Nothing was removed: the assessment and its rationale MOVED into the helper, and
