@@ -1,3 +1,21 @@
+## [1.6.175] - 2026-07-20
+### Changed — **fit_photobleaching decomposed by phase (233 → 65 lines), proven byte-identical.**
+The exponential-bleach fit fused the curve fit, the tau confidence interval, the non-circular
+observation-window adequacy metric, and its two-tier warning — most of its 233 lines being the measured
+rationale for each (five failed single-number attempts, the circularity of checking against the fitted
+tau, why two decay bounds are reported). Split into pure phase helpers, each carrying its own rationale:
+- `_photobleach_tau_ci` — the 95% CI on tau from the fit covariance (the only evidence tau is determined;
+  R² does not carry it);
+- `_photobleach_window_metrics` — the two decay-observed bounds (no-floor lower bound; floor-subtracted
+  upper bound), because no single scalar is both floor-robust and non-circular;
+- `_photobleach_window_warn` — the two-tier warning (severe < 0.5 τ, mild 0.5–0.8 τ), measured on the
+  decay actually observed rather than the fitted tau (which would be circular).
+- **Behaviour-preserving, pinned as such.** `tests/test_photobleaching_characterization.py` captured the
+  fitted parameters, R², the tau CI, both decay bounds, the correction factors, and WHICH warning tier
+  fires across adequate / mid-window / short / flat synthetic movies before the split and asserts them
+  unchanged after. The existing `test_photobleaching_window` passes unmodified. No number moved.
+  Complexity ratchet 131 → 130; truncation guard allowlisted.
+
 ## [1.6.174] - 2026-07-20
 ### Changed — **fit_size_distribution_mle decomposed by phase (301 → 92 lines), proven byte-identical.**
 The droplet-size-distribution identifier fused per-model MLE fitting, a Clauset power-law tail comparison

@@ -96,7 +96,14 @@ _LONG_FUNCTION_LIMIT = 120
 # model, every model's AIC/loglik, power-law x_min + tail test, distinguishability comparison, descriptive
 # moments, on lognormal + gamma samples, captured BEFORE and asserted unchanged after; the bootstrap is
 # seeded so it is deterministic). Count 132 → 131.
-_MAX_LONG_FUNCTIONS = 131
+# 130. (2026-07-20) `fit_photobleaching` (condensate_physics_tools), the 233-line exponential-bleach fit
+# (mostly measured-rationale comment blocks), was split into `_photobleach_tau_ci` (the fit-covariance CI
+# on tau), `_photobleach_window_metrics` (the two non-circular decay-observed bounds) and
+# `_photobleach_window_warn` (the two-tier observation-window warning), leaving a 65-line fit + orchestrate
+# body. Each rationale block moved with its phase. Pinned byte-identical by
+# `test_photobleaching_characterization` (fitted params, R², tau CI, both decay bounds, correction factors
+# and WHICH warning tier fires, on adequate / mid / short / flat synthetic movies). Count 131 → 130.
+_MAX_LONG_FUNCTIONS = 130
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.175 — `fit_photobleaching` (the 233-line exponential-bleach fit) was split into
+    # `_photobleach_tau_ci`, `_photobleach_window_metrics` and `_photobleach_window_warn`, leaving a
+    # 65-line fit + orchestrate body. Nothing was removed: the fit, the tau CI, the decay-observed bounds,
+    # the two-tier warning and their measured-rationale comment blocks MOVED into the helpers, and a
+    # byte-identity characterization test (`test_photobleaching_characterization`) pins the fitted params,
+    # R², tau CI, both bounds, correction factors and which warning tier fires unchanged across the split.
+    'condensate_physics_tools.py::fit_photobleaching',
+
     # 1.6.174 — `fit_size_distribution_mle` (the 301-line droplet-size-distribution identifier) was split
     # BY PHASE into pure helpers — `_fit_size_models`, `_powerlaw_tail_comparison`,
     # `_size_distinguishability`, `_size_verdict` — leaving a 92-line orchestrator. Nothing was removed:
