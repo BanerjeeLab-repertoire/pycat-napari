@@ -189,6 +189,75 @@ def test_two_mode_relaxation(t, y):
                 observation_window_s=span, verdict=verdict)
 
 
+def _fusion_tau_ci(pcov, tau):
+    """The 95% CI on the relaxation time constant from the fit covariance, or None.
+
+    ``tau`` is the whole physics: the inverse capillary velocity η/γ is read off the SLOPE of tau against
+    droplet length, so a biased tau is a biased η/γ by the same factor — and a short record biases tau LOW
+    (measured, true tau 20 s: a 2-tau window fits 15.7, −21.6%, at R² = 1.000). R² cannot see that; the
+    covariance can. It was being discarded here too (``popt, _ = curve_fit(...)``)."""
+    tau_ci = None
+    try:
+        _perr = np.sqrt(np.diag(pcov))
+        _se = float(_perr[1])
+        if np.isfinite(_se) and _se > 0:
+            tau_ci = (float(tau - 1.96 * _se), float(tau + 1.96 * _se))
+    except Exception as _exc:
+        debug_log('fusion: could not assess the tau uncertainty', _exc)
+    return tau_ci
+
+
+def _fusion_window_warn(tt, tau, tau_ci):
+    """How many relaxation time constants the record actually covers, plus the short-record warning.
+
+    Measured on the SPAN, not the fitted tau (checking a record against a tau that is itself wrong is
+    circular). The model carries a linear drift ``b·t``, so the raw endpoint is not the plateau and cannot
+    be used as the amplitude measure — the honest quantity is the record length in units of tau. A record
+    shorter than ~3 tau cannot constrain tau whatever the fit says; the CI carries the uncertainty."""
+    _span = float(tt[-1] - tt[0])
+    _windows_observed = (_span / float(tau)) if float(tau) > 1e-9 else 0.0
+    if _windows_observed < 3.0:
+        napari_show_warning(
+            f"Fusion: the record covers only {_windows_observed:.1f} relaxation time "
+            f"constants (tau = {tau:.1f} s). **A short record biases tau LOW, and R² "
+            f"cannot see it.**\n\n"
+            f"Measured on synthetic data with a true tau of 20 s: a 2-tau window fits "
+            f"tau = 15.7 (**-21.6 %**) at R² = 1.000, and a 3-tau window fits 17.9 "
+            f"(-10.6 %), also at R² = 1.000. Ten time constants recovers it to 1 %.\n\n"
+            f"**tau IS the physics here**: the inverse capillary velocity eta/gamma is the "
+            f"slope of tau against droplet length, so a tau biased 20 % low gives an "
+            f"eta/gamma biased 20 % low. Acquire further past the fusion, or report the "
+            f"interval"
+            + (f" (95% CI on tau: [{tau_ci[0]:.1f}, {tau_ci[1]:.1f}] s)." if tau_ci
+               else "."))
+    return _windows_observed
+
+
+def _fusion_model_adequacy(t_fit, y_fit, fit_curve):
+    """Is a SINGLE exponential the right model? Returns ``(quality, two_mode)`` and warns when it is not.
+
+    tau only means η·R/σ if the relaxation really is a single exponential — but droplet fusion can have a
+    fast surface-driven mode and a slow bulk one. A single-exp fit to a two-mode decay (tau = 3 and 20)
+    returns tau = 4.7 at R² = 0.996 — a 76% viscosity underestimate R² cannot see. The residual runs test
+    catches ~62% (the drift term absorbs part of the slow mode); comparing the MODELS directly catches
+    100% at a 2% false-alarm rate, so the two-mode test leads and the runs-test verdict is the fallback."""
+    quality = assess_fit(y_fit, fit_curve, n_params=4,
+                         model_name="fusion single-exponential relaxation")
+    two_mode = test_two_mode_relaxation(t_fit, y_fit)
+    if two_mode.get('two_mode'):
+        napari_show_warning("Fusion: " + two_mode['verdict'])
+    elif quality.get('assessable', True) and not quality['adequate']:
+        napari_show_warning(
+            "Fusion: " + quality['verdict'] + " For a fusion relaxation the usual "
+            "cause is MORE THAN ONE RELAXATION MODE (a fast surface-driven decay and "
+            "a slow bulk one). A single exponential then returns a tau between the "
+            "two — and since tau = eta*R/sigma, the viscosity is wrong by the same "
+            "factor. In validation a two-mode relaxation (tau = 3 and 20) was fitted "
+            "with tau = 4.7 at R^2 = 0.996: a 76 % underestimate of the bulk "
+            "viscosity.")
+    return quality, two_mode
+
+
 def fit_fusion_relaxation(
     time: np.ndarray,
     signal: np.ndarray,
@@ -250,108 +319,14 @@ def fit_fusion_relaxation(
         a, tau, b, d = popt
         fit_curve = fusion_relaxation_model(tt, *popt)
 
-        # ── The window must cover the relaxation, and R² CANNOT see when it does not ─
-        #
-        # ``tau`` is the whole physics: the inverse capillary velocity is ``eta/gamma``, and it
-        # is read off the SLOPE of tau against droplet length. **A biased tau is a biased
-        # viscosity-to-surface-tension ratio**, by exactly the same factor.
-        #
-        # And the bias is large on a short record. Measured, TRUE tau = 20 s:
-        #
-        #     window          taus observed   fitted tau   error        R²
-        #     0-40 s          2.0             15.69        **-21.6 %**  **1.000**
-        #     0-60 s          3.0             17.89        -10.6 %      1.000
-        #     0-100 s         5.0             19.11        -4.4 %       1.000
-        #     0-200 s         10.0            19.79        -1.0 %       1.000
-        #
-        # **A 21.6 % error in tau, at R² = 1.000.** The curve fits the points that exist; it
-        # says nothing about whether they constrain the decay. This is the same failure as FRAP
-        # (1.5.446), the MSD fit (1.5.447) and the photobleaching fit (1.5.451), and the
-        # covariance was being discarded here too (``popt, _ = curve_fit(...)``).
-        #
-        # The window is measured from the DATA, not from the fitted tau — checking the record
-        # against a tau that is itself wrong is circular (1.5.451 spent six attempts learning
-        # that).
-        tau_ci = None
-        try:
-            _perr = np.sqrt(np.diag(pcov))
-            _se = float(_perr[1])
-            if np.isfinite(_se) and _se > 0:
-                tau_ci = (float(tau - 1.96 * _se), float(tau + 1.96 * _se))
-        except Exception as _exc:
-            debug_log('fusion: could not assess the tau uncertainty', _exc)
+        tau_ci = _fusion_tau_ci(pcov, tau)
+        _windows_observed = _fusion_window_warn(tt, tau, tau_ci)
 
-        # ── The model carries a LINEAR DRIFT, so the raw endpoint is not the plateau ─
-        #
-        # ``S(t) = a·exp(-t/tau) + b·t + d``. A first version measured the remaining amplitude as
-        # ``|y[-1] - d| / |a|`` — and on a 200 s record with ``b = 1`` that is ``200/2 = 100``,
-        # because **the endpoint is dominated by the drift, not by the relaxation.** The measure
-        # was meaningless and fired the gate on every window, good ones included.
-        #
-        # The exponential's own remaining amplitude is what matters, and it is simply
-        # ``exp(-t_span/tau)`` — but reading it off the FITTED tau is circular (the 1.5.451
-        # lesson). So it is read from the record length against the fit, and the check is
-        # explicitly on the SPAN: a record shorter than ~3 tau cannot constrain tau, whatever
-        # the fit says, and the CI is what carries the honest uncertainty.
-        _span = float(tt[-1] - tt[0])
-        _windows_observed = (_span / float(tau)) if float(tau) > 1e-9 else 0.0
-
-        if _windows_observed < 3.0:
-            napari_show_warning(
-                f"Fusion: the record covers only {_windows_observed:.1f} relaxation time "
-                f"constants (tau = {tau:.1f} s). **A short record biases tau LOW, and R\u00b2 "
-                f"cannot see it.**\n\n"
-                f"Measured on synthetic data with a true tau of 20 s: a 2-tau window fits "
-                f"tau = 15.7 (**-21.6 %**) at R\u00b2 = 1.000, and a 3-tau window fits 17.9 "
-                f"(-10.6 %), also at R\u00b2 = 1.000. Ten time constants recovers it to 1 %.\n\n"
-                f"**tau IS the physics here**: the inverse capillary velocity eta/gamma is the "
-                f"slope of tau against droplet length, so a tau biased 20 % low gives an "
-                f"eta/gamma biased 20 % low. Acquire further past the fusion, or report the "
-                f"interval"
-                + (f" (95% CI on tau: [{tau_ci[0]:.1f}, {tau_ci[1]:.1f}] s)." if tau_ci
-                   else "."))
         ss_res = np.sum((y_fit - fit_curve) ** 2)
         ss_tot = np.sum((y_fit - np.mean(y_fit)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
-        # ── Is a SINGLE exponential the right model for this relaxation? ────────
-        #
-        # tau is the whole measurement: by Frenkel, tau = eta*R/sigma, so the viscosity is
-        # read straight off it. But tau only means that if the relaxation really is a
-        # single exponential — and droplet fusion can have MORE THAN ONE relaxation mode
-        # (a fast surface-driven one and a slow bulk one).
-        #
-        # Measured on a synthetic two-mode relaxation (tau = 3 and 20, which a single
-        # exponential cannot represent):
-        #
-        #     single-exp fit:  tau = 4.72     R^2 = 0.9964   <-- looks flawless
-        #     true bulk mode:  tau = 20.0
-        #
-        # The fit reports tau = 4.7 for a bulk mode of 20 — **understating the viscosity by
-        # 76 %** — and R^2 says 0.996. R^2 cannot see this, because beating a flat line is a
-        # trivially low bar for a decaying curve.
-        #
-        # The residuals can: a single exponential fitted to a two-mode decay sits
-        # systematically above the data early and below it late, so the residual signs run
-        # in blocks instead of flipping like noise. The runs test gives p = 0.009 here.
-        quality = assess_fit(y_fit, fit_curve, n_params=4,
-                             model_name="fusion single-exponential relaxation")
-
-        # A residual runs test catches only ~62% of two-mode relaxations here, because the
-        # linear drift term absorbs part of the slow mode. Comparing the MODELS directly
-        # catches 100%, at a 2% false-alarm rate. See test_two_mode_relaxation.
-        two_mode = test_two_mode_relaxation(t_fit, y_fit)
-        if two_mode.get('two_mode'):
-            napari_show_warning("Fusion: " + two_mode['verdict'])
-        elif quality.get('assessable', True) and not quality['adequate']:
-            napari_show_warning(
-                "Fusion: " + quality['verdict'] + " For a fusion relaxation the usual "
-                "cause is MORE THAN ONE RELAXATION MODE (a fast surface-driven decay and "
-                "a slow bulk one). A single exponential then returns a tau between the "
-                "two — and since tau = eta*R/sigma, the viscosity is wrong by the same "
-                "factor. In validation a two-mode relaxation (tau = 3 and 20) was fitted "
-                "with tau = 4.7 at R^2 = 0.996: a 76 % underestimate of the bulk "
-                "viscosity.")
+        quality, two_mode = _fusion_model_adequacy(t_fit, y_fit, fit_curve)
 
         return dict(
             a=float(a), tau=float(tau), b=float(b), d=float(d),

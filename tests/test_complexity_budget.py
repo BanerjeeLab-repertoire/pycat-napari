@@ -110,7 +110,21 @@ _LONG_FUNCTION_LIMIT = 120
 # (fitted params, R², mobile/immobile fractions, over-recovery flag, per-parameter CI widths + verdicts,
 # and which warnings fire, on adequate / short-unidentifiable / over-recovery / too-few-points curves);
 # the existing `test_frap_fitting` passes unmodified. Count 130 → 129.
-_MAX_LONG_FUNCTIONS = 129
+# 128. (2026-07-20) `fit_fusion_relaxation` (fusion_tools), the 184-line droplet-fusion relaxation fit,
+# was split into `_fusion_tau_ci` (the covariance CI on tau), `_fusion_window_warn` (the relaxations-
+# observed count + short-record warning) and `_fusion_model_adequacy` (the runs test + two-mode test),
+# leaving a 90-line fit + orchestrate body. Pinned byte-identical by
+# `test_fusion_relaxation_characterization` (fitted params, R², tau CI, relaxations-observed, adequacy /
+# two-mode verdicts, and which warnings fire, on adequate / short / two-mode / too-few-points traces); the
+# existing `test_fusion_physics` passes unmodified. Count 129 → 128.
+# 127. (2026-07-20) `partition_measurement` (invitro_tools), the 191-line Kp measurement-with-assumptions
+# builder, had its background-subtracted assessment (the image cannot tell a camera pedestal from a
+# genuine dilute phase, so it is resolved by a dark reference / stated by the caller / recorded UNCHECKED)
+# extracted to `_partition_background_assumption`, leaving a 110-line body. Pinned byte-identical by
+# `test_partition_measurement_characterization` (which branch fires and the exact checked/holds/detail of
+# the assumption across all four inputs, plus the other assumptions + measurement identity); the existing
+# `test_claim_scoping` passes unmodified. Count 128 → 127.
+_MAX_LONG_FUNCTIONS = 127
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

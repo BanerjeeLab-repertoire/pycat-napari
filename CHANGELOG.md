@@ -1,3 +1,20 @@
+## [1.6.180] - 2026-07-20
+### Changed — **fit_fusion_relaxation decomposed by phase (184 → 90 lines), proven byte-identical.**
+The droplet-fusion relaxation fit fused the single-exponential-plus-drift curve fit, the tau confidence
+interval, the observation-window adequacy check (a record shorter than ~3 τ biases τ low, which biases
+η/γ by the same factor, and R² cannot see it), and a two-mode-relaxation test. Split into pure phase
+helpers, each carrying its rationale:
+- `_fusion_tau_ci` — the 95% CI on τ from the fit covariance;
+- `_fusion_window_warn` — the relaxations-observed count (measured on the span, not the circular fitted τ)
+  and the short-record warning;
+- `_fusion_model_adequacy` — the residual runs test + the direct two-mode test (which catches 100% where
+  the runs test catches ~62%, the drift term absorbing part of the slow mode).
+- **Behaviour-preserving, pinned as such.** `tests/test_fusion_relaxation_characterization.py` captured the
+  fitted parameters, R², the τ CI, the relaxations-observed count, the adequacy/two-mode verdicts, and
+  WHICH warnings fire across adequate / short / two-mode / too-few-points traces before the split and
+  asserts them unchanged after; the existing `test_fusion_physics` passes unmodified. Complexity ratchet
+  129 → 128; truncation guard allowlisted.
+
 ## [1.6.179] - 2026-07-20
 ### Added — **FilterStore: the active analytical population, provably separate from selection.**
 Two questions were tangled: *which entities am I examining?* (selection — transient attention) and *which

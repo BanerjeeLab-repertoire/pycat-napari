@@ -64,6 +64,20 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
+    # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line
+    # body. Nothing was removed: the assessment and its rationale MOVED into the helper, and
+    # `test_partition_measurement_characterization` pins which branch fires and the exact checked/holds/
+    # detail of the assumption unchanged across the split.
+    'invitro_tools.py::partition_measurement',
+
+    # 1.6.180 — `fit_fusion_relaxation` (the 184-line droplet-fusion relaxation fit) was split into
+    # `_fusion_tau_ci`, `_fusion_window_warn` and `_fusion_model_adequacy`, leaving a 90-line fit body.
+    # Nothing was removed: the fit, the CI, the window check, the two-mode test and their measured
+    # rationale MOVED into the helpers; `test_fusion_relaxation_characterization` pins the fit, CI,
+    # relaxations-observed, adequacy/two-mode verdicts and which warnings fire unchanged across the split.
+    'fusion_tools.py::fit_fusion_relaxation',
+
     # 1.6.176 — `fit_frap_recovery` (the 206-line FRAP recovery fit) was split into `_frap_derive_mobile`
     # (normalisation-aware mobile fraction + over-recovery warning) and `_frap_identifiability` (the
     # per-parameter covariance CI + warning), leaving a 109-line fit body. Nothing was removed: the fit,
