@@ -1,0 +1,263 @@
+[
+ {
+  "menu": "★ Open/Save File(s)",
+  "dict": "file_io_methods_dict",
+  "actions": [
+   "Open Image (auto-detect 2D / stack)",
+   "Add Image / Mask (keep current)",
+   "Switch Position / Scene (multi-position files)",
+   "Load Previous Session Results",
+   "Save and Clear"
+  ]
+ },
+ {
+  "menu": "Cell and Object Analyses",
+  "dict": "condensate_cell_analysis_dict",
+  "actions": [
+   "Cellular Object Analysis (Fluorescence)",
+   "In Vitro Object Analysis (Fluorescence)",
+   "In Vitro Object Analysis (Brightfield)",
+   "Time Series Cellular Object Analysis",
+   "Time Series In Vitro Object Analysis (Fluorescence)",
+   "Z-Stack (3D) Object Analysis",
+   "Cellular Fibril Analysis",
+   "In Vitro Fibril Analysis"
+  ]
+ },
+ {
+  "menu": "Biophysics",
+  "dict": "biophysics_dict",
+  "actions": [
+   "Video Particle Tracking (Microrheology)",
+   "FRAP (Fluorescence Recovery)",
+   "Droplet Fusion (C-Trap)",
+   "Temperature-Dependent Microscopy",
+   "Force-Distance Curve (DNA Tethering)"
+  ]
+ },
+ {
+  "menu": "Colocalization Analysis",
+  "dict": "coloc_analysis_actions",
+  "actions": [
+   "Colocalization Analysis (Pixel-wise + Object-based)",
+   "Colocalization Over Time (time-series)"
+  ]
+ },
+ {
+  "menu": "Analysis Methods",
+  "dict": "analysis_methods_dict",
+  "actions": [
+   "Data Quality Control",
+   "Exploratory Analysis",
+   "Comparative Figures (batch consolidated table)"
+  ]
+ },
+ {
+  "menu": "Toolbox",
+  "dict": "toolbox_actions",
+  "actions": [
+   "Measure Object Diameters"
+  ]
+ },
+ {
+  "menu": "Image Processing",
+  "dict": "image_processing_actions",
+  "actions": [
+   "Pre-Process Image",
+   "Reference / Background Subtraction",
+   "Image Registration (subpixel)",
+   "Photobleach Correction",
+   "Detrend Stack (drift / bleaching)",
+   "Pipeline Step Diagnostics",
+   "Pipeline SNR Analysis",
+   "Foreground Suppression Tuner",
+   "Temporal Enhancement Optimizer",
+   "Segmentation Benchmark",
+   "Segmentation Speed Comparison",
+   "Chromatin Topology Map",
+   "Nucleolus / Void Estimator",
+   "Display Diagnostics"
+  ]
+ },
+ {
+  "menu": "Image Adjustments",
+  "dict": "image_adjustment_actions",
+  "actions": [
+   "Rescale Intensity",
+   "Invert Image",
+   "Upscale Image"
+  ]
+ },
+ {
+  "menu": "Stack / Time-Series Tools",
+  "dict": "stack_tools_actions",
+  "actions": [
+   "Upscale Stack",
+   "Pre-Process Stack (lazy)",
+   "Cellpose Segmentation (stack)"
+  ]
+ },
+ {
+  "menu": "Background and Noise Correction",
+  "dict": "background_noise_correction_actions",
+  "actions": [
+   "Rolling-Ball Gaussian Background Removal",
+   "Background Removal w/ Edge Enhancement",
+   "Calibration Correction (flat-field / clear-frame)",
+   "Wavelet BG and Noise Subtraction",
+   "Wavelet Noise Reduction",
+   "Bilateral Noise Reduction"
+  ]
+ },
+ {
+  "menu": "Enhancements and Filters",
+  "dict": "enhancements_and_filters_actions",
+  "actions": [
+   "CLAHE",
+   "Peak and Edge Enhancement",
+   "Morphological Gaussian Filter",
+   "LoG Filter",
+   "Deblur by Pixel Reassignment",
+   "FFT Bandpass Filter"
+  ]
+ },
+ {
+  "menu": "Image Segmentation",
+  "dict": "image_segmentation_actions",
+  "actions": [
+   "Local Thresholding",
+   "Manual Threshold (im2bw)",
+   "Cellpose Segmentation",
+   "Felzenszwalb Segmentation and Region Merging",
+   "Gaussian Spot Localization",
+   "Contrast Cascade (bright body + dim fibers)"
+  ]
+ },
+ {
+  "menu": "Binary Mask Tools",
+  "dict": "mask_tools_actions",
+  "actions": [
+   "Binary Morphological Operations",
+   "Measure Binary Mask",
+   "Label Binary Mask"
+  ]
+ },
+ {
+  "menu": "Labeled Mask Tools",
+  "dict": "label_tools_actions",
+  "actions": [
+   "Label Updater",
+   "Convert Labels to Mask",
+   "Expand Labels",
+   "Measure Region Properties"
+  ]
+ },
+ {
+  "menu": "Layer Operations",
+  "dict": "layer_operations_actions",
+  "actions": [
+   "Simple Multi-Layer Merge",
+   "Advanced 2-Layer Merge",
+   "Mask Operations (AND/OR/XOR)"
+  ]
+ },
+ {
+  "menu": "Colocalization/Correlation",
+  "dict": "autocorrelation_actions",
+  "actions": [
+   "Auto-Correlation Function Analysis",
+   "Client Partition / Enrichment"
+  ]
+ },
+ {
+  "menu": "Pixel-Wise Correlation Analysis",
+  "dict": "pixel_coloc_tools_actions",
+  "actions": [
+   "Pixel-Wise Correlation Coefficient Analysis",
+   "Cross-Correlation Function Analysis"
+  ]
+ },
+ {
+  "menu": "Object-Based Colocalization Analysis",
+  "dict": "obj_coloc_tools_actions",
+  "actions": [
+   "Object Based Colocalization Analysis",
+   "Manders Colocalization Coefficient",
+   "Two-Channel Condensate Colocalization"
+  ]
+ },
+ {
+  "menu": "Cell and Object Analyses",
+  "dict": "condensate_analysis_actions",
+  "actions": [
+   "Cell Analyzer",
+   "Condensate Segmentation",
+   "Condensate Analyzer",
+   "Partial-Volume Measurement (measure on original pixels)"
+  ]
+ },
+ {
+  "menu": "Spatial Metrology",
+  "dict": "spatial_metrology_actions",
+  "actions": [
+   "Per-Cell Spatial ACF Analysis",
+   "Spatial Metrology (NND, Ripley, Voronoi…)",
+   "Spatial Randomness (noise vs. clustering)",
+   "Intensity Profiles (line / radial)",
+   "Morphological Complexity (fractal, lacunarity…)",
+   "Fibril Analysis (beads, morphometry, graph)"
+  ]
+ },
+ {
+  "menu": "Advanced Analysis",
+  "dict": "advanced_analysis_actions",
+  "actions": [
+   "Dynamic Spatial Phenotyping / Tracking",
+   "Condensate Biophysics (MSD, C_sat, Kinetics…)"
+  ]
+ },
+ {
+  "menu": "Molecular Counting",
+  "dict": "molecular_counting_actions",
+  "actions": [
+   "Photobleaching Step Counting",
+   "SpIDA (density & oligomeric state)",
+   "Number & Brightness (camera / time-series)"
+  ]
+ },
+ {
+  "menu": "Brightfield Tools",
+  "dict": "brightfield_actions",
+  "actions": [
+   "BF Preprocessing (flat-field, halo, CLAHE)",
+   "BF Condensate Segmentation",
+   "BF Optical Density Metrics",
+   "BF Per-Cell Summary",
+   "BF Spatial Metrology",
+   "BF Dynamics",
+   "BF Texture Analysis",
+   "BF Frame Quality"
+  ]
+ },
+ {
+  "menu": "Z-Stack (3D) Tools",
+  "dict": "zstack_actions",
+  "actions": [
+   "3D Background Removal",
+   "3D Cell Segmentation",
+   "3D Condensate Segmentation",
+   "3D Condensate Metrics",
+   "Best Slice Selector"
+  ]
+ },
+ {
+  "menu": "Data Visualization",
+  "dict": "data_visualization_actions",
+  "actions": [
+   "Plotting Widget",
+   "Frame Quality / Focus QC",
+   "Motion Scale Estimator (linking distance)",
+   "Export Time-Series Video"
+  ]
+ }
+]

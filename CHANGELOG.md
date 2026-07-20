@@ -1,3 +1,28 @@
+## [1.6.148] - 2026-07-19
+### Added — **`ui_modules.py` decomposition, Phase 1: the menu-contract verification net (ships before any move).**
+`ui_modules.py` is the file the codebase deliberately left un-split — its own ratchet warns *"a refactor
+whose only verification is 'it still imports' ships bugs"* (a real one hid here once: a pixel-size gate
+wrapped in `except: pass`, 1.5.509). So this spec builds the verification FIRST and ships it on its own;
+**no code is moved yet.**
+
+- **`tests/test_menu_contract.py` (`core`, pure AST)** — extracts the entire menu tree from
+  `ui_modules.py` (every top-level menu + submenu title and, in order, the action labels under it: **25
+  menus, 111 actions**) and asserts it against a committed reference (`tests/menu_contract_snapshot.json`,
+  regenerate with `python tests/test_menu_contract.py --regenerate`). A blind refactor that silently
+  drops, renames, reorders, or moves an action changes the contract and fails — the single highest-value
+  guard, and exactly the regression hardest to catch by hand. Plus a non-triviality floor (so the guard
+  can't pass vacuously) and a static check that `_setup_menu_bar` still assigns each guarded install's
+  result attribute (the 1.5.509 bug class).
+- **`tests/test_ui_smoke.py` (Qt-smoke, offscreen)** — the runtime companion: constructs the real
+  `MenuManager` and asserts the guarded installs actually RAN (`_pycat_marker_action`, `palette_action`,
+  a populated `_command_registry`, the layer-event backstops), that **every snapshot label became a real
+  registered action** (cross-checking the static contract against the live menu), and that the guarded
+  scene-switcher entry point is safe to invoke. *(These need an OpenGL-capable display, like the existing
+  `test_ui_smoke` tests; they run in CI/with a display, not in this headless GL-less sandbox.)*
+
+Full `pytest -m core` green (1115). Phase 2 (extracting `MenuManager` into its own module(s)) is a
+separate version, gated on this net.
+
 ## [1.6.147] - 2026-07-19
 ### Changed — **Finish the `file_io.py` decomposition: the lazy wrapper + the exception conversion.**
 Completes the two follow-ups deferred from 1.6.146.
