@@ -171,6 +171,14 @@ _DELIBERATE = {
     'file_io.py::_ome_pixel_size_um',
     'file_io.py::_lazy_backing_label',
 
+    # 1.6.146 — the three format-specific stack openers (`_open_stack_ims`, `_open_stack_generic`,
+    # `_open_czi_streaming`) MOVED to `file_io/stack_openers.py` as `_StackOpenersMixin` (decomposition,
+    # move 4). Kept as a mixin (not standalone functions): they write FileIOClass state and call sibling
+    # methods, so a function form would be a worse seam. `FileIOClass` inherits it; bodies unchanged.
+    'file_io.py::_open_stack_ims',
+    'file_io.py::_open_stack_generic',
+    'file_io.py::_open_czi_streaming',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

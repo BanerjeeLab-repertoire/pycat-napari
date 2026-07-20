@@ -146,7 +146,10 @@ _FILE_LINE_CEILINGS = {
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
     "toolbox/vpt_ui.py": 1139,
     "ui/ui_modules.py": 5573,
-    "file_io/file_io.py": 2805,
+    # 2805 -> 1670 (-40.5%) as StackLoadCancelled (errors.py), the two dialogs (dialogs.py), the pure
+    # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
+    # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.
+    "file_io/file_io.py": 1670,
     "batch_step_registry.py": 1663,
 }
 

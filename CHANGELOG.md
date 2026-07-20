@@ -1,3 +1,36 @@
+## [1.6.146] - 2026-07-19
+### Changed — **Decompose `file_io.py`: 2805 → 1670 lines (−40.5%), the second god-file after `vpt_ui`.**
+Behaviour-preserving refactor — move code into its proper homes, no rewrites, no new features. Same
+discipline as the `vpt_ui` decomposition (core green between each move, no test edited to make a move
+pass, drop-guard move-records for everything relocated).
+
+**Measured: `file_io.py` 2805 → 1670 lines (past the ≥39% target).** Four moves:
+- `StackLoadCancelled` → `utils/errors.py` — kept a plain `Exception`, **deliberately not a
+  `PyCATError`**: it is a user-cancel control-flow signal, not a failure, so `except PyCATError` must not
+  swallow it. Re-exported.
+- The two Qt dialogs (`LayerDataframeSelectionDialog`, `ChannelAssignmentDialog`) → `file_io/dialogs.py`.
+- The pure pixel-size / naming helpers (`_lazy_contrast_limits`, `_tiff_pixel_size_um`,
+  `_ome_pixel_size_um`, `_lazy_backing_label`) → a new **`file_io/naming.py`**, now headlessly testable
+  (`tests/test_file_io_naming.py`).
+- The three format-specific stack openers (`_open_stack_ims`, `_open_stack_generic`,
+  `_open_czi_streaming`, ~600 lines) → **`file_io/stack_openers.py`** as a mixin. They were kept as a
+  mixin, not standalone functions, because each writes `FileIOClass` state and calls sibling methods — a
+  function form would take 10+ params or pass `self`, the "worse seam" the spec warns against.
+
+Everything moved is **re-exported from `file_io.py`**, so every existing import path and call site still
+works. The `file_io/file_io.py` line ratchet is lowered 2805 → 1670 so it cannot regrow. Full
+`pytest -m core` green (1112 passed).
+
+**Blocker recorded** (per the spec's "report blockers" rule): `derive_layer_name` and
+`_clean_filename_token` could NOT move — two tests (`test_channel_modality`, `navigator/test_loader_fixes`)
+AST-parse `file_io.py` *by path* and pull those functions out by name, so relocating them would fail
+tests the decomposition is not allowed to edit. They stay put; the target was met without them.
+
+**Deliberately deferred** (clean, non-target-critical follow-ups): moving the `_ZarrTYX` lazy wrapper to
+`lazy_sources.py` (−63 lines more), and the broad-`except`→typed-error conversion in the moved code (the
+handlers moved *within* the `file_io` package, so the package count is unchanged — a conversion sweep is
+its own focused pass).
+
 ## [1.6.145] - 2026-07-19
 ### Changed — **Slim the distribution: stop shipping ~20 MB of docs/assets per release.**
 PyPI enforces a total project-size quota and PyCAT was consuming it at ~25 MB per release, dominated by
