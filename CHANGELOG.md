@@ -1,3 +1,32 @@
+## [1.6.160] - 2026-07-20
+### Added — **Per-measurement parameter stability: "if I nudge this parameter, does the number I report change?"**
+`benchmark_tools` sweeps a parameter and compares the resulting **masks** (Dice/IoU/F1). It does not report
+how much each *derived measurement* moves — and that is the scientifically load-bearing distinction: two
+settings can produce masks that agree at Dice 0.95 while the partition coefficient computed from them
+differs by 40%, because a small boundary shift moves the dense/dilute split. Mask agreement is not
+measurement agreement, and it is the measurement that gets published.
+
+- New **`toolbox/measurement_stability.py`** (`core`, pure): `measurement_stability(image, method, param,
+  sweep, measure_fn)` runs the full chain (segmentation → measurement) across a **plausible** parameter
+  range and returns a `StabilityResult` per measurement — baseline, per-setting values, `relative_range`
+  ((max−min)/|baseline|), and a verdict. Segmentation reuses `benchmark_tools.run_candidate` (no second
+  runner to drift).
+- **Two traps encoded.** *Population change vs measurement change:* `n_objects` is reported alongside, and
+  when the object count changes materially across the sweep the verdict is **`population-change`** ("a
+  shifting measurement here reflects a DIFFERENT POPULATION, not instability") rather than confidently
+  calling the measurement unstable. *A near-zero baseline* returns `nan` with a stated reason, never an
+  infinite relative range.
+- **Stated convention, not a fitted quantity:** the verdict thresholds (<5% stable, 5–20% sensitive, >20%
+  unstable) are documented as a convention.
+- **MRI adapter** (`stability_factor`) maps the verdict to a 0..1 parameter-sensitivity factor for the
+  Measurement Reliability Index (`nan` = "cannot assess", never treated as reliable) — the classification
+  lives here once, not duplicated in the index. Plus a **report figure** (measurement/baseline vs
+  parameter) that reads the measurement ontology's display name and units.
+- New **`tests/test_measurement_stability.py`** (`core`, synthetic, known-answer): a stable total-intensity
+  measurement reads `stable`; a partition coefficient whose boundary the threshold decides reads
+  `sensitive`/`unstable`; a count-changing sweep is a **population change**; `relative_range` is scale-free;
+  and a zero baseline is `undefined`, not a divide-by-zero.
+
 ## [1.6.159] - 2026-07-20
 ### Added — **Route equivalence increment A: the matrix grows from three to six canonical workflows, plus metadata comparison.**
 The cross-route equivalence matrix asserts the same workflow yields the same numbers through every route it
