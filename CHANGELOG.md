@@ -1,3 +1,29 @@
+## [1.6.162] - 2026-07-20
+### Added — **Analysis presets: "reasonable starting parameters" as a declared, inspectable object that can't smuggle an unaudited default past a user.**
+Sensible defaults are scattered across signatures, docstrings, and the maintainer's head; a new user
+opening a condensate workflow faces a dozen parameters with no idea which suit their data. This makes a
+preset a declared, versioned bundle — with two non-optional honesty invariants.
+
+- New **`utils/analysis_presets.py`** (`core`): a frozen `AnalysisPreset` (key, applies_to, parameters,
+  provenance, validated, validation_ref, requirements, caveats) and a **sparsely, honestly seeded**
+  `ANALYSIS_PRESETS` registry — only instrument/sample combinations actually run (a validated condensate
+  SNR gate, VPT bead tracking, an in-vitro 63× confocal starting point). An invented preset for unused
+  hardware carries false authority and is not seeded.
+- **`provenance` is mandatory and non-empty** (enforced at import) — a preset with unstated provenance is
+  just a hidden default with a friendly name, which is exactly what the filter-sensitivity programme exists
+  to expose. **`validated=True` requires a linked `validation_ref`** into `VALIDATED_CASES`, so the flag
+  cannot be decorative — it means the set passed the sensitivity harness, not that it looked reasonable.
+- **Drift guard:** `orphan_parameter_keys` checks every preset's keys against the REAL parameter names of
+  the workflow it claims (read from the live function signatures), so a preset that rots out of sync with
+  its function fails a test.
+- **Populate, never lock:** `PresetApplication` seeds the values, lets the user change any, and reports
+  "modified from <preset>" once edited (a result from a modified preset is not the preset's result) —
+  recording the applied preset + modification state into the workflow. **Requirement gating reuses
+  `operation_spec.runnability`** (the single requirements vocabulary), never a second gate.
+- New **`tests/test_analysis_presets.py`** (`core`): unique keys + mandatory provenance; the drift guard;
+  `validated⇒ref` (and the import-time refusal of an unlinked one); populate-not-lock deviation tracking
+  and recording; and requirement gating with a stated reason.
+
 ## [1.6.161] - 2026-07-20
 ### Added — **Per-feature provenance: attach the workflow chain to each measurement, not just the session.**
 `batch_processor` records a complete, replayable workflow — but that chain is attached to the *session*,
