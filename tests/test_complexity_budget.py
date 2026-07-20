@@ -103,7 +103,14 @@ _LONG_FUNCTION_LIMIT = 120
 # body. Each rationale block moved with its phase. Pinned byte-identical by
 # `test_photobleaching_characterization` (fitted params, R², tau CI, both decay bounds, correction factors
 # and WHICH warning tier fires, on adequate / mid / short / flat synthetic movies). Count 131 → 130.
-_MAX_LONG_FUNCTIONS = 130
+# 129. (2026-07-20) `fit_frap_recovery` (frap_tools), the 206-line FRAP recovery fit, was split into
+# `_frap_derive_mobile` (the normalisation-aware mobile fraction + over-recovery warning) and
+# `_frap_identifiability` (the per-parameter covariance CI + its warning, with the covariance rationale),
+# leaving a 109-line fit + orchestrate body. Pinned byte-identical by `test_frap_recovery_characterization`
+# (fitted params, R², mobile/immobile fractions, over-recovery flag, per-parameter CI widths + verdicts,
+# and which warnings fire, on adequate / short-unidentifiable / over-recovery / too-few-points curves);
+# the existing `test_frap_fitting` passes unmodified. Count 130 → 129.
+_MAX_LONG_FUNCTIONS = 129
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

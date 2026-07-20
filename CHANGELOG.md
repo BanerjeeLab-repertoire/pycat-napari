@@ -1,3 +1,20 @@
+## [1.6.176] - 2026-07-20
+### Changed — **fit_frap_recovery decomposed by phase (206 → 109 lines), proven byte-identical.**
+The FRAP recovery fit fused the hyperbolic curve fit, the normalisation-aware mobile-fraction derivation
+(+ over-recovery warning), a residual-runs adequacy test, and a per-parameter identifiability assessment
+(+ its warning) into one body dominated by measured rationale. Split into pure phase helpers:
+- `_frap_derive_mobile` — the mobile fraction of the BLEACHED material that recovered (correct under
+  pre-bleach normalisation, where `b - a` under-reported it) + the unphysical-plateau (b>1) warning;
+- `_frap_identifiability` — the per-parameter 95% CI from the fit covariance, flagging any parameter
+  whose interval is wider than its own value (the covariance is the only thing that knows whether the
+  data constrains a parameter — R² cannot; the rationale moved here with it).
+- **Behaviour-preserving, pinned as such.** `tests/test_frap_recovery_characterization.py` captured the
+  fitted parameters, R², the mobile/immobile fractions, the over-recovery flag, the per-parameter CI
+  widths and identifiability verdicts, and WHICH warnings fire across adequate / short-unidentifiable /
+  over-recovery / too-few-points curves before the split and asserts them unchanged after; the existing
+  `test_frap_fitting` passes unmodified. No number moved. Complexity ratchet 130 → 129; truncation guard
+  allowlisted.
+
 ## [1.6.175] - 2026-07-20
 ### Changed — **fit_photobleaching decomposed by phase (233 → 65 lines), proven byte-identical.**
 The exponential-bleach fit fused the curve fit, the tau confidence interval, the non-circular

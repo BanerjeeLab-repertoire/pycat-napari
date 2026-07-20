@@ -64,6 +64,14 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.176 — `fit_frap_recovery` (the 206-line FRAP recovery fit) was split into `_frap_derive_mobile`
+    # (normalisation-aware mobile fraction + over-recovery warning) and `_frap_identifiability` (the
+    # per-parameter covariance CI + warning), leaving a 109-line fit body. Nothing was removed: the fit,
+    # the derived quantities, the identifiability assessment and their measured rationale MOVED into the
+    # helpers, and a byte-identity characterization test (`test_frap_recovery_characterization`) pins the
+    # fitted params, fractions, CI widths and which warnings fire unchanged across the split.
+    'frap_tools.py::fit_frap_recovery',
+
     # 1.6.175 — `fit_photobleaching` (the 233-line exponential-bleach fit) was split into
     # `_photobleach_tau_ci`, `_photobleach_window_metrics` and `_photobleach_window_warn`, leaving a
     # 65-line fit + orchestrate body. Nothing was removed: the fit, the tau CI, the decay-observed bounds,

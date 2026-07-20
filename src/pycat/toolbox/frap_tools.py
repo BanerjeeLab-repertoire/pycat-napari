@@ -224,6 +224,78 @@ def frap_recovery_model(t, a, b, tau_half):
     return (a + b * x) / (1.0 + x)
 
 
+def _frap_derive_mobile(a, b):
+    """Normalisation-aware mobile fraction (the fraction of the BLEACHED material that recovered) plus the
+    over-recovery flag. Reduces to b when a==0 (Taylor); correct when a>0 (pre-bleach normalisation),
+    where the old ``b - a`` under-reported it by exactly -(1 - bleach_depth). A plateau above the
+    pre-bleach level (b>1) is not physical for a simple recovery and warns."""
+    bleach_depth = float(1.0 - a)
+    if abs(bleach_depth) < 1e-6:
+        # The bleach removed (essentially) nothing: the mobile fraction is not identifiable from this
+        # curve. Say so rather than dividing by ~0.
+        mobile = float('nan')
+    else:
+        mobile = float((b - a) / bleach_depth)
+    over_recovery = bool(np.isfinite(b) and b > 1.0 + 1e-6)
+    if over_recovery:
+        napari_show_warning(
+            "FRAP: the recovery plateau exceeds the pre-bleach level "
+            f"(b = {b:.3f} > 1). That is not physical for a simple recovery — "
+            "check the normalisation and the photofading correction (an "
+            "over-aggressive reference correction will do this).")
+    return bleach_depth, mobile, over_recovery
+
+
+def _frap_identifiability(popt, pcov, r2):
+    """Can the data DETERMINE each parameter? Returns ``(identifiability, unidentifiable_names)`` and warns
+    on any parameter whose 95% CI is wider than its own value.
+
+    The covariance is the ONLY thing in the fit that knows whether the data constrains the parameters — a
+    question R² cannot answer (R² measures how well the curve fits the points you HAVE, not whether those
+    points CONSTRAIN the parameter). Measured with a true half-time of 8.0 s: at a 4 s window the half-time
+    is 12.6 ± 9.9 — essentially unconstrained — at R² = 0.963, the fit reports a mobile fraction of 1.209
+    (physically impossible), and the 95% CI on the half-time is [-0.2, 15.1] (it includes a NEGATIVE
+    half-time). The usual cause is an observation window shorter than the recovery — you cannot measure a
+    half-time you did not wait for."""
+    _identifiable = {}
+    try:
+        _perr = np.sqrt(np.diag(pcov))
+        for _i, _name in enumerate(('a', 'b', 'tau_half')):
+            _val, _se = float(popt[_i]), float(_perr[_i])
+            if not np.isfinite(_se) or _se <= 0:
+                _identifiable[_name] = dict(value=_val, ci=(np.nan, np.nan),
+                                            identifiable=False,
+                                            reason='the covariance is singular — the '
+                                                   'parameter is not constrained at all')
+                continue
+            _lo, _hi = _val - 1.96 * _se, _val + 1.96 * _se
+            _rel = (_hi - _lo) / max(abs(_val), 1e-12)
+            _identifiable[_name] = dict(
+                value=_val, se=_se, ci=(float(_lo), float(_hi)),
+                relative_ci_width=float(_rel),
+                identifiable=bool(_rel < 1.0))
+    except Exception as _exc:
+        debug_log('FRAP: could not assess identifiability', _exc)
+
+    _unident = [k for k, v in _identifiable.items() if not v.get('identifiable', True)]
+    if _unident:
+        _detail = "; ".join(
+            f"{k} = {_identifiable[k]['value']:.3g} "
+            f"[95% CI {_identifiable[k]['ci'][0]:.3g} to {_identifiable[k]['ci'][1]:.3g}]"
+            for k in _unident)
+        napari_show_warning(
+            f"FRAP: the data does not DETERMINE {', '.join(_unident)} — the confidence "
+            f"interval is wider than the value itself. {_detail}.\n\n"
+            f"R² = {r2:.3f}, and that is not a contradiction: R² measures how well the "
+            f"curve fits the points you HAVE, and cannot know that those points do not "
+            f"constrain the parameter. The usual cause is an observation window shorter "
+            f"than the recovery — you cannot measure a half-time you did not wait for. "
+            f"Measured: at a 4-second window on an 8-second recovery, the half-time comes "
+            f"out at 12.6 ± 9.9 with R² = 0.963.\n\n"
+            f"Do not report these values without the interval.")
+    return _identifiable, _unident
+
+
 def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
     """
     Fit the recovery model to a normalized FRAP curve.
@@ -288,30 +360,8 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
     tau0 = max((t[-1] - t[0]) / 4.0, 1e-3)
 
     try:
-        # ── The covariance was being THROWN AWAY ────────────────────────────────
-        #
-        # This was `popt, _ = curve_fit(...)`. The second return value is the parameter
-        # covariance, and it is the ONLY thing in the fit that knows whether the data can
-        # DETERMINE the parameters at all — a question R² cannot answer.
-        #
-        # R² measures how well the curve fits the points you HAVE. It cannot know that the
-        # points you have do not CONSTRAIN the parameter. Measured, with a true half-time of
-        # 8.0 s and 2 % noise, over 30 noise realisations:
-        #
-        #     window            t_half (sd)      mean R²
-        #     60 s, 40 pts      7.9  (0.7)        0.982
-        #     20 s, 20 pts      8.0  (1.4)        0.984
-        #     8 s, 10 pts      10.6  (6.6)        0.978    <- unidentifiable
-        #     4 s, 6 pts       12.6  (9.9)        0.963    <- unidentifiable
-        #
-        # **At a 4-second window the half-time is 12.6 ± 9.9 — essentially unconstrained —
-        # and R² is 0.963.** The fit also reports a mobile fraction of 1.209, which is
-        # physically impossible.
-        #
-        # The covariance already knew. The 95 % CI on the half-time at that window is
-        # [-0.2, 15.1] — it includes a NEGATIVE half-time, which is meaningless. That is the
-        # definition of "this data cannot determine this parameter", and it was available all
-        # along and discarded.
+        # KEEP the covariance (pcov): it is the only thing that knows whether the data can DETERMINE the
+        # parameters at all — R² cannot (see `_frap_identifiability` for the measured rationale).
         popt, pcov = curve_fit(
             frap_recovery_model, t, y, p0=[a0, b0, tau0],
             bounds=([-0.5, -0.5, 1e-4], [1.5, 2.0, 1e6]),
@@ -321,91 +371,16 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
         ss_res = np.sum((y - fit_curve) ** 2)
         ss_tot = np.sum((y - np.mean(y)) ** 2)
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
-        # Normalisation-aware mobile fraction: the fraction of the BLEACHED material
-        # that recovered. Reduces to b when a == 0 (Taylor); correct when a > 0
-        # (pre-bleach normalisation), where the old `b - a` under-reported it by
-        # exactly -(1 - bleach_depth).
-        bleach_depth = float(1.0 - a)
-        if abs(bleach_depth) < 1e-6:
-            # The bleach removed (essentially) nothing: the mobile fraction is not
-            # identifiable from this curve. Say so rather than dividing by ~0.
-            mobile = float('nan')
-        else:
-            mobile = float((b - a) / bleach_depth)
-        over_recovery = bool(np.isfinite(b) and b > 1.0 + 1e-6)
-        if over_recovery:
-            napari_show_warning(
-                "FRAP: the recovery plateau exceeds the pre-bleach level "
-                f"(b = {b:.3f} > 1). That is not physical for a simple recovery — "
-                "check the normalisation and the photofading correction (an "
-                "over-aggressive reference correction will do this).")
-        # ── Is the MODEL right, or does it merely beat a flat line? ────────────
-        #
-        # R^2 answers only "does this beat a horizontal line?", which for a monotonic
-        # recovery curve is a trivially low bar. Validated on synthetic FRAP whose truth
-        # is a TWO-component recovery (fast + slow pool, a very common case), fitted with
-        # this SINGLE-POOL model (PyCAT uses the hyperbolic form I = (a + b*x)/(1 + x)):
-        #
-        #     wrong model (1-exp):  R^2 = 0.904   mobile fraction 0.724
-        #     right model (2-exp):  R^2 = 0.992   mobile fraction 0.930
-        #     truth:                              mobile fraction 0.875
-        #
-        # The wrong model scores R^2 = 0.90 -- respectable by the usual heuristic -- and
-        # returns a mobile fraction 17% from the truth.
-        #
-        # The residuals catch it: a correct model leaves residual signs randomly ordered;
-        # a model missing structure leaves them in BLOCKS. The runs test flagged the wrong
-        # model 30/30 times and the correct model 0/30.
+        bleach_depth, mobile, over_recovery = _frap_derive_mobile(a, b)
+
+        # Fit adequacy is a runs test on the residuals, NOT R²: R² only asks 'does this beat a flat
+        # line?' — a trivial bar for a monotonic recovery. On synthetic two-pool FRAP fitted with the
+        # single-pool model the runs test flagged the wrong model 30/30 (R²=0.90, mobile 17% off).
         quality = assess_fit(y, fit_curve, n_params=3, model_name="FRAP single-pool (hyperbolic)")
         if not quality['adequate']:
             napari_show_warning("FRAP: " + quality['verdict'])
 
-        # ── Can the data DETERMINE these parameters? ────────────────────────────
-        #
-        # The standard error of each parameter comes from the covariance diagonal. A 95 % CI
-        # whose WIDTH exceeds the parameter's own value means the data does not constrain it:
-        # the fit produced a number, but any number across that range would have fitted about
-        # as well.
-        #
-        # The commonest cause is an observation window shorter than the recovery — you cannot
-        # measure a half-time you did not wait for. R² stays high throughout, because the
-        # curve does fit the few points that exist.
-        _identifiable = {}
-        try:
-            _perr = np.sqrt(np.diag(pcov))
-            for _i, _name in enumerate(('a', 'b', 'tau_half')):
-                _val, _se = float(popt[_i]), float(_perr[_i])
-                if not np.isfinite(_se) or _se <= 0:
-                    _identifiable[_name] = dict(value=_val, ci=(np.nan, np.nan),
-                                                identifiable=False,
-                                                reason='the covariance is singular — the '
-                                                       'parameter is not constrained at all')
-                    continue
-                _lo, _hi = _val - 1.96 * _se, _val + 1.96 * _se
-                _rel = (_hi - _lo) / max(abs(_val), 1e-12)
-                _identifiable[_name] = dict(
-                    value=_val, se=_se, ci=(float(_lo), float(_hi)),
-                    relative_ci_width=float(_rel),
-                    identifiable=bool(_rel < 1.0))
-        except Exception as _exc:
-            debug_log('FRAP: could not assess identifiability', _exc)
-
-        _unident = [k for k, v in _identifiable.items() if not v.get('identifiable', True)]
-        if _unident:
-            _detail = "; ".join(
-                f"{k} = {_identifiable[k]['value']:.3g} "
-                f"[95% CI {_identifiable[k]['ci'][0]:.3g} to {_identifiable[k]['ci'][1]:.3g}]"
-                for k in _unident)
-            napari_show_warning(
-                f"FRAP: the data does not DETERMINE {', '.join(_unident)} — the confidence "
-                f"interval is wider than the value itself. {_detail}.\n\n"
-                f"R² = {r2:.3f}, and that is not a contradiction: R² measures how well the "
-                f"curve fits the points you HAVE, and cannot know that those points do not "
-                f"constrain the parameter. The usual cause is an observation window shorter "
-                f"than the recovery — you cannot measure a half-time you did not wait for. "
-                f"Measured: at a 4-second window on an 8-second recovery, the half-time comes "
-                f"out at 12.6 ± 9.9 with R² = 0.963.\n\n"
-                f"Do not report these values without the interval.")
+        _identifiable, _unident = _frap_identifiability(popt, pcov, r2)
 
         return dict(
             a=float(a), b=float(b), tau_half=float(tau_half),
