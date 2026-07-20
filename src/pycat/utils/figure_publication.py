@@ -55,10 +55,17 @@ THEMES = {
 
 @dataclass
 class FigureSpec:
-    """An editable description of a figure's presentation. Round-trips to a dict / JSON.
+    """**DEPRECATED — use ``figure_spec.FigureSpec`` (the canonical merged spec).**
 
-    Every field is optional: ``None`` means "leave what the figure already has". So a spec is a set of
-    *overrides*, and applying an empty spec is a no-op — a caller changes only what they name.
+    The two `FigureSpec` implementations were merged in 1.6.192: `figure_spec.FigureSpec` now carries every
+    field this one had (journal column, mm height, theme, recolour, tick format, significance brackets), and
+    `figure_spec.refine(fig, spec)` applies them by delegating to `apply_spec` below — so THIS class stays
+    the validated rendering carrier while the canonical PUBLIC spec is `figure_spec.FigureSpec`. New code
+    should build a `figure_spec.FigureSpec` and call `figure_spec.render`/`refine`; this remains for the
+    existing consumers until they migrate.
+
+    An editable description of a figure's presentation. Round-trips to a dict / JSON. Every field is
+    optional: ``None`` means "leave what the figure already has", so applying an empty spec is a no-op.
     """
     title: Optional[str] = None
     xlabel: Optional[str] = None

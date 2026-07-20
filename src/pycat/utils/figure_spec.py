@@ -54,7 +54,14 @@ class FigureData:
 
 @dataclasses.dataclass
 class FigureSpec:
-    """The declarative presentation spec. Mutating this and re-rendering never recomputes the data."""
+    """The **canonical** declarative presentation spec (the two `FigureSpec` implementations merged here).
+    Mutating this and re-rendering never recomputes the data.
+
+    It carries the ontology-aware fields this module always had AND the journal/theme/bracket capabilities
+    absorbed from ``figure_publication`` (the fields below the divider). Every absorbed field defaults to
+    off/None, so a spec that sets none of them renders EXACTLY as before — the merge is pixel-equivalent by
+    construction. ``figure_publication.FigureSpec`` is now a deprecated shim over this one.
+    """
     title: "str | None" = None
     x_label: "str | None" = None       # default: FigureData.x_label or 'condition'
     y_label: "str | None" = None       # default: '<display_name> (<units>)' from the ontology
@@ -65,8 +72,16 @@ class FigureSpec:
     figure_size_in: tuple = (5.0, 3.5)
     dpi: int = 300
     annotate_n: bool = True            # show n per group
-    significance: str = 'none'         # 'none' | 'stars' | 'p_values'
+    significance: str = 'none'         # 'none' | 'stars' | 'p_values' (label style for the brackets below)
     caveats_shown: bool = False        # render ontology caveats as a footnote
+    # ── absorbed from figure_publication (additive; every default preserves current output) ──────────
+    theme: "str | None" = None                 # journal theme for refine(); None = no theme adjustment
+    recolor: bool = False                       # opt-in palette re-assignment (off: keep purposeful colours)
+    title_size_pt: "float | None" = None
+    journal_column: "str | None" = None         # 'single'|'onehalf'|'double' → width preset (mm→in at edge)
+    height_mm: "float | None" = None
+    tick_format: "str | None" = None            # e.g. '%.2f' on the y axis
+    significance_brackets: tuple = ()           # ({'x1','x2','y','label'}, ...) — render()/refine() draw them
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -136,6 +151,17 @@ def render(fig_data, spec):
                  + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(spec.font_size_pt)
 
+    # ── significance brackets (the merged gap: figure_spec.render() now HONOURS them) ────────────────
+    # The old figure_spec carried a `significance` mode string that render() never acted on; the working
+    # bracket implementation lived only in figure_publication. It is now driven from here, so a spec that
+    # requests brackets actually gets them. The honesty stays upstream: a bracket is drawn only for a pair
+    # the caller supplied (from replicate-level stats), never inferred from a pixel-level test.
+    if spec.significance_brackets:
+        from pycat.utils.figure_publication import add_significance_bracket
+        for ann in spec.significance_brackets:
+            add_significance_bracket(ax, ann['x1'], ann['x2'], ann['y'],
+                                     ann.get('label', ''), font_size=spec.font_size_pt)
+
     if spec.caveats_shown:
         caveats = ontology_caveats(fig_data.measurement)
         if caveats:
@@ -149,10 +175,28 @@ def render(fig_data, spec):
     return fig
 
 
+def refine(fig, spec):
+    """Refine an ALREADY-RENDERED figure under the canonical spec — theme, journal sizing, tick format,
+    optional recolour, and significance brackets — **without recomputing the data** (the refine-not-recompute
+    contract). Reuses the validated ``figure_publication.apply_spec`` by mapping the canonical fields onto
+    its spec, so a refined figure is byte-for-byte what the publication path always produced (the merge
+    changes the API surface, not the output). A canonical spec with no journal/theme fields set leaves the
+    figure's presentation as-is."""
+    from pycat.utils.figure_publication import FigureSpec as _PubSpec, apply_spec
+    pub = _PubSpec(
+        title=spec.title, xlabel=spec.x_label, ylabel=spec.y_label,
+        xlim=spec.x_limits, ylim=spec.y_limits,
+        theme=(spec.theme or 'colorblind_safe'), recolor=spec.recolor,
+        font_size=spec.font_size_pt, title_size=spec.title_size_pt,
+        column=(spec.journal_column or 'single'), height_mm=spec.height_mm,
+        tick_format=spec.tick_format, significance=list(spec.significance_brackets))
+    return apply_spec(fig, pub)
+
+
 # ── Spec JSON round-trip (regenerate the figure identically later) ──────────────────────────────
 def spec_to_dict(spec) -> dict:
     d = dataclasses.asdict(spec)
-    for k in ('figure_size_in', 'x_limits', 'y_limits'):
+    for k in ('figure_size_in', 'x_limits', 'y_limits', 'significance_brackets'):
         if d.get(k) is not None:
             d[k] = list(d[k])
     return d
@@ -163,6 +207,8 @@ def spec_from_dict(d) -> FigureSpec:
     for k in ('figure_size_in', 'x_limits', 'y_limits'):
         if d.get(k) is not None:
             d[k] = tuple(d[k])
+    if d.get('significance_brackets') is not None:
+        d['significance_brackets'] = tuple(d['significance_brackets'])
     return FigureSpec(**d)
 
 

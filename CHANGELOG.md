@@ -1,3 +1,27 @@
+## [1.6.192] - 2026-07-20
+### Changed — **The two FigureSpec systems merged behind one canonical spec; significance now rendered.**
+`utils/figure_spec.py::FigureSpec` and `utils/figure_publication.py::FigureSpec` overlapped but differed —
+a feature added to one was absent from the other, and no module knew which to use. Merged behind
+`figure_spec.FigureSpec` (the canonical spec):
+- The canonical spec **absorbs** the publication fields (journal `column`, `height_mm`, `theme`, `recolor`,
+  `tick_format`, `significance_brackets`, `title_size_pt`) — **each defaulting off/None, so a spec that
+  sets none of them renders EXACTLY as before**: the merge is pixel-equivalent for existing usage by
+  construction.
+- **`figure_spec.render()` now HONOURS significance** (the verified gap — the working bracket
+  implementation lived only in `figure_publication`); a spec requesting brackets gets them, still driven by
+  caller-supplied replicate-level pairs, never a pixel-level inference.
+- New `figure_spec.refine(fig, spec)` applies theme / journal sizing / ticks / recolour / brackets to an
+  already-rendered figure by **reusing the validated `figure_publication.apply_spec`** — so the output is
+  byte-for-byte what the publication path always produced (the merge changes the API surface, not the
+  pixels). Unit is inches internally; mm is converted at the journal-width boundary.
+- `figure_publication.FigureSpec` is now **deprecated** (marked in its docstring) but fully functional —
+  existing consumers keep working until they migrate.
+- Tests (`core`): `tests/test_figurespec_merge.py` — the canonical spec carries every capability, default
+  render is unchanged, render honours brackets, `refine` matches `apply_spec`, the JSON round-trip carries
+  the new fields, and the deprecated shim still works; the existing `test_figure_spec` / `test_figure_
+  publication` pass unmodified. Migrating the two consumers off the deprecated shim (then removing it) is
+  the follow-on; nothing breaks meanwhile.
+
 ## [1.6.191] - 2026-07-20
 ### Changed — **Identity integration: `dataset_id_for` now returns a durable UUID for a readable file.**
 Wires the dataset-identity registry (1.6.190) into entity identity: `dataset_id_for(path)` resolves a
