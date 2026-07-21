@@ -289,7 +289,7 @@ _FILE_LINE_CEILINGS = {
     # 2447 -> 2242 (coarsening, 1.6.217) -> 1802 (photobleaching + frame_quality, 1.6.218): domains moved to
     # toolbox/condensate_physics/*.py. The ceiling ratchets DOWN as the remaining quantities (msd, moduli,
     # relaxation, intensity, survival) move out.
-    "toolbox/condensate_physics_tools.py": 1479,
+    "toolbox/condensate_physics_tools.py": 602,
 }
 
 

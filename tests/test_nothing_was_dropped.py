@@ -207,6 +207,26 @@ _DELIBERATE = {
     'condensate_physics_tools.py::bimodal',
     'condensate_physics_tools.py::kaplan_meier_lifetimes',
     'condensate_physics_tools.py::fit_aspect_ratio_relaxation',
+    # 1.6.220 — condensate_physics decomposition step 4: the MSD / anomalous-diffusion domain (compute_msd,
+    # fit_anomalous_diffusion, msd_per_track, test_confinement + the _short_track_rejections / _confined_msd
+    # / _aicc / _lag_window_gate / _fit_msd_powerlaw / _assess_msd_identifiability / _classify_msd_motion /
+    # _package_msd_result / _insufficient_result / _report_short_track_rejections helpers) MOVED verbatim to
+    # condensate_physics/msd.py; the tools module re-exports the public entry points + MIN_TRACK_LENGTH_FRAMES.
+    # The golden-master MSD->D->viscosity chain passes unmodified (two monkeypatch targets updated to the
+    # moved module). These keys vanished by the move.
+    'condensate_physics_tools.py::compute_msd',
+    'condensate_physics_tools.py::msd_per_track',
+    'condensate_physics_tools.py::test_confinement',
+    'condensate_physics_tools.py::_confined_msd',
+    'condensate_physics_tools.py::_aicc',
+    'condensate_physics_tools.py::_lag_window_gate',
+    'condensate_physics_tools.py::_insufficient_result',
+    'condensate_physics_tools.py::_fit_msd_powerlaw',
+    'condensate_physics_tools.py::_assess_msd_identifiability',
+    'condensate_physics_tools.py::_classify_msd_motion',
+    'condensate_physics_tools.py::_package_msd_result',
+    'condensate_physics_tools.py::_short_track_rejections',
+    'condensate_physics_tools.py::_report_short_track_rejections',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

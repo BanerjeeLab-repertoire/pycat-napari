@@ -1,3 +1,19 @@
+## [1.6.220] - 2026-07-21
+### Changed — **condensate_physics decomposition step 4: the MSD / anomalous-diffusion domain moves out (byte-identical).**
+The largest, most-checked domain — the MSD→D→viscosity chain the golden-master pins — moved **verbatim** into
+`condensate_physics/msd.py`: `compute_msd`, `fit_anomalous_diffusion`, `msd_per_track`, `test_confinement`,
+their `_short_track_rejections`/`_confined_msd`/`_lag_window_gate`/… helpers, and the
+`MIN_TRACK_LENGTH_FRAMES` constant.
+
+- **The tools module re-exports** the public entry points + `MIN_TRACK_LENGTH_FRAMES` + the constants/helpers
+  the diagnostic tests read, so every caller (VPT, timeseries, dynamics UIs, `analysis_presets`) and the
+  still-in-tools moduli functions (which call `compute_msd`) are unchanged.
+- **Byte-identical — the golden-master MSD→D→viscosity chain (D to 1.1%, α to 0.1%, viscosity to 3.2%)
+  passes unmodified**, as do the min-track-length diagnostics; two monkeypatch targets were updated to follow
+  the moved symbols (assertions unchanged). Moved keys recorded in the drop-guard's `_DELIBERATE`.
+- `condensate_physics_tools.py` dropped **1479 -> 602** lines; the per-file ceiling ratcheted to 602. Only
+  the moduli section remains before the shim.
+
 ## [1.6.219] - 2026-07-21
 ### Changed — **condensate_physics decomposition step 3: three leaf domains move out (byte-identical).**
 Three independent domains moved verbatim into the `condensate_physics/` package: `intensity.py`

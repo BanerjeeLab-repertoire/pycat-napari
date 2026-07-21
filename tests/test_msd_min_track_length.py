@@ -41,9 +41,13 @@ pytestmark = pytest.mark.core
 
 @pytest.fixture
 def notices(monkeypatch):
+    # compute_msd + the track-rejection diagnostic moved to condensate_physics/msd.py (1.6.220); patch the
+    # notices at their new home (cpt re-exports the functions). Assertions unchanged — the rejection report
+    # still fires; only the monkeypatch target follows the moved symbol.
+    from pycat.toolbox.condensate_physics import msd as _msd
     said = []
-    monkeypatch.setattr(cpt, 'napari_show_info', lambda m: said.append(m))
-    monkeypatch.setattr(cpt, 'napari_show_warning', lambda m: said.append(m))
+    monkeypatch.setattr(_msd, 'napari_show_info', lambda m: said.append(m))
+    monkeypatch.setattr(_msd, 'napari_show_warning', lambda m: said.append(m))
     return said
 
 
@@ -186,7 +190,10 @@ def test_a_genuinely_ABSENT_bead_is_not_blamed_on_the_linker(notices):
 
 def test_the_diagnostic_cannot_break_the_analysis(monkeypatch, notices):
     """A diagnostic must never be able to take down the thing it describes."""
-    monkeypatch.setattr(cpt, '_short_track_rejections',
+    # _short_track_rejections moved to condensate_physics/msd.py (1.6.220) — patch it where compute_msd
+    # actually calls it, so this test still exercises the diagnostic-failure path.
+    from pycat.toolbox.condensate_physics import msd as _msd
+    monkeypatch.setattr(_msd, '_short_track_rejections',
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
     tracks = pd.concat([_track(i, range(0, 300), seed=i) for i in range(3)],
                        ignore_index=True)
