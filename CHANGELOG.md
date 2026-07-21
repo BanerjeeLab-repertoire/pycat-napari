@@ -1,3 +1,24 @@
+## [1.6.240] - 2026-07-21
+### Changed — **segmentation decomposition step 1: the leaf/foundation families move out (byte-identical).**
+Began decomposing `segmentation_tools.py` (2,692 lines, the best-covered large file — 41 test files) into a
+`toolbox/segmentation/` package by family. This step moves the five families with no upward dependencies,
+**verbatim** — no threshold, morphology, or operation-order change:
+
+- `_common.py` — the shared `_to_uint16_safe` dtype helper.
+- `local_thresholding.py` — `local_thresholding_func` (registered op) + its viewer wrapper.
+- `watershed.py` — `apply_watershed_labeling` + `opencv_watershed_func` (both registered ops); imports
+  `_to_uint16_safe` from `_common`.
+- `morphology.py` — `cell_mask_stretching` (registered op, keeps its 50× gain ceiling).
+- `intensity.py` — `compute_image_intensity_stats` + `cell_has_punctate_signal`, the RESTORED
+  absolute-intensity punctate gate whose loss once caused spurious puncta (1.5.526).
+
+The move is **dependency-ordered**: family modules import from each other, never back from `segmentation_tools`,
+so there are no import cycles. Four registered ops moved → `operation_catalog.json` regenerated. The wiring
+guard `test_spurious_puncta_gate` now inspects the whole segmentation surface (package + shim) so "the gate
+exists and is wired in" is checked wherever the code lives — same assertions, stronger guarantee.
+`segmentation_tools.py`: **2692 → 2030**; ceiling ratcheted to 2030. Remaining families: fz, cellpose,
+puncta, subcellular.
+
 ## [1.6.239] - 2026-07-21
 ### Changed — **vpt decomposition COMPLETE (steps 5-6): vpt_tools.py is now a pure re-export shim.**
 The last two domains moved out **verbatim**: bead-population routing (`split_bead_populations`,

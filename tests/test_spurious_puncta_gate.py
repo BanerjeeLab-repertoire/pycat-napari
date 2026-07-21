@@ -119,12 +119,20 @@ def test_the_gate_is_WIRED_IN_and_not_merely_present():
     import ast
     import pathlib
 
-    source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
-              / "segmentation_tools.py").read_text(encoding='utf-8', errors='ignore')
-    tree = ast.parse(source)
+    # segmentation_tools.py is being decomposed into a toolbox/segmentation/ package (1.6.240+); the
+    # gate functions and cell_mask_stretching now live in family modules. Inspect the WHOLE segmentation
+    # surface so "the function exists and is wired in" is checked wherever the code actually lives —
+    # which is a stronger guarantee than pinning it to one file.
+    _tb = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
+    _files = [_tb / "segmentation_tools.py"] + sorted((_tb / "segmentation").glob("*.py"))
+    _texts = [p.read_text(encoding='utf-8', errors='ignore') for p in _files]
+    source = "\n".join(_texts)  # for the "is CALLED" substring checks below
 
-    signatures = {n.name: [a.arg for a in n.args.args]
-                  for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    signatures = {}
+    for _t in _texts:  # parse each file on its own — from __future__ must be at a file's top
+        for n in ast.walk(ast.parse(_t)):
+            if isinstance(n, ast.FunctionDef):
+                signatures[n.name] = [a.arg for a in n.args.args]
 
     for name in ('compute_image_intensity_stats', 'cell_has_punctate_signal'):
         assert name in signatures, f"`{name}` is missing — the regression has returned"

@@ -316,6 +316,22 @@ _DELIBERATE = {
     'vpt_tools.py::_link',
     'vpt_tools.py::compare_detection_variants',
 
+    # 1.6.240 — segmentation decomposition step 1 (leaf/foundation layer): five independent families MOVED
+    # verbatim out of segmentation_tools into toolbox/segmentation/ — _to_uint16_safe -> _common.py;
+    # local_thresholding_func/run_local_thresholding -> local_thresholding.py; apply_watershed_labeling/
+    # opencv_watershed_func -> watershed.py; cell_mask_stretching -> morphology.py; compute_image_intensity_
+    # stats/cell_has_punctate_signal (the RESTORED punctate-gate subsystem) -> intensity.py. No threshold,
+    # morphology, or operation-order change. Four are registered ops → catalog regenerated. segmentation_
+    # tools re-exports each. Keys vanished from segmentation_tools.py by the moves.
+    'segmentation_tools.py::_to_uint16_safe',
+    'segmentation_tools.py::local_thresholding_func',
+    'segmentation_tools.py::run_local_thresholding',
+    'segmentation_tools.py::apply_watershed_labeling',
+    'segmentation_tools.py::opencv_watershed_func',
+    'segmentation_tools.py::cell_mask_stretching',
+    'segmentation_tools.py::compute_image_intensity_stats',
+    'segmentation_tools.py::cell_has_punctate_signal',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was
