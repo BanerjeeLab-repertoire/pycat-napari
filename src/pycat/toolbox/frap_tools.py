@@ -126,7 +126,7 @@ def estimate_bleach_depth(time: np.ndarray, bl_intensity: np.ndarray,
     try:
         s = InterpolatedUnivariateSpline(time[:n], bl_intensity[:n], k=spline_k)
         return float(s(0.0))
-    except Exception:
+    except Exception:  # broad-ok: degraded fallback to the first baseline sample when the spline cannot extrapolate to t=0 — a reasonable baseline estimate, not a fabricated fit result
         return float(bl_intensity[0])
 
 
@@ -398,7 +398,7 @@ def fit_frap_recovery(time: np.ndarray, norm_intensity: np.ndarray) -> dict:
             fit_quality=quality,
             fit_adequate=bool(quality['adequate']),
             fit_time=t, fit_curve=fit_curve)
-    except Exception as e:
+    except Exception as e:  # broad-ok: a fit failure returns an all-NaN result AND warns the user — an honest missing value the caller can see, never a fabricated default
         napari_show_warning(f"FRAP fit failed: {e}")
         return dict(a=np.nan, b=np.nan, tau_half=np.nan,
                     mobile_fraction=np.nan, immobile_fraction=np.nan,
@@ -533,7 +533,7 @@ def fit_reaction_diffusion(time, norm_intensity, d_x_um, d_y_um,
                    k_off_err=float(errs[3]) if fit_koff else 0.0,
                    r_squared=float(r2), fit_time=t, fit_curve=fit_curve)
         return out
-    except Exception as e:
+    except Exception as e:  # broad-ok: a fit failure returns an all-NaN result AND warns the user — an honest missing value the caller can see, never a fabricated default
         napari_show_warning(f"Reaction-diffusion fit failed: {e}")
         return dict(f_f=np.nan, f_b=np.nan, D_um2_per_s=np.nan,
                     k_off_per_s=np.nan, f_f_err=np.nan, f_b_err=np.nan,
@@ -656,7 +656,7 @@ def fit_circular_soumpasis(time, norm_intensity, bleach_radius_um):
                     f_f_err=float(errs[0]), tau_D_err=float(errs[1]),
                     D_err=float(D_err), half_time_s=half_time,
                     r_squared=float(r2), fit_time=t, fit_curve=fit_curve)
-    except Exception as e:
+    except Exception as e:  # broad-ok: a fit failure returns an all-NaN result AND warns the user — an honest missing value the caller can see, never a fabricated default
         napari_show_warning(f"Circular Soumpasis fit failed: {e}")
         return dict(f_f=np.nan, tau_D_s=np.nan, D_um2_per_s=np.nan,
                     offset=np.nan, f_f_err=np.nan, tau_D_err=np.nan,

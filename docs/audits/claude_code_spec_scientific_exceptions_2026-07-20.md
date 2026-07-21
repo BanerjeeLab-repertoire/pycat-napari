@@ -1,5 +1,19 @@
 # Claude Code spec — Scientific exception tightening: classify by what a handler returns
 
+> **◐ STATUS — Part 2 (the guard) DONE + frap_tools classified (1.6.210); the other 4 modules are the
+> follow-on.** The signature deliverable `tests/test_no_scientific_result_swallowing.py` is in place — an
+> AST guard, scoped to the five fit/measure modules, that flags any broad `except` whose body directly
+> `return`s a non-`None` value (a fabricated number/DataFrame/mask) without a `# broad-ok:` reason. It is a
+> ratchet at today's value and includes a canary (a deliberately-introduced swallower is flagged; a
+> re-raising / None-returning / annotated one passes). **Measured inventory: 15 result-swallowing handlers**
+> (vpt_tools 3, condensate_physics_tools 5, frap_tools 4, invitro_tools 3, partition_enrichment_tools 0) —
+> far fewer than the 51 raw broad handlers, because most re-raise or log. frap_tools (4) is classified and
+> annotated: three return an all-NaN fit result AND warn the user (an honest missing value, not a fabricated
+> default), one is a documented degraded baseline fallback; the ratchet dropped 15→11 and `toolbox`
+> 514→509. **Remaining:** classify/convert the 11 handlers in vpt_tools / condensate_physics_tools /
+> invitro_tools — annotate the honest NaN-returners, convert genuine fabricated-default swallowers to typed
+> raises (`from exc`, narrowed catch), lowering the ratchet each time. One module per commit.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. The engineering
 audit's #4 recommendation, made concrete: the exception ratchet prevents *growth* but does not establish
 that current behaviour is *safe*. The audit's precise next step — **no broad handler in a scientific

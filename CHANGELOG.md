@@ -1,3 +1,23 @@
+## [1.6.210] - 2026-07-21
+### Added — **A guard against scientific modules silently returning a wrong NUMBER (scientific_exceptions Part 2).**
+The exception-budget ratchet counts broad handlers; it does not ask what they *return*. A broad `except`
+around a fit or calibration that then returns a plausible default is a silent wrong-number generator — the
+audit's #4 concern. This adds the rule as a test and begins the classification.
+
+- New **`tests/test_no_scientific_result_swallowing.py`** (core): an AST guard over the five fit/measure
+  modules (vpt_tools, condensate_physics_tools, frap_tools, invitro_tools, partition_enrichment_tools) that
+  flags any un-annotated broad `except` whose body directly `return`s a non-`None` value. Ratchet-style
+  (pinned at today's count, only ever down) with a canary proving it flags a fabricated-default handler and
+  passes a re-raising / None-returning / `# broad-ok:`-annotated one.
+- **Measured inventory: 15 result-swallowing handlers** (far fewer than the 51 raw broad handlers — most
+  re-raise or log). **frap_tools classified (4):** three return an all-NaN fit result AND warn the user (an
+  honest missing value, not a fabricated default) and one is a documented degraded baseline fallback, so
+  they are annotated `# broad-ok:` rather than converted. The scientific-swallow ratchet drops 15→11 and the
+  `toolbox` exception ratchet 514→509.
+- **Remaining (follow-on):** the 11 handlers in vpt_tools / condensate_physics_tools / invitro_tools —
+  annotate the honest NaN-returners, convert genuine fabricated-default swallowers to typed raises. One
+  module per commit. No scientific output changed; only failure-path documentation.
+
 ## [1.6.209] - 2026-07-20
 ### Changed — **Complexity ratchet 121 → 120: `field_summary` non-empty metrics extracted (byte-identical).**
 The 182-line in-vitro whole-field summary — dominated by an ~80-line docstring and two large inline
