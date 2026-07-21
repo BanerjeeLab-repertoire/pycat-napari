@@ -1,3 +1,19 @@
+## [1.6.229] - 2026-07-21
+### Added — **Spectral / bleed-through unmixing is now a UI step — the C1 capability is user-reachable.**
+The linear unmixing shipped in 1.6.226 was API-only; it now has a toolbox step, so it is no longer an
+invisible capability. **Menu:** Image Processing → Background and Noise Correction → "Spectral /
+Bleed-through Unmixing (2–4 channels)"; it also appears in the exploratory workbench's Image Processing
+section.
+- New `_ImageOpsWidgetsMixin._add_run_spectral_unmixing`: pick a single-label CONTROL layer per channel
+  (each a sample with only that fluorophore, imaged in all channels) + the mixed multi-channel image + a
+  background offset, and Run. The **thin handler only reads layers and shows results** — the matrix
+  estimation, the singular-matrix refusal, the unmix and the negative-fraction honesty check are all the
+  `core`-tested `unmixing_tools`. Unmixed channels are added as `Unmixed C0…` layers; a high negative
+  fraction and any matrix-plausibility warnings surface as napari messages; a refusal is shown, not crashed.
+- Tests (`integration`, `test_unmixing_ui.py`): the step builds, is driven end-to-end (dropdowns → Run) and
+  **recovers the true channel abundances** from a synthetic mixture; and with controls missing it warns and
+  emits nothing. `menu_manager` / `ui_modules` held exactly at their line ratchets (net-zero registrations).
+
 ## [1.6.228] - 2026-07-21
 ### Added — **Typed result models (backlog D3) — a result crossing a boundary is a TYPE, not a bare dict.**
 New `utils/result_models.py`: two frozen envelopes that formalize the results PyCAT passes between modules

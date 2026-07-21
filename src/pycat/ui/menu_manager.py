@@ -2160,10 +2160,10 @@ class MenuManager:
             'Cellpose Segmentation (stack)': (self.central_manager.toolbox_functions_ui._add_run_ts_cellpose, {'separate_widget': True}),
         }
         self._add_actions_to_menu(stack_tools_actions, stack_tools_submenu)
-
         # Create sub-sub-menu for background and noise correction functions
         background_noise_correction_submenu = image_processing_submenu.addMenu('Background and Noise Correction')
         background_noise_correction_actions = {
+            'Spectral / Bleed-through Unmixing (2–4 channels)': (self.central_manager.toolbox_functions_ui._add_run_spectral_unmixing, {'separate_widget': True}),
             'Rolling-Ball Gaussian Background Removal': (self.central_manager.toolbox_functions_ui._add_run_rb_gaussian_background_removal, {'separate_widget': True}),
             'Background Removal w/ Edge Enhancement': (self.central_manager.toolbox_functions_ui._add_run_enhanced_rb_gaussian_bg_removal, {'separate_widget': True}),
             'Calibration Correction (flat-field / clear-frame)': (self.central_manager.toolbox_functions_ui._add_run_calibration_correction, {'separate_widget': True}),

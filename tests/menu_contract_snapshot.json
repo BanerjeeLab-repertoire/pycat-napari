@@ -102,6 +102,7 @@
   "menu": "Background and Noise Correction",
   "dict": "background_noise_correction_actions",
   "actions": [
+   "Spectral / Bleed-through Unmixing (2–4 channels)",
    "Rolling-Ball Gaussian Background Removal",
    "Background Removal w/ Edge Enhancement",
    "Calibration Correction (flat-field / clear-frame)",

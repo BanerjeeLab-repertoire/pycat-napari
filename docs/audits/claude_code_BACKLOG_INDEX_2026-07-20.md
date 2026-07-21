@@ -112,9 +112,9 @@ Wire don't rewrite; additive (no existing number/pixel changes); degrade honestl
 > `core`-tested: `estimate_mixing_matrix` (from single-label controls, background removed first, refuses a
 > control dark in its own channel), `unmix` (refuses a singular/ill-conditioned matrix), `negative_fraction`
 > (the honesty check), `clip_for_display`, `mixing_matrix_warnings`. Linear 2–4 channel crosstalk only.
-> Usable via the API/batch now; a toolbox UI step (select controls + mixed image, show the negative
-> fraction) is the remaining piece and waits on the feature-registry/navigator work (Tier A3). Tracked here
-> so it is not a silent orphan.
+> **UI DONE (shipped 1.6.229):** wired as a toolbox step (Image Processing → Background and Noise Correction
+> → "Spectral / Bleed-through Unmixing", + the exploratory workbench). Thin handler over the tested
+> `unmixing_tools`; driven end-to-end in `test_unmixing_ui.py` (integration). C1 is now fully user-reachable.
 **Verified missing:** no `unmix`/`linear_unmix`. `toolbox/unmixing_tools.py`:
 `estimate_mixing_matrix(single_label_controls, *, background)` + `unmix(channels, M)`. The science is in
 the rules: **M from single-label controls, never from the mixed data** (circular); background-subtract

@@ -2985,9 +2985,9 @@ class GeneralAnalysisUI(AnalysisMethodsUI):
         add(tf._add_measure_line, s)
         add(tf._add_run_upscaling, s)
         add(tf._add_pre_process, s)
-
-        # ── Image Processing (collapsed) ────────────────────────────────────
+        # ── Image Processing (collapsed) ──
         s = section("Image Processing")
+        add(tf._add_run_spectral_unmixing, s)
         add(tf._add_run_reference_subtraction, s)
         add(tf._add_run_apply_rescale_intensity, s)
         add(tf._add_run_invert_image, s)
