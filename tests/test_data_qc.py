@@ -997,3 +997,45 @@ def test_run_full_qc_adds_NO_note_when_it_read_everything():
     # and the default (unknown source) adds nothing either
     results2 = qc.run_full_qc(stack)
     assert not any(r['name'] == 'Frames assessed' for r in results2)
+
+
+# ── Byte-identical characterization of qc_focus (all five result branches) ────────────────────────
+#
+# The property tests above pin the focus VERDICT; this pins the exact result dict across every branch,
+# so a phase-split of qc_focus (stack / diffraction-limit verdict / na / info) can be proven to move no
+# number. Pure numpy/scipy (edge width + band-pass energy), so the golden values are platform-portable.
+
+@pytest.mark.core
+def test_qc_focus_is_byte_identical():
+    qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
+    optics = dict(pixel_um=0.065, na=1.4, wavelength_nm=520)
+
+    # 3D STACK with one defocused frame -> the stack branch, flags a frame -> 'warn'.
+    st = _stack(seed=0)
+    st[5] = ndi.gaussian_filter(st[5], 6.0)
+    r = qc.qc_focus(st)
+    assert r['status'] == 'warn' and r['unit'] == 'band-pass energy'
+    assert np.isclose(r['value'], 132.622819597542, atol=1e-6)
+    assert np.isclose(r['diag']['median'], 132.622819597542, atol=1e-6)
+
+    # 2D SINGLE image + optics, in focus -> the diffraction-limit ABSOLUTE-VERDICT branch -> 'good'.
+    r = qc.qc_focus(_focus_scene(seed=0), **optics)
+    assert r['status'] == 'good'
+    assert np.isclose(r['value'], 0.44922098337362576, atol=1e-9)
+    assert np.isclose(r['diag']['edge_width_px'], 0.5450057426431614, atol=1e-9)
+    assert np.isclose(r['diag']['ratio'], 0.44922098337362576, atol=1e-9)
+
+    # 2D large smooth cells + optics -> the REFUSE branch (nothing sharp, ratio > 3) -> 'na'.
+    r = qc.qc_focus(_brightfield(seed=0), **optics)
+    assert r['status'] == 'na'
+    assert np.isclose(r['value'], 4.047946243059266, atol=1e-9)
+    assert np.isclose(r['diag']['ratio'], 4.047946243059266, atol=1e-9)
+
+    # 2D single image, NO optics -> the INFO branch (value = edge width in px).
+    r = qc.qc_focus(_focus_scene(seed=0))
+    assert r['status'] == 'info' and r['unit'] == 'px (sharpest edge)'
+    assert np.isclose(r['value'], 0.5450057426431614, atol=1e-9)
+
+    # Flat image -> the NA branch (no measurable edges).
+    r = qc.qc_focus(np.full((64, 64), 100.0), **optics)
+    assert r['status'] == 'na' and r['value'] is None and r['diag'] is None

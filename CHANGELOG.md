@@ -1,3 +1,19 @@
+## [1.6.208] - 2026-07-20
+### Changed — **Complexity ratchet 122 → 121: `qc_focus` split into its result-branch phases (byte-identical).**
+The 203-line focus/sharpness QC check — a big dispatch of result dicts with dense measured rationale — was
+split into pure helpers, leaving the orchestrator with just the na/info branches. No number moved.
+
+- **`_qc_focus_stack(a)`** — the 3D per-frame band-pass-energy branch (flags frames far below the median).
+- **`_qc_focus_absolute(width, limit)`** — the single-image diffraction-limit verdict: the
+  refuse-when-nothing-sharp path (a blurry cell can't hide a sharp punctum, but with no small object there
+  is no evidence of focus) plus the deliberately wide gross-defocus screen (the step-vs-blob conversion
+  constant makes an absolute ratio uncertain by ~1.5×; the comparative use across a dataset cancels it).
+- **Pinned byte-identical** by a new `test_qc_focus_is_byte_identical` that exercises **all five** result
+  branches (stack→warn, absolute→good, refuse→na, info, flat→na) on pure numpy/scipy inputs (portable) and
+  asserts the exact status + value + diag scalars. The existing focus property tests pass unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 122 → 121 (the ratchet only moves down); recorded in the drop-guard's
+  `_DELIBERATE` set.
+
 ## [1.6.207] - 2026-07-20
 ### Changed — **Complexity ratchet 123 → 122: `topology_metrics` basin-count phase extracted (byte-identical).**
 The 192-line per-cell structural-envelope metric had its comment-dense basin-count phase — topological-

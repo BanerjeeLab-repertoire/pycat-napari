@@ -174,7 +174,15 @@ _LONG_FUNCTION_LIMIT = 120
 # cov / roughness / components / largest-frac on a peaked field (structure branch) and a near-flat field
 # (flat branch, which omits topo_noise_known); the existing basin-count property tests pass unmodified.
 # Count 123 → 122.
-_MAX_LONG_FUNCTIONS = 122
+# 121. (2026-07-20) `qc_focus` (data_qc_tools), the 203-line focus/sharpness QC check (a big dispatch of
+# result dicts with dense measured rationale), was split into pure helpers — `_qc_focus_stack` (the 3D
+# per-frame band-pass-energy branch) and `_qc_focus_absolute` (the single-image diffraction-limit verdict:
+# the refuse-when-nothing-sharp path + the wide gross-defocus screen) — leaving the orchestrator with just
+# the na/info branches. Pinned byte-identical by `test_qc_focus_is_byte_identical`, which exercises ALL
+# five result branches (stack-warn / absolute-good / refuse-na / info / flat-na) on pure-numpy/scipy inputs
+# (portable) and asserts exact status + value + diag scalars; the existing focus property tests pass
+# unmodified. Count 122 → 121.
+_MAX_LONG_FUNCTIONS = 121
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

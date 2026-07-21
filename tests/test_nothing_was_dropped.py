@@ -96,6 +96,12 @@ _DELIBERATE = {
     # dropped; the params stay in the signature). Pinned byte-identical by
     # `test_topology_metrics_is_byte_identical`; the basin-count property tests pass unmodified.
     'topology_tools.py::topology_metrics',
+    # 1.6.208 — `qc_focus` (the 203-line focus/sharpness QC check) was split into `_qc_focus_stack` (the 3D
+    # per-frame branch) and `_qc_focus_absolute` (the single-image diffraction-limit verdict), leaving the
+    # orchestrator with the na/info branches. Nothing was removed: each branch MOVED into a named helper
+    # with its rationale. Pinned byte-identical by `test_qc_focus_is_byte_identical` (all five result
+    # branches); the existing focus property tests pass unmodified.
+    'data_qc_tools.py::qc_focus',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line

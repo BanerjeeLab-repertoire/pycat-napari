@@ -308,28 +308,8 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
     quantity that could not see defocus.
     """
     a = _to_float(data)
-
-    def _sharp(f):
-        # Difference of Gaussians: keeps the mid-frequency band where genuine edges sit.
-        f = np.asarray(f, dtype=float)
-        band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
-        return float(np.var(band))
     if a.ndim == 3:
-        vals = np.array([_sharp(f) for f in a])
-        med = float(np.median(vals))
-        # frames well below the median sharpness are likely defocused/drifted
-        lo = vals < 0.5 * med if med > 0 else np.zeros(len(vals), bool)
-        status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
-        return dict(
-            name='Focus / sharpness', tier='core', status=status,
-            value=med, unit='band-pass energy',
-            headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
-            how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
-                "Laplacian is dominated by detector noise and cannot see defocus at "
-                "all; the band-pass rejects the noise and keeps real edges.",
-            good="All frames near the same sharpness. Frames dipping far below "
-                 "the others are out of focus or drifted axially.",
-            diag=dict(per_frame=vals, median=med))
+        return _qc_focus_stack(a)
     # ── A single image CAN be judged: via the sharpness of its objects' edges ───
     #
     # This used to headline **"sharpness = 545.3 (relative)"** and refuse a verdict. It was
@@ -358,103 +338,7 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
             good='', diag=None)
 
     if limit:
-        ratio = width / limit
-
-        # ── If NOTHING in the field is small, focus cannot be judged. Refuse. ───
-        #
-        # The measure works because a **blurry cell cannot hide a sharp punctum** — the sharpest
-        # edge present is the best available evidence of focus. **But if there is no small
-        # object at all, there is no evidence.**
-        #
-        # A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere.
-        # The check reported **4.0x the diffraction limit -> "bad"** — which is *true about the
-        # image* and *wrong about the focus*: those cells genuinely have soft boundaries, and
-        # the microscope may be perfectly focused.
-        #
-        # **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft
-        # focus" when nothing small is present.** That is a real limit and it is not fixable by
-        # a better estimator. So it is DETECTED and the check refuses, rather than reporting a
-        # confident verdict it has no basis for.
-        #
-        # (The comparative use survives this untouched: across a dataset of the same specimen
-        # the object type is constant, so a field that IS softer than its neighbours still
-        # stands out. The refusal is only of the ABSOLUTE claim.)
-        if ratio > 3.0:
-            return dict(
-                name='Focus / sharpness', tier='core', status='na',
-                value=float(ratio), unit='x the diffraction limit',
-                headline=("no sharp objects in this field — focus cannot be judged "
-                          "against the diffraction limit"),
-                how=f"The sharpest edge here is {width:.1f} px, against a diffraction limit of "
-                    f"{limit:.1f} px. **Either the image is grossly defocused, or the specimen "
-                    f"simply has no small objects** — a field of large smooth cells has no "
-                    f"sharp edge anywhere, and this check cannot tell the two apart.",
-                good="Compare this number ACROSS your dataset instead: the object type is the "
-                     "same in every field, so a field that is genuinely softer than its "
-                     "neighbours still stands out unambiguously. Or image a sub-resolution "
-                     "bead, which gives the focus an unambiguous reference.",
-                diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
-
-        # ── The ABSOLUTE verdict carries a ~1.5x systematic floor. Say so. ──────
-        #
-        # The estimator converts ``contrast / steepest_gradient`` into an edge sigma, and **the
-        # conversion constant depends on what the object IS**:
-        #
-        #     a blurred STEP edge  ->  contrast/gradient = **2.51** x sigma
-        #     a Gaussian BLOB      ->  contrast/gradient = **1.65** x sigma
-        #
-        # (Both verified against exact synthetic objects.) The estimator cannot distinguish
-        # them, so an absolute ratio against the diffraction limit is uncertain by ~1.5x
-        # depending on whether the field is puncta or membranes.
-        #
-        # **This does NOT affect the comparative use**, which is how focus is most often needed:
-        # *which of my 40 fields is the soft one?* Across one dataset the object type is the
-        # same, so the constant **cancels exactly**. Verified: in a 40-field acquisition where
-        # field 17 slipped, it is the only outlier at 1.58x the median.
-        #
-        # So the thresholds are set WIDE, and the headline states the uncertainty. A check that
-        # claims more precision than it has is worse than one that admits its floor — the user
-        # would go and refocus a microscope that is already at the limit.
-        # ── The absolute path is a SCREEN FOR GROSS DEFOCUS. Nothing more. ──────
-        #
-        # I tried to set these thresholds by the measurement error the blur causes, and **it
-        # cannot be done honestly.** The systematic floor (~1.5x, from the step-vs-blob
-        # constant) is larger than the effect being measured:
-        #
-        #     blur      ratio    apparent size error
-        #     1.0 px    0.67     +30 %
-        #     2.0 px    1.14     **+94 %**
-        #     3.0 px    1.46     **+169 %**
-        #
-        # **A 169 % size error sits inside the systematic floor.** Any threshold tight enough to
-        # catch it would fire on a perfectly focused image of the wrong object type.
-        #
-        # So the absolute verdict is deliberately WIDE — it catches gross defocus and nothing
-        # else — and the text sends the user to the comparative measure, which has no such floor
-        # because the object type is constant across a dataset and the constant cancels.
-        #
-        # **Reporting a screen as a screen is the honest thing. A tighter threshold here would
-        # be false precision**, and it would send someone to refocus a microscope that is
-        # already at the diffraction limit.
-        status = 'good' if ratio < 1.5 else ('warn' if ratio < 2.5 else 'bad')
-        return dict(
-            name='Focus / sharpness', tier='core', status=status,
-            value=float(ratio), unit='x the diffraction limit (±~1.5x systematic)',
-            headline=(f"sharpest edge \u2248 {width:.1f} px vs a diffraction limit of "
-                      f"{limit:.1f} px \u2014 {ratio:.1f}x (\u00b1~1.5x, see below)"),
-            how="The sharpest edge in the image, converted to an edge sigma and compared "
-                "against the narrowest edge the optics permit (Abbe lambda/2\u00b7NA, converted "
-                "from a resolution to a sigma). **The conversion constant depends on the object "
-                "type** — 2.51 for a step edge, 1.65 for a Gaussian blob — so this absolute "
-                "ratio is uncertain by about 1.5x. It is a screen, not a measurement.",
-            good="**This is a SCREEN for gross defocus, not a measurement.** Near 1x is "
-                 "diffraction-limited. Above ~2.5x the boundaries are soft enough "
-                 "that object sizes are overestimated and any edge-dependent measurement (area, "
-                 "partition coefficient, enrichment) is biased.\n\n**For a precise answer, "
-                 "compare this number ACROSS your dataset rather than against the limit** — the "
-                 "object type is then the same in every field, the conversion constant cancels "
-                 "exactly, and the soft field stands out unambiguously.",
-            diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
+        return _qc_focus_absolute(width, limit)
 
     return dict(
         name='Focus / sharpness', tier='core', status='info', value=float(width),
@@ -469,6 +353,137 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
              "an edge can physically be. Otherwise, compare this number across your dataset "
              "and look for the outlier.",
         diag=dict(edge_width_px=width))
+
+
+def _qc_focus_stack(a):
+    """Per-frame band-pass (difference-of-Gaussians) sharpness across a stack, flagging frames far below
+    the median. A plain Laplacian is dominated by detector noise and cannot see defocus; the band-pass
+    rejects the noise and keeps real edges."""
+    def _sharp(f):
+        f = np.asarray(f, dtype=float)
+        band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
+        return float(np.var(band))
+    vals = np.array([_sharp(f) for f in a])
+    med = float(np.median(vals))
+    # frames well below the median sharpness are likely defocused/drifted
+    lo = vals < 0.5 * med if med > 0 else np.zeros(len(vals), bool)
+    status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
+    return dict(
+        name='Focus / sharpness', tier='core', status=status,
+        value=med, unit='band-pass energy',
+        headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
+        how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
+            "Laplacian is dominated by detector noise and cannot see defocus at "
+            "all; the band-pass rejects the noise and keeps real edges.",
+        good="All frames near the same sharpness. Frames dipping far below "
+             "the others are out of focus or drifted axially.",
+        diag=dict(per_frame=vals, median=med))
+
+
+def _qc_focus_absolute(width, limit):
+    """The diffraction-limit ABSOLUTE verdict for a single 2D image: the sharpest edge
+    (``width``) against the narrowest the optics permit (``limit``). REFUSES when nothing in the
+    field is small (ratio > 3 — a blurry cell cannot hide a sharp punctum, but with no small
+    object there is no evidence of focus), and otherwise returns a deliberately WIDE screen for
+    gross defocus (the step-vs-blob conversion constant makes an absolute ratio uncertain by
+    ~1.5x; the comparative use across a dataset cancels it exactly)."""
+    ratio = width / limit
+
+    # ── If NOTHING in the field is small, focus cannot be judged. Refuse. ───
+    #
+    # The measure works because a **blurry cell cannot hide a sharp punctum** — the sharpest
+    # edge present is the best available evidence of focus. **But if there is no small
+    # object at all, there is no evidence.**
+    #
+    # A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere.
+    # The check reported **4.0x the diffraction limit -> "bad"** — which is *true about the
+    # image* and *wrong about the focus*: those cells genuinely have soft boundaries, and
+    # the microscope may be perfectly focused.
+    #
+    # **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft
+    # focus" when nothing small is present.** That is a real limit and it is not fixable by
+    # a better estimator. So it is DETECTED and the check refuses, rather than reporting a
+    # confident verdict it has no basis for.
+    #
+    # (The comparative use survives this untouched: across a dataset of the same specimen
+    # the object type is constant, so a field that IS softer than its neighbours still
+    # stands out. The refusal is only of the ABSOLUTE claim.)
+    if ratio > 3.0:
+        return dict(
+            name='Focus / sharpness', tier='core', status='na',
+            value=float(ratio), unit='x the diffraction limit',
+            headline=("no sharp objects in this field — focus cannot be judged "
+                      "against the diffraction limit"),
+            how=f"The sharpest edge here is {width:.1f} px, against a diffraction limit of "
+                f"{limit:.1f} px. **Either the image is grossly defocused, or the specimen "
+                f"simply has no small objects** — a field of large smooth cells has no "
+                f"sharp edge anywhere, and this check cannot tell the two apart.",
+            good="Compare this number ACROSS your dataset instead: the object type is the "
+                 "same in every field, so a field that is genuinely softer than its "
+                 "neighbours still stands out unambiguously. Or image a sub-resolution "
+                 "bead, which gives the focus an unambiguous reference.",
+            diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
+
+    # ── The ABSOLUTE verdict carries a ~1.5x systematic floor. Say so. ──────
+    #
+    # The estimator converts ``contrast / steepest_gradient`` into an edge sigma, and **the
+    # conversion constant depends on what the object IS**:
+    #
+    #     a blurred STEP edge  ->  contrast/gradient = **2.51** x sigma
+    #     a Gaussian BLOB      ->  contrast/gradient = **1.65** x sigma
+    #
+    # (Both verified against exact synthetic objects.) The estimator cannot distinguish
+    # them, so an absolute ratio against the diffraction limit is uncertain by ~1.5x
+    # depending on whether the field is puncta or membranes.
+    #
+    # **This does NOT affect the comparative use**, which is how focus is most often needed:
+    # *which of my 40 fields is the soft one?* Across one dataset the object type is the
+    # same, so the constant **cancels exactly**. Verified: in a 40-field acquisition where
+    # field 17 slipped, it is the only outlier at 1.58x the median.
+    #
+    # So the thresholds are set WIDE, and the headline states the uncertainty. A check that
+    # claims more precision than it has is worse than one that admits its floor — the user
+    # would go and refocus a microscope that is already at the limit.
+    # ── The absolute path is a SCREEN FOR GROSS DEFOCUS. Nothing more. ──────
+    #
+    # I tried to set these thresholds by the measurement error the blur causes, and **it
+    # cannot be done honestly.** The systematic floor (~1.5x, from the step-vs-blob
+    # constant) is larger than the effect being measured:
+    #
+    #     blur      ratio    apparent size error
+    #     1.0 px    0.67     +30 %
+    #     2.0 px    1.14     **+94 %**
+    #     3.0 px    1.46     **+169 %**
+    #
+    # **A 169 % size error sits inside the systematic floor.** Any threshold tight enough to
+    # catch it would fire on a perfectly focused image of the wrong object type.
+    #
+    # So the absolute verdict is deliberately WIDE — it catches gross defocus and nothing
+    # else — and the text sends the user to the comparative measure, which has no such floor
+    # because the object type is constant across a dataset and the constant cancels.
+    #
+    # **Reporting a screen as a screen is the honest thing. A tighter threshold here would
+    # be false precision**, and it would send someone to refocus a microscope that is
+    # already at the diffraction limit.
+    status = 'good' if ratio < 1.5 else ('warn' if ratio < 2.5 else 'bad')
+    return dict(
+        name='Focus / sharpness', tier='core', status=status,
+        value=float(ratio), unit='x the diffraction limit (±~1.5x systematic)',
+        headline=(f"sharpest edge \u2248 {width:.1f} px vs a diffraction limit of "
+                  f"{limit:.1f} px \u2014 {ratio:.1f}x (\u00b1~1.5x, see below)"),
+        how="The sharpest edge in the image, converted to an edge sigma and compared "
+            "against the narrowest edge the optics permit (Abbe lambda/2\u00b7NA, converted "
+            "from a resolution to a sigma). **The conversion constant depends on the object "
+            "type** — 2.51 for a step edge, 1.65 for a Gaussian blob — so this absolute "
+            "ratio is uncertain by about 1.5x. It is a screen, not a measurement.",
+        good="**This is a SCREEN for gross defocus, not a measurement.** Near 1x is "
+             "diffraction-limited. Above ~2.5x the boundaries are soft enough "
+             "that object sizes are overestimated and any edge-dependent measurement (area, "
+             "partition coefficient, enrichment) is biased.\n\n**For a precise answer, "
+             "compare this number ACROSS your dataset rather than against the limit** — the "
+             "object type is then the same in every field, the conversion constant cancels "
+             "exactly, and the soft field stands out unambiguously.",
+        diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
 
 
 def qc_snr(img):
