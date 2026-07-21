@@ -1,3 +1,12 @@
+## [1.6.215] - 2026-07-21
+### Changed — **invitro decomposition step 3: the whole-field summary moves to its own module (byte-identical).**
+`field_summary` and `_field_summary_metrics` — per-field droplet-size and phase-intensity statistics with
+the honest-name result dict and its measured caveats — moved **verbatim** into
+`toolbox/invitro/field_summary.py`. `invitro_tools.py` re-exports `field_summary` for every caller (invitro
+UIs, batch steps, timeseries); no number changed, pinned by `test_field_summary_is_byte_identical` and the
+enrichment/halo tests. `invitro_tools.py` dropped **799 → 605** lines; the per-file ceiling ratcheted to 605.
+Remaining sections (coarsening, C_sat, contact-angle, fusion, sedimentation) follow.
+
 ## [1.6.214] - 2026-07-21
 ### Changed — **invitro decomposition step 2: the partition-coefficient domain moves to its own module (byte-identical).**
 The calibration-sensitive quantitative core — `partition_coefficient_local` and its `_pc_*` phase helpers,
