@@ -1,5 +1,12 @@
 # Claude Code spec — File-I/O decomposition #5: `_open_stack_generic` → `readers/` (sub-pieced)
 
+> **✅ STATUS — DONE, shipped across 1.6.61–1.6.63** (git commits f21a85e / 5d8d00e / 0d2f53e; predate the
+> current CHANGELOG, which starts at 1.6.103). The generic path was sub-pieced into
+> `readers/stack_metadata.py` (`read_stack_structure`, 5a) and `readers/stack_layer_builders.py` (per-branch
+> `build_*_layer`, 5b–5d); `_open_stack_generic` (now in `stack_openers.py`) is a slim orchestrator over
+> them. Commit 0d2f53e marked the fileio-godclass decomposition roadmap complete. Every Definition-of-done
+> item met.
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.59 · Verified against the uploaded 1.6.59 tree.
 **This is the LAST and BIGGEST decomposition piece. Do NOT do it in one shot — sub-piece it.**
 

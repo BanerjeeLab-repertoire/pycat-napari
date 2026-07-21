@@ -1,5 +1,13 @@
 # Claude Code spec — OperationSpec, increment 1: **validate-first** (no generation yet)
 
+> **✅ STATUS — DONE, shipped in 1.6.68** (git commit dd3dd47; predates the current CHANGELOG, which starts
+> at 1.6.103). `src/pycat/navigator/operation_spec.py` provides the frozen `OperationSpec` +
+> `iter_operation_specs()` — a read-only typed view over `tag_registry._OPERATIONS` (no new source of
+> truth). The validate-first mechanism is the drift-guard test
+> `tests/navigator/test_operation_spec_matches_catalog.py` (coverage / no-stale / field-fidelity), with a
+> `regenerate_operation_catalog()` path (`op_catalog.py`). Increments 2–5 (1.6.126–1.6.129) built on it and
+> added `inputs`/`requirements`/runnability. Every increment-1 Definition-of-done item met.
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.63+ (assumes file-I/O cleanup + `lazy_sources.py` have
 landed first). Verified against the 1.6.63 tree. Does NOT touch `file_io.py` — no collision with the
 loader work.

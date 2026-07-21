@@ -1,5 +1,10 @@
 # Claude Code spec — File-I/O decomposition #4: `save_and_clear_all` write loop → `writers.py`
 
+> **✅ STATUS — DONE, shipped in 1.6.59** (git commit 36fdf01; predates the current CHANGELOG, which starts
+> at 1.6.103). `src/pycat/file_io/writers.py::write_session_outputs` is the pure, extracted write loop, and
+> `file_io.py` imports and calls it. Every Definition-of-done item met. (A later `Unnamed: 0` CSV-index
+> quirk was found and handled separately in 1.6.125 — not a gap against this spec.)
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.58 · Verified against the uploaded 1.6.58 tree.
 
 ## Read first

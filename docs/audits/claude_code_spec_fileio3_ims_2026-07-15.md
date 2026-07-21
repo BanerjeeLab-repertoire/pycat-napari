@@ -1,5 +1,11 @@
 # Claude Code spec — File-I/O decomposition #3: `_open_stack_ims` → `readers/ims_reader.py`
 
+> **✅ STATUS — DONE, shipped in 1.6.60** (git commit 1a914a3; predates the current CHANGELOG, which starts
+> at 1.6.103). `src/pycat/file_io/readers/ims_reader.py` holds the Qt/napari-free IMS logic (the
+> `_ImsReaderTYX/ZYX/TZYX` lazy wrappers + pixel-size/index helpers); the `_open_stack_ims` opener (now in
+> `stack_openers.py` after the 1.6.146 mixin refactor) imports and constructs them, with reader retention
+> pinned by `tests/test_ims_reader_retention.py`. Every Definition-of-done item met.
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.58 · Verified against the uploaded 1.6.58 tree.
 
 ## Read first

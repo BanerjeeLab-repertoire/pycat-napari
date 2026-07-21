@@ -1,5 +1,15 @@
 # Claude Code spec — Calibration module + ΔG_transfer (the flagship differentiator)
 
+> **✅ STATUS — DONE, shipped in 1.6.94** (git commit 227ea79; predates the current CHANGELOG, which starts
+> at 1.6.103). `src/pycat/utils/calibration.py` is the shared module: `CalibrationCurve`, `build_calibration`,
+> `intensity_to_concentration` (returns a `Parameter` tagged `CALIBRATED`, downgrading to `FITTED` out of
+> range), `delta_g_transfer` (−RT·ln K_p in kcal/mol with error propagation, refusing non-positive
+> concentration and Celsius-as-Kelvin), a loud validity gate (`check_calibration_validity` hard-blocks
+> mismatched exposure/gain/laser/channel), and drift/persistence helpers (`curve_age_days`, JSON
+> round-trip). Wired additively into `partition_enrichment_tools.client_enrichment`. Pinned by
+> `tests/test_calibration.py` (24 core tests). Every Definition-of-done item met. Typed-exception follow-up
+> touched it in 1.6.139.
+
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. Builds the
 calibration→concentration→ΔG_transfer chain that turns PyCAT from "intensity ratios" into "calibrated
 biophysical parameters" — the flagship manuscript differentiator. Per Gable's design: calibration is a
