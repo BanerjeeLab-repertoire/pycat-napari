@@ -335,7 +335,7 @@ def _fit_clipped_radius(reg: np.ndarray) -> float:
             return eqrad
         # Never return smaller than what we already see
         return max(r, eqrad)
-    except Exception:
+    except Exception:  # broad-ok: falls back to the already-measured equivalent radius (eqrad) when the ellipse fit fails — a real prior measurement, not a fabricated default
         return eqrad
 
 
@@ -1461,7 +1461,7 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
             popt, _ = curve_fit(g, (xx, yy), p.ravel(),
                                 p0=[p.max(), h, h, 1.5, 0.0], maxfev=4000)
             return abs(float(popt[3]))
-        except Exception:
+        except Exception:  # broad-ok: returns NaN on Gaussian-fit failure — an honest missing width, not a fabricated value
             return np.nan
 
     # Materialise only the projection window (small), not the whole movie.
@@ -1553,7 +1553,7 @@ def _gpu_build_id() -> str:
         import cupy
         return (f"{getattr(cupy, '__version__', '?')}/"
                 f"{cupy.cuda.runtime.runtimeGetVersion()}")
-    except Exception:
+    except Exception:  # broad-ok: optional-backend version probe — 'no-cupy' when CuPy is absent, not a scientific result
         return 'no-cupy'
 
 

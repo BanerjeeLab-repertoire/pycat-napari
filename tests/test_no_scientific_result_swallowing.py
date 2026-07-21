@@ -43,10 +43,14 @@ _SCI_MODULES = [
 
 # Un-converted result-swallowing broad handlers, at today's value. A RATCHET — it only ever decreases.
 # Convert one to a typed raise (or annotate a genuinely-safe one `# broad-ok:`) and lower this number.
-# 15 -> 11: the four frap_tools handlers were classified and annotated (1.6.210) — three return an all-NaN
-# fit result AND warn the user (an honest missing value, not a fabricated default), one is a documented
-# degraded fallback to the first baseline sample when the spline cannot extrapolate to t=0.
-_RESULT_SWALLOW_BUDGET = 11
+# 15 -> 11 (1.6.210): frap_tools' four handlers classified + annotated.
+# 11 -> 0 (1.6.211): the remaining eleven — condensate_physics_tools (5), invitro_tools (3), vpt_tools (3) —
+# were classified and annotated. The finding: NONE of the five scientific modules fabricates a plausible
+# default on failure. Each flagged handler reports the failure honestly — an all-NaN fit + fit_success flag,
+# an explicit verdict string, a fall-back to an already-measured value (equivalent radius / power-law
+# retained when the confined model fails), or an optional-backend/optional-check probe. The budget is now
+# ZERO: any NEW broad handler that returns a fabricated scientific default is caught.
+_RESULT_SWALLOW_BUDGET = 0
 
 
 def _is_broad(handler):

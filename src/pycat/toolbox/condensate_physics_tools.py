@@ -470,7 +470,7 @@ def test_confinement(tau, msd):
             tau, msd, p0=[max(msd[0] / (4 * tau[0]), 1e-6), 1.0, 0.0], maxfev=30000)
         pl_fit = 4.0 * p_pl[0] * tau ** p_pl[1] + 4.0 * p_pl[2]
         a_pl = _aicc(msd, pl_fit, 3)
-    except Exception:
+    except Exception:  # broad-ok: reports the failure explicitly (assessable=False + a verdict that says the fit failed), not a fabricated confinement result
         return dict(confined=False, assessable=False,
                     verdict="Power-law fit failed; confinement not assessed.")
 
@@ -481,7 +481,7 @@ def test_confinement(tau, msd):
             maxfev=30000)
         cf_fit = _confined_msd(tau, *p_cf)
         a_cf = _aicc(msd, cf_fit, 3)
-    except Exception:
+    except Exception:  # broad-ok: the confined-model fit failed, so the already-fit power law is retained — a reported fallback (the verdict states it), not a fabricated default
         return dict(confined=False, assessable=True,
                     verdict="Confined-model fit failed; power law retained.")
 
@@ -1051,7 +1051,7 @@ def fit_bimodal_intensity(
             fit_y1=y1,
             fit_y2=y2,
         )
-    except Exception:
+    except Exception:  # broad-ok: reports fit_success=False — an honest failure flag with no fabricated fit values
         return dict(fit_success=False)
 
 
@@ -1207,7 +1207,7 @@ def fit_aspect_ratio_relaxation(
                     fit_adequate=bool(quality['adequate']),
                     characteristic_length_um=R,
                     eta_over_gamma_s_per_um=eta_over_gamma)
-    except Exception:
+    except Exception:  # broad-ok: returns NaN fit values + fit_success=False (an honest failure); characteristic_length_um echoes the input R, not a fabricated fit result
         return dict(tau_s=np.nan, AR_0=np.nan, r_squared=np.nan,
                     fit_ar=np.array([]), fit_success=False,
                     characteristic_length_um=R,
@@ -1582,7 +1582,7 @@ def fit_photobleaching(
                     fit_success=r2 > 0.7,
                     fit_intensities=I_fit,
                     correction_factors=correction.astype(np.float32))
-    except Exception:
+    except Exception:  # broad-ok: fit_success=False + identity correction_factors (no bleach correction applied) — the safe honest fallback when the bleach fit fails, flagged for the caller
         return dict(fit_success=False,
                     correction_factors=np.ones(len(I), dtype=np.float32))
 

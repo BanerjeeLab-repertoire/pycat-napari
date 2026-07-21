@@ -1,3 +1,19 @@
+## [1.6.211] - 2026-07-21
+### Changed — **scientific_exceptions DONE: all 15 result-path handlers classified; none fabricate a default.**
+Completing the scientific-exception guard: the remaining 11 broad handlers the AST guard flagged — in
+`condensate_physics_tools` (5), `invitro_tools` (3), `vpt_tools` (3) — were classified and annotated
+`# broad-ok:` with body-matched reasons.
+
+- **The finding:** none of the five fit/measure modules fabricates a plausible default on failure. Every
+  flagged handler reports the failure honestly — an all-NaN fit result with a `fit_success=False` flag, an
+  explicit verdict string ("Power-law fit failed; confinement not assessed"), a fall-back to an
+  already-measured value (the equivalent radius when the ellipse fit fails; the retained power law when the
+  confined model fails), or an optional-backend/optional-check probe (CuPy version, intensity-semantics
+  availability). So each was annotated, not converted — the correct action once classified by return value.
+- The result-swallow ratchet is now **0** and the `toolbox` exception ratchet dropped **514 → 498** across
+  the two increments. The guard catches any NEW broad handler that returns a fabricated scientific default.
+- No scientific output changed; only failure-path documentation. Spec STATUS → DONE.
+
 ## [1.6.210] - 2026-07-21
 ### Added — **A guard against scientific modules silently returning a wrong NUMBER (scientific_exceptions Part 2).**
 The exception-budget ratchet counts broad handlers; it does not ask what they *return*. A broad `except`

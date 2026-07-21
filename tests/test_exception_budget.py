@@ -40,9 +40,10 @@ _BUDGET = {
                       # robustness, format-open log-and-continue) during the 1.6.146 decomposition.
     'navigator': 1,
     'run_pycat.py': 30,
-    'toolbox': 509,   # 514 -> 509: frap_tools' four scientific fit/baseline handlers annotated `# broad-ok:`
-                      # (honest NaN-and-warn results + one documented degraded fallback) during the
-                      # scientific_exceptions guard work (1.6.210). See test_no_scientific_result_swallowing.
+    'toolbox': 498,   # 514 -> 509 -> 498: the 15 scientific result-path handlers (frap 4 @1.6.210; then
+                      # condensate_physics 5 / invitro 3 / vpt 3 @1.6.211) annotated `# broad-ok:` after
+                      # classification found each reports its failure honestly (NaN + flag, verdict, prior-
+                      # measurement fallback, or optional-backend probe). See test_no_scientific_result_swallowing.
     'ui': 252,
     'utils': 114,
 }
