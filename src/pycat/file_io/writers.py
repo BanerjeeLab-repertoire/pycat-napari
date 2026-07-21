@@ -369,6 +369,18 @@ def _write_session_manifest(session_dir, central_manager, source_path,
         from pycat.utils.general_utils import debug_log
         debug_log('writers: could not attach sample_metadata to the manifest', _sme)
 
+    # User-entered workflow parameters (session_persist_settings Part 2): the batch processor already
+    # records each step's params as the ONE parameter record — carry that same record into the manifest
+    # so a reloaded session reproduces the analysis the user set up. No recorded steps → no `workflow`
+    # block, so an un-recorded session's manifest is byte-identical to before.
+    try:
+        _bp = getattr(central_manager, '_pycat_batch_processor', None)
+        if _bp is not None:
+            _extra.update(_sm.workflow_to_manifest_extra(getattr(_bp, 'config', None)))
+    except Exception as _wf:  # broad-ok: persisting the workflow is best-effort; never fail a save over it
+        from pycat.utils.general_utils import debug_log
+        debug_log('writers: could not attach the recorded workflow to the manifest', _wf)
+
     _sm.write_manifest(
         session_dir, source_path=source_path,
         data_repository=central_manager.active_data_class.data_repository,

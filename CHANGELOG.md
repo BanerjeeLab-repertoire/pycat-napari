@@ -1,3 +1,28 @@
+## [1.6.201] - 2026-07-20
+### Added — **Sessions now persist the user's entered workflow parameters (session_persist_settings Part 2).**
+A saved session recorded the layers, dataframes and calibration but NOT the workflow parameters the user
+entered (thresholds, radii, method choices), so a reloaded session could not reproduce the analysis setup.
+It now carries them — reusing the ONE parameter record that already exists rather than inventing a second
+capture path.
+
+- **The recorded batch config travels with the manifest.** `session_manifest.workflow_to_manifest_extra`
+  serializes the batch processor's own config (its single source of parameter truth — the same dict
+  `save_config` already writes) into a `workflow` manifest block; `write_session_outputs` attaches it on
+  save. No recorded steps → no block, so an un-recorded session's manifest is byte-identical to before.
+- **Restored into the processor on load.** `_read_session_payload` surfaces the `workflow` block into the
+  payload (Qt-free, on the worker) and `_apply_session_payload` restores it into
+  `central_manager._pycat_batch_processor.config` — so the reloaded session carries the exact recorded
+  parameter set, available for replay and inspection in "Recorded Steps". Recording stays OFF (the restored
+  steps are a completed recording, not a live one).
+- **Backward-compatible both ways.** `workflow_from_manifest` returns None for a manifest written before
+  this feature (or one that recorded nothing), so old sessions load unchanged.
+- **Part 1 (manual pixel size) was already satisfied** — the manifest already stored and restored a
+  user-entered pixel size with honest provenance. Added a regression guard test so a reload never silently
+  drops the calibration the user typed.
+- `tests/test_session_persist_workflow.py` (core) pins the serialize/deserialize pair, the full manifest
+  round-trip, the loader payload surfacing + processor restore, the pre-feature back-compat (both read and
+  apply leave old sessions untouched), and the pixel-size round-trip. Spec STATUS → DONE.
+
 ## [1.6.200] - 2026-07-20
 ### Fixed — **Clearing the workspace now resets every open method widget's fields (session_clear_reset Bug 2).**
 Clearing reset the layers, the data repository and the status circles the clear path knew about, but left

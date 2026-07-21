@@ -1,7 +1,17 @@
 # Claude Code spec — Persist user-entered settings + manual pixel size in the session
 
-> **◐ STATUS — Part 1 (manual pixel size) premise is STALE / already satisfied; Part 2 (workflow params)
-> is a genuine open follow-on.** Re-verified against the current tree (1.6.193):
+> **✅ STATUS — Part 1 already satisfied (verified); Part 2 (workflow params) DONE (shipped 1.6.201).**
+>
+> Part 2 fix: the user's entered workflow parameters are persisted by reusing the ONE parameter record that
+> already exists — the batch processor's recorded config. `session_manifest.workflow_to_manifest_extra`
+> serializes that config into a `workflow` manifest block (attached by `write_session_outputs`), the loader
+> surfaces it into the payload (`workflow_from_manifest`, Qt-free) and restores it into
+> `central_manager._pycat_batch_processor.config`, so a reloaded session carries the exact recorded
+> parameter set for replay/inspection in "Recorded Steps". No parallel capture path; backward-compatible
+> (a pre-feature manifest has no `workflow` key → None). Pinned by `tests/test_session_persist_workflow.py`
+> (core). Part 1's manual-pixel-size round-trip got a regression guard test in the same file.
+>
+> _Original re-verification note (against the 1.6.193 tree):_
 > **Part 1 — manual pixel size: ALREADY PERSISTS.** The spec's premise ("the manifest stores the pixel-size
 > flags but NOT the value when the user entered it manually") is no longer true. `session_manifest.py:163`
 > writes `microns_per_pixel_sq` (the value itself) alongside the `pixel_size_from_metadata` /

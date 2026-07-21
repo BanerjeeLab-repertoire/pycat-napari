@@ -335,6 +335,7 @@ def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None
     payload = {
         'source_path': None, 'source_missing': None, 'acquisition': {},
         'dataframes': {}, 'layers': [], 'skipped': [], 'active_method': None,
+        'workflow': None,
     }
 
     # ── Manifest-first: a session folder carries pycat_session.json describing how to restore the
@@ -390,6 +391,14 @@ def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None
             payload['skipped'].append((str(folder), f"manifest dataframes: {e}"))
 
         payload['active_method'] = _manifest.get('active_method')
+
+        # User-entered workflow parameters (session_persist_settings Part 2): the recorded batch config,
+        # to restore into the processor on the main thread. A manifest written before this feature has no
+        # `workflow` key → None (nothing to restore); pure data read, safe off the Qt thread.
+        try:
+            payload['workflow'] = _sm.workflow_from_manifest(_manifest)
+        except Exception:  # broad-ok: restoring recorded params is best-effort; never fail a load over it
+            pass
 
     groups = scan_output_folder(folder)
 
@@ -507,11 +516,27 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
         except Exception as e:
             skipped.append((spec['name'], str(e)))
 
+    # 5) Recorded workflow parameters -> the batch processor (session_persist_settings Part 2). Restoring
+    #    the config the user built means the reloaded session carries the exact recorded parameter set,
+    #    available for replay and inspection in "Recorded Steps". Recording stays OFF (the restored steps
+    #    are a completed recording, not a live one) — the user re-arms the toggle to record onward.
+    workflow = payload.get('workflow')
+    if workflow:
+        try:
+            bp = getattr(central_manager, '_pycat_batch_processor', None)
+            if bp is not None:
+                bp.config = dict(workflow)
+                print(f"[PyCAT Session]   Restored recorded workflow: "
+                      f"{len(workflow.get('steps') or [])} step(s)")
+        except Exception as e:  # broad-ok: a failed workflow restore is noted as skipped, not fatal to the load
+            skipped.append(('recorded workflow', str(e)))
+
     return dict(
         loaded_layers=loaded_layers,
         loaded_dfs=loaded_dfs,
         skipped=skipped,
         active_method=payload.get('active_method'),
+        workflow=workflow,
     )
 
 
