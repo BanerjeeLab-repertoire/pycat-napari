@@ -58,9 +58,10 @@ class FigureSpec:
     Mutating this and re-rendering never recomputes the data.
 
     It carries the ontology-aware fields this module always had AND the journal/theme/bracket capabilities
-    absorbed from ``figure_publication`` (the fields below the divider). Every absorbed field defaults to
-    off/None, so a spec that sets none of them renders EXACTLY as before — the merge is pixel-equivalent by
-    construction. ``figure_publication.FigureSpec`` is now a deprecated shim over this one.
+    absorbed from the former ``figure_publication`` module (the fields below the divider). Every absorbed
+    field defaults to off/None, so a spec that sets none of them renders EXACTLY as before — the merge is
+    pixel-equivalent by construction. (The old ``figure_publication.FigureSpec`` shim has been removed; its
+    validated rendering primitives now live at the bottom of this module.)
     """
     title: "str | None" = None
     x_label: "str | None" = None       # default: FigureData.x_label or 'condition'
@@ -157,7 +158,6 @@ def render(fig_data, spec):
     # requests brackets actually gets them. The honesty stays upstream: a bracket is drawn only for a pair
     # the caller supplied (from replicate-level stats), never inferred from a pixel-level test.
     if spec.significance_brackets:
-        from pycat.utils.figure_publication import add_significance_bracket
         for ann in spec.significance_brackets:
             add_significance_bracket(ax, ann['x1'], ann['x2'], ann['y'],
                                      ann.get('label', ''), font_size=spec.font_size_pt)
@@ -178,19 +178,146 @@ def render(fig_data, spec):
 def refine(fig, spec):
     """Refine an ALREADY-RENDERED figure under the canonical spec — theme, journal sizing, tick format,
     optional recolour, and significance brackets — **without recomputing the data** (the refine-not-recompute
-    contract). Reuses the validated ``figure_publication.apply_spec`` by mapping the canonical fields onto
-    its spec, so a refined figure is byte-for-byte what the publication path always produced (the merge
-    changes the API surface, not the output). A canonical spec with no journal/theme fields set leaves the
-    figure's presentation as-is."""
-    from pycat.utils.figure_publication import FigureSpec as _PubSpec, apply_spec
-    pub = _PubSpec(
-        title=spec.title, xlabel=spec.x_label, ylabel=spec.y_label,
-        xlim=spec.x_limits, ylim=spec.y_limits,
-        theme=(spec.theme or 'colorblind_safe'), recolor=spec.recolor,
-        font_size=spec.font_size_pt, title_size=spec.title_size_pt,
-        column=(spec.journal_column or 'single'), height_mm=spec.height_mm,
-        tick_format=spec.tick_format, significance=list(spec.significance_brackets))
-    return apply_spec(fig, pub)
+    contract). Applies the validated presentation logic (``apply_spec`` below) directly to the canonical
+    spec; a spec with no journal/theme fields set leaves the figure's presentation as-is."""
+    return apply_spec(fig, spec)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# Publication rendering primitives — theme, journal sizing, brackets, palette, vector export.
+#
+# These were the validated core of the former ``figure_publication`` module; the FigureSpec merge
+# (1.6.192) made ``figure_spec.FigureSpec`` canonical, and this cleanup folds the primitives in here so
+# there is ONE figure module and no deprecated ``FigureSpec`` duplicate. They read the canonical spec's
+# fields; output is unchanged from the publication path (the merge changed the API surface, not pixels).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+#: Okabe–Ito minus yellow — the colour-blind-safe categorical palette validated on a white publication
+#: surface with the dataviz validator (worst adjacent CVD ΔE 9.6, above the 8 target). Okabe–Ito's yellow
+#: (#F0E442) is dropped: it FAILED the lightness band on white (L 0.90). Fixed order — never cycled.
+PUBLICATION_PALETTE = (
+    '#0072B2',   # blue
+    '#E69F00',   # orange
+    '#009E73',   # bluish green
+    '#D55E00',   # vermillion
+    '#56B4E9',   # sky blue
+    '#CC79A7',   # reddish purple
+)
+
+#: Journal single/one-and-a-half/double column widths, millimetres (Nature/Cell conventions).
+JOURNAL_COLUMN_MM = {'single': 89.0, 'onehalf': 120.0, 'double': 183.0}
+
+#: Named themes — small dicts of matplotlib knobs applied by ``apply_spec``. ``colorblind_safe`` is the
+#: default and the only validated palette.
+THEMES = {
+    'colorblind_safe': dict(palette=PUBLICATION_PALETTE, font_size=8, title_size=9,
+                            spines=('left', 'bottom'), grid=False, line_width=1.0),
+    'colorblind_safe_grid': dict(palette=PUBLICATION_PALETTE, font_size=8, title_size=9,
+                                 spines=('left', 'bottom'), grid=True, line_width=1.0),
+}
+
+
+def apply_spec(fig, spec):
+    """Apply the canonical ``spec``'s presentation to a matplotlib figure in place, and return it.
+
+    Presentation only — it never touches the plotted data, so a refined figure is the same measurement
+    dressed differently. Recolouring is **opt-in** (``spec.recolor``, off by default): most PyCAT figures
+    colour purposefully (the comparative figure makes replicate means one colour so they read as "the units
+    tested"), and blindly re-assigning the palette in series order would scramble that meaning. ``recolor=
+    True`` opts a plain multi-series line plot into the validated palette.
+    """
+    theme = THEMES.get(spec.theme or 'colorblind_safe', THEMES['colorblind_safe'])
+    font_size = spec.font_size_pt or theme['font_size']
+    title_size = spec.title_size_pt or theme['title_size']
+
+    for ax in fig.axes:
+        if spec.title is not None:
+            ax.set_title(spec.title, fontsize=title_size, loc='left')
+        if spec.x_label is not None:
+            ax.set_xlabel(spec.x_label, fontsize=font_size)
+        if spec.y_label is not None:
+            ax.set_ylabel(spec.y_label, fontsize=font_size)
+        if spec.x_limits is not None:
+            ax.set_xlim(spec.x_limits)
+        if spec.y_limits is not None:
+            ax.set_ylim(spec.y_limits)
+        ax.tick_params(labelsize=font_size)
+        for side in ('top', 'right', 'left', 'bottom'):
+            ax.spines[side].set_visible(side in theme['spines'])
+        # Only pass line properties when enabling — `grid(False, color=...)` perversely ENABLES it.
+        if theme['grid']:
+            ax.grid(True, color='0.9', linewidth=0.6)
+        else:
+            ax.grid(False)
+        if spec.tick_format:
+            import matplotlib.ticker as mticker
+            ax.yaxis.set_major_formatter(mticker.FormatStrFormatter(spec.tick_format))
+        if spec.recolor:
+            _recolor_series(ax, theme['palette'])
+        for ann in spec.significance_brackets:
+            add_significance_bracket(ax, ann['x1'], ann['x2'], ann['y'],
+                                     ann.get('label', ''), font_size=font_size)
+
+    width_mm = JOURNAL_COLUMN_MM.get(spec.journal_column or 'single', JOURNAL_COLUMN_MM['single'])
+    width_in = width_mm / 25.4
+    if spec.height_mm:
+        fig.set_size_inches(width_in, spec.height_mm / 25.4)
+    else:
+        # keep the current aspect ratio at the journal width
+        w0, h0 = fig.get_size_inches()
+        fig.set_size_inches(width_in, width_in * (h0 / w0) if w0 else width_in * 0.75)
+    fig.tight_layout()
+    return fig
+
+
+def _recolor_series(ax, palette):
+    """Re-assign the palette, in fixed order, to the lines and scatter collections of an axis."""
+    lines = [ln for ln in ax.get_lines() if ln.get_label() and not ln.get_label().startswith('_')]
+    for i, ln in enumerate(lines):
+        ln.set_color(palette[i % len(palette)])
+    for i, coll in enumerate(ax.collections):
+        try:
+            coll.set_color(palette[i % len(palette)])
+        except Exception:      # broad-ok: a collection that rejects a colour keeps its own — cosmetic only
+            pass
+
+
+def add_significance_bracket(ax, x1, x2, y, label='*', *, font_size=8):
+    """Draw a significance bracket between two x positions at height ``y``.
+
+    Only the caller decides whether to add one — this draws what it is told. The honesty lives upstream in
+    ``comparative_stats``, where "is this significant, at the replicate level" is decided; a bracket is
+    never generated automatically from a pixel-level test.
+    """
+    h = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02
+    ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], lw=1.0, color='0.2')
+    ax.text((x1 + x2) / 2, y + h, label, ha='center', va='bottom', fontsize=font_size, color='0.2')
+
+
+def export_figure(fig, path, *, fmt=None, dpi=None, column=None, spec=None):
+    """Export at publication settings: vector (PDF/SVG) or high-DPI raster, at a journal column width.
+
+    Fonts are embedded in vector output (``pdf.fonttype=42`` / ``ps.fonttype=42`` = editable TrueType; SVG
+    keeps text as text) so the file opens in Illustrator/Inkscape with live, editable labels rather than
+    outlines. ``fmt`` defaults to the path's extension; ``dpi``/``column`` fall back to the spec's ``dpi`` /
+    ``journal_column``. This is the single-file export; :func:`export` writes the full reproducible bundle.
+    """
+    import matplotlib
+    import pathlib
+
+    path = pathlib.Path(path)
+    fmt = (fmt or path.suffix.lstrip('.') or 'pdf').lower()
+    dpi = dpi or (spec.dpi if spec else 300)
+    column = column or (getattr(spec, 'journal_column', None) if spec else None) or 'single'
+
+    if column:
+        width_in = JOURNAL_COLUMN_MM.get(column, JOURNAL_COLUMN_MM['single']) / 25.4
+        w0, h0 = fig.get_size_inches()
+        fig.set_size_inches(width_in, width_in * (h0 / w0) if w0 else width_in * 0.75)
+
+    with matplotlib.rc_context({'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none'}):
+        fig.savefig(str(path), format=fmt, dpi=dpi, bbox_inches='tight')
+    return str(path)
 
 
 # ── Spec JSON round-trip (regenerate the figure identically later) ──────────────────────────────

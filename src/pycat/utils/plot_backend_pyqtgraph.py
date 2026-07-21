@@ -59,7 +59,7 @@ def pd_unique(series):
 def _hue_brushes(df, hue):
     """One brush per point, coloured by group — still one artist, still row order."""
     import pyqtgraph as pg
-    from pycat.utils.figure_publication import PUBLICATION_PALETTE
+    from pycat.utils.figure_spec import PUBLICATION_PALETTE
 
     cats = list(pd_unique(df[hue]))
     lut = {c: pg.mkBrush(PUBLICATION_PALETTE[i % len(PUBLICATION_PALETTE)])

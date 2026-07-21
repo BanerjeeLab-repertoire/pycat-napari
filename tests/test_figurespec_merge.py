@@ -4,9 +4,10 @@
 was absent from the other. They are merged behind `figure_spec.FigureSpec` (the canonical spec), which now
 carries every field both had, and `figure_spec.render()` finally HONOURS significance (the verified gap —
 the working bracket implementation was in figure_publication). These pin: the merge is pixel-equivalent for
-existing usage (absorbed fields default off), render() draws requested brackets, refine() reuses the
-validated publication path so output is unchanged, the JSON round-trip carries the new fields, and the
-deprecated `figure_publication` shim still works.
+existing usage (absorbed fields default off), render() draws requested brackets, refine() applies the
+validated publication logic so output is unchanged, and the JSON round-trip carries the new fields. (The
+deprecated `figure_publication.FigureSpec` shim has since been removed and its primitives folded into
+`figure_spec`; `test_figure_spec_primitives.py` pins those.)
 """
 import numpy as np
 import pytest
@@ -48,17 +49,13 @@ def test_render_now_HONOURS_significance_brackets_the_verified_gap():
         "significance brackets requested but render() drew none — the merged gap is not closed")
 
 
-def test_refine_reuses_the_validated_publication_path_output_unchanged():
-    """`refine(fig, canonical)` must equal `figure_publication.apply_spec(fig, equivalent_pub_spec)` — the
-    merge changes the API surface, not the rendered output."""
+def test_refine_applies_the_validated_publication_sizing_unchanged():
+    """`refine(fig, canonical)` applies the journal sizing the publication path always produced — a
+    'double' column at 60 mm height is 183 mm × 60 mm in inches, regardless of the source figure size."""
     from pycat.utils.figure_spec import FigureSpec, render, refine
-    from pycat.utils.figure_publication import FigureSpec as PubSpec, apply_spec
-
     a = refine(render(_fd(), FigureSpec()),
                FigureSpec(journal_column='double', theme='colorblind_safe', height_mm=60.0))
-    b = apply_spec(render(_fd(), FigureSpec()),
-                   PubSpec(column='double', theme='colorblind_safe', height_mm=60.0))
-    assert np.allclose(a.get_size_inches(), b.get_size_inches()), "refine diverged from apply_spec"
+    assert np.allclose(a.get_size_inches(), (183.0 / 25.4, 60.0 / 25.4)), "refine sizing diverged"
 
 
 def test_the_json_roundtrip_carries_the_new_fields_unchanged():
@@ -69,11 +66,3 @@ def test_the_json_roundtrip_carries_the_new_fields_unchanged():
     back = spec_from_dict(json.loads(json.dumps(spec_to_dict(spec))))
     assert back.journal_column == 'onehalf' and back.tick_format == '%.2f' and back.recolor is True
     assert back.significance_brackets == ({'x1': 0, 'x2': 1, 'y': 7, 'label': 'p=0.01'},)
-
-
-def test_the_deprecated_publication_shim_still_works():
-    """Existing consumers using figure_publication.FigureSpec keep working until they migrate."""
-    from pycat.utils.figure_spec import FigureSpec, render
-    from pycat.utils.figure_publication import FigureSpec as PubSpec, apply_spec
-    fig = apply_spec(render(_fd(), FigureSpec()), PubSpec(title='T', column='single'))
-    assert fig.axes[0].get_title(loc='left') == 'T'          # apply_spec titles left-aligned

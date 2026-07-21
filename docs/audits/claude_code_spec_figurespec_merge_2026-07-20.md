@@ -1,6 +1,20 @@
 # Claude Code spec — Merge the two `FigureSpec` systems
 
-> **✅ STATUS — merge DONE, shipped in 1.6.192; consumer migration is the follow-on.** `figure_spec.FigureSpec`
+> **✅ STATUS — COMPLETE. Merge DONE (1.6.192); consumer migration + shim removal DONE (1.6.203).**
+> The consolidation follow-on is finished: the deprecated `figure_publication.FigureSpec` class is gone,
+> and its validated rendering primitives (`apply_spec`, `add_significance_bracket`, `export_figure`,
+> `PUBLICATION_PALETTE`, `JOURNAL_COLUMN_MM`, `THEMES`, `_recolor_series`) are folded into the canonical
+> `figure_spec.py`, reading the canonical spec's field names directly. `figure_spec.refine()` now calls
+> `apply_spec(fig, spec)` on the canonical spec (no field-name mapping through a deprecated shim). The sole
+> external consumer (`plot_backend_pyqtgraph`'s `PUBLICATION_PALETTE` import) is repointed; the
+> comparative-figures UI never referenced it. `figure_publication.py` is DELETED. Tests migrated:
+> `test_figure_publication.py` → `test_figure_spec_primitives.py` (repointed to the canonical spec; the
+> deprecated class's redundant JSON-serialization tests dropped — the canonical round-trip is covered in
+> `test_figure_spec.py`), and `test_figurespec_merge.py`'s shim tests replaced with direct assertions.
+> Full `pytest -m core` green; output is byte-equivalent (the merge changed the API surface, not pixels).
+> This unblocks `publication_features` and `explore_refine_export` (not yet written).
+>
+> _Merge (1.6.192):_ `figure_spec.FigureSpec`
 > is now the canonical spec, absorbing `figure_publication`'s fields (column, height_mm, theme, recolor,
 > tick_format, significance_brackets, title_size) as additive, off-by-default options — so existing figures
 > render pixel-identically. `figure_spec.render()` now HONOURS significance (the verified gap); new

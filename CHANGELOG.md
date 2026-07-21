@@ -1,3 +1,24 @@
+## [1.6.203] - 2026-07-20
+### Changed — **One figure module: the deprecated `figure_publication.FigureSpec` shim is removed (figurespec_merge cleanup).**
+The 1.6.192 merge made `figure_spec.FigureSpec` canonical but left `figure_publication.py` in place as the
+home of the validated rendering primitives plus a deprecated `FigureSpec` shim that `figure_spec.refine()`
+still constructed internally. This finishes the consolidation: one figure module, no deprecated duplicate.
+
+- **Primitives folded into `figure_spec.py`** — `apply_spec`, `add_significance_bracket`, `export_figure`,
+  `PUBLICATION_PALETTE`, `JOURNAL_COLUMN_MM`, `THEMES`, `_recolor_series` — now reading the canonical spec's
+  field names directly (`x_label`/`y_limits`/`font_size_pt`/`journal_column`/`significance_brackets`).
+- **`refine()` applies the canonical spec directly** via `apply_spec(fig, spec)` — no field-name mapping
+  through a deprecated `FigureSpec`. Output is byte-equivalent (the merge changed the API surface, not
+  pixels).
+- **`figure_publication.py` deleted.** Its one external consumer — `plot_backend_pyqtgraph`'s
+  `PUBLICATION_PALETTE` import — is repointed to `figure_spec`; the comparative-figures UI never referenced
+  it.
+- **Tests migrated:** `test_figure_publication.py` → `test_figure_spec_primitives.py` (repointed to the
+  canonical spec; the deprecated class's redundant JSON-serialization tests dropped — the canonical
+  round-trip is already covered in `test_figure_spec.py`); `test_figurespec_merge.py`'s two shim-dependent
+  tests replaced with direct assertions on `refine()`'s output. Full `pytest -m core` green. Unblocks the
+  not-yet-written `publication_features` and `explore_refine_export`.
+
 ## [1.6.202] - 2026-07-20
 ### Fixed — **Brushable plots tear down on close — figures, callbacks and subscriptions stop accumulating (plot_lifecycle Parts A/B).**
 The audit found ">20 matplotlib figures" open during a session: `make_pickable` (the one integration every
