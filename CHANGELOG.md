@@ -1,3 +1,19 @@
+## [1.6.223] - 2026-07-21
+### Added — **The in-vitro field-summary tables now carry their `condensate_mode` — wiring the orphaned `condensate_modes` module (backlog B2).**
+`toolbox/condensate_modes.py` was shipped and unit-tested but imported by nothing — so the "**2D
+projection, not a volume fraction**" caveat lived only in a transient napari message while the number
+travelled on into tables, the consolidated long table, and comparative figures with no qualifier attached.
+Now wired at both in-vitro whole-field-summary emission points (fluorescence and brightfield):
+- New pure `condensate_modes.annotate_summary_table(table, masks)` resolves the mode from the mask, adds a
+  `condensate_mode` column, and — where a volume fraction is refused for that mode (a 2D field, or a time
+  series with no Z) — adds a `volume_fraction_note` stating why. **Purely additive:** existing columns are
+  untouched, so the byte-identical `field_summary` dict is never modified (its guard test still passes).
+- `invitro_fluor_ui` and `invitro_bf_ui` each call it in one line after building `summ_df`, so the
+  projection qualifier now rides IN the emitted/saved table instead of evaporating with the info message.
+- Tests (`core`): `test_condensate_modes.py` gains the additive-annotation test (2D → mode `2d` + refusal
+  note, originals untouched), the 3D case (mode `3d`, no refusal note — the volume fraction is real there),
+  and an AST guard that both in-vitro handlers call `annotate_summary_table`. No measurement changes.
+
 ## [1.6.222] - 2026-07-21
 ### Fixed — **Status markers (the "logic gate" circles) now tell the truth: GREEN means DONE, not "ready".**
 A tester found four ways the workflow status circles lied about readiness — and a lying marker undermines

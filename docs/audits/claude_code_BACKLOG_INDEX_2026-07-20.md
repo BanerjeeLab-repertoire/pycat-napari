@@ -73,7 +73,14 @@ manifests load). *(The prior `session_persist_settings` spec is in-tree; this is
 it has NOT landed as of 1.6.203.)*
 
 ### B2. Wire the actionable orphaned modules  *(finished work, invisible)*
-**Verified unwired:** `cohort_targets` (0 refs in plots), `condensate_modes` (0 refs in invitro),
+> **◐ PARTIAL (updated 2026-07-21, tree 1.6.223):** `condensate_modes` is now **WIRED** (shipped 1.6.223) —
+> both in-vitro whole-field-summary emitters (`invitro_fluor_ui`, `invitro_bf_ui`) call the new pure
+> `condensate_modes.annotate_summary_table`, so every emitted table carries its `condensate_mode` and a
+> 2D volume-fraction-refusal note (additive; byte-identical `field_summary` untouched). `cohort_targets` and
+> `feature_provenance` each gained an importer since this index was written (partially wired — verify what
+> remains). **Still fully unwired:** `czi_seam` (load-time CZI seam QC — the open path is lazy/streaming, so
+> wiring it safely + testably is the remaining work here).
+**Verified unwired (at index time):** `cohort_targets` (0 refs in plots), `condensate_modes` (0 refs in invitro),
 `feature_provenance` export hook, `czi_seam` (1 ref — partially wired, verify). Each already exposes the
 exact hook needed:
 - `cohort_targets.attach_histogram_brushing` / `select_aggregate_row` → the histogram + aggregate-row

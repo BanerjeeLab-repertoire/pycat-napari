@@ -109,6 +109,23 @@ def attach_mode_column(table, mode):
     return df
 
 
+def annotate_summary_table(table, masks, *, declared=None, axis_kind=None):
+    """Attach the mode qualifier to a whole-field summary table so it travels WITH the numbers.
+
+    Resolves the condensate mode from ``masks`` (or a ``declared`` mode / ``axis_kind`` for an ambiguous
+    3D array), adds the ``condensate_mode`` column, and — where a volume fraction is REFUSED in that mode
+    (a 2D field, or a time series with no Z) — adds a ``volume_fraction_note`` stating why. **Additive:**
+    existing columns are left exactly as they are (the byte-identical ``field_summary`` dict is never
+    touched). This is the wiring that stops the *"2D projection, not a volume fraction"* caveat from
+    evaporating in a transient napari message — it now rides in the emitted / saved table."""
+    mode = resolve_condensate_mode(masks, declared=declared, axis_kind=axis_kind)
+    out = attach_mode_column(table, mode)
+    _value, _reason = volume_fraction(masks, mode)
+    if _reason:
+        out['volume_fraction_note'] = _reason
+    return out
+
+
 # ── Time-series independence — a series is ONE biological unit, not N independent frames ─────────
 def is_pseudoreplicated(mode) -> bool:
     """True in `TIMESERIES` mode: per-frame measurements of the same droplets are not independent samples,

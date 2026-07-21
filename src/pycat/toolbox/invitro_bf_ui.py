@@ -350,6 +350,9 @@ def _ivbf_od_field(ui, layout):
         ui._dr()['ivbf_field_summary'] = summ
         ui._dr()['ivbf_droplet_df']    = per_drop
         summ_df = pd.DataFrame([summ])
+        # The 2D-projection caveat now rides IN the table, not only the napari message (wire_orphans B2).
+        from pycat.toolbox.condensate_modes import annotate_summary_table
+        summ_df = annotate_summary_table(summ_df, mask)
         _show("IVBF Field Summary", [
             ("Field statistics", summ_df),
             ("Per-droplet OD metrics", per_drop),

@@ -6,6 +6,18 @@
 successful, applied to the worst remaining offenders. **Behaviour-preserving; no science function is
 touched.**
 
+> **⚠ SIZING FINDING (2026-07-21, verified against 1.6.221):** the "extract each tab into a
+> `_build_<tab>_tab` helper" plan is NOT sufficient on its own. Measured on `_add_advanced_analysis`: the
+> Morphological tab is 111 lines (OK) but the **Dynamic tab is 257 and the Organizational tab 145** — both
+> still over 120 as single helpers, so a tab-level split would push the global long-function count UP by one
+> and TRIP the ratchet. Getting each piece under 120 needs a DEEPER extraction: pull each `_on_*` handler
+> (`_on_dynamic` 108, `_on_org` 97, `_on_morph` 76) out to module level with its widget dependencies passed
+> as parameters, and split the Dynamic tab's construction (~147 lines) further. That param-passing surface
+> is where a silent regression hides, and the handlers spawn threaded real-analysis workers, so headless
+> construction verifies only that it BUILDS — not that a run still works. **Recommendation:** do this only
+> alongside GUI click-testing of each builder, one builder per commit; do not treat the AST contract test as
+> sufficient verification on its own.
+
 ## Verified state (against 1.6.221)
 The science-function split programme has been executed hard (condensate_physics and invitro decomposed
 byte-identical through 1.6.221), so **the five largest functions in the entire codebase are now all UI

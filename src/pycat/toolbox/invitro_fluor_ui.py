@@ -769,6 +769,10 @@ def _ivf_field_summary(ui, layout):
             'image_layer': img_dd.currentText(), 'mask_layer': mask_dd.currentText()})
 
         summ_df = pd.DataFrame([summ])
+        # The 2D-projection caveat now rides IN the table (condensate_mode + volume-fraction refusal note),
+        # not only in the transient napari message below (wire_orphans B2 — condensate_modes).
+        from pycat.toolbox.condensate_modes import annotate_summary_table
+        summ_df = annotate_summary_table(summ_df, mask)
         part_df = part['per_droplet_df']
         part_df['area_um2'] = [
             p.area * mpx**2 for p in sk.measure.regionprops(mask.astype(np.int32))
