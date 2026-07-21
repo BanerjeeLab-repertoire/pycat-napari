@@ -1,3 +1,21 @@
+## [1.6.241] - 2026-07-21
+### Changed — **segmentation decomposition step 2: the fz + cellpose families move out (byte-identical).**
+Continued the `segmentation_tools.py` split. Both families depend only on already-moved modules, so they
+move cleanly, **verbatim** — no scale/sigma/threshold change:
+
+- `fz.py` — `felzenszwalb_segmentation_and_merging` (+ the RAG `merge_mean_color`/`_weight_mean_color`
+  callbacks) and `fz_segmentation_and_binarization`; imports `local_thresholding_func` from the
+  `local_thresholding` family.
+- `cellpose.py` — the optional-dependency Cellpose wrapper (`cellpose_segmentation`, with torch/cellpose
+  imported LAZILY and the version-aware cyto2-vs-cpsam model build preserved exactly) plus the RandomForest
+  pixel classifier + `refine_labels_with_contours`; imports `opencv_watershed_func` from `watershed`. The
+  module owns the GPU/model caches it manages.
+
+Five registered ops moved → `operation_catalog.json` regenerated. Two source-inspection tests had their
+target repointed to the new module locations (`test_conditional_imports` → `cellpose.py`; the puncta-gate
+guard already scans the whole package) — assertions unchanged. `segmentation_tools.py`: **2030 → 1239**;
+ceiling ratcheted to 1239. Remaining families: puncta refinement, subcellular.
+
 ## [1.6.240] - 2026-07-21
 ### Changed — **segmentation decomposition step 1: the leaf/foundation families move out (byte-identical).**
 Began decomposing `segmentation_tools.py` (2,692 lines, the best-covered large file — 41 test files) into a

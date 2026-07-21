@@ -332,6 +332,29 @@ _DELIBERATE = {
     'segmentation_tools.py::compute_image_intensity_stats',
     'segmentation_tools.py::cell_has_punctate_signal',
 
+    # 1.6.241 — segmentation decomposition step 2: the FZ and CELLPOSE families MOVED verbatim out of
+    # segmentation_tools. fz.py (felzenszwalb_segmentation_and_merging + RAG merge_mean_color/
+    # _weight_mean_color + fz_segmentation_and_binarization + run_ wrapper) imports local_thresholding_func
+    # from the local_thresholding family; cellpose.py (the optional-dep cellpose wrapper with its version-
+    # aware model build + GPU/model caches, plus the RandomForest classifier + refine_labels_with_contours)
+    # imports opencv_watershed_func from the watershed family. No scale/sigma/threshold change; the optional-
+    # import guard is preserved exactly. Five registered ops moved → catalog regenerated.
+    'segmentation_tools.py::_weight_mean_color',
+    'segmentation_tools.py::merge_mean_color',
+    'segmentation_tools.py::felzenszwalb_segmentation_and_merging',
+    'segmentation_tools.py::run_fz_segmentation_and_merging',
+    'segmentation_tools.py::fz_segmentation_and_binarization',
+    'segmentation_tools.py::_get_cellpose_gpu',
+    'segmentation_tools.py::_cellpose_major_version',
+    'segmentation_tools.py::available_cellpose_models',
+    'segmentation_tools.py::default_cellpose_model',
+    'segmentation_tools.py::_build_cellpose_model',
+    'segmentation_tools.py::cellpose_segmentation',
+    'segmentation_tools.py::run_cellpose_segmentation',
+    'segmentation_tools.py::train_and_apply_rf_classifier',
+    'segmentation_tools.py::refine_labels_with_contours',
+    'segmentation_tools.py::run_train_and_apply_rf_classifier',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was

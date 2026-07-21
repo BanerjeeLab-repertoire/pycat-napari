@@ -264,10 +264,9 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    # 2692 -> 2030: the leaf/foundation families (_common, local_thresholding, watershed, morphology,
-    # intensity) split into toolbox/segmentation/ (segmentation decomposition step 1, 1.6.240). A NEW
-    # ceiling at the post-move size; it ratchets DOWN as fz / cellpose / puncta / subcellular move out.
-    "toolbox/segmentation_tools.py": 2030,
+    # 2692 -> 2030 (step 1, 1.6.240: leaf families) -> 1239 (step 2, 1.6.241: fz + cellpose). The ceiling
+    # ratchets DOWN as puncta / subcellular move out toward the pure-shim end state.
+    "toolbox/segmentation_tools.py": 1239,
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.

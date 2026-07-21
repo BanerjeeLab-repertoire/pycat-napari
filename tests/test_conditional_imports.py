@@ -147,7 +147,8 @@ def test_the_cellpose_model_builds_on_BOTH_major_versions():
 
     Both APIs must work, and the import must be visible to both.
     """
-    source = (_SOURCE / "toolbox" / "segmentation_tools.py").read_text(
+    # _build_cellpose_model moved to the segmentation/cellpose.py family module (1.6.241).
+    source = (_SOURCE / "toolbox" / "segmentation" / "cellpose.py").read_text(
         encoding='utf-8', errors='ignore')
 
     tree = ast.parse(source)

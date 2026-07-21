@@ -1,10 +1,9 @@
 # Claude Code spec — Decompose `segmentation_tools.py` by domain
 
-> **◐ STATUS — IN PROGRESS. Step 1 (leaf/foundation layer) DONE (1.6.240): _common, local_thresholding,
-> watershed, morphology, and the intensity gate (compute_image_intensity_stats + cell_has_punctate_signal)
-> split into `toolbox/segmentation/` — all byte-identical, dependency-ordered (family modules import each
-> other, never segmentation_tools). segmentation_tools.py 2692 → 2030. Remaining: fz, cellpose, puncta,
-> subcellular, then the pure-shim finalize.**
+> **◐ STATUS — IN PROGRESS. Steps 1-2 DONE (1.6.240-241): the leaf families + fz + cellpose split into
+> `toolbox/segmentation/` — all byte-identical, dependency-ordered (family modules import each other,
+> never segmentation_tools). segmentation_tools.py 2692 → 1239. Remaining: puncta refinement (the
+> filter-sensitivity-gated core), then subcellular + the pure-shim finalize.**
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Third-largest file
 (**2,692 lines**), and the **best-covered decomposition target in the codebase — 41 test files**. That
