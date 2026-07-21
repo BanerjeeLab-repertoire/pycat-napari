@@ -177,6 +177,12 @@ _DELIBERATE = {
     'invitro_tools.py::detect_sedimentation',
     'invitro_tools.py::_circle_residuals',
     'invitro_tools.py::_slope_r2',
+    # 1.6.217 — condensate_physics decomposition step 1: the coarsening domain (fit_coarsening + its
+    # _coarsening_* helpers, with the nested ostwald / coalescence model fns) MOVED verbatim to
+    # `toolbox/condensate_physics/coarsening.py`; the tools module re-exports fit_coarsening. No number
+    # changed (test_fit_coarsening_output_is_byte_identical passes). These nested keys vanished by the move.
+    'condensate_physics_tools.py::ostwald',
+    'condensate_physics_tools.py::coalescence',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

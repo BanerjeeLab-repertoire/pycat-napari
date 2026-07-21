@@ -1,5 +1,13 @@
 # Claude Code spec — Decompose `condensate_physics_tools.py` by physics domain
 
+> **◐ STATUS — Step 1 (coarsening) DONE (1.6.217); msd / moduli / relaxation / frame_quality + the
+> intensity/photobleaching/survival sections remain.** The `toolbox/condensate_physics/` package exists;
+> `coarsening.py` holds `fit_coarsening` + its `_coarsening_*` helpers, moved VERBATIM, re-exported for every
+> caller (UIs, navigator, trackmate). Byte-identical (`test_fit_coarsening_output_is_byte_identical` +
+> arrest tests pass); nested keys recorded in the drop-guard's `_DELIBERATE`. A NEW per-file ceiling was
+> established (2447→2242) that ratchets DOWN as the remaining quantities move out. One quantity per commit;
+> the MSD→D→viscosity golden-master is the net for the msd move.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. **2,470 lines**,
 20 test files, and it holds the manuscript-facing material-properties physics (MSD, moduli, coarsening,
 FRAP-adjacent fits). Several of its functions were already split by phase (`fit_anomalous_diffusion`,

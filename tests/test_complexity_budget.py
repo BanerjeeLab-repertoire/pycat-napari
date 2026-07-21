@@ -286,6 +286,10 @@ _FILE_LINE_CEILINGS = {
     # to toolbox/invitro/{size_distribution,partition,field_summary,analysis}.py. invitro_tools.py is now a
     # pure re-export shim (-96%). The ceiling is locked at the shim size.
     "toolbox/invitro_tools.py": 88,
+    # 2447 -> 2242: the coarsening domain moved to toolbox/condensate_physics/coarsening.py (decomposition
+    # step 1, 1.6.217). A NEW ceiling established at the post-move size; it ratchets DOWN as the remaining
+    # quantities (msd, moduli, relaxation, frame_quality, ...) move out.
+    "toolbox/condensate_physics_tools.py": 2242,
 }
 
 

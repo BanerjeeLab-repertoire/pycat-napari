@@ -1,3 +1,16 @@
+## [1.6.217] - 2026-07-21
+### Changed — **condensate_physics decomposition step 1: the coarsening domain moves to its own module (byte-identical).**
+Begins decomposing the 2,443-line `condensate_physics_tools.py` by physical quantity. `fit_coarsening` and
+its phase helpers (`_coarsening_powerlaw_fits`, `_coarsening_is_arrested`, `_coarsening_confidence`) moved
+**verbatim** into the new `toolbox/condensate_physics/coarsening.py`.
+
+- **The tools module re-exports `fit_coarsening`** for every caller (condensate-physics/invitro/brightfield
+  UIs, the navigator op-catalog, trackmate bridge). Move, not rewrite — no fit or number changed.
+- **Byte-identical:** `test_fit_coarsening_output_is_byte_identical` and the arrest-classification tests
+  pass unmodified; the moved nested keys are recorded in the drop-guard's `_DELIBERATE`.
+- `condensate_physics_tools.py` dropped **2447 → 2242** lines; a new per-file ceiling established there that
+  ratchets down as the remaining quantities (MSD, moduli, relaxation, frame-quality) move out.
+
 ## [1.6.216] - 2026-07-21
 ### Changed — **invitro decomposition COMPLETE: `invitro_tools.py` is now a pure re-export shim (byte-identical).**
 The final domains — coarsening kinetics (`coarsening_statistics`), critical-concentration estimation
