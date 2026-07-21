@@ -1,3 +1,18 @@
+## [1.6.212] - 2026-07-21
+### Added — **A structural guard that every `_mpx` pixel-size accessor uses the ONE canonical helper (redundancy_consolidation axis 1).**
+Pixel size scales every physical-unit measurement (viscosity, ΔG, size, density); a per-UI `_mpx()` that
+re-derives it inconsistently silently corrupts units in one workflow but not another. Axis 1 of the
+redundancy-consolidation spec routed every `_mpx` through the canonical `pixel_size_um_or_default`; this
+adds the missing structural ratchet so it stays that way.
+
+- New **`tests/test_pixel_size_single_accessor.py`** (core): an AST guard asserting every function named
+  `_mpx` in the package references `pixel_size_um_or_default`, with a canary (a bespoke
+  `dr.get('microns_per_pixel_sq') or 1.0` accessor is flagged; a routed one passes). Confirms all 10 current
+  `_mpx` accessors route through the one helper. `test_pixel_size.py` pins the accessor's behaviour; this
+  pins the structure — a new UI cannot quietly re-open the silent-units hole.
+- No behaviour change. redundancy_consolidation axes 2–4 (background mechanics, worker lifecycle,
+  stack-access) remain open.
+
 ## [1.6.211] - 2026-07-21
 ### Changed — **scientific_exceptions DONE: all 15 result-path handlers classified; none fabricate a default.**
 Completing the scientific-exception guard: the remaining 11 broad handlers the AST guard flagged — in
