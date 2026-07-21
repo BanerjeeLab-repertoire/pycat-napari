@@ -1,5 +1,19 @@
 # Claude Code spec — CI hygiene + test-fixture correctness (audit's new findings)
 
+> **✅ STATUS — DONE, shipped in 1.6.222.** All three fixes landed. **Fix 1:** the stale core.yml comment
+> (claiming the marker "selects only the two guard files") is corrected with the MEASURED number — the core
+> suite (~1,500 tests, 200+ marked files) covers **30% of pycat** (46,882 statements). Coverage is kept OFF
+> in CI for a real reason (it adds ~70% to the job's runtime, 4.5→7.5 min, and nothing consumes the report —
+> no service upload, no threshold), with the local command recorded; enable `--cov-report=xml` the day a
+> coverage service/threshold is wired up. **Fix 2:** the two ambiguous `tifffile.imwrite` fixtures in
+> `test_lazy_sources_headless.py` are pinned `photometric='minisblack'` (verified: passes under
+> `-W error::DeprecationWarning`) — the future tifffile default change can no longer silently shift the plane
+> layout. **Fix 3:** `from pywt import wavedecn, waverecn` moved from module scope into
+> `wavelet_bg_and_noise_calculation` — importing `image_processing_tools` (and the 8 modules that transitively
+> import it) no longer loads PyWavelets (verified: `pywt` absent from `sys.modules` after a fresh import).
+> Behaviour-identical; full `pytest -m core` green.
+
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.221 · Verified against the 1.6.221 tree. Three small,
 concrete, *newly-identified* issues from the latest engineering audit — distinct from the larger
 release-engineering spec (which covers ruff/pythonpath/markers/classifier). These are fast, low-risk

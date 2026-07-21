@@ -68,7 +68,6 @@ def _napari():
     return napari
 import scipy.ndimage as ndi
 from scipy.interpolate import RectBivariateSpline
-from pywt import wavedecn, waverecn 
 import SimpleITK as sitk
 
 # Local application imports
@@ -1937,7 +1936,11 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
     - Manuel Hüpfel, Institute of Applied Physics, KIT, Karlsruhe, Germany
     - Improved documentation: Christian Neureuter, University at Buffalo
     """
-
+    # PyWavelets is imported HERE, not at module scope: 8 toolbox modules transitively import
+    # image_processing_tools, and this wavelet path is the only code that needs pywt — a function-scope
+    # import keeps a minimal segmentation/coloc/time-series import from dragging in PyWavelets (ci_hygiene
+    # Fix 3, 1.6.222). Behaviour-identical; only WHEN pywt is imported changes.
+    from pywt import wavedecn, waverecn
 
     # Wavelet decomposition
     coeffs = wavedecn(image, 'db1', level=None) # 'db1' denotes Daubechies wavelet with one vanishing moment
