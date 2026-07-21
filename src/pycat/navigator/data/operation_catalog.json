@@ -411,7 +411,7 @@
       "function": "drift_correct_com",
       "inputs": [],
       "kind": "toolbox",
-      "module": "vpt_tools",
+      "module": "drift",
       "op": "drift_correct",
       "produces": "overlay",
       "requirements": [
@@ -419,7 +419,7 @@
       ],
       "role": "overlay",
       "role_declared": "overlay",
-      "source": "src/pycat/toolbox/vpt_tools.py",
+      "source": "src/pycat/toolbox/vpt/drift.py",
       "summary": "Common-mode drift correction of tracks",
       "target": null
     },

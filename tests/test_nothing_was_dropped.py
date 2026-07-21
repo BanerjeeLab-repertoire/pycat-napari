@@ -244,6 +244,11 @@ _DELIBERATE = {
     'vpt_tools.py::viscosity_measurement',
     'vpt_tools.py::viscosity_from_diffusion',
     'vpt_tools.py::viscosity_interval_from_diffusion',
+    # 1.6.236 — vpt decomposition step 2: the ensemble drift-correction domain (drift_correct_com,
+    # reclassify_by_temporal_stability) MOVED verbatim to toolbox/vpt/drift.py; vpt_tools re-exports both.
+    # No number changed (drift tests pass). Keys vanished from vpt_tools.py by the move.
+    'vpt_tools.py::drift_correct_com',
+    'vpt_tools.py::reclassify_by_temporal_stability',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

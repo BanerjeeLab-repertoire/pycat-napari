@@ -1,3 +1,14 @@
+## [1.6.236] - 2026-07-21
+### Changed — **vpt decomposition step 2: the ensemble drift-correction domain moves out (byte-identical).**
+`drift_correct_com` (subtracts common-mode stage/sample drift so it is not read as bead diffusion) and
+`reclassify_by_temporal_stability` moved **verbatim** into `toolbox/vpt/drift.py`. `vpt_tools.py`
+re-exports both; no number changed, drift tests pass unmodified.
+
+- `drift_correct_com` is a registered navigator operation, so its catalog source updated from
+  `vpt_tools.py` to `vpt/drift.py` — the generated `operation_catalog.json` was regenerated (2 lines).
+- `vpt_tools.py` dropped **2585 -> 2429** lines; the per-file ceiling ratcheted to 2429. Moved keys in the
+  drop-guard's `_DELIBERATE`.
+
 ## [1.6.235] - 2026-07-21
 ### Changed — **vpt decomposition step 1: the Stokes-Einstein viscosity domain moves to its own module (byte-identical).**
 Begins decomposing the 2,834-line `vpt_tools.py` by domain. `viscosity_measurement`,
