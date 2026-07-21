@@ -1,6 +1,6 @@
 # Claude Code spec — CI hygiene + test-fixture correctness (audit's new findings)
 
-> **✅ STATUS — DONE, shipped in 1.6.222.** All three fixes landed. **Fix 1:** the stale core.yml comment
+> **✅ STATUS — DONE, shipped in 1.6.234.** All three fixes landed. **Fix 1:** the stale core.yml comment
 > (claiming the marker "selects only the two guard files") is corrected with the MEASURED number — the core
 > suite (~1,500 tests, 200+ marked files) covers **30% of pycat** (46,882 statements). Coverage is kept OFF
 > in CI for a real reason (it adds ~70% to the job's runtime, 4.5→7.5 min, and nothing consumes the report —

@@ -1,3 +1,16 @@
+## [1.6.234] - 2026-07-21
+### Fixed — **Three CI-hygiene / test-fixture correctness fixes (ci_hygiene_fixes).**
+- **Stale CI coverage comment corrected.** `core.yml` claimed the `core` marker "selects only the two guard
+  files, so coverage would be near-zero" — a fossil. Measured: the suite (~1,500 tests, 200+ marked files)
+  covers **30% of pycat**. The comment now states the real number; coverage stays off in CI for a real
+  reason (adds ~70% runtime with no report consumer), with the local command recorded.
+- **tifffile fixtures pinned to `minisblack`.** Two `imwrite` calls in `test_lazy_sources_headless.py` wrote
+  `(4,H,W)`/`(5,H,W)` arrays with no `photometric`, which a future tifffile default change could reinterpret
+  as RGBA planes — a latent test time-bomb. Now explicit grayscale (verified under `-W error`).
+- **`pywt` import deferred to function scope.** `from pywt import wavedecn, waverecn` moved out of
+  `image_processing_tools` module scope into the one wavelet function that uses it, so the 8 toolbox modules
+  that transitively import it no longer load PyWavelets on import (verified). Behaviour-identical.
+
 ## [1.6.233] - 2026-07-21
 ### Fixed — **A batch image whose consolidated-table append fails is no longer reported as a clean success (silent cohort corruption).**
 `exception_context_classification` spec, increment 1 — the batch_step category and its concrete offender.
@@ -227,19 +240,6 @@ pipeline that uses them, not just the fluorescence one the tester used.
   not-done marker is never solid green, done beats ready, only ready is outlined;
   `tests/test_status_markers.py` (`integration`) pins the widget wiring (ready-ring→green on run, cycling
   button no-green-on-click, optional→blue). No measurement or output changes — UX correctness only.
-
-## [1.6.222] - 2026-07-21
-### Fixed — **Three CI-hygiene / test-fixture correctness fixes (ci_hygiene_fixes).**
-- **Stale CI coverage comment corrected.** `core.yml` claimed the `core` marker "selects only the two guard
-  files, so coverage would be near-zero" — a fossil. Measured: the suite (~1,500 tests, 200+ marked files)
-  covers **30% of pycat**. The comment now states the real number; coverage stays off in CI for a real
-  reason (adds ~70% runtime with no report consumer), with the local command recorded.
-- **tifffile fixtures pinned to `minisblack`.** Two `imwrite` calls in `test_lazy_sources_headless.py` wrote
-  `(4,H,W)`/`(5,H,W)` arrays with no `photometric`, which a future tifffile default change could reinterpret
-  as RGBA planes — a latent test time-bomb. Now explicit grayscale (verified under `-W error`).
-- **`pywt` import deferred to function scope.** `from pywt import wavedecn, waverecn` moved out of
-  `image_processing_tools` module scope into the one wavelet function that uses it, so the 8 toolbox modules
-  that transitively import it no longer load PyWavelets on import (verified). Behaviour-identical.
 
 ## [1.6.221] - 2026-07-21
 ### Changed — **condensate_physics decomposition COMPLETE: the tools file is now a pure re-export shim (byte-identical).**
