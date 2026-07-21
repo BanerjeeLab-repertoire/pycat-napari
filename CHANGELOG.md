@@ -1,3 +1,15 @@
+## [1.6.219] - 2026-07-21
+### Changed — **condensate_physics decomposition step 3: three leaf domains move out (byte-identical).**
+Three independent domains moved verbatim into the `condensate_physics/` package: `intensity.py`
+(`fit_bimodal_intensity`, `intensity_decomposition_per_cell`), `survival.py` (`kaplan_meier_lifetimes`),
+and `relaxation.py` (`fit_aspect_ratio_relaxation`). The tools module re-exports all four for every caller.
+
+- Move, not rewrite — no fit or number changed; the intensity/survival/fusion tests pass unmodified. Moved
+  keys recorded in the drop-guard's `_DELIBERATE`; two cross-module helper imports (`_bbox_cols`,
+  `assess_fit`) carried into the new modules (caught by the undefined-name guard).
+- `condensate_physics_tools.py` dropped **1802 -> 1479** lines; the per-file ceiling ratcheted to 1479.
+  Remaining: MSD (the golden-master net) + moduli, then the shim.
+
 ## [1.6.218] - 2026-07-21
 ### Changed — **condensate_physics decomposition step 2: photobleaching + frame-quality domains move out (byte-identical).**
 Two coupled domains — `analyse_frame_quality` calls `fit_photobleaching` — moved together into

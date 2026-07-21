@@ -197,6 +197,16 @@ _DELIBERATE = {
     'condensate_physics_tools.py::_fit_linear_trend',
     'condensate_physics_tools.py::_norm_slope',
     'condensate_physics_tools.py::model',
+    # 1.6.219 — condensate_physics decomposition step 3: three independent leaf domains — intensity
+    # (fit_bimodal_intensity + intensity_decomposition_per_cell, nested `bimodal`), survival
+    # (kaplan_meier_lifetimes), and shape-relaxation (fit_aspect_ratio_relaxation) — MOVED verbatim to
+    # condensate_physics/{intensity,survival,relaxation}.py; the tools module re-exports all four. No number
+    # changed (the intensity/survival/fusion tests pass). These keys vanished by the move.
+    'condensate_physics_tools.py::fit_bimodal_intensity',
+    'condensate_physics_tools.py::intensity_decomposition_per_cell',
+    'condensate_physics_tools.py::bimodal',
+    'condensate_physics_tools.py::kaplan_meier_lifetimes',
+    'condensate_physics_tools.py::fit_aspect_ratio_relaxation',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
