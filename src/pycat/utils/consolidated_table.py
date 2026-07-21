@@ -262,6 +262,7 @@ class ConsolidatedLongWriter:
         self._header_written = False
         self.n_images = 0
         self.n_rows = 0
+        self._measurements_seen = set()   # feature vocabulary, for the provenance sidecar
 
     def add_image(self, image_stem, records, *, sample_metadata=None, provenance=None, masks=None):
         """Melt one image's objects and append them. Returns the number of rows written."""
@@ -272,6 +273,9 @@ class ConsolidatedLongWriter:
             masks=masks, qc=self.qc, qc_k=self.qc_k)
         # Reindex to the fixed schema so append can never drift a column.
         table = table.reindex(columns=self._columns)
+        if 'measurement' in table.columns:      # remember the features present, for the sidecar
+            self._measurements_seen.update(
+                str(m) for m in table['measurement'].dropna().unique())
 
         table.to_csv(self.path, mode=('w' if not self._header_written else 'a'),
                      header=not self._header_written, index=False)
@@ -279,6 +283,27 @@ class ConsolidatedLongWriter:
         self.n_images += 1
         self.n_rows += len(table)
         return len(table)
+
+    def write_provenance_sidecar(self):
+        """Write a provenance sidecar JSON beside the consolidated CSV — one entry per feature present,
+        with its units + ontology definition (where known) and the software versions — so provenance
+        travels WITH the exported table instead of living only in memory (feature_provenance, backlog B2).
+        No-op when no measurements were written; returns the sidecar path or None."""
+        if not self._measurements_seen:
+            return None
+        from pycat.utils.feature_provenance import compose_provenance, write_provenance_sidecar as _write
+        from pycat.utils.measurement_ontology import describe as _describe, units_for as _units_for
+        prov = {}
+        for m in sorted(self._measurements_seen):
+            params = {}
+            u = self.units.get(m) or _units_for(m)
+            if u:
+                params['units'] = u
+            d = _describe(m)
+            if d is not None:
+                params['definition'] = d.definition
+            prov[m] = compose_provenance(m, parameters=params)
+        return _write(self.path, prov)
 
     def summary(self) -> str:
         return (f"Consolidated table: {self.n_rows} rows from {self.n_images} image(s) "

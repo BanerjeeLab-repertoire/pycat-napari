@@ -311,6 +311,14 @@ class BatchWorker(QThread):
                 print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{tb}")
 
         print(f"[PyCAT Batch] {_consolidated.summary()}")
+        # A provenance sidecar (feature units/definitions + software versions) next to the CSV, so the
+        # consolidated table's reproducibility record travels with it (wire_orphans B2).
+        try:
+            _sidecar = _consolidated.write_provenance_sidecar()
+            if _sidecar:
+                print(f"[PyCAT Batch] Provenance sidecar -> {_sidecar}")
+        except Exception as _pexc:  # broad-ok: the sidecar is an additive extra; never fail the batch over it
+            print(f"[PyCAT Batch] provenance sidecar skipped: {_pexc}")
 
         # A sheet row that matched no image is a likely filename typo — warn once, don't crash.
         if _sample_resolver is not None:

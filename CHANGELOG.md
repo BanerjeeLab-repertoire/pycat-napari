@@ -1,3 +1,21 @@
+## [1.6.225] - 2026-07-21
+### Added — **The batch consolidated table now exports a provenance sidecar — wiring the orphaned `feature_provenance` export hook (backlog B2 complete).**
+`feature_provenance.write_provenance_sidecar` was built and tested but had no caller, so a consolidated
+table left no machine-readable record of what its features are or what software produced them. Now wired at
+the batch export:
+- `ConsolidatedLongWriter` tracks the feature vocabulary it writes and gains
+  `write_provenance_sidecar()`, which emits `consolidated_long_provenance.json` beside the CSV — one entry
+  per feature present, each carrying the software versions (filled automatically) and, for features in the
+  measurement ontology, their units + definition. Nothing is fabricated: an unknown feature gets no guessed
+  unit. No-op when no measurements were written.
+- `batch_processor` calls it once after the consolidated table is finalized (additive, best-effort — a
+  sidecar failure never fails the batch).
+- Tests (`core`): the sidecar is written beside the table keyed by feature, ontology features carry
+  units+definition while unknown ones do not, and the empty case writes nothing.
+- **This completes backlog B2** (wire the actionable orphans): `condensate_modes` (1.6.223), `czi_seam`
+  (1.6.224), and `feature_provenance` are now wired; `cohort_targets`'s histogram-brushing hook was already
+  wired in the feature-explorer dock.
+
 ## [1.6.224] - 2026-07-21
 ### Added — **CZI opens now run a non-blocking mosaic-seam QC — wiring the orphaned `czi_seam` module (backlog B2).**
 `file_io/czi_seam.py` (the pure, tested seam metric) was imported by nothing, so a returning tile-assembly

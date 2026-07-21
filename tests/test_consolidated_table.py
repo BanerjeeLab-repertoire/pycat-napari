@@ -204,3 +204,30 @@ def test_the_extractor_feeds_the_writer_end_to_end(tmp_path):
     got = pd.read_csv(path)
     assert len(got) == 4 and (got['genotype'] == 'WT').all()
     assert set(got['object_type']) == {'puncta'}
+
+
+# ── wire_orphans B2: the provenance sidecar travels with the exported consolidated table ──────────
+def test_the_provenance_sidecar_is_written_beside_the_table_keyed_by_feature(tmp_path):
+    """Exporting the consolidated table also writes a provenance sidecar JSON — one entry per feature
+    present, carrying software versions and (for ontology features) units + definition. This is what wires
+    the orphaned `feature_provenance.write_provenance_sidecar` into the batch export."""
+    import json
+    path = tmp_path / 'consolidated_long.csv'
+    w = ConsolidatedLongWriter(path, condition_fields=['g'])
+    w.add_image('img0', [('punctum', _wide(2))], sample_metadata=SampleMetadata({'g': 'x'}))
+
+    sidecar = w.write_provenance_sidecar()
+    assert sidecar is not None and sidecar.exists()
+    doc = json.loads(sidecar.read_text(encoding='utf-8'))
+    assert set(doc) == {'area', 'intensity'}                 # one entry per feature melted
+    assert doc['area']['feature'] == 'area'
+    assert doc['area']['software']                           # software_versions filled automatically
+    # 'area' IS an ontology feature → its units + definition ride along; 'intensity' is not → no fabrication
+    assert doc['area']['parameters'].get('units')
+    assert doc['area']['parameters'].get('definition')
+    assert 'units' not in doc['intensity']['parameters']     # honest: unknown feature gets no guessed unit
+
+
+def test_no_sidecar_when_no_measurements_were_written(tmp_path):
+    w = ConsolidatedLongWriter(tmp_path / 'empty.csv', condition_fields=['g'])
+    assert w.write_provenance_sidecar() is None

@@ -73,6 +73,13 @@ manifests load). *(The prior `session_persist_settings` spec is in-tree; this is
 it has NOT landed as of 1.6.203.)*
 
 ### B2. Wire the actionable orphaned modules  *(finished work, invisible)*
+> **✅ DONE (updated 2026-07-21, tree 1.6.225):** all four actionable orphans are wired —
+> `condensate_modes` (1.6.223), `czi_seam` (1.6.224), `feature_provenance` export sidecar (1.6.225,
+> `ConsolidatedLongWriter.write_provenance_sidecar` → `consolidated_long_provenance.json` beside the batch
+> CSV), and `cohort_targets`'s histogram-brushing hook (already wired in the feature-explorer dock;
+> `select_aggregate_row` remains available for the aggregate-table path when that view lands). Historical
+> detail below.
+>
 > **◐ PARTIAL (updated 2026-07-21, tree 1.6.223):** `condensate_modes` is now **WIRED** (shipped 1.6.223) —
 > both in-vitro whole-field-summary emitters (`invitro_fluor_ui`, `invitro_bf_ui`) call the new pure
 > `condensate_modes.annotate_summary_table`, so every emitted table carries its `condensate_mode` and a
