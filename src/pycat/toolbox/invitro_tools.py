@@ -162,6 +162,17 @@ def field_summary(
                     partition_coefficient=np.nan,
                     total_droplet_area_um2=0.0, field_area_um2=field_area_um2)
 
+    return _field_summary_metrics(props, image, bg_mask, cond_mask,
+                                  microns_per_pixel, field_area_um2)
+
+
+def _field_summary_metrics(props, image, bg_mask, cond_mask, microns_per_pixel, field_area_um2):
+    """The non-empty whole-field metrics — droplet sizes, phase intensities, and the honest-name
+    result dict (with the deprecated aliases kept for back-compat and the measured caveats on what
+    each quantity IS and is not: the area fraction is a projection not a volume fraction; the
+    intensity ratio is not a partition coefficient; the contrast is pedestal-exact but not
+    halo-immune)."""
+    n = len(props)
     areas_um2 = np.array([p.area * microns_per_pixel**2 for p in props])
     radii_um  = np.sqrt(areas_um2 / np.pi)
     total_area = float(areas_um2.sum())
@@ -236,6 +247,7 @@ def field_summary(
         total_droplet_area_um2=total_area,
         field_area_um2=field_area_um2,
     )
+
 
 
 # ---------------------------------------------------------------------------

@@ -182,7 +182,15 @@ _LONG_FUNCTION_LIMIT = 120
 # five result branches (stack-warn / absolute-good / refuse-na / info / flat-na) on pure-numpy/scipy inputs
 # (portable) and asserts exact status + value + diag scalars; the existing focus property tests pass
 # unmodified. Count 122 → 121.
-_MAX_LONG_FUNCTIONS = 121
+# 120. (2026-07-20) `field_summary` (invitro_tools), the 182-line in-vitro whole-field summary — dominated
+# by an ~80-line docstring and two large inline measured-caveat comments — had its non-empty compute + the
+# honest-name result dict extracted to `_field_summary_metrics(props, image, bg_mask, cond_mask,
+# microns_per_pixel, field_area_um2)`, leaving the orchestrator with the docstring, setup and the n == 0
+# empty branch (which deliberately carries a different key set). Pinned byte-identical by
+# `test_field_summary_is_byte_identical` (the exact populated dict — sizes, phase intensities, intensity
+# ratio, contrast, area fraction + deprecated aliases — AND the empty branch, which omits intensity_ratio /
+# dense_dilute_contrast); the existing halo/contrast property tests pass unmodified. Count 121 → 120.
+_MAX_LONG_FUNCTIONS = 120
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

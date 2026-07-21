@@ -158,3 +158,45 @@ def test_contrast_is_pedestal_exact_but_not_halo_immune():
         f"free to go back to calling the contrast 'exact' without qualification, and that "
         f"reassurance is what this test exists to prevent."
     )
+
+
+# ── Byte-identical characterization of field_summary (populated + empty branches) ─────────────────
+#
+# Pins the exact whole-field summary dict on a deterministic scene, so a phase-split of field_summary
+# (extracting the non-empty metrics into a helper) can be proven to move no number. Pure numpy/skimage,
+# so the golden values are platform-portable. Both branches: four droplets, and an empty field (n == 0).
+
+@pytest.mark.core
+def test_field_summary_is_byte_identical():
+    invitro = pytest.importorskip("pycat.toolbox.invitro_tools")
+    img, dense, _cell, _ped = _scene()
+
+    m = invitro.field_summary(dense, img, 0.1)
+    assert m['n_droplets'] == 4
+    for k, v in {
+        'bulk_intensity': 626.3103004823804,
+        'dense_dilute_contrast': 2560.0314667126086,
+        'dilute_phase_intensity': 626.3103004823804,
+        'field_area_um2': 400.00000000000006,
+        'intensity_ratio': 5.087481021373732,
+        'mean_droplet_intensity': 3186.341767194989,
+        'mean_radius_um': 1.2828336258339186,
+        'median_radius_um': 1.2828336258339186,
+        'number_density_per_um2': 0.009999999999999998,
+        'partition_coefficient': 5.087481021373732,
+        'projected_area_fraction': 0.0517,
+        'std_radius_um': 0.0,
+        'total_droplet_area_um2': 20.680000000000003,
+        'volume_fraction': 0.0517,
+    }.items():
+        assert np.isclose(m[k], v, atol=1e-9), f"{k}: {m[k]!r} != {v!r}"
+
+    # EMPTY field — the n == 0 branch. It deliberately omits intensity_ratio and dense_dilute_contrast.
+    e = invitro.field_summary(np.zeros((200, 200), np.int32), img, 0.1)
+    assert e['n_droplets'] == 0
+    assert np.isnan(e['mean_droplet_intensity']) and np.isnan(e['partition_coefficient'])
+    assert np.isclose(e['dilute_phase_intensity'], 758.6639273114222, atol=1e-9)
+    assert np.isclose(e['bulk_intensity'], 758.6639273114222, atol=1e-9)
+    assert e['projected_area_fraction'] == 0.0 and e['volume_fraction'] == 0.0
+    assert e['total_droplet_area_um2'] == 0.0
+    assert 'intensity_ratio' not in e and 'dense_dilute_contrast' not in e

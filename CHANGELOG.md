@@ -1,3 +1,21 @@
+## [1.6.209] - 2026-07-20
+### Changed — **Complexity ratchet 121 → 120: `field_summary` non-empty metrics extracted (byte-identical).**
+The 182-line in-vitro whole-field summary — dominated by an ~80-line docstring and two large inline
+measured-caveat comments — had its non-empty compute and result dict extracted into a helper, leaving the
+orchestrator with the docstring, setup, and the empty branch. No number moved.
+
+- **`_field_summary_metrics(props, image, bg_mask, cond_mask, microns_per_pixel, field_area_um2)`** carries
+  the droplet-size and phase-intensity metrics and the honest-name result dict — with its deprecated
+  aliases kept for back-compat and the measured caveats on what each quantity is and is not (the area
+  fraction is a 2-D projection, not a volume fraction; the intensity ratio is not a partition coefficient;
+  the dense/dilute contrast is pedestal-exact but not halo-immune). The `n == 0` empty branch (a different
+  key set — no `intensity_ratio` / `dense_dilute_contrast`) stays in the orchestrator.
+- **Pinned byte-identical** by a new `test_field_summary_is_byte_identical` — the exact populated dict and
+  the empty branch — on a deterministic four-droplet scene (pure numpy/skimage, portable). The existing
+  halo/contrast property tests pass unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 121 → 120 (the ratchet only moves down); recorded in the drop-guard's
+  `_DELIBERATE` set.
+
 ## [1.6.208] - 2026-07-20
 ### Changed — **Complexity ratchet 122 → 121: `qc_focus` split into its result-branch phases (byte-identical).**
 The 203-line focus/sharpness QC check — a big dispatch of result dicts with dense measured rationale — was

@@ -102,6 +102,12 @@ _DELIBERATE = {
     # with its rationale. Pinned byte-identical by `test_qc_focus_is_byte_identical` (all five result
     # branches); the existing focus property tests pass unmodified.
     'data_qc_tools.py::qc_focus',
+    # 1.6.209 — `field_summary` (the 182-line in-vitro whole-field summary) had its non-empty compute + the
+    # result dict extracted to `_field_summary_metrics`, leaving the orchestrator with the docstring, setup
+    # and the n == 0 empty branch. Nothing was removed: the metrics MOVED into a named helper with their
+    # measured caveats. Pinned byte-identical by `test_field_summary_is_byte_identical`; the halo/contrast
+    # property tests pass unmodified.
+    'invitro_tools.py::field_summary',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line
