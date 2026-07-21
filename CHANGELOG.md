@@ -1,3 +1,24 @@
+## [1.6.228] - 2026-07-21
+### Added — **Typed result models (backlog D3) — a result crossing a boundary is a TYPE, not a bare dict.**
+New `utils/result_models.py`: two frozen envelopes that formalize the results PyCAT passes between modules
+(brushing, batch replay, plotting, export) as free-form dicts today — where a renamed key is a runtime
+surprise, not a type error. **They compose existing types; they invent nothing.**
+- `AnalysisResult` (operation_id, entity_type, source_layer_ids, measurements table, artifacts, provenance,
+  calibration) — carries the `feature_provenance.FeatureProvenance` / `calibration.CalibrationCurve` PyCAT
+  already produces. **Validates at construction:** non-empty ids, and `measurements` must be a DataFrame or
+  None — never a bare dict (that is the drift the envelope exists to stop).
+- `BatchStepResult` (status, outputs, warnings, error) — `status` is one of `ok/warning/error/skipped`, and
+  `error` is a **typed `PyCATError`, never a string**. Status and error must AGREE: you cannot build a step
+  marked `error` with no error, or one carrying an error but claiming success.
+- Both are **frozen**; sequences coerce to tuples. `to_dict`/`from_dict` bridge to the dict form existing
+  code speaks, so a producer can emit the typed object while a not-yet-migrated consumer still reads a dict
+  (incremental, non-breaking adoption). The rich composed fields cross the serialization boundary in their
+  dict form; the in-memory model holds the real typed objects.
+- Tests (`core`, `test_result_models.py`): frozen + validation (unknown status, failed-step-without-error,
+  stringly-typed error, measurements bare-dict all refused), dict-boundary round-trip, composed-dataclass
+  serialization. Migrating the first consumers (brushing, batch, export) behind `to_dict`/`from_dict` is the
+  follow-on — nothing breaks meanwhile.
+
 ## [1.6.227] - 2026-07-21
 ### Added — **A first-class biological object graph, increment 1 (backlog C2) — objects + parent/child, read-only.**
 New `utils/object_graph.py`: every detected object as a persistent identity with a graph over it, instead of

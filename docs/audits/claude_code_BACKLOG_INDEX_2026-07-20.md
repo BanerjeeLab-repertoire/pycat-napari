@@ -171,6 +171,13 @@ Gate for flipping: no validated numerical result differs between 3.12 and 3.13. 
 - Classifier → `4 - Beta` until the install matrix + 3.13 lane are green.
 
 ### D3. Typed result models
+> **◐ MODELS DONE (shipped 1.6.228); consumer migration is the follow-on.** `utils/result_models.py` is
+> built + `core`-tested: frozen `AnalysisResult` (composes the measurements table + `FeatureProvenance` +
+> `CalibrationCurve`; refuses empty ids and a bare-dict measurements) and `BatchStepResult` (status ∈
+> ok/warning/error/skipped; `error` a typed `PyCATError`; status↔error must agree). Both validate at
+> construction and bridge via `to_dict`/`from_dict` (dict form at the serialization boundary). Migrating the
+> first consumers (brushing, batch replay, publication export) onto the models behind the adapters is the
+> remaining, non-breaking work.
 **Verified missing:** `utils/result_models.py`. Frozen `AnalysisResult` (operation_id, source_layer_ids,
 entity_type, measurements, artifacts, provenance, calibration) + `BatchStepResult`
 (status Literal, outputs, warnings, error: PyCATError|None). **Envelopes composing existing types**
