@@ -1,3 +1,19 @@
+## [1.6.214] - 2026-07-21
+### Changed — **invitro decomposition step 2: the partition-coefficient domain moves to its own module (byte-identical).**
+The calibration-sensitive quantitative core — `partition_coefficient_local` and its `_pc_*` phase helpers,
+the assumptions-scoped `partition_measurement`, the no-cell-mask `partition_coefficient_field`, and the
+dilution-series `estimate_phase_boundary` — moved **verbatim** into `toolbox/invitro/partition.py`.
+
+- **`invitro_tools.py` re-exports** the four public entry points, so every caller (invitro fluor/BF UIs,
+  `batch/steps/invitro_steps.py`, `timeseries_invitro_tools.py`) imports them unchanged. Move, not rewrite
+  — no background handling, fit, or reported K_p changed.
+- **Byte-identical:** `test_partition`, `test_partition_local_characterization`,
+  `test_partition_measurement_characterization`, and the calibration/ΔG net pass. One test's monkeypatch
+  target was updated to follow the moved `napari_show_warning` binding (assertions and values unchanged —
+  the OVER-INCLUSIVE mask warning still fires). Moved keys recorded in the drop-guard's `_DELIBERATE`.
+- `invitro_tools.py` dropped **1623 → 799** lines; the per-file ceiling ratcheted to 799. Remaining domains
+  (field_summary, coarsening/C_sat, contact-angle, fusion, sedimentation) follow in later commits.
+
 ## [1.6.213] - 2026-07-21
 ### Changed — **invitro decomposition step 1: the size-distribution domain moves to its own module (byte-identical).**
 Begins decomposing the 2,051-line `invitro_tools.py` by analysis domain. The MLE size-distribution path —

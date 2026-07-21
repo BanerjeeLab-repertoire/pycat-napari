@@ -1,7 +1,15 @@
 # Claude Code spec — Decompose `invitro_tools.py` by domain
 
-> **◐ STATUS — Step 1 (size_distribution) DONE (1.6.213); partition / field_summary / spatial / analysis
-> remain.** The `toolbox/invitro/` package exists; `size_distribution.py` holds the MLE model-selection
+> **◐ STATUS — Steps 1–2 (size_distribution, partition) DONE (1.6.213–1.6.214); field_summary + the
+> remaining sections remain.** Step 2: the calibration-sensitive partition-coefficient domain
+> (`partition_coefficient_local` + `_pc_*` helpers + `partition_measurement` + `partition_coefficient_field`
+> + `estimate_phase_boundary`) moved VERBATIM to `toolbox/invitro/partition.py`, re-exported for callers;
+> byte-identical (test_partition* + the calibration/ΔG net pass). One test's monkeypatch target was updated
+> to the moved module (assertions/values unchanged — the OVER-INCLUSIVE warning still fires). `invitro_tools`
+> dropped 1623→799; the per-file ceiling ratcheted to 799. **Remaining:** field_summary + the smaller
+> sections (coarsening, C_sat, contact-angle, fusion, sedimentation) — one domain per commit.
+>
+> _Step 1 (1.6.213):_ The `toolbox/invitro/` package exists; `size_distribution.py` holds the MLE model-selection
 > path (`fit_size_distribution_mle` + `fit_size_distribution` + the phase helpers), moved VERBATIM from
 > `invitro_tools`, which now re-exports the two public entry points so every caller (invitro UIs, batch
 > steps, the op-catalog api string) is unchanged. Byte-identical — `test_size_distribution_mle_characterization`

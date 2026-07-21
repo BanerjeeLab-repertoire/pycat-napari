@@ -155,6 +155,16 @@ _DELIBERATE = {
     'invitro_tools.py::_add',
     'invitro_tools.py::_pointwise',
     'invitro_tools.py::lognormal_pdf',
+    # 1.6.214 — the partition-coefficient domain (partition_coefficient_local + _pc_* helpers +
+    # partition_measurement + partition_coefficient_field + estimate_phase_boundary, with their nested
+    # _fit / _hinge / _resid) MOVED verbatim to `toolbox/invitro/partition.py`; invitro_tools re-exports the
+    # four public entry points. No K_p, background, or fit changed (pinned by test_partition* +
+    # calibration/ΔG tests). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::partition_coefficient_field',
+    'invitro_tools.py::estimate_phase_boundary',
+    'invitro_tools.py::_fit',
+    'invitro_tools.py::_hinge',
+    'invitro_tools.py::_resid',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
