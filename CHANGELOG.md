@@ -1,3 +1,20 @@
+## [1.6.239] - 2026-07-21
+### Changed — **vpt decomposition COMPLETE (steps 5-6): vpt_tools.py is now a pure re-export shim.**
+The last two domains moved out **verbatim**: bead-population routing (`split_bead_populations`,
+`select_bead_population`, `aggregate_population_stats`) to `toolbox/vpt/populations.py`, and the
+`run_vpt_analysis` orchestrator (+ `_link` linker dispatch, `compare_detection_variants` sweep) to
+`toolbox/vpt/analysis.py`.
+
+- **`vpt_tools.py`: 2834 → 95 lines (-97%)** across the six steps (viscosity 1.6.235, drift 1.6.236,
+  host 1.6.237, detection 1.6.238, populations + analysis 1.6.239). It now contains **no function
+  definitions** — only re-exports of the `toolbox/vpt/` package, so every historical import path
+  (`from pycat.toolbox.vpt_tools import …`) keeps working unchanged.
+- Byte-identical throughout: the golden-master MSD→D→viscosity chain (~8.325 on the real bead file) and
+  the GPU / CPU-parallel equivalence guards are the net, all green. Revert condition unchanged: any drift
+  in detect_beads_stack's output/order or the viscosity number.
+- Ceilings ratcheted: `vpt_tools.py` → 95 (locked at shim size); `vpt/detection.py` 1773, `vpt/analysis.py`
+  228 get their own concentration ceilings. This closes the vpt_decomposition audit spec.
+
 ## [1.6.238] - 2026-07-21
 ### Changed — **vpt decomposition step 4: the entire bead-detection stack moves out (byte-identical).**
 The whole detection domain — LoG blob detection (CPU + GPU), Airy/template PSF scoring, hot-pixel masking,

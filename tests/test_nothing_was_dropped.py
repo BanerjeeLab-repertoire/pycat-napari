@@ -303,6 +303,19 @@ _DELIBERATE = {
     'vpt_tools.py::local_intensity',
     'vpt_tools.py::score_beads_template',
 
+    # 1.6.239 — vpt decomposition steps 5-6 (FINAL): the bead-population routing
+    # (split_bead_populations/select_bead_population/aggregate_population_stats) MOVED to
+    # toolbox/vpt/populations.py, and the run_vpt_analysis orchestrator (+ _link dispatch,
+    # compare_detection_variants sweep) MOVED to toolbox/vpt/analysis.py — both byte-identical. With these,
+    # vpt_tools.py is a PURE re-export shim (95 lines, no defs) over the toolbox/vpt/ package. These keys
+    # vanished from vpt_tools.py by the moves; the shim re-exports each (+ _link, imported by vpt_ui).
+    'vpt_tools.py::split_bead_populations',
+    'vpt_tools.py::select_bead_population',
+    'vpt_tools.py::aggregate_population_stats',
+    'vpt_tools.py::run_vpt_analysis',
+    'vpt_tools.py::_link',
+    'vpt_tools.py::compare_detection_variants',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was
