@@ -1,3 +1,23 @@
+## [1.6.238] - 2026-07-21
+### Changed — **vpt decomposition step 4: the entire bead-detection stack moves out (byte-identical).**
+The whole detection domain — LoG blob detection (CPU + GPU), Airy/template PSF scoring, hot-pixel masking,
+ring-merge dedup, bead classification, the `detect_beads_stack` orchestrator with its GPU/CPU-parallel
+backend chooser, and the two linking-condition probes (`assess_linking_conditions`,
+`estimate_linking_distance_um`) — moved **verbatim** (1754 lines) into `toolbox/vpt/detection.py`.
+
+- **Not a single detection or its order changed** — this is the validated detection path and downstream
+  linking is order-sensitive (revert condition: any change to detect_beads_stack's output or the parallel /
+  GPU equivalence guards). The linking probes are folded in because they *run* detection and are coupled to
+  it. `vpt_tools.py` re-exports every public entry point plus the two private helpers the
+  parallel-equivalence test imports.
+- `detect_beads_stack` is a registered navigator op → `operation_catalog.json` regenerated (its source
+  updated to `vpt/detection.py`).
+- Two VPT tests had their module alias repointed from `vpt_tools` to `vpt.detection` so their
+  `monkeypatch.setattr` targets bind the module the internal bare-name calls now resolve against
+  (`test_vpt_pool_gate`, `test_vpt_equivalence_guard_memo`) — assertions and pinned numbers unchanged.
+- `vpt_tools.py` dropped **2155 -> 405** lines (-81%); the per-file ceiling ratcheted to 405, and
+  `detection.py` got its own ceiling at 1773. Only population routing + `run_vpt_analysis` remain.
+
 ## [1.6.237] - 2026-07-21
 ### Changed — **vpt decomposition step 3: the host-condensate domain moves out (byte-identical).**
 `segment_host_condensate`, `erode_host_mask`, and `infer_host_from_beads` (the Mode-C host reconstruction

@@ -1,6 +1,9 @@
 # Claude Code spec — Decompose `vpt_tools.py` scientific core by domain
 
-> **◐ STATUS — Steps 1–3 (viscosity, drift, host) DONE (1.6.235–1.6.237); detection / linking / analysis remain.**
+> **◐ STATUS — Steps 1–4 (viscosity, drift, host, detection) DONE (1.6.235–1.6.238); the whole detection
+> stack + both linking-condition probes now live in `toolbox/vpt/detection.py` (linking folded in — the two
+> probes run detection and are order-coupled to it). vpt_tools.py is 405 lines; population routing + the
+> run_vpt_analysis orchestrator remain.**
 > The Stokes-Einstein viscosity domain (`viscosity_measurement`, `viscosity_from_diffusion`,
 > `viscosity_interval_from_diffusion` + the `_K_BOLTZMANN` constant) moved VERBATIM to `toolbox/vpt/viscosity.py`,
 > re-exported for callers (vpt_ui, tests). Byte-identical — the golden-master viscosity chain (viscosity to

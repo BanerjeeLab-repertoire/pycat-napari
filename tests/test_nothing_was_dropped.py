@@ -258,6 +258,51 @@ _DELIBERATE = {
     'vpt_tools.py::infer_host_from_beads',
     'vpt_tools.py::_fit_clipped_radius',
 
+    # 1.6.238 — vpt decomposition step 4: the ENTIRE bead-detection stack (LoG CPU+GPU blob detection,
+    # Airy/template PSF scoring, hot-pixel masking, ring-merge dedup, the detect_beads_stack orchestrator
+    # with its GPU/CPU-parallel backend chooser, and the two linking-condition probes) MOVED verbatim to
+    # toolbox/vpt/detection.py — 1754 lines, byte-identical, not a single detection or its order changed.
+    # vpt_tools re-exports every public entry point plus the two private helpers the parallel-equivalence
+    # test imports. detect_beads_stack is a registered op → catalog regenerated. These keys (incl. the
+    # nested closures _fit_sigma/_key/_time/g/local_intensity) vanished from vpt_tools.py by the move.
+    'vpt_tools.py::_assemble_detections',
+    'vpt_tools.py::_bead_first_frame',
+    'vpt_tools.py::_bead_hot_mask',
+    'vpt_tools.py::_bead_source_descriptor',
+    'vpt_tools.py::_choose_detection_backend',
+    'vpt_tools.py::_choose_detection_tier',
+    'vpt_tools.py::_classify_fast_template',
+    'vpt_tools.py::_classify_fast_template_refs',
+    'vpt_tools.py::_classify_gaussian_fit',
+    'vpt_tools.py::_detect_all_frames',
+    'vpt_tools.py::_detect_frame_worker',
+    'vpt_tools.py::_fast_frame_rows',
+    'vpt_tools.py::_fit_sigma',
+    'vpt_tools.py::_frame_costs_s',
+    'vpt_tools.py::_gpu_build_id',
+    'vpt_tools.py::_key',
+    'vpt_tools.py::_pool_predetect',
+    'vpt_tools.py::_pool_spawn_cost_s',
+    'vpt_tools.py::_pool_speedup',
+    'vpt_tools.py::_precise_frame_rows',
+    'vpt_tools.py::_read_frame_from_descriptor',
+    'vpt_tools.py::_run_gpu_equivalence_check',
+    'vpt_tools.py::_time',
+    'vpt_tools.py::assess_linking_conditions',
+    'vpt_tools.py::bead_half_from_size',
+    'vpt_tools.py::blob_log_gpu',
+    'vpt_tools.py::build_airy_template',
+    'vpt_tools.py::build_bead_template',
+    'vpt_tools.py::build_hot_pixel_mask',
+    'vpt_tools.py::dedup_detections',
+    'vpt_tools.py::dedup_detections_ring_merge',
+    'vpt_tools.py::detect_beads_frame',
+    'vpt_tools.py::estimate_linking_distance_um',
+    'vpt_tools.py::g',
+    'vpt_tools.py::gpu_matches_cpu',
+    'vpt_tools.py::local_intensity',
+    'vpt_tools.py::score_beads_template',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was

@@ -25,13 +25,13 @@
         "image"
       ],
       "kind": "toolbox",
-      "module": "vpt_tools",
+      "module": "detection",
       "op": "bead_detect",
       "produces": "overlay",
       "requirements": [],
       "role": "overlay",
       "role_declared": "overlay",
-      "source": "src/pycat/toolbox/vpt_tools.py",
+      "source": "src/pycat/toolbox/vpt/detection.py",
       "summary": "Bead detection across a stack (blob LoG)",
       "target": "bead"
     },
