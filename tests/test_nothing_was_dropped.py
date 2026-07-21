@@ -165,6 +165,18 @@ _DELIBERATE = {
     'invitro_tools.py::_fit',
     'invitro_tools.py::_hinge',
     'invitro_tools.py::_resid',
+    # 1.6.216 — the remaining in-vitro analysis sections (coarsening_statistics, estimate_csat_lever_rule,
+    # estimate_contact_angle, detect_and_fit_fusions, detect_sedimentation, with their nested
+    # _circle_residuals / _slope_r2) MOVED verbatim to `toolbox/invitro/analysis.py`; invitro_tools re-exports
+    # all five and is now a pure shim over the invitro/ package. No number changed (existing in-vitro tests
+    # are the net). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::coarsening_statistics',
+    'invitro_tools.py::estimate_csat_lever_rule',
+    'invitro_tools.py::estimate_contact_angle',
+    'invitro_tools.py::detect_and_fit_fusions',
+    'invitro_tools.py::detect_sedimentation',
+    'invitro_tools.py::_circle_residuals',
+    'invitro_tools.py::_slope_r2',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

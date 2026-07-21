@@ -1,3 +1,17 @@
+## [1.6.216] - 2026-07-21
+### Changed — **invitro decomposition COMPLETE: `invitro_tools.py` is now a pure re-export shim (byte-identical).**
+The final domains — coarsening kinetics (`coarsening_statistics`), critical-concentration estimation
+(`estimate_csat_lever_rule`), contact-angle geometry (`estimate_contact_angle`), fusion detection
+(`detect_and_fit_fusions`), and sedimentation correction (`detect_sedimentation`) — moved **verbatim** into
+`toolbox/invitro/analysis.py`.
+
+- **`invitro_tools.py` is now an 88-line re-export shim** (from 2051, −96%) over the `toolbox/invitro/`
+  package: `size_distribution.py`, `partition.py`, `field_summary.py`, `analysis.py`. Every previously-public
+  name is re-exported, so all callers (invitro UIs, batch steps, timeseries, op-catalog) import unchanged.
+- **Byte-identical:** no fit, background, threshold, or reported number changed across the whole
+  decomposition; the existing in-vitro tests are the net. Moved keys recorded in the drop-guard's
+  `_DELIBERATE`; the per-file ceiling ratcheted 2051 → 88. Full `pytest -m core` green.
+
 ## [1.6.215] - 2026-07-21
 ### Changed — **invitro decomposition step 3: the whole-field summary moves to its own module (byte-identical).**
 `field_summary` and `_field_summary_metrics` — per-field droplet-size and phase-intensity statistics with

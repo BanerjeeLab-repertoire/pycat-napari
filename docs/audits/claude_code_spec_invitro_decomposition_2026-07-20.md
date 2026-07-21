@@ -1,14 +1,17 @@
 # Claude Code spec — Decompose `invitro_tools.py` by domain
 
-> **◐ STATUS — Steps 1–3 (size_distribution, partition, field_summary) DONE (1.6.213–1.6.215); the small
-> remaining sections remain.** Step 3: the whole-field summary (`field_summary` + `_field_summary_metrics`)
-> moved to `toolbox/invitro/field_summary.py`, re-exported; byte-identical (`test_field_summary_is_byte_identical`
-> + enrichment/halo tests pass). `invitro_tools` dropped 799→605; ceiling ratcheted to 605. **Remaining:**
-> the smaller sections — coarsening_statistics, estimate_csat_lever_rule, estimate_contact_angle,
-> detect_and_fit_fusions, detect_sedimentation — to a final `analysis.py`/domain module, then `invitro_tools`
-> is a pure shim.
+> **✅ STATUS — DONE (1.6.213–1.6.216). `invitro_tools.py` is now a pure 88-line re-export shim (from 2051,
+> −96%).** Every domain moved to the `toolbox/invitro/` package: `size_distribution.py` (MLE model
+> selection), `partition.py` (the calibration-sensitive K_p family), `field_summary.py` (whole-field
+> summary), and `analysis.py` (coarsening, C_sat, contact-angle, fusion, sedimentation). Each domain moved
+> VERBATIM — no fit, background, threshold, or reported number changed — pinned by the existing
+> characterization + calibration/ΔG + partition + enrichment/halo tests (one monkeypatch target updated to
+> follow the moved `napari_show_warning` binding, assertions unchanged). Every previously-public name is
+> re-exported so callers (invitro UIs, batch steps, timeseries, op-catalog) are untouched; all moves recorded
+> in the drop-guard's `_DELIBERATE`; the per-file ceiling ratcheted 2051→88. Full `pytest -m core` green
+> throughout.
 >
-> _Steps 1–2 (1.6.213–1.6.214):_ Step 2: the calibration-sensitive partition-coefficient domain
+> _History (1.6.213–1.6.215):_ Step 2: the calibration-sensitive partition-coefficient domain
 > (`partition_coefficient_local` + `_pc_*` helpers + `partition_measurement` + `partition_coefficient_field`
 > + `estimate_phase_boundary`) moved VERBATIM to `toolbox/invitro/partition.py`, re-exported for callers;
 > byte-identical (test_partition* + the calibration/ΔG net pass). One test's monkeypatch target was updated

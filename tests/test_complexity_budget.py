@@ -282,10 +282,10 @@ _FILE_LINE_CEILINGS = {
     # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
     # a source-level test) stay. Ratchet moves down only.
     "batch_step_registry.py": 432,
-    # 2051 -> 1623 (size_distribution, 1.6.213) -> 799 (partition, 1.6.214) -> 605 (field_summary, 1.6.215):
-    # domains moved to toolbox/invitro/{size_distribution,partition,field_summary}.py. The ceiling ratchets
-    # DOWN as the remaining sections (coarsening/C_sat, contact-angle, fusion, sedimentation) move out.
-    "toolbox/invitro_tools.py": 605,
+    # 2051 -> 1623 -> 799 -> 605 -> 88: the full invitro decomposition (1.6.213-1.6.216) moved every domain
+    # to toolbox/invitro/{size_distribution,partition,field_summary,analysis}.py. invitro_tools.py is now a
+    # pure re-export shim (-96%). The ceiling is locked at the shim size.
+    "toolbox/invitro_tools.py": 88,
 }
 
 
