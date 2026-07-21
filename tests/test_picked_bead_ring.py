@@ -130,6 +130,11 @@ class _Viewer:
         self.layers.append(l)
         return l
 
+    def add_tracks(self, data, **kw):
+        l = _Layer(data, **kw)
+        self.layers.append(l)
+        return l
+
 
 def _hub(viewer):
     from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
@@ -237,58 +242,77 @@ def test_the_overlay_is_NEVER_accumulated(immediate_qtimer):
     assert len(rings) == 1, f'{len(rings)} ring layers after 3 picks'
 
 
-# ── the pulse ────────────────────────────────────────────────────────────────
+# ── the ring is STATIC (1.6.104) ──────────────────────────────────────────────
+#
+# The ring used to pulse — a QTimer oscillated its size/opacity. Removed: a per-frame ring is only
+# present on the bead's own frame, so scrubbing away from that frame left nothing to glow while the
+# opacity slider churned on for nothing (viewer report). The zoom-to-bead navigation draws the eye
+# now; the ring just marks the spot at a fixed size/opacity.
 
-def test_the_pulse_changes_SIZE_and_OPACITY_only(immediate_qtimer):
-    """Display state, never the data. An overlay that edits pixels is not an overlay."""
+def test_the_ring_has_a_FIXED_size_and_opacity(immediate_qtimer):
+    """No timer, no oscillation — a plain marker at a steady size and opacity."""
     v = _Viewer(ndim=3)
     _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
     ring = v.layers['Picked bead']
-    before = ring.data.copy()
-
-    timer = immediate_qtimer[-1]
-    seen = set()
-    for _ in range(6):
-        timer.fire()
-        seen.add((ring.size, ring.opacity))
-
-    assert len(seen) > 1, 'the ring never changed — it is not pulsing'
-    assert np.array_equal(ring.data, before), 'the pulse moved the data'
+    assert ring.size == 12
+    assert ring.opacity == 0.9
 
 
-def test_the_pulse_touches_ONLY_the_overlay_layer(immediate_qtimer):
-    """Never the image/labels layer — the caution the spec is explicit about."""
+def test_NO_pulse_timer_is_armed_by_a_pick(immediate_qtimer):
+    """The pulse is gone: drawing the ring must not start any QTimer. A running timer would be the old
+    repaint-for-nothing coming back."""
     v = _Viewer(ndim=3)
-    img = v.layers['movie']
     _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
-
-    before = (img.scale, getattr(img, 'size', None), getattr(img, 'opacity', None))
-    for _ in range(6):
-        immediate_qtimer[-1].fire()
-
-    assert (img.scale, getattr(img, 'size', None),
-            getattr(img, 'opacity', None)) == before, 'the pulse touched the image layer'
-
-
-def test_only_ONE_pulse_timer_survives_repeated_picks(immediate_qtimer):
-    """A timer per click would accumulate, and each would pin a dead layer alive."""
-    v = _Viewer(ndim=3)
-    hub = _hub(v)
-    for _ in range(3):
-        hub._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
 
     running = [t for t in immediate_qtimer if t.started and not t.stopped]
-    assert len(running) == 1, f'{len(running)} pulse timers still running'
+    assert running == [], f'{len(running)} timers armed — the pulse was not removed'
 
 
-def test_the_pulse_STOPS_when_the_ring_is_deleted(immediate_qtimer):
-    """The user can always delete an overlay. A timer writing to a removed layer
-    would raise on every tick, forever."""
+# ── the picked track: same layer type as the base, 2× its width (1.6.105) ─────
+#
+# The overlay was a Shapes path with a data-unit `edge_width`, which ballooned at the deep
+# zoom-to-bead and buried the trajectory detail. It is a Tracks layer now — same type as the base
+# "Bead Trajectories", so its width is in screen pixels and stays put across zoom — at 2× the base
+# width so it stands out while still reading as a fine line. (Viewer feedback.)
+
+def test_the_picked_track_width_is_TWICE_the_base(immediate_qtimer):
+    from pycat.toolbox.vpt_ui import VideoParticleTrackingUI as V
+    assert V._PICKED_TRACK_TAIL_WIDTH == 2.0 * V._BASE_TRACK_TAIL_WIDTH
+
+
+def test_the_picked_track_is_a_TRACKS_layer_at_the_picked_width(immediate_qtimer):
+    """Not a Shapes path (data-unit width that balloons on zoom) — a Tracks layer, `tail_width` in
+    screen pixels, so the deep zoom-to-bead does not fatten it over the detail."""
+    v = _Viewer(ndim=3)
+    hub = _hub(v)
+    hub._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
+    track = v.layers['Picked track']
+    assert 'tail_width' in track.kw, 'the picked track is not a Tracks layer'
+    assert track.kw['tail_width'] == hub._PICKED_TRACK_TAIL_WIDTH
+
+
+def test_the_picked_track_is_ORANGE(immediate_qtimer):
+    """The user confirmed the orange; a Tracks layer colours via a registered colormap name."""
     v = _Viewer(ndim=3)
     _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
-    timer = immediate_qtimer[-1]
 
-    v.layers.remove('Picked bead')
-    timer.fire()
+    track = v.layers['Picked track']
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+    name = track.kw.get('colormap')
+    assert name in AVAILABLE_COLORMAPS, f'picked-track colormap {name!r} is not registered'
+    # a flat orange ramp — first stop is #ff8c00
+    stop = AVAILABLE_COLORMAPS[name].colors[0]
+    assert tuple(round(float(c), 2) for c in stop[:3]) == (1.0, 0.55, 0.0)
 
-    assert timer.stopped, 'the pulse kept running after its layer was deleted'
+
+def test_the_picked_track_spans_the_WHOLE_track_at_any_frame(immediate_qtimer):
+    """`tail_length`/`head_length` cover the track's frame span, so it is fully drawn even at the
+    bead's first frame (a default Tracks layer would show almost nothing there)."""
+    v = _Viewer(ndim=3)
+    _hub(v)._draw_picked_track(_PATH, _FRAMES, 1.0, 1.0, 1.0)
+
+    track = v.layers['Picked track']
+    span = int(_FRAMES.max() - _FRAMES.min()) + 1
+    assert track.kw['tail_length'] >= span and track.kw['head_length'] >= span

@@ -1,0 +1,93 @@
+# Claude Code spec — General publication-figure features (the workstation gap)
+
+**Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
+audit's §8: the figure system is strong for simple grouped scatter/comparison plots but is *"not yet a
+complete general publication-figure workstation."* This spec fills the missing controls. **It must land
+after the FigureSpec merge** — these features attach to the canonical model, and building them against
+two specs would double the work and the bugs.
+
+## Prerequisite
+The two `FigureSpec` implementations must be merged first (companion spec). These features extend the
+canonical `FigureSpec`'s sub-specs (`layout`, `axes`, `marks`, `annotations`, `export`). Verified: the
+current render path is single-axis (`figure_spec.py:107` — `fig.add_subplot(111)`), so multi-panel is
+genuinely absent.
+
+## The missing controls, grouped by sub-spec
+Implement in priority tiers; each tier ships independently so value lands incrementally.
+
+### Tier 1 — the ones reviewers notice immediately
+- **Log / symlog scales** (`AxesSpec.scale`) — condensate size and intensity distributions are often
+  log-normal; a linear axis misrepresents them. Include symlog for data crossing zero.
+- **Major/minor tick control + scientific notation** with exponent positioning — currently absent;
+  default matplotlib ticks look unfinished in print.
+- **Consistent significance annotation** — the merge wires one implementation; this exposes bracket
+  placement, comparison pairs, and stars-vs-p-values through the UI. (The audit notes the two modules
+  disagree today; the merge fixes the model, this exposes the controls.)
+- **Error / confidence representation** (`MarkSpec`) — error bars, CIs, SEM/SD choice with the choice
+  labelled. A comparison figure without stated error is not publishable.
+
+### Tier 2 — layout and legibility
+- **Multi-panel layout + panel labels (A, B, C)** — the single-axis render becomes a grid; panel labels
+  are the standard figure requirement. This is the biggest structural change (touches `LayoutSpec` and
+  the render loop).
+- **Legend placement/formatting** — position, columns, frame on/off.
+- **Font family selection with availability validation** — offer families, but **validate the font is
+  installed and warn/fall back** rather than silently substituting (a silent substitution changes the
+  figure between machines).
+- **Transparent vs white background** (`ExportSpec`).
+
+### Tier 3 — polish and fidelity
+- **Line/marker/error-bar specification** (`MarkSpec` detail).
+- **Rasterize dense scatter inside vector output** — a 50k-point scatter as vector is a huge unusable
+  PDF; rasterize the points layer while keeping axes/text vector. Important and specific.
+- **Semantic colour mapping** — colour tied to group identity consistently across figures (a condition
+  keeps its colour everywhere).
+- **Arbitrary annotation/callout placement.**
+- **Export metadata** — software/version + provenance embedded in the file metadata.
+- **Exact regeneration from raw plotted data** (not only summary) — store enough to reproduce the exact
+  figure, strengthening reproducibility beyond the summary CSV.
+- **Image panels + scale bars + microscopy overlays** — for figures that combine a micrograph with
+  plots (the biggest new surface; can be its own follow-on).
+
+## Design discipline
+- **Every feature is a field on a sub-spec + handling in `render`.** No feature bypasses the spec; the
+  spec must remain the complete, serializable description of the figure (so `refine` and JSON
+  round-trip keep working).
+- **Defaults must be publication-sane** — a user who sets nothing still gets a clean figure. Features
+  are opt-in refinements, not required knobs.
+- **Validate and warn, don't silently substitute** — missing font, impossible axis limit, a log scale
+  on data with zeros: warn with the consequence, fall back predictably.
+
+## Tests (`core`, matplotlib Agg)
+- Each Tier-1 feature: setting the field changes the rendered figure as specified (log scale actually
+  log; error bars present with the stated type; significance brackets on the right pairs).
+- Multi-panel: a 2×2 spec produces four panels with correct labels; a single-panel spec is unchanged.
+- Font validation: an unavailable font warns and falls back deterministically (not silently).
+- Rasterized dense scatter: the vector output embeds a raster points layer but vector axes/text (assert
+  the artist rasterization flag).
+- Spec round-trips through JSON with every new field.
+- `refine` applies any new field without recomputing analysis (the retained contract).
+- Export metadata contains the PyCAT version and provenance.
+
+## Steps
+1. (After the merge) Tier 1 fields + render handling; tests.
+2. Tier 2 (multi-panel is the large one) + tests.
+3. Tier 3 polish + tests, with image-panels/scale-bars as an optional final follow-on.
+4. Full `pytest -m core` green after each tier.
+5. Ship each tier as its own version + PyPI push + commit (EXPLICIT filenames) + CHANGELOG.
+
+## Definition of done
+- Log/symlog scales, tick control, consistent significance, and error representation exist (Tier 1).
+- Multi-panel layout with labels, legend control, validated fonts, background choice (Tier 2).
+- Dense-scatter rasterization, semantic colour, callouts, export metadata, exact-regeneration, and
+  (optionally) image panels/scale bars (Tier 3).
+- Every feature is a spec field honoured by `render`, round-trips through JSON, and works with `refine`.
+- Full `pytest -m core` green.
+
+## Cautions
+- **Merge the two FigureSpecs first** — building these against two models doubles the work and the bugs.
+- **Every feature goes through the spec** — nothing bypasses it, or `refine`/JSON round-trip breaks.
+- **Validate and warn, never silently substitute** — a silently swapped font or clipped axis changes
+  the figure invisibly between machines.
+- Publication-sane defaults — features are opt-in; a bare spec still yields a clean figure.
+- Ship in tiers; a single mega-commit adding a dozen controls is un-reviewable and un-bisectable.

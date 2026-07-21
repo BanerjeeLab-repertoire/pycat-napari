@@ -165,6 +165,16 @@ def _empty_config() -> Dict:
     }
 
 
+def _batch_pycat_version() -> str:
+    """The installed ``pycat-napari`` version, for per-row provenance in the consolidated table.
+    Returns ``''`` (blank, not a guess) if it cannot be resolved."""
+    try:
+        from importlib.metadata import version
+        return version('pycat-napari')
+    except Exception:
+        return ''
+
+
 # ---------------------------------------------------------------------------
 # Batch worker (runs in a background QThread so the GUI stays responsive)
 # ---------------------------------------------------------------------------
@@ -242,6 +252,27 @@ class BatchWorker(QThread):
         results = []
         total = len(self.files)
 
+        # ── Comparative-phenotyping condition/metadata (increment 1, Part B) ────────────────
+        # One resolver for the whole run, from the sheet/pattern the config carries. `None` when no
+        # source is configured — and then nothing below writes a metadata file, so a batch with no
+        # sample sheet or filename pattern produces exactly the outputs it did before (additive).
+        from pycat.utils.sample_metadata import (resolver_from_config,
+                                                 write_image_sample_metadata)
+        _sample_resolver = resolver_from_config(self.config)
+
+        # ── One tidy top-level table for the whole batch (comparative phenotyping inc 2) ───────
+        # The keystone comparative output: instead of N per-image folders a scientist joins by hand,
+        # batch streams one long-format `consolidated_long.csv` — every measurement tagged with its
+        # image, condition (WT/dose/replicate…), and provenance. Additive: it sits ALONGSIDE the
+        # per-image folders and removes nothing. The condition-field vocabulary is fixed up front
+        # (from the sheet/pattern) so streaming append can never drift a column.
+        from pycat.utils.consolidated_table import ConsolidatedLongWriter, records_from_output_dir
+        _condition_fields = (_sample_resolver.condition_field_names()
+                             if _sample_resolver is not None else [])
+        _consolidated = ConsolidatedLongWriter(
+            output_dir / 'consolidated_long.csv', _condition_fields)
+        _pycat_version = _batch_pycat_version()
+
         for idx, image_path in enumerate(self.files):
             if self._cancelled:
                 self.finished.emit(
@@ -257,11 +288,44 @@ class BatchWorker(QThread):
 
             try:
                 self._process_file(image_path, file_output)
+                # Attach this image's condition (WT/rep2/10µM…) beside its results. No-op when no
+                # metadata source is configured (resolver is None).
+                write_image_sample_metadata(_sample_resolver, image_path, file_output)
+                # Append this image's measurements to the top-level consolidated table, read from the
+                # per-image CSVs it just wrote. An image with no object tables contributes no rows.
+                try:
+                    _meta = (_sample_resolver.for_image(image_path)
+                             if _sample_resolver is not None else None)
+                    _consolidated.add_image(
+                        image_path.stem,
+                        records_from_output_dir(file_output, image_path.stem),
+                        sample_metadata=_meta,
+                        provenance={'pycat_version': _pycat_version})
+                except Exception as _cexc:
+                    print(f"[PyCAT Batch] consolidated-table append failed for "
+                          f"{image_path.name}: {_cexc}")
                 results.append(f"✓ {image_path.name}")
             except Exception as exc:  # noqa: BLE001
                 tb = traceback.format_exc()
                 results.append(f"✗ {image_path.name}: {exc}")
                 print(f"[PyCAT Batch] ERROR on {image_path.name}:\n{tb}")
+
+        print(f"[PyCAT Batch] {_consolidated.summary()}")
+        # A provenance sidecar (feature units/definitions + software versions) next to the CSV, so the
+        # consolidated table's reproducibility record travels with it (wire_orphans B2).
+        try:
+            _sidecar = _consolidated.write_provenance_sidecar()
+            if _sidecar:
+                print(f"[PyCAT Batch] Provenance sidecar -> {_sidecar}")
+        except Exception as _pexc:  # broad-ok: the sidecar is an additive extra; never fail the batch over it
+            print(f"[PyCAT Batch] provenance sidecar skipped: {_pexc}")
+
+        # A sheet row that matched no image is a likely filename typo — warn once, don't crash.
+        if _sample_resolver is not None:
+            try:
+                _sample_resolver.warn_unmatched_sheet_rows()
+            except Exception as _wexc:
+                print(f"[PyCAT Batch] sample-metadata unmatched-row check failed: {_wexc}")
 
         summary = "\n".join(results)
         self.finished.emit(

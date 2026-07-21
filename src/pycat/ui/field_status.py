@@ -7,12 +7,20 @@ user, at a glance, where they still need to act:
     RED     required input not yet provided  (or a prior-step field still
             waiting for its upstream layer)
     YELLOW  optional input sitting at its sensible default — you may change it
-    GREEN   satisfied: a required field that is filled, or an auto/prior-step
-            field that received its value and matches the suggested option
-    BLUE    an optional or auto field the user deliberately set away from the
-            default / suggested value
+    READY   (outlined amber ring) for an ACTION button: its inputs are satisfied
+            but the step has NOT run yet — deliberately NOT solid green, so
+            "ready to run" can never be misread as "done"
+    GREEN   satisfied/DONE: a required field that is filled, or a required action
+            that has actually been run (green means the step ran, not that it
+            could run)
+    BLUE    an optional field set away from its default, OR an optional action
+            that has been run (blue = "you did this optional thing")
     (none)  expert / auto-tuning knobs most users never touch — no circle
             (and hidden later in "easy mode")
+
+The colour DECISION for action-button markers lives in the Qt-free
+``utils.marker_logic.resolve_marker`` (unit-tested headlessly); this module owns
+only the Qt rendering (the painted dot/ring) and the wiring.
 
 Each field is registered with a ROLE, its default value, and (for dropdowns) an
 optional name hint identifying the auto-populated choice. That single tag drives
@@ -39,6 +47,7 @@ _COLORS = {
     'yellow': '#f5b301',
     'green':  '#43a047',
     'blue':   '#1e88e5',
+    'ready':  '#fb8c00',   # amber — rendered OUTLINED (see StatusCircle) so "ready" ≠ solid-green "done"
 }
 _TIPS = {
     'red':    "Required — this still needs your input.",
@@ -61,10 +70,12 @@ class StatusCircle(QLabel):
         super().__init__(parent)
         self.setFixedSize(14, 14)
         self._color = _COLORS['red']
+        self._filled = True
         self._set('red', _TIPS['red'])
 
-    def _set(self, color_key, tip):
+    def _set(self, color_key, tip, filled=True):
         self._color = _COLORS.get(color_key, '#888')
+        self._filled = filled
         self.setToolTip(tip)
         self.update()
 
@@ -73,8 +84,14 @@ class StatusCircle(QLabel):
         from PyQt5.QtCore import Qt as _Qt
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.setBrush(QBrush(QColor(self._color)))
-        p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        if self._filled:
+            p.setBrush(QBrush(QColor(self._color)))
+            p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        else:
+            # OUTLINED (hollow) ring — the "ready, not yet run" look. A ring reads as clearly
+            # unfinished next to a solid "done" dot, so ready can never be mistaken for done.
+            p.setBrush(QBrush(_Qt.NoBrush))
+            p.setPen(QPen(QColor(self._color), 2))
         # inset by 1px so the border isn't clipped
         p.drawEllipse(1, 1, self.width() - 3, self.height() - 3)
         p.end()
@@ -151,6 +168,13 @@ class FieldRegistry:
     def __init__(self):
         # each entry: dict(widget, role, default, name_hint, circle, step, row_widget)
         self._fields = []
+        # Register with the central hub so a workspace CLEAR can reset this method widget's fields back to
+        # their defaults — coverage grows by construction, not by each builder remembering to wire it.
+        try:
+            from pycat.utils.field_registry_hub import register_field_registry
+            register_field_registry(self)
+        except Exception:  # broad-ok: registration is a convenience; never break a UI builder over it
+            pass
 
     def register(self, widget, role, default=None, name_hint=None, step=None,
                  row_widget=None):
@@ -690,51 +714,50 @@ def label_with_circle(text, optional=False, dropdown=None):
     return w
 
 
-def button_with_circle(button, optional=False, watch_dropdowns=None):
+def button_with_circle(button, optional=False, watch_dropdowns=None,
+                        complete_on_click=True):
     """Return a QWidget containing [● circle][button] — a status square to the
-    left of an action button. Red (required) or yellow (optional). If
-    *watch_dropdowns* is given (a list of QComboBox), the circle turns green once
-    all of them have a real (non-placeholder) selection, so the square reflects
-    whether the action is ready to run.
+    left of an action button.
 
-    The button's own click also marks completion: after the user runs the action,
-    the circle goes GREEN for a required step or BLUE for an optional step (blue =
-    "you did this optional thing"). A ``reset()`` method is attached to the
-    wrapper so a per-step / whole-workflow Clear can revert it to its initial
-    red/yellow. Returns the wrapper widget; add it to a layout in place of the
-    bare button.
+    Three states, decided by the Qt-free ``marker_logic.resolve_marker`` so the rule is uniform and
+    testable: **RED/YELLOW** at rest (required/optional, not run); **READY** — an outlined amber ring —
+    when *watch_dropdowns* are all satisfied but the step has NOT run yet; **GREEN** (required) or
+    **BLUE** (optional) once the step has actually run. Green means *done*, never merely *ready* — the
+    outlined ready-ring exists precisely so the two can't be confused.
+
+    Completion:
+    - ``complete_on_click=True`` (default) marks done on the button's own ``clicked`` — correct for a
+      one-shot action button.
+    - ``complete_on_click=False`` does NOT auto-complete on click; the caller marks completion by calling
+      ``wrapper.mark_done()`` at the real success point. Use this for a *cycling* button (e.g. the
+      Draw→Measure→Clear line button) where a raw click is not "the step ran".
+
+    A ``reset()`` reverts the circle to its initial red/yellow; ``mark_done()`` marks it done. Both are
+    attached to the returned wrapper (along with ``_status_circle``) for Clear wiring.
     """
     from PyQt5.QtWidgets import QWidget, QHBoxLayout
+    from pycat.utils.marker_logic import resolve_marker
     w = QWidget(); hb = QHBoxLayout(w)
     hb.setContentsMargins(0, 0, 0, 0); hb.setSpacing(4)
     c = StatusCircle()
     init = 'yellow' if optional else 'red'
-    tip = ('Optional step.' if optional else 'Required — run this step to continue.')
-    c._set(init, tip)
+    c._set(init, 'Optional step.' if optional else 'Required — run this step to continue.')
     hb.addWidget(c)
     hb.addWidget(button, 1)
 
     state = {'done': False}
     dds = list(watch_dropdowns or [])
 
+    def _ok(dd):
+        t = (dd.currentText() or '').strip().lower()
+        return bool(t) and not t.startswith(
+            ('select', 'none', '--', '—', 'no ', 'choose'))
+
     def _refresh():
-        if state['done']:
-            # Completed: blue for an optional action, green for a required one.
-            if optional:
-                c._set('blue', 'Done — you ran this optional step.')
-            else:
-                c._set('green', 'Done — this step has been run.')
-            return
-        if dds:
-            def _ok(dd):
-                t = (dd.currentText() or '').strip().lower()
-                return t and not t.startswith(
-                    ('select', 'none', '--', '—', 'no ', 'choose'))
-            ready = all(_ok(dd) for dd in dds)
-            c._set('green' if ready else init,
-                   'Ready to run.' if ready else tip)
-        else:
-            c._set(init, tip)
+        ready = bool(dds) and all(_ok(dd) for dd in dds)
+        color, filled, tip = resolve_marker(
+            done=state['done'], optional=optional, ready=ready)
+        c._set(color, tip, filled=filled)
 
     def _mark_done(*_):
         state['done'] = True
@@ -744,18 +767,21 @@ def button_with_circle(button, optional=False, watch_dropdowns=None):
         state['done'] = False
         _refresh()
 
-    # Clicking the button marks the step done (after its own handler runs).
-    try:
-        button.clicked.connect(_mark_done)
-    except Exception:
-        pass
+    # A one-shot action button completes on its own click; a cycling button opts out and calls
+    # mark_done() at the real completion point (so green never fires on the wrong phase of the cycle).
+    if complete_on_click:
+        try:
+            button.clicked.connect(_mark_done)
+        except Exception:
+            pass
     for dd in dds:
         try:
             dd.currentIndexChanged.connect(lambda *_: _refresh())
         except Exception:
             pass
     _refresh()
-    # Expose reset + circle for per-step Clear wiring.
+    # Expose reset + completion + circle for per-step Clear wiring.
     w.reset = reset
+    w.mark_done = _mark_done
     w._status_circle = c
     return w

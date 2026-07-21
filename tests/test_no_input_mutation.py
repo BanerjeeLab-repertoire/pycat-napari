@@ -83,12 +83,31 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         'plot_msd_trajectories',  # `line_registry` is a registry — a dict the caller wants filled
         '_draw_msd_into',         # ditto, and the name says "into"
         'plot_vpt_panel',         # ditto
+        '_msd_overlay_hooks',     # 1.6.120 — populates the same line_registry + the overlay/coords
+                                  # DICTS (the shared brushing state), extracted from the two above so
+                                  # both MSD renderers brush from one implementation. No numpy arrays.
+        '_draw_centered_tracks',  # 1.6.141 — same contract: fills the caller's `registry` DICT (lines/
+                                  # coords/promote/demote) so the centered panel brushes like the MSD one.
         # 1.6.67 — complexity-ratchet split. `dr` here is the DATA REPOSITORY (a dict results are
         # stored into), NOT a caller image/mask array. Writing `dr[key] = ...` is the contract, as
         # everywhere else in the codebase. It was closure-scoped before the `_on_dynamic` split
         # hoisted this worker-setup to module level and made `dr` a parameter — same writes, same
         # behavior; only the scope changed, which is what exposed it to this static check.
         '_start_dynamic_worker',
+        # 1.6.173 — complexity-ratchet split of `classify_beads`. The `df` these two helpers write into is
+        # `classify_beads`'s OWN private copy (`df = beads_df.copy()` at the top of the dispatcher), not a
+        # caller's array — the copy is made before dispatch and each helper is called on it exactly once.
+        # Same writes, same behaviour as the pre-split single function; only the scope changed, which is
+        # what exposed it to this static check. (The public entry point still copies, so callers are safe.)
+        '_classify_fast_template',
+        '_classify_gaussian_fit',
+        # 1.6.204 — complexity-ratchet split of `link_trajectories_bayesian`. The `active` dict these two
+        # helpers write into is the linker's OWN internal track-state, created fresh in the orchestrator
+        # (`active = {}`) and threaded through the per-frame phases; `df` is likewise its private
+        # `props_df.copy()`. Neither is a caller's array — same writes, same behaviour as the pre-split
+        # single function; only the scope changed, which is what exposed it to this static check.
+        '_start_new_tracks',
+        '_apply_frame_assignment',
     }
 
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"

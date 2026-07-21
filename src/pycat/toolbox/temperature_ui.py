@@ -17,7 +17,6 @@ Steps
 from __future__ import annotations
 import os
 import numpy as np
-from pycat.file_io.file_io import materialize_stack
 import pandas as pd
 import napari
 from napari.utils.notifications import (
@@ -62,20 +61,13 @@ class TemperatureDependentUI:
             return cache[2]
         # ── The cache is why this looked harmless ────────────────────────────────────────
         #
-        # Only the FIRST call decodes; every later one is instant. So the freeze happens once, on
-        # whichever section the user happens to click first — which is exactly the kind of "it only
-        # hangs sometimes" nobody pins down.
-        #
-        # The bar is the CALLER's: this helper is shared across five sections and cannot know which
-        # one is on screen. Passing it down is the only honest wiring.
-        _pp = None
-        if progress_bar is not None:
-            from pycat.ui.ui_utils import PhasedProgress
-            _pp = PhasedProgress(progress_bar, phases=[("Materializing frames", 1.0)])
-        arr = materialize_stack(data,
-                                progress_callback=_pp.callback if _pp is not None else None)
-        if _pp is not None:
-            _pp.hide()
+        # Only the FIRST call decodes; every later one is instant. So the freeze happened once, on
+        # whichever section the user clicked first — the kind of "it only hangs sometimes" nobody pins
+        # down. The decode now runs OFF the Qt thread behind a modal dialog, so even that first call no
+        # longer freezes the window. `progress_bar` is retained for the five callers that pass their
+        # section's bar, but the worker owns its own dialog, so it is no longer read.
+        from pycat.utils.qt_worker import materialize_off_thread
+        arr = materialize_off_thread(data, viewer=self.viewer)
         self._stack_cache = (sname, data, arr)
         return arr
 

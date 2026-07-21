@@ -1,11 +1,26 @@
 # Claude Code spec — PyQtGraph interactive plot backend
 
+> **✅ STATUS — DONE, shipped in 1.6.122** (present in CHANGELOG; retrofit follow-up 1.6.123).
+> `src/pycat/utils/plot_backend_pyqtgraph.py` provides `pyqtgraph_scatter` (a `PlotWidget` with the shared
+> row-order guard, O(1) overlay-artist highlight under a `ProgrammaticGuard`, and `sigClicked` →
+> `service.select(Selection(...))` into the SelectionService with echo-suppression, as a proper
+> `SelectionView`). Registered as the 4th backend in `plot_backends.py`
+> (`BACKENDS = ('matplotlib','seaborn','plotly','pyqtgraph')`) with a lazy-guarded branch and a graceful
+> install message when absent. Additive, optional (`pip install pycat-napari[pyqtgraph]`); matplotlib stays
+> default. Pinned by `tests/test_plot_backend_pyqtgraph.py`. Every Definition-of-done item met.
+
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. Adds PyQtGraph as a
 FOURTH plot backend in the existing `plot_backends` abstraction — a native-Qt interactive scatter that
 emits into the brushing `SelectionService`. Per the plotting-backend addendum
 (`brushing_roadmap_plotting_backends_2026-07-16.md`): this is ADDITIVE, not a plotting-architecture
-switch; matplotlib stays for export, plotly stays as-is. **PREREQUISITE: the brushing arc (inc 1–5) has
-landed** (it has — `SelectionService`, `make_pickable`, `EntityRef` all present). Touches
+switch; matplotlib stays for export, plotly stays as-is. **PREREQUISITES:**
+1. The brushing arc (inc 1–5) — landed (`SelectionService`, `make_pickable`, `EntityRef` all present).
+2. **`claude_code_spec_interaction_layer_2026-07-17.md` MUST land FIRST.** That spec introduces the
+   `SelectionView` adapter protocol, the programmatic-update guard, the `SelectionState`
+   (hover/selected/pinned) model, and the shared adapter contract tests. Building this backend BEFORE
+   it means writing a pyqtgraph adapter against the old bare-callback API and then rewriting it — and
+   worse, a second selection path that skips the contract. The interaction-layer spec is what makes
+   the brushing layer backend-NEUTRAL; this spec is the first consumer that proves it. Order matters. Touches
 `plot_backends.py`, a new backend impl, an opt-in dep. Not `file_io.py`.
 
 ## Why PyQtGraph, why now

@@ -20,7 +20,7 @@ import numpy as np
 
 
 
-from pycat.utils.entity_ref import attach_layer_id, source_path_of, stamp_entity_ids
+from pycat.utils.entity_ref import attach_layer_id, finalize_entity_table, source_path_of
 from pycat.utils.object_ref import bbox_columns_from_regionprops
 from pycat.utils.tag_registry import tags_layer
 from pycat.utils.general_utils import debug_log
@@ -754,10 +754,9 @@ def measure_region_props(labeled_mask, image, selected_props, *, data_instance=N
     # If the user did not select `label`, `stamp_entity_ids` leaves the table untouched and it
     # stays brushable by row position, flagged rather than silently trusted. That is the honest
     # outcome: without a label there is genuinely nothing stable to name an object by.
-    measurement_df = stamp_entity_ids(
-        measurement_df, entity_type='mask_object',
-        source_path=source_path_of(data_instance),
-        operation_id='measure_region_props')
+    measurement_df = finalize_entity_table(
+        measurement_df, 'measure_region_props',
+        source_path=source_path_of(data_instance))
 
     measurement_df = measurement_df.rename(columns=custom_names)
 

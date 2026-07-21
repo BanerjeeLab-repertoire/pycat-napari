@@ -162,8 +162,59 @@ def assert_scale_invariant(run, *, pixel_sizes, truth, tol, param='microns_per_p
 #   assert an invariant that cannot break, which is coverage, not a warning. (Different reason from
 #   `defocus_r2_max` below, which is excluded for being dead — this one runs, it just is not a filter.)
 #
-# ~37-113 other defaults remain. The audit's view stands: they are not equal, and the next increment
-# is another prioritisation call, not a sweep.
+# ── Increment 3 (1.6.131): the next prioritisation call — a LIVE default, not a fixed one ──
+#
+# The first four cases pin FIXED inverters. Increment 3's survey of the remaining defaults found no
+# new fixed inverter — but it found a live one worth pinning, and several non-cases worth recording so
+# the next pass does not re-litigate them:
+#
+# * `partition.client_enrichment` `background=0.0` — ADDED, OFFSET sensitivity. K = (dense-bg)/(dilute-bg)
+#   is exact at any pedestal PROVIDED the offset is supplied; the default 0.0 asserts there is none, and
+#   a real pedestal then sits in both terms and drags K toward 1. Measured on a TRUE K of 30:
+#   30 / 15.5 / 5.83 / 2.38 at pedestals 0/100/500/2000 — a 12x error on the flagship partition metric.
+#   It is WARNED (the function says so) but the wrong number is still returned, so this is the FIRST case
+#   whose NEGATIVE control is the current DEFAULT rather than a removed form: the harness pins that
+#   supplying the offset recovers K, and that the default is the thing that inverts it.
+#
+# NOT added, with reasons (record, don't re-evaluate):
+# * `segmentation.min_spot_radius=2` — a live scale risk on the reported puncta count (a raw-px
+#   `min_area = ceil(pi*r^2)` gate, NOT pixel-size-derived), but it is the SAME scale shape already
+#   covered by `segmentation.local_ring_geometry` in the same function, it is a user-facing px control
+#   rather than a hidden constant, and `_report_refinement_drops` already surfaces the drops and warns
+#   to check it against the pixel size. Reported as a finding (DEV_NOTES), not added as machinery.
+# * `partition.client_enrichment_per_condensate` `shell_px=5` — a fixed-px local dilute ring (scale
+#   shape, already covered). A finding, not new machinery.
+# * `segmentation.max_area_fraction=0.25` — SAFE by construction: it is a FRACTION of `np.sum(cell_mask)`,
+#   so object and cell area both scale as pixel_size^2 and the ratio is scale-invariant. Worth pinning
+#   only against a future refactor to a fixed `max_area_px`; deferred (no live danger).
+# * `segmentation.kurtosis_threshold=-3.0` — INERT, not a filter: scipy Fisher (excess) kurtosis has a
+#   hard floor of -2, so `kurtosis < -3.0` can never be true and the gate rejects nothing. Like
+#   `bleach_r2_min`, it is documented-absent rather than tested.
+# * `estimate_object_size_px_brightfield` — DEAD/unwired (explicitly "EXPERIMENTAL, NOT VALIDATED, not
+#   in the batch path"); excluded for the same reason as `defocus_r2_max`. The spec's "brightfield
+#   min_diameter_px class" does not reach production.
+#
+# ── Increment 4 (1.6.158): the puncta refinement gate CLUSTER, swept jointly ──────────────
+#
+# The refinement gate applies `kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0`
+# together, and it decides which puncta EXIST — every downstream count/density/partition/coloc statistic
+# inherits it. Increment 4 swept the cluster for offset, scale, selection-bias, AND the joint kurtosis ×
+# SNR interaction (a two-parameter cliff is invisible to one-at-a-time sweeps). Findings — no new inverter:
+#
+# * `segmentation.global_snr_threshold` — ADDED, OFFSET (validated). The local sibling was added in
+#   increment 2; the global one is the same contrast-to-noise form against the whole-cell background, and
+#   it passes all three signatures. Its selection-bias sweep is the important new result: over the
+#   plausible threshold range, a brightness-spanning population of clearly-real puncta is retained WHOLE,
+#   so the SNR gate does not select for brightness the way an absolute-intensity gate would.
+# * `segmentation.kurtosis_threshold=-3.0` — CONFIRMED INERT, not added (documented-absent, like
+#   `bleach_r2_min`). scipy Fisher (excess) kurtosis has a hard floor of -2, so `kurtosis < -3.0` is
+#   impossible and the gate rejects nothing. It therefore cannot be one arm of an interaction cliff: the
+#   joint grid is flat along the kurtosis axis. An inert gate has no bad control, so it stays out of the
+#   registry — pinned instead by `test_kurtosis_threshold_of_minus_three_can_never_fire`. (Even raised into
+#   a firing range, it keeps real leptokurtic puncta, so the cluster still has no real-population cliff.)
+#
+# ~35-110 other defaults remain. The audit's view stands: they are not equal, and the next increment is
+# another prioritisation call, not a sweep.
 VALIDATED_CASES = (
     {
         'id': 'molecular_counting.r2_min',
@@ -206,5 +257,31 @@ VALIDATED_CASES = (
                "punctum (1/1/2) and fixes it for everything larger (1.6.87).",
         'good': 'radii scaled to the object (current)',
         'bad': 'fixed 1/1/2 px rim (removed 1.6.87)',
+    },
+    {
+        'id': 'segmentation.global_snr_threshold',
+        'check': 'offset_invariance',
+        'why': "The global SNR gate rejects when the object's contrast against the whole-CELL background "
+               "is below threshold. Like its local sibling (added in increment 2) it is now contrast-to-"
+               "noise — (object_mean - cell_bg_median) / cell_bg_noise — so the camera pedestal cancels "
+               "and the verdict is the specimen's, not the sensor's. Increment 4 swept it for offset, "
+               "scale, and selection bias on a brightness-spanning population of clearly-real puncta: a "
+               "real population is retained WHOLE across the plausible threshold range, so it does not "
+               "select for brightness (the r2_min shape) the way an absolute-intensity gate would. The "
+               "negative control is the same removed object_mean/bg_std ratio that inverted the local one.",
+        'good': 'contrast-to-noise vs the cell background (current)',
+        'bad': 'object_mean / bg_std (the same un-subtracted ratio, removed 1.6.86)',
+    },
+    {
+        'id': 'partition.client_enrichment.background',
+        'check': 'offset_invariance',
+        'why': "The partition coefficient K = (dense - bg) / (dilute - bg) is exact at any camera "
+               "pedestal PROVIDED the offset is supplied. The DEFAULT background=0.0 asserts there is "
+               "none; with a real pedestal it sits in both terms and drags K toward 1 — measured on a "
+               "TRUE K of 30: 30 / 15.5 / 5.83 / 2.38 at pedestals 0/100/500/2000. A 12x error on the "
+               "flagship partition metric, warned but still returned. This is the LIVE-default case: "
+               "the negative control is the current default, not a removed form.",
+        'good': 'background supplied (the measured camera offset)',
+        'bad': 'default background=0.0 (no offset removed)',
     },
 )

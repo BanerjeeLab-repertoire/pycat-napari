@@ -1,7 +1,15 @@
 # CZI streaming-acquisition files: unreadable by libCZI — investigation pin
 
 **Date:** 2026-07-15
-**Status (updated 2026-07-15, v1.6.61): READER BUILT + SHIPPED (opt-in), pending a GUI confirm.**
+**Status (re-verified 2026-07-20): READER BUILT + SHIPPED + REAL-FILE VERIFIED (opt-in); only a GUI confirm remains.**
+Since the 1.6.61 build note below, the path has grown a byte-budgeted LRU + direction-aware prefetch, a
+scene stack, the `stack_openers` decomposition, and a seam-regression metric (`test_czi_seam.py`, 1.6.153).
+**Measured 2026-07-20:** `test_streaming_czi_opens_and_reads_through_bioformats` PASSED against the real
+8.1 GB streaming movie (dims `T=15766, 500×500`, planes non-zero, ~57 s incl. one-time JVM+index). The
+only item still open is a subjective `run-pycat` GUI confirm on a display machine (freeze-free open +
+smooth scrub) — no code is pending. Original 1.6.61 build note follows.
+
+**Status (2026-07-15, v1.6.61): READER BUILT + SHIPPED (opt-in), pending a GUI confirm.**
 The reader was **built, not re-enabled** — the earlier BioFormats reader code described below was a
 loose-file drop that never landed in the tree; only the `[bioformats]` extra had. What shipped in
 1.6.61 (see `docs/audits/czi_bakeoff_2026-07-15.md` for the empirical basis):

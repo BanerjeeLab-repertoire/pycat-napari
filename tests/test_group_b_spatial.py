@@ -402,3 +402,58 @@ def test_the_noise_must_come_from_the_RAW_IMAGE_not_the_envelope():
         f"{envelope_noise:.2f}. The envelope has been SMOOTHED — its local differences measure "
         f"the smoothing, not the noise."
     )
+
+
+# ── Byte-identical characterization of topology_metrics (pure-numpy input, platform-portable) ─────
+#
+# The property tests above pin the basin COUNT; this pins the exact metrics dict. It feeds a SYNTHETIC
+# numpy envelope directly (never through the GPU-routed rolling-ball), so topology_metrics — which is
+# pure numpy/scipy — is isolated and the golden values are platform-independent. Guards the phase-split
+# into `_estimate_pedestal_read_noise`-style helpers by proving no number moved. Both branches: a peaked
+# field (structure) and a near-flat field (the range/noise gate → topo_field_is_flat).
+
+def _synthetic_envelope(n_peaks, base, noise, seed, size=64):
+    yy, xx = np.mgrid[0:size, 0:size]
+    rng = np.random.default_rng(seed)
+    env = np.full((size, size), float(base))
+    for i in range(n_peaks):
+        cy = 15 + (i // 2) * 30
+        cx = 15 + (i % 2) * 30
+        env += 500.0 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2)) / (2 * 6.0 ** 2))
+    return env + rng.normal(0, noise, (size, size))
+
+
+_TOPO_PEAKS_PERSIST = [508.761369363, 455.434935566, 454.311664912, 452.339216538, 5.587616025,
+                       4.929083355, 4.839739916, 4.615017909, 4.395032789, 3.962899716,
+                       3.461551484, 3.411321482]
+
+
+@pytest.mark.core
+def test_topology_metrics_is_byte_identical():
+    topo = pytest.importorskip("pycat.toolbox.topology_tools")
+    mask = np.ones((64, 64), bool)
+
+    # PEAKED field — the structure branch (range/noise well above the flat gate).
+    m = topo.topology_metrics(_synthetic_envelope(4, base=50.0, noise=2.0, seed=0),
+                              mask, image_noise=5.0)
+    assert m['topo_n_basins'] == 4 and m['topo_field_is_flat'] is False
+    assert m['topo_noise_known'] is True and m['topo_n_components'] == 4
+    assert np.isclose(m['topo_cov'], 0.7837185810612979, atol=1e-9)
+    assert np.isclose(m['topo_roughness'], 0.2461135983467102, atol=1e-6)
+    assert np.isclose(m['topo_persistence_gate'], 25.43806846815476, atol=1e-6)
+    assert np.isclose(m['topo_largest_frac'], 0.251953125, atol=1e-9)
+    assert np.isclose(m['topo_high_area_frac'], 0.5, atol=1e-12)
+    assert np.allclose(m['topo_basin_persistences'], _TOPO_PEAKS_PERSIST, atol=1e-5, rtol=0)
+
+    # NEAR-FLAT field — the flat branch: the whole dynamic range is noise-sized, so no basins, and the
+    # `topo_noise_known` key is deliberately NOT set on this path.
+    f = topo.topology_metrics(_synthetic_envelope(0, base=100.0, noise=3.0, seed=0),
+                              mask, image_noise=10.0)
+    assert f['topo_n_basins'] == 0 and f['topo_field_is_flat'] is True
+    assert f['topo_basin_persistences'] == []
+    assert np.isnan(f['topo_persistence_gate'])
+    assert 'topo_noise_known' not in f, "the flat branch must not set topo_noise_known"
+    assert np.isclose(f['topo_cov'], 0.029941162602793715, atol=1e-9)
+    assert np.isclose(f['topo_roughness'], 0.13938921689987183, atol=1e-6)
+    assert f['topo_n_components'] == 285
+    assert np.isclose(f['topo_largest_frac'], 0.10009765625, atol=1e-9)

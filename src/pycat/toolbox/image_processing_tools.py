@@ -196,21 +196,21 @@ def pseudo3d_tri_planar_filter(volume: np.ndarray, filter_2d_fn, **filter_kwargs
     return (xy_result + xz_result + yz_result) / 3.0
 
 
-@tags_layer('gaussian', role='preprocessed',
+@tags_layer('gaussian', role='preprocessed', inputs=('image',),
             summary='Gaussian smoothing')
 def gaussian_smooth_2d(image: np.ndarray, sigma: float) -> np.ndarray:
     """Thin wrapper around ndi.gaussian_filter for use with pseudo3d_tri_planar_filter."""
     return ndi.gaussian_filter(np.asarray(image).astype(np.float32), sigma=sigma)
 
 
-@tags_layer('gaussian_3d', role='preprocessed',
+@tags_layer('gaussian_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D (tri-planar) Gaussian smoothing')
 def gaussian_smooth_3d_pseudo(volume: np.ndarray, sigma: float) -> np.ndarray:
     """Pseudo-3D (tri-planar) Gaussian smoothing of a (Z, H, W) volume."""
     return pseudo3d_tri_planar_filter(volume, gaussian_smooth_2d, sigma=sigma)
 
 
-@tags_layer('gabor_3d', role='preprocessed',
+@tags_layer('gabor_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D (tri-planar) Gabor texture filter')
 def gabor_filter_3d_pseudo(volume: np.ndarray) -> np.ndarray:
     """
@@ -222,7 +222,7 @@ def gabor_filter_3d_pseudo(volume: np.ndarray) -> np.ndarray:
     return pseudo3d_tri_planar_filter(volume, gabor_filter_func)
 
 
-@tags_layer('dog', role='preprocessed',
+@tags_layer('dog', role='preprocessed', inputs=('image',),
             summary='Difference-of-Gaussians blob enhancement', aliases=('difference_of_gaussians',))
 def dog_blob_enhance_2d(image: np.ndarray, sigma_lo: float = 2.0, sigma_hi: float = 3.2) -> np.ndarray:
     """
@@ -238,7 +238,7 @@ def dog_blob_enhance_2d(image: np.ndarray, sigma_lo: float = 2.0, sigma_hi: floa
     return (enhanced / mx if mx > 0 else enhanced).astype(np.float32)
 
 
-@tags_layer('dog_3d', role='preprocessed',
+@tags_layer('dog_3d', role='preprocessed', requirements=('z_stack',),
             summary='Pseudo-3D difference-of-Gaussians blob enhancement')
 def dog_blob_enhance_3d_pseudo(volume: np.ndarray, sigma_lo: float = 2.0,
                                sigma_hi: float = 3.2) -> np.ndarray:
@@ -367,7 +367,7 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}", operation='rescale_intensity')
 
 
-@tags_layer('invert', role='preprocessed',
+@tags_layer('invert', role='preprocessed', inputs=('image',),
             summary='Intensity inversion (dark <-> bright)')
 def invert_image(image):
     """
@@ -704,7 +704,7 @@ _GABOR_KERNELS = [
 ]
 
 
-@tags_layer('gabor', role='preprocessed',
+@tags_layer('gabor', role='preprocessed', inputs=('image',),
             summary='Gabor texture filter')
 def gabor_filter_func(image):
     """
@@ -871,7 +871,7 @@ def run_peak_and_edge_enhancement(data_instance, viewer):
   _add_image(enhanced_image, viewer, name=f"Peak & Edge Enhanced {active_layer.name}", operation='log_enhance')
 
 
-@tags_layer('log', role='preprocessed',
+@tags_layer('log', role='preprocessed', inputs=('image',),
             summary='Laplacian-of-Gaussian filter', aliases=('laplacian_of_gaussian',))
 def apply_laplace_of_gauss_filter(image, sigma=3):
     """
@@ -1355,7 +1355,7 @@ def compute_rolling_ball_background(image, ball_radius):
     bg = ndi.grey_erosion(bg, footprint=sk.morphology.disk(1))
     return dtype_conversion_func(bg.astype(np.float32), input_dtype)
 
-@tags_layer('bg_subtract', role='preprocessed',
+@tags_layer('bg_subtract', role='preprocessed', inputs=('image',),
             summary='Background subtraction')
 def subtract_background(image, background, bg_scaling_factor=0.75, equalize_intensity=False, window_size=None):
     """
@@ -1406,7 +1406,7 @@ def subtract_background(image, background, bg_scaling_factor=0.75, equalize_inte
     return ouput_image
 
 
-@tags_layer('rolling_ball', role='preprocessed',
+@tags_layer('rolling_ball', role='preprocessed', inputs=('image',),
             summary='Rolling-ball + Gaussian background removal')
 def rb_gaussian_background_removal(image, ball_radius, equalize_intensity=False, roi_mask=None):
     """
@@ -1963,7 +1963,7 @@ def wavelet_bg_and_noise_calculation(image, num_levels, noise_lvl):
 
     return Background, Noise, BG_unfiltered
 
-@tags_layer('wbns', role='preprocessed',
+@tags_layer('wbns', role='preprocessed', inputs=('image',),
             summary='Wavelet-based background and noise subtraction')
 def wbns_func(img, psf_px_resolution, noise_lvl):
     """
@@ -2148,7 +2148,7 @@ def run_wavelet_noise_subtraction(psf_input, noise_level_input, viewer):
     # Display the processed image
     _add_image(wavelet_noise_corrected, viewer, name=f"Wavelet Noise Corrected {active_layer.name}")
 
-@tags_layer('bilateral', role='preprocessed',
+@tags_layer('bilateral', role='preprocessed', inputs=('image',),
             summary='Edge-preserving bilateral filter')
 def apply_bilateral_filter(image, radius):
     """

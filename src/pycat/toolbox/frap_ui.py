@@ -501,15 +501,12 @@ class FRAPUI:
         name = self._rec_dd.currentText()
         if name not in [l.name for l in self.viewer.layers]:
             napari_show_warning(f"Recovery stack '{name}' not found."); return
-        from pycat.file_io.file_io import materialize_stack
-        from pycat.ui.ui_utils import PhasedProgress
-        # The bar moves even though this blocks the thread: QProgressBar.setValue calls repaint(),
-        # which is synchronous. (A status LABEL would not — setText only schedules an update that
-        # the blocked event loop never runs.) This makes the wait VISIBLE; it does not remove it.
-        _pp = PhasedProgress(self._prog, phases=[("Materializing frames", 1.0)])
-        stack = materialize_stack(self.viewer.layers[name].data,
-                                  progress_callback=_pp.callback)
-        _pp.hide()
+        # Decode OFF the Qt thread, behind a modal progress dialog: the earlier inline bar advanced
+        # (setValue's repaint() is synchronous) but the window still froze because the decode ran on
+        # the Qt thread. `materialize_off_thread` runs it on a worker and returns the array here.
+        from pycat.utils.qt_worker import materialize_off_thread
+        stack = materialize_off_thread(self.viewer.layers[name].data, viewer=self.viewer,
+                                       text="Decoding recovery frames…")
         # FRAP treats frames as TIME (recovery curve) — warn once if the axis was
         # assumed at load.
         try:
@@ -612,12 +609,10 @@ class FRAPUI:
         prebleach_stack = None
         pbname = self._prebleach_dd.currentText()
         if pbname != "None" and pbname in [l.name for l in self.viewer.layers]:
-            from pycat.file_io.file_io import materialize_stack
-            from pycat.ui.ui_utils import PhasedProgress
-            _pp = PhasedProgress(self._prog, phases=[("Materializing pre-bleach frames", 1.0)])
-            prebleach_stack = materialize_stack(self.viewer.layers[pbname].data,
-                                                progress_callback=_pp.callback)
-            _pp.hide()
+            from pycat.utils.qt_worker import materialize_off_thread
+            prebleach_stack = materialize_off_thread(
+                self.viewer.layers[pbname].data, viewer=self.viewer,
+                text="Decoding pre-bleach frames…")
 
         # Fit model + ROI geometry
         use_rd   = self._rb_rd.isChecked()

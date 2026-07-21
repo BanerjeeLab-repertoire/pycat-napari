@@ -88,7 +88,7 @@ def gaussian_psf_3d(size_xy: int = 11, size_z: int = 13,
 # CLEAN core
 # ---------------------------------------------------------------------------
 
-@tags_layer('clean', role='overlay',
+@tags_layer('clean', role='overlay', inputs=('image',),
             summary='CLEAN iterative deconvolution spot detection', target='punctum')
 def clean_detect(
     image: np.ndarray,

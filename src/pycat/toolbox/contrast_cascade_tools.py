@@ -82,7 +82,7 @@ def contrast_cascade_bands(image, n_bands=4, method='percentile',
     return bands
 
 
-@tags_layer('tone_map', role='preprocessed',
+@tags_layer('tone_map', role='preprocessed', inputs=('image',),
             summary='Tone mapping (log/gamma)')
 def tone_map(image, method='log', clip_limit=0.003):
     """Compress a high-dynamic-range image into one viewable image.
@@ -100,7 +100,7 @@ def tone_map(image, method='log', clip_limit=0.003):
 # Part 2 — brightness-invariant features
 # ---------------------------------------------------------------------------
 
-@tags_layer('local_contrast', role='preprocessed',
+@tags_layer('local_contrast', role='preprocessed', inputs=('image',),
             summary='Local contrast normalisation')
 def local_contrast_normalize(image, sigma=15.0, mode='divide'):
     """Normalise each pixel relative to its LOCAL surround, so dim structures
@@ -153,16 +153,26 @@ def cascade_feature_stack(image, object_diameter=20):
 
 
 def cascade_rf_segment(image, training_labels, object_diameter=20,
-                       n_estimators=300):
+                       n_estimators=300, progress_callback=None):
     """Multi-feature Random-Forest segmentation for the contrast-cascade problem.
     Unlike the single-intensity RF, this trains on the full brightness-invariant
     feature stack, so it can learn body / fiber / background even across a large
     brightness swing.
 
     training_labels : integer scribble image (0 = unlabelled, 1..K = classes).
-    Returns the predicted class-label image (same K classes)."""
+    Returns the predicted class-label image (same K classes).
+
+    progress_callback : optional ``callback(done, total)`` (the signature
+        ``materialize_stack`` uses, so ``PhasedProgress`` composes). Reported at the
+        three STAGE boundaries — build features, train, predict — because each stage
+        is one opaque call, not an iteration: a per-pixel bar here would be faking a
+        granularity the work does not have. ``None`` is a complete no-op."""
     from sklearn.ensemble import RandomForestClassifier
+    _progress = progress_callback or (lambda _done, _total: None)
+
+    _progress(0, 3)
     feats = cascade_feature_stack(image, object_diameter)
+    _progress(1, 3)                       # feature stack built
     H, W, F = feats.shape
     X = feats.reshape(-1, F)
     tl = np.asarray(training_labels)
@@ -173,7 +183,9 @@ def cascade_rf_segment(image, training_labels, object_diameter=20,
     clf = RandomForestClassifier(n_estimators=n_estimators, max_depth=12,
                                  n_jobs=-1, class_weight='balanced')
     clf.fit(X[train_mask], tl.ravel()[train_mask])
+    _progress(2, 3)                       # forest trained
     pred = clf.predict(X).reshape(H, W).astype(np.int32)
+    _progress(3, 3)                       # prediction done
     return pred
 
 

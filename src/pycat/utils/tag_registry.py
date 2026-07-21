@@ -37,9 +37,54 @@ key          answers
 
 from __future__ import annotations
 
+import contextvars
 import functools
+from contextlib import contextmanager
 
 from pycat.utils.general_utils import debug_log
+
+
+# ── The EXPLICIT operation context — what the stack walk was doing implicitly, said out loud ──
+#
+# The layer-tag hook needs to know which operation is responsible for a layer it sees created. Its
+# original mechanism, ``_op_from_stack``, walked the call stack for a function carrying ``__pycat_op__``
+# — clever, but it only fires when the decorated function is STILL ON THE STACK when the layer is made.
+# Off-thread execution (``operation_runner``, shipped 1.6.139) breaks that: the compute frame has already
+# returned by the time the result callback creates the layer, so the walk finds nothing and the tag
+# silently degrades from definitional (``source='derived'``) to a name-substring guess (``'inferred'``).
+#
+# This is the explicit replacement: an operation declares itself for the duration of a block, and the hook
+# reads it directly. **``contextvars``, not a module global** — a global would leak the op across threads
+# and mis-attribute a layer created on another thread, which is strictly WORSE than an absent tag (it
+# violates the hook's own "an absent tag is honest; a guessed one is a lie" principle). A ``ContextVar`` is
+# thread-isolated by default and propagates into ``asyncio`` correctly.
+_ACTIVE_OP: contextvars.ContextVar = contextvars.ContextVar('pycat_active_op', default=None)
+
+
+@contextmanager
+def operation_context(op):
+    """Declare the operation responsible for every layer created inside this block.
+
+    ::
+
+        with operation_context('cellpose'):
+            labels = run_cellpose(image)
+            viewer.add_labels(labels)      # tagged op='cellpose', source='derived' — definitional
+
+    The layer-tag hook prefers this over the stack walk, so it works for the off-thread / compute-then-
+    add-later cases the stack walk cannot see. Nesting restores the outer op on exit; an exception inside
+    the block still restores correctly (``finally``)."""
+    token = _ACTIVE_OP.set(op)
+    try:
+        yield
+    finally:
+        _ACTIVE_OP.reset(token)
+
+
+def active_operation():
+    """The operation declared by the innermost enclosing ``operation_context``, or ``None``. Thread-local
+    by virtue of ``contextvars`` — an op set on one thread is invisible to another."""
+    return _ACTIVE_OP.get()
 
 
 # ── THE ROLES ARE layer_tags.CORE_VALUES['role']. There is ONE vocabulary. ─────────────────
@@ -59,6 +104,24 @@ ROLES = tuple(sorted(_CORE_VALUES['role']))
 TARGETS = tuple(sorted(_CORE_VALUES['target']))
 
 
+# ── THE RUNNABILITY REQUIREMENTS (OperationSpec increment 5) ────────────────────────────────
+#
+# `inputs` (increment 2) says which LAYERS an operation consumes; `requirements` says what the
+# DATA/ENVIRONMENT must provide for it to be runnable at all — a precondition beyond any layer. Each
+# maps to a **human-readable reason**, because the point of declaring it is that the UI can grey the
+# operation out and SAY WHY ("needs a 3D z-stack") instead of letting the user click it and hit an
+# error. A controlled vocabulary, for the same reason `op` is: a free-string requirement is one the UI
+# cannot render and nothing can check.
+REQUIREMENTS: dict[str, str] = {
+    'z_stack':      'a 3D z-stack',
+    'time_axis':    'a time axis (a stack of frames over time)',
+    'pixel_size':   'a calibrated pixel size (microns per pixel)',
+    'two_channels': 'two image channels',
+    'gpu':          'a CUDA-capable GPU',
+}
+REQUIREMENT_NAMES = tuple(sorted(REQUIREMENTS))
+
+
 _OPERATIONS: dict[str, dict] = {}
 
 
@@ -73,7 +136,8 @@ class TagCollision(ImportError):
 
 def register_operation(op: str, *, role: str, summary: str,
                        target: str | None = None, produces: str | None = None,
-                       aliases: tuple = ()):
+                       aliases: tuple = (), inputs: tuple = (),
+                       requirements: tuple = ()):
     """Declare an operation in the vocabulary. **Raises on a duplicate.**
 
     Parameters
@@ -86,6 +150,16 @@ def register_operation(op: str, *, role: str, summary: str,
     produces : the role of the OUTPUT, if different from ``role``.
     aliases : other names that mean the same thing, so a query can find it either way. **An alias
         cannot be a registered op** — that would be the collision this class exists to prevent.
+    inputs : the layer role(s)/target(s) this operation CONSUMES — the edges that turn the flat
+        vocabulary into a graph (``op_a.produces -> op_b.inputs``). Values are drawn from the SAME
+        ``ROLES`` / ``TARGETS`` vocabularies, never a third one. **Optional:** an operation that
+        declares nothing is a *root* — it loads or creates a layer from a file, not from another
+        layer. Absent is honest; a guessed input is drift with extra steps, so declare only what is
+        unambiguous (OperationSpec increment 2).
+    requirements : what the DATA/ENVIRONMENT must provide for this op to be runnable, beyond any layer
+        — values from the controlled ``REQUIREMENTS`` vocabulary (``z_stack``, ``time_axis``, …). It
+        exists so a consumer can gate the op with a STATED REASON ("needs a 3D z-stack") instead of
+        letting it fail at run time. Optional; declare only unambiguous preconditions (increment 5).
     """
     op = str(op).strip().lower()
 
@@ -105,6 +179,27 @@ def register_operation(op: str, *, role: str, summary: str,
             f"tag was rejected by the validator.")
     if target is not None and target not in TARGETS:
         raise ValueError(f"target '{target}' is not one of {TARGETS}")
+
+    # An input must be a REGISTERED role or target — the same refusal an unregistered tag gets. A
+    # free string here is exactly the degeneracy the vocabulary exists to prevent, one layer deeper.
+    inputs = tuple(str(i).strip().lower() for i in inputs)
+    for value in inputs:
+        if value not in ROLES and value not in TARGETS:
+            raise ValueError(
+                f"input '{value}' (declared by '{op}') is not a registered role {ROLES} or "
+                f"target {TARGETS}. `inputs` draws on the SAME vocabulary as `role`/`target` — "
+                f"there is no third one. A guessed input is worse than none; leave it undeclared.")
+
+    # A requirement must be in the controlled REQUIREMENTS vocabulary — else the UI has no reason to
+    # show and nothing can check it, the same degeneracy an unregistered tag would be.
+    requirements = tuple(str(r).strip().lower() for r in requirements)
+    for value in requirements:
+        if value not in REQUIREMENTS:
+            raise ValueError(
+                f"requirement '{value}' (declared by '{op}') is not one of "
+                f"{REQUIREMENT_NAMES}. A requirement must be in the controlled vocabulary so a "
+                f"consumer can render its reason and gate on it; add it to REQUIREMENTS (with its "
+                f"human-readable reason) if it is genuinely new, don't free-string it here.")
 
     if op in _OPERATIONS:
         existing = _OPERATIONS[op]
@@ -127,6 +222,8 @@ def register_operation(op: str, *, role: str, summary: str,
         op=op, role=role, summary=summary, target=target,
         produces=produces or role,
         aliases=tuple(str(a).strip().lower() for a in aliases),
+        inputs=inputs,
+        requirements=requirements,
         registered_by=None,      # filled in by the decorator
     )
     return op
@@ -134,7 +231,7 @@ def register_operation(op: str, *, role: str, summary: str,
 
 def tags_layer(op: str, *, role: str, summary: str,
                target: str | None = None, produces: str | None = None,
-               aliases: tuple = ()):
+               aliases: tuple = (), inputs: tuple = (), requirements: tuple = ()):
     """Decorator: **an operation declares its own tag, on the function that performs it.**
 
     ::
@@ -155,17 +252,25 @@ def tags_layer(op: str, *, role: str, summary: str,
     """
     def _decorate(fn):
         register_operation(op, role=role, summary=summary, target=target,
-                           produces=produces, aliases=aliases)
+                           produces=produces, aliases=aliases, inputs=inputs,
+                           requirements=requirements)
         _OPERATIONS[op.strip().lower()]['registered_by'] = (
             f"{fn.__module__}.{fn.__qualname__}")
 
-        fn.__pycat_op__ = op.strip().lower()
+        _op = op.strip().lower()
+        fn.__pycat_op__ = _op
 
         @functools.wraps(fn)
         def _wrapped(*args, **kwargs):
-            return fn(*args, **kwargs)
+            # Declare the op for the duration of the call, so any layer this function creates
+            # *synchronously* is attributed definitionally with no call-site change — this covers most
+            # sites and makes the explicit-context migration small. The stack walk stays as the fallback
+            # for un-decorated / cross-thread paths; the runner (operation_runner) carries the context
+            # across the off-thread boundary the stack walk cannot see.
+            with operation_context(_op):
+                return fn(*args, **kwargs)
 
-        _wrapped.__pycat_op__ = op.strip().lower()
+        _wrapped.__pycat_op__ = _op
         return _wrapped
 
     return _decorate
@@ -306,8 +411,11 @@ def _register_ui_operations():
 
     _UI_OPS = [
         # ---- filtering (ui_filtering_mixin) --------------------------------------------------
+        # A row may carry a 6th element, `inputs` — the role(s)/target(s) it consumes (the graph
+        # edges). Most UI ops leave it off (roots, or their input role is not yet unambiguous);
+        # CLAHE is a plain image→image filter, so it declares `('image',)`.
         ('clahe', 'preprocessed', 'Contrast-limited adaptive histogram equalisation', None,
-         ('equalize_adapthist',)),
+         ('equalize_adapthist',), ('image',)),
         ('im2bw', 'mask', 'Binarise at a threshold', None, ('binarize',)),
         ('best_slice', 'preprocessed', 'Select the best-focused slice of a stack', None, ()),
         ('morph_gaussian', 'preprocessed', 'Morphological Gaussian filter', None, ()),
@@ -341,9 +449,13 @@ def _register_ui_operations():
         ('cropped', 'image', 'Cropped to a region', None, ()),
     ]
 
-    for op, role, summary, target, aliases in _UI_OPS:
+    for row in _UI_OPS:
+        op, role, summary, target, aliases = row[:5]
+        inputs = row[5] if len(row) > 5 else ()
+        requirements = row[6] if len(row) > 6 else ()
         try:
-            register_operation(op, role=role, summary=summary, target=target, aliases=aliases)
+            register_operation(op, role=role, summary=summary, target=target,
+                               aliases=aliases, inputs=inputs, requirements=requirements)
             _OPERATIONS[op]['registered_by'] = 'pycat.utils.tag_registry (UI operation)'
         except TagCollision:
             # Already registered by a toolbox function -- that is fine and correct.

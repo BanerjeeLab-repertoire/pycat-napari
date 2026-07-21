@@ -31,8 +31,20 @@ import scipy.ndimage as ndi
 # helpers
 # ---------------------------------------------------------------------------
 
+#: How many frames QC assesses from a long time series. QC is a health check, not a measurement, so an
+#: evenly-spaced sample across the whole acquisition answers it — while reading every one of a 600- to
+#: 1000-frame 2048² movie is both a multi-GiB allocation and needlessly slow. 64 frames spans the run
+#: for drift/bleaching/focus and keeps the working set to ~1 GiB even at 2048². The UI reads only these
+#: frames off disk (see `materialize_stack(max_frames=…)`).
+QC_MAX_FRAMES = 64
+
+
 def _to_float(img):
-    return np.asarray(img, dtype=np.float64)
+    # float32, not float64: QC is a diagnostic, and float32 is ample precision for every metric here
+    # (clipping fractions, SNR ratios, focus variance, phase-correlation drift). float64 DOUBLED the
+    # memory of an already-large stack — an 18.8 GiB allocation that OOM'd QC on a 600-frame 2048²
+    # movie — and for a stack already decoded as float32 this is now a no-op view rather than a copy.
+    return np.asarray(img, dtype=np.float32)
 
 
 def _robust_noise_std(img):
@@ -296,28 +308,8 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
     quantity that could not see defocus.
     """
     a = _to_float(data)
-
-    def _sharp(f):
-        # Difference of Gaussians: keeps the mid-frequency band where genuine edges sit.
-        f = np.asarray(f, dtype=float)
-        band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
-        return float(np.var(band))
     if a.ndim == 3:
-        vals = np.array([_sharp(f) for f in a])
-        med = float(np.median(vals))
-        # frames well below the median sharpness are likely defocused/drifted
-        lo = vals < 0.5 * med if med > 0 else np.zeros(len(vals), bool)
-        status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
-        return dict(
-            name='Focus / sharpness', tier='core', status=status,
-            value=med, unit='band-pass energy',
-            headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
-            how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
-                "Laplacian is dominated by detector noise and cannot see defocus at "
-                "all; the band-pass rejects the noise and keeps real edges.",
-            good="All frames near the same sharpness. Frames dipping far below "
-                 "the others are out of focus or drifted axially.",
-            diag=dict(per_frame=vals, median=med))
+        return _qc_focus_stack(a)
     # ── A single image CAN be judged: via the sharpness of its objects' edges ───
     #
     # This used to headline **"sharpness = 545.3 (relative)"** and refuse a verdict. It was
@@ -346,103 +338,7 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
             good='', diag=None)
 
     if limit:
-        ratio = width / limit
-
-        # ── If NOTHING in the field is small, focus cannot be judged. Refuse. ───
-        #
-        # The measure works because a **blurry cell cannot hide a sharp punctum** — the sharpest
-        # edge present is the best available evidence of focus. **But if there is no small
-        # object at all, there is no evidence.**
-        #
-        # A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere.
-        # The check reported **4.0x the diffraction limit -> "bad"** — which is *true about the
-        # image* and *wrong about the focus*: those cells genuinely have soft boundaries, and
-        # the microscope may be perfectly focused.
-        #
-        # **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft
-        # focus" when nothing small is present.** That is a real limit and it is not fixable by
-        # a better estimator. So it is DETECTED and the check refuses, rather than reporting a
-        # confident verdict it has no basis for.
-        #
-        # (The comparative use survives this untouched: across a dataset of the same specimen
-        # the object type is constant, so a field that IS softer than its neighbours still
-        # stands out. The refusal is only of the ABSOLUTE claim.)
-        if ratio > 3.0:
-            return dict(
-                name='Focus / sharpness', tier='core', status='na',
-                value=float(ratio), unit='x the diffraction limit',
-                headline=("no sharp objects in this field — focus cannot be judged "
-                          "against the diffraction limit"),
-                how=f"The sharpest edge here is {width:.1f} px, against a diffraction limit of "
-                    f"{limit:.1f} px. **Either the image is grossly defocused, or the specimen "
-                    f"simply has no small objects** — a field of large smooth cells has no "
-                    f"sharp edge anywhere, and this check cannot tell the two apart.",
-                good="Compare this number ACROSS your dataset instead: the object type is the "
-                     "same in every field, so a field that is genuinely softer than its "
-                     "neighbours still stands out unambiguously. Or image a sub-resolution "
-                     "bead, which gives the focus an unambiguous reference.",
-                diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
-
-        # ── The ABSOLUTE verdict carries a ~1.5x systematic floor. Say so. ──────
-        #
-        # The estimator converts ``contrast / steepest_gradient`` into an edge sigma, and **the
-        # conversion constant depends on what the object IS**:
-        #
-        #     a blurred STEP edge  ->  contrast/gradient = **2.51** x sigma
-        #     a Gaussian BLOB      ->  contrast/gradient = **1.65** x sigma
-        #
-        # (Both verified against exact synthetic objects.) The estimator cannot distinguish
-        # them, so an absolute ratio against the diffraction limit is uncertain by ~1.5x
-        # depending on whether the field is puncta or membranes.
-        #
-        # **This does NOT affect the comparative use**, which is how focus is most often needed:
-        # *which of my 40 fields is the soft one?* Across one dataset the object type is the
-        # same, so the constant **cancels exactly**. Verified: in a 40-field acquisition where
-        # field 17 slipped, it is the only outlier at 1.58x the median.
-        #
-        # So the thresholds are set WIDE, and the headline states the uncertainty. A check that
-        # claims more precision than it has is worse than one that admits its floor — the user
-        # would go and refocus a microscope that is already at the limit.
-        # ── The absolute path is a SCREEN FOR GROSS DEFOCUS. Nothing more. ──────
-        #
-        # I tried to set these thresholds by the measurement error the blur causes, and **it
-        # cannot be done honestly.** The systematic floor (~1.5x, from the step-vs-blob
-        # constant) is larger than the effect being measured:
-        #
-        #     blur      ratio    apparent size error
-        #     1.0 px    0.67     +30 %
-        #     2.0 px    1.14     **+94 %**
-        #     3.0 px    1.46     **+169 %**
-        #
-        # **A 169 % size error sits inside the systematic floor.** Any threshold tight enough to
-        # catch it would fire on a perfectly focused image of the wrong object type.
-        #
-        # So the absolute verdict is deliberately WIDE — it catches gross defocus and nothing
-        # else — and the text sends the user to the comparative measure, which has no such floor
-        # because the object type is constant across a dataset and the constant cancels.
-        #
-        # **Reporting a screen as a screen is the honest thing. A tighter threshold here would
-        # be false precision**, and it would send someone to refocus a microscope that is
-        # already at the diffraction limit.
-        status = 'good' if ratio < 1.5 else ('warn' if ratio < 2.5 else 'bad')
-        return dict(
-            name='Focus / sharpness', tier='core', status=status,
-            value=float(ratio), unit='x the diffraction limit (±~1.5x systematic)',
-            headline=(f"sharpest edge \u2248 {width:.1f} px vs a diffraction limit of "
-                      f"{limit:.1f} px \u2014 {ratio:.1f}x (\u00b1~1.5x, see below)"),
-            how="The sharpest edge in the image, converted to an edge sigma and compared "
-                "against the narrowest edge the optics permit (Abbe lambda/2\u00b7NA, converted "
-                "from a resolution to a sigma). **The conversion constant depends on the object "
-                "type** — 2.51 for a step edge, 1.65 for a Gaussian blob — so this absolute "
-                "ratio is uncertain by about 1.5x. It is a screen, not a measurement.",
-            good="**This is a SCREEN for gross defocus, not a measurement.** Near 1x is "
-                 "diffraction-limited. Above ~2.5x the boundaries are soft enough "
-                 "that object sizes are overestimated and any edge-dependent measurement (area, "
-                 "partition coefficient, enrichment) is biased.\n\n**For a precise answer, "
-                 "compare this number ACROSS your dataset rather than against the limit** — the "
-                 "object type is then the same in every field, the conversion constant cancels "
-                 "exactly, and the soft field stands out unambiguously.",
-            diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
+        return _qc_focus_absolute(width, limit)
 
     return dict(
         name='Focus / sharpness', tier='core', status='info', value=float(width),
@@ -457,6 +353,137 @@ def qc_focus(data, pixel_um=None, na=None, wavelength_nm=None):
              "an edge can physically be. Otherwise, compare this number across your dataset "
              "and look for the outlier.",
         diag=dict(edge_width_px=width))
+
+
+def _qc_focus_stack(a):
+    """Per-frame band-pass (difference-of-Gaussians) sharpness across a stack, flagging frames far below
+    the median. A plain Laplacian is dominated by detector noise and cannot see defocus; the band-pass
+    rejects the noise and keeps real edges."""
+    def _sharp(f):
+        f = np.asarray(f, dtype=float)
+        band = ndi.gaussian_filter(f, 1.0) - ndi.gaussian_filter(f, 2.0)
+        return float(np.var(band))
+    vals = np.array([_sharp(f) for f in a])
+    med = float(np.median(vals))
+    # frames well below the median sharpness are likely defocused/drifted
+    lo = vals < 0.5 * med if med > 0 else np.zeros(len(vals), bool)
+    status = 'good' if not lo.any() else ('warn' if lo.mean() < 0.15 else 'bad')
+    return dict(
+        name='Focus / sharpness', tier='core', status=status,
+        value=med, unit='band-pass energy',
+        headline=f"{int(lo.sum())}/{len(vals)} frames below half-median sharpness",
+        how="Band-pass (difference-of-Gaussians) energy per frame. A plain "
+            "Laplacian is dominated by detector noise and cannot see defocus at "
+            "all; the band-pass rejects the noise and keeps real edges.",
+        good="All frames near the same sharpness. Frames dipping far below "
+             "the others are out of focus or drifted axially.",
+        diag=dict(per_frame=vals, median=med))
+
+
+def _qc_focus_absolute(width, limit):
+    """The diffraction-limit ABSOLUTE verdict for a single 2D image: the sharpest edge
+    (``width``) against the narrowest the optics permit (``limit``). REFUSES when nothing in the
+    field is small (ratio > 3 — a blurry cell cannot hide a sharp punctum, but with no small
+    object there is no evidence of focus), and otherwise returns a deliberately WIDE screen for
+    gross defocus (the step-vs-blob conversion constant makes an absolute ratio uncertain by
+    ~1.5x; the comparative use across a dataset cancels it exactly)."""
+    ratio = width / limit
+
+    # ── If NOTHING in the field is small, focus cannot be judged. Refuse. ───
+    #
+    # The measure works because a **blurry cell cannot hide a sharp punctum** — the sharpest
+    # edge present is the best available evidence of focus. **But if there is no small
+    # object at all, there is no evidence.**
+    #
+    # A brightfield field of large smooth cells (sigma ~14 px) has no sharp edge anywhere.
+    # The check reported **4.0x the diffraction limit -> "bad"** — which is *true about the
+    # image* and *wrong about the focus*: those cells genuinely have soft boundaries, and
+    # the microscope may be perfectly focused.
+    #
+    # **The check cannot distinguish "soft objects, sharp focus" from "sharp objects, soft
+    # focus" when nothing small is present.** That is a real limit and it is not fixable by
+    # a better estimator. So it is DETECTED and the check refuses, rather than reporting a
+    # confident verdict it has no basis for.
+    #
+    # (The comparative use survives this untouched: across a dataset of the same specimen
+    # the object type is constant, so a field that IS softer than its neighbours still
+    # stands out. The refusal is only of the ABSOLUTE claim.)
+    if ratio > 3.0:
+        return dict(
+            name='Focus / sharpness', tier='core', status='na',
+            value=float(ratio), unit='x the diffraction limit',
+            headline=("no sharp objects in this field — focus cannot be judged "
+                      "against the diffraction limit"),
+            how=f"The sharpest edge here is {width:.1f} px, against a diffraction limit of "
+                f"{limit:.1f} px. **Either the image is grossly defocused, or the specimen "
+                f"simply has no small objects** — a field of large smooth cells has no "
+                f"sharp edge anywhere, and this check cannot tell the two apart.",
+            good="Compare this number ACROSS your dataset instead: the object type is the "
+                 "same in every field, so a field that is genuinely softer than its "
+                 "neighbours still stands out unambiguously. Or image a sub-resolution "
+                 "bead, which gives the focus an unambiguous reference.",
+            diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
+
+    # ── The ABSOLUTE verdict carries a ~1.5x systematic floor. Say so. ──────
+    #
+    # The estimator converts ``contrast / steepest_gradient`` into an edge sigma, and **the
+    # conversion constant depends on what the object IS**:
+    #
+    #     a blurred STEP edge  ->  contrast/gradient = **2.51** x sigma
+    #     a Gaussian BLOB      ->  contrast/gradient = **1.65** x sigma
+    #
+    # (Both verified against exact synthetic objects.) The estimator cannot distinguish
+    # them, so an absolute ratio against the diffraction limit is uncertain by ~1.5x
+    # depending on whether the field is puncta or membranes.
+    #
+    # **This does NOT affect the comparative use**, which is how focus is most often needed:
+    # *which of my 40 fields is the soft one?* Across one dataset the object type is the
+    # same, so the constant **cancels exactly**. Verified: in a 40-field acquisition where
+    # field 17 slipped, it is the only outlier at 1.58x the median.
+    #
+    # So the thresholds are set WIDE, and the headline states the uncertainty. A check that
+    # claims more precision than it has is worse than one that admits its floor — the user
+    # would go and refocus a microscope that is already at the limit.
+    # ── The absolute path is a SCREEN FOR GROSS DEFOCUS. Nothing more. ──────
+    #
+    # I tried to set these thresholds by the measurement error the blur causes, and **it
+    # cannot be done honestly.** The systematic floor (~1.5x, from the step-vs-blob
+    # constant) is larger than the effect being measured:
+    #
+    #     blur      ratio    apparent size error
+    #     1.0 px    0.67     +30 %
+    #     2.0 px    1.14     **+94 %**
+    #     3.0 px    1.46     **+169 %**
+    #
+    # **A 169 % size error sits inside the systematic floor.** Any threshold tight enough to
+    # catch it would fire on a perfectly focused image of the wrong object type.
+    #
+    # So the absolute verdict is deliberately WIDE — it catches gross defocus and nothing
+    # else — and the text sends the user to the comparative measure, which has no such floor
+    # because the object type is constant across a dataset and the constant cancels.
+    #
+    # **Reporting a screen as a screen is the honest thing. A tighter threshold here would
+    # be false precision**, and it would send someone to refocus a microscope that is
+    # already at the diffraction limit.
+    status = 'good' if ratio < 1.5 else ('warn' if ratio < 2.5 else 'bad')
+    return dict(
+        name='Focus / sharpness', tier='core', status=status,
+        value=float(ratio), unit='x the diffraction limit (±~1.5x systematic)',
+        headline=(f"sharpest edge \u2248 {width:.1f} px vs a diffraction limit of "
+                  f"{limit:.1f} px \u2014 {ratio:.1f}x (\u00b1~1.5x, see below)"),
+        how="The sharpest edge in the image, converted to an edge sigma and compared "
+            "against the narrowest edge the optics permit (Abbe lambda/2\u00b7NA, converted "
+            "from a resolution to a sigma). **The conversion constant depends on the object "
+            "type** — 2.51 for a step edge, 1.65 for a Gaussian blob — so this absolute "
+            "ratio is uncertain by about 1.5x. It is a screen, not a measurement.",
+        good="**This is a SCREEN for gross defocus, not a measurement.** Near 1x is "
+             "diffraction-limited. Above ~2.5x the boundaries are soft enough "
+             "that object sizes are overestimated and any edge-dependent measurement (area, "
+             "partition coefficient, enrichment) is biased.\n\n**For a precise answer, "
+             "compare this number ACROSS your dataset rather than against the limit** — the "
+             "object type is then the same in every field, the conversion constant cancels "
+             "exactly, and the soft field stands out unambiguously.",
+        diag=dict(edge_width_px=width, diffraction_px=limit, ratio=ratio))
 
 
 def qc_snr(img):
@@ -1351,10 +1378,117 @@ def _not_applicable(name, why):
                 headline='not applicable to this data', how=why, good='', diag=None)
 
 
+def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=3.5):
+    """Object-level QC as a report section — *"can I trust this OBJECT?"* beside the imaging checks.
+
+    Runs ``biological_qc`` on the segmented-object table and returns one report dict per flag family,
+    each stating **how many of the N objects** tripped it, in the same
+    Assessment → Interpretation → Recommendation shape the imaging checks use. This is the second QC
+    layer the roadmap names: imaging QC asks whether the image is trustworthy; this asks whether each
+    measured object is.
+
+    **Flags, never filters.** A flag count is a review hint, not a verdict — edge-touching is stated
+    definitively (a truncated object is a measurement artefact), the rest are worded as observations
+    ("unusual size") because a mitotic or dead cell is real data. ``labels`` enables the edge flag;
+    ``parent_labels`` enables containment; both are optional and simply not reported when absent.
+    """
+    try:
+        import pandas as pd
+        from pycat.toolbox.biological_qc_tools import biological_qc, _FLAG_WORDS
+    except Exception as exc:      # broad-ok: the object-QC add-on must never break the imaging report
+        debug_log('qc_biological_objects: import failed', exc)
+        return []
+
+    table = pd.DataFrame(object_table)
+    if table.empty:
+        return [_not_applicable('Object QC (biological)',
+                                "No segmented objects to assess — run segmentation first.")]
+
+    try:
+        result = biological_qc(table, labels=labels, parent_labels=parent_labels, k=k)
+    except Exception as exc:      # broad-ok: object-level QC degrades to an N/A note, never a crash
+        debug_log('qc_biological_objects: biological_qc failed', exc)
+        return [_not_applicable('Object QC (biological)',
+                                f"Object-level QC could not run on this table ({exc}).")]
+
+    counts = result.attrs.get('qc_report', {})
+    n = len(table)
+    _DEFINITIVE = {'edge_touching'}     # a truncated object is objectively wrong, not a hint
+
+    # A per-flag interpretation: what the flag means and what to do about it.
+    _MEANING = {
+        'edge_touching':     ("Objects truncated by the field edge have wrong area, shape, and total "
+                              "intensity, and bias every population statistic.",
+                              "Exclude edge-touching objects before comparing populations, or re-image "
+                              "with the objects fully inside the field."),
+        'size_outlier':      ("An object far from the population's size (robust MAD) may be an "
+                              "oversegmented fragment or a merged pair / aggregate.",
+                              "Review the flagged objects; a real size range is fine — recompute with "
+                              "and without them and see if the conclusion holds."),
+        'shape_outlier':     ("Unusual eccentricity or solidity can mark a segmentation error — but a "
+                              "mitotic or dead cell is legitimately odd-shaped.",
+                              "A review hint, not a rejection: look before excluding."),
+        'intensity_outlier': ("An extreme-intensity object may be an aggregate, debris, or a saturated "
+                              "region rather than a typical object.",
+                              "Cross-check against the saturation report; decide explicitly whether to "
+                              "keep it."),
+        'containment_violation': ("A child object whose centroid falls outside every parent object is "
+                              "usually a segmentation error (a condensate not in a cell).",
+                              "Review the parent/child masks for the flagged objects."),
+        'scan_shear':        ("Objects torn by motion during a raster scan have distorted shape — an "
+                              "acquisition-geometry artifact, not biology.",
+                              "Exclude motion-sheared objects, or re-image stable fields."),
+    }
+
+    section = [dict(
+        name='Object QC (biological)', tier='core', status='info',
+        value=float(n), unit='objects',
+        headline=f"{n} object(s) assessed for biological / segmentation outliers",
+        how="A second QC layer, at the object level: imaging QC asks whether the IMAGE is trustworthy; "
+            "this asks whether each measured OBJECT is. Every flag below is REPORTED, never removed — "
+            "excluding an object is your explicit decision.",
+        good="", diag=None)]
+
+    for flag, tripped in counts.items():
+        tripped = int(tripped)
+        frac = tripped / n if n else 0.0
+        if flag in _DEFINITIVE:
+            status = 'good' if tripped == 0 else ('warn' if frac <= 0.25 else 'bad')
+        else:
+            # Observation flags never read 'bad' — they are hints; many just means a variable population.
+            status = 'good' if tripped == 0 else 'warn'
+        meaning, rec = _MEANING.get(flag, ("", ""))
+        word = _FLAG_WORDS.get('qc_' + flag, flag.replace('_', ' '))
+        section.append(dict(
+            name=f"· {word}", tier='core', status=status,
+            value=float(tripped), unit='objects',
+            headline=(f"{tripped} of {n} object(s) flagged ({frac*100:.0f}%)"
+                      if tripped else f"none of {n} objects flagged"),
+            how=meaning, good=rec, diag=None))
+    return section
+
+
 def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
                 frame_interval_s=None, process_timescale_s=None, n_channels=1,
-                is_zstack=False):
-    """Run every applicable metric and return an ordered list of result dicts."""
+                is_zstack=False, n_source_frames=None,
+                labels=None, modality=None, line_time_s=None,
+                object_table=None, parent_labels=None):
+    """Run every applicable metric and return an ordered list of result dicts.
+
+    n_source_frames : if `data` is an evenly-spaced SUBSAMPLE of a longer time series (QC caps a long
+        movie at `QC_MAX_FRAMES` to bound memory), pass the ORIGINAL frame count so the report can say
+        so honestly — QC assessed N of M frames, and a high-frequency vibration check saw a lower
+        sampling rate. None means `data` is the whole thing.
+    labels, modality, line_time_s : optional inputs for the scan-acquisition-artifact checks
+        (`scan_qc_tools`). They are **gated by modality** and only appended when a modality is given —
+        scan shear on a widefield image is noise, so when `modality` is None the scan checks are reported
+        `na` with the reason, never guessed from pixels.
+    object_table, parent_labels : optional inputs for the object-level BIOLOGICAL QC section
+        (`qc_biological_objects`). When an object table is supplied, a second QC layer is appended asking
+        *"can I trust this object?"* — edge-touching, size/shape/intensity outliers, containment. Flags
+        are reported, never used to drop a row. `labels` (above) enables the edge flag; `parent_labels`
+        enables containment. Absent → the section is simply not added (additive).
+    """
     a = np.asarray(data)
     is_stack = a.ndim == 3 and a.shape[0] > 1
     # ── A check that cannot apply must not RUN. It must not "pass", either. ─────
@@ -1449,6 +1583,48 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
         # broken. Pass `channels=[ch1, ch2, ...]` and it gives a verdict.
         qc_chromatic(n_channels, channels=channels),
     ]
+
+    # ── Scan-acquisition-geometry artifacts (gated by modality; never guessed from pixels) ──────
+    # Only appended when a modality is supplied. scan_qc_tools does its own per-modality gating and
+    # reports `na` with a reason for the checks that do not apply — so the report shows the whole family
+    # (greyed where inapplicable) rather than silently omitting it. Scan checks read a single 2D frame.
+    if modality is not None:
+        try:
+            from pycat.toolbox.scan_qc_tools import run_scan_qc
+            scan_frame = a[0] if is_stack else a
+            results += run_scan_qc(scan_frame, labels=labels, modality=modality,
+                                   line_time_s=line_time_s, pixel_um=pixel_um)
+        except Exception as _exc:  # broad-ok: an optional add-on QC family must never break the core QC report
+            debug_log('run_full_qc: scan-QC checks failed', _exc)
+
+    # ── Object-level biological QC (second QC layer; appended when an object table is given) ─────
+    # "Can I trust this OBJECT?" beside the imaging checks. Additive: only runs when a table is passed,
+    # never drops a row, and a failure inside it must not break the imaging report.
+    if object_table is not None:
+        try:
+            results += qc_biological_objects(object_table, labels=labels,
+                                             parent_labels=parent_labels)
+        except Exception as _bexc:  # broad-ok: the object-QC add-on must never break the core report
+            debug_log('run_full_qc: biological object-QC failed', _bexc)
+
+    # ── Be honest when QC assessed a SAMPLE, not the whole movie ────────────────
+    #
+    # A long time series is capped at QC_MAX_FRAMES to bound memory, so the report must say it looked
+    # at N of M frames rather than imply it read them all — and flag the one check that sampling
+    # changes: vibration is a high-frequency measurement, and a wider inter-frame interval lowers the
+    # frequency range it can see.
+    if (n_source_frames is not None and is_stack
+            and int(n_source_frames) > int(a.shape[0])):
+        results.insert(0, dict(
+            name='Frames assessed', tier='core', status='info',
+            value=float(a.shape[0]), unit='frames',
+            headline=f"{int(a.shape[0])} of {int(n_source_frames)} frames "
+                     f"(evenly sampled across the acquisition)",
+            how="QC is a health check, so it assesses an evenly-spaced sample of a long movie rather "
+                "than every frame — this bounds memory and time. Drift, bleaching and focus are "
+                "sampled across the whole run; the vibration check sees a lower sampling rate, so it "
+                "detects slower motion than a full-rate read would.",
+            good="", diag=None))
     return results
 
 

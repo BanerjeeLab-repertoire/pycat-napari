@@ -89,3 +89,44 @@ def test_genuinely_arrested_growth_is_still_detected(noise):
         f"{noise:.0%} scatter. Removing the R² clause must not cost sensitivity to real "
         f"arrest — the slope test should catch every one of them."
     )
+
+
+# ── Byte-identical characterization: pins the EXACT output before/after a phase-split ────────────
+#
+# The property tests above pin the arrest CLASSIFICATION across noise; this pins the exact numerical
+# output dict (r2s, rate constants, bootstrap agreement, radius change) on two deterministic scenarios,
+# so a phase-split of `fit_coarsening` can be proven to move no number. The bootstrap is seeded
+# (`default_rng(0)` inside the fit), so the agreement value is deterministic.
+
+@pytest.mark.core
+def test_fit_coarsening_output_is_byte_identical():
+    physics = pytest.importorskip("pycat.toolbox.condensate_physics_tools")
+
+    # OSTWALD ripening, low noise — a confident power-law call.
+    t, R = _coarsening(0.05, seed=3)
+    out = physics.fit_coarsening(t, R)
+    assert out['preferred_mechanism'] == 'ostwald'
+    assert out['mechanism_confidence'] == 'high'
+    assert np.isclose(out['mechanism_bootstrap_agreement'], 0.905, atol=1e-12)
+    assert np.isclose(out['ostwald_r2'], 0.9699059208099262, atol=1e-9)
+    assert np.isclose(out['coalescence_r2'], 0.9686712225701184, atol=1e-9)
+    assert np.isclose(out['radius_change_um'], 7.544318517032984, atol=1e-9)
+    assert np.isclose(out['radius_change_frac'], 3.422869289381456, atol=1e-9)
+    assert np.isclose(out['ostwald_K'], 2.0961071979836112, atol=1e-9)
+    assert np.isclose(out['coalescence_K'], 0.8011093416513432, atol=1e-9)
+    assert np.isclose(out['R0'], -0.29690230986955557, atol=1e-9)
+    assert np.isclose(np.nansum(out['fit_radii_ostwald']), 210.123838094, atol=1e-6)
+    assert np.isclose(np.nansum(out['fit_radii_coalescence']), 210.123838387, atol=1e-6)
+
+    # ARRESTED — the slope test wins, no coarsening exponent fitted.
+    t, R = _arrested(0.05, seed=3)
+    out = physics.fit_coarsening(t, R)
+    assert out['preferred_mechanism'] == 'arrested'
+    assert out['mechanism_confidence'] == 'n/a (arrested)'
+    assert np.isnan(out['mechanism_bootstrap_agreement'])
+    assert np.isclose(out['ostwald_r2'], 0.028139152831067382, atol=1e-9)
+    assert np.isclose(out['coalescence_r2'], 0.03739274030714068, atol=1e-9)
+    assert np.isclose(out['radius_change_um'], -0.2596513800273721, atol=1e-9)
+    assert np.isclose(out['radius_change_frac'], -0.04712169734799228, atol=1e-9)
+    assert np.isclose(out['ostwald_K'], 0.05146967574028197, atol=1e-9)
+    assert np.isclose(out['R0'], 5.510229780346295, atol=1e-9)

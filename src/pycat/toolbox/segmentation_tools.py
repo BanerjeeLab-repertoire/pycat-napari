@@ -225,7 +225,7 @@ def _build_cellpose_model(model_name):
 
 
 
-@tags_layer('local_threshold', role='mask',
+@tags_layer('local_threshold', role='mask', inputs=('image',),
             summary='Local (adaptive) thresholding')
 def local_thresholding_func(image, window_size, k_val=-0.5, mode='AND'):
     """
@@ -615,7 +615,7 @@ def merge_mean_color(graph, src, dst):
                                       graph.nodes[dst]['pixel count'])
 
 
-@tags_layer('felzenszwalb', role='labels',
+@tags_layer('felzenszwalb', role='labels', inputs=('image',),
             summary='Felzenszwalb graph segmentation with merging')
 def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=2):
     """
@@ -730,7 +730,7 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
     add_image_with_default_colormap(segmented_img, viewer, name=f"Felzenszwalb Segmented {active_layer.name}")
 
 
-@tags_layer('felzenszwalb_binary', role='mask',
+@tags_layer('felzenszwalb_binary', role='mask', inputs=('image',),
             summary='Felzenszwalb segmentation, binarised')
 def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=5,
                                      rim_close_min_result_area=150):
@@ -916,7 +916,7 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
     return boolean_mask
 
 
-@tags_layer('cellpose', role='labels',
+@tags_layer('cellpose', role='labels', inputs=('image',),
             summary='Cellpose deep-learning segmentation', target='cell')
 def cellpose_segmentation(image, object_diameter, model_name=None, postprocess=True):
     """
@@ -2298,7 +2298,7 @@ def cell_mask_stretching(image, cell_masks, min_relative_max=0.02,
     output_image = dtype_conversion_func(output_image, output_bit_depth=input_dtype)
     
     return output_image
-@tags_layer('subcellular_segment', role='labels',
+@tags_layer('subcellular_segment', role='labels', inputs=('image',),
             summary='Subcellular object segmentation within cells')
 def segment_subcellular_objects(original_image, pre_processed_image, cell_mask, cell_label, ball_radius, cell_df=None,
                                 kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,

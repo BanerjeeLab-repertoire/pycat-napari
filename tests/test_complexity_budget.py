@@ -67,7 +67,130 @@ _LONG_FUNCTION_LIMIT = 120
 # extracting a contiguous widget block into a helper, dropping the count 147 → 135. No science function
 # was touched. The ceiling is lowered to the genuine new value (135) — the ratchet moving DOWN, which is
 # it working; it is never raised to grandfather offenders.
-_MAX_LONG_FUNCTIONS = 135
+# 134. (2026-07-20, science_function_split) `fit_anomalous_diffusion` (condensate_physics_tools), the
+# 394-line MSD/α fit behind viscosity, was split BY COMPUTATIONAL PHASE into pure helpers — the lag-window
+# gate, the non-linear power-law fit, the identifiability CI, the motion-type classification, and result
+# packaging — dropping the function to 98 lines. This is a SCIENCE function, so the split was governed by
+# coverage: its 4 existing numerical tests (test_msd_drift / test_msd_min_track_length /
+# test_vpt_viscosity_chain / test_route_equivalence) passed UNMODIFIED, proving no number changed. No
+# floating-point operation was reassociated and nothing was "improved" while moving. Count 135 → 134.
+# 133. (2026-07-20) `partition_coefficient_local` (invitro_tools), the 394-line local-annulus Kp
+# measurement, was split BY PHASE into pure helpers — input-validity (`_pc_check_input`), camera-floor
+# determination (`_pc_camera_floor`), the interface-width gap (`_pc_estimate_gap`), the per-droplet
+# measurement loop (`_pc_measure_droplets`), and the reporting verdict (`_pc_verdict`) — dropping the
+# function to 109 lines. A SCIENCE function, so the split was pinned by a byte-identity characterization
+# test (`test_partition_local_characterization`) capturing the exact per-droplet + aggregate outputs
+# across all five reporting branches BEFORE the split and asserting them unchanged after. No number
+# moved. Count 134 → 133.
+# 132. (2026-07-20) `classify_beads` (vpt_tools), the 306-line bead classifier, was split into its two
+# independent branches — `_classify_fast_template` (+ its `_classify_fast_template_refs` reference-stats
+# phase) and `_classify_gaussian_fit` — leaving `classify_beads` a 68-line empty-guard + dispatch. Pinned
+# byte-identical by `test_classify_beads_characterization` (the categorical `bead_class` labels, the
+# `n_units_est` estimates, the dropped-rejected row count, and the recorded thresholds, captured on both
+# branches BEFORE the split and asserted unchanged after). Count 133 → 132.
+# 131. (2026-07-20) `fit_size_distribution_mle` (invitro_tools), the 301-line droplet-size-distribution
+# identifier, was split BY PHASE into pure helpers — `_fit_size_models` (per-model MLE + Clauset power-law
+# x_min), `_powerlaw_tail_comparison` (the tail Vuong test + seeded bootstrap goodness-of-fit gate),
+# `_size_distinguishability` (the whole-sample Vuong test) and `_size_verdict` — leaving the function a
+# 92-line orchestrator. Pinned byte-identical by `test_size_distribution_mle_characterization` (selected
+# model, every model's AIC/loglik, power-law x_min + tail test, distinguishability comparison, descriptive
+# moments, on lognormal + gamma samples, captured BEFORE and asserted unchanged after; the bootstrap is
+# seeded so it is deterministic). Count 132 → 131.
+# 130. (2026-07-20) `fit_photobleaching` (condensate_physics_tools), the 233-line exponential-bleach fit
+# (mostly measured-rationale comment blocks), was split into `_photobleach_tau_ci` (the fit-covariance CI
+# on tau), `_photobleach_window_metrics` (the two non-circular decay-observed bounds) and
+# `_photobleach_window_warn` (the two-tier observation-window warning), leaving a 65-line fit + orchestrate
+# body. Each rationale block moved with its phase. Pinned byte-identical by
+# `test_photobleaching_characterization` (fitted params, R², tau CI, both decay bounds, correction factors
+# and WHICH warning tier fires, on adequate / mid / short / flat synthetic movies). Count 131 → 130.
+# 129. (2026-07-20) `fit_frap_recovery` (frap_tools), the 206-line FRAP recovery fit, was split into
+# `_frap_derive_mobile` (the normalisation-aware mobile fraction + over-recovery warning) and
+# `_frap_identifiability` (the per-parameter covariance CI + its warning, with the covariance rationale),
+# leaving a 109-line fit + orchestrate body. Pinned byte-identical by `test_frap_recovery_characterization`
+# (fitted params, R², mobile/immobile fractions, over-recovery flag, per-parameter CI widths + verdicts,
+# and which warnings fire, on adequate / short-unidentifiable / over-recovery / too-few-points curves);
+# the existing `test_frap_fitting` passes unmodified. Count 130 → 129.
+# 128. (2026-07-20) `fit_fusion_relaxation` (fusion_tools), the 184-line droplet-fusion relaxation fit,
+# was split into `_fusion_tau_ci` (the covariance CI on tau), `_fusion_window_warn` (the relaxations-
+# observed count + short-record warning) and `_fusion_model_adequacy` (the runs test + two-mode test),
+# leaving a 90-line fit + orchestrate body. Pinned byte-identical by
+# `test_fusion_relaxation_characterization` (fitted params, R², tau CI, relaxations-observed, adequacy /
+# two-mode verdicts, and which warnings fire, on adequate / short / two-mode / too-few-points traces); the
+# existing `test_fusion_physics` passes unmodified. Count 129 → 128.
+# 127. (2026-07-20) `partition_measurement` (invitro_tools), the 191-line Kp measurement-with-assumptions
+# builder, had its background-subtracted assessment (the image cannot tell a camera pedestal from a
+# genuine dilute phase, so it is resolved by a dark reference / stated by the caller / recorded UNCHECKED)
+# extracted to `_partition_background_assumption`, leaving a 110-line body. Pinned byte-identical by
+# `test_partition_measurement_characterization` (which branch fires and the exact checked/holds/detail of
+# the assumption across all four inputs, plus the other assumptions + measurement identity); the existing
+# `test_claim_scoping` passes unmodified. Count 128 → 127.
+# 126. (2026-07-20) `detect_beads_stack` (vpt_tools), the 317-line VPT detection stage feeding the whole
+# viscosity chain, was split BY PIPELINE STAGE — `_choose_detection_backend` (GPU/pool/serial tier),
+# `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames` (the per-frame loop) with `_fast_frame_rows` /
+# `_precise_frame_rows`, and `_assemble_detections` — leaving a 116-line orchestrator. This is the
+# VALIDATED detection path (~8.325 through TrackMate), so it is GUARD-ANCHORED: the existing VPT
+# equivalence guards (`test_vpt_gpu_equivalence`, `test_vpt_parallel_equivalence`, the memo) pass
+# unmodified, and a new serial-path characterization (`test_detect_beads_stack_characterization`) pins the
+# exact detection table — coordinates, order, area, counts — on a seeded synthetic stack. No number moved.
+# Count 127 → 126.
+# 125. (2026-07-20) `link_trajectories_bayesian` (dynamic_spatial_tools), the 245-line Bayesian/Hungarian
+# trajectory linker feeding every VPT viscosity, was split BY COMPUTATIONAL PHASE into pure helpers —
+# `_bayesian_cost_defaults` (resolve the None cost params), `_start_new_tracks` (open tracks when none are
+# viable), `_build_frame_cost_matrix` (the per-frame viable×detection cost block + death/birth/dummy
+# structure) and `_apply_frame_assignment` (the Hungarian solve written back onto the DataFrame + active
+# state) — leaving a ~50-line orchestrator. Two provably-dead locals (`_sigma2`, the `assigned_*` sets) were
+# dropped in the move. Pinned byte-identical by `test_bayesian_linker_assignment_is_byte_identical` (the
+# exact per-detection track_id + link_cost on a fixed births/links/bridged-gap/velocity/area scenario —
+# the Hungarian solve is sensitive to the cost matrix, so identical output proves the construction was
+# preserved); the existing purity/gap/ambiguity property tests pass unmodified. Count 126 → 125.
+# 124. (2026-07-20) `fit_coarsening` (condensate_physics_tools), the 227-line coarsening-mechanism
+# classifier (Ostwald vs coalescence vs arrested), was split BY COMPUTATIONAL PHASE into pure helpers —
+# `_coarsening_powerlaw_fits` (the two curve_fits + R²), `_coarsening_is_arrested` (the slope-test that
+# decides whether the radius grew at all, never a fit statistic) and `_coarsening_confidence` (the seeded
+# residual bootstrap + confidence tiers; the single napari warning became a returned flag the orchestrator
+# emits) — leaving a ~35-line orchestrator. Two provably-dead locals (`noise`, `r2_gap`) were dropped in
+# the move. This is a physics FIT function, like its four already-split siblings; pinned byte-identical by
+# `test_fit_coarsening_output_is_byte_identical` (exact preferred_mechanism / confidence / r²s / rate
+# constants / bootstrap agreement / radius change on Ostwald + arrested scenarios — the bootstrap is
+# seeded, so its agreement is deterministic); the existing arrest-classification property tests pass
+# unmodified. Count 125 → 124.
+# 123. (2026-07-20) `count_molecules_single` (molecular_counting_tools), the 214-line single-trace N&B
+# molecule counter, was split BY COMPUTATIONAL PHASE into pure helpers — `_estimate_pedestal_read_noise`
+# (the pedestal + read-noise floor read from the trace's own post-bleach tail) and `_fit_counting_nu`
+# (the ν = variance-vs-mean slope fit, free-intercept when a noise floor is present else through-origin,
+# with the read-noise fallback) — leaving a ~55-line orchestrator; each dense rationale block moved with
+# its phase. Pinned byte-identical by `test_count_molecules_single_is_byte_identical` (exact
+# ν / N / bleach_r² / pedestal / read_noise_var / accepted / n_points on a clean trace — the through-origin
+# branch — AND a read-noise+pedestal trace — the free-intercept branch); the existing accuracy /
+# pedestal-removal property tests pass unmodified. Count 124 → 123.
+# 122. (2026-07-20) `topology_metrics` (topology_tools), the 192-line per-cell structural-envelope metric,
+# had its comment-dense basin-count phase — topological-persistence peak counting with a range-vs-noise
+# flat-field guard — extracted to a pure `_topo_basin_metrics(envelope, mask, image_noise)` returning the
+# basin keys, leaving a ~55-line orchestrator (basic stats + connectivity). The dead `min_basin_distance`
+# /`ball_radius` default computation (unused by the persistence method) was dropped in the move; the
+# parameters stay in the signature. Pinned byte-identical by `test_topology_metrics_is_byte_identical`,
+# which feeds a SYNTHETIC numpy envelope directly (bypassing the GPU-routed rolling-ball) so the pure
+# numpy/scipy metric is isolated and platform-portable — exact basin count / persistence gate + list /
+# cov / roughness / components / largest-frac on a peaked field (structure branch) and a near-flat field
+# (flat branch, which omits topo_noise_known); the existing basin-count property tests pass unmodified.
+# Count 123 → 122.
+# 121. (2026-07-20) `qc_focus` (data_qc_tools), the 203-line focus/sharpness QC check (a big dispatch of
+# result dicts with dense measured rationale), was split into pure helpers — `_qc_focus_stack` (the 3D
+# per-frame band-pass-energy branch) and `_qc_focus_absolute` (the single-image diffraction-limit verdict:
+# the refuse-when-nothing-sharp path + the wide gross-defocus screen) — leaving the orchestrator with just
+# the na/info branches. Pinned byte-identical by `test_qc_focus_is_byte_identical`, which exercises ALL
+# five result branches (stack-warn / absolute-good / refuse-na / info / flat-na) on pure-numpy/scipy inputs
+# (portable) and asserts exact status + value + diag scalars; the existing focus property tests pass
+# unmodified. Count 122 → 121.
+# 120. (2026-07-20) `field_summary` (invitro_tools), the 182-line in-vitro whole-field summary — dominated
+# by an ~80-line docstring and two large inline measured-caveat comments — had its non-empty compute + the
+# honest-name result dict extracted to `_field_summary_metrics(props, image, bg_mask, cond_mask,
+# microns_per_pixel, field_area_um2)`, leaving the orchestrator with the docstring, setup and the n == 0
+# empty branch (which deliberately carries a different key set). Pinned byte-identical by
+# `test_field_summary_is_byte_identical` (the exact populated dict — sizes, phase intensities, intensity
+# ratio, contrast, area fraction + deprecated aliases — AND the empty branch, which omits intensity_ratio /
+# dense_dilute_contrast); the existing halo/contrast property tests pass unmodified. Count 121 → 120.
+_MAX_LONG_FUNCTIONS = 120
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
@@ -122,6 +245,77 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
         + "\n\n**Split the new work, or lower an existing one to make room.** A function this "
           "long is not reviewed — it is skimmed, and a silent failure path inside it is invisible."
     )
+
+
+# ── Per-file ratchet on the CONCENTRATION POINTS ─────────────────────────────────────────────
+#
+# The count/absolute ratchets above bound individual functions. They do NOT stop a god-file growing by
+# adding more medium functions — and an audit measured exactly that: across two revisions, while the new
+# abstractions (SelectionService, OperationSpec, the plot backends, the scene stack) were added BESIDE
+# these files, every one grew or held:
+#
+#     ui_modules.py         5555 -> 5573   (+18)
+#     file_io.py            2787 -> 2805   (+18)
+#     batch_step_registry   1613 -> 1663   (+50)
+#     vpt_ui.py             2458 -> 2458   ( 0)
+#
+# So each concentration point gets a whole-FILE line ceiling, set at today's value. **The ratchet only
+# moves DOWN:** a decomposition that moves responsibility out lowers the number here; nothing may raise
+# it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
+# of the vpt_ui decomposition spec.
+_FILE_LINE_CEILINGS = {
+    # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
+    # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
+    # ratchet moving DOWN is the point — the file cannot grow back to where it was.
+    "toolbox/vpt_ui.py": 1139,
+    # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
+    # decomposition. The ratchet moves DOWN — it cannot grow back.
+    "ui/ui_modules.py": 3268,
+    # MenuManager's new home, ratcheted at its post-extraction size. Phase-2's internal splits
+    # (napari_menus / grid_view / metadata_dialogs) would lower it further — a later increment.
+    "ui/menu_manager.py": 2344,
+    # 2805 -> 1670 (-40.5%) as StackLoadCancelled (errors.py), the two dialogs (dialogs.py), the pure
+    # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
+    # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.
+    "file_io/file_io.py": 1670,
+    # 1663 -> 432 (-74%): the replay handlers + shared helpers moved to the pycat.batch.steps package
+    # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
+    # a source-level test) stay. Ratchet moves down only.
+    "batch_step_registry.py": 432,
+    # 2051 -> 1623 -> 799 -> 605 -> 88: the full invitro decomposition (1.6.213-1.6.216) moved every domain
+    # to toolbox/invitro/{size_distribution,partition,field_summary,analysis}.py. invitro_tools.py is now a
+    # pure re-export shim (-96%). The ceiling is locked at the shim size.
+    "toolbox/invitro_tools.py": 88,
+    # 2447 -> 2242 (coarsening, 1.6.217) -> 1802 (photobleaching + frame_quality, 1.6.218): domains moved to
+    # toolbox/condensate_physics/*.py. The ceiling ratchets DOWN as the remaining quantities (msd, moduli,
+    # relaxation, intensity, survival) move out.
+    "toolbox/condensate_physics_tools.py": 122,
+}
+
+
+@pytest.mark.core
+def test_the_concentration_points_do_not_GROW():
+    """**A per-file ratchet on the god-files.** The function ratchets do not stop a file growing by
+    accretion of medium methods — which is precisely the additive-not-replacing drift the audit
+    measured. This bounds the whole file, at today's size, moving only down.
+
+    To pass after a legitimate extraction: **lower the ceiling** to the new count. To pass after adding
+    code: move something out, don't raise the number.
+    """
+    over = []
+    for rel, ceiling in sorted(_FILE_LINE_CEILINGS.items()):
+        path = _SOURCE / rel
+        if not path.exists():
+            over.append(f"{rel}: MISSING — the ratchet points at a file that no longer exists")
+            continue
+        n = len(path.read_text(encoding='utf-8', errors='ignore').splitlines())
+        if n > ceiling:
+            over.append(f"{rel}: {n} lines (ceiling {ceiling}, +{n - ceiling})")
+    assert not over, (
+        "a concentration point grew past its ceiling:\n  " + "\n  ".join(over)
+        + "\n\n**Move a responsibility OUT** (into an adapter/helper module), don't raise the number — "
+          "the ceiling is a ratchet that only goes down. A new abstraction added BESIDE the god-file "
+          "instead of absorbing code is the exact 'additive, not replacing' drift this guards against.")
 
 
 @pytest.mark.core

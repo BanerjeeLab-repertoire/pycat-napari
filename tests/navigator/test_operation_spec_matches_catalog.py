@@ -1,20 +1,20 @@
 """
-**The OperationSpec drift guard** (increment 1: validate-first).
+**The OperationSpec catalog guard** — validate-first (inc 1) → **generate-from-the-spec (inc 4)**.
 
-The Navigator's ``data/operation_catalog.json`` is a COMMITTED SNAPSHOT of the live ``@tags_layer`` /
-UI-registered operations. Before this test, nothing checked it still matched the decorators: the old
-``test_catalog_has_real_layer_operations`` only asserted a hard-coded handful (``cellpose``, ``clahe``)
-were present — it could not catch a decorator that was ADDED, REMOVED, or had its ``role``/``target``
-CHANGED without the JSON being regenerated. That is exactly the "one identity, five encodings that
-drift" problem the OperationSpec effort exists to end.
+The Navigator's ``data/operation_catalog.json`` began as a COMMITTED SNAPSHOT of the live
+``@tags_layer`` / UI-registered operations, and this guard made any divergence a test failure three
+ways (coverage, no-stale-layer-ops, field fidelity) — ending the "one identity, five encodings that
+drift" problem.
 
-This guard makes drift a test failure, three ways:
+**Increment 4 flips it.** The Navigator now GENERATES its operation set from the live spec
+(``build_operation_registry(from_spec=True)`` → ``iter_operation_specs`` → the decorators) rather than
+reading the committed JSON. The decorators are the runtime source of truth; the JSON is a reviewable,
+shippable *artifact* — no longer authoritative at run time — kept faithful by a **regeneration check**:
+the committed file must equal ``build_catalog_document()`` exactly. The granular coverage/field tests
+are kept because they name *what* diverged; the regeneration check is the authoritative one and also
+catches provenance/ordering/field-set drift the granular tests do not.
 
-1. **Coverage** — every live ``@tags_layer``/UI op appears in the snapshot.
-2. **No stale layer-ops** — every snapshot layer op corresponds to a live op.
-3. **Field fidelity** — ``role`` / ``produces`` / ``target`` in the snapshot match the live declaration.
-
-When it fails for a LEGITIMATE change, the fix is not to edit the JSON by hand — it is to regenerate:
+When any of these fails for a LEGITIMATE change, the fix is not to edit the JSON by hand — regenerate:
 
     python -m pycat.navigator.op_catalog --regenerate
 
@@ -24,11 +24,16 @@ Headless: populating the live registry imports the tag-bearing toolbox modules +
 (the UI ops); none import Qt/napari at module scope, so this runs under ``-m core`` with no display.
 """
 
+import json
+import os
+
 import pytest
 
 pytestmark = pytest.mark.core
 
-from pycat.navigator.op_catalog import _measure_ops, load_operation_catalog
+from pycat.navigator import op_catalog
+from pycat.navigator.op_catalog import (
+    _measure_ops, build_catalog_document, build_operation_registry, load_operation_catalog)
 from pycat.navigator.operation_spec import OperationSpec, iter_operation_specs
 
 _REGEN = "python -m pycat.navigator.op_catalog --regenerate"
@@ -79,8 +84,8 @@ def test_no_stale_layer_ops_in_the_catalog():
 
 
 def test_catalog_fields_match_the_live_declaration():
-    """A decorator whose ``role``/``produces``/``target`` changed without regeneration → this fails,
-    naming the field."""
+    """A decorator whose ``role``/``produces``/``target``/``inputs`` changed without regeneration →
+    this fails, naming the field."""
     live, catalog = _live(), _catalog()
     mismatches = []
     for op in sorted(set(live) & set(catalog)):
@@ -90,6 +95,15 @@ def test_catalog_fields_match_the_live_declaration():
                                   ("target", spec.target)):
             if (entry.get(field) or None) != (live_value or None):
                 mismatches.append(f"{op}.{field}: catalog={entry.get(field)!r} live={live_value!r}")
+        # `inputs`/`requirements` are lists in the snapshot, tuples live — compare order-preserving so
+        # a declared-vs-snapshot divergence on the graph edges or the gating fails like any other field.
+        if tuple(entry.get("inputs") or ()) != tuple(spec.inputs):
+            mismatches.append(
+                f"{op}.inputs: catalog={entry.get('inputs')!r} live={list(spec.inputs)!r}")
+        if tuple(entry.get("requirements") or ()) != tuple(spec.requirements):
+            mismatches.append(
+                f"{op}.requirements: catalog={entry.get('requirements')!r} "
+                f"live={list(spec.requirements)!r}")
     assert not mismatches, (
         f"{len(mismatches)} catalog field(s) disagree with the live decorator:\n  "
         + "\n  ".join(mismatches)
@@ -106,3 +120,46 @@ def test_the_explicit_canonical_ops_survive():
         assert op in live, f"canonical op '{op}' is not registered — the sweep is incomplete"
     assert live["cellpose"].produces == "labels" and live["cellpose"].target == "cell"
     assert live["clahe"].produces == "image"
+
+
+# ── Increment 4: the catalog is GENERATED from the spec; the guard is a regeneration check ─────
+
+def test_the_committed_catalog_is_the_regeneration_of_the_spec():
+    """**The authoritative guard (increment 4).** The committed ``operation_catalog.json`` must equal
+    ``build_catalog_document()`` — the document generated purely from the live decorators — exactly.
+
+    This is stronger than the field-by-field checks above: it also catches a changed provenance field,
+    a dropped/added key, or a re-ordering. The catalog is no longer hand-maintained; it is generated,
+    and this proves the committed artifact is that generation and nothing else.
+    """
+    committed_path = os.path.join(os.path.dirname(op_catalog.__file__), "data",
+                                  op_catalog.CATALOG)
+    with open(committed_path, encoding="utf-8") as fh:
+        committed = json.load(fh)
+
+    generated = build_catalog_document()
+
+    assert committed == generated, (
+        "the committed operation_catalog.json is NOT the regeneration of the live spec — it is stale "
+        "or was hand-edited. It is a generated artifact now; regenerate and commit:\n    "
+        "python -m pycat.navigator.op_catalog --regenerate")
+
+
+def test_the_navigator_registry_GENERATES_from_the_spec_not_the_file():
+    """The flip itself: ``build_operation_registry`` builds its layer ops from the spec by default, and
+    that produces the same registry as building from the committed file — so the JSON is an artifact,
+    not the runtime source of truth (the Navigator would work even without it)."""
+    from_spec = build_operation_registry(from_spec=True)
+    from_file = build_operation_registry(from_spec=False)
+
+    # Same set of operation contracts either way — the file and the spec are equal by construction.
+    spec_names = {c.name for c in from_spec.all()}
+    file_names = {c.name for c in from_file.all()}
+    assert spec_names == file_names, (
+        "generating the registry from the spec yields a different op set than reading the committed "
+        "file — the two have diverged, which the regeneration check should also have caught")
+
+    # And the generated set covers every live layer op (the acquisition source aside).
+    live_ids = set(_live())
+    assert live_ids <= spec_names, (
+        f"the generated registry is missing live ops: {sorted(live_ids - spec_names)}")

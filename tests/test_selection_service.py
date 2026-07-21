@@ -297,3 +297,82 @@ def test_the_deferred_subscriber_also_skips_its_OWN_selection():
     for fn in flush:
         fn()
     assert heard == [], "a view was made to resolve the image for its own click"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Interaction layer — hover / selected / pinned are ONE state (Gap 1)
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+#
+# Selection used to be a single object: no multi-select, no pin-while-exploring, no independent hover.
+# `SelectionState` makes the three real and independent, published as one value. Back-compat is
+# mandatory (covered by every test above, which still passes) — these pin the NEW behaviour.
+
+
+def test_TOGGLE_adds_then_removes_from_the_selection():
+    """Ctrl-click a comparison set: toggle adds, toggle again removes."""
+    s = _service()
+    s.toggle('a', source='plot')
+    assert s.state.selected == frozenset({'a'}) and s.state.primary == 'a'
+    s.toggle('b', source='plot')
+    assert s.state.selected == frozenset({'a', 'b'})
+    s.toggle('a', source='plot')
+    assert s.state.selected == frozenset({'b'}), "toggling a selected entity did not remove it"
+
+
+def test_CLEAR_empties_selection_and_hover_but_KEEPS_pins():
+    """Escape clears what you were looking at without throwing away what you pinned to compare."""
+    s = _service()
+    s.select_entity('a', source='plot')
+    s.pin('p', source='plot')
+    s.hover('h', source='plot')
+
+    s.clear_selection(source='plot')
+
+    assert s.state.selected == frozenset() and s.state.hovered is None
+    assert s.state.pinned == frozenset({'p'}), "clear threw away the pins"
+
+
+def test_HOVER_is_independent_of_the_selection():
+    s = _service()
+    s.select_entity('a', source='plot')
+    s.hover('b', source='plot')
+    assert s.state.selected == frozenset({'a'}), "hovering changed the selection"
+    assert s.state.hovered == 'b'
+
+
+def test_one_command_is_ONE_generation_and_ONE_publish():
+    s = _service()
+    gens = []
+    s.subscribe('view', lambda st: gens.append(st.generation))
+    g0 = s.state.generation
+
+    s.toggle('a', source='other')
+
+    assert len(gens) == 1, "a single command published more than once"
+    assert s.state.generation != g0 and gens[-1] == s.state.generation
+
+
+def test_a_command_still_reaches_the_OLD_subscribers_through_the_back_compat_interface():
+    """A subscriber written against the old `Selection` (reads `.entity_ids`) fires unchanged when a
+    NEW command drives the state."""
+    s = _service()
+    heard = []
+    s.subscribe('table', lambda st: heard.append(st.entity_ids))
+    s.select_entity('a', source='plot')
+    assert heard == [('a',)]
+
+
+def test_a_command_skips_its_OWN_source_view():
+    s = _service()
+    heard = {'plot': 0, 'table': 0}
+    for n in heard:
+        s.subscribe(n, lambda st, k=n: heard.__setitem__(k, heard[k] + 1))
+    s.toggle('a', source='plot')
+    assert heard['plot'] == 0 and heard['table'] == 1
+
+
+def test_SelectionState_reads_like_the_old_Selection():
+    from pycat.utils.selection_service import SelectionState
+    st = SelectionState(selected=frozenset({'x', 'a'}), primary='a')
+    assert st.primary_id == 'a' and not st.is_empty
+    assert st.entity_ids == ('a', 'x'), "entity_ids must be primary-first then sorted (stable order)"

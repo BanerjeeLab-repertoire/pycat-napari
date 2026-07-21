@@ -70,6 +70,16 @@ def _clear_everything(viewer, central_manager):
     except Exception:
         pass
 
+    # Reset every open method widget's fields to their defaults — the "~fresh open" state — so a cleared
+    # workspace does not still show the previous workflow's spin boxes, dropdowns and status circles
+    # populated (session_clear_reset Bug 2). The hub holds the registries weakly; Qt-free, so this import
+    # is safe even where PyQt5 is absent.
+    try:
+        from pycat.utils.field_registry_hub import active_field_registries
+        active_field_registries().reset_all()
+    except Exception:  # broad-ok: resetting method-widget fields is best-effort; never block the clear over it
+        pass
+
     # Reset the batch recording so the recorded-steps list starts empty for
     # the next dataset. The plain Clear button previously left the recording
     # intact (only Save & Clear reset it via terminate_recording); both paths
@@ -166,15 +176,37 @@ def _auto_clear_before_load(viewer, central_manager):
     return True
 
 
+def clear_before_session_load(viewer, central_manager) -> bool:
+    """Clear the workspace before a session load REPLACES it — returns True to proceed, False to abort.
+
+    A session is a DOCUMENT, not an overlay: loading it replaces the current workspace instead of stacking
+    onto it. On an EMPTY workspace there is nothing to clear and nothing to confirm — proceed. With layers
+    present, treat them as possibly-unsaved work and route through ``clear_all_without_saving`` (the same
+    guarded discard prompt the Clear button uses); if the user cancels, return False so the caller ABORTS
+    the load and leaves the current state untouched. Shared by both "Load Session" handlers so the
+    replace-not-stack rule lives in ONE place.
+    """
+    try:
+        has_layers = len(getattr(viewer, 'layers', ()) or ()) > 0
+    except Exception:      # broad-ok: a missing/odd viewer means nothing to clear — proceed with the load
+        has_layers = False
+    if not has_layers:
+        return True
+    return clear_all_without_saving(viewer, central_manager, confirm=True) is not False
+
+
 def clear_all_without_saving(viewer, central_manager, confirm=True):
     """
     Clear all layers and data without saving, resetting the workspace to the
     beginning-of-workflow (startup) state. If `confirm` is True, asks for
     explicit confirmation first and warns that all unsaved data will be lost.
-    """
-    from qtpy.QtWidgets import QMessageBox
 
+    Returns ``True`` if the workspace was cleared, ``False`` if the user cancelled the confirmation — so a
+    caller that clears-before-doing-something-else (e.g. Load Session) can abort when the user declines,
+    rather than proceeding to discard the current workspace anyway.
+    """
     if confirm:
+        from qtpy.QtWidgets import QMessageBox      # only the confirm path needs Qt (headless-safe otherwise)
         reply = QMessageBox.warning(
             None, "Clear everything without saving?",
             "This resets the workspace to the start of a workflow.\n\n"
@@ -182,6 +214,7 @@ def clear_all_without_saving(viewer, central_manager, confirm=True):
             "NOTHING will be saved. All unsaved data will be lost.\n\nContinue?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply != QMessageBox.Yes:
-            return
+            return False
     _clear_everything(viewer, central_manager)
     print("[PyCAT] Workspace cleared without saving.")
+    return True

@@ -383,6 +383,10 @@ class _DiagnosticsWidgetsMixin:
 
         run_btn = QPushButton("\u25b6  Run competition")
         run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        from pycat.ui.operation_gating import gate_run_button
+        gate_run_button(run_btn, ('time_axis',), getattr(self, 'central_manager', None),
+                        getattr(self, 'viewer', None),
+                        base_tooltip="Load a time-series (frames over time) to enable this.")
         def _run():
             import numpy as np
             from napari.utils.notifications import show_info, show_warning
@@ -681,6 +685,121 @@ class _DiagnosticsWidgetsMixin:
         wdt = QWidget(); wdt.setLayout(outer)
         self._add_widget_to_layout_or_dock(wdt, layout, separate_widget,
                                             "Segmentation Benchmark")
+
+    def _add_control_validation(self, layout=None, separate_widget=False):
+        """Positive/negative control validation.
+
+        Sweeps an intensity threshold across a matched positive control (known to
+        contain the objects) and negative control (should contain none), and
+        recommends the operating point that maximizes detection in the positive
+        control while keeping the negative control near zero — or REFUSES, with a
+        stated reason, when no setting separates them (an assay finding, not a
+        software one). Produces the supplementary-figure artifact: detections vs
+        threshold for both controls, the recommended point marked.
+        """
+        from PyQt5.QtWidgets import (QFormLayout, QComboBox, QSpinBox, QLabel as _QLabel)
+        from PyQt5.QtCore import Qt
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        import napari
+
+        outer = QVBoxLayout()
+        self.add_text_label(outer, 'Control Validation', bold=True)
+        self.add_text_label(
+            outer,
+            'Sweep a detection threshold across a matched positive/negative control '
+            'pair. Recommends the setting that maximizes detection in the positive '
+            'control while the negative control stays near zero — and refuses, with a '
+            'reason, when no setting separates them. Counts are density-normalized '
+            '(objects/µm²) when a pixel size is known.')
+
+        form = QFormLayout()
+        pos_dd = self.create_layer_dropdown(napari.layers.Image)
+        neg_dd = self.create_layer_dropdown(napari.layers.Image)
+        form.addRow("Positive control:", pos_dd)
+        form.addRow("Negative control:", neg_dd)
+        n_steps = QSpinBox(); n_steps.setRange(3, 40); n_steps.setValue(12)
+        form.addRow("Threshold steps:", n_steps)
+        exp_neg = QSpinBox(); exp_neg.setRange(0, 100000); exp_neg.setValue(0)
+        form.addRow("Expected negative count:", exp_neg)
+        outer.addLayout(form)
+
+        results_lbl = _QLabel(""); results_lbl.setWordWrap(True)
+        results_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        outer.addWidget(results_lbl)
+
+        fig = Figure(figsize=(6, 4)); canvas = FigureCanvasQTAgg(fig)
+        outer.addWidget(canvas, 1)
+
+        run_btn = QPushButton("▶  Validate against controls")
+        run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        def _run():
+            import warnings
+            import numpy as np
+            from napari.utils.notifications import show_info, show_warning
+            from pycat.toolbox.control_validation import (
+                validate_against_controls, recommend_parameters, control_report_figure)
+
+            pn, nn = pos_dd.currentText(), neg_dd.currentText()
+            if not pn or not nn or pn == nn:
+                show_warning("Pick two DIFFERENT image layers (positive and negative)."); return
+            try:
+                pos = np.asarray(self.viewer.layers[pn].data, dtype=float)
+                neg = np.asarray(self.viewer.layers[nn].data, dtype=float)
+            except Exception as e:  # broad-ok: reading a napari layer's .data can fail many ways; report and abort, don't crash the widget
+                show_warning("Could not read the control images: %s" % e); return
+            if pos.ndim != 2 or neg.ndim != 2:
+                show_warning("Control validation runs on single 2D fields (pick one plane each)."); return
+
+            lo = float(min(pos.min(), neg.min())); hi = float(max(pos.max(), neg.max()))
+            if not (hi > lo):
+                show_warning("The control images are flat — no threshold sweep is possible."); return
+            grid = [{'threshold': float(t)}
+                    for t in np.linspace(lo, hi, int(n_steps.value()) + 2)[1:-1]]
+
+            def _thresh(image, threshold=0.5):
+                return np.asarray(image) > threshold
+
+            dr = self.central_manager.active_data_class.data_repository
+            mpx = float(dr.get('microns_per_pixel_sq', 0) or 0) ** 0.5 or None
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                df = validate_against_controls(pos, neg, _thresh, grid, microns_per_px=mpx,
+                                               expected_negative=int(exp_neg.value()))
+                rec = recommend_parameters(df)
+            refusal = next((str(w.message) for w in caught
+                            if 'do not separate' in str(w.message)
+                            or 'distinguishes your positive' in str(w.message)), None)
+
+            fig.clear(); ax = fig.add_subplot(111)
+            control_report_figure(df, recommended=rec, ax=ax)
+            canvas.draw()
+
+            if rec is None:
+                results_lbl.setText(
+                    "<b style='color:#c0392b;'>No usable operating point.</b><br>"
+                    + (refusal or "The controls do not separate at any tested threshold.")
+                    + "<br><i>This is a finding about the assay, not the software.</i>")
+                show_warning("Control validation: the controls do not separate — see the panel.")
+            else:
+                dens = ("—" if rec.positive_density != rec.positive_density
+                        else "%.4g /µm²" % rec.positive_density)
+                results_lbl.setText(
+                    "<b>Recommended:</b> %s &nbsp; <b>verdict:</b> %s<br>"
+                    "positive: %d objects (%s) &nbsp; negative: %d &nbsp; "
+                    "false-positive rate: %.0f%% &nbsp; separation: %.2f<br>"
+                    "<i>%s</i>" % (rec.params, rec.verdict, rec.n_positive, dens, rec.n_negative,
+                                   100 * rec.false_positive_rate, rec.separation, rec.reason))
+                show_info("Control validation complete: %s (%s)." % (rec.params, rec.verdict))
+
+        run_btn.clicked.connect(_run)
+        outer.addWidget(run_btn)
+
+        wdt = QWidget(); wdt.setLayout(outer)
+        self._add_widget_to_layout_or_dock(wdt, layout, separate_widget,
+                                            "Control Validation")
 
     def _add_segmentation_speed_comparison(self, layout=None, separate_widget=False):
         """A/B widget: run condensate segmentation with the original vs the

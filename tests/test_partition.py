@@ -104,11 +104,15 @@ def test_over_inclusive_droplet_mask_is_detected():
             lab[np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2) < radius] = i
         return lab
 
+    # partition_coefficient_local moved to invitro/partition.py (1.6.214); patch the warning at its new
+    # home (invitro_tools re-exports the function). Assertions and values are unchanged — the OVER-INCLUSIVE
+    # warning still fires; only the monkeypatch target follows the moved symbol.
+    from pycat.toolbox.invitro import partition as _part
     warnings_seen = []
-    real_warn = it.napari_show_warning
-    real_info = it.napari_show_info
-    it.napari_show_warning = lambda msg, *a, **k: warnings_seen.append(msg)
-    it.napari_show_info = lambda msg, *a, **k: None
+    real_warn = _part.napari_show_warning
+    real_info = _part.napari_show_info
+    _part.napari_show_warning = lambda msg, *a, **k: warnings_seen.append(msg)
+    _part.napari_show_info = lambda msg, *a, **k: None
     try:
         good = it.partition_coefficient_local(img, _labels(13), sample_type="in_vitro",
                                               dark_reference=dark)
@@ -119,8 +123,8 @@ def test_over_inclusive_droplet_mask_is_detected():
                                              dark_reference=dark)
         n_warnings_bad = sum("OVER-INCLUSIVE" in m for m in warnings_seen)
     finally:
-        it.napari_show_warning = real_warn
-        it.napari_show_info = real_info
+        _part.napari_show_warning = real_warn
+        _part.napari_show_info = real_info
 
     assert good["partition_coefficient"] == pytest.approx(30.0, rel=0.1)
     assert n_warnings_good == 0, (

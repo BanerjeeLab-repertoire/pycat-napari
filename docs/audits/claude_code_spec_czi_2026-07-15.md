@@ -1,5 +1,33 @@
 # Claude Code spec — CZI reader: stress-test, build, thread, re-enable
 
+> **✅ STATUS — CODE COMPLETE (built 1.6.61, evolved since); the only residual is a manual GUI confirm.**
+> Verified against the current tree (2026-07-20). Every task is delivered and tested:
+> - **Task 1 — bake-off:** done. `docs/audits/czi_bakeoff_2026-07-15.md` has the per-file × per-reader
+>   results table and the decided **routing rule (a)** (`.czi` → libCZI first; divert to BioFormats only
+>   on the streaming/many-subblock layout it cannot decode). libCZI reads confocal AND
+>   widefield-single-subblock fine; only the 15,766-frame streaming movie needs BioFormats.
+> - **Task 2 — reader path:** done. `file_io/readers/czi_bioformats.py` reads pixels via the DIRECT
+>   `loci.formats.ImageReader.openBytes` (~5 ms/plane, not bioio's ~50–80 s/plane dask), a lazy
+>   `(T,Y,X)` `_CziChannelStack` whose `__array__` refuses a full read; routed from
+>   `file_io/stack_openers.py::_open_czi_streaming` with the libCZI→BioFormats fallback and the clear
+>   "install `pycat-napari[bioformats]`" message. Reader lifetime pinned via `ImageSource().retain(reader)`.
+> - **Task 3 — non-blocking open:** done. The ~33 s one-time frame-index parse runs on a worker via
+>   `_run_with_busy_progress` behind an "Indexing CZI via BioFormats…" busy dialog (elapsed counter,
+>   cancellable), with a synchronous fallback.
+> - **Task 4 — scrubbing:** done. Byte-budgeted LRU + **direction-aware** prefetch (reads ahead forward,
+>   behind on a backward scrub), a generation counter so a stale read-ahead yields to the newest request.
+> - **Task 5 — test + guard:** done. `tests/test_czi_bioformats_reader.py` — headless unit coverage (lazy
+>   wrapper, refuse-full-read, probe routing, LRU/prefetch, byte budget, close-stops-prefetcher) plus an
+>   opt-in real-file integration test. **Measured 2026-07-20:** the real 8.1 GB streaming CZI opens through
+>   BioFormats, dims `T=15766, 500×500`, planes read non-zero — `test_streaming_czi_opens_and_reads_through_bioformats`
+>   **PASSED** (57 s incl. JVM). The seam-regression follow-on shipped separately (1.6.153,
+>   `test_czi_seam.py`).
+>
+> **The one open item is not code:** a `run-pycat` GUI confirm on a display machine that opening the 4
+> test CZIs is freeze-free and scrubbing the streaming movie is subjectively smooth — the anti-freeze UX
+> and scrub feel are structurally implemented and unit-tested, but only a human at the GUI can sign off
+> the *feel*. No code change is pending.
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.57 · **Author of spec:** chat-side Claude (design), verified against the uploaded 1.6.57 tree.
 
 ## Read first

@@ -47,6 +47,27 @@ def _sibling_channels(ui_instance, active_name, active_data):
         return None
 
 
+def _qc_object_table(ui_instance):
+    """The segmented-object table to run object-level biological QC on, or None.
+
+    Prefers the cell table, then puncta — the tables PyCAT's pipelines populate in the data repository.
+    Table-based flags (size / shape / intensity outliers) need only the table, so this alone lets the
+    object-QC section appear; the mask-based flags (edge, containment) are surfaced by the batch /
+    upstream path where the label image lives, and are not guessed at here (a wrong table→mask pairing
+    would fabricate an edge flag). Best-effort: any failure simply means no object section.
+    """
+    try:
+        repo = ui_instance.central_manager.active_data_class.data_repository
+    except Exception as exc:      # broad-ok: object QC is optional — no repository simply means no section
+        debug_log('QC: no data repository for object-level QC', exc)
+        return None
+    for key in ('cell_df', 'puncta_df'):
+        df = repo.get(key)
+        if df is not None and getattr(df, 'empty', True) is False:
+            return df
+    return None
+
+
 def _add_data_qc(ui_instance, layout=None, separate_widget=False):
     """Build the Data QC dashboard widget."""
     outer = QVBoxLayout()
@@ -132,18 +153,28 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
         # found nothing to report". It did not look.
         #
         # Every other stack-consuming UI already uses `materialize_stack`. This one did not.
-        from pycat.file_io.file_io import materialize_stack
+        from pycat.utils.qt_worker import materialize_off_thread
+        from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report, QC_MAX_FRAMES
         _layer_data = ui_instance.viewer.layers[name].data
-        if getattr(_layer_data, 'ndim', 2) == 3:
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(run_prog, phases=[("Materializing frames", 1.0)])
-            data = materialize_stack(_layer_data, progress_callback=_pp.callback)
-            _pp.hide()
+        # Read the dimensionality from SHAPE, not a `.ndim` attribute: the IMS readers advertise a
+        # (T, Y, X) shape but no `ndim`, so `getattr(..., 'ndim', 2)` used to read them as 2-D and fall
+        # to `np.asarray(wrapper)` — which the lazy guard REFUSES (the crash the user hit).
+        _shape = getattr(_layer_data, 'shape', None)
+        _nd = getattr(_layer_data, 'ndim', None)
+        if _nd is None:
+            _nd = len(_shape) if _shape is not None else 2
+        _n_source = None
+        if _nd == 3:
+            # A long movie is capped to QC_MAX_FRAMES evenly-spaced frames — read OFF the Qt thread and
+            # only those frames off disk (a full 600×2048² read is ~18 GiB and OOM'd QC). The report
+            # notes it assessed N of M frames.
+            _n_source = int(_shape[0]) if _shape is not None else None
+            data = materialize_off_thread(_layer_data, viewer=ui_instance.viewer,
+                                          max_frames=QC_MAX_FRAMES)
         else:
             data = np.asarray(_layer_data)      # already 2-D: instant, a bar would only flash
         if data.ndim not in (2, 3):
             napari_show_warning("QC needs a 2-D image or a 3-D (T/Z, H, W) stack."); return
-        from pycat.toolbox.data_qc_tools import run_full_qc, plot_qc_report
         try:
             results = run_full_qc(
                 data,
@@ -152,6 +183,7 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 frame_interval_s=(dt.value() or None),
                 process_timescale_s=(tau.value() or None),
                 n_channels=nch.value(), is_zstack=zstack_cb.isChecked(),
+                n_source_frames=_n_source,
                 # ── A correct check that never receives its data never runs ──────
                 #
                 # `qc_chromatic` MEASURES correctly when handed the channel images (0.00 px on
@@ -161,7 +193,12 @@ def _add_data_qc(ui_instance, layout=None, separate_widget=False):
                 #
                 # The channels are the other 2-D image layers of the same shape in the viewer —
                 # which is exactly what a multi-colour acquisition looks like once loaded.
-                channels=_sibling_channels(ui_instance, name, data))
+                channels=_sibling_channels(ui_instance, name, data),
+                # ── Object-level biological QC (second layer): "can I trust this OBJECT?" ────────
+                # Appended only when the pipeline has produced a segmented-object table. Table-based
+                # flags (size/shape/intensity) surface here; edge/containment ride the batch path where
+                # the label mask lives. Flags are REPORTED, never used to drop an object.
+                object_table=_qc_object_table(ui_instance))
         except Exception as e:
             napari_show_warning(f"QC failed: {e}")
             import traceback; traceback.print_exc(); return

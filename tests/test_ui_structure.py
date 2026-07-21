@@ -131,10 +131,19 @@ def test_core_ui_classes_present():
     """The core UI class hierarchy must remain intact. A mixin refactor should
     preserve these public class names (or this test is the reminder to update
     the contract deliberately)."""
-    tree = ast.parse(_read_ui_source())
-    classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    ui_src = _read_ui_source()
+    classes = {n.name for n in ast.walk(ast.parse(ui_src)) if isinstance(n, ast.ClassDef)}
     for required in ("BaseUIClass", "ToolboxFunctionsUI", "AnalysisMethodsUI",
-                     "CondensateAnalysisUI", "MenuManager"):
+                     "CondensateAnalysisUI"):
         assert required in classes, (
             f"Class '{required}' missing from ui_modules.py — if this move was "
             f"intentional, update this test to reflect the new structure.")
+    # MenuManager was EXTRACTED to menu_manager.py (1.6.149 decomposition, Phase 2). The public name
+    # must stay reachable via ui_modules — CentralManager and the smoke tests import it from there — so
+    # this pins both halves: defined in its new home AND re-exported from the old one.
+    import pathlib
+    mm_src = (pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
+              / 'menu_manager.py').read_text(encoding='utf-8')
+    assert 'class MenuManager' in mm_src, "MenuManager missing from menu_manager.py"
+    assert 'from pycat.ui.menu_manager import MenuManager' in ui_src, (
+        "ui_modules.py must re-export MenuManager so `from pycat.ui.ui_modules import MenuManager` works")

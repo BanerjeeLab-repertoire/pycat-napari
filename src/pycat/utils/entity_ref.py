@@ -200,12 +200,24 @@ def source_path_of(data_instance) -> str | None:
 
 
 def dataset_id_for(source_path) -> str:
-    """The dataset's identity. **The file it came from**, which is the thing that is actually stable.
+    """The dataset's identity — a **durable UUID** for a readable file, else the path.
 
-    Not the layer: layers are closed, renamed and re-derived; the acquisition on disk is not. A
-    table produced in batch has no layer at all and still has this.
+    The file it came from is the stable thing (not the layer: layers close/rename/re-derive; the
+    acquisition on disk does not). But the PATH breaks on move/remount/cross-platform, so a readable file
+    is resolved to a persistent UUID (``dataset_identity`` registry) that survives a move. An absent or
+    unreadable path (a test fixture, a batch replay of a relocated file, a registry outage) falls back to
+    the path string — **backward-compatible**: nothing that stamped a non-existent path changes.
     """
-    return str(source_path) if source_path else UNKNOWN
+    if not source_path:
+        return UNKNOWN
+    try:
+        from pycat.utils.dataset_identity import uuid_for_path
+        u = uuid_for_path(source_path)
+        if u:
+            return u
+    except Exception:                # broad-ok: a durable id is a convenience; never cost the caller their table
+        pass
+    return str(source_path)
 
 
 def entity_id_column(dataset_id, operation_id, entity_type, frame, label, parent=None) -> str:
@@ -224,7 +236,7 @@ _PARENT_COLUMNS = ('cell_label', 'cell label', 'parent_id')
 
 def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
                      labels_layer=None, frame=None, label_column='label',
-                     parent_column=None):
+                     parent_column=None, frame_column=None):
     """**Give every row in an object table a name.** Returns the same df, with the hidden columns.
 
     Called at the table-building chokepoints. Additive and total: a df that cannot be stamped (no
@@ -234,6 +246,12 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
 
     ``parent_column`` is looked up automatically among the names the codebase uses; it matters for
     puncta, whose labels restart per cell (see `make_entity_id`).
+
+    ``frame_column`` gives identity its frame **PER ROW** for a multi-frame table (a tracked-object or
+    time-series table where the same label recurs across frames as DIFFERENT entities). When it is absent
+    the scalar ``frame`` is used for every row — correct only for a genuinely single-frame table. Stamping
+    a whole time-series with one reference frame (the old behaviour) collapsed distinct entities onto one
+    id; a real ``frame_column`` fixes that.
 
     ``labels_layer`` is optional and usually absent here on purpose — the output labels layer is
     typically created *after* the table (see `attach_layer_id`). In batch there is no viewer at all,
@@ -251,12 +269,18 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
                 parents = df[name]
                 break
 
+        # Per-row frame when a frame_column is present (a multi-frame table); else the scalar `frame`.
+        per_frame = df[frame_column].to_numpy() if (frame_column and frame_column in df.columns) else None
+
+        def _frame_at(i):
+            return per_frame[i] if per_frame is not None else frame
+
         if parents is None:
-            values = [entity_id_column(dataset, operation_id, entity_type, frame, label)
-                      for label in df[label_column]]
+            values = [entity_id_column(dataset, operation_id, entity_type, _frame_at(i), label)
+                      for i, label in enumerate(df[label_column])]
         else:
-            values = [entity_id_column(dataset, operation_id, entity_type, frame, label, parent)
-                      for label, parent in zip(df[label_column], parents)]
+            values = [entity_id_column(dataset, operation_id, entity_type, _frame_at(i), label, parent)
+                      for i, (label, parent) in enumerate(zip(df[label_column], parents))]
         df[ENTITY_ID_COLUMN] = values
 
         layer_id = None
@@ -267,6 +291,104 @@ def stamp_entity_ids(df, *, entity_type, source_path=None, operation_id=None,
         # Identity is a convenience; a results table is not. Never cost the user their numbers.
         debug_log('stamp_entity_ids: could not stamp entity identity', exc)
     return df
+
+
+# ── Automatic stamping via declaration (the finalization chokepoint) ─────────────────────────────
+#
+# Manual `stamp_entity_ids` reaches only the 3 sites that remember to call it; every new analysis is one
+# forgotten call away from silent row-position linking. The fix is to make an operation DECLARE how its
+# rows are identified, once, and stamp automatically at the result-finalization chokepoint — so coverage
+# grows by DECLARATION, not by scattering more stamping calls. `operation_id` comes from the declaration,
+# not a hard-coded string at the call site, which is the interactive/batch divergence the audit named.
+@dataclasses.dataclass(frozen=True)
+class EntitySpec:
+    """How an operation's object-table rows are identified. Declared once per operation via
+    ``register_entity_spec``; the finalization chokepoint reads it to stamp identity + location together."""
+    entity_type: str
+    label_column: str = 'label'
+    parent_column: "str | None" = None      # None → auto-detect among the known parent-column spellings
+    frame_column: "str | None" = None        # None → single-frame (scalar frame); set for multi-frame tables
+
+
+_ENTITY_SPECS: dict = {}
+
+
+def register_entity_spec(operation_id, spec):
+    """Declare that ``operation_id`` produces the entities described by ``spec``. Idempotent."""
+    _ENTITY_SPECS[str(operation_id)] = spec
+    return spec
+
+
+def entity_spec_for(operation_id):
+    """The `EntitySpec` declared for ``operation_id``, or ``None`` (an undeclared operation stays honestly
+    row-position-linked — never silently mis-stamped)."""
+    return _ENTITY_SPECS.get(str(operation_id)) if operation_id is not None else None
+
+
+def finalize_entity_table(table, operation_id, *, source_path=None, frame=None, labels_layer=None):
+    """**The identity chokepoint.** If ``operation_id`` declares an `EntitySpec`, stamp the table's identity
+    AND location in one pass, using the operation's real id and the declared columns. An operation that
+    declares nothing is returned untouched (honestly row-position-linked). **Idempotent** — a table already
+    carrying ``_pycat_entity_id`` is returned unchanged, so the automatic runner path and a manual call can
+    never double-stamp. This is what lets a new producer gain identity by declaring a spec, not by adding a
+    stamping call."""
+    spec = entity_spec_for(operation_id)
+    if spec is None or table is None:
+        return table
+    already_stamped = ENTITY_ID_COLUMN in getattr(table, 'columns', ())
+    stamped = table if already_stamped else stamp_entity_ids(
+        table, entity_type=spec.entity_type, source_path=source_path, operation_id=operation_id,
+        labels_layer=labels_layer, frame=frame, label_column=spec.label_column,
+        parent_column=spec.parent_column, frame_column=spec.frame_column)
+    # Identity and LOCATION are registered together from one record — the chokepoint that closes the
+    # "identity can carry stale location" divergence. Additive; never costs the caller their table.
+    if not already_stamped:
+        populate_registry(stamped, source_path=source_path, operation_id=operation_id)
+    return stamped
+
+
+def populate_registry(table, *, registry=None, source_path=None, operation_id=None):
+    """Populate the entity registry from a STAMPED table — one row → one `EntityRecord` binding the id to
+    its CURRENT location (bbox / layer id / frame / source), provenance, and dataset. Called at the same
+    finalization point that stamps identity, so the two are generated together and cannot drift. Rows
+    without an id are skipped; unstamped tables do nothing. Never raises — the registry is a convenience."""
+    from pycat.utils.entity_registry import EntityLocation, EntityRecord, default_registry
+    reg = registry if registry is not None else default_registry()
+    try:
+        if table is None or ENTITY_ID_COLUMN not in getattr(table, 'columns', ()):
+            return reg
+        dataset = dataset_id_for(source_path)
+        src = str(source_path) if source_path is not None else None
+        for _, row in table.iterrows():
+            eid = row.get(ENTITY_ID_COLUMN)
+            if not eid:
+                continue
+            ref = ObjectRef.from_row(row, source_path=source_path)
+            reg.register(EntityRecord(
+                entity_id=str(eid),
+                location=EntityLocation(bbox=ref.bbox, layer_id=row.get(LAYER_ID_COLUMN),
+                                        frame=ref.frame, source=src),
+                provenance=operation_id, dataset=dataset))
+    except Exception as exc:  # broad-ok: registry population is additive; it must never break the analysis result
+        debug_log('entity_ref: could not populate the entity registry', exc)
+    return reg
+
+
+def _register_default_entity_specs():
+    """Declare the highest-value object-producing operations (increment 1). The three existing manual sites
+    (cell / puncta / region props) migrate to these declarations — identical output, sourced from one place
+    — and the top previously-unstamped producers (condensate, tracks, colocalized objects) now gain identity
+    by declaration. Parent columns are left None where the codebase auto-detects the spelling (puncta emit
+    ``'cell label'`` with a space); frame_column is set only for genuinely multi-frame tables (tracks)."""
+    register_entity_spec('cell_analysis', EntitySpec('cell', label_column='label'))
+    register_entity_spec('puncta_analysis', EntitySpec('punctum', label_column='label'))
+    register_entity_spec('measure_region_props', EntitySpec('mask_object', label_column='label'))
+    register_entity_spec('condensate_analysis', EntitySpec('condensate', label_column='label'))
+    register_entity_spec('vpt_tracks', EntitySpec('bead', label_column='track_id', frame_column='frame'))
+    register_entity_spec('object_colocalization', EntitySpec('colocalized_object', label_column='label'))
+
+
+_register_default_entity_specs()
 
 
 def attach_layer_id(df, labels_layer):

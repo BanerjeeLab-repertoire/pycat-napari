@@ -4,10 +4,14 @@
     {
       "aliases": [],
       "function": "fft_bandpass",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "fft_bandpass_tools",
       "op": "bandpass",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/fft_bandpass_tools.py",
@@ -17,10 +21,14 @@
     {
       "aliases": [],
       "function": "detect_beads_stack",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "bead_detect",
       "produces": "overlay",
+      "requirements": [],
       "role": "overlay",
       "role_declared": "overlay",
       "source": "src/pycat/toolbox/vpt_tools.py",
@@ -30,10 +38,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "best_slice",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/utils/tag_registry.py",
@@ -43,10 +53,12 @@
     {
       "aliases": [],
       "function": "bf_background_subtract",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_bg_subtract",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -56,10 +68,12 @@
     {
       "aliases": [],
       "function": "bf_enhance_contrast",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_contrast",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -69,10 +83,12 @@
     {
       "aliases": [],
       "function": "bf_flat_field_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_flatfield",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -82,10 +98,12 @@
     {
       "aliases": [],
       "function": "bf_halo_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_halo",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -95,10 +113,14 @@
     {
       "aliases": [],
       "function": "segment_bf_condensates",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "bf_segment",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -108,10 +130,14 @@
     {
       "aliases": [],
       "function": "subtract_background",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bg_subtract",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -121,10 +147,14 @@
     {
       "aliases": [],
       "function": "bg_removal_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "bg_subtract_3d",
       "produces": "image",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/zstack_segmentation_tools.py",
@@ -134,10 +164,12 @@
     {
       "aliases": [],
       "function": "apply_background_subtraction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bg_subtract_clear",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -147,10 +179,14 @@
     {
       "aliases": [],
       "function": "apply_bilateral_filter",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "bilateral",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -160,10 +196,12 @@
     {
       "aliases": [],
       "function": "custom_binary_closing",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_close",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -173,10 +211,12 @@
     {
       "aliases": [],
       "function": "binary_morph_operation",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_morph",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -186,10 +226,12 @@
     {
       "aliases": [],
       "function": "custom_binary_opening",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "binary_open",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -199,10 +241,14 @@
     {
       "aliases": [],
       "function": "cellpose_segmentation",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "cellpose",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -212,10 +258,14 @@
     {
       "aliases": [],
       "function": "cellpose_segmentation_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "cellpose_3d",
       "produces": "labels",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/zstack_segmentation_tools.py",
@@ -227,10 +277,14 @@
         "equalize_adapthist"
       ],
       "function": "_register_ui_operations",
+      "inputs": [
+        "image"
+      ],
       "kind": "ui",
       "module": "tag_registry",
       "op": "clahe",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/utils/tag_registry.py",
@@ -240,10 +294,14 @@
     {
       "aliases": [],
       "function": "clean_detect",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "clean_spot_detection_tools",
       "op": "clean",
       "produces": "overlay",
+      "requirements": [],
       "role": "overlay",
       "role_declared": "overlay",
       "source": "src/pycat/toolbox/clean_spot_detection_tools.py",
@@ -253,10 +311,12 @@
     {
       "aliases": [],
       "function": "opencv_contour_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "contour_filter",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -266,10 +326,12 @@
     {
       "aliases": [],
       "function": "refine_labels_with_contours",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "contour_refine",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -279,10 +341,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "cropped",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "image",
       "source": "src/pycat/utils/tag_registry.py",
@@ -294,10 +358,14 @@
         "difference_of_gaussians"
       ],
       "function": "dog_blob_enhance_2d",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dog",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -307,10 +375,14 @@
     {
       "aliases": [],
       "function": "dog_blob_enhance_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dog_3d",
       "produces": "image",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -322,10 +394,12 @@
         "pixel_reassignment"
       ],
       "function": "deblur_by_pixel_reassignment",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "dpr",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -335,10 +409,14 @@
     {
       "aliases": [],
       "function": "drift_correct_com",
+      "inputs": [],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "drift_correct",
       "produces": "overlay",
+      "requirements": [
+        "time_axis"
+      ],
       "role": "overlay",
       "role_declared": "overlay",
       "source": "src/pycat/toolbox/vpt_tools.py",
@@ -348,10 +426,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "expand_labels",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -361,10 +441,12 @@
     {
       "aliases": [],
       "function": "extend_mask_to_edges",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "extend_edges",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -374,10 +456,14 @@
     {
       "aliases": [],
       "function": "felzenszwalb_segmentation_and_merging",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "felzenszwalb",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -387,10 +473,14 @@
     {
       "aliases": [],
       "function": "fz_segmentation_and_binarization",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "felzenszwalb_binary",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -400,10 +490,12 @@
     {
       "aliases": [],
       "function": "soft_foreground_suppression",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "fg_suppress",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -413,10 +505,12 @@
     {
       "aliases": [],
       "function": "apply_flatfield_correction",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "flatfield",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -426,10 +520,14 @@
     {
       "aliases": [],
       "function": "gabor_filter_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gabor",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -439,10 +537,14 @@
     {
       "aliases": [],
       "function": "gabor_filter_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gabor_3d",
       "produces": "image",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -452,10 +554,14 @@
     {
       "aliases": [],
       "function": "gaussian_smooth_2d",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gaussian",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -465,10 +571,14 @@
     {
       "aliases": [],
       "function": "gaussian_smooth_3d_pseudo",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "gaussian_3d",
       "produces": "image",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -480,10 +590,12 @@
         "user_drawn"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "hand_drawn",
       "produces": "annotation",
+      "requirements": [],
       "role": "annotation",
       "role_declared": "annotation",
       "source": "src/pycat/utils/tag_registry.py",
@@ -493,10 +605,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "hand_painted",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -506,10 +620,12 @@
     {
       "aliases": [],
       "function": "erode_host_mask",
+      "inputs": [],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "host_erode",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/vpt_tools.py",
@@ -519,10 +635,14 @@
     {
       "aliases": [],
       "function": "segment_host_condensate",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "vpt_tools",
       "op": "host_segment",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/vpt_tools.py",
@@ -534,10 +654,12 @@
         "binarize"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "im2bw",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/utils/tag_registry.py",
@@ -547,10 +669,12 @@
     {
       "aliases": [],
       "function": "background_inpainting_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "inpaint",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -560,10 +684,14 @@
     {
       "aliases": [],
       "function": "invert_image",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "invert",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -573,10 +701,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "label_mask",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -586,10 +716,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "labels_to_mask",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/utils/tag_registry.py",
@@ -599,10 +731,14 @@
     {
       "aliases": [],
       "function": "local_contrast_normalize",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "local_contrast",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/contrast_cascade_tools.py",
@@ -612,10 +748,14 @@
     {
       "aliases": [],
       "function": "local_thresholding_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "local_threshold",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -627,10 +767,14 @@
         "laplacian_of_gaussian"
       ],
       "function": "apply_laplace_of_gauss_filter",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "log",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -640,10 +784,12 @@
     {
       "aliases": [],
       "function": "apply_laplace_of_gauss_enhancement",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "log_enhance",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -655,10 +801,12 @@
         "mask_logic_merge"
       ],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "mask_merge",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/utils/tag_registry.py",
@@ -668,10 +816,12 @@
     {
       "aliases": [],
       "function": "cell_mask_stretching",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "mask_stretch",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -681,10 +831,12 @@
     {
       "aliases": [],
       "function": "merge_mean_color",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "merge_mean_color",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -694,10 +846,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "morph_gaussian",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/utils/tag_registry.py",
@@ -707,10 +861,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "multi_merge",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/utils/tag_registry.py",
@@ -720,10 +876,14 @@
     {
       "aliases": [],
       "function": "multi_otsu_cell_mask",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "batch_roi_tools",
       "op": "multi_otsu",
       "produces": "mask",
+      "requirements": [],
       "role": "mask",
       "role_declared": "mask",
       "source": "src/pycat/toolbox/batch_roi_tools.py",
@@ -733,10 +893,12 @@
     {
       "aliases": [],
       "function": "compute_optical_density",
+      "inputs": [],
       "kind": "toolbox",
       "module": "brightfield_tools",
       "op": "optical_density",
       "produces": "result",
+      "requirements": [],
       "role": "result",
       "role_declared": "measurement",
       "source": "src/pycat/toolbox/brightfield_tools.py",
@@ -746,10 +908,12 @@
     {
       "aliases": [],
       "function": "peak_and_edge_enhancement_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "peak_edge",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -759,10 +923,12 @@
     {
       "aliases": [],
       "function": "pre_process_image",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "preprocess",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -772,10 +938,12 @@
     {
       "aliases": [],
       "function": "puncta_refinement_filtering_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "puncta_filter",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -785,10 +953,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "relabel",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -798,10 +968,12 @@
     {
       "aliases": [],
       "function": "apply_rescale_intensity",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rescale",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -811,10 +983,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "rf_classifier",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -824,10 +998,12 @@
     {
       "aliases": [],
       "function": "ridge_enhance",
+      "inputs": [],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "ridge",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/contrast_cascade_tools.py",
@@ -837,10 +1013,14 @@
     {
       "aliases": [],
       "function": "rb_gaussian_background_removal",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rolling_ball",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -850,10 +1030,12 @@
     {
       "aliases": [],
       "function": "compute_rolling_ball_background",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "rolling_ball_bg",
       "produces": "reference",
+      "requirements": [],
       "role": "reference",
       "role_declared": "reference",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -863,10 +1045,12 @@
     {
       "aliases": [],
       "function": "assess_and_split_touching",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "split_assessed",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -876,10 +1060,12 @@
     {
       "aliases": [],
       "function": "split_touching_objects",
+      "inputs": [],
       "kind": "toolbox",
       "module": "label_and_mask_tools",
       "op": "split_watershed",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/label_and_mask_tools.py",
@@ -889,10 +1075,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "stardist",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -902,10 +1090,14 @@
     {
       "aliases": [],
       "function": "segment_subcellular_objects",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "subcellular_segment",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -915,10 +1107,14 @@
     {
       "aliases": [],
       "function": "segment_subcellular_objects_3d",
+      "inputs": [],
       "kind": "toolbox",
       "module": "zstack_segmentation_tools",
       "op": "subcellular_segment_3d",
       "produces": "labels",
+      "requirements": [
+        "z_stack"
+      ],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/zstack_segmentation_tools.py",
@@ -928,10 +1124,14 @@
     {
       "aliases": [],
       "function": "enhance_stack",
+      "inputs": [],
       "kind": "toolbox",
       "module": "temporal_enhancement_tools",
       "op": "temporal_enhance",
       "produces": "image",
+      "requirements": [
+        "time_axis"
+      ],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/temporal_enhancement_tools.py",
@@ -941,10 +1141,14 @@
     {
       "aliases": [],
       "function": "tone_map",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "contrast_cascade_tools",
       "op": "tone_map",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/contrast_cascade_tools.py",
@@ -954,10 +1158,12 @@
     {
       "aliases": [],
       "function": "compute_topology_envelope",
+      "inputs": [],
       "kind": "toolbox",
       "module": "topology_tools",
       "op": "topology_envelope",
       "produces": "result",
+      "requirements": [],
       "role": "result",
       "role_declared": "measurement",
       "source": "src/pycat/toolbox/topology_tools.py",
@@ -967,10 +1173,12 @@
     {
       "aliases": [],
       "function": "_register_ui_operations",
+      "inputs": [],
       "kind": "ui",
       "module": "tag_registry",
       "op": "two_layer_merge",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/utils/tag_registry.py",
@@ -980,10 +1188,12 @@
     {
       "aliases": [],
       "function": "upscale_image_interp",
+      "inputs": [],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "upscale",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",
@@ -993,10 +1203,12 @@
     {
       "aliases": [],
       "function": "detect_chromatin_voids",
+      "inputs": [],
       "kind": "toolbox",
       "module": "topology_tools",
       "op": "void_detect",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/topology_tools.py",
@@ -1006,10 +1218,12 @@
     {
       "aliases": [],
       "function": "apply_watershed_labeling",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "watershed",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -1019,10 +1233,12 @@
     {
       "aliases": [],
       "function": "opencv_watershed_func",
+      "inputs": [],
       "kind": "toolbox",
       "module": "segmentation_tools",
       "op": "watershed_cv",
       "produces": "labels",
+      "requirements": [],
       "role": "labels",
       "role_declared": "labels",
       "source": "src/pycat/toolbox/segmentation_tools.py",
@@ -1032,10 +1248,14 @@
     {
       "aliases": [],
       "function": "wbns_func",
+      "inputs": [
+        "image"
+      ],
       "kind": "toolbox",
       "module": "image_processing_tools",
       "op": "wbns",
       "produces": "image",
+      "requirements": [],
       "role": "image",
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing_tools.py",

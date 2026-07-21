@@ -51,7 +51,7 @@ import numpy as np
 
 from pycat.utils.general_utils import debug_log
 from pycat.utils.layer_tags import tag_layer, get_tag
-from pycat.utils.tag_registry import get_operation
+from pycat.utils.tag_registry import active_operation, get_operation
 
 
 # ── Which layer types map to which role ───────────────────────────────────────────────────
@@ -233,9 +233,13 @@ def _wrap(viewer, original, layer_type):
 
             # ── The OP is set only when it is KNOWN ──────────────────────────────
             #
-            # From the stack: definitional. From the name: a guess, and marked as one.
+            # Resolution order: explicit operation_context → stack walk → name guess → absent.
+            # The explicit context (definitional) is preferred because the stack walk cannot see the
+            # off-thread / compute-then-add-later cases — a decorated function's frame has already
+            # returned by the time a result callback creates the layer. The stack walk stays as the
+            # fallback for un-migrated synchronous paths; the name guess is a last resort, marked as one.
             # **An absent tag is honest; a guessed one is a lie that will be queried as truth.**
-            op = _op_from_stack()
+            op = active_operation() or _op_from_stack()
             if op and get_operation(op):
                 tag_layer(layer, 'op', op, source='derived')     # definitional, not a guess
             else:
@@ -258,6 +262,18 @@ def _wrap(viewer, original, layer_type):
                 entry = get_operation(op)
                 if entry and entry.get('target'):
                     tag_layer(layer, 'target', entry['target'], source='derived')
+                # ── A DECLARED `produces` beats the inferred role ────────────────
+                #
+                # The role above is read from the DATA (a 0/1 array is a mask, more values are
+                # labels). But an op that DECLARES it makes a mask makes a mask even when its
+                # array happens to look like labels — the declaration is definitional, the
+                # data-shape is a guess. So a declared `produces` that differs from the inferred
+                # role overwrites it (`source='derived'`, beating the `'inferred'` write above);
+                # a user override, which does not exist yet at creation, is still never touched
+                # because it would be `source='user_set'`.
+                produces = entry.get('produces') if entry else None
+                if produces and produces != role:
+                    tag_layer(layer, 'role', produces, source='derived', overwrite=True)
 
         except Exception as exc:
             # A tagging failure must NEVER stop a layer being added. The user's data comes first.

@@ -342,6 +342,53 @@ def _save_layer(central_manager, data, layer_type: str, save_name: str, safe_nam
         with atomic_write(f"{save_name}_{safe_name}.npz") as _tmp:
             np.savez_compressed(_tmp, data=np.asarray(data))
 
+def _write_session_manifest(session_dir, central_manager, source_path,
+                            manifest_layers, manifest_dfs, stem):
+    """Write the restore manifest, recording the OPEN ANALYSIS METHOD alongside the data.
+
+    The source image is REFERENCED by path, never copied. ``active_method`` — the UI class currently
+    open — is what lets Load Session reopen that method and rebuild its view (plots/tables), instead of
+    dropping the restored dataframes into an empty panel.
+    """
+    from pycat.file_io import session_manifest as _sm
+    _cur = getattr(getattr(central_manager, 'analysis_methods_ui', None),
+                   'current_analysis_ui', None)
+    active_method = _cur.__class__.__name__ if _cur is not None else None
+
+    _extra = {'stem': stem, 'active_method': active_method}
+    # Comparative-phenotyping condition/metadata (increment 1, Part C): if the user tagged images
+    # in-app, those tags live in the data repository — carry them into the manifest so they travel
+    # with the session. Absent → `_extra` is unchanged, so an untagged session's manifest is
+    # byte-identical to before (back-compat both ways).
+    try:
+        from pycat.utils.sample_metadata import tags_to_manifest_extra
+        _tags = central_manager.active_data_class.data_repository.get('sample_metadata')
+        if _tags:
+            _extra.update(tags_to_manifest_extra(_tags))
+    except Exception as _sme:
+        from pycat.utils.general_utils import debug_log
+        debug_log('writers: could not attach sample_metadata to the manifest', _sme)
+
+    # User-entered workflow parameters (session_persist_settings Part 2): the batch processor already
+    # records each step's params as the ONE parameter record — carry that same record into the manifest
+    # so a reloaded session reproduces the analysis the user set up. No recorded steps → no `workflow`
+    # block, so an un-recorded session's manifest is byte-identical to before.
+    try:
+        _bp = getattr(central_manager, '_pycat_batch_processor', None)
+        if _bp is not None:
+            _extra.update(_sm.workflow_to_manifest_extra(getattr(_bp, 'config', None)))
+    except Exception as _wf:  # broad-ok: persisting the workflow is best-effort; never fail a save over it
+        from pycat.utils.general_utils import debug_log
+        debug_log('writers: could not attach the recorded workflow to the manifest', _wf)
+
+    _sm.write_manifest(
+        session_dir, source_path=source_path,
+        data_repository=central_manager.active_data_class.data_repository,
+        layer_entries=manifest_layers, dataframe_entries=manifest_dfs,
+        extra=_extra)
+    print(f"[PyCAT] Session saved to {session_dir}")
+
+
 def write_session_outputs(central_manager, layers_by_name, selected_layers,
                           selected_dataframes, dataframes, file_metadata,
                           save_name, session_dir, source_path, stem):
@@ -446,18 +493,10 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
             debug_log("file_io: metadata JSON export failed", _mde)
 
         # Write the session manifest so Load Session can restore this state.
-        # The source image is REFERENCED by path, never copied.
         try:
             if session_dir is not None:
-                _dr = central_manager.active_data_class.data_repository
-                _sm.write_manifest(
-                    session_dir,
-                    source_path=source_path,
-                    data_repository=_dr,
-                    layer_entries=manifest_layers,
-                    dataframe_entries=manifest_dfs,
-                    extra={'stem': stem})
-                print(f"[PyCAT] Session saved to {session_dir}")
+                _write_session_manifest(session_dir, central_manager, source_path,
+                                        manifest_layers, manifest_dfs, stem)
         except Exception as _me:
             debug_log("file_io: session manifest write failed", _me)
 

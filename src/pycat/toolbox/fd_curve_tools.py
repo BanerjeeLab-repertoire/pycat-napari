@@ -357,17 +357,27 @@ def analyze_stretch_rips(distance: np.ndarray, force: np.ndarray,
 
 
 def detect_all_rips(seg_result: dict, which: str = 'stretches',
-                    **rip_kwargs) -> pd.DataFrame:
+                    progress_callback=None, **rip_kwargs) -> pd.DataFrame:
     """
     Run rip detection across every stretch (or relax) half-cycle and return a
     combined table tagged by cycle number.
+
+    progress_callback : optional ``callback(done, total)`` (the ``materialize_stack``
+        signature, so ``PhasedProgress`` composes). Called once per half-cycle — the
+        real, countable loop, where each iteration runs a WLC fit and is the slow
+        part. ``None`` is a complete no-op, so headless/batch callers are unaffected.
     """
+    _progress = progress_callback or (lambda _done, _total: None)
+    segments = list(seg_result.get(which, []))
+    total = len(segments)
+
     rows = []
-    for i, (d_seg, f_seg) in enumerate(seg_result.get(which, [])):
+    for i, (d_seg, f_seg) in enumerate(segments):
         r = analyze_stretch_rips(d_seg, f_seg, **rip_kwargs)
         if not r.empty:
             r.insert(0, 'cycle', i + 1)
             rows.append(r)
+        _progress(i + 1, total)           # per half-cycle: honest, countable progress
     if not rows:
         return pd.DataFrame(columns=['cycle', 'index', 'distance_um',
                                      'rupture_force_pN', 'force_after_pN',

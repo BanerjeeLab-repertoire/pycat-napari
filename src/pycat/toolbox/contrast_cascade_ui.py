@@ -9,7 +9,7 @@ import napari
 from napari.utils.notifications import show_info as napari_show_info
 from napari.utils.notifications import show_warning as napari_show_warning
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton,
     QSpinBox, QComboBox, QWidget, QSizePolicy,
 )
 
@@ -155,18 +155,26 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
         if sname not in [l.name for l in viewer.layers]:
             napari_show_warning("Add and paint a scribble layer first."); return
         from pycat.toolbox.contrast_cascade_tools import cascade_rf_segment
+        from pycat.utils.operation_runner import OperationRunner
         data = np.asarray(viewer.layers[iname].data)
         img2d = data.max(axis=0) if data.ndim == 3 else data
         scr = np.asarray(viewer.layers[sname].data)
         if scr.ndim == 3:
             scr = scr.max(axis=0)
-        try:
-            pred = cascade_rf_segment(img2d, scr, object_diameter=obj_d.value())
-        except Exception as e:
-            napari_show_warning(f"Cascade RF failed: {e}"); return
-        viewer.add_labels(pred.astype(np.int32), name="Cascade RF classes")
-        napari_show_info(f"Cascade RF done — classes {sorted(np.unique(pred))} "
-                         "(as painted: 1=body, 2=fiber, 3=background).")
+
+        # Off the Qt thread via the ONE operation runner: features/train/predict run on a worker behind
+        # a modal progress dialog (the tool's 3-stage progress_callback drives it), and the labels layer
+        # is created back on the main thread in on_result. No "Not Responding" during a multi-second RF.
+        def _done(pred):
+            viewer.add_labels(pred.astype(np.int32), name="Cascade RF classes")
+            napari_show_info(f"Cascade RF done — classes {sorted(np.unique(pred))} "
+                             "(as painted: 1=body, 2=fiber, 3=background).")
+
+        _parent = getattr(getattr(viewer, 'window', None), '_qt_window', None)
+        OperationRunner().execute(
+            cascade_rf_segment, img2d, scr, object_diameter=obj_d.value(),
+            on_result=_done, on_error=lambda exc: napari_show_warning(f"Cascade RF failed: {exc}"),
+            parent=_parent, title='Cascade RF', text='Segmenting (features → train → predict)…')
 
     def _on_diag():
         iname = diag_img_dd.currentText(); lname = diag_lbl_dd.currentText()
@@ -207,6 +215,8 @@ def _add_contrast_cascade(ui_instance, layout=None, separate_widget=False):
                          f"{n_focus} blurry-dim (below-focus-like). "
                          "Confirm below-focus with a z-stack.")
 
+    # The Cascade RF's progress now shows in the operation runner's modal dialog (it runs off the Qt
+    # thread), so no inline bar is needed here.
     band_btn.clicked.connect(_on_bands)
     tone_btn.clicked.connect(_on_tone)
     scribble_btn.clicked.connect(_on_scribble)

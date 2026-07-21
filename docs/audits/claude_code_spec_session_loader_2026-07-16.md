@@ -1,6 +1,6 @@
 # Claude Code spec — Session loader: a session is a manifest, loaded in stages
 
-## 🟡 STATUS — bug 1 + discovery DONE, shipped in 1.6.79. Bug 2 (the freeze) NOT done — see below.
+## ✅ STATUS — COMPLETE. Bug 1 + discovery (1.6.79); Bug 2 (the freeze) staged off-thread (see Part C below).
 `pytest -m core`: **707 passed, 2 skipped** (was 697).
 
 **Bug 1 — confirmed exactly as written, and worse than it reads.** `_on_load` computes
@@ -22,14 +22,18 @@ parent directory the sessions were saved into (the obvious thing to do) reports 
 PyCAT outputs found"* with every session in plain view underneath. `discover_sessions(folder)` fixes
 that; the dialog becomes the session picker Part B asks for, for the reason Part B gives.
 
-**Part C (staged, off-thread load) — NOT DONE.** The freeze is real. The fix is right. But it is the
-one change **no test in this environment can reach**: it needs a real `napari.Viewer`, and offscreen
-Qt has no GL context (the same reason `test_ui_smoke.py` errors headlessly). Combined with the
-spec's own caution — *"Getting this wrong trades the freeze for a crash"* — shipping an unverifiable
-threading change into the path that restores a user's saved work is a bad trade against a progress
-bar that pauses. Recorded in `roadmap.rst` with the pattern to copy
-(`batch_processor.BatchWorker`), the staging it needs, and what it wants first: someone able to
-exercise a real multi-file restore in a running viewer.
+**Part C (staged, off-thread load) — ✅ DONE.** The concern that "no test in this environment can reach it"
+was resolved by STAGING rather than by a raw thread: `load_session` was split into `_read_session_payload`
+(decode — `tifffile.imread` per layer, `pd.read_csv` per table — **taking no viewer, so it structurally
+cannot add a layer**) and `_apply_session_payload` (the only half that calls `viewer.add_*`, on the caller
+thread). `load_session(use_worker=True)` runs the read on a worker via the **tested** `qt_worker.
+run_with_progress` behind a modal progress dialog; the source image is only *recorded* by the reader and
+opened by the applier on the main thread. Both "Load Session" handlers in `menu_manager.py` pass
+`use_worker=True`. That split IS Qt-free-testable: `tests/test_session_load_threading.py` pins that the
+reader takes no viewer, decodes into a payload, the applier is the only half that adds layers, and
+`load_session` round-trips through both unchanged — so the freeze fix rides the tested main-thread-
+marshalling contract, not unverified threading. (1.6.199 also completed the `ui_modules` re-export of the
+session method-restore maps, which had been resolvable only by full-suite import order.)
 
 **Partial restore — not built.** With the session picker the default *is* the whole session, which
 was the point of it being non-default. An opt-in subset can follow if anyone asks.

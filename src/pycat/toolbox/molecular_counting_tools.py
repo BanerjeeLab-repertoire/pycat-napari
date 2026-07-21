@@ -182,121 +182,17 @@ def count_molecules_single(trace: np.ndarray, fast: int = 4,
     bf = fit_bleaching_trace(y)
     if not bf['success']:
         return dict(nu=np.nan, N=np.nan, bleach_r2=np.nan, accepted=False, n_points=0)
-    # ── The pedestal must come off BEFORE the variance pairs are built ──────────
-    #
-    # ``_variance_pairs`` regresses ``(I(t+1) - p*I(t))**2`` against ``p(1-p)*I(t)`` — the
-    # binomial variance of stochastic bleaching. **Both axes contain I(t), and I(t) contains the
-    # pedestal.** Subtracting it from ``y[fast]`` afterwards is not enough: it fixes the
-    # numerator of ``N = signal/nu`` and leaves ``nu`` itself corrupted.
-    #
-    # Measured (true nu = 100, true N = 10), with a 500-count pedestal: the pedestal was
-    # detected exactly (500.0) and subtracted from y[fast] correctly (1500 -> 1000) — and
-    # **N was still +79 % wrong, because nu came out at 49.0 instead of 100.**
-    #
-    # After every fluorophore has bleached the trace sits at the pedestal, so the tail IS the
-    # dark reference. Verified: a true pedestal of 500 recovers as 497.7 from the last frames.
-    _tail = y[-max(10, len(y) // 8):]
-    _pedestal = float(np.median(_tail))
-    _read_var = float(np.var(_tail))
-
+    # The pedestal must come off BEFORE the variance pairs are built — `_variance_pairs` regresses on
+    # I(t) on both axes, so subtracting it from `y[fast]` afterwards fixes only the numerator of
+    # `N = signal/nu` and leaves `nu` itself corrupted (see `_estimate_pedestal_read_noise`).
+    _pedestal, _read_var = _estimate_pedestal_read_noise(y)
     y = np.asarray(y, dtype=float) - _pedestal
 
     x_v, y_v = _variance_pairs(y, bf, fast=fast)
     if len(x_v) < 5:
         return dict(nu=np.nan, N=np.nan, bleach_r2=bf['r_squared'],
                     accepted=False, n_points=int(len(x_v)))
-    # ── The post-bleach plateau IS the dark reference ───────────────────────────
-    #
-    # ``nu`` is fitted as the slope of VARIANCE against MEAN — the N&B brightness estimator —
-    # and ``N = y[fast] / nu``. **Both terms were corrupted, in opposite directions, and they
-    # partly cancelled.** That is the worst case: the combined error looks acceptable while
-    # both halves are badly wrong.
-    #
-    # Measured, TRUE nu = 100 counts, TRUE N = 10 molecules:
-    #
-    #     trace                        nu       N          error
-    #     clean                        91.4     10.94      +9 %      (the estimator is SOUND)
-    #     + read noise (sd 15)         **166.1**  5.91     **-41 %**
-    #     + pedestal (500)             88.3     **16.99**  **+70 %**
-    #     + both                       164.7    8.99       -10 %     <- the cancellation
-    #
-    # **Read noise inflates the variance at every mean**, so the variance-vs-mean slope reads
-    # high and N reads low. **The pedestal inflates ``y[fast]``**, so N reads high. Neither is a
-    # molecular signal, and both are camera constants.
-    #
-    # And **both are recoverable from the trace itself**: after every fluorophore has bleached,
-    # the trace sits at the pedestal, and the variance of that plateau is the read noise. No
-    # dark reference, no extra user input. Verified: a true pedestal of 500 with sd 15 recovers
-    # as **497.7 +/- 13.5** from the last 30 frames.
-    # ── The difference carries read noise from BOTH frames ──────────────────────
-    #
-    # The y-axis is ``(I(t+1) - p*I(t))**2``, and read noise enters through I(t+1) AND through
-    # I(t). For an additive noise of variance s**2 on every frame:
-    #
-    #     var[I(t+1) - p*I(t)]  =  s**2  +  p**2 * s**2  =  s**2 * (1 + p**2)
-    #
-    # At a survival p of 0.97 that is **1.94 x s**2**, not s**2. A first version subtracted the
-    # plain plateau variance and **corrected only half the bias** — the read-noise case stayed
-    # 23 % low.
-    #
-    # This is an ADDITIVE offset on the y-axis (it does not scale with the mean), so it biases a
-    # through-origin slope HIGH, and nu high means N low.
-    _p_typ = float(np.median(np.clip(np.asarray(bf.get('p', 0.97), dtype=float), 0.0, 1.0))) \
-        if np.size(bf.get('p', None)) else 0.97
-    if not np.isfinite(_p_typ):
-        _p_typ = 0.97
-
-    # ── The INTERCEPT *IS* the noise floor. Let the fit find it. ────────────────
-    #
-    # The old path estimated the read variance and ``p`` **separately**, combined them into a
-    # noise floor ``s^2 * (1 + p^2)``, subtracted it, and fitted through the origin. Each estimate
-    # carries its own error, and **they multiply**: a wrong ``p`` scales the floor wrongly, and
-    # ``p`` appears in BOTH axes of the regression. **That is why the two corrections did not
-    # compose** -- each worked alone and the combination was worse than either.
-    #
-    # A free intercept collapses all of it into one fit: the line ``y = nu*x + b`` has the noise
-    # floor AS ``b``, and the slope is unaffected by it. **Nothing is estimated separately, so
-    # nothing multiplies.**
-    #
-    # Measured against the binomial-thinning simulation (TRUE nu = 100):
-    #
-    #     trace                   through-origin   FREE INTERCEPT
-    #     clean                   -5 %             -7 %
-    #     read noise sd = 15      +17 %            +15 %
-    #     **read 40 + ped 800**   **+21 %**        **-3 %**
-    #
-    # The pathological case -- the one where the corrections fought each other -- goes from
-    # **+21 % to -3 %**.
-    # **Which fit is right depends on whether there IS a noise floor** — and the tail variance
-    # MEASURES that. It is ~0 on a noiseless trace and s^2 otherwise:
-    #
-    #     clean          tail variance 0.0
-    #     read sd = 5    23.4
-    #     read sd = 15   210.4
-    #     read sd = 40   1496.3
-    #
-    # A noiseless trace has NO floor, and forcing the line through the origin is then **correct
-    # information**, not an assumption — a free intercept there adds a parameter that soaks up
-    # real signal (measured: slope 76.7 against a true 100, versus 86.7 through the origin).
-    #
-    # *A camera with zero read noise does not exist, so the noiseless case is a simulation
-    # artefact* — but the rule is decided by a MEASUREMENT rather than by that argument, and it
-    # costs nothing to be right in both regimes.
-    _has_noise_floor = _read_var > 1e-6 * max(float(np.max(np.abs(y_v))), 1.0)
-
-    if _has_noise_floor:
-        _fit_matrix = np.vstack([np.asarray(x_v, dtype=float),
-                                 np.ones(len(x_v), dtype=float)]).T
-        try:
-            nu, _intercept = np.linalg.lstsq(
-                _fit_matrix, np.asarray(y_v, dtype=float), rcond=None)[0]
-            nu = float(nu)
-        except Exception as _exc:
-            debug_log('molecular counting: the free-intercept fit failed; falling back', _exc)
-            nu = _slope_through_origin(
-                x_v, np.asarray(y_v, dtype=float) - _read_var * (1.0 + _p_typ ** 2))
-    else:
-        nu = _slope_through_origin(x_v, np.asarray(y_v, dtype=float))
+    nu = _fit_counting_nu(x_v, y_v, bf, _read_var)
 
     # ── `y[fast]` is NOT the signal at t=0. `fast` frames have already bleached. ─
     #
@@ -350,6 +246,62 @@ def count_molecules_single(trace: np.ndarray, fast: int = 4,
     return dict(nu=float(nu), N=float(N), bleach_r2=float(bf['r_squared']),
                 pedestal=_pedestal, read_noise_var=_read_var,
                 accepted=accepted, n_points=int(len(x_v)), quality=quality)
+
+
+# ── Phases of count_molecules_single (split out for reviewability; byte-identical) ────────────────
+# The two camera constants that corrupt an N&B count — the pedestal and the read-noise floor — are BOTH
+# recoverable from the trace's own post-bleach tail, and the ν fit's form depends on which is present.
+# Pinned by test_group_a_moments.test_count_molecules_single_is_byte_identical.
+
+def _estimate_pedestal_read_noise(y):
+    """The pedestal and read-noise variance, read from the trace's own tail — the dark reference.
+
+    After every fluorophore has bleached the trace sits at the pedestal, so the last frames ARE the dark
+    reference: their median is the pedestal (a camera offset that inflates ``y[fast]`` → N reads high) and
+    their variance is the read noise (inflates the variance-vs-mean slope → nu reads high, N low). Both are
+    camera constants, not molecular signal, and need no extra user input. Verified: a true pedestal of 500
+    with sd 15 recovers as 497.7 ± 13.5 from the last 30 frames."""
+    _tail = y[-max(10, len(y) // 8):]
+    return float(np.median(_tail)), float(np.var(_tail))
+
+
+def _fit_counting_nu(x_v, y_v, bf, read_var):
+    """Fit the single-fluorophore brightness ν — the slope of variance vs mean — with the noise floor as
+    a FREE INTERCEPT when the trace has one, else through the origin.
+
+    ── Why a free intercept, decided by a measurement ──────────────────────────────────────────────
+    The old path estimated the read variance and ``p`` SEPARATELY, combined them into a floor
+    ``s²·(1+p²)``, subtracted it and fitted through the origin. Each estimate carries its own error and
+    they MULTIPLY (``p`` appears in both axes), so the two corrections did not compose — each worked alone
+    and the combination was worse than either. A free intercept collapses all of it into one fit: the line
+    ``y = ν·x + b`` has the floor AS ``b`` and the slope is unaffected, so nothing is estimated separately
+    and nothing multiplies. Measured (TRUE ν = 100), the pathological read-40 + pedestal-800 case goes from
+    +21 % (through-origin) to −3 % (free intercept). But a NOISELESS trace has no floor, and forcing the
+    line through the origin is then correct information, not an assumption (a free intercept there soaks up
+    real signal: slope 76.7 vs a true 100, versus 86.7 through the origin). Which fit is right is decided by
+    the tail variance, which MEASURES whether a floor exists (~0 clean, s² otherwise).
+
+    The through-origin FALLBACK subtracts ``read_var·(1+p²)`` — the read noise enters through BOTH I(t+1)
+    and I(t), so the y-axis offset is ``s²·(1+p²)`` (1.94·s² at p = 0.97), not s²; subtracting the plain
+    plateau variance corrected only half the bias."""
+    _p_typ = float(np.median(np.clip(np.asarray(bf.get('p', 0.97), dtype=float), 0.0, 1.0))) \
+        if np.size(bf.get('p', None)) else 0.97
+    if not np.isfinite(_p_typ):
+        _p_typ = 0.97
+
+    _has_noise_floor = read_var > 1e-6 * max(float(np.max(np.abs(y_v))), 1.0)
+    if _has_noise_floor:
+        _fit_matrix = np.vstack([np.asarray(x_v, dtype=float),
+                                 np.ones(len(x_v), dtype=float)]).T
+        try:
+            nu, _intercept = np.linalg.lstsq(
+                _fit_matrix, np.asarray(y_v, dtype=float), rcond=None)[0]
+            return float(nu)
+        except Exception as _exc:
+            debug_log('molecular counting: the free-intercept fit failed; falling back', _exc)
+            return _slope_through_origin(
+                x_v, np.asarray(y_v, dtype=float) - read_var * (1.0 + _p_typ ** 2))
+    return _slope_through_origin(x_v, np.asarray(y_v, dtype=float))
 
 
 # ---------------------------------------------------------------------------

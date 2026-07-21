@@ -270,12 +270,8 @@ class DropletFusionUI:
             name = self._img_dd.currentText()
             if name not in [l.name for l in self.viewer.layers]:
                 napari_show_warning(f"Image stack '{name}' not found."); return
-            from pycat.file_io.file_io import materialize_stack
-            from pycat.ui.ui_utils import PhasedProgress as _PP
-            _pp = _PP(self._build_prog, phases=[("Materializing frames", 1.0)])
-            stack = materialize_stack(self.viewer.layers[name].data,
-                                      progress_callback=_pp.callback)
-            _pp.hide()
+            from pycat.utils.qt_worker import materialize_off_thread
+            stack = materialize_off_thread(self.viewer.layers[name].data, viewer=self.viewer)
             # Image-mode fusion treats frames as TIME (aspect-ratio relaxation) —
             # warn once if the stack's axis was assumed at load.
             try:

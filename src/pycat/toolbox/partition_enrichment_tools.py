@@ -48,6 +48,30 @@ from pycat.utils.notify import show_warning as napari_show_warning
 # Core enrichment computation
 # ---------------------------------------------------------------------------
 
+#: A candidate background region is "suspect" when it is NOT meaningfully darker than the dilute phase —
+#: i.e. its mean is at least this fraction of the dilute mean. Below this it is plausibly signal-free.
+_BACKGROUND_SUSPECT_RATIO = 0.7
+
+
+def assess_background_region(region_mean, dilute_mean, *, ratio=_BACKGROUND_SUSPECT_RATIO):
+    """Is a candidate 'signal-free' background region plausibly signal-free? Returns ``(suspect, message)``.
+
+    The dilute phase is NOT background — subtracting a region that is really dilute phase subtracts the
+    partition measurement's own denominator and destroys it. So when the candidate region's intensity is
+    comparable to the dilute phase (not meaningfully darker), the message states the **consequence**, not
+    merely the observed similarity. It warns; it never blocks — the user may have a legitimate case."""
+    if not (np.isfinite(region_mean) and np.isfinite(dilute_mean)) or dilute_mean <= 0:
+        return False, None
+    if region_mean >= ratio * dilute_mean:
+        return True, (
+            f"The selected background region (mean {region_mean:.4g}) has intensity SIMILAR to the dilute "
+            f"phase (mean {dilute_mean:.4g}). If this region is inside the cell, subtracting it will "
+            f"subtract the dilute phase from itself and DESTROY the partition measurement — a background "
+            f"region must be OUTSIDE the cell, or a dark/blank frame. (The dilute phase is real client "
+            f"signal, not background.)")
+    return False, None
+
+
 def client_enrichment(
     client_image: np.ndarray,
     dense_mask: np.ndarray,
@@ -56,6 +80,9 @@ def client_enrichment(
     dilute_gap_px: int = 0,
     background: float = 0.0,
     background_mask: Optional[np.ndarray] = None,
+    calibration_curve=None,
+    image_metadata: Optional[dict] = None,
+    temperature_K: Optional[float] = None,
 ) -> dict:
     """
     Global client partition coefficient:  K = (dense − bg) / (dilute − bg).
@@ -194,10 +221,85 @@ def client_enrichment(
             "(a signal-free region). If the image genuinely has no offset — because it was "
             "already background-subtracted — this warning can be ignored.")
 
-    return dict(dense_mean=dense_c, dilute_mean=dilute_c,
-                dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
-                background=bg, enrichment=enrichment,
-                n_dense_px=n_dense, n_dilute_px=n_dilute)
+    # ── The background choice TRAVELS with the result ───────────────────────────
+    #
+    # A K computed with a dark-frame offset and one computed raw are DIFFERENT measurements; a reader must
+    # be able to tell them apart, so the mode/offset/source ride in the table (and hence the consolidated
+    # long table). Derived from the inputs — never a separate recording.
+    if background_mask is not None:
+        background_mode, background_source = 'region', 'signal-free region mask (mean)'
+    elif float(background) != 0.0:
+        background_mode, background_source = 'scalar', 'user scalar offset'
+    else:
+        background_mode, background_source = 'none', 'none (raw means, no offset removed)'
+
+    # ── The guardrail: a "background" region that is really dilute phase would DESTROY the measurement ──
+    # Reuse the existing napari warning machinery; state the CONSEQUENCE, not just the similarity. Also
+    # carried in the result so a headless caller (and a test) sees the same verdict the UI shows.
+    background_warning = None
+    if background_mask is not None:
+        suspect, message = assess_background_region(bg, dilute_raw)
+        if suspect:
+            background_warning = message
+            napari_show_warning("Client enrichment background region — " + message)
+
+    result = dict(dense_mean=dense_c, dilute_mean=dilute_c,
+                  dense_mean_raw=dense_raw, dilute_mean_raw=dilute_raw,
+                  background=bg, enrichment=enrichment,
+                  n_dense_px=n_dense, n_dilute_px=n_dilute,
+                  background_mode=background_mode, background_source=background_source,
+                  background_warning=background_warning)
+
+    # ── Optional CALIBRATED path — real units, gated ─────────────────────────
+    #
+    # Additive: with no curve this is skipped and `result` is exactly what it has always been.
+    # With a curve, the dense/dilute intensities become apparent molar concentrations and their
+    # ratio becomes a real K_p and a transfer free energy — BUT only through the validity gate. A
+    # curve measured under a different acquisition converts nothing; it just produces a wrong number
+    # of the right magnitude, which is the exact failure this codebase refuses to ship. So a
+    # mismatch is reported as `calibration_validity` and the concentrations are NOT computed.
+    if calibration_curve is not None:
+        result.update(_calibrated_partition(
+            calibration_curve, image_metadata, dense_c, dilute_c, temperature_K))
+
+    return result
+
+
+def _calibrated_partition(curve, image_metadata, dense_intensity, dilute_intensity,
+                          temperature_K):
+    """Concentrations + real-unit K_p + ΔG for `client_enrichment`, behind the validity gate.
+
+    Kept out of `client_enrichment` so that function does not grow, and so the gated conversion is
+    testable on its own. Returns only extra keys; on a hard block it returns the verdict and no
+    concentrations — a refused calibration must not leave a plausible number behind.
+    """
+    from pycat.utils.calibration import (check_calibration_validity, intensity_to_concentration,
+                                         delta_g_transfer)
+
+    verdict = check_calibration_validity(curve, image_metadata or {})
+    out = {'calibration_validity': {'valid': verdict.valid, 'level': verdict.level,
+                                    'reason': verdict.reason}}
+    if not verdict.valid:
+        napari_show_warning(f"Calibrated partition: refused — {verdict.reason}. Reporting the "
+                            f"intensity ratio only.")
+        return out
+    if verdict.level == 'warn':
+        napari_show_warning(f"Calibrated partition: {verdict.reason}")
+
+    c_dense = intensity_to_concentration(dense_intensity, curve, name='dense_concentration')
+    c_dilute = intensity_to_concentration(dilute_intensity, curve, name='dilute_concentration')
+    out['dense_concentration'] = c_dense
+    out['dilute_concentration'] = c_dilute
+    out['Kp_calibrated'] = (c_dense.value / c_dilute.value
+                            if c_dilute.value not in (0, None) and c_dilute.value > 0 else float('nan'))
+
+    if temperature_K is not None:
+        try:
+            out['delta_g_transfer'] = delta_g_transfer(c_dense, c_dilute, temperature_K)
+        except ValueError as exc:
+            out['delta_g_transfer'] = None
+            napari_show_warning(f"Calibrated partition: ΔG not computed — {exc}")
+    return out
 
 
 def client_enrichment_per_condensate(

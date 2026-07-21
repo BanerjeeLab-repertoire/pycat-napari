@@ -44,6 +44,20 @@ import pytest
 # any of these at import time is a GUI / file-IO test, not a core scientific one.
 _OPTIONAL_STACK = ("napari", "PyQt5", "qtpy", "aicsimageio", "cellpose", "torch")
 
+
+@pytest.fixture(autouse=True)
+def _close_matplotlib_figures():
+    """Close any pyplot figures a test left open, so the suite does not trip matplotlib's ">20 figures"
+    warning (the plot_lifecycle audit finding). Runs AFTER the test body, so a test that asserts on
+    ``plt.get_fignums()`` mid-run is unaffected — this only sweeps what it forgot to close. A no-op when
+    matplotlib is not importable."""
+    yield
+    try:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+    except Exception:
+        pass
+
 # PyCAT modules that pull the GUI/IO stack in at import time. A test importing one of these
 # transitively needs the stack, even though it never names it.
 _GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui")

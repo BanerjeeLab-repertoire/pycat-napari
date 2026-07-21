@@ -1,5 +1,13 @@
 # Claude Code spec — Comparative phenotyping increment 1: the condition/metadata model
 
+> **✅ STATUS — DONE.** Part A (the resolver / condition-metadata model) shipped in 1.6.95; Parts B & C
+> (batch-loop + session-manifest wiring) in 1.6.133. (1.6.95 predates the current CHANGELOG, which starts at
+> 1.6.103; 1.6.133 is present and references Part A.) `src/pycat/utils/sample_metadata.py` provides the
+> frozen `SampleMetadata` dataclass, `SampleMetadataResolver.for_image()` (precedence + field-level merge),
+> `load_sample_sheet`, and safe `parse_filename` (named-group regex, no eval), plus batch/manifest wiring
+> helpers. Pinned by `tests/test_sample_metadata.py` + `tests/test_sample_metadata_wiring.py`. Every
+> Definition-of-done item met.
+
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. First increment of
 the comparative-phenotyping roadmap (`roadmap_comparative_phenotyping_2026-07-16.md`). Builds the
 metadata layer that attaches condition/perturbation labels to data — the prerequisite for the

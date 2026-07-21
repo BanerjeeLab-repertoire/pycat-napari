@@ -63,7 +63,7 @@ _K_BOLTZMANN = 1.38064852e-23
 # 1-2. Host condensate segmentation + interface erosion
 # ---------------------------------------------------------------------------
 
-@tags_layer('host_segment', role='mask',
+@tags_layer('host_segment', role='mask', inputs=('image',),
             summary='Host condensate segmentation for VPT', target='condensate')
 def segment_host_condensate(
     host_image: np.ndarray,
@@ -335,7 +335,7 @@ def _fit_clipped_radius(reg: np.ndarray) -> float:
             return eqrad
         # Never return smaller than what we already see
         return max(r, eqrad)
-    except Exception:
+    except Exception:  # broad-ok: falls back to the already-measured equivalent radius (eqrad) when the ellipse fit fails — a real prior measurement, not a fabricated default
         return eqrad
 
 
@@ -640,7 +640,7 @@ def build_hot_pixel_mask(bead_stack, cv_max=0.12, tstd_max=8.0,
     wired, low-risk (baseline untouched); expect little effect on clean
     fluorescence bead movies.
     """
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
     # Streaming mean/variance (Welford) so we never hold the whole stack.
     mean = None
     M2 = None
@@ -914,6 +914,187 @@ def score_beads_template(frame, coords, template_z, half=4, subpixel=False):
     return out
 
 
+def _classify_fast_template_refs(df, strictness, variant):
+    """Reference statistics for fast-template classification, computed over the REAL beads only (so
+    ring/hot/noise detections do not skew them): the NCC realness floor, the singlet intensity, the
+    aggregate mass/amplitude gates (p99.3 mass just below the top cluster so a true aggregate stays
+    stable frame-to-frame; p50 amplitude so it must also be bright), and the dim/out-of-focus cutoffs
+    scaled by ``strictness``. Returned as a dict the per-bead pass reads."""
+    ncc = df['ncc'].to_numpy(dtype=float)
+    amp = df['amplitude'].to_numpy(dtype=float)
+    ii = df['integrated_intensity'].to_numpy(dtype=float)
+    snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
+           else np.full(len(df), np.nan))
+
+    # Real-vs-garbage: absolute NCC floor. The template is built FROM the real beads, so genuine beads
+    # match it well; rings/hot/noise do not. 0.55 (not 0.50) reduces frame-to-frame flicker of dim
+    # detections whose NCC hovers at the floor.
+    NCC_FLOOR = 0.55
+    is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
+
+    # Hot-pixel reject variant: a HARSHER acceptance test on suspect pixels, not a flat veto — a real
+    # bead drifting over a hot/dead pixel must still be accepted if it brings genuine template evidence.
+    if variant == 'hot_pixel_reject' and 'on_hot_pixel' in df.columns:
+        HOT_NCC_FLOOR = 0.75
+        on_hot = df['on_hot_pixel'].fillna(False).to_numpy(dtype=bool)
+        harsh_ok = ~on_hot | (np.isfinite(ncc) & (ncc >= HOT_NCC_FLOOR))
+        is_real = is_real & harsh_ok
+
+    rii = ii[is_real & np.isfinite(ii)]
+    ramp = amp[is_real & np.isfinite(amp)]
+    rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
+    if len(rii) >= 10:
+        singlet_int = float(np.median(rii[rii <= np.median(rii)]))
+        mass_hi = float(np.percentile(rii, 99.3))
+        amp_hi = float(np.percentile(ramp, 50))     # must also be bright
+    else:
+        singlet_int = float(np.median(rii)) if len(rii) else np.nan
+        mass_hi = np.inf; amp_hi = np.inf
+
+    # Dim / out-of-focus threshold: a low-amplitude percentile scaled by strictness (default 1.0 → 25th
+    # pct, tuned for viscous samples where most beads stay in focus). A low-SNR detection is dim-like too.
+    s = float(strictness) if strictness and strictness > 0 else 1.0
+    dim_pct = None
+    if len(ramp) >= 10:
+        dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
+        amp_dim = float(np.percentile(ramp, dim_pct))
+    else:
+        amp_dim = -np.inf
+    if len(rsnr) >= 10:
+        snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
+        snr_dim = float(np.percentile(rsnr, snr_pct))
+    else:
+        snr_dim = -np.inf
+
+    # High-NCC guard against out_of_plane flicker: a bright, well-matched bead near the moving dim line
+    # must never be demoted to yellow purely on a wobbling per-frame SNR percentile.
+    return dict(ncc=ncc, amp=amp, ii=ii, snr=snr, has_snr=('snr' in df),
+                is_real=is_real, singlet_int=singlet_int, mass_hi=mass_hi, amp_hi=amp_hi,
+                amp_dim=amp_dim, snr_dim=snr_dim, ncc_floor=NCC_FLOOR,
+                ncc_singlet_guard=0.80, dim_pct=dim_pct)
+
+
+def _classify_fast_template(df, strictness, variant):
+    """Fast-mode (template-scorer) classification into four tiers, for large Airy-disk beads where a real
+    single bead is BRIGHT and high-mass:
+
+      rejected  : poor template match (NCC below the floor) — Airy-ring fragments, hot pixels, noise;
+                  DROPPED entirely (never become points).
+      aggregate : BRIGHT and COMPACT and HIGH-MASS (top mass tail AND high amplitude) — requiring BOTH
+                  is what separates a true aggregate from an out-of-focus blob (high-mass but dim).
+      ambiguous : high-mass but dim/diffuse (out of focus) — too uncertain to call; flagged honestly.
+      singlet   : every other well-matched real bead (the large majority).
+    """
+    R = _classify_fast_template_refs(df, strictness, variant)
+    ii, amp, snr, ncc = R['ii'], R['amp'], R['snr'], R['ncc']
+    is_real, singlet_int, has_snr = R['is_real'], R['singlet_int'], R['has_snr']
+    mass_hi, amp_hi, amp_dim, snr_dim = R['mass_hi'], R['amp_hi'], R['amp_dim'], R['snr_dim']
+    NCC_SINGLET_GUARD = R['ncc_singlet_guard']
+
+    n_units, classes = [], []
+    for k in range(len(df)):
+        if not is_real[k]:
+            n_units.append(np.nan); classes.append('rejected'); continue
+        I, A = ii[k], amp[k]
+        S = snr[k] if has_snr else np.nan
+        C = ncc[k]
+        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
+        n_units.append(nu)
+        high_mass = np.isfinite(I) and I >= mass_hi
+        bright = np.isfinite(A) and A >= amp_hi
+        # Require the AMPLITUDE to actually be low — a low per-frame SNR alone must NOT demote a bead
+        # whose amplitude is fine (that was the flicker source); SNR is only a secondary confirmation.
+        amp_low = np.isfinite(A) and A <= amp_dim
+        snr_low = np.isfinite(S) and S <= snr_dim
+        is_dim = amp_low or (snr_low and amp_low)
+        well_matched = np.isfinite(C) and C >= NCC_SINGLET_GUARD   # immune to the dim gate (anti-flicker)
+        if high_mass and bright:
+            classes.append('aggregate')
+        elif is_dim and not high_mass and not well_matched:
+            classes.append('out_of_plane')
+        elif high_mass and not bright:
+            classes.append('ambiguous')
+        else:
+            classes.append('singlet')
+    df['n_units_est'] = n_units
+    df['bead_class'] = classes
+    # DROP rejected detections entirely — a marked point should be a real bead.
+    df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
+    df['singlet'] = df['bead_class'] == 'singlet'
+    # Record the thresholds actually used, so results are reproducible and the regime is auditable.
+    df.attrs['classify_thresholds'] = {
+        'mode': 'fast_template',
+        'ncc_floor': float(R['ncc_floor']),
+        'ncc_singlet_guard': float(NCC_SINGLET_GUARD),
+        'aggregate_mass_percentile': 99.3,
+        'aggregate_amp_percentile': 50.0,
+        'aggregate_mass_hi': float(mass_hi),
+        'aggregate_amp_hi': float(amp_hi),
+        'dim_amp_percentile': float(R['dim_pct']) if R['dim_pct'] is not None else None,
+        'strictness': float(strictness),
+    }
+    return df
+
+
+def _classify_gaussian_fit(df, sigma_outlier_factor, aggregate_intensity_factor):
+    """Gaussian-fit-mode classification (fast_fit / precise / legacy), reached when a Gaussian fit
+    produced ``sigma_mean`` + ``r_squared``. Focus is judged by the fitted SIGMA, which is
+    SNR-independent — NOT by R² (R² measures how well the model explains the VARIANCE, so at low SNR it
+    collapses even for a perfectly in-focus bead: a true sigma-1.0 bead scores R² 0.24 at SNR 3 and 0.99
+    at SNR 53, so an R² gate flagged DIM in-focus beads as out-of-plane. ``defocus_r2_max`` is retained
+    in the caller's signature for back-compat and is no longer used)."""
+    # Restrict the singlet reference stats to beads with finite fit metrics (else NaN/failed fits
+    # pollute the reference medians).
+    valid = (
+        np.isfinite(df['integrated_intensity']) &
+        np.isfinite(df['sigma_mean']) &
+        np.isfinite(df['r_squared'])
+    )
+
+    # Robust singlet reference = lower-half median (biases the reference toward singlets; aggregates are
+    # the bright minority).
+    ref = df.loc[valid, 'integrated_intensity']
+    if len(ref) >= 4:
+        singlet_int = float(np.median(ref[ref <= ref.median()]))
+    elif len(ref) > 0:
+        singlet_int = float(ref.median())
+    else:
+        singlet_int = np.nan
+    sig = df.loc[valid, 'sigma_mean']
+    singlet_sigma = float(np.median(sig[sig <= sig.median()])) if len(sig) >= 4 else \
+        (float(sig.median()) if len(sig) > 0 else np.nan)
+
+    amp = df.loc[valid, 'amplitude']
+    singlet_amp = float(np.median(amp[amp <= amp.median()])) if len(amp) >= 4 else \
+        (float(amp.median()) if len(amp) > 0 else np.nan)
+
+    n_units, classes = [], []
+    for _, r in df.iterrows():
+        I = r['integrated_intensity']; s = r['sigma_mean']
+        r2 = r['r_squared']; A = r['amplitude']
+        if not np.isfinite(I) or not np.isfinite(r2):
+            n_units.append(np.nan); classes.append('unfit'); continue
+        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
+        n_units.append(nu)
+        oversized = (np.isfinite(s) and np.isfinite(singlet_sigma)
+                     and s > sigma_outlier_factor * singlet_sigma)
+        brighter = np.isfinite(nu) and nu >= aggregate_intensity_factor
+        # Defocus signature: enlarged spot whose PEAK amplitude is depressed relative to a singlet
+        # (photons spread over a wider area), i.e. NOT a true aggregate. Sigma (not R²) is the focus test.
+        dim_peak = (np.isfinite(A) and np.isfinite(singlet_amp)
+                    and singlet_amp > 0 and A < 0.7 * singlet_amp)
+        if brighter and not dim_peak:
+            classes.append('aggregate')
+        elif oversized and dim_peak:
+            classes.append('out_of_plane')
+        else:
+            classes.append('singlet')
+    df['n_units_est'] = n_units
+    df['bead_class'] = classes
+    df['singlet'] = df['bead_class'] == 'singlet'
+    return df
+
+
 def classify_beads(beads_df: pd.DataFrame,
                    aggregate_intensity_factor: float = 1.6,
                    defocus_r2_max: float = 0.85,
@@ -976,250 +1157,12 @@ def classify_beads(beads_df: pd.DataFrame,
             df[c] = [] if c != 'singlet' else []
         return df
 
-    # Fast-mode classification: when the fast template scorer was used, we have
-    # ncc / snr / symmetry / integrated_intensity but no Gaussian r_squared.
-    # Classify from those instead: a singlet matches the template well (high
-    # ncc), is symmetric, and has near-singlet integrated intensity; an
-    # aggregate is much brighter; a poor template match (low ncc/symmetry) that
-    # isn't brighter is treated as out-of-plane/unfit.
+    # Fast-template mode: the template scorer produced ncc/snr/symmetry but no Gaussian r_squared.
     if 'r_squared' not in df.columns and 'ncc' in df.columns:
-        # Fast-mode classification, calibrated for large (non-diffraction-limited)
-        # Airy-disk beads where a real single bead is BRIGHT and high-mass.
-        #
-        # Four tiers:
-        #   rejected     : poor template match (ncc below a floor) — these are
-        #                  Airy-ring fragments, hot pixels, and noise. DROPPED
-        #                  entirely (never become points), not just labelled.
-        #   aggregate    : a real bead that is BRIGHT and COMPACT and HIGH-MASS
-        #                  (top mass tail AND high amplitude). Requiring BOTH is
-        #                  what separates a true aggregate from an out-of-focus
-        #                  blob (which is high-mass but DIM/diffuse).
-        #   ambiguous    : high-mass but dim/diffuse (out of focus) — too
-        #                  uncertain to call singlet or aggregate; flagged so the
-        #                  software is honest about not knowing.
-        #   singlet      : every other well-matched real bead (the large majority).
-        ncc = df['ncc'].to_numpy(dtype=float)
-        amp = df['amplitude'].to_numpy(dtype=float)
-        ii = df['integrated_intensity'].to_numpy(dtype=float)
-        snr = (df['snr'].to_numpy(dtype=float) if 'snr' in df
-               else np.full(len(df), np.nan))
+        return _classify_fast_template(df, strictness, variant)
 
-        # Real-vs-garbage: absolute NCC floor. The template is built FROM the
-        # real beads, so genuine beads match it well; rings/hot/noise do not.
-        # 0.55 (rather than 0.50) reduces frame-to-frame flicker: dim detections
-        # whose NCC hovers right at the floor were dropping in and out between
-        # frames as their score wobbled; a slightly firmer floor keeps that
-        # borderline-noise population consistently rejected.
-        NCC_FLOOR = 0.55
-        is_real = np.isfinite(ncc) & (ncc >= NCC_FLOOR)
-
-        # Hot-pixel reject variant: on a FIXED sensor hot pixel, apply a HARSHER
-        # acceptance test instead of a flat veto — a real bead can drift over a
-        # hot/dead pixel and must still be accepted if it brings genuine template
-        # evidence. A bare hot pixel is a flat/spiky single pixel that matches the
-        # bead PSF template poorly (low NCC), so a raised NCC floor on suspect
-        # pixels drops the naked hot pixel while a bead passing over (high NCC)
-        # survives. Baseline is untouched (no 'on_hot_pixel' column there).
-        if variant == 'hot_pixel_reject' and 'on_hot_pixel' in df.columns:
-            HOT_NCC_FLOOR = 0.75   # stricter than the 0.55 baseline floor
-            on_hot = df['on_hot_pixel'].fillna(False).to_numpy(dtype=bool)
-            # A detection on a hot pixel must clear the higher floor to be real.
-            harsh_ok = ~on_hot | (np.isfinite(ncc) & (ncc >= HOT_NCC_FLOOR))
-            is_real = is_real & harsh_ok
-
-        # References computed over REAL beads only (so garbage doesn't skew them).
-        rii = ii[is_real & np.isfinite(ii)]
-        ramp = amp[is_real & np.isfinite(amp)]
-        rsnr = snr[is_real & np.isfinite(snr)] if 'snr' in df else np.array([])
-        if len(rii) >= 10:
-            singlet_int = float(np.median(rii[rii <= np.median(rii)]))
-            # Aggregate mass gate at p99.3 (not p99.5): p99.5 landed INSIDE the
-            # top mass cluster, so a genuine aggregate whose mass fluctuates a
-            # few percent frame-to-frame kept crossing it and flickered
-            # red/green. p99.3 sits just BELOW that cluster, so the handful of
-            # true aggregates stay solidly above it every frame (stable class).
-            mass_hi = float(np.percentile(rii, 99.3))
-            amp_hi = float(np.percentile(ramp, 50))     # must also be bright
-        else:
-            singlet_int = float(np.median(rii)) if len(rii) else np.nan
-            mass_hi = np.inf; amp_hi = np.inf
-
-        # Dim / out-of-focus (YELLOW) threshold. Dim detections — low amplitude
-        # relative to the population — are most likely beads drifting out of the
-        # focal plane; they belong in the out_of_plane (yellow) bin, not called
-        # singlets. The cutoff is a low-amplitude percentile scaled by
-        # `strictness`: strictness=1.0 (default, tuned for viscous samples
-        # ~3 Pa·s and above, where beads move slowly) uses the 25th percentile;
-        # higher strictness pushes more borderline-dim detections to yellow,
-        # lower strictness (opt-in for less viscous / faster samples) keeps more
-        # as singlets. In a viscous sample most beads stay in focus, so the dim
-        # tail is genuinely out-of-plane; in a fast/low-viscosity sample beads
-        # cross the plane quickly and a stricter dim gate would wrongly bin real
-        # beads, hence the exposed control.
-        s = float(strictness) if strictness and strictness > 0 else 1.0
-        if len(ramp) >= 10:
-            dim_pct = float(np.clip(25.0 * s, 2.0, 60.0))
-            amp_dim = float(np.percentile(ramp, dim_pct))
-        else:
-            amp_dim = -np.inf
-        # A low-SNR detection is also out-of-focus-like (weak, diffuse peak).
-        if len(rsnr) >= 10:
-            snr_pct = float(np.clip(15.0 * s, 2.0, 50.0))
-            snr_dim = float(np.percentile(rsnr, snr_pct))
-        else:
-            snr_dim = -np.inf
-
-        # High-NCC guard against out_of_plane flicker. The out_of_plane (yellow)
-        # class is meant for genuinely dim / defocused beads — but a per-frame
-        # amplitude/SNR percentile will always bin ~the lowest quarter as dim,
-        # and when the whole population is uniformly low-quality a BRIGHT,
-        # well-matched bead sitting near that moving line flips singlet<->yellow
-        # frame-to-frame (verified: a bead at amp~163, ncc~0.95 read out_of_plane
-        # ~24% of frames purely from the SNR percentile wobbling). NCC is the
-        # template match built FROM the real beads, so a high NCC is strong
-        # evidence of a real in-focus bead regardless of a noisy per-frame SNR.
-        # A bead with NCC at/above this guard is never demoted to out_of_plane.
-        NCC_SINGLET_GUARD = 0.80
-
-        n_units, classes = [], []
-        for k in range(len(df)):
-            if not is_real[k]:
-                n_units.append(np.nan); classes.append('rejected'); continue
-            I, A = ii[k], amp[k]
-            S = snr[k] if 'snr' in df else np.nan
-            C = ncc[k]
-            nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
-            n_units.append(nu)
-            high_mass = np.isfinite(I) and I >= mass_hi
-            bright = np.isfinite(A) and A >= amp_hi
-            # Dim / out-of-focus. Require the AMPLITUDE to actually be low — a
-            # low per-frame SNR alone must NOT demote a bead whose amplitude is
-            # fine (that was the flicker source). SNR is now only a secondary
-            # confirmation: it can push a bead that is ALREADY amplitude-dim into
-            # the yellow bin, but it can't drag a bright bead there on its own.
-            amp_low = np.isfinite(A) and A <= amp_dim
-            snr_low = np.isfinite(S) and S <= snr_dim
-            is_dim = amp_low or (snr_low and amp_low)
-            # High-NCC well-matched beads are immune to the dim gate (anti-flicker).
-            well_matched = np.isfinite(C) and C >= NCC_SINGLET_GUARD
-            if high_mass and bright:
-                classes.append('aggregate')          # bright + compact + heavy
-            elif is_dim and not high_mass and not well_matched:
-                classes.append('out_of_plane')        # YELLOW: dim / out of focus
-            elif high_mass and not bright:
-                classes.append('ambiguous')           # heavy but dim/diffuse (OOF)
-            else:
-                classes.append('singlet')             # the large majority
-        df['n_units_est'] = n_units
-        df['bead_class'] = classes
-        # DROP rejected detections entirely — a marked point should be a real
-        # bead (rings/hot pixels/noise never become points).
-        df = df[df['bead_class'] != 'rejected'].reset_index(drop=True)
-        df['singlet'] = df['bead_class'] == 'singlet'
-        # Record the (otherwise hard-coded) classification thresholds actually
-        # used, so results are reproducible and the regime is auditable (#11).
-        df.attrs['classify_thresholds'] = {
-            'mode': 'fast_template',
-            'ncc_floor': float(NCC_FLOOR),
-            'ncc_singlet_guard': float(NCC_SINGLET_GUARD),
-            'aggregate_mass_percentile': 99.3,
-            'aggregate_amp_percentile': 50.0,
-            'aggregate_mass_hi': float(mass_hi),
-            'aggregate_amp_hi': float(amp_hi),
-            'dim_amp_percentile': float(locals().get('dim_pct')) if locals().get('dim_pct') is not None else None,
-            'strictness': float(strictness),
-        }
-        return df
-
-
-    # ── Gaussian-fit-mode classification (fast_fit / precise / legacy) ────────
-    # This branch is reached when a Gaussian fit produced sigma_mean + r_squared
-    # (the fast-template branch above returns before here). Restrict the singlet
-    # reference statistics to beads with finite fit metrics — without this mask
-    # the reference medians would be polluted by NaN/failed fits (and 'valid'
-    # was previously undefined here, crashing every Gaussian-fit call).
-    valid = (
-        np.isfinite(df['integrated_intensity']) &
-        np.isfinite(df['sigma_mean']) &
-        np.isfinite(df['r_squared'])
-    )
-
-    # Robust singlet reference = median of reasonably-fit beads. Use the lower
-    # half of the intensity distribution to bias the reference toward singlets
-    # (aggregates are the bright minority).
-    ref = df.loc[valid, 'integrated_intensity']
-    if len(ref) >= 4:
-        singlet_int = float(np.median(ref[ref <= ref.median()]))
-    elif len(ref) > 0:
-        singlet_int = float(ref.median())
-    else:
-        singlet_int = np.nan
-    sig = df.loc[valid, 'sigma_mean']
-    singlet_sigma = float(np.median(sig[sig <= sig.median()])) if len(sig) >= 4 else         (float(sig.median()) if len(sig) > 0 else np.nan)
-
-    # Reference peak amplitude of a singlet (lower-half median, like intensity)
-    amp = df.loc[valid, 'amplitude']
-    singlet_amp = float(np.median(amp[amp <= amp.median()])) if len(amp) >= 4 else \
-        (float(amp.median()) if len(amp) > 0 else np.nan)
-
-    n_units, classes = [], []
-    for _, r in df.iterrows():
-        I = r['integrated_intensity']; s = r['sigma_mean']
-        r2 = r['r_squared']; A = r['amplitude']
-        if not np.isfinite(I) or not np.isfinite(r2):
-            n_units.append(np.nan); classes.append('unfit'); continue
-        nu = I / singlet_int if (singlet_int and singlet_int > 0) else np.nan
-        n_units.append(nu)
-        oversized = (np.isfinite(s) and np.isfinite(singlet_sigma)
-                     and s > sigma_outlier_factor * singlet_sigma)
-        brighter = np.isfinite(nu) and nu >= aggregate_intensity_factor
-        # Defocus signature: enlarged spot whose PEAK amplitude is depressed
-        # relative to a singlet (photons spread over a wider area), i.e. NOT a
-        # true aggregate.
-        #
-        # ── The R² clause is REMOVED, because R² measures SNR, not focus ────────
-        #
-        # This used to be `oversized and (dim_peak or r2 < defocus_r2_max)`, with the
-        # comment "poor R² reinforces it". It does not. R² measures how well the model
-        # explains the VARIANCE, and at low SNR the noise dominates the variance — so R²
-        # collapses even when the shape is perfect.
-        #
-        # Measured on a bead that is PERFECTLY IN FOCUS (true sigma 1.0) at every
-        # brightness, with only the SNR changing:
-        #
-        #     amplitude  SNR   mean R²   flagged "defocused" (R² < 0.85)?
-        #        10       3     0.236    **YES**
-        #        20       7     0.532    **YES**
-        #        40      13     0.817    **YES**
-        #        80      27     0.947    no
-        #       160      53     0.986    no
-        #
-        # **A dim IN-FOCUS bead was called out_of_plane. The same bead, brighter, was
-        # not.** The classifier was sorting by brightness, not by focus — which is exactly
-        # the inverted-classifier behaviour observed on the real bead data, and a direct
-        # contributor to the ~15 % dropout of stable, in-focus beads that fragments the
-        # tracks and corrupts the viscosity.
-        #
-        # SIGMA is the SNR-independent measure of focus, because it is a property of the
-        # SHAPE rather than of how well the model explains the variance. Verified: a fitted
-        # sigma of 1.00 at every SNR from 3 to 53 for an in-focus bead, and 2.49–2.50 for a
-        # genuinely defocused one. The `oversized` test below is already sigma-based and
-        # correct; the R² clause only ADDED false positives, so it is gone.
-        #
-        # `defocus_r2_max` is retained in the signature for backward compatibility and is
-        # no longer used. It is not a focus measure and should not be reintroduced.
-        dim_peak = (np.isfinite(A) and np.isfinite(singlet_amp)
-                    and singlet_amp > 0 and A < 0.7 * singlet_amp)
-        if brighter and not dim_peak:
-            classes.append('aggregate')
-        elif oversized and dim_peak:
-            classes.append('out_of_plane')
-        else:
-            classes.append('singlet')
-    df['n_units_est'] = n_units
-    df['bead_class'] = classes
-    df['singlet'] = df['bead_class'] == 'singlet'
-    return df
+    # Gaussian-fit mode (fast_fit / precise / legacy): sigma_mean + r_squared are present.
+    return _classify_gaussian_fit(df, sigma_outlier_factor, aggregate_intensity_factor)
 
 
 def _bead_source_descriptor(bead_stack):
@@ -1476,7 +1419,7 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
     """
     import numpy as np
     from scipy.optimize import curve_fit
-    from pycat.file_io.file_io import materialize_stack
+    from pycat.file_io.stack_access import materialize_stack
 
     def _fit_sigma(patch, h):
 
@@ -1518,7 +1461,7 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
             popt, _ = curve_fit(g, (xx, yy), p.ravel(),
                                 p0=[p.max(), h, h, 1.5, 0.0], maxfev=4000)
             return abs(float(popt[3]))
-        except Exception:
+        except Exception:  # broad-ok: returns NaN on Gaussian-fit failure — an honest missing width, not a fabricated value
             return np.nan
 
     # Materialise only the projection window (small), not the whole movie.
@@ -1610,7 +1553,7 @@ def _gpu_build_id() -> str:
         import cupy
         return (f"{getattr(cupy, '__version__', '?')}/"
                 f"{cupy.cuda.runtime.runtimeGetVersion()}")
-    except Exception:
+    except Exception:  # broad-ok: optional-backend version probe — 'no-cupy' when CuPy is absent, not a scientific result
         return 'no-cupy'
 
 
@@ -1788,7 +1731,251 @@ def _choose_detection_tier(*, n_frames, t_ser, t_gpu, workers, gpu_ok, pool_ok) 
     return min(options, key=lambda kv: kv[1])[0]
 
 
-@tags_layer('bead_detect', role='overlay',
+def _bead_first_frame(bead_stack, frame_indices):
+    """The first frame to be processed — used by the backend-choice cost/equivalence probes without
+    materialising the stack."""
+    from pycat.file_io.stack_access import iter_frames as _itf
+    return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
+
+
+def _choose_detection_backend(bead_stack, frame_indices, n_frames, *, quality_mode, use_gpu, parallel,
+                              n_workers, host_mask, min_sigma, max_sigma, num_sigma, threshold, variant):
+    """Pick the detection execution tier for THIS stack and return ``(tier, gpu_on, src_desc, max_workers)``.
+
+    No fixed preference order — each candidate (GPU / CPU-process-pool / serial) is COSTED and the cheapest
+    wins (see `_choose_detection_tier`). The GPU equivalence guard runs whenever the GPU is a candidate,
+    even if the pool ends up winning — "never trust a mismatching GPU" is a correctness rule, memoised so
+    it is free. The pool is a candidate only for the fast path on multi-frame stacks whose variant does not
+    need per-detection sigma / a stack-level mask. **Path OUTCOME is behaviour: the equivalence guards pin
+    that GPU/pool/serial produce identical blobs.**"""
+    # Is the GPU a CANDIDATE?
+    gpu_ok = False
+    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
+        try:
+            from pycat.toolbox.gpu_utils import gpu_available
+            gpu_ok = bool(gpu_available())
+        except Exception:
+            gpu_ok = False
+        if gpu_ok:
+            gpu_ok = gpu_matches_cpu(
+                lambda: _bead_first_frame(bead_stack, frame_indices),
+                min_sigma=min_sigma, max_sigma=max_sigma,
+                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+
+    # Is the POOL a candidate? Ring-merge needs per-detection sigma (not carried by the worker) and
+    # hot-pixel reject filters against a stack-level mask, so both stay serial.
+    src_desc = _bead_source_descriptor(bead_stack) if quality_mode == 'fast' else None
+    try:
+        import os as _os
+        max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
+    except Exception:
+        max_workers = 1
+    pool_ok = (quality_mode == 'fast'
+               and variant not in ('ring_merge', 'hot_pixel_reject')
+               and parallel in ('auto', 'cpu', 'process')
+               and src_desc is not None and max_workers >= 2
+               and bool(n_frames) and n_frames > 1)
+
+    # An explicit request is the caller telling us which tier they want; only 'auto' must justify itself.
+    if use_gpu in ('gpu', True, 'true') and gpu_ok:
+        tier = 'gpu'
+    elif parallel in ('cpu', 'process') and pool_ok:
+        tier = 'pool'
+    elif not gpu_ok and not pool_ok:
+        tier = 'serial'
+    else:
+        _t_ser, _t_gpu = _frame_costs_s(
+            _bead_first_frame(bead_stack, frame_indices), gpu_ok=gpu_ok, min_sigma=min_sigma,
+            max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+        tier = _choose_detection_tier(
+            n_frames=n_frames, t_ser=_t_ser, t_gpu=_t_gpu, workers=max_workers,
+            gpu_ok=gpu_ok, pool_ok=pool_ok)
+        debug_log(
+            f'VPT tier: {tier} for {n_frames} x {tuple(getattr(bead_stack, "shape", ()))[-2:]} '
+            f'(serial {_t_ser*1000:.0f} ms/frame'
+            + (f', GPU {_t_gpu*1000:.0f} ms/frame' if _t_gpu else '')
+            + (f', pool ~{_t_ser/_pool_speedup(max_workers)*1000:.0f} ms/frame + '
+               f'{_pool_spawn_cost_s():.1f} s spawn' if pool_ok else '') + ')', None)
+    return tier, (tier == 'gpu'), src_desc, max_workers
+
+
+def _pool_predetect(src_desc, frame_indices, n_frames, max_workers, *, min_sigma, max_sigma, num_sigma,
+                    threshold, host_mask, merge_radius_px, progress_callback):
+    """Detect coordinates for every frame on a process pool, or ``None`` on any failure (→ serial fallback).
+    Reports progress DURING detection (the expensive phase), mapped to the first 70% of the bar so the
+    subsequent cheap scoring loop continues from there rather than restarting at 0."""
+    try:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
+                          num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+        idxs = (list(frame_indices) if frame_indices is not None else list(range(n_frames)))
+        tasks = [(t, src_desc, True, det_kwargs, merge_radius_px) for t in idxs]
+        precomputed_coords = {}
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            _n_par = len(tasks)
+            futures = [ex.submit(_detect_frame_worker, task) for task in tasks]
+            _done_par = 0
+            for fut in as_completed(futures):
+                t, coords = fut.result()
+                precomputed_coords[t] = coords
+                _done_par += 1
+                if progress_callback is not None and _n_par:
+                    progress_callback(int(_done_par / _n_par * 0.70 * max(1, n_frames)),
+                                      max(1, n_frames))
+        return precomputed_coords
+    except Exception:
+        return None      # pickling / worker crash / non-picklable host_mask → serial detection
+
+
+def _fast_frame_rows(frame, t, coords, template_z, *, template_mode, template_type, half, subpixel,
+                     microns_per_pixel, nominal_area, hot_mask):
+    """The fast-path scoring for one frame: (re)build the PSF template as needed, score the coords, and
+    build the per-bead rows. Returns ``(rows, template_z)`` — template_z threads across frames so the
+    per_stack template is built once."""
+    if template_z is None or template_mode == 'per_frame':
+        if template_type == 'airy':
+            template_z = build_airy_template(half)
+        else:
+            tz, _h = build_bead_template(frame, coords, half=half)
+            if tz is not None:
+                template_z = tz
+    scored = score_beads_template(frame, coords, template_z, half=half, subpixel=subpixel)
+    rows = []
+    for i, b in enumerate(scored):
+        _row = {
+            'frame': t, 'object_id': i,
+            'y_um': float(b['y']) * microns_per_pixel,
+            'x_um': float(b['x']) * microns_per_pixel,
+            'area_um2': nominal_area,
+            'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
+            'amplitude': b['amplitude'],
+            'integrated_intensity': b['integrated_intensity']}
+        # Flag a detection on a fixed sensor hot pixel so the classifier applies a HARSHER acceptance
+        # test there (not a flat reject — a real bead can drift over a hot/dead pixel).
+        if hot_mask is not None:
+            yi = int(round(b['y'])); xi = int(round(b['x']))
+            if 0 <= yi < hot_mask.shape[0] and 0 <= xi < hot_mask.shape[1]:
+                _row['on_hot_pixel'] = bool(hot_mask[yi, xi])
+        rows.append(_row)
+    return rows, template_z
+
+
+def _precise_frame_rows(beads, t, *, microns_per_pixel, nominal_area):
+    """The Gaussian-fit-path rows for one frame — area from the fitted sigmas when finite, else nominal."""
+    rows = []
+    for i, b in enumerate(beads):
+        if np.isfinite(b.get('sigma_x', np.nan)) and np.isfinite(b.get('sigma_y', np.nan)):
+            area = float(np.pi * b['sigma_x'] * b['sigma_y'] * microns_per_pixel ** 2)
+        else:
+            area = nominal_area
+        rows.append({
+            'frame': t, 'object_id': i,
+            'y_um': float(b['y']) * microns_per_pixel,
+            'x_um': float(b['x']) * microns_per_pixel,
+            'area_um2': area,
+            'sigma_x': b['sigma_x'], 'sigma_y': b['sigma_y'],
+            'sigma_mean': b['sigma_mean'], 'amplitude': b['amplitude'],
+            'integrated_intensity': b['integrated_intensity'],
+            'r_squared': b['r_squared']})
+    return rows
+
+
+def _assemble_detections(rows, *, quality_mode, strictness, variant, exclude_aggregates,
+                         recover_out_of_plane):
+    """Build the detection DataFrame from the per-frame rows, classify the beads, and apply the optional
+    class filters. 'baseline' is the 1.5.329-validated classifier (recovers ~8.325 through TrackMate); the
+    variant is recorded on the frame for auditability. An empty run returns the correct empty schema."""
+    if not rows:
+        cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']
+        if quality_mode == 'fast':
+            cols += ['ncc', 'snr', 'symmetry', 'amplitude',
+                     'integrated_intensity', 'n_units_est', 'bead_class', 'singlet']
+        else:
+            cols += ['sigma_x', 'sigma_y', 'sigma_mean', 'amplitude',
+                     'integrated_intensity', 'r_squared', 'n_units_est', 'bead_class', 'singlet']
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(rows)
+    df = classify_beads(df, strictness=strictness, variant=variant)
+    df.attrs['detection_variant'] = variant
+    if exclude_aggregates:
+        df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
+    if not recover_out_of_plane:
+        df = df[df['bead_class'] != 'out_of_plane'].reset_index(drop=True)
+    return df
+
+
+def _bead_hot_mask(bead_stack, variant, progress_callback):
+    """The fixed-sensor hot-pixel mask for the ``hot_pixel_reject`` variant, built ONCE from the stack's
+    temporal statistics (scene-independent), or ``None``. A build failure degrades to no mask, never a
+    crash — the reject is an opt-in robustness variant, not the detection itself."""
+    if variant != 'hot_pixel_reject':
+        return None
+    try:
+        hot_mask = build_hot_pixel_mask(bead_stack)
+        _n_hot = int(hot_mask.sum()) if hot_mask is not None else 0
+        if progress_callback is None:
+            print(f"[PyCAT VPT] hot_pixel_reject: flagged {_n_hot} fixed "
+                  f"sensor pixels from temporal statistics.")
+        return hot_mask
+    except Exception as _e:
+        print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
+        return None
+
+
+def _detect_all_frames(bead_stack, frame_indices, precomputed_coords, template_z, *, quality_mode,
+                       variant, gpu_on, template_mode, template_type, half, subpixel, microns_per_pixel,
+                       nominal_area, hot_mask, min_sigma, max_sigma, num_sigma, threshold, host_mask,
+                       merge_radius_px, fit_window, progress_callback, n_frames):
+    """Stream the stack one frame at a time and build the per-bead rows for the whole movie. The fast
+    path detects coords (using the pool's precomputed set when present), (re)builds the PSF template
+    threaded across frames, and scores; the precise path runs a Gaussian fit. Progress is reported per
+    frame — mapped to the 70→100% tail when the pool pre-detected (which filled the first 70%)."""
+    from pycat.file_io.stack_access import iter_frames
+    rows = []
+    done = 0
+    for t, frame in iter_frames(bead_stack, indices=frame_indices):
+        if quality_mode == 'fast':
+            if precomputed_coords is not None and t in precomputed_coords:
+                coords = precomputed_coords[t]
+            elif variant == 'ring_merge':
+                coords, _sig = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=gpu_on, return_sigma=True)
+                coords = dedup_detections_ring_merge(
+                    coords, frame, sigmas=_sig, base_radius_px=merge_radius_px)
+            else:
+                coords = detect_beads_frame(
+                    frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                    num_sigma=num_sigma, threshold=threshold,
+                    host_mask=host_mask, use_gpu=gpu_on)
+                if merge_radius_px:
+                    coords = dedup_detections(coords, frame, merge_radius_px)
+            _frows, template_z = _fast_frame_rows(
+                frame, t, coords, template_z, template_mode=template_mode,
+                template_type=template_type, half=half, subpixel=subpixel,
+                microns_per_pixel=microns_per_pixel, nominal_area=nominal_area, hot_mask=hot_mask)
+            rows.extend(_frows)
+        else:
+            beads = detect_beads_frame(
+                frame, min_sigma=min_sigma, max_sigma=max_sigma,
+                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+                fit_quality=True, fit_window=fit_window,
+                fast_fit=(quality_mode == 'fast_fit'))
+            rows.extend(_precise_frame_rows(beads, t, microns_per_pixel=microns_per_pixel,
+                                            nominal_area=nominal_area))
+        done += 1
+        if progress_callback is not None:
+            if precomputed_coords is not None:
+                _val = int(0.70 * n_frames + (done / max(1, n_frames)) * 0.30 * n_frames)
+                progress_callback(min(_val, n_frames), n_frames)
+            else:
+                progress_callback(done, n_frames)
+    return rows
+
+
+@tags_layer('bead_detect', role='overlay', inputs=('image',),
             summary='Bead detection across a stack (blob LoG)', target='bead')
 def detect_beads_stack(
     bead_stack: np.ndarray,
@@ -1852,7 +2039,7 @@ def detect_beads_stack(
         (+ quality columns depending on mode). Schema is compatible with the
         trajectory linkers and classify_beads.
     """
-    from pycat.file_io.file_io import iter_frames
+    from pycat.file_io.stack_access import iter_frames
 
     # Back-compat: fit_quality=True means the caller wants a real fit.
     if fit_quality and quality_mode == 'fast':
@@ -1877,236 +2064,35 @@ def detect_beads_stack(
             pass
     template_z = None  # built lazily on first frame in 'fast' + per_stack mode
 
-    # ── Tier selection ───────────────────────────────────────────────────────
-    # No fixed preference order — each tier is costed for THIS stack and the
-    # cheapest wins. See the note above `_choose_detection_tier` for the
-    # measurements that killed the old "GPU > CPU-parallel > serial" rule.
     _variant = (detection_variant or 'baseline').lower()
 
-    def _frame0():
-        from pycat.file_io.file_io import iter_frames as _itf
-        return next(iter(_itf(bead_stack, indices=frame_indices)))[1]
+    # Choose the execution tier (GPU / process-pool / serial), costed for this stack; the equivalence
+    # guards pin that all three produce identical blobs.
+    _tier, gpu_on, _src_desc, _max_workers = _choose_detection_backend(
+        bead_stack, frame_indices, n_frames, quality_mode=quality_mode, use_gpu=use_gpu,
+        parallel=parallel, n_workers=n_workers, host_mask=host_mask, min_sigma=min_sigma,
+        max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, variant=_variant)
 
-    # Is the GPU a CANDIDATE? The equivalence guard still runs whenever it is —
-    # even if the pool ends up winning — because "never trust a mismatching GPU"
-    # is a correctness rule, not a performance one, and the memo makes it free.
-    gpu_ok = False
-    if quality_mode == 'fast' and use_gpu in ('auto', 'gpu', True, 'true'):
-        try:
-            from pycat.toolbox.gpu_utils import gpu_available
-            gpu_ok = bool(gpu_available())
-        except Exception:
-            gpu_ok = False
-        if gpu_ok:
-            # Memoised per process on (build, LoG params) — a cache hit costs one
-            # dict lookup and does not touch frame 0; a miss still runs the full
-            # double-detect once. See `gpu_matches_cpu`.
-            gpu_ok = gpu_matches_cpu(
-                _frame0, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
+    _hot_mask = _bead_hot_mask(bead_stack, _variant, progress_callback)
 
-    # Is the POOL a candidate? Ring-merge needs per-detection sigma from blob_log
-    # (which the worker path does not carry) and hot-pixel reject filters coords
-    # against a stack-level mask, so both stay serial.
-    _src_desc = _bead_source_descriptor(bead_stack) if quality_mode == 'fast' else None
-    try:
-        import os as _os
-        _max_workers = n_workers or max(1, min(8, (_os.cpu_count() or 2) - 1))
-    except Exception:
-        _max_workers = 1
-    pool_ok = (quality_mode == 'fast'
-               and _variant not in ('ring_merge', 'hot_pixel_reject')
-               and parallel in ('auto', 'cpu', 'process')
-               and _src_desc is not None and _max_workers >= 2
-               and bool(n_frames) and n_frames > 1)
-
-    # An explicit request is the caller telling us which tier they want; only
-    # 'auto' has to justify itself against the others.
-    if use_gpu in ('gpu', True, 'true') and gpu_ok:
-        _tier = 'gpu'
-    elif parallel in ('cpu', 'process') and pool_ok:
-        _tier = 'pool'
-    elif not gpu_ok and not pool_ok:
-        _tier = 'serial'
-    else:
-        _t_ser, _t_gpu = _frame_costs_s(
-            _frame0(), gpu_ok=gpu_ok, min_sigma=min_sigma, max_sigma=max_sigma,
-            num_sigma=num_sigma, threshold=threshold, host_mask=host_mask)
-        _tier = _choose_detection_tier(
-            n_frames=n_frames, t_ser=_t_ser, t_gpu=_t_gpu, workers=_max_workers,
-            gpu_ok=gpu_ok, pool_ok=pool_ok)
-        debug_log(
-            f'VPT tier: {_tier} for {n_frames} x {tuple(getattr(bead_stack, "shape", ()))[-2:]} '
-            f'(serial {_t_ser*1000:.0f} ms/frame'
-            + (f', GPU {_t_gpu*1000:.0f} ms/frame' if _t_gpu else '')
-            + (f', pool ~{_t_ser/_pool_speedup(_max_workers)*1000:.0f} ms/frame + '
-               f'{_pool_spawn_cost_s():.1f} s spawn' if pool_ok else '') + ')', None)
-
-    gpu_on = (_tier == 'gpu')
-    # Hot-pixel reject: build the fixed-sensor-pixel mask ONCE from the stack's
-    # temporal statistics (scene-independent), then drop detections landing on
-    # those pixels. Needs all frames, so it's a stack-level pre-pass.
-    _hot_mask = None
-    if _variant == 'hot_pixel_reject':
-        try:
-            _hot_mask = build_hot_pixel_mask(bead_stack)
-            _n_hot = int(_hot_mask.sum()) if _hot_mask is not None else 0
-            if progress_callback is None:
-                print(f"[PyCAT VPT] hot_pixel_reject: flagged {_n_hot} fixed "
-                      f"sensor pixels from temporal statistics.")
-        except Exception as _e:
-            print(f"[PyCAT VPT] hot-pixel mask failed ({_e}); proceeding without.")
-            _hot_mask = None
     precomputed_coords = None
     if _tier == 'pool':
-        try:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            det_kwargs = dict(min_sigma=min_sigma, max_sigma=max_sigma,
-                              num_sigma=num_sigma, threshold=threshold,
-                              host_mask=host_mask)
-            idxs = (list(frame_indices) if frame_indices is not None
-                    else list(range(n_frames)))
-            tasks = [(t, _src_desc, True, det_kwargs, merge_radius_px)
-                     for t in idxs]
-            precomputed_coords = {}
-            with ProcessPoolExecutor(max_workers=_max_workers) as ex:
-                _n_par = len(tasks)
-                futures = [ex.submit(_detect_frame_worker, task)
-                           for task in tasks]
-                _done_par = 0
-                for fut in as_completed(futures):
-                    t, coords = fut.result()
-                    precomputed_coords[t] = coords
-                    _done_par += 1
-                    # Report progress DURING parallel detection — the
-                    # expensive phase. as_completed fires as each frame
-                    # finishes, so the bar advances smoothly instead of
-                    # sitting at 0 until the (cheap) scoring loop runs.
-                    # Parallel detection is phase 1 of 2 → map it to the
-                    # first 70% of the bar so the subsequent scoring loop
-                    # continues from there instead of restarting at 0
-                    # (avoids the bar hitting 100% twice).
-                    if progress_callback is not None and _n_par:
-                        progress_callback(
-                            int(_done_par / _n_par * 0.70 * max(1, n_frames)),
-                            max(1, n_frames))
-        except Exception:
-            # Any failure (pickling, worker crash, host_mask not picklable)
-            # → fall back to serial detection below.
-            precomputed_coords = None
+        precomputed_coords = _pool_predetect(
+            _src_desc, frame_indices, n_frames, _max_workers, min_sigma=min_sigma,
+            max_sigma=max_sigma, num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
+            merge_radius_px=merge_radius_px, progress_callback=progress_callback)
 
-    done = 0
-    for t, frame in iter_frames(bead_stack, indices=frame_indices):
-        if quality_mode == 'fast':
-            if precomputed_coords is not None and t in precomputed_coords:
-                # Coords already found in parallel; frame still needed for
-                # template building + scoring (both cheap).
-                coords = precomputed_coords[t]
-            else:
-                if _variant == 'ring_merge':
-                    coords, _sig = detect_beads_frame(
-                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                        num_sigma=num_sigma, threshold=threshold,
-                        host_mask=host_mask, use_gpu=gpu_on, return_sigma=True)
-                    # Ring-merge: sigma-scaled radius, merge dim ring fragments
-                    # into bright centres, keep two bright beads as two.
-                    coords = dedup_detections_ring_merge(
-                        coords, frame, sigmas=_sig,
-                        base_radius_px=merge_radius_px)
-                else:
-                    coords = detect_beads_frame(
-                        frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                        num_sigma=num_sigma, threshold=threshold,
-                        host_mask=host_mask, use_gpu=gpu_on)
-                    # Baseline de-dup (fixed radius, keep brightest per cluster).
-                    if merge_radius_px:
-                        coords = dedup_detections(coords, frame, merge_radius_px)
-            if template_z is None or template_mode == 'per_frame':
-                if template_type == 'airy':
-                    # Analytic Airy (Bessel J1) template — matches beads that
-                    # show a resolved ring, so a bead is one object not several.
-                    template_z = build_airy_template(half)
-                else:
-                    tz, _h = build_bead_template(frame, coords, half=half)
-                    if tz is not None:
-                        template_z = tz
-            scored = score_beads_template(frame, coords, template_z,
-                                          half=half, subpixel=subpixel)
-            for i, b in enumerate(scored):
-                _row = {
-                    'frame': t, 'object_id': i,
-                    'y_um': float(b['y']) * microns_per_pixel,
-                    'x_um': float(b['x']) * microns_per_pixel,
-                    'area_um2': nominal_area,
-                    'ncc': b['ncc'], 'snr': b['snr'], 'symmetry': b['symmetry'],
-                    'amplitude': b['amplitude'],
-                    'integrated_intensity': b['integrated_intensity']}
-                # Flag detections sitting on a fixed sensor hot pixel so the
-                # classifier can apply a HARSHER acceptance test there (not a flat
-                # reject — a real bead can drift over a hot/dead pixel and should
-                # still be accepted if it brings real PSF/template evidence).
-                if _hot_mask is not None:
-                    yi = int(round(b['y'])); xi = int(round(b['x']))
-                    if 0 <= yi < _hot_mask.shape[0] and 0 <= xi < _hot_mask.shape[1]:
-                        _row['on_hot_pixel'] = bool(_hot_mask[yi, xi])
-                rows.append(_row)
-        else:
-            beads = detect_beads_frame(
-                frame, min_sigma=min_sigma, max_sigma=max_sigma,
-                num_sigma=num_sigma, threshold=threshold, host_mask=host_mask,
-                fit_quality=True, fit_window=fit_window,
-                fast_fit=(quality_mode == 'fast_fit'))
-            for i, b in enumerate(beads):
-                if np.isfinite(b.get('sigma_x', np.nan)) and np.isfinite(b.get('sigma_y', np.nan)):
-                    area = float(np.pi * b['sigma_x'] * b['sigma_y']
-                                 * microns_per_pixel ** 2)
-                else:
-                    area = nominal_area
-                rows.append({
-                    'frame': t, 'object_id': i,
-                    'y_um': float(b['y']) * microns_per_pixel,
-                    'x_um': float(b['x']) * microns_per_pixel,
-                    'area_um2': area,
-                    'sigma_x': b['sigma_x'], 'sigma_y': b['sigma_y'],
-                    'sigma_mean': b['sigma_mean'], 'amplitude': b['amplitude'],
-                    'integrated_intensity': b['integrated_intensity'],
-                    'r_squared': b['r_squared']})
-        done += 1
-        if progress_callback is not None:
-            # If parallel pre-detection ran, it consumed the first 70% of the
-            # bar; the scoring loop here fills the remaining 70→100%. Otherwise
-            # (pure serial) the scoring loop IS the whole operation → 0→100%.
-            if precomputed_coords is not None:
-                _val = int(0.70 * n_frames + (done / max(1, n_frames)) * 0.30 * n_frames)
-                progress_callback(min(_val, n_frames), n_frames)
-            else:
-                progress_callback(done, n_frames)
+    rows = _detect_all_frames(
+        bead_stack, frame_indices, precomputed_coords, template_z, quality_mode=quality_mode,
+        variant=_variant, gpu_on=gpu_on, template_mode=template_mode, template_type=template_type,
+        half=half, subpixel=subpixel, microns_per_pixel=microns_per_pixel, nominal_area=nominal_area,
+        hot_mask=_hot_mask, min_sigma=min_sigma, max_sigma=max_sigma, num_sigma=num_sigma,
+        threshold=threshold, host_mask=host_mask, merge_radius_px=merge_radius_px,
+        fit_window=fit_window, progress_callback=progress_callback, n_frames=n_frames)
 
-    if not rows:
-        cols = ['frame', 'object_id', 'y_um', 'x_um', 'area_um2']
-        if quality_mode == 'fast':
-            cols += ['ncc', 'snr', 'symmetry', 'amplitude',
-                     'integrated_intensity', 'n_units_est', 'bead_class', 'singlet']
-        else:
-            cols += ['sigma_x', 'sigma_y', 'sigma_mean', 'amplitude',
-                     'integrated_intensity', 'r_squared', 'n_units_est',
-                     'bead_class', 'singlet']
-        return pd.DataFrame(columns=cols)
-
-    df = pd.DataFrame(rows)
-    # ── Detection-variant staging ────────────────────────────────────────────
-    # 'baseline' = the 1.5.329-validated classifier (recovers ~8.325 through
-    # TrackMate). New variants are OPT-IN and additive so the validated path
-    # stays selectable and a revert is a clean single-arg change. The variant is
-    # recorded on the frame for auditability and downstream comparison.
-    df = classify_beads(df, strictness=strictness, variant=_variant)
-    df.attrs['detection_variant'] = _variant
-
-    if exclude_aggregates:
-        df = df[df['bead_class'] != 'aggregate'].reset_index(drop=True)
-    if not recover_out_of_plane:
-        df = df[df['bead_class'] != 'out_of_plane'].reset_index(drop=True)
-    return df
+    return _assemble_detections(
+        rows, quality_mode=quality_mode, strictness=strictness, variant=_variant,
+        exclude_aggregates=exclude_aggregates, recover_out_of_plane=recover_out_of_plane)
 
 
 # ---------------------------------------------------------------------------
@@ -2287,7 +2273,7 @@ def reclassify_by_temporal_stability(tracks_df, min_stable_len=5,
     return df
 
 
-@tags_layer('drift_correct', role='overlay',
+@tags_layer('drift_correct', role='overlay', requirements=('time_axis',),
             summary='Common-mode drift correction of tracks')
 def drift_correct_com(tracks_df: pd.DataFrame, mode: str = 'com',
                       immobile_fraction: float = 0.25) -> pd.DataFrame:

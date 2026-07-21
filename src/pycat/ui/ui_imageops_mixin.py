@@ -385,3 +385,82 @@ class _ImageOpsWidgetsMixin:
         w = QWidget(); w.setLayout(lay)
         self._add_widget_to_layout_or_dock(w, layout, separate_widget,
                                            "Reference Subtraction Dock")
+
+    def _add_run_spectral_unmixing(self, layout=None, separate_widget=False):
+        """Linear spectral / bleed-through unmixing (2–4 channels).
+
+        The mixing matrix is estimated from SINGLE-LABEL CONTROL layers (one per channel, each a sample
+        containing only that fluorophore, imaged in all channels), **never from the mixed image** — and a
+        singular / ill-conditioned matrix is refused, not inverted. The thin handler here only reads layers
+        and shows results; all the science is in the `core`-tested `toolbox/unmixing_tools`.
+        """
+        import numpy as np
+        from PyQt5.QtWidgets import QDoubleSpinBox
+        from napari.utils.notifications import show_info as _info, show_warning as _warn
+        from pycat.toolbox.unmixing_tools import (
+            estimate_mixing_matrix, unmix, negative_fraction, clip_for_display, mixing_matrix_warnings)
+        from pycat.utils.errors import ScientificAssumptionError
+
+        lay = QVBoxLayout()
+        self.add_text_label(lay, 'Spectral / Bleed-through Unmixing', bold=True)
+        _info_lbl = QLabel(
+            "Linear 2–4 channel crosstalk correction. Give a single-label CONTROL layer per channel (each a "
+            "sample with only that fluorophore, imaged in all channels) and the mixed multi-channel image "
+            "(leading axis = channel). The matrix comes from the controls, never the mixed data.")
+        _info_lbl.setWordWrap(True); lay.addWidget(_info_lbl)
+
+        mixed_dd = self.create_layer_dropdown(napari.layers.Image)
+        lay.addWidget(QLabel("Mixed multi-channel image (C, H, W):")); lay.addWidget(mixed_dd)
+        ctrl_dds = []
+        for k in range(4):
+            dd = self.create_layer_dropdown(napari.layers.Image)
+            lay.addWidget(QLabel(f"Single-label control for channel {k}"
+                                 f"{' (optional)' if k >= 2 else ''}:"))
+            lay.addWidget(dd); ctrl_dds.append(dd)
+        bg_sp = QDoubleSpinBox(); bg_sp.setRange(0, 1e12); bg_sp.setDecimals(2); bg_sp.setValue(0.0)
+        bg_sp.setToolTip("Camera offset subtracted from every channel BEFORE the matrix is estimated and "
+                         "before unmixing — an un-removed pedestal inflates the crosstalk.")
+        lay.addWidget(QLabel("Background (camera offset):")); lay.addWidget(bg_sp)
+
+        run = QPushButton("Run Unmixing")
+        run.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        def _layer(dd):
+            name = (dd.currentText() or '').strip()
+            if not name or name.lower().startswith(('select', 'none', '--', 'no ', 'choose')):
+                return None
+            try:
+                return np.asarray(self.viewer.layers[name].data, dtype=float)
+            except Exception:      # broad-ok: a missing/odd layer just means "not selected" here
+                return None
+
+        def _on_run():
+            mixed = _layer(mixed_dd)
+            if mixed is None or mixed.ndim < 3:
+                _warn("Select the mixed multi-channel image (leading axis = channel)."); return
+            controls = [c for c in (_layer(dd) for dd in ctrl_dds) if c is not None]
+            k = len(controls)
+            if k < 2:
+                _warn("Provide a single-label control for at least 2 channels."); return
+            if mixed.shape[0] != k:
+                _warn(f"The mixed image has {mixed.shape[0]} channels but {k} controls were given — "
+                      "give one control per channel."); return
+            bg = float(bg_sp.value())
+            try:
+                M = estimate_mixing_matrix(controls, background=bg)
+                for _w in mixing_matrix_warnings(M):
+                    _warn("Unmixing: " + _w)
+                unmixed = unmix(mixed, M, background=bg)
+            except ScientificAssumptionError as e:
+                _warn(f"Unmixing refused: {e}"); return
+            neg = negative_fraction(unmixed)
+            disp = clip_for_display(unmixed)
+            for i in range(k):
+                self.viewer.add_image(disp[i], name=f"Unmixed C{i}")
+            _info(f"Unmixed {k} channels. Negative fraction = {neg:.1%} "
+                  f"({'ok' if neg < 0.05 else 'HIGH — the linear model may be wrong'}).")
+
+        run.clicked.connect(_on_run)
+        lay.addWidget(run)
+        w = QWidget(); w.setLayout(lay)
+        self._add_widget_to_layout_or_dock(w, layout, separate_widget, "Spectral Unmixing Dock")

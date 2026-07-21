@@ -1,22 +1,18 @@
-"""**A plot click must not loop, and must not yank the view.**
+"""**A plot click goes to the bead, and must not loop.**
 
-`_reveal_track_in_viewer` moved the camera and stepped the frame on every pick.
-Moving the camera fires napari's `draw_event`, which re-runs the MSD plot's
-blit-capture, which can re-enter the pick → reveal again: a continuous jump until
+Clicking a track in the MSD plot takes the user to that bead — steps to its
+frame, centres, and zooms in. That navigation is what the user asked for, and it
+is on by default now (1.6.104). The reason it was ever gated off was a loop:
+moving the camera fires napari's `draw_event`, which re-runs the MSD plot's
+blit-capture, which can re-enter the pick → reveal again, a continuous jump until
 force-close. `_select_track` was already guarded, but that guard stops selection
 *echo* — it never saw the camera-move → draw → re-selection re-entrancy, because
 that path does not go back through the dispatcher.
 
-Two independent fixes, so two independent groups of tests:
-
-* the navigation is **opt-in** (`central_manager.follow_selection`, OFF by
-  default) — which removes the loop entirely for the default case, because there
-  is no camera move to fire the `draw_event`;
-* the reveal is **re-entrant-guarded** — which removes it for the users who turn
-  follow ON, a supported state that must not force-close their session.
-
-The second is not made redundant by the first. That is the whole point of having
-both, and it is why the guard is tested with follow ON.
+So navigation is safe now for a different reason than "it doesn't happen": one
+`button_press` per click (1.6.100) plus the `_revealing` re-entrancy guard. Two
+groups of tests below: the pick **navigates** to the bead, and the reveal is
+**re-entrant-guarded** so navigating can never loop.
 """
 
 # Standard library imports
@@ -131,6 +127,12 @@ class _Viewer:
         self.added.append(kw.get('name'))
         return layer
 
+    def add_tracks(self, data, **kw):
+        layer = type('_T', (), {'name': kw.get('name'), 'data': data})()
+        self.layers.append(layer)
+        self.added.append(kw.get('name'))
+        return layer
+
 
 def _tracks():
     import pandas as pd
@@ -142,7 +144,7 @@ def _tracks():
     })
 
 
-def _Hub(viewer, follow=False):
+def _Hub(viewer):
     """**The real VPT class**, with only its data accessors stubbed.
 
     A subclass, not a borrowed unbound method: `_reveal_track_in_viewer` is free
@@ -151,13 +153,10 @@ def _Hub(viewer, follow=False):
     """
     from pycat.toolbox.vpt_ui import VideoParticleTrackingUI
 
-    class _CM:
-        follow_selection = follow
-
     class _H(VideoParticleTrackingUI):
         def __init__(self):
             self.viewer = viewer
-            self.central_manager = _CM()
+            self.central_manager = None
             self.reveals = 0
 
         def _dr(self):
@@ -173,76 +172,45 @@ def _Hub(viewer, follow=False):
     return _H()
 
 
-# ── follow OFF: the default, and the reason the loop cannot start ─────────────
+# ── a pick NAVIGATES to the bead (default now — the user asked for it) ────────
+#
+# Navigation was gated off while the plot-click loop existed. With one button_press per click and the
+# re-entrancy guard, the camera move is safe, and going to the bead is what the user wants: a plot
+# click steps to the bead's frame and centres on it.
 
-def test_with_follow_OFF_a_pick_does_not_move_the_camera(immediate_qtimer):
-    """You clicked a track to ask what it is. The view you were reading stays."""
+def test_a_pick_STEPS_to_the_beads_frame(immediate_qtimer):
     viewer = _Viewer()
-    hub = _Hub(viewer, follow=False)
-
+    hub = _Hub(viewer)
     hub._reveal_track_in_viewer(7)
+    assert viewer.dims.current_step[0] == 4, 'the pick did not step to the bead frame'
 
-    assert viewer.camera.center == (0.0, 0.0), 'the pick yanked the camera'
 
-
-def test_with_follow_OFF_a_pick_does_not_jump_the_frame(immediate_qtimer):
-    """The frame and the camera are the same question, so one flag gates both."""
+def test_a_pick_CENTRES_the_camera_on_the_bead(immediate_qtimer):
     viewer = _Viewer()
-    hub = _Hub(viewer, follow=False)
-
+    hub = _Hub(viewer)
     hub._reveal_track_in_viewer(7)
+    assert viewer.camera.center == (10.0, 20.0), 'the pick did not centre the bead'
 
-    assert viewer.dims.current_step == (0, 0, 0), 'the pick jumped the timepoint'
 
-
-def test_with_follow_OFF_the_track_is_still_MARKED(immediate_qtimer):
-    """Not-navigating is not not-answering. The overlay is what makes staying put
-    safe: the track is shown where it sits."""
+def test_a_pick_MARKS_the_track(immediate_qtimer):
+    """Navigating and marking both happen — the track is shown where it sits AND the view goes to it."""
     viewer = _Viewer()
-    hub = _Hub(viewer, follow=False)
-
+    hub = _Hub(viewer)
     hub._reveal_track_in_viewer(7)
-
-    assert 'Picked track' in viewer.added, (
-        'follow-off suppressed the highlight too — the click now does nothing')
+    assert 'Picked track' in viewer.added
 
 
-def test_a_MISSING_manager_reads_as_do_not_yank(immediate_qtimer):
-    """Plenty of callers have no manager. A missing preference must read as
-    "leave my view alone", not crash and not navigate."""
+def test_a_MISSING_manager_does_not_crash_the_reveal(immediate_qtimer):
+    """Navigation no longer depends on a manager preference, but a missing manager must still not
+    crash the reveal."""
     viewer = _Viewer()
-    hub = _Hub(viewer, follow=False)
+    hub = _Hub(viewer)
     hub.central_manager = None
-
-    hub._reveal_track_in_viewer(7)
-
-    assert viewer.camera.center == (0.0, 0.0)
+    hub._reveal_track_in_viewer(7)          # must not raise
+    assert viewer.camera.center == (10.0, 20.0)
 
 
-def test_VPT_reads_the_SAME_preference_the_generic_brushing_path_reads(immediate_qtimer):
-    """Not a second flag. `follow_selection` already existed and already meant
-    this; VPT's plot just had its own pick route and never honoured it."""
-    viewer = _Viewer()
-    hub = _Hub(viewer, follow=False)
-    hub.central_manager.follow_selection = True
-
-    hub._reveal_track_in_viewer(7)
-
-    assert viewer.camera.center != (0.0, 0.0), (
-        'the shared follow_selection preference did not re-enable navigation')
-
-
-# ── follow ON: supported, and it must not loop ────────────────────────────────
-
-def test_with_follow_ON_a_pick_navigates_to_the_tracks_first_frame(immediate_qtimer):
-    """Opt-in, not gone. Some users want it; the loop was the bug, not the feature."""
-    viewer = _Viewer()
-    hub = _Hub(viewer, follow=True)
-
-    hub._reveal_track_in_viewer(7)
-
-    assert viewer.dims.current_step[0] == 4, 'follow-on did not step to frame 4'
-    assert viewer.camera.center == (10.0, 20.0), 'follow-on did not centre the bead'
+# ── the reveal must not loop ──────────────────────────────────────────────────
 
 
 def test_the_camera_move_does_not_RE_ENTER_the_reveal(immediate_qtimer):
@@ -263,7 +231,7 @@ def test_the_camera_move_does_not_RE_ENTER_the_reveal(immediate_qtimer):
 
     viewer.dims._on_write = _draw_event
     viewer.camera._on_write = _draw_event
-    hub = _Hub(viewer, follow=True)
+    hub = _Hub(viewer)
 
     hub._reveal_track_in_viewer(7)
 
@@ -277,7 +245,7 @@ def test_the_guard_RELEASES_so_the_next_click_still_works(immediate_qtimer):
     """A guard that never releases is not a fix, it is a dead plot: every later
     pick would be silently swallowed."""
     viewer = _Viewer()
-    hub = _Hub(viewer, follow=True)
+    hub = _Hub(viewer)
 
     hub._reveal_track_in_viewer(7)
     viewer.camera.center = (0.0, 0.0)       # prove the SECOND click does the work
@@ -300,7 +268,7 @@ def test_one_selection_per_click_not_unbounded(immediate_qtimer):
 
     viewer.dims._on_write = _draw_event
     viewer.camera._on_write = _draw_event
-    hub = _Hub(viewer, follow=True)
+    hub = _Hub(viewer)
     hub._highlight_track_in_plot = lambda tid: None
     hub._highlight_track_in_table = lambda tid: None
     hub._reveal_track_in_viewer = (

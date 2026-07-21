@@ -83,3 +83,50 @@ def test_menu_manager_constructs(viewer):
         # MenuManager(viewer, central_manager).
         mm = MenuManager(viewer, cm)
     assert mm is not None
+
+
+def _menu_manager(viewer):
+    from pycat.central_manager import CentralManager
+    from pycat.ui.ui_modules import MenuManager
+    cm = CentralManager(viewer)
+    return getattr(cm, "menu_manager", None) or MenuManager(viewer, cm)
+
+
+def test_menu_guarded_installs_actually_RAN(viewer):
+    """**The 1.5.509 bug class, guarded at runtime.** Several installs in `_setup_menu_bar` are wrapped
+    in `try/except`, so a broken one no-ops SILENTLY. Assert each produced its result attribute — i.e.
+    the guard ran to completion — rather than merely 'construction didn't raise'."""
+    mm = _menu_manager(viewer)
+    # The branded marker always resolves (it falls back to a disabled QAction inside its own guard).
+    assert getattr(mm, "_pycat_marker_action", None) is not None
+    # The command palette action + its registry (populated by every _add_actions_to_menu call).
+    assert getattr(mm, "palette_action", None) is not None
+    reg = getattr(mm, "_command_registry", None)
+    assert reg and len(reg) >= 90, "the command registry is empty/short — actions were not wired"
+    # The layer-event backstops installed (attributes set inside their guards).
+    assert hasattr(mm, "_pycat_reroute_guard")
+    assert callable(getattr(mm, "_autotag_user_layer", None))
+
+
+def test_every_snapshot_label_became_a_registered_action(viewer):
+    """Cross-check the static contract against reality: every action label the AST snapshot extracted
+    must appear as a REAL registered action in `_command_registry` (which _add_actions_to_menu keys by
+    label). Proves the headless snapshot is faithful AND that no action was dropped at runtime."""
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from test_menu_contract import extract_menu_contract
+    labels = {lbl for entry in extract_menu_contract() for lbl in entry["actions"]}
+
+    mm = _menu_manager(viewer)
+    registered = set(getattr(mm, "_command_registry", {}) or {})
+    missing = labels - registered
+    assert not missing, (
+        f"these menu labels are in the snapshot but were NOT registered at runtime: {sorted(missing)} "
+        "— the static extractor and the real menu wiring have diverged (or an action silently failed).")
+
+
+def test_scene_switcher_entry_point_does_not_raise(viewer):
+    """The fully-guarded entry point must be safe to invoke (it swallows its own errors); a smoke that it
+    is at least callable and does not blow up the menu on a bare viewer."""
+    mm = _menu_manager(viewer)
+    mm._open_scene_switcher()          # end-to-end try/except inside — must never raise

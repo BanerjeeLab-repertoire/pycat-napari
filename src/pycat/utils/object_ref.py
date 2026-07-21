@@ -348,6 +348,37 @@ def layers_for_ref(ref: ObjectRef, viewer, roles=('labels', 'mask')):
     return candidates, ''
 
 
+def location_from_registry(ref: ObjectRef) -> ObjectRef:
+    """Refresh a ref's LOCATION from the entity registry when the registry knows this entity — so
+    resolution uses the one authority for *where to show it* (which ``update_location`` keeps live) rather
+    than the columns the ref was built from, which can go stale after a re-crop / layer re-add / frame
+    reindex. This is the consumer side of the identity-registry contract: a view carries the id, and asks
+    the registry where the object is now.
+
+    Honest fallbacks: a ref with no ``entity_id``, or an entity the registry does not know (dataset closed /
+    never registered), is returned unchanged — the ref's own last-known location is used, and a wrong
+    location is never invented. Per field, a registry ``None`` leaves the ref's own value in place.
+    """
+    eid = getattr(ref, 'entity_id', None)
+    if not eid:
+        return ref
+    try:
+        from pycat.utils.entity_registry import default_registry
+        rec = default_registry().resolve(eid)
+    except Exception as exc:                 # broad-ok: a registry miss must never break resolution
+        debug_log('object_ref: entity-registry lookup failed', exc)
+        return ref
+    if rec is None:
+        return ref
+    loc = rec.location
+    return dataclasses.replace(
+        ref,
+        bbox=loc.bbox if loc.bbox is not None else ref.bbox,
+        frame=loc.frame if loc.frame is not None else ref.frame,
+        source_layer_id=loc.layer_id if loc.layer_id is not None else ref.source_layer_id,
+        source_path=loc.source if loc.source is not None else ref.source_path)
+
+
 def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
     """**Interactive**: find the object in a live layer and reveal it.
 
@@ -358,6 +389,10 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
 
     if viewer is None:
         return False
+
+    # Resolve WHERE to show it through the entity registry — the one location authority — so navigation
+    # follows the object's current place, not a stale bbox/frame baked into the ref at wiring time.
+    ref = location_from_registry(ref)
 
     # ── `centre` now gates the FRAME too, because both are navigation ─────────────────────
     #
@@ -429,6 +464,9 @@ def resolve_offline(ref: ObjectRef, *, pad_px=8):
 
     Returns the cropped array, or None with a reason.
     """
+    # Resolve WHERE through the registry first (it may even supply a bbox the ref lacked) — same location
+    # authority as the interactive path, so a batch crop follows the current location, not a stale column.
+    ref = location_from_registry(ref)
     if not ref.is_resolvable_offline():
         return None, (
             "This point cannot be turned back into an image. It carries "

@@ -28,7 +28,6 @@ tag is honest; a guessed one is a lie" (1.5.493). It keeps coming up because it 
 mistake wearing different clothes.*
 """
 
-import importlib
 import io
 import contextlib
 
@@ -62,11 +61,12 @@ def _viewer_with(*layers):
     """A tagged viewer, built through the real auto-tagging hook."""
     hook = pytest.importorskip("pycat.utils.layer_tag_hook")
 
-    for module in ('image_processing_tools', 'segmentation_tools', 'vpt_tools'):
-        try:
-            importlib.import_module(f'pycat.toolbox.{module}')
-        except Exception:
-            pass
+    # Populate the registry through the ONE discovery mechanism, not a hand-kept module list.
+    # The hook looks up an operation's declared `target`/`produces` in the registry, so the ops
+    # must be registered first — and a stale import list here is the same drift that made a tag
+    # audit misfire (see test_tag_registry).
+    from pycat.navigator.operation_spec import _populate_registry
+    assert not _populate_registry(), "tag discovery could not import a decorated module"
 
     viewer = hook.install(_FakeViewer())
 
@@ -78,6 +78,21 @@ def _viewer_with(*layers):
                 viewer.add_labels(data, name=name)
 
     return viewer
+
+
+def _run_op(viewer, op_id, kind, name, data):
+    """Stand in for a decorated toolbox op producing a layer.
+
+    The op id is carried on THIS function, so the hook's stack walk (`_op_from_stack`) finds it
+    the same **definitional** way it finds a real ``@tags_layer`` function's op — not from a name
+    guess. Setting it here, on the module-level function the walk resolves by name, is what makes
+    the op reach the layer without depending on the layer's name matching a hint.
+    """
+    _run_op.__pycat_op__ = op_id
+    with contextlib.redirect_stderr(io.StringIO()):
+        if kind == 'image':
+            return viewer.add_image(data, name=name)
+        return viewer.add_labels(data, name=name)
 
 
 @pytest.mark.core
@@ -186,6 +201,52 @@ def test_the_operations_TARGET_is_carried_onto_the_layer():
         viewer, 'cell_segmentation.cell_labels')
 
     assert confidence == resolver.CERTAIN and layer.name == 'Cellpose labels'
+
+
+@pytest.mark.core
+def test_END_TO_END_an_operations_output_is_FOUND_by_its_declared_semantics():
+    """**The acceptance test the audit asked for — execute → layer → tags → resolver, end to end.**
+
+    Not six unit checks of the hook. Six operations run, each produces a layer, the hook tags it
+    from the registry entry, and a resolver query written in the operation's **declared** semantics
+    finds exactly that layer. This is the path that was broken 'the last inch': the registry knew
+    what each op produces, and the query could ask for it, but the fact never reached the layer.
+
+    ``mask_merge`` is the sharp case: it is fed labels-like data, so the DATA says 'labels' and
+    only the DECLARED ``produces='mask'`` gets the ``role=mask`` query to match — proving declared
+    semantics beat the inferred role.
+    """
+    resolver = pytest.importorskip("pycat.utils.tag_resolver")
+    layer_tags = pytest.importorskip("pycat.utils.layer_tags")
+
+    rng = np.random.default_rng(0)
+    labels = rng.integers(0, 7, (48, 48))               # many values -> the hook infers 'labels'
+    image = rng.random((48, 48)).astype('float32')
+
+    # op id, layer kind fed to the hook, its data, and the DECLARED query that must find it.
+    cases = [
+        ('cellpose',     'labels', labels, dict(role='labels', target='cell')),
+        ('watershed',    'labels', labels, dict(role='labels')),
+        ('log',          'image',  image,  dict(role='image')),
+        ('dog',          'image',  image,  dict(role='image')),
+        ('rolling_ball', 'image',  image,  dict(role='image')),
+        ('mask_merge',   'labels', labels, dict(role='mask')),   # declared 'mask' beats inferred
+    ]
+
+    for op_id, kind, data, query in cases:
+        viewer = _viewer_with()                          # a fresh, hook-installed, tagged viewer
+        layer = _run_op(viewer, op_id, kind, f'{op_id} output', data)
+
+        tags = {t['key']: t['value'] for t in layer_tags.get_tags(layer)}
+        assert tags.get('op') == op_id, (
+            f"{op_id}: the op was not carried onto the layer (got {tags}). The stack walk that "
+            f"makes the op DEFINITIONAL did not reach it.")
+
+        found, confidence, reason = resolver.resolve(viewer, query)
+        assert confidence == resolver.CERTAIN and found is layer, (
+            f"{op_id}: a query for its DECLARED semantics {query} did not find its own output "
+            f"(confidence={confidence!r}, reason={reason!r}). The declared fact is not reaching "
+            f"the layer — the 'last inch' gap.")
 
 
 @pytest.mark.core

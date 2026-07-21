@@ -46,6 +46,10 @@ import pandas as pd
 MANIFEST_NAME = "pycat_session.json"
 MANIFEST_VERSION = 1
 
+# The manifest key under which a session carries the user's recorded workflow (the batch-processor
+# config). ONE parameter record travels with the session — we serialize that, not a parallel capture.
+WORKFLOW_KEY = "workflow"
+
 
 # ---------------------------------------------------------------------------
 # What belongs in a session (the smart default — no user curation needed)
@@ -178,6 +182,24 @@ def write_manifest(session_dir, source_path, data_repository,
     return session_dir / MANIFEST_NAME
 
 
+def workflow_to_manifest_extra(config):
+    """The ``{'workflow': …}`` blob to merge into ``write_manifest``'s ``extra`` so the user's recorded
+    workflow parameters travel with the session — or ``{}`` when nothing was recorded.
+
+    ``config`` is the batch processor's own config dict (``{'steps': [{'step', 'params', …}], …}``) — its
+    single parameter record. We serialize THAT (batch_processor already ``json.dump``s the same dict in
+    ``save_config``), rather than inventing a second workflow-parameter capture. An empty / steps-less
+    config returns ``{}`` so an un-recorded session's manifest is byte-identical to before (back-compat).
+    """
+    try:
+        steps = (config or {}).get('steps') or []
+    except Exception:      # broad-ok: an odd/None config just means nothing to persist
+        return {}
+    if not steps:
+        return {}
+    return {WORKFLOW_KEY: dict(config)}
+
+
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
@@ -192,6 +214,22 @@ def read_manifest(folder):
             return json.load(f)
     except Exception:
         return None
+
+
+def workflow_from_manifest(manifest):
+    """The recorded workflow config a session saved (to restore into the batch processor), or ``None``.
+
+    Backward-compatible: a manifest written before this feature has no ``workflow`` key → ``None``, and a
+    manifest that recorded no steps → ``None`` (nothing to restore). The returned dict is the same shape
+    the batch processor's ``config`` uses, so the loader can put it straight back.
+    """
+    try:
+        wf = (manifest or {}).get(WORKFLOW_KEY)
+    except Exception:      # broad-ok: a non-dict manifest just means no workflow to restore
+        return None
+    if isinstance(wf, dict) and wf.get('steps'):
+        return wf
+    return None
 
 
 def discover_sessions(folder, max_depth=1):
@@ -245,9 +283,13 @@ def discover_sessions(folder, max_depth=1):
     return found
 
 
-def restore_dataframes_from_manifest(manifest, folder, data_repository):
-    """Load each dataframe file recorded in the manifest back into the repo.
-    Returns the dict of restored {key: DataFrame}."""
+def read_dataframes_from_manifest(manifest, folder):
+    """Read each dataframe file recorded in the manifest. Returns ``{key: DataFrame}``.
+
+    Pure I/O — it does NOT store into any repository, so it is safe to call **off the Qt thread**
+    (the session loader reads the CSVs on a worker and stores them on the main thread). The reading
+    is the slow part; the storing is a dict write.
+    """
     folder = Path(folder)
     out = {}
     for entry in (manifest.get('dataframes') or []):
@@ -259,9 +301,15 @@ def restore_dataframes_from_manifest(manifest, folder, data_repository):
         if not fpath.exists():
             continue
         try:
-            df = pd.read_csv(fpath)
-            data_repository[key] = df
-            out[key] = df
+            out[key] = pd.read_csv(fpath)
         except Exception:
             continue
+    return out
+
+
+def restore_dataframes_from_manifest(manifest, folder, data_repository):
+    """Load each dataframe file recorded in the manifest back into the repo.
+    Returns the dict of restored {key: DataFrame}."""
+    out = read_dataframes_from_manifest(manifest, folder)
+    data_repository.update(out)
     return out

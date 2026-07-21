@@ -62,7 +62,7 @@ import numpy as np
 
 
 from pycat.utils.object_ref import bbox_columns_from_regionprops
-from pycat.utils.math_utils import robust_focus_energy
+from pycat.utils.math_utils import robust_focus_energy, resolve_frame_mask
 from pycat.utils.tag_registry import tags_layer
 # Optical density is a LOG of a RATIO, so it needs the detector's zero point. An image
 # that has been normalised, CLAHE'd or top-hatted cannot produce one: measured, the
@@ -314,7 +314,7 @@ def _watershed_split(binary, min_diameter_px, split_touching, _skfeat, _skseg):
         return sk.measure.label(binary)
 
 
-@tags_layer('bf_segment', role='labels',
+@tags_layer('bf_segment', role='labels', inputs=('image',),
             summary='Brightfield condensate segmentation (DARK objects)', target='condensate')
 def segment_bf_condensates(
     enhanced_image: np.ndarray,
@@ -759,6 +759,7 @@ def bf_focus_metric(image: np.ndarray, mask: np.ndarray = None) -> float:
 def bf_analyse_focus_series(
     stack: np.ndarray,
     threshold_fraction: float = 0.3,
+    mask: np.ndarray = None,
 ) -> pd.DataFrame:
     """
     Assess focus quality for each frame in a brightfield time-series.
@@ -769,6 +770,15 @@ def bf_analyse_focus_series(
       - Normalised variance — simple and fast
 
     A frame is flagged if the majority of metrics fall below their threshold.
+
+    Parameters
+    ----------
+    mask : optional focus region — a single (H, W) boolean applied to every frame,
+        or a (T, H, W) per-frame stack. When given, ALL THREE metrics are scored
+        over the masked region only, so a LARGE out-of-plane structure (beyond what
+        `robust_focus_energy`'s trimming reaches) no longer wins. Gradients are
+        computed on the full frame, then aggregated over masked pixels (no
+        zero-fill). `mask=None` is byte-identical to the whole-frame behaviour.
 
     Returns
     -------
@@ -781,14 +791,17 @@ def bf_analyse_focus_series(
 
     for t in range(n):
         frame = stack[t].astype(np.float32)
-        brenners.append(bf_focus_metric(frame))
+        fm = resolve_frame_mask(mask, t, frame.shape)   # None → whole-frame
+        brenners.append(bf_focus_metric(frame, mask=fm))
 
-        gy = ndimage.sobel(frame, axis=0)
+        gy = ndimage.sobel(frame, axis=0)               # full frame — no fake boundary edges
         gx = ndimage.sobel(frame, axis=1)
-        tenens.append(robust_focus_energy(gy**2 + gx**2))
+        energy = gy**2 + gx**2
+        tenens.append(robust_focus_energy(energy if fm is None else energy[fm]))
 
-        m = frame.mean()
-        norms.append(float(frame.var() / (m**2 + 1e-9)))
+        vals = frame if fm is None else frame[fm]
+        m = vals.mean()
+        norms.append(float(vals.var() / (m**2 + 1e-9)))
 
     b, te, nv = np.array(brenners), np.array(tenens), np.array(norms)
 

@@ -1,5 +1,12 @@
 # Claude Code spec — restore the complexity ratchet (CI is RED)
 
+> **✅ STATUS — DONE (CI green) and actively maintained since.** The RED CI (147 > 139 long functions) was
+> restored in git commit 9fee6b8 ("Restore complexity ratchet (147>139 RED): split 12 UI builders, lower
+> ceiling to 135 — not raise it"). `tests/test_complexity_budget.py` has been green since and the ceiling
+> has been ratcheted DOWN continuously (147 → 135 → … → 126 as science functions were split by phase, each
+> pinned byte-identical). The ratchet is working exactly as intended — it only ever moves down. Nothing
+> outstanding.
+
 **Date:** 2026-07-15 · **Target tree:** 1.6.64 · Verified against the 1.6.64 tree.
 **Priority: BLOCKING.** `pytest -m core` (the CI gate in `.github/workflows/core.yml:166`) is failing
 on `test_complexity_budget.py::test_the_number_of_unreviewable_functions_does_not_GROW`. Every other

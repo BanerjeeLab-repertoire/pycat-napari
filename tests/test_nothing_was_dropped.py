@@ -64,6 +64,433 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.183 — `detect_beads_stack` (the 317-line VPT detection stage) was split BY PIPELINE STAGE into
+    # `_choose_detection_backend`, `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames`
+    # (+ `_fast_frame_rows` / `_precise_frame_rows`) and `_assemble_detections`, leaving a 116-line
+    # orchestrator. Nothing was removed: every stage MOVED into a named helper. Guard-anchored — the
+    # existing VPT equivalence guards pass unmodified and a serial-path characterization
+    # (`test_detect_beads_stack_characterization`) pins the exact detection table across the split.
+    'vpt_tools.py::detect_beads_stack',
+    # 1.6.204 — `link_trajectories_bayesian` (the 245-line Bayesian/Hungarian trajectory linker) was split
+    # BY COMPUTATIONAL PHASE into `_bayesian_cost_defaults`, `_start_new_tracks`, `_build_frame_cost_matrix`
+    # and `_apply_frame_assignment`, leaving a ~50-line orchestrator. Nothing was removed: every phase MOVED
+    # into a named helper (two provably-dead locals were dropped in the move). Pinned byte-identical by
+    # `test_bayesian_linker_assignment_is_byte_identical` (exact track_id + link_cost on a fixed scenario);
+    # the existing purity/gap/ambiguity property tests pass unmodified.
+    'dynamic_spatial_tools.py::link_trajectories_bayesian',
+    # 1.6.205 — `fit_coarsening` (the 227-line coarsening-mechanism classifier) was split BY COMPUTATIONAL
+    # PHASE into `_coarsening_powerlaw_fits`, `_coarsening_is_arrested` and `_coarsening_confidence`, leaving
+    # a ~35-line orchestrator. Nothing was removed: every phase MOVED into a named helper (two provably-dead
+    # locals, `noise` and `r2_gap`, were dropped in the move). Pinned byte-identical by
+    # `test_fit_coarsening_output_is_byte_identical`; the arrest-classification property tests pass unmodified.
+    'condensate_physics_tools.py::fit_coarsening',
+    # 1.6.206 — `count_molecules_single` (the 214-line single-trace N&B counter) was split BY COMPUTATIONAL
+    # PHASE into `_estimate_pedestal_read_noise` (pedestal + read-noise from the tail) and `_fit_counting_nu`
+    # (the free-intercept-vs-through-origin ν fit), leaving a ~55-line orchestrator. Nothing was removed:
+    # every phase MOVED into a named helper with its rationale. Pinned byte-identical by
+    # `test_count_molecules_single_is_byte_identical`; the accuracy/pedestal property tests pass unmodified.
+    'molecular_counting_tools.py::count_molecules_single',
+    # 1.6.207 — `topology_metrics` (the 192-line per-cell envelope metric) had its comment-dense basin-count
+    # phase extracted to `_topo_basin_metrics`, leaving a ~55-line orchestrator. Nothing was removed: the
+    # phase MOVED into a named helper with its rationale (the dead min_basin_distance/ball_radius default was
+    # dropped; the params stay in the signature). Pinned byte-identical by
+    # `test_topology_metrics_is_byte_identical`; the basin-count property tests pass unmodified.
+    'topology_tools.py::topology_metrics',
+    # 1.6.208 — `qc_focus` (the 203-line focus/sharpness QC check) was split into `_qc_focus_stack` (the 3D
+    # per-frame branch) and `_qc_focus_absolute` (the single-image diffraction-limit verdict), leaving the
+    # orchestrator with the na/info branches. Nothing was removed: each branch MOVED into a named helper
+    # with its rationale. Pinned byte-identical by `test_qc_focus_is_byte_identical` (all five result
+    # branches); the existing focus property tests pass unmodified.
+    'data_qc_tools.py::qc_focus',
+    # 1.6.209 — `field_summary` (the 182-line in-vitro whole-field summary) had its non-empty compute + the
+    # result dict extracted to `_field_summary_metrics`, leaving the orchestrator with the docstring, setup
+    # and the n == 0 empty branch. Nothing was removed: the metrics MOVED into a named helper with their
+    # measured caveats. Pinned byte-identical by `test_field_summary_is_byte_identical`; the halo/contrast
+    # property tests pass unmodified.
+    'invitro_tools.py::field_summary',
+
+    # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
+    # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line
+    # body. Nothing was removed: the assessment and its rationale MOVED into the helper, and
+    # `test_partition_measurement_characterization` pins which branch fires and the exact checked/holds/
+    # detail of the assumption unchanged across the split.
+    'invitro_tools.py::partition_measurement',
+
+    # 1.6.180 — `fit_fusion_relaxation` (the 184-line droplet-fusion relaxation fit) was split into
+    # `_fusion_tau_ci`, `_fusion_window_warn` and `_fusion_model_adequacy`, leaving a 90-line fit body.
+    # Nothing was removed: the fit, the CI, the window check, the two-mode test and their measured
+    # rationale MOVED into the helpers; `test_fusion_relaxation_characterization` pins the fit, CI,
+    # relaxations-observed, adequacy/two-mode verdicts and which warnings fire unchanged across the split.
+    'fusion_tools.py::fit_fusion_relaxation',
+
+    # 1.6.176 — `fit_frap_recovery` (the 206-line FRAP recovery fit) was split into `_frap_derive_mobile`
+    # (normalisation-aware mobile fraction + over-recovery warning) and `_frap_identifiability` (the
+    # per-parameter covariance CI + warning), leaving a 109-line fit body. Nothing was removed: the fit,
+    # the derived quantities, the identifiability assessment and their measured rationale MOVED into the
+    # helpers, and a byte-identity characterization test (`test_frap_recovery_characterization`) pins the
+    # fitted params, fractions, CI widths and which warnings fire unchanged across the split.
+    'frap_tools.py::fit_frap_recovery',
+
+    # 1.6.175 — `fit_photobleaching` (the 233-line exponential-bleach fit) was split into
+    # `_photobleach_tau_ci`, `_photobleach_window_metrics` and `_photobleach_window_warn`, leaving a
+    # 65-line fit + orchestrate body. Nothing was removed: the fit, the tau CI, the decay-observed bounds,
+    # the two-tier warning and their measured-rationale comment blocks MOVED into the helpers, and a
+    # byte-identity characterization test (`test_photobleaching_characterization`) pins the fitted params,
+    # R², tau CI, both bounds, correction factors and which warning tier fires unchanged across the split.
+    'condensate_physics_tools.py::fit_photobleaching',
+
+    # 1.6.174 — `fit_size_distribution_mle` (the 301-line droplet-size-distribution identifier) was split
+    # BY PHASE into pure helpers — `_fit_size_models`, `_powerlaw_tail_comparison`,
+    # `_size_distinguishability`, `_size_verdict` — leaving a 92-line orchestrator. Nothing was removed:
+    # every fit, test and its rationale MOVED into a named helper, and a byte-identity characterization
+    # test (`test_size_distribution_mle_characterization`) pins the selected model, every AIC/loglik, the
+    # power-law tail test and the descriptive moments unchanged across the split.
+    'invitro_tools.py::fit_size_distribution_mle',
+    # 1.6.213 — the whole size-distribution domain (fit_size_distribution_mle + fit_size_distribution + the
+    # phase helpers, and their nested _add / _pointwise / lognormal_pdf) MOVED verbatim from invitro_tools to
+    # `toolbox/invitro/size_distribution.py`; invitro_tools re-exports the two public entry points, so every
+    # caller's import still resolves. No fit or number changed (pinned by
+    # test_size_distribution_mle_characterization). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::fit_size_distribution',
+    'invitro_tools.py::_add',
+    'invitro_tools.py::_pointwise',
+    'invitro_tools.py::lognormal_pdf',
+    # 1.6.214 — the partition-coefficient domain (partition_coefficient_local + _pc_* helpers +
+    # partition_measurement + partition_coefficient_field + estimate_phase_boundary, with their nested
+    # _fit / _hinge / _resid) MOVED verbatim to `toolbox/invitro/partition.py`; invitro_tools re-exports the
+    # four public entry points. No K_p, background, or fit changed (pinned by test_partition* +
+    # calibration/ΔG tests). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::partition_coefficient_field',
+    'invitro_tools.py::estimate_phase_boundary',
+    'invitro_tools.py::_fit',
+    'invitro_tools.py::_hinge',
+    'invitro_tools.py::_resid',
+    # 1.6.216 — the remaining in-vitro analysis sections (coarsening_statistics, estimate_csat_lever_rule,
+    # estimate_contact_angle, detect_and_fit_fusions, detect_sedimentation, with their nested
+    # _circle_residuals / _slope_r2) MOVED verbatim to `toolbox/invitro/analysis.py`; invitro_tools re-exports
+    # all five and is now a pure shim over the invitro/ package. No number changed (existing in-vitro tests
+    # are the net). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::coarsening_statistics',
+    'invitro_tools.py::estimate_csat_lever_rule',
+    'invitro_tools.py::estimate_contact_angle',
+    'invitro_tools.py::detect_and_fit_fusions',
+    'invitro_tools.py::detect_sedimentation',
+    'invitro_tools.py::_circle_residuals',
+    'invitro_tools.py::_slope_r2',
+    # 1.6.217 — condensate_physics decomposition step 1: the coarsening domain (fit_coarsening + its
+    # _coarsening_* helpers, with the nested ostwald / coalescence model fns) MOVED verbatim to
+    # `toolbox/condensate_physics/coarsening.py`; the tools module re-exports fit_coarsening. No number
+    # changed (test_fit_coarsening_output_is_byte_identical passes). These nested keys vanished by the move.
+    'condensate_physics_tools.py::ostwald',
+    'condensate_physics_tools.py::coalescence',
+    # 1.6.218 — condensate_physics decomposition step 2: the photobleaching + frame-quality domains (coupled:
+    # analyse_frame_quality calls fit_photobleaching) MOVED verbatim to condensate_physics/photobleaching.py
+    # and frame_quality.py; the tools module re-exports fit_photobleaching / apply_bleach_correction /
+    # analyse_frame_quality / detect_out_of_focus. No number changed (photobleaching + focus/debris tests
+    # pass; one monkeypatch target updated to the moved module). These keys vanished by the move; the nested
+    # `model` (exponential bleach model, params I0/I_inf) collides with a same-named nested fit elsewhere.
+    'condensate_physics_tools.py::apply_bleach_correction',
+    'condensate_physics_tools.py::analyse_frame_quality',
+    'condensate_physics_tools.py::detect_out_of_focus',
+    'condensate_physics_tools.py::_frame_entropy',
+    'condensate_physics_tools.py::_frame_gradient_energy',
+    'condensate_physics_tools.py::_fit_linear_trend',
+    'condensate_physics_tools.py::_norm_slope',
+    'condensate_physics_tools.py::model',
+    # 1.6.219 — condensate_physics decomposition step 3: three independent leaf domains — intensity
+    # (fit_bimodal_intensity + intensity_decomposition_per_cell, nested `bimodal`), survival
+    # (kaplan_meier_lifetimes), and shape-relaxation (fit_aspect_ratio_relaxation) — MOVED verbatim to
+    # condensate_physics/{intensity,survival,relaxation}.py; the tools module re-exports all four. No number
+    # changed (the intensity/survival/fusion tests pass). These keys vanished by the move.
+    'condensate_physics_tools.py::fit_bimodal_intensity',
+    'condensate_physics_tools.py::intensity_decomposition_per_cell',
+    'condensate_physics_tools.py::bimodal',
+    'condensate_physics_tools.py::kaplan_meier_lifetimes',
+    'condensate_physics_tools.py::fit_aspect_ratio_relaxation',
+    # 1.6.220 — condensate_physics decomposition step 4: the MSD / anomalous-diffusion domain (compute_msd,
+    # fit_anomalous_diffusion, msd_per_track, test_confinement + the _short_track_rejections / _confined_msd
+    # / _aicc / _lag_window_gate / _fit_msd_powerlaw / _assess_msd_identifiability / _classify_msd_motion /
+    # _package_msd_result / _insufficient_result / _report_short_track_rejections helpers) MOVED verbatim to
+    # condensate_physics/msd.py; the tools module re-exports the public entry points + MIN_TRACK_LENGTH_FRAMES.
+    # The golden-master MSD->D->viscosity chain passes unmodified (two monkeypatch targets updated to the
+    # moved module). These keys vanished by the move.
+    'condensate_physics_tools.py::compute_msd',
+    'condensate_physics_tools.py::msd_per_track',
+    'condensate_physics_tools.py::test_confinement',
+    'condensate_physics_tools.py::_confined_msd',
+    'condensate_physics_tools.py::_aicc',
+    'condensate_physics_tools.py::_lag_window_gate',
+    'condensate_physics_tools.py::_insufficient_result',
+    'condensate_physics_tools.py::_fit_msd_powerlaw',
+    'condensate_physics_tools.py::_assess_msd_identifiability',
+    'condensate_physics_tools.py::_classify_msd_motion',
+    'condensate_physics_tools.py::_package_msd_result',
+    'condensate_physics_tools.py::_short_track_rejections',
+    'condensate_physics_tools.py::_report_short_track_rejections',
+    # 1.6.221 — condensate_physics decomposition COMPLETE: the microrheology-moduli domain
+    # (per_track_msd_curves, compute_moduli_gser/evans/evans_bootstrap, extract_fusion_relaxation, nested
+    # _iw_Jtilde) MOVED verbatim to condensate_physics/moduli.py; condensate_physics_tools.py is now a pure
+    # re-export shim. No modulus number changed. These keys vanished by the move.
+    'condensate_physics_tools.py::per_track_msd_curves',
+    'condensate_physics_tools.py::compute_moduli_gser',
+    'condensate_physics_tools.py::compute_moduli_evans',
+    'condensate_physics_tools.py::compute_moduli_evans_bootstrap',
+    'condensate_physics_tools.py::extract_fusion_relaxation',
+    'condensate_physics_tools.py::_iw_Jtilde',
+
+    # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
+    # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
+    # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was
+    # removed: both classifiers and their rationale MOVED into the named helpers, and a byte-identity
+    # characterization test (`test_classify_beads_characterization`) pins both branches' exact labels,
+    # estimates, row counts and thresholds unchanged across the split.
+    'vpt_tools.py::classify_beads',
+
+    # 1.6.172 — `partition_coefficient_local` (the 394-line local-annulus Kp measurement) was split BY
+    # PHASE into pure helpers — `_pc_check_input` (intensity-provenance gate), `_pc_camera_floor`
+    # (pedestal / dark-reference / extracellular), `_pc_estimate_gap` (interface-width annulus offset),
+    # `_pc_measure_droplets` (the per-droplet loop + over-inclusive-mask warning) and `_pc_verdict` (the
+    # six-branch reporting chain) — dropping it 393 → 108 lines. Nothing was removed: every line and its
+    # rationale MOVED into a named helper, and a byte-identity characterization test
+    # (`test_partition_local_characterization`) captured the exact outputs across all branches BEFORE the
+    # split and asserts them unchanged after (no number moved).
+    'invitro_tools.py::partition_coefficient_local',
+
+    # 1.6.168 — science_function_split: `fit_anomalous_diffusion` (the 394-line MSD/α fit behind
+    # viscosity) was split BY COMPUTATIONAL PHASE into pure helpers — `_lag_window_gate`,
+    # `_fit_msd_powerlaw`, `_assess_msd_identifiability`, `_classify_msd_motion`, `_package_msd_result` —
+    # dropping it 393 → 98 lines. Nothing was removed: every line MOVED into a named helper, and the
+    # function's 4 numerical tests passed UNMODIFIED (no number changed). The rationale in the deleted
+    # lines lives on in those helpers.
+    'condensate_physics_tools.py::fit_anomalous_diffusion',
+
+    # 1.6.100 — the MSD plot's `_on_pick` (per-line pick_event handler) was removed with its whole
+    # mechanism. An audit found the pick_event-plus-debounce approach intrinsically fragile (it
+    # assumed all of a click's pick_events arrive before a zero-delay timer — not a safe contract),
+    # so one click still cycled through many tracks. Replaced by a single canvas `button_press_event`
+    # handler (`_connect_nearest_curve_click`) that fires once per click and selects the nearest
+    # curve — there is nothing to debounce. `_on_pick` has no successor by name; the capability moved
+    # to `_connect_nearest_curve_click` + `_apply_pick`.
+    'analysis_plots.py::_on_pick',
+
+    # 1.6.120 — the MSD spaghetti background became ONE LineCollection and selection an OVERLAY
+    # (interaction-layer Gap 4). `_render_consolidated` (the VPT panel) shrank because its bespoke
+    # blit + apply-pick + connect were replaced by a call to the shared `_msd_overlay_hooks`, which the
+    # standalone `plot_msd_trajectories` also uses — so the panel and the standalone brush identically
+    # from ONE implementation instead of two divergent copies. Nothing was dropped; the logic moved
+    # into `_msd_overlay_hooks` (+ the coords hit-tester `_connect_nearest_curve_click_coords`).
+    'analysis_plots.py::_render_consolidated',
+
+    # 1.6.106 — session load moved OFF the Qt thread. `load_session` was one 149-line function that
+    # read/decoded every file AND created the napari layers in one loop — so it could not be run on a
+    # worker (layer creation off the main thread is a crash). It is split: `_read_session_payload`
+    # (pure decode + CSV reads, no viewer — the slow half that now runs on a QThread) and
+    # `_apply_session_payload` (the `viewer.add_*` + repository writes, on the caller's thread).
+    # `load_session` is now the thin orchestrator that runs the read via `qt_worker.run_with_progress`
+    # and applies the result. Nothing was dropped — the whole body moved into the two helpers, and the
+    # synchronous round trip is pinned by `test_session_load_threading` and the existing
+    # `test_session_load_lazy_image` suite.
+    'session_loader.py::load_session',
+
+    # 1.6.106 — `_prog`, the inline progress-callback closure in `_open_session_loader._on_load`, was
+    # removed. It drove an in-dialog QProgressBar from the (blocked) main thread — the bar the 1.6.81/82
+    # rollout added, which advanced while the window still said "Not Responding". The worker now owns a
+    # modal QProgressDialog that keeps the window painting, so a second in-dialog bar would be two bars
+    # for one operation (the UX trap the roadmap flagged); the inline bar and its `_prog` driver are
+    # retired together.
+    'ui_modules.py::_prog',
+
+    # 1.6.104 — the picked-bead PULSE was removed. `_pulse_layer` armed a QTimer that oscillated the
+    # ring's size/opacity to draw the eye. But the ring is per-frame — present only on the bead's own
+    # frame — so scrubbing away from that frame left NOTHING to pulse while the opacity slider churned
+    # on for nothing (reported from the viewer). Zoom-to-bead navigation draws the eye now; the ring is
+    # a static marker. No successor — the pulse mechanism is simply gone, along with `_PULSE_MS`/
+    # `_PULSE_STEPS`.
+    'vpt_ui.py::_pulse_layer',
+
+    # 1.6.104 — `_follow_enabled` (VPT) went dead when a plot click became "always navigate to the
+    # bead" (the user asked for it, and it is safe now the click-loop is fixed — see `_on_pick` above).
+    # The reveal no longer consults a follow preference, so this wrapper had no caller. The GENERIC
+    # brushing path still has its own `pycat.utils.brushing._follow_enabled` for the double-click/
+    # follow_selection case — this was only VPT's now-unused copy.
+    'vpt_ui.py::_follow_enabled',
+
+    # 1.6.137 — the five pure-layout PANEL BUILDERS MOVED from vpt_ui.py into `vpt/panels.py` as the
+    # `_VptPanelsMixin` (vpt_ui decomposition, step 2). Nothing was dropped: the method bodies are
+    # byte-for-byte unchanged; they just live in the module vpt_ui now COMPOSES instead of implementing.
+    # (`setup_ui` — the top-level construction/composition + the pixel-size gate install — deliberately
+    # STAYS in vpt_ui.py; only the pieces it composes moved.) The guard keys by FILENAME, so a move
+    # reads as a vanish from the old file — these record it. The functions still exist as
+    # `panels.py::<name>`. vpt_ui.py: 2458 -> 1778 lines.
+    'vpt_ui.py::_build_per_track_metrics',
+    'vpt_ui.py::_add_host_segmentation',
+    'vpt_ui.py::_add_bead_detection',
+    'vpt_ui.py::_add_tracking',
+    'vpt_ui.py::_add_microrheology',
+
+    # 1.6.138 — the napari-facing layer/overlay/reveal methods MOVED from vpt_ui.py into
+    # `vpt/napari_adapter.py` as `_VptNapariMixin` (vpt_ui decomposition, step 3). Behaviour-preserving
+    # move; bodies unchanged. (`_on_click` is the nested pick handler defined inside
+    # `_add_pickable_bead_points`, so it moved with it.) They exist now as `napari_adapter.py::<name>`.
+    'vpt_ui.py::_add_pickable_bead_points',
+    'vpt_ui.py::_reveal_track_in_viewer',
+    'vpt_ui.py::_on_click',
+
+    # 1.6.138 — the track-table methods MOVED from vpt_ui.py into `vpt/table_adapter.py` as
+    # `_VptTableMixin` (vpt_ui decomposition, step 3). Behaviour-preserving move; bodies unchanged.
+    # (`_on_row` / `_closeEvent` are nested handlers defined inside `_show_per_track_table`, so they
+    # moved with it.) They exist now as `table_adapter.py::<name>`.
+    'vpt_ui.py::_show_per_track_table',
+    'vpt_ui.py::_highlight_track_in_table',
+    'vpt_ui.py::_select_track',
+    'vpt_ui.py::_on_row',
+    'vpt_ui.py::_closeEvent',
+
+    # 1.6.138 — the MSD-plot methods MOVED from vpt_ui.py into `vpt/msd_adapter.py` as `_VptMsdMixin`
+    # (vpt_ui decomposition, step 3). Behaviour-preserving move; bodies unchanged. They exist now as
+    # `msd_adapter.py::<name>`.
+    'vpt_ui.py::_highlight_track_in_plot',
+    'vpt_ui.py::_update_tracklen_hist',
+
+    # 1.6.146 — the two Qt dialog CLASSES (`LayerDataframeSelectionDialog`, `ChannelAssignmentDialog`)
+    # MOVED from file_io.py into `file_io/dialogs.py` (file_io decomposition, move 2). Their methods
+    # went with them; bodies unchanged. Nothing imported these dialogs externally; `FileIOClass` now
+    # imports them from `dialogs.py`. These method names are unique to the dialogs, so they read as
+    # "vanished" from file_io.py — they exist now as `dialogs.py::<name>`.
+    'file_io.py::get_selections',
+    'file_io.py::initUI',
+    'file_io.py::_est_size_mb',
+    'file_io.py::_is_reconstructable',
+    'file_io.py::_on_discard',
+
+    # 1.6.146 — pure pixel-size / lazy-label helpers MOVED to `file_io/naming.py` (decomposition, move 3),
+    # now headlessly testable. `file_io` re-exports them, so every call site + importer still works.
+    # (`derive_layer_name`/`_clean_filename_token` deliberately stayed — two tests AST-parse them by path.)
+    'file_io.py::_lazy_contrast_limits',
+    'file_io.py::_tiff_pixel_size_um',
+    'file_io.py::_ome_pixel_size_um',
+    'file_io.py::_lazy_backing_label',
+
+    # 1.6.146 — the three format-specific stack openers (`_open_stack_ims`, `_open_stack_generic`,
+    # `_open_czi_streaming`) MOVED to `file_io/stack_openers.py` as `_StackOpenersMixin` (decomposition,
+    # move 4). Kept as a mixin (not standalone functions): they write FileIOClass state and call sibling
+    # methods, so a function form would be a worse seam. `FileIOClass` inherits it; bodies unchanged.
+    'file_io.py::_open_stack_ims',
+    'file_io.py::_open_stack_generic',
+    'file_io.py::_open_czi_streaming',
+
+    # 1.6.146 — the `_ZarrTYX` lazy IMS wrapper MOVED to `file_io/lazy_sources.py` (decomposition, move
+    # 5), joining `_TiffPageStack` & friends in the Qt-free lazy-wrapper home. `file_io` re-exports it.
+    'file_io.py::_ZarrTYX',
+
+    # 1.6.147 catch-up — _ZarrTYX's dunders moved to lazy_sources.py with the class (they live as
+    # lazy_sources.py::<name> now); `_file_has_imaging_metadata` was renamed to the `_safe` form.
+    'file_io.py::__array__',
+    'file_io.py::__len__',
+    'file_io.py::_file_has_imaging_metadata',
+
+    # 1.6.149 — MenuManager (+ its many nested helpers) MOVED from ui_modules.py to
+    # ui/menu_manager.py (decomposition Phase 2). Behaviour-preserving, re-exported; the menu-
+    # contract snapshot (test_menu_contract.py) proves not one action changed. Now menu_manager.py::<name>.
+    'ui_modules.py::_activate',
+    'ui_modules.py::_add_actions_to_menu',
+    'ui_modules.py::_add_analysis_methods_to_menu',
+    'ui_modules.py::_add_file_io_methods_to_menu',
+    'ui_modules.py::_add_toolbox_to_menu',
+    'ui_modules.py::_anchor_key',
+    'ui_modules.py::_annotation_layers',
+    'ui_modules.py::_apply_managed_grid',
+    'ui_modules.py::_apply_override',
+    'ui_modules.py::_ask_clear_or_add',
+    'ui_modules.py::_autotag_user_layer',
+    'ui_modules.py::_current_layer',
+    'ui_modules.py::_dead',
+    'ui_modules.py::_disable_in_menu',
+    'ui_modules.py::_disable_napari_open_actions',
+    'ui_modules.py::_enable_drops',
+    'ui_modules.py::_export',
+    'ui_modules.py::_fmt',
+    'ui_modules.py::_fmt_interval',
+    'ui_modules.py::_gather_compared_metadata',
+    'ui_modules.py::_grid_tileable_visible',
+    'ui_modules.py::_hide_napari_native_menus',
+    'ui_modules.py::_home_fit_view',
+    'ui_modules.py::_image_layer_present',
+    'ui_modules.py::_is_load_action',
+    'ui_modules.py::_key',
+    'ui_modules.py::_maybe_warn_metadata_diff',
+    'ui_modules.py::_nm',
+    'ui_modules.py::_norm',
+    'ui_modules.py::_obj_is_sample_loader',
+    'ui_modules.py::_on_foreign_layer_inserted',
+    'ui_modules.py::_on_grid_layer_vis_changed',
+    'ui_modules.py::_on_grid_layers_changed',
+    'ui_modules.py::_open_image_add',
+    'ui_modules.py::_open_session_loader',
+    'ui_modules.py::_populate',
+    'ui_modules.py::_process_foreign_layers',
+    'ui_modules.py::_reassert_canvas_drops',
+    'ui_modules.py::_refresh',
+    'ui_modules.py::_refresh_table',
+    'ui_modules.py::_reorder_pycat_menu_bar',
+    'ui_modules.py::_restore_grid_removed_layers',
+    'ui_modules.py::_route',
+    'ui_modules.py::_route_one',
+    'ui_modules.py::_score',
+    'ui_modules.py::_set_napari_menus_visible',
+    'ui_modules.py::_setup_menu_bar',
+    'ui_modules.py::_show_metadata_comparison',
+    'ui_modules.py::_show_metadata_dialog',
+    'ui_modules.py::_show_recorded_steps_dialog',
+    'ui_modules.py::_sweep',
+    'ui_modules.py::_toggle_grid_view',
+    'ui_modules.py::_toggle_napari_menus',
+    'ui_modules.py::make_lambda',
+    'ui_modules.py::open_command_palette',
+    'ui_modules.py::open_tag_inspector',
+
+    # 1.6.150 — the batch replay handlers + their shared helpers MOVED from batch_step_registry.py into
+    # the pycat.batch.steps package (decomposition, split by name-prefix family). _STEP_MAP stays in
+    # batch_step_registry.py and imports them; route-equivalence + the composition guard prove replay is
+    # unchanged. (_flatten_scalars/_proc are nested helpers that moved with their parent handler.)
+    'batch_step_registry.py::_derive_split_companion_path',
+    'batch_step_registry.py::_flatten_scalars',
+    'batch_step_registry.py::_get_data',
+    'batch_step_registry.py::_ivf_droplet_mask_and_image',
+    'batch_step_registry.py::_load_image',
+    'batch_step_registry.py::_normalize_to_float',
+    'batch_step_registry.py::_proc',
+    'batch_step_registry.py::_raw_counts',
+    'batch_step_registry.py::_resolve_channel_for_layer',
+    'batch_step_registry.py::_resolve_image_layer',
+    'batch_step_registry.py::_save_array',
+    'batch_step_registry.py::_source_path_for_recorded_channel',
+    'batch_step_registry.py::replay_auto_crop_roi',
+    'batch_step_registry.py::replay_bf_cell_segmentation',
+    'batch_step_registry.py::replay_bf_condensate_segmentation',
+    'batch_step_registry.py::replay_bf_preprocess',
+    'batch_step_registry.py::replay_calibration_correction',
+    'batch_step_registry.py::replay_cell_analysis',
+    'batch_step_registry.py::replay_cellpose_segmentation',
+    'batch_step_registry.py::replay_condensate_analysis',
+    'batch_step_registry.py::replay_condensate_segmentation',
+    'batch_step_registry.py::replay_ivbf_preprocess',
+    'batch_step_registry.py::replay_ivbf_segmentation',
+    'batch_step_registry.py::replay_ivf_field_summary',
+    'batch_step_registry.py::replay_ivf_preprocess',
+    'batch_step_registry.py::replay_ivf_segmentation',
+    'batch_step_registry.py::replay_ivf_size_distribution',
+    'batch_step_registry.py::replay_ivf_spatial_metrology',
+    'batch_step_registry.py::replay_measure_line',
+    'batch_step_registry.py::replay_open_image',
+    'batch_step_registry.py::replay_open_stack',
+    'batch_step_registry.py::replay_preprocessing',
+    'batch_step_registry.py::replay_sacf_analysis',
+    'batch_step_registry.py::replay_save_and_clear',
+    'batch_step_registry.py::replay_set_frame_range',
+    'batch_step_registry.py::replay_ts_cellpose_keyframe',
+    'batch_step_registry.py::replay_upscaling',
+
     # 1.5.517 — de-duplicated. These were defined TWICE, byte-identically, in file_io.py AND
     # stack_access.py. `stack_access` now owns them and `file_io` RE-EXPORTS, so every one of the
     # 25 existing `from pycat.file_io.file_io import materialize_stack` call sites still works.

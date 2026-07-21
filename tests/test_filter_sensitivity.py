@@ -411,7 +411,9 @@ def test_bleach_r2_min_is_NOT_a_filter_and_is_correctly_absent():
     if `has_bleaching` ever gates a population, this fails and the case should be added.
     """
     import inspect
-    from pycat.toolbox import condensate_physics_tools as cpt
+    # analyse_frame_quality (where `has_bleaching` sets dominant_cause) moved to
+    # condensate_physics/frame_quality.py (1.6.218); inspect it there. Same claim about the code.
+    from pycat.toolbox.condensate_physics import frame_quality as cpt
 
     src = inspect.getsource(cpt)
     uses = [l.strip() for l in src.splitlines()
@@ -442,3 +444,64 @@ def test_bleach_r2_min_is_not_offset_sensitive_either():
         f'bleach_r2 moved with the pedestal ({r2}) — then it IS an offset case and belongs in the '
         f'registry after all')
     assert min(r2) > 0.9, f'the fixture does not bleach convincingly ({r2})'
+
+
+# ── Case 5: partition coefficient background=0.0 — OFFSET SENSITIVITY (a LIVE default) ──────
+#
+# The first case whose NEGATIVE control is the current DEFAULT, not a removed form. `client_enrichment`
+# computes K = (dense - bg) / (dilute - bg). Supply the camera offset and K is exact at any pedestal;
+# leave `background` at its default 0.0 and the pedestal sits in both terms and drags K toward 1. The
+# function WARNS, but returns the wrong number — which is exactly why a harness case that pins it is
+# worth more than the warning: it fails a build if the default is ever trusted in a measurement path.
+
+_K_TRUE = 30.0
+_DILUTE = 100.0
+
+
+def _partition_run(background_mode):
+    """A `run(pedestal)` that drives the REAL `client_enrichment` on a known-K scene at `pedestal`.
+
+    `background_mode='supplied'` passes the true offset (correct usage); `'default_zero'` uses the
+    library default 0.0. Both call the same production function — no reimplementation of the science.
+    """
+    from tests.fixtures_synthetic import partition_scene
+    from pycat.toolbox.partition_enrichment_tools import client_enrichment
+
+    img, dense, cell = partition_scene(k_true=_K_TRUE, dilute_val=_DILUTE)
+
+    def run(pedestal):
+        bg = float(pedestal) if background_mode == 'supplied' else 0.0
+        out = client_enrichment(img + pedestal, dense, cell_mask=cell, background=bg)
+        return out['enrichment']
+    return run
+
+
+def test_the_MECHANISM_is_real_the_pedestal_collapses_K_when_the_offset_is_not_removed():
+    """**Why the default reads the sensor.** The pedestal in both terms of a ratio drags it toward 1 —
+    and the collapse is monotone in the pedestal, so it is the offset that carries it."""
+    run = _partition_run('default_zero')
+    ks = [run(p) for p in (0.0, 100.0, 500.0, 2000.0)]
+
+    # Reproduces the function's own docstring table exactly: 30 / 15.5 / 5.83 / 2.38.
+    assert ks[0] == pytest.approx(30.0, rel=1e-3)
+    assert ks[2] == pytest.approx(5.83, abs=0.05)
+    assert ks == sorted(ks, reverse=True) and ks[-1] < 5.0, (
+        f'K did not collapse with the pedestal ({ks}) — then the negative control proves nothing')
+
+
+def test_POSITIVE_supplying_the_background_recovers_K_at_any_pedestal():
+    """Correct usage — the measured camera offset supplied — recovers the true K at every pedestal."""
+    assert_offset_invariant(
+        _partition_run('supplied'), offsets=[0.0, 100.0, 500.0, 2000.0],
+        truth=_K_TRUE, tol=0.1)
+
+
+def test_NEGATIVE_the_DEFAULT_background_inverts_K_and_the_harness_CATCHES_it():
+    """**The proof, on the live default.** With `background=0.0` a 500-count pedestal turns a true K of
+    30 into 5.83; the harness names the pedestal that broke it."""
+    with pytest.raises(FilterSensitivityError) as caught:
+        assert_offset_invariant(
+            _partition_run('default_zero'), offsets=[0.0, 100.0, 500.0, 2000.0],
+            truth=_K_TRUE, tol=0.1)
+
+    assert '500' in str(caught.value), "the report must name the pedestal that broke it"

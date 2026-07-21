@@ -55,6 +55,36 @@ def _entity(df, label):
     return df.loc[df['label'] == label, ENTITY_ID_COLUMN].iloc[0]
 
 
+def test_the_BrushableTable_satisfies_the_SelectionView_contract(qapp):
+    """The real Qt adapter passes the SAME shared contract the reference fake and every other view
+    pass (interaction-layer Gap 5): programmatic apply emits no command, a user row-select emits
+    exactly one, an unknown entity is safe, and close() unsubscribes."""
+    from tests.selection_view_contract import assert_selection_view_contract
+    from pycat.utils.selection_service import SelectionState
+    from pycat.ui.brushable_table import make_brushable, sorted_table_view
+    from pycat.ui.ui_utils import DataFrameModel
+
+    df = _stamped()
+    service = _service()
+    e1, e2, e3 = _entity(df, 1), _entity(df, 2), _entity(df, 3)
+
+    def make_view():
+        model = DataFrameModel(df)
+        view = sorted_table_view(df, model)
+        return make_brushable(view, df, service, 'results.cells', model=model)
+
+    def do_user_select(table):
+        # a USER selecting a row — drive the selection model directly (not apply_selection). Pick a
+        # DIFFERENT row than the programmatic apply left selected, or selectionChanged never fires.
+        src_row = table._rows[str(e2)]
+        proxy_idx = table.proxy.mapFromSource(table.proxy.sourceModel().index(src_row, 0))
+        table.view.selectRow(proxy_idx.row())
+
+    assert_selection_view_contract(
+        service, make_view, do_user_select, an_entity=e3,
+        other_state=SelectionState(selected=frozenset({str(e1)}), primary=str(e1)))
+
+
 def test_selecting_a_row_emits_the_OBJECTS_NAME_not_its_position(qapp):
     df = _stamped()
     table, service = _table(qapp, df)

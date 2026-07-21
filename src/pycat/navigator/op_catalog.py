@@ -363,10 +363,19 @@ def _measure_op_contract(o: dict) -> ModuleContract:
 
 
 def build_operation_registry(catalog_path: Optional[str] = None,
-                             include_measure: bool = True) -> ModuleRegistry:
-    """Operation-granularity registry: layer ops bootstrapped from the real
-    op-registry catalog, measure/interpret ops from curated capability-map
-    function names, plus the synthetic acquisition source."""
+                             include_measure: bool = True,
+                             from_spec: bool = True) -> ModuleRegistry:
+    """Operation-granularity registry: layer ops, measure/interpret ops, and the acquisition source.
+
+    **OperationSpec increment 4 — the flip from validate to generate.** The layer ops are now
+    GENERATED from the live spec (``build_catalog_document`` → ``iter_operation_specs`` → the
+    ``@tags_layer``/UI decorators) rather than READ from the committed ``operation_catalog.json``. The
+    decorators are the runtime source of truth; the committed JSON is a reviewable, shippable *artifact*
+    kept faithful by a regeneration guard, no longer authoritative at run time (the Navigator builds
+    correctly even if the file is absent). Pass ``from_spec=False`` to build from the committed file
+    instead — the two are equal by construction, so this is an escape hatch for tooling that wants the
+    on-disk snapshot, not a behaviour difference.
+    """
     reg = ModuleRegistry()
 
     # synthetic source of the loaded image
@@ -376,8 +385,11 @@ def build_operation_registry(catalog_path: Optional[str] = None,
         provides=[cap(R.INTENSITY_FIELD, "target:*")], preference=0.9,
         public_api="file_io.load()", source="synthetic"))
 
+    layer_ops = (build_catalog_document(catalog_path)["operations"] if from_spec
+                 else load_operation_catalog(catalog_path))
+
     seen = {"acquisition"}
-    for o in load_operation_catalog(catalog_path):
+    for o in layer_ops:
         if o["op"] in seen:            # op tags are globally unique by design
             continue
         seen.add(o["op"])
@@ -420,17 +432,17 @@ def _provenance_from_registered_by(registered_by: Optional[str]) -> dict:
     return dict(module="", function=rb, source="", kind="toolbox")
 
 
-def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
-    """Rewrite ``operation_catalog.json`` from the LIVE ``@tags_layer``/UI registry, deterministically.
+def build_catalog_document(path: Optional[str] = None) -> dict:
+    """Build the catalog document **purely from the live spec** — ``iter_operation_specs()`` — with no
+    file write. This is the "generate from the spec" half of OperationSpec increment 4: the document is
+    a **deterministic function of the ``@tags_layer``/UI decorators**, not a hand-maintained file.
 
-    Walks ``iter_operation_specs()`` (the typed view over ``_OPERATIONS``) and writes one entry per
-    layer op, id-sorted with sorted keys, so the file is stable across runs and reviews. Provenance
-    fields are derived from each op's ``registered_by``; ``role_declared`` (informational — no
-    consumer reads it) is preserved from the existing snapshot when present, else defaults to the
-    op's role. Measure/interpret ops are NOT written: they are injected at build time by
-    ``_measure_ops()`` and were never part of this JSON — adding them would change
-    ``build_operation_registry``'s input contract, which is out of scope for the validate-first
-    increment. Returns the written document.
+    One entry per layer op, id-sorted, provenance derived from each op's ``registered_by``.
+    ``role_declared`` (informational — no consumer reads it) is preserved from the committed snapshot at
+    ``path`` when present, else defaults to the op's role; that preservation is the document's only touch
+    of the file, and it is idempotent, so ``build_catalog_document() == the committed JSON`` once
+    regenerated (this is what the regeneration guard checks). Measure/interpret ops are NOT written: they
+    are injected at build time by ``_measure_ops()`` and were never part of this JSON.
     """
     from .operation_spec import iter_operation_specs
 
@@ -447,13 +459,15 @@ def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
         pass
 
     operations = []
-    for spec in iter_operation_specs():
+    for spec in iter_operation_specs(live=True):   # the GENERATOR reads the live decorators, never the JSON
         prov = _provenance_from_registered_by(spec.registered_by)
         operations.append({
             "op": spec.id,
             "role": spec.role,
             "produces": spec.produces,
             "target": spec.target,
+            "inputs": list(spec.inputs),
+            "requirements": list(spec.requirements),
             "summary": spec.summary,
             "aliases": list(spec.aliases),
             "module": prov["module"],
@@ -464,7 +478,18 @@ def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
         })
 
     operations.sort(key=lambda o: o["op"])
-    doc = {"operations": operations, "count": len(operations)}
+    return {"operations": operations, "count": len(operations)}
+
+
+def regenerate_operation_catalog(path: Optional[str] = None) -> dict:
+    """Rewrite ``operation_catalog.json`` from the LIVE registry, deterministically.
+
+    A thin writer over :func:`build_catalog_document` — it builds the document from the spec and dumps
+    it id-sorted with sorted keys, so the committed file is stable across runs and reviews. The fix for
+    a failing regeneration guard is therefore "run this, commit the JSON". Returns the written document.
+    """
+    p = path or os.path.join(_DATA, CATALOG)
+    doc = build_catalog_document(p)
     with open(p, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=2, sort_keys=True)
         fh.write("\n")

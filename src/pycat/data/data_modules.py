@@ -321,11 +321,19 @@ class BaseDataClass:
         """
         #print("Update_metadata called on instance:", id(self))
         try:
-            # Check if the image has multiple scenes (e.g., z-stack)
-            num_scenes = len(image.scenes) 
+            # Check if the image has multiple scenes (e.g., multi-position acquisition)
+            num_scenes = len(image.scenes)
             if num_scenes > 1:
-                # Optionally, handle multiple scenes. Here, we'll use the first scene.
-                scene = image.get_scene(0)
+                # ── The CURRENT scene, not a fixed scene 0 ──────────────────────────────────
+                # A position switch must re-read the NEW scene's calibration: a scene can
+                # legitimately differ (a well imaged at a different magnification), so assuming
+                # scene 0's pixel size carries over would silently mis-scale every length and area
+                # after a switch. `current_scene` is the active scene's name; read its calibration.
+                try:
+                    idx = list(image.scenes).index(image.current_scene)
+                except Exception:
+                    idx = 0
+                scene = image.get_scene(idx)
                 physical_pixel_sizes = scene.physical_pixel_sizes
                 metadata = scene.metadata
             else:
