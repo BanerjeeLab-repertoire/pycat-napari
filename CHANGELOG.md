@@ -1,3 +1,24 @@
+## [1.6.232] - 2026-07-21
+### Added — **A general object-quality gate (backlog A2, part 1) — block / warn / downgrade, with reasons.**
+Every measurement has preconditions (a physical-unit result needs a real pixel size; a concentration needs a
+valid calibration; a trusted number needs its reliability assessed), and those signals already exist — but
+nothing composed them into one answer a navigator, batch run, QC advisor, and measurement UI could all
+consult. New `utils/quality_gate.py` is that composer — **feature-agnostic, and it invents no new metric**;
+it only combines `pixel_size`, `calibration.check_calibration_validity`, and `reliability`.
+- `evaluate_quality(objects, requirement, *, context) -> GateResult`, where `QualityRequirement` declares
+  what an op needs (`needs_pixel_size`, `needs_calibration`, `min_reliability`) and `context` supplies the
+  signal inputs. Only the requested signals are consulted; the op that needs nothing is OK.
+- Enforces the "refuse rather than lie" rules: **BLOCK ≠ WARN ≠ DOWNGRADE** (do-not-run / caveat-attached /
+  reduced-claim); **an unassessed signal is never a silent pass** (it WARNs); **report, don't drop** — every
+  signal's outcome is on the result and the overall verdict is the WORST of them (`runnable` is false only
+  on BLOCK).
+- Tests (`core`, `test_quality_gate.py`): missing pixel size blocks; unassessed pixel size / absent
+  calibration warn; invalid calibration blocks and a warn-level warns; an unreliable grade downgrades; a
+  below-floor grade warns; NaN reliability warns; the worst signal wins with all reported; and it composes
+  the real `reliability` signal from raw inputs. **Remaining A2:** binding the measurement ops into
+  `operation_catalog.json` with a `QualityRequirement` each, so the planner emits a measurement step as
+  runnable only when the gate passes — the heavier, catalog-wiring half.
+
 ## [1.6.231] - 2026-07-21
 ### Added — **App mode + feature registry (backlog A3 substrate) — beginner/advanced, and the catalogue of "what can PyCAT do."**
 The non-Qt foundation for the navigator/beginner-mode work, both consuming the 1.6.230 user-settings store

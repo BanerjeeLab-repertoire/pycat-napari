@@ -27,6 +27,14 @@ resolution, subscription fires, corruption-safety, atomicity (mid-write failure 
 intact), namespace non-collision.
 
 ### A2. General object-quality gate + wire the navigator's measurement half  *(the generator unblock)*
+> **◐ PART 1 DONE (the gate, shipped 1.6.232); part 2 (catalog wiring) remains.** `utils/quality_gate.py`:
+> `evaluate_quality(objects, requirement, *, context) -> GateResult` composing `pixel_size` /
+> `check_calibration_validity` / `reliability` into BLOCK/WARN/DOWNGRADE/OK (unassessed ≠ pass; worst signal
+> wins; every outcome reported). `QualityRequirement` (needs_pixel_size / needs_calibration / min_reliability).
+> `core`-tested (`test_quality_gate.py`). **Remaining:** part 2 — bind each measurement op in
+> `operation_catalog.json` to its `public_api` symbol + a `QualityRequirement`, and have `planner.compile`
+> emit a terminal measurement step as runnable only when `evaluate_quality` passes (surfacing the reason when
+> blocked), so the oracle reproduces all 13 workflows end-to-end. That is the heavier catalog-wiring half.
 **Verified:** navigator catalog is **79 ops, all image→objects; zero measure/interpret/tracking**.
 Two joined pieces:
 1. **`utils/quality_gate.py`** — `evaluate_quality(objects, requirement, *, context) -> GateResult`
