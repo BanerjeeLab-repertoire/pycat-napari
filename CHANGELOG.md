@@ -1,3 +1,20 @@
+## [1.6.231] - 2026-07-21
+### Added — **App mode + feature registry (backlog A3 substrate) — beginner/advanced, and the catalogue of "what can PyCAT do."**
+The non-Qt foundation for the navigator/beginner-mode work, both consuming the 1.6.230 user-settings store
+and both `core`-tested. The heavy beginner-home Qt dock is the remaining A3 piece.
+- `utils/app_mode.py`: `AppMode` (BEGINNER/ADVANCED) persisted at `app.mode` — **first run is BEGINNER**,
+  every later run is the last choice. `current_mode`/`set_mode`/`is_beginner`/`is_advanced`/`toggle_mode`
+  and `on_mode_change(cb)` (fires on change). Owns no widget; any UI consults it. An unrecognized stored
+  value degrades to BEGINNER. The store is injectable, so it tests without touching the real config.
+- `utils/feature_registry.py`: `FeatureCard` (key, title, one-line summary, category, opaque `entry`
+  callable, docs anchor, `min_mode`) + `FeatureRegistry` — the single answer to "what can PyCAT do, and
+  where." A duplicate key is refused (two features can't claim one id); `visible_in(mode)` / `visible_now()`
+  filter by app mode (a beginner sees the beginner set, an advanced user sees everything); `by_category`
+  groups them. A **catalogue, not a launcher** — it never invokes `entry`, so it stays Qt-free. A future
+  capability becomes discoverable the moment it registers one card.
+- Tests (`core`): `test_app_mode.py` (first-run beginner, persistence, toggle, degrade, change-notify) and
+  `test_feature_registry.py` (register/retrieve, duplicate refused, mode-visibility, category grouping).
+
 ## [1.6.230] - 2026-07-21
 ### Added — **Process-wide user settings (backlog A1) — one corruption-safe, atomic home for cross-session preferences.**
 PyCAT had nowhere to remember a choice between sessions (no `QSettings`, no user-config file, no first-run

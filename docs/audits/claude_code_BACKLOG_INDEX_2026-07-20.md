@@ -44,6 +44,13 @@ Two joined pieces:
    spine). `operation_id` must come from the spec, not hard-coded strings.
 
 ### A3. Navigator UI + general feature surfacing + beginner-default mode  *(depends on A1, A2)*
+> **◐ SUBSTRATE DONE (shipped 1.6.231); the beginner-home Qt dock remains.** `utils/app_mode.py` (AppMode
+> BEGINNER/ADVANCED over user-settings `app.mode`; first-run beginner; `current_mode`/`set_mode`/`toggle`/
+> `on_mode_change`) and `utils/feature_registry.py` (`FeatureCard` + `FeatureRegistry`; register/visible-by-
+> mode/by-category; duplicate-key refused; never invokes `entry`, so Qt-free) are built + `core`-tested. What
+> remains: pieces (1)/(2) below are done; (3) the beginner home dock (question-flow + capability cards +
+> mode toggle, `add_dock_widget`) is the heavy Qt piece, and populating cards for the currently-invisible
+> features is a follow-on that hangs off this registry.
 **Verified:** zero `AnalysisIntent`/`QuestionEngine`/`Planner` refs outside `navigator/`; and many
 features have **0 UI refs** (biological_qc, measurement_stability, ontology, feature_provenance,
 analysis_presets, scan_qc, figure_spec).
