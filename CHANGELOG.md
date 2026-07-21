@@ -1,3 +1,16 @@
+## [1.6.218] - 2026-07-21
+### Changed — **condensate_physics decomposition step 2: photobleaching + frame-quality domains move out (byte-identical).**
+Two coupled domains — `analyse_frame_quality` calls `fit_photobleaching` — moved together into
+`toolbox/condensate_physics/photobleaching.py` (`fit_photobleaching`, `apply_bleach_correction` + helpers)
+and `frame_quality.py` (`analyse_frame_quality`, `detect_out_of_focus` + entropy/gradient/trend helpers).
+
+- **The tools module re-exports all four** for every caller (condensate-physics/invitro/general-image UIs,
+  the file_io stack-access probes). Move, not rewrite — no number changed.
+- **Byte-identical:** the photobleaching characterization/window tests and the focus/debris tests pass; two
+  test targets were updated to follow the moved symbols (a monkeypatch and a source-inspection module),
+  assertions unchanged. Moved keys recorded in the drop-guard's `_DELIBERATE`.
+- `condensate_physics_tools.py` dropped **2242 -> 1802** lines; the per-file ceiling ratcheted to 1802.
+
 ## [1.6.217] - 2026-07-21
 ### Changed — **condensate_physics decomposition step 1: the coarsening domain moves to its own module (byte-identical).**
 Begins decomposing the 2,443-line `condensate_physics_tools.py` by physical quantity. `fit_coarsening` and

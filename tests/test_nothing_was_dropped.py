@@ -183,6 +183,20 @@ _DELIBERATE = {
     # changed (test_fit_coarsening_output_is_byte_identical passes). These nested keys vanished by the move.
     'condensate_physics_tools.py::ostwald',
     'condensate_physics_tools.py::coalescence',
+    # 1.6.218 — condensate_physics decomposition step 2: the photobleaching + frame-quality domains (coupled:
+    # analyse_frame_quality calls fit_photobleaching) MOVED verbatim to condensate_physics/photobleaching.py
+    # and frame_quality.py; the tools module re-exports fit_photobleaching / apply_bleach_correction /
+    # analyse_frame_quality / detect_out_of_focus. No number changed (photobleaching + focus/debris tests
+    # pass; one monkeypatch target updated to the moved module). These keys vanished by the move; the nested
+    # `model` (exponential bleach model, params I0/I_inf) collides with a same-named nested fit elsewhere.
+    'condensate_physics_tools.py::apply_bleach_correction',
+    'condensate_physics_tools.py::analyse_frame_quality',
+    'condensate_physics_tools.py::detect_out_of_focus',
+    'condensate_physics_tools.py::_frame_entropy',
+    'condensate_physics_tools.py::_frame_gradient_energy',
+    'condensate_physics_tools.py::_fit_linear_trend',
+    'condensate_physics_tools.py::_norm_slope',
+    'condensate_physics_tools.py::model',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

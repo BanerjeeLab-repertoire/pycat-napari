@@ -411,7 +411,9 @@ def test_bleach_r2_min_is_NOT_a_filter_and_is_correctly_absent():
     if `has_bleaching` ever gates a population, this fails and the case should be added.
     """
     import inspect
-    from pycat.toolbox import condensate_physics_tools as cpt
+    # analyse_frame_quality (where `has_bleaching` sets dominant_cause) moved to
+    # condensate_physics/frame_quality.py (1.6.218); inspect it there. Same claim about the code.
+    from pycat.toolbox.condensate_physics import frame_quality as cpt
 
     src = inspect.getsource(cpt)
     uses = [l.strip() for l in src.splitlines()

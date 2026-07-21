@@ -24,7 +24,10 @@ def _synth(tau, n, dt, I0=1000.0, I_inf=200.0, seed=0):
 
 @pytest.fixture
 def _warns(monkeypatch):
-    import pycat.toolbox.condensate_physics_tools as cpt
+    # fit_photobleaching moved to condensate_physics/photobleaching.py (1.6.218); patch the warning at its
+    # new home (condensate_physics_tools re-exports the function). Assertions unchanged — the window warning
+    # still fires; only the monkeypatch target follows the moved symbol.
+    import pycat.toolbox.condensate_physics.photobleaching as cpt
     seen = []
     monkeypatch.setattr(cpt, 'napari_show_warning', lambda m, *a, **k: seen.append(m))
     monkeypatch.setattr(cpt, 'napari_show_info', lambda *a, **k: None)

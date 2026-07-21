@@ -1,12 +1,15 @@
 # Claude Code spec — Decompose `condensate_physics_tools.py` by physics domain
 
-> **◐ STATUS — Step 1 (coarsening) DONE (1.6.217); msd / moduli / relaxation / frame_quality + the
-> intensity/photobleaching/survival sections remain.** The `toolbox/condensate_physics/` package exists;
-> `coarsening.py` holds `fit_coarsening` + its `_coarsening_*` helpers, moved VERBATIM, re-exported for every
-> caller (UIs, navigator, trackmate). Byte-identical (`test_fit_coarsening_output_is_byte_identical` +
-> arrest tests pass); nested keys recorded in the drop-guard's `_DELIBERATE`. A NEW per-file ceiling was
-> established (2447→2242) that ratchets DOWN as the remaining quantities move out. One quantity per commit;
-> the MSD→D→viscosity golden-master is the net for the msd move.
+> **◐ STATUS — Steps 1–2 DONE (1.6.217–1.6.218); msd / moduli / relaxation + intensity/survival remain.**
+> The `toolbox/condensate_physics/` package holds `coarsening.py` (`fit_coarsening` + `_coarsening_*`),
+> `photobleaching.py` (`fit_photobleaching`, `apply_bleach_correction`), and `frame_quality.py`
+> (`analyse_frame_quality`, `detect_out_of_focus`) — photobleaching + frame_quality moved together because
+> `analyse_frame_quality` calls `fit_photobleaching` (a coupling that would otherwise be a circular import).
+> All moved VERBATIM and re-exported; byte-identical (coarsening/photobleaching/focus-debris tests pass; two
+> test targets — a monkeypatch and a source-inspection module — updated to follow moved symbols, assertions
+> unchanged). Per-file ceiling ratcheted 2447→2242→1802. **Remaining:** msd (the golden-master net),
+> moduli (Evans), relaxation (aspect-ratio/fusion), and the intensity/survival sections — one quantity per
+> commit, then the tools file is a pure shim.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. **2,470 lines**,
 20 test files, and it holds the manuscript-facing material-properties physics (MSD, moduli, coarsening,
