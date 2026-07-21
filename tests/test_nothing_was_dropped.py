@@ -227,6 +227,16 @@ _DELIBERATE = {
     'condensate_physics_tools.py::_package_msd_result',
     'condensate_physics_tools.py::_short_track_rejections',
     'condensate_physics_tools.py::_report_short_track_rejections',
+    # 1.6.221 — condensate_physics decomposition COMPLETE: the microrheology-moduli domain
+    # (per_track_msd_curves, compute_moduli_gser/evans/evans_bootstrap, extract_fusion_relaxation, nested
+    # _iw_Jtilde) MOVED verbatim to condensate_physics/moduli.py; condensate_physics_tools.py is now a pure
+    # re-export shim. No modulus number changed. These keys vanished by the move.
+    'condensate_physics_tools.py::per_track_msd_curves',
+    'condensate_physics_tools.py::compute_moduli_gser',
+    'condensate_physics_tools.py::compute_moduli_evans',
+    'condensate_physics_tools.py::compute_moduli_evans_bootstrap',
+    'condensate_physics_tools.py::extract_fusion_relaxation',
+    'condensate_physics_tools.py::_iw_Jtilde',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

@@ -1,15 +1,14 @@
 # Claude Code spec — Decompose `condensate_physics_tools.py` by physics domain
 
-> **◐ STATUS — Steps 1–2 DONE (1.6.217–1.6.218); msd / moduli / relaxation + intensity/survival remain.**
-> The `toolbox/condensate_physics/` package holds `coarsening.py` (`fit_coarsening` + `_coarsening_*`),
-> `photobleaching.py` (`fit_photobleaching`, `apply_bleach_correction`), and `frame_quality.py`
-> (`analyse_frame_quality`, `detect_out_of_focus`) — photobleaching + frame_quality moved together because
-> `analyse_frame_quality` calls `fit_photobleaching` (a coupling that would otherwise be a circular import).
-> All moved VERBATIM and re-exported; byte-identical (coarsening/photobleaching/focus-debris tests pass; two
-> test targets — a monkeypatch and a source-inspection module — updated to follow moved symbols, assertions
-> unchanged). Per-file ceiling ratcheted 2447→2242→1802. **Remaining:** msd (the golden-master net),
-> moduli (Evans), relaxation (aspect-ratio/fusion), and the intensity/survival sections — one quantity per
-> commit, then the tools file is a pure shim.
+> **✅ STATUS — DONE (1.6.217–1.6.221). `condensate_physics_tools.py` is now a 122-line re-export shim (from
+> 2470, −95%).** Every physical quantity moved to the `toolbox/condensate_physics/` package: `msd.py`,
+> `moduli.py`, `coarsening.py`, `relaxation.py`, `photobleaching.py`, `frame_quality.py`, `intensity.py`,
+> `survival.py`. All moved VERBATIM and re-exported; **the golden-master MSD→D→viscosity chain (D to 1.1%,
+> α to 0.1%, viscosity to 3.2%) passes unmodified**, as does every physics characterization test. Coupled
+> domains (frame_quality↔photobleaching; moduli↔msd) were moved so imports resolve without cycles; a handful
+> of monkeypatch/source-inspection test targets were updated to follow moved symbols (assertions unchanged).
+> All moves recorded in the drop-guard `_DELIBERATE`; per-file ceiling ratcheted 2470→122. Full `pytest -m
+> core` green throughout.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. **2,470 lines**,
 20 test files, and it holds the manuscript-facing material-properties physics (MSD, moduli, coarsening,

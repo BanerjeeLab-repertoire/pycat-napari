@@ -1,3 +1,18 @@
+## [1.6.221] - 2026-07-21
+### Changed — **condensate_physics decomposition COMPLETE: the tools file is now a pure re-export shim (byte-identical).**
+The final domain — microrheology **moduli** (`per_track_msd_curves`, GSER + Evans G'/G'' estimators,
+`extract_fusion_relaxation`) — moved **verbatim** into `condensate_physics/moduli.py` (it imports the MSD
+path from the sibling `msd` module). No modulus number changed.
+
+- **`condensate_physics_tools.py` is now a 122-line pure re-export shim** (from 2470, -95%) over the
+  `toolbox/condensate_physics/` package: `msd.py`, `moduli.py`, `coarsening.py`, `relaxation.py`,
+  `photobleaching.py`, `frame_quality.py`, `intensity.py`, `survival.py`. Every previously-public name is
+  re-exported, so all callers (VPT, timeseries, dynamics UIs, navigator, trackmate) import unchanged; the
+  now-unused module-level imports were removed from the shim.
+- **Byte-identical across the whole decomposition** — the golden-master MSD->D->viscosity chain and every
+  physics characterization test pass unmodified; moved keys recorded in the drop-guard's `_DELIBERATE`; the
+  per-file ceiling ratcheted 2470 -> 122. Full `pytest -m core` green.
+
 ## [1.6.220] - 2026-07-21
 ### Changed — **condensate_physics decomposition step 4: the MSD / anomalous-diffusion domain moves out (byte-identical).**
 The largest, most-checked domain — the MSD→D→viscosity chain the golden-master pins — moved **verbatim** into
