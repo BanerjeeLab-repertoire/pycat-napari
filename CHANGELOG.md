@@ -1,3 +1,19 @@
+## [1.6.213] - 2026-07-21
+### Changed — **invitro decomposition step 1: the size-distribution domain moves to its own module (byte-identical).**
+Begins decomposing the 2,051-line `invitro_tools.py` by analysis domain. The MLE size-distribution path —
+`fit_size_distribution_mle`, `fit_size_distribution`, and the phase helpers (`_fit_size_models`,
+`_powerlaw_tail_comparison`, `_size_distinguishability`, `_size_verdict`) — moved **verbatim** into the new
+`toolbox/invitro/size_distribution.py`.
+
+- **`invitro_tools.py` re-exports** the two public entry points, so every caller (the invitro fluor/BF UIs,
+  `batch/steps/invitro_steps.py`, the op-catalog api string) imports them unchanged. Move, not rewrite — no
+  fit, threshold, or reported number changed.
+- **Byte-identical:** `test_size_distribution_mle_characterization` and the invitro size tests pass
+  unmodified; the moved keys are recorded in the drop-guard's `_DELIBERATE` set.
+- `invitro_tools.py` dropped **2051 → 1623** lines; a new per-file ceiling was established there (1623) that
+  ratchets down as the remaining domains (partition, field_summary, spatial, analysis) move out in
+  follow-on commits.
+
 ## [1.6.212] - 2026-07-21
 ### Added — **A structural guard that every `_mpx` pixel-size accessor uses the ONE canonical helper (redundancy_consolidation axis 1).**
 Pixel size scales every physical-unit measurement (viscosity, ΔG, size, density); a per-UI `_mpx()` that

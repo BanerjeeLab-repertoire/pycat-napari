@@ -146,6 +146,15 @@ _DELIBERATE = {
     # test (`test_size_distribution_mle_characterization`) pins the selected model, every AIC/loglik, the
     # power-law tail test and the descriptive moments unchanged across the split.
     'invitro_tools.py::fit_size_distribution_mle',
+    # 1.6.213 — the whole size-distribution domain (fit_size_distribution_mle + fit_size_distribution + the
+    # phase helpers, and their nested _add / _pointwise / lognormal_pdf) MOVED verbatim from invitro_tools to
+    # `toolbox/invitro/size_distribution.py`; invitro_tools re-exports the two public entry points, so every
+    # caller's import still resolves. No fit or number changed (pinned by
+    # test_size_distribution_mle_characterization). These keys vanished from invitro_tools.py by the move.
+    'invitro_tools.py::fit_size_distribution',
+    'invitro_tools.py::_add',
+    'invitro_tools.py::_pointwise',
+    'invitro_tools.py::lognormal_pdf',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

@@ -282,6 +282,10 @@ _FILE_LINE_CEILINGS = {
     # (decomposition, 1.6.150); _STEP_MAP, the registry wiring, and replay_background_removal (pinned by
     # a source-level test) stay. Ratchet moves down only.
     "batch_step_registry.py": 432,
+    # 2051 -> 1623: the size-distribution domain moved to toolbox/invitro/size_distribution.py (invitro
+    # decomposition step 1, 1.6.213). A NEW ceiling established at the post-move size to lock the shrink;
+    # it moves DOWN as the remaining domains (partition, field_summary, spatial, analysis) move out.
+    "toolbox/invitro_tools.py": 1623,
 }
 
 

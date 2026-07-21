@@ -1,5 +1,16 @@
 # Claude Code spec — Decompose `invitro_tools.py` by domain
 
+> **◐ STATUS — Step 1 (size_distribution) DONE (1.6.213); partition / field_summary / spatial / analysis
+> remain.** The `toolbox/invitro/` package exists; `size_distribution.py` holds the MLE model-selection
+> path (`fit_size_distribution_mle` + `fit_size_distribution` + the phase helpers), moved VERBATIM from
+> `invitro_tools`, which now re-exports the two public entry points so every caller (invitro UIs, batch
+> steps, the op-catalog api string) is unchanged. Byte-identical — `test_size_distribution_mle_characterization`
+> and the invitro size tests pass unmodified; the moved keys are recorded in the drop-guard's `_DELIBERATE`.
+> `invitro_tools.py` dropped 2051→1623 and a NEW per-file ceiling was established there (1623) to lock the
+> shrink and ratchet DOWN as the remaining domains move out. **Remaining:** partition (calibration-sensitive
+> — the calibration/ΔG/partition tests are the net), field_summary (preserve the 2D projection behaviour),
+> spatial, and the run_* orchestration — one domain per commit.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. A well-covered
 mid-size science file (**2,039 lines, 15 test files**) holding the in-vitro condensate analysis — the
 partition/enrichment/size-distribution/volume-fraction path that is manuscript-facing. Splits cleanly by
