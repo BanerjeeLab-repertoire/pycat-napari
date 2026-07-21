@@ -1,3 +1,24 @@
+## [1.6.226] - 2026-07-21
+### Added — **Linear spectral / bleed-through unmixing (backlog C1) — from controls, refusing to invert garbage.**
+New `toolbox/unmixing_tools.py`: the general 2–4 channel form of the single-coefficient bleed-through knob
+in `ratiometric_tools` (it complements it, does not replace it). Models each observed channel as a fixed
+linear combination of the true fluorophore abundances, `c = M·a`, and recovers `a = M⁻¹·c`, with the science
+in the rules — the same "refuse rather than lie" contract as the calibration and pixel-size gates:
+- `estimate_mixing_matrix(single_label_controls, *, background)` — the mixing matrix comes from single-label
+  CONTROLS, never the mixed data (that would be circular); background is subtracted BEFORE the crosstalk
+  ratio is formed; a control dark in its own channel is refused (you cannot normalize by zero).
+- `unmix(channels, M, *, background, condition_limit)` — **refuses a singular / ill-conditioned matrix**
+  (`cond(M) > 1e6`) with a stated reason rather than pseudo-inverting it and amplifying noise into confident
+  nonsense.
+- `negative_fraction(unmixed)` — the built-in honesty check (a large negative fraction means the linear
+  model is wrong); `clip_for_display` clips negatives **for display only**, never back into a measurement;
+  `mixing_matrix_warnings` flags a likely swapped channel assignment or an over-subtracted background.
+- Linear 2–4 channel crosstalk only — NOT a lambda-stack spectral unmix. Pure numpy, `core`-tested against
+  synthetic mixtures with a known matrix (`test_unmixing.py`: control-based estimation, background removed
+  first, mix→unmix round-trip, singular-matrix refusal, the negative-fraction honesty check).
+- **Follow-on (tracked, not silent):** a toolbox UI step to select the controls + mixed image is not wired
+  yet — the capability is usable via the API / batch today; UI surfacing waits on the feature-registry work.
+
 ## [1.6.225] - 2026-07-21
 ### Added — **The batch consolidated table now exports a provenance sidecar — wiring the orphaned `feature_provenance` export hook (backlog B2 complete).**
 `feature_provenance.write_provenance_sidecar` was built and tested but had no caller, so a consolidated
