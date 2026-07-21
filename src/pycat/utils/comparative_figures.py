@@ -253,14 +253,30 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
         selection_service.subscribe(view_id, apply_selection)
     except Exception:                                # broad-ok: service without subscribe → no receive wiring
         pass
+    _cid = None
     try:
-        fig.canvas.mpl_connect(
+        _cid = fig.canvas.mpl_connect(
             'button_press_event',
             lambda ev: (getattr(ev, 'inaxes', None) is ax and getattr(ev, 'x', None) is not None
                         and emit_nearest(ev.x, ev.y)))
     except Exception:                                # broad-ok: no canvas to connect (headless)
         pass
-    return {'emit_nearest': emit_nearest, 'apply_selection': apply_selection}
+
+    def dispose():
+        """Detach on dialog close — idempotent (plot_lifecycle). ``apply_selection`` is a CLOSURE, held
+        STRONGLY by the service (the weak-method net does not catch it), so this explicit unsubscribe is
+        what keeps the subscriber list from growing; it also disconnects the canvas cid."""
+        try:
+            selection_service.unsubscribe(view_id)
+        except Exception:                            # broad-ok: teardown is best-effort; never raise on close
+            pass
+        if _cid is not None:
+            try:
+                fig.canvas.mpl_disconnect(_cid)
+            except Exception:                        # broad-ok: a stale/twice-disconnected cid is harmless
+                pass
+
+    return {'emit_nearest': emit_nearest, 'apply_selection': apply_selection, 'dispose': dispose}
 
 
 def _condition_summary(objs, units, order=None):

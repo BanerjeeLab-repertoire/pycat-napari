@@ -1,12 +1,20 @@
-> **✅ STATUS — Part C (service self-defense) DONE, shipped in 1.6.187.** The verified state was already
-> better than the premise: `SelectionService` holds bound-method subscribers WEAKLY (`_as_callable` →
+> **✅ STATUS — Part C DONE (1.6.187); Parts A/B (the UI teardown) DONE (shipped 1.6.202).**
+>
+> Parts A/B: `make_pickable` (the one integration every brushable plot uses) now tracks its connection ids
+> and gets `dispose_pickable(figure)` — disconnect the pick/key/close callbacks, remove the overlay, drop
+> the `LazyRefs` sequence, `plt.close` the figure — idempotent and also wired to the figure's own
+> `close_event`. The two sibling brushing helpers (`cohort_targets.attach_histogram_brushing`,
+> `comparative_figures._attach_object_brushing`) return a `dispose` that unsubscribes their CLOSURE
+> subscription (which Part C's weak-method net does not catch) and disconnects its cid; Feature Explorer
+> disposes the previous brushing before re-wiring on each column switch. The suite's ">20 figures" warning
+> is gone (a `conftest` autouse fixture closes leftover figures). Selection behaviour is unchanged —
+> lifecycle only. Pinned by `tests/test_plot_lifecycle_dispose.py` (core, Agg backend).
+>
+> _Part C (shipped 1.6.187):_ `SelectionService` holds bound-method subscribers WEAKLY (`_as_callable` →
 > `WeakMethod`, so a closed dock's method dies) and drops dead handles on broadcast. Added `subscriber_count()`
 > (live count, dead handles pruned) + `_prune_dead()` (proactive sweep), and the leak test
 > (`tests/test_selection_lifecycle.py`): 50 open→dispose cycles return to baseline, a GC'd view is never
-> broadcast to, idempotent unsubscribe, deferred channel counted too. **Follow-on** (the UI half, Parts A/B):
-> a per-view `dispose()` that also `mpl_disconnect`s canvas callbacks and `plt.close`s the figure, wired to
-> dock/dialog close signals — the weak-method design already prevents the subscription leak; this remains for
-> the figure/callback accumulation.
+> broadcast to, idempotent unsubscribe, deferred channel counted too.
 
 # Claude Code spec — Plot/view lifecycle cleanup
 

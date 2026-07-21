@@ -135,14 +135,30 @@ def attach_histogram_brushing(fig, ax, values, entity_ids, *, bin_edges, selecti
         selection_service.subscribe(view_id, apply_selection)
     except Exception:                                # broad-ok: a service without subscribe → no receive wiring
         pass
+    _cid = None
     try:
-        fig.canvas.mpl_connect(
+        _cid = fig.canvas.mpl_connect(
             'button_press_event',
             lambda ev: (getattr(ev, 'inaxes', None) is ax and getattr(ev, 'xdata', None) is not None
                         and emit_bin(ev.xdata)))
     except Exception:                                # broad-ok: no canvas to connect (headless)
         pass
-    return {'emit_bin': emit_bin, 'apply_selection': apply_selection}
+
+    def dispose():
+        """Detach on close — idempotent (plot_lifecycle). ``apply_selection`` is a CLOSURE, so the service
+        holds it STRONGLY (the weak-method net does not catch it); this is the explicit unsubscribe that
+        keeps the subscriber list from growing across a session, plus the canvas cid disconnect."""
+        try:
+            selection_service.unsubscribe(view_id)
+        except Exception:                            # broad-ok: teardown is best-effort; never raise on close
+            pass
+        if _cid is not None:
+            try:
+                fig.canvas.mpl_disconnect(_cid)
+            except Exception:                        # broad-ok: a stale/twice-disconnected cid is harmless
+                pass
+
+    return {'emit_bin': emit_bin, 'apply_selection': apply_selection, 'dispose': dispose}
 
 
 def select_aggregate_row(selection_service, members, *, definition=None, view_id='aggregate'):

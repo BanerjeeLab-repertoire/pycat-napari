@@ -249,25 +249,103 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
             except Exception as exc:
                 debug_log('brushing: could not clear the viewer overlay', exc)
 
+    _wire_pickable(figure, _on_pick, _on_key, state, refs)
+    return figure
+
+
+def _wire_pickable(figure, on_pick, on_key, state, refs) -> None:
+    """Connect the pick/key/close callbacks and stash the teardown handles on ``figure``.
+
+    Split out of :func:`make_pickable` so the tracked-cids + close-event wiring lives in one place and
+    the caller stays reviewable. Tracks the connection ids so teardown is EXACT (disconnecting what was
+    actually wired, not guessing at close time), stores the refs + cids + state on the figure, and wires
+    the auto-teardown to the figure's OWN close.
+    """
+    cids = []
     try:
-        figure.canvas.mpl_connect('pick_event', _on_pick)
-        figure.canvas.mpl_connect('key_press_event', _on_key)
+        cids.append(figure.canvas.mpl_connect('pick_event', on_pick))
+        cids.append(figure.canvas.mpl_connect('key_press_event', on_key))
     except Exception as exc:
         debug_log('brushing: could not connect the pick event', exc)
 
-    # The refs travel WITH the figure, so anything downstream — an export, a saved session, a
-    # batch report — can still answer "what is this point?".
-    #
-    # **Stored as they are, NOT `list(refs)`.** That call rebuilt every ref the `LazyRefs` sequence
-    # exists to avoid building — measured at 3.0 s for 50 000 points — so it quietly undid the whole
-    # of increment 4's lazy construction *in the one function that wires every brushable plot*. The
-    # sequence is indexable, sized and iterable; nothing downstream needs it to be a list.
+    # The refs travel WITH the figure, so anything downstream — an export, a saved session, a batch
+    # report — can still answer "what is this point?". **Stored as they are, NOT `list(refs)`.** That
+    # call rebuilt every ref the `LazyRefs` sequence exists to avoid building — measured at 3.0 s for
+    # 50 000 points — so it quietly undid increment 4's lazy construction in the one function that wires
+    # every brushable plot. The sequence is indexable, sized and iterable; nothing needs it to be a list.
     try:
         figure._pycat_object_refs = refs
-    except Exception:
+        figure._pycat_brush_cids = cids
+        figure._pycat_brush_state = state
+    except Exception:      # broad-ok: a figure that rejects attributes just loses auto-teardown, not brushing
         pass
 
-    return figure
+    # Wire teardown to the figure's OWN close so a closed window cleans up without the caller remembering
+    # to. Uses `event.canvas.figure` rather than capturing `figure`, so the handler adds no reference
+    # cycle; it does NOT `plt.close` (the figure is already closing — that would recurse). Idempotent.
+    try:
+        cids.append(figure.canvas.mpl_connect(
+            'close_event', lambda event: _teardown_pickable(event.canvas.figure)))
+    except Exception:      # broad-ok: no canvas to wire the auto-teardown onto (headless) — dispose still works
+        pass
+
+
+def _teardown_pickable(figure) -> None:
+    """Undo everything :func:`make_pickable` wired onto ``figure`` **except closing it** — idempotent.
+
+    Disconnects the pick/key/close canvas callbacks it connected (by their tracked cids, so teardown is
+    exact), removes the one-point selection overlay artist, and drops the ``ObjectRef`` sequence the
+    figure carried (releasing the ``LazyRefs`` cache). Safe to call more than once — a close signal can
+    fire twice — and safe on a figure that was never made pickable (everything is a no-op then).
+    """
+    cids = getattr(figure, '_pycat_brush_cids', None) or []
+    for cid in list(cids):
+        try:
+            figure.canvas.mpl_disconnect(cid)
+        except Exception:      # broad-ok: a stale/twice-disconnected cid must not break teardown
+            pass
+    try:
+        figure._pycat_brush_cids = []
+    except Exception:          # broad-ok: teardown is best-effort; never raise while cleaning up
+        pass
+
+    state = getattr(figure, '_pycat_brush_state', None)
+    overlay = state.get('overlay') if isinstance(state, dict) else None
+    if overlay is not None:
+        try:
+            overlay.remove()
+        except Exception:      # broad-ok: an already-removed overlay must not break teardown
+            pass
+        try:
+            state['overlay'] = None
+        except Exception:      # broad-ok: best-effort
+            pass
+
+    try:
+        figure._pycat_object_refs = None       # release the LazyRef sequence the plot held
+    except Exception:          # broad-ok: best-effort
+        pass
+
+
+def dispose_pickable(figure, *, close_figure=True) -> None:
+    """**Explicit teardown for a brushable plot window** — disconnect, drop refs, and close the figure.
+
+    The complement to :func:`make_pickable`: call this when a plot dock/dialog closes so a long session
+    does not accumulate open figures, canvas callbacks and ``LazyRef`` caches (the audit's ">20 figures"
+    finding). Runs :func:`_teardown_pickable` (disconnect cids, remove overlay, drop refs) and then, by
+    default, ``plt.close(figure)`` so the figure count returns to baseline. Idempotent — a close signal
+    can fire twice, and a second call is a no-op.
+
+    ``close_figure=False`` tears down the wiring but leaves the figure open (e.g. a figure embedded in a
+    dock that Qt will destroy itself, where ``plt.close`` on an unmanaged canvas would do nothing useful).
+    """
+    _teardown_pickable(figure)
+    if close_figure:
+        try:
+            import matplotlib.pyplot as plt
+            plt.close(figure)
+        except Exception:      # broad-ok: closing is best-effort; a non-pyplot figure just stays as-is
+            pass
 
 
 def _emphasise(artist, index, state):

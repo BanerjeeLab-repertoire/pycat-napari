@@ -91,6 +91,12 @@ def build_feature_explorer_dock(table, *, context=None, selection_service=None,
 
     layout.addLayout(left, 1); layout.addLayout(right, 2)
 
+    # The mini-histogram figure is REUSED across column switches, and `fig.clear()` drops the artists but
+    # NOT the canvas callbacks — so without this, every switch would leave another `button_press_event`
+    # cid (and a stale subscription) on the same canvas (plot_lifecycle). Hold the previous brushing's
+    # disposer and tear it down before re-wiring.
+    _brush = {'dispose': None}
+
     def _show(key):
         card = build_feature_card(table, key, context=context)
         card_view.setHtml(_card_text(card))
@@ -106,12 +112,17 @@ def build_feature_explorer_dock(table, *, context=None, selection_service=None,
             if selection_service is not None and entity_id_col in getattr(table, 'columns', ()):
                 try:
                     from pycat.utils.cohort_targets import attach_histogram_brushing
+                    # Tear down the previous column's brushing first — its cid lives on this same reused
+                    # canvas, which fig.clear() did not touch.
+                    if _brush['dispose'] is not None:
+                        _brush['dispose']()
                     vals = table[key].to_numpy()
                     eids = table[entity_id_col].astype(str).to_numpy()
-                    attach_histogram_brushing(fig, ax, vals, eids, bin_edges=edges2,
-                                              selection_service=selection_service,
-                                              view_id=_VIEW_ID, measurement=key, units=card.units,
-                                              bars=bars)
+                    handles = attach_histogram_brushing(
+                        fig, ax, vals, eids, bin_edges=edges2,
+                        selection_service=selection_service,
+                        view_id=_VIEW_ID, measurement=key, units=card.units, bars=bars)
+                    _brush['dispose'] = handles.get('dispose')
                 except Exception as exc:      # broad-ok: histogram brushing is optional — never break the dock
                     debug_log('Feature Explorer: could not wire histogram brushing', exc)
         canvas.draw_idle()

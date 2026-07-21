@@ -1,3 +1,33 @@
+## [1.6.202] - 2026-07-20
+### Fixed — **Brushable plots tear down on close — figures, callbacks and subscriptions stop accumulating (plot_lifecycle Parts A/B).**
+The audit found ">20 matplotlib figures" open during a session: `make_pickable` (the one integration every
+brushable plot uses) connected two canvas callbacks, stored an overlay artist and a `LazyRefs` sequence on
+the figure, and had NO teardown — and two sibling brushing helpers subscribed a CLOSURE the service holds
+strongly (which Part C's weak-method net does not catch). Every plot window left all of that behind. Part C
+(the `SelectionService` self-defense) shipped in 1.6.187; this is the UI half.
+
+- **`make_pickable` now tracks its connection ids** and gets `dispose_pickable(figure)` — disconnect the
+  pick/key/close callbacks, remove the selection overlay, drop the ref sequence, and `plt.close` the figure.
+  Idempotent (a close signal can fire twice). Teardown is also wired to the figure's own `close_event`, so a
+  closed window cleans up even without an explicit dispose. Selection *behaviour* is unchanged — lifecycle
+  only.
+- **`cohort_targets.attach_histogram_brushing` and `comparative_figures._attach_object_brushing` now return
+  a `dispose`** that unsubscribes the (strongly-held) closure and disconnects its canvas cid — closing the
+  subscription leak the weak-method net cannot reach.
+- **Feature Explorer no longer leaks per column switch.** Its mini-histogram reuses one figure, and
+  `fig.clear()` does not drop canvas callbacks — so every column switch used to leave another
+  `button_press_event` cid and a stale subscription behind. It now disposes the previous brushing before
+  re-wiring.
+- **The suite's ">20 figures" warning is gone** — a `conftest` autouse fixture closes leftover pyplot
+  figures after each test (test hygiene; runs after the body, so a test asserting on `plt.get_fignums()`
+  mid-run is unaffected).
+- `tests/test_plot_lifecycle_dispose.py` (core, headless via the Agg backend) pins it: a pick reaches the
+  handler before dispose and not after; dispose closes the figure and returns `get_fignums()` to baseline;
+  the overlay and refs are released; dispose is idempotent and safe on a never-pickable figure; the
+  close_event wiring runs teardown; N open→dispose cycles do not grow the open-figure count; and the
+  histogram-cohort `dispose` unsubscribes the closure across simulated column switches. Spec Parts A/B
+  STATUS → DONE.
+
 ## [1.6.201] - 2026-07-20
 ### Added — **Sessions now persist the user's entered workflow parameters (session_persist_settings Part 2).**
 A saved session recorded the layers, dataframes and calibration but NOT the workflow parameters the user
