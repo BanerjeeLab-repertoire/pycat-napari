@@ -98,7 +98,20 @@ instrument have polarization optics installed?) before committing.
 
 ## 3. Known issues (may name specific machines/configs — keep private)
 
-### GPU / OpenGL canvas corruption on some NVIDIA configs (ACTIVE, not resolved)
+### GPU / OpenGL canvas corruption on some NVIDIA configs (BLOCKED — not abandoned)
+**Suggested action for affected users: update the GPU driver to the latest, and/or roll back
+to a previous stable driver.**
+
+**Why this is blocked rather than deprioritized (2026-07-20):** the two machines where this
+reproduces are institution-managed, NOT user-maintained — driver updates and rollbacks require
+IT/admin action and cannot be performed by the user. The prime-suspect fix (driver rollback from
+595.97) is therefore not something we can currently execute or verify on either affected machine.
+This is a LOGISTICS block, not a decision to stop: the diagnosis points at the driver, the
+confirming test needs a driver change, and we do not have admin rights to make that change. If/when
+IT performs a driver update or rollback on one of these machines, retest plain napari + load image +
+click/scroll to confirm, and only then decide whether a PyCAT-side `--safe-rendering` fallback flag
+is worth adding. Until admin access or a driver change is available, no further PyCAT-side progress
+is possible — it is waiting on infrastructure we do not control, not on engineering effort.
 
 **Symptom:** after loading an image, clicking the canvas renders the view
 tilted/sheared (diagonal split); scroll/zoom still work (input + data fine — a
@@ -1428,3 +1441,187 @@ does not re-discover them from scratch:
 
 ~35-110 other filter defaults remain; the audit's view stands — they are not equal, and the next
 increment is another prioritisation call, not a sweep.
+
+## SWEEP: cross-session dropped-thread audit (2026-07-20, 1.6.168)
+
+A deliberate pass over the full PyCAT chat history looking for things IDENTIFIED but never
+tracked in a durable doc. Most large threads were already captured (roadmap rubrics, sections
+1-8 above). The items below are the genuine gaps — recorded here so they stop living only in
+chat transcripts. Each is tagged with its state as of 1.6.168.
+
+### Paused bugs not in the Known-Issues section (section 3)
+- **RESOLVED (2026-07-20): drag-drop onto the napari CANVAS works** — verified loading CZI, TIFF,
+  and IMS by drop. (Prior investigation retained below for history.) ORIGINAL: napari 0.7.1;
+  the canvas widget has `acceptDrops=False`, so Qt rejects the drag at the door and no
+  DragEnter/Drop event fires. The app-level `_FileDropFilter` only catches drops on non-canvas
+  widgets. Multiple fixes attempted through 1.5.329 (force `setAcceptDrops` on QtViewer+canvas+
+  children; a layer-insertion backstop watching `layers.events.inserted`) — STILL red-slash per
+  Gable's test: the drop is rejected entirely, so the backstop never fires. `dnd_diag.py`
+  delivered; resume by getting its output to pin the exact 0.7.1 widget/accessor. Dropping onto
+  non-canvas areas works, so this is low-severity but real and user-visible. Belongs in the
+  public known-issues note eventually.
+- **PAUSED INDEFINITELY: GPU/OpenGL canvas corruption on some NVIDIA configs** — lives in the
+  Known-Issues section (section 3). Suggested user action: **update the GPU driver to the latest,
+  and/or roll back to a previous stable driver.** No further PyCAT-side investigation planned; the
+  `--safe-rendering` flag remains an optional future idea, not committed.
+
+### Latent-pattern decision never formalized
+- **DECISION NEEDED: the ~79 `np.asarray(layer.data)` sites.** The frame-0-collapse landmine is
+  DEFUSED (the lazy `__array__` now REFUSES via `lazy_guard` rather than silently returning frame
+  0), so any remaining offender is a LOUD crash, not a silent wrong-answer. But ~79 sites remain
+  and there is no recorded decision on whether to triage them proactively or leave them to fail
+  loudly if hit. Most are safe 2D-only workflows. This is a judgment call per site (does this
+  workflow ever receive a time-series?), not a blind sweep — and it currently lives only in a
+  point-in-time audit doc, not as a live task. Recommendation: leave defused, fix opportunistically
+  when a site is touched for other reasons; do NOT open a dedicated sweep.
+
+### Delivered-but-unlanded specs (in docs/audits/ as .md, not yet shipped, not in roadmap)
+These have written specs but no roadmap/DEV_NOTES home, so their rationale would be lost if the
+.md files were cleared:
+- **Exception conversion increment 2** (`claude_code_spec_exception_conversion_2_*.md`) — convert
+  scientific-path broad handlers in `toolbox/` (ratchet still 514) to typed errors; annotate the
+  legitimate Qt-teardown ones `# broad-ok:`. Convert by CONSEQUENCE, not count.
+- **UI-builder split** (`claude_code_spec_ui_builder_split_*.md`) — the five 400-638 line `_add_*`
+  widget constructors; the low-risk half of the complexity ratchet-down.
+- **Science-function split increments 2+** (`claude_code_spec_science_function_split_*.md`) — 1 of 6
+  done (`fit_anomalous_diffusion`, 1.6.168); `partition_coefficient_local` (394, covered, ready),
+  `run_timeseries_condensate_analysis` (362, uncovered — needs characterization test first), and
+  the long `timeseries_condensate_tools` functions remain. Coverage-gated: no test, no split.
+
+### Older deferred follow-ons never converted to roadmap rubrics
+- **Topology follow-ons** (chromatin topology map shipped 1.5.137, foundation exists in
+  `topology_tools.py`): the two utilities that build on it were never started —
+  (1) over-segmentation sanity check (objects-per-basin), (2) wetting/connectedness metrics
+  (ridge-bridging, percolation). Gable wanted to eyeball the topology map on real data before
+  building these; that gate was never explicitly closed or reopened.
+- **Maximize-on-open** — RESOLVED/non-issue (2026-07-20): the app does not maximize on opening; no
+  inconsistent-maximize behaviour to fix.
+- **Session-load audit** — does "Load Previous Session" restore line/intermediate layers created
+  before a Save-and-Clear? Raised as a non-verify pending item during the grid/menu work; never
+  audited. Worth a one-time check.
+- **Same-channel grid grouping** — the managed grid tiles in canonical/layer order, not grouped by
+  channel across images. Raised as a possible enhancement; never specced.
+- **Partial-volume default** (verify against current tree before acting): the Cell Analyzer image
+  dropdown still defaults to `name_hint='Upscaled Fluorescence'` (`ui_analysis_mixin.py`). Earlier
+  work added an amber warning but left the DEFAULT on the upscaled image, so the flawed measurement
+  path may still be the path of least resistance. Confirm whether later work changed the default;
+  if not, this is a live measurement-correctness nudge worth finishing.
+
+### Manuscript-track items (never in a doc, only in memory/chat)
+- Nature Methods Brief Communication prep as an explicit track: benchmarking (now partly served by
+  the validation suite, 1.6.166), ground-truth validation, biological validation across systems,
+  figure polish (now partly served by publication figure refinement, 1.6.167). The remaining gap
+  is cross-system biological validation — not a code task, but it should be a named roadmap line so
+  it is not forgotten.
+
+None of the above is urgent. The point of the sweep is that they now have a home other than a
+transcript. The two genuinely user-facing ones (drag-drop, GPU corruption) are the known-issues
+candidates; the rest are backlog.
+
+## SWEEP ADDENDUM: full 12-chat read (2026-07-20) — non-private items only
+
+The cross-session sweep was extended to a full read of all 12 PyCAT chats. Manuscript-strategy
+content found in three of them is PRIVATE and has been kept OUT of the repo (see the local-only
+file on Gable's machine, not tracked here). The repo-appropriate findings:
+
+### Delivery-workflow rule that was never written down
+From the 1.5.335/336 session (the changelog-staleness incident): **always include CHANGELOG.md and
+pyproject.toml in the delivery zip; if the sandbox copy might be stale, upload-and-merge (or ASK)
+before zipping — never ship a partial bundle that could overwrite live changelog/version history.**
+Root cause was a sandbox worktree extracted from an older tag, so its CHANGELOG lagged the live one
+and would have clobbered real entries on extract.
+
+### Chats read in full, confirmed to hold NO untracked code threads
+- "Debugging code / Pip not installing updated git code" — GPU/torch cu118 install; covered by GPU notes.
+- "Styling GUI file buttons" — cosmetic QGroupBox title styling; no durable thread.
+- "Publishing conda package updates" — packaging mechanics; no dropped item.
+- "PyCAT batch processing workflow automation" — workflow-checklist replay-on-activate; shipped.
+- Three manuscript-strategy chats — content is private, captured in Gable's local-only file.
+
+## Brushing/plotting audit → spec coverage map (2026-07-20)
+
+The brushing/plotting/publication audit (identity + brushing + figures) was fully converted to specs
+in docs/audits/. Every audit section now has a home so none is forgotten:
+
+| audit section | spec | priority |
+|---|---|---|
+| §7 two FigureSpecs (largest design issue) | claude_code_spec_figurespec_merge | 1 |
+| §1 identity not universal (next milestone) | claude_code_spec_auto_identity_stamping | 2 |
+| §5 plot lifecycle / >20 open figures | claude_code_spec_plot_lifecycle | 3 |
+| §2 dataset identity = path (breaks on move) | claude_code_spec_dataset_identity_uuid | 4 |
+| §2 identity/location divergence | claude_code_spec_entity_registry | 5 |
+| §4 backend parity (seaborn/pyqtgraph/plotly) | claude_code_spec_backend_parity | 6 |
+| §8 missing general publication features | claude_code_spec_publication_features | 7 (after merge) |
+| §9 Explore→Refine→Export UX | claude_code_spec_explore_refine_export | 8 (after merge) |
+
+**Dependency order:** figurespec_merge FIRST (publication_features + explore_refine_export both depend
+on the unified spec). auto_identity_stamping before entity_registry (registry populates at the stamping
+finalization point) and dataset_identity_uuid feeds the registry's durable `dataset` field. plot_lifecycle
+and backend_parity are independent and can slot anywhere.
+
+**Recommended sequence:** merge → auto-stamp → lifecycle → dataset-uuid → entity-registry → backend-parity
+→ publication-features → explore-refine-export. The first three are the audit's own top-3; the identity
+pair (uuid + registry) is the deepest correctness work; the last two are the publication-workstation build.
+
+## Built-but-unwired modules (2026-07-20 orphan scan)
+
+An import scan found modules that are **shipped and unit-tested but imported by nothing in `src/`** —
+built, correct, and invisible/unreachable. Verified via exact-import grep (0 real importers each). This
+is the concrete "unwired due to needing unblocking" list. Most map onto the feature-registry /
+navigator-UI visibility work; a few are integration follow-ons whose backing thread stalled.
+
+| module | what it is | why unwired / next step |
+|---|---|---|
+| `utils/reliability.py` | MRI reliability index | needs UI surface (feature-registry card) + wire as the quality-gate's reliability input |
+| `utils/feature_provenance.py` | per-feature provenance record | no consumer wires it into exported tables yet — needs the sidecar/export hook from its spec |
+| `utils/analysis_presets.py` | workflow preset objects | preset picker never added to the workflows — needs the UI from its spec |
+| `utils/cohort_targets.py` | histogram-bin + aggregate-row cohort emitters | the emitters exist but no plot wires its clicks to them — wire in the plot adapters |
+| `toolbox/condensate_modes.py` | 2D/3D/timeseries `CondensateMode` gating | never wired into the invitro workflow — the mode selector + output gating from its spec |
+| `toolbox/clean_spot_detection_tools.py` | CLEAN spot detection | **INTENTIONALLY UNWIRED — not a loose end.** A validated detector held back on purpose until the future smFISH pipeline it was written for lands (CLEAN assumes model-PSF spots, true for smFISH, so it must not be offered for arbitrary images). The intent is documented in the file's own header. Do NOT wire, remove, or re-flag it. |
+| `ui/brushable_table.py` | entity-stable brushable table | the audit's strong table impl — confirm it's actually mounted where tables render (may be wired via a name my grep missed; verify at GUI) |
+| `file_io/czi_seam.py` | CZI seam metric (`column_seam_score`) | the seam regression test uses it but the READER doesn't call it as a live check — wire as an optional load-time QC per the seam spec |
+
+**Common thread:** most of these are the "shipped capability with no UI" set the feature-registry +
+navigator-UI beginner-mode spec is designed to surface. Wiring the feature registry is the single move
+that makes `reliability`, `analysis_presets`, `condensate_modes`, and `feature_provenance` reachable.
+`cohort_targets` and `czi_seam` are narrower integration hooks (plot-adapter wiring; reader QC hook).
+`clean_spot_detection_tools` is INTENTIONALLY unwired (documented in-file — held for the future smFISH
+pipeline; not a loose end). `brushable_table` should be verified at the GUI before assuming it's orphaned.
+
+**Action:** don't mass-wire blindly. The feature-registry spec covers the visibility set; the two
+integration hooks (cohort_targets → plot adapters, czi_seam → reader) are small dedicated wirings; and
+clean_spot_detection_tools needs a decision, not a wiring.
+
+## Engineering audit → spec coverage map (2026-07-20)
+
+The second engineering audit (release engineering + finishing architectural transitions) mapped to
+specs. Coverage:
+
+| audit item | spec / status |
+|---|---|
+| #5 Python 3.13 blocked | claude_code_spec_python313_enablement (STAGED + COLLABORATIVE — Gable verifies real-data no-regression before the ceiling flips) |
+| #7 ruff correctness advisory | claude_code_spec_release_engineering (Part 1: make blocking) |
+| #6 pytest needs PYTHONPATH | release_engineering (Part 2: pythonpath + wheel-install lane) |
+| #8 core marker not minimal | release_engineering (Part 3: core/base/gui/... markers) |
+| #9 qt_api warning | release_engineering (Part 4: pytest-qt in [test]) |
+| #13 stale dep comments | release_engineering (Part 5) + python313 Stage 0 (coordinate — do once) |
+| #14 Production/Stable classifier | release_engineering (Part 6: → Beta) |
+| #12 free-form result dicts | claude_code_spec_typed_result_models |
+| #10 file_io ownership boundaries | **covered** by the existing fileio decomposition specs + the audit's own "architectural test rejecting new low-level fns in file_io.py" — add that guard test as part of the next file_io touch |
+| #11 VPT + timeseries still monolithic | **partially specced** — detect_beads_split (VPT) exists; the FULL VPT/timeseries domain split (vpt/trajectories,drift,msd,fitting,viscosity,... and timeseries/frame_access,preprocessing,...) is NOT yet specced — the biggest remaining decomposition, gated on coverage like the science-split programme |
+| #1-4,#10 (transitions) | ongoing via the decomposition specs already delivered |
+
+**Not yet specced (flagged so it isn't forgotten):**
+- **The full VPT scientific-domain split** (vpt_tools 2791 lines → trajectories/drift/msd/fitting/
+  viscosity/calibration/uncertainty/execution/result_models). detect_beads_split is one function; the
+  domain split is the whole module. Coverage-gated (VPT has the ~8.325 baseline + equivalence guards,
+  so it is splittable safely — but it's a large arc, needs its own spec.)
+- **The full timeseries_condensate_tools split** (2828 lines → frame_access/preprocessing/segmentation/
+  tracking/colocalization/coarsening/fusion/photobleaching/result_models). Some functions covered by
+  characterization tests; others uncovered (need tests first, per the science-split discipline).
+- **The file_io "no new low-level functions" architectural guard test** (#10) — a test that fails if a
+  new reader/metadata function is added to file_io.py, enforcing the ownership table. Small; fold into
+  the next file_io change.
+
+These three are the remaining engineering-audit work beyond the three specs written. VPT and timeseries
+domain splits are the large ones and should be their own coverage-gated specs when picked up.

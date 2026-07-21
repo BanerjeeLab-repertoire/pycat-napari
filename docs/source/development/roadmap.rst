@@ -2609,6 +2609,32 @@ Adaptive Gaussian Threshold Function (Detailed)
 
 
 
+.. rubric:: Dropped-thread sweep follow-ons (2026-07-20 cross-session audit)
+
+A pass over the full development history surfaced several older follow-ons that
+were identified but never promoted to roadmap items. The lab-specific and paused-bug
+details live in the private ``DEV_NOTES`` sweep section; the buildable, non-private
+ones are listed here so they are not forgotten:
+
+* **Topology follow-ons** — the chromatin topology map (shipped) has two unbuilt
+  utilities that depend on it: an *over-segmentation sanity check* (objects-per-basin)
+  and *wetting / connectedness metrics* (ridge-bridging, percolation). Gated on
+  eyeballing the topology map on real data first; that gate was never formally closed.
+
+* **Session-load completeness** — audit whether "Load Previous Session" restores line
+  and intermediate layers created before a Save-and-Clear. A one-time correctness check.
+
+* **Same-channel grid grouping** — the managed grid currently tiles in canonical layer
+  order; an option to group tiles by channel across images was raised but never specced.
+
+* **Cross-system biological validation** — the manuscript track's remaining
+  non-code gap. Benchmarking (validation suite) and figure polish (publication figure
+  refinement) now exist; validation across biological systems is still an explicit,
+  named to-do rather than an assumed one.
+
+* **Maximize-on-open timing** — the staggered window-maximize in ``run_pycat`` fires
+  inconsistently relative to the initial relayout. Cosmetic, low priority, long deferred.
+
 .. note::
    This roadmap is a living document and will be updated as development progresses and new requirements emerge. 
    If you'd like to contribute, please visit our :doc:`contributing` page to help work on implementing any of these or other useful features. 
