@@ -143,7 +143,18 @@ _LONG_FUNCTION_LIMIT = 120
 # exact per-detection track_id + link_cost on a fixed births/links/bridged-gap/velocity/area scenario —
 # the Hungarian solve is sensitive to the cost matrix, so identical output proves the construction was
 # preserved); the existing purity/gap/ambiguity property tests pass unmodified. Count 126 → 125.
-_MAX_LONG_FUNCTIONS = 125
+# 124. (2026-07-20) `fit_coarsening` (condensate_physics_tools), the 227-line coarsening-mechanism
+# classifier (Ostwald vs coalescence vs arrested), was split BY COMPUTATIONAL PHASE into pure helpers —
+# `_coarsening_powerlaw_fits` (the two curve_fits + R²), `_coarsening_is_arrested` (the slope-test that
+# decides whether the radius grew at all, never a fit statistic) and `_coarsening_confidence` (the seeded
+# residual bootstrap + confidence tiers; the single napari warning became a returned flag the orchestrator
+# emits) — leaving a ~35-line orchestrator. Two provably-dead locals (`noise`, `r2_gap`) were dropped in
+# the move. This is a physics FIT function, like its four already-split siblings; pinned byte-identical by
+# `test_fit_coarsening_output_is_byte_identical` (exact preferred_mechanism / confidence / r²s / rate
+# constants / bootstrap agreement / radius change on Ostwald + arrested scenarios — the bootstrap is
+# seeded, so its agreement is deterministic); the existing arrest-classification property tests pass
+# unmodified. Count 125 → 124.
+_MAX_LONG_FUNCTIONS = 124
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

@@ -78,6 +78,12 @@ _DELIBERATE = {
     # `test_bayesian_linker_assignment_is_byte_identical` (exact track_id + link_cost on a fixed scenario);
     # the existing purity/gap/ambiguity property tests pass unmodified.
     'dynamic_spatial_tools.py::link_trajectories_bayesian',
+    # 1.6.205 — `fit_coarsening` (the 227-line coarsening-mechanism classifier) was split BY COMPUTATIONAL
+    # PHASE into `_coarsening_powerlaw_fits`, `_coarsening_is_arrested` and `_coarsening_confidence`, leaving
+    # a ~35-line orchestrator. Nothing was removed: every phase MOVED into a named helper (two provably-dead
+    # locals, `noise` and `r2_gap`, were dropped in the move). Pinned byte-identical by
+    # `test_fit_coarsening_output_is_byte_identical`; the arrest-classification property tests pass unmodified.
+    'condensate_physics_tools.py::fit_coarsening',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line

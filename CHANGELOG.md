@@ -1,3 +1,22 @@
+## [1.6.205] - 2026-07-20
+### Changed — **Complexity ratchet 125 → 124: `fit_coarsening` split by computational phase (byte-identical).**
+The 227-line coarsening-mechanism classifier (Ostwald ripening vs coalescence vs arrested) — the fifth and
+last long physics-fit function in `condensate_physics_tools` — was decomposed into pure per-phase helpers,
+leaving a ~35-line orchestrator. No number moved.
+
+- **Phases extracted:** `_coarsening_powerlaw_fits` (the two `curve_fit`s + R²), `_coarsening_is_arrested`
+  (the slope-test that decides whether the radius grew *at all* — a physical claim, never a fit statistic)
+  and `_coarsening_confidence` (the seeded residual bootstrap + confidence tiers). The single
+  `napari_show_warning` became a returned flag the orchestrator emits, keeping the helpers pure. Two
+  provably-dead locals (`noise`, `r2_gap`) were dropped in the move.
+- **Pinned byte-identical** by a new `test_fit_coarsening_output_is_byte_identical` — exact
+  `preferred_mechanism` / confidence / R²s / rate constants / bootstrap agreement / radius change on
+  Ostwald and arrested scenarios (the bootstrap is seeded via `default_rng(0)`, so its agreement is
+  deterministic). The existing arrest-classification property tests in `test_coarsening_arrest.py` pass
+  unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 125 → 124 (the ratchet only moves down); the decomposition is recorded in
+  the drop-guard's `_DELIBERATE` set.
+
 ## [1.6.204] - 2026-07-20
 ### Changed — **Complexity ratchet 126 → 125: `link_trajectories_bayesian` split by computational phase (byte-identical).**
 The 245-line Bayesian/Hungarian trajectory linker — which feeds every VPT viscosity PyCAT reports — was
