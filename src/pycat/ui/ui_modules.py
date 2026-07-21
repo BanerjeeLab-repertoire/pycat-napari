@@ -852,7 +852,7 @@ class BaseUIClass:
                         circle._set('blue', 'Changed — you picked a different '
                                             'layer than the suggested one.')
                     else:
-                        circle._set(init_color, init_tip)
+                        circle._set('green', 'Done — layer selected.')  # valid (non-hint) selection → satisfied, never red (Fix 4)
                 else:
                     # No hint: a required field is simply satisfied (green); an
                     # optional field with a real value has been changed from its
@@ -1301,6 +1301,9 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 _do_draw()
             elif st == 'measure':
                 _do_measure()
+                _w = getattr(self, '_measure_line_status', None)  # green = a real measure, not the Draw click (Fix 1)
+                if _w is not None and self.central_manager.active_data_class.data_repository.get('_diameter_measured'):
+                    _w.mark_done()
             else:  # clear
                 if not _confirm_clear():
                     return  # cancelled — leave state (and label) as "Clear Lines"
@@ -1309,13 +1312,10 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
 
         measure_button.clicked.connect(_on_measure_line)
 
-        # "Measure Line(s)" is the only button here — drawing happens directly on
-        # the diameter Shapes layer (armed by _arm_line_drawing when the widget is
-        # shown / the layer is selected). The circle is required (red) and turns
-        # green once Measure Line(s) has been run.
+        # Only button here; circle greens only after a real Measure — complete_on_click=False (cycling) (Fix 1).
         try:
             from pycat.ui.field_status import button_with_circle
-            _measure_wrapped = button_with_circle(measure_button)  # red → green on run
+            _measure_wrapped = button_with_circle(measure_button, complete_on_click=False)
             self._measure_line_status = _measure_wrapped
             measure_layout.addWidget(_measure_wrapped)
         except Exception:

@@ -1,3 +1,31 @@
+## [1.6.222] - 2026-07-21
+### Fixed — **Status markers (the "logic gate" circles) now tell the truth: GREEN means DONE, not "ready".**
+A tester found four ways the workflow status circles lied about readiness — and a lying marker undermines
+the whole anti-black-box promise. All four are fixed in the SHARED mechanisms, so the fix applies to every
+pipeline that uses them, not just the fluorescence one the tester used.
+- **Green now means the step RAN, not "could run" (the systemic bug).** `button_with_circle` used the same
+  solid green for "inputs satisfied" (ready) and "action completed" (done). Readiness now renders as a
+  distinct **outlined amber ring** — it can never be misread as the solid-green done. The colour decision
+  moved into a new Qt-free `utils/marker_logic.py::resolve_marker` (unit-tested headlessly): precedence
+  done → ready → resting; `filled=False` only for ready.
+- **Measure-line completes on Measure, not Draw.** The Draw→Measure→Clear line control is one cycling
+  button, and the marker greened on *any* click — so it went green on the Draw click. `button_with_circle`
+  gained `complete_on_click=False` + a `mark_done()` hook; the measure widget now marks done only from the
+  Measure phase, success-gated on a real measurement (`_diameter_measured`).
+- **Select-image labels turn green on a valid layer.** In `_layer_row`, a real (non-placeholder) layer
+  that didn't match the dropdown's `name_hint` and wasn't manually picked (auto-defaulted) fell through to
+  **red** — so a valid selection read as "nothing selected." A valid selection is now green (the hint is a
+  suggestion, not a requirement); placeholder still reverts to red/yellow. Fixes all four selectors the
+  tester named (they share `_layer_row`).
+- **Optional-step colour convention decided and made explicit (kept blue).** Blue = "an optional step you
+  completed" carries real information, so it stays — but its meaning is now stated in the tooltip and the
+  `field_status` / `marker_logic` docstrings, applied uniformly to every optional action (e.g. upscaling),
+  not left ad hoc.
+- Tests: `tests/test_marker_logic.py` (`core`, Qt-free) pins the decision — ready is never solid green, a
+  not-done marker is never solid green, done beats ready, only ready is outlined;
+  `tests/test_status_markers.py` (`integration`) pins the widget wiring (ready-ring→green on run, cycling
+  button no-green-on-click, optional→blue). No measurement or output changes — UX correctness only.
+
 ## [1.6.221] - 2026-07-21
 ### Changed — **condensate_physics decomposition COMPLETE: the tools file is now a pure re-export shim (byte-identical).**
 The final domain — microrheology **moduli** (`per_track_msd_curves`, GSER + Evans G'/G'' estimators,
