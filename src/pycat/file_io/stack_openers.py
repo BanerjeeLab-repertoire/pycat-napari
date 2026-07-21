@@ -567,6 +567,7 @@ class _StackOpenersMixin:
         from napari.utils.notifications import show_warning as napari_show_warning
         from pycat.file_io.readers import czi_bioformats as _czibf
         from pycat.file_io.image_source import ImageSource
+        from pycat.file_io.czi_seam import warn_seam_qc
 
         if not _czibf.bioformats_available():
             napari_show_warning(
@@ -663,6 +664,10 @@ class _StackOpenersMixin:
             napari_show_info(
                 f"Lazy-loaded CZI {_ch_label}: {n_t} frames {H}×{W}px via BioFormats "
                 f"(frames read on demand)")
+
+            # Optional, non-blocking mosaic-seam QC, once per file (wire_orphans B2 — czi_seam).
+            if channel_idx == 0:
+                warn_seam_qc(lazy, napari_show_warning)
 
         self._finalise_stack_load(H, W, microns_per_pixel, list(range(n_c)),
                                   n_t, 1, file_path, source='generic')

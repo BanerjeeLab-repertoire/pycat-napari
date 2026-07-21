@@ -1,3 +1,19 @@
+## [1.6.224] - 2026-07-21
+### Added — **CZI opens now run a non-blocking mosaic-seam QC — wiring the orphaned `czi_seam` module (backlog B2).**
+`file_io/czi_seam.py` (the pure, tested seam metric) was imported by nothing, so a returning tile-assembly
+seam could go unnoticed. The streaming CZI open path now warns if one is present:
+- New pure helpers in `czi_seam.py`: `sample_frame_indices` (a handful of evenly-spaced frames, never the
+  whole movie), `seam_qc_message` (a one-line warning if the sampled frames share a persistent vertical
+  seam, else None), `seam_qc_from_lazy_stack` (samples by **per-frame indexing** — `np.asarray` on the whole
+  lazy stack is refused by design — row-subsamples each plane to stay cheap, needs ≥2 frames, degrades to
+  None on any read/shape problem), and a thin `warn_seam_qc(stack, show_warning)` wrapper.
+- `stack_openers._open_czi_streaming` calls `warn_seam_qc(lazy, napari_show_warning)` once per file
+  (channel 0). **Best-effort and non-blocking:** a QC failure never breaks the open, and it reads a handful
+  of planes, not the movie. It measures the seam; it does not fix or refuse the load.
+- Tests (`core`): `test_czi_seam.py` gains the frame-sampling, message, lazy-stack (flags an injected
+  persistent seam, clean → None, degrades safely, needs multiple frames), and an AST guard that the
+  streaming loader wires it. No pixel/measurement changes.
+
 ## [1.6.223] - 2026-07-21
 ### Added — **The in-vitro field-summary tables now carry their `condensate_mode` — wiring the orphaned `condensate_modes` module (backlog B2).**
 `toolbox/condensate_modes.py` was shipped and unit-tested but imported by nothing — so the "**2D

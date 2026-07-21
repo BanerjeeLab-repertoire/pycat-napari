@@ -64,3 +64,75 @@ def persistent_seam_columns(frames, *, z_threshold=5.0, frame_fraction=0.6, wind
         if hits >= need:
             seams.append(int(x))
     return sorted(seams)
+
+
+# ── Load-time QC wiring: sample a handful of frames, warn on a persistent seam ───────────────────
+#
+# The measurement above is pure and reader-free; this turns it into an optional, NON-BLOCKING open-time
+# check. It samples a HANDFUL of frames by per-frame indexing (never `np.asarray` on the whole lazy stack —
+# that is refused by design), so it costs a few plane reads, not a materialised movie.
+
+def sample_frame_indices(n, max_frames=5):
+    """Up to ``max_frames`` evenly-spaced frame indices across a length-``n`` stack — a handful, never all
+    (first, last, and a few between). Fewer than ``max_frames`` frames ⇒ every index."""
+    n = int(n)
+    if n <= 0:
+        return []
+    if n <= max_frames:
+        return list(range(n))
+    return sorted({int(round(i * (n - 1) / (max_frames - 1))) for i in range(max_frames)})
+
+
+def seam_qc_message(frames, **kw):
+    """A one-line QC warning if ``frames`` (a few 2-D planes) share a PERSISTENT vertical seam, else None.
+
+    Reporting only — it measures the seam, it does not fix or refuse the load. Extra kwargs pass through to
+    :func:`persistent_seam_columns` (``z_threshold``, ``frame_fraction``, ``window``, ``boundaries``)."""
+    seams = persistent_seam_columns(frames, **kw)
+    if not seams:
+        return None
+    shown = ', '.join(str(c) for c in seams[:8]) + ('…' if len(seams) > 8 else '')
+    return ("CZI mosaic-seam QC: a persistent vertical discontinuity was detected at column(s) "
+            f"{shown} across the sampled frames — this looks like a tile-assembly seam, not image content "
+            "(real structure moves frame-to-frame; a seam does not). Measurements crossing that column may "
+            "be affected.")
+
+
+def seam_qc_from_lazy_stack(stack, *, max_frames=5, **kw):
+    """Sample up to ``max_frames`` 2-D planes from a lazy ``(T, …, H, W)`` stack and run the seam QC —
+    returns a warning string or ``None``.
+
+    Indexes ``stack[i]`` for a handful of ``i`` (the same per-frame access the loader uses) and
+    row-subsamples each plane so the scan stays fast and non-blocking; a seam spans all rows, so
+    subsampling is representative. **Never materialises the whole movie**, and any read/shape problem
+    degrades to ``None`` — QC is best-effort and must never break a load. Needs ≥2 frames (a one-frame
+    "seam" is just image content)."""
+    try:
+        n = int(stack.shape[0])
+    except Exception:      # broad-ok: not a shaped stack → no QC (best-effort, must never break a load)
+        return None
+    frames = []
+    for i in sample_frame_indices(n, max_frames):
+        try:
+            f = np.asarray(stack[i])
+            while f.ndim > 2:              # reduce any channel / z axis to one plane for the column check
+                f = f[0]
+            if f.ndim == 2 and f.size:
+                step = max(1, f.shape[0] // 256)   # row-subsample: keeps the QC cheap; a seam spans rows
+                frames.append(f[::step])
+        except Exception:      # broad-ok: a single unreadable frame is skipped; QC is best-effort
+            continue
+    if len(frames) < 2:
+        return None
+    return seam_qc_message(frames, **kw)
+
+
+def warn_seam_qc(stack, show_warning):
+    """Run the load-time seam QC on ``stack`` and, if a persistent seam is found, hand the message to
+    ``show_warning``. Best-effort — any failure is swallowed, because QC must never break an open."""
+    try:
+        msg = seam_qc_from_lazy_stack(stack)
+        if msg:
+            show_warning(msg)
+    except Exception:      # broad-ok: seam QC is best-effort; never break the open over it
+        pass

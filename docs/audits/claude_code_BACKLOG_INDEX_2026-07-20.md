@@ -78,8 +78,10 @@ it has NOT landed as of 1.6.203.)*
 > `condensate_modes.annotate_summary_table`, so every emitted table carries its `condensate_mode` and a
 > 2D volume-fraction-refusal note (additive; byte-identical `field_summary` untouched). `cohort_targets` and
 > `feature_provenance` each gained an importer since this index was written (partially wired — verify what
-> remains). **Still fully unwired:** `czi_seam` (load-time CZI seam QC — the open path is lazy/streaming, so
-> wiring it safely + testably is the remaining work here).
+> remains). `czi_seam` is now **WIRED** too (shipped 1.6.224) — the streaming CZI open path runs a
+> non-blocking, per-frame-sampled mosaic-seam QC (`warn_seam_qc`) that warns on a persistent tile seam
+> without materialising the movie. **Remaining B2:** verify the residual hooks for the two partially-wired
+> modules (`cohort_targets` plot-click wiring, `feature_provenance` export sidecar).
 **Verified unwired (at index time):** `cohort_targets` (0 refs in plots), `condensate_modes` (0 refs in invitro),
 `feature_provenance` export hook, `czi_seam` (1 ref — partially wired, verify). Each already exposes the
 exact hook needed:

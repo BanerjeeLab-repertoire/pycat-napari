@@ -15,7 +15,9 @@ import os
 import numpy as np
 import pytest
 
-from pycat.file_io.czi_seam import column_seam_score, persistent_seam_columns
+from pycat.file_io.czi_seam import (
+    column_seam_score, persistent_seam_columns,
+    sample_frame_indices, seam_qc_message, seam_qc_from_lazy_stack)
 
 pytestmark = pytest.mark.core
 
@@ -84,3 +86,47 @@ def test_the_real_czi_path_is_seam_free():
     assert not seams, (
         f"the real CZI path has persistent seam column(s) {seams} — the reported defect is PRESENT. "
         "This is a finding for a fix spec; the number is the evidence.")
+
+
+# ── Load-time QC wiring (wire_orphans B2): sample a handful of frames, warn on a persistent seam ──
+def test_sample_frame_indices_is_a_handful_never_the_whole_movie():
+    assert sample_frame_indices(3) == [0, 1, 2]                 # fewer than the cap → all
+    got = sample_frame_indices(10000, max_frames=5)
+    assert got[0] == 0 and got[-1] == 9999 and len(got) == 5    # first, last, evenly spaced, a handful
+    assert sample_frame_indices(0) == []
+
+
+def test_seam_qc_message_is_None_for_clean_and_a_warning_for_a_seam():
+    assert seam_qc_message([_clean_frame(s) for s in range(6)]) is None
+    msg = seam_qc_message([_offset_frame(s) for s in range(6)])
+    assert msg is not None and 'seam' in msg.lower() and str(_SEAM_X) in msg
+
+
+def test_seam_qc_from_lazy_stack_samples_by_frame_and_flags_a_persistent_seam():
+    seam_stack = np.stack([_offset_frame(s) for s in range(8)])   # (T,H,W) with a persistent seam
+    clean_stack = np.stack([_clean_frame(s) for s in range(8)])
+    assert seam_qc_from_lazy_stack(clean_stack) is None
+    msg = seam_qc_from_lazy_stack(seam_stack)
+    assert msg is not None and str(_SEAM_X) in msg
+
+
+def test_seam_qc_from_lazy_stack_degrades_safely_and_needs_multiple_frames():
+    assert seam_qc_from_lazy_stack(np.zeros((64, 128))) is None          # 2-D, not a stack → None
+    assert seam_qc_from_lazy_stack(np.stack([_offset_frame(0)])) is None  # a single frame is not a seam
+    assert seam_qc_from_lazy_stack(object()) is None                     # no .shape → best-effort None
+
+
+def test_the_streaming_czi_loader_wires_the_seam_qc():
+    """AST: the streaming CZI open path (Qt/IO-bound, not run in core) must call seam_qc_from_lazy_stack —
+    else the orphan is unwired again."""
+    import ast
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'file_io'
+           / 'stack_openers.py').read_text(encoding='utf-8')
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == '_open_czi_streaming')
+    called = any(
+        isinstance(c, ast.Call) and
+        (getattr(c.func, 'id', None) or getattr(c.func, 'attr', None)) == 'warn_seam_qc'
+        for c in ast.walk(fn))
+    assert called, "the streaming CZI loader no longer runs the mosaic-seam QC"
