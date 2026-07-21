@@ -101,6 +101,13 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
         # what exposed it to this static check. (The public entry point still copies, so callers are safe.)
         '_classify_fast_template',
         '_classify_gaussian_fit',
+        # 1.6.204 — complexity-ratchet split of `link_trajectories_bayesian`. The `active` dict these two
+        # helpers write into is the linker's OWN internal track-state, created fresh in the orchestrator
+        # (`active = {}`) and threaded through the per-frame phases; `df` is likewise its private
+        # `props_df.copy()`. Neither is a caller's array — same writes, same behaviour as the pre-split
+        # single function; only the scope changed, which is what exposed it to this static check.
+        '_start_new_tracks',
+        '_apply_frame_assignment',
     }
 
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"

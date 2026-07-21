@@ -166,18 +166,8 @@ def link_trajectories_bayesian(
         track_id   : integer track identifier (−1 = unlinked, should not occur)
         link_cost  : cost of the assignment for this detection
     """
-    from scipy.optimize import linear_sum_assignment
-
-    if sigma_um is None:
-        sigma_um = max_displacement_um / 3.0
-    _sigma2 = max(sigma_um, 1e-6) ** 2
-
-    if birth_cost is None:
-        birth_cost = _gaussian_cost(max_displacement_um, sigma_um)
-    if death_cost is None:
-        death_cost = birth_cost
-
-    INF_COST = birth_cost * 10   # effective infinity for forbidden links
+    sigma_um, birth_cost, death_cost, INF_COST = _bayesian_cost_defaults(
+        max_displacement_um, sigma_um, birth_cost, death_cost)
 
     df = props_df.copy().sort_values(['frame', 'object_id']).reset_index(drop=True)
     df['track_id']  = -1
@@ -207,136 +197,18 @@ def link_trajectories_bayesian(
         n_viable   = len(viable_ids)
 
         if n_viable == 0:
-            # First frame or all tracks expired — start new tracks
-            for idx in curr.index:
-                df.at[idx, 'track_id']  = next_track_id
-                df.at[idx, 'link_cost'] = birth_cost
-                active[next_track_id] = {
-                    'y': df.at[idx, 'y_um'],
-                    'x': df.at[idx, 'x_um'],
-                    'area': df.at[idx, 'area_um2'],
-                    'last_frame': t,
-                    'vy': 0.0, 'vx': 0.0,
-                }
-                next_track_id += 1
+            # First frame or all tracks expired — start new tracks.
+            next_track_id = _start_new_tracks(df, curr, active, t, birth_cost, next_track_id)
             continue
 
-        # ── Build cost matrix ─────────────────────────────────────────────
-        # Rows: viable tracks + n_curr dummy-death rows
-        # Cols: current detections + n_viable dummy-birth cols
-        dim = n_viable + n_curr
-        C   = np.full((dim, dim), INF_COST)
+        C, curr_y, curr_x, curr_a = _build_frame_cost_matrix(
+            active, viable_ids, curr, t, sigma_um, area_weight,
+            max_displacement_um, birth_cost, death_cost, INF_COST)
 
-        # Predicted positions using velocity
-        pred_y = np.array([
-            active[tid]['y'] + active[tid]['vy'] * (t - active[tid]['last_frame'])
-            for tid in viable_ids])
-        pred_x = np.array([
-            active[tid]['x'] + active[tid]['vx'] * (t - active[tid]['last_frame'])
-            for tid in viable_ids])
-        pred_a = np.array([active[tid]['area'] for tid in viable_ids])
-
-        curr_y = curr['y_um'].values
-        curr_x = curr['x_um'].values
-        curr_a = curr['area_um2'].values
-
-        # ── Vectorised cost block (viable tracks × current detections) ──────
-        # This inner block used to be a double Python for-loop over every
-        # (track, detection) pair — O(n_viable × n_curr) Python-level ops per
-        # frame, which dominated runtime on dense movies (hundreds of beads ×
-        # thousands of frames). Broadcasting computes the whole block at once.
-        if n_viable > 0 and n_curr > 0:
-            gaps = np.array([max(1, t - active[tid]['last_frame'])
-                             for tid in viable_ids], dtype=float)  # (n_viable,)
-            # Pairwise displacements: (n_viable, n_curr)
-            dyv = curr_y[None, :] - pred_y[:, None]
-            dxv = curr_x[None, :] - pred_x[:, None]
-            dist = np.sqrt(dyv * dyv + dxv * dxv)
-            gapcol = gaps[:, None]
-            # Gaussian distance cost = d² / (2 (σ·gap)²)
-            sig = sigma_um * gapcol
-            cost_block = dist * dist / (2.0 * sig * sig)
-            # Area-consistency cost (only where both areas are positive)
-            if area_weight > 0:
-                pa = pred_a[:, None]
-                ca = curr_a[None, :]
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    log_ratio = np.abs(np.log(ca / pa))
-                log_ratio[~np.isfinite(log_ratio)] = 0.0
-                valid_area = (pa > 0) & (ca > 0)
-                cost_block = cost_block + np.where(valid_area,
-                                                   area_weight * log_ratio, 0.0)
-            # Hard cutoff: forbid links beyond max displacement (gap-scaled).
-            forbidden = dist > (max_displacement_um * gapcol)
-            cost_block = np.where(forbidden, INF_COST, cost_block)
-            C[:n_viable, :n_curr] = cost_block
-
-        # Death diagonal (track ends, no detection in this frame)
-        for i in range(n_viable):
-            C[i, n_curr + i] = death_cost
-
-        # Birth row (new detection, no prior track)
-        for j in range(n_curr):
-            C[n_viable + j, j] = birth_cost
-
-        # Dummy-to-dummy block: zero cost (allows unmatched births/deaths)
-        C[n_viable:, n_curr:] = 0.0
-
-        # ── Solve with Hungarian algorithm ────────────────────────────────
-        row_ind, col_ind = linear_sum_assignment(C)
-
-        assigned_tracks = set()
-        assigned_dets   = set()
-
-        for r, c in zip(row_ind, col_ind):
-            cost_val = C[r, c]
-            if cost_val >= INF_COST:
-                continue
-
-            if r < n_viable and c < n_curr:
-                # Real link: viable track r → detection c
-                tid      = viable_ids[r]
-                det_idx  = curr.index[c]
-                prev_y   = active[tid]['y']
-                prev_x   = active[tid]['x']
-                new_y    = curr_y[c]
-                new_x    = curr_x[c]
-
-                df.at[det_idx, 'track_id']  = tid
-                df.at[det_idx, 'link_cost'] = cost_val
-
-                # Update velocity estimate
-                if use_velocity:
-                    dt = max(1, t - active[tid]['last_frame'])
-                    new_vy = (new_y - prev_y) / dt
-                    new_vx = (new_x - prev_x) / dt
-                    active[tid]['vy'] = (velocity_alpha * new_vy
-                                         + (1 - velocity_alpha) * active[tid]['vy'])
-                    active[tid]['vx'] = (velocity_alpha * new_vx
-                                         + (1 - velocity_alpha) * active[tid]['vx'])
-
-                active[tid].update({
-                    'y': new_y, 'x': new_x,
-                    'area': curr_a[c],
-                    'last_frame': t,
-                })
-                assigned_tracks.add(r)
-                assigned_dets.add(c)
-
-            elif r >= n_viable and c < n_curr:
-                # Birth: new track for detection c
-                det_idx = curr.index[c]
-                df.at[det_idx, 'track_id']  = next_track_id
-                df.at[det_idx, 'link_cost'] = birth_cost
-                active[next_track_id] = {
-                    'y': curr_y[c], 'x': curr_x[c],
-                    'area': curr_a[c],
-                    'last_frame': t,
-                    'vy': 0.0, 'vx': 0.0,
-                }
-                next_track_id += 1
-                assigned_dets.add(c)
-            # else: death (r < n_viable, c >= n_curr) — track ends naturally
+        next_track_id = _apply_frame_assignment(
+            df, C, viable_ids, curr, curr_y, curr_x, curr_a, active, t,
+            n_viable, n_curr, next_track_id, birth_cost, death_cost, INF_COST,
+            use_velocity, velocity_alpha)
 
         # Expire tracks not seen for too long. Must match the viability filter
         # above (t - last_frame <= max_gap_frames + 1); using the bare
@@ -351,6 +223,146 @@ def link_trajectories_bayesian(
                                    sigma_um, area_weight)
 
     return df
+
+
+# ── Phases of the Bayesian linker (split out of link_trajectories_bayesian for reviewability) ──────
+# The per-frame work is three pure phases: resolve the cost defaults, BUILD the assignment cost matrix,
+# then APPLY the Hungarian solution back onto the DataFrame + active-track state. The split is
+# byte-identical — pinned by test_linkers.test_bayesian_linker_assignment_is_byte_identical.
+
+def _bayesian_cost_defaults(max_displacement_um, sigma_um, birth_cost, death_cost):
+    """Resolve the None-defaulted cost parameters. ``sigma_um`` → 3-sigma of max displacement; ``birth``
+    → the Gaussian cost at max displacement; ``death`` → ``birth``; ``INF_COST`` → 10× birth (effective
+    infinity for forbidden links). Returns ``(sigma_um, birth_cost, death_cost, INF_COST)``."""
+    if sigma_um is None:
+        sigma_um = max_displacement_um / 3.0
+    if birth_cost is None:
+        birth_cost = _gaussian_cost(max_displacement_um, sigma_um)
+    if death_cost is None:
+        death_cost = birth_cost
+    return sigma_um, birth_cost, death_cost, birth_cost * 10
+
+
+def _start_new_tracks(df, curr, active, t, birth_cost, next_track_id):
+    """Open a fresh track for every current detection (first frame, or all prior tracks expired).
+    Mutates ``df`` (track_id/link_cost) and ``active``; returns the advanced ``next_track_id``."""
+    for idx in curr.index:
+        df.at[idx, 'track_id'] = next_track_id
+        df.at[idx, 'link_cost'] = birth_cost
+        active[next_track_id] = {
+            'y': df.at[idx, 'y_um'], 'x': df.at[idx, 'x_um'], 'area': df.at[idx, 'area_um2'],
+            'last_frame': t, 'vy': 0.0, 'vx': 0.0,
+        }
+        next_track_id += 1
+    return next_track_id
+
+
+def _build_frame_cost_matrix(active, viable_ids, curr, t, sigma_um, area_weight,
+                             max_displacement_um, birth_cost, death_cost, INF_COST):
+    """Build the square assignment cost matrix for one frame — viable tracks × current detections, plus
+    dummy death/birth rows and columns. Returns ``(C, curr_y, curr_x, curr_a)`` (the current-detection
+    coordinate/area arrays travel out so the apply phase reads them without recomputing).
+
+    Rows: viable tracks + n_curr dummy-death rows. Cols: current detections + n_viable dummy-birth cols.
+    """
+    n_viable = len(viable_ids)
+    n_curr = len(curr)
+    dim = n_viable + n_curr
+    C = np.full((dim, dim), INF_COST)
+
+    # Predicted positions using each track's velocity estimate.
+    pred_y = np.array([active[tid]['y'] + active[tid]['vy'] * (t - active[tid]['last_frame'])
+                       for tid in viable_ids])
+    pred_x = np.array([active[tid]['x'] + active[tid]['vx'] * (t - active[tid]['last_frame'])
+                       for tid in viable_ids])
+    pred_a = np.array([active[tid]['area'] for tid in viable_ids])
+
+    curr_y = curr['y_um'].values
+    curr_x = curr['x_um'].values
+    curr_a = curr['area_um2'].values
+
+    # ── Vectorised cost block (viable tracks × current detections) ──────
+    # This used to be a double Python for-loop over every (track, detection) pair — O(n_viable × n_curr)
+    # per frame, dominating runtime on dense movies. Broadcasting computes the whole block at once.
+    if n_viable > 0 and n_curr > 0:
+        gaps = np.array([max(1, t - active[tid]['last_frame'])
+                         for tid in viable_ids], dtype=float)  # (n_viable,)
+        dyv = curr_y[None, :] - pred_y[:, None]
+        dxv = curr_x[None, :] - pred_x[:, None]
+        dist = np.sqrt(dyv * dyv + dxv * dxv)
+        gapcol = gaps[:, None]
+        # Gaussian distance cost = d² / (2 (σ·gap)²)
+        sig = sigma_um * gapcol
+        cost_block = dist * dist / (2.0 * sig * sig)
+        # Area-consistency cost (only where both areas are positive).
+        if area_weight > 0:
+            pa = pred_a[:, None]
+            ca = curr_a[None, :]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log_ratio = np.abs(np.log(ca / pa))
+            log_ratio[~np.isfinite(log_ratio)] = 0.0
+            valid_area = (pa > 0) & (ca > 0)
+            cost_block = cost_block + np.where(valid_area, area_weight * log_ratio, 0.0)
+        # Hard cutoff: forbid links beyond max displacement (gap-scaled).
+        forbidden = dist > (max_displacement_um * gapcol)
+        cost_block = np.where(forbidden, INF_COST, cost_block)
+        C[:n_viable, :n_curr] = cost_block
+
+    for i in range(n_viable):                       # death diagonal (track ends, no detection)
+        C[i, n_curr + i] = death_cost
+    for j in range(n_curr):                         # birth row (new detection, no prior track)
+        C[n_viable + j, j] = birth_cost
+    C[n_viable:, n_curr:] = 0.0                      # dummy-to-dummy: zero, allows unmatched births/deaths
+    return C, curr_y, curr_x, curr_a
+
+
+def _apply_frame_assignment(df, C, viable_ids, curr, curr_y, curr_x, curr_a, active, t,
+                            n_viable, n_curr, next_track_id, birth_cost, death_cost, INF_COST,
+                            use_velocity, velocity_alpha):
+    """Solve the assignment (Hungarian) and write it back: real links update the track's position, area
+    and EWM velocity; unmatched detections open a new track; deaths (track vs dummy) end naturally.
+    Mutates ``df`` and ``active``; returns the advanced ``next_track_id``."""
+    from scipy.optimize import linear_sum_assignment
+    row_ind, col_ind = linear_sum_assignment(C)
+
+    for r, c in zip(row_ind, col_ind):
+        cost_val = C[r, c]
+        if cost_val >= INF_COST:
+            continue
+
+        if r < n_viable and c < n_curr:
+            # Real link: viable track r → detection c.
+            tid = viable_ids[r]
+            det_idx = curr.index[c]
+            prev_y = active[tid]['y']
+            prev_x = active[tid]['x']
+            new_y = curr_y[c]
+            new_x = curr_x[c]
+
+            df.at[det_idx, 'track_id'] = tid
+            df.at[det_idx, 'link_cost'] = cost_val
+
+            if use_velocity:                        # update the EWM velocity estimate
+                dt = max(1, t - active[tid]['last_frame'])
+                new_vy = (new_y - prev_y) / dt
+                new_vx = (new_x - prev_x) / dt
+                active[tid]['vy'] = velocity_alpha * new_vy + (1 - velocity_alpha) * active[tid]['vy']
+                active[tid]['vx'] = velocity_alpha * new_vx + (1 - velocity_alpha) * active[tid]['vx']
+
+            active[tid].update({'y': new_y, 'x': new_x, 'area': curr_a[c], 'last_frame': t})
+
+        elif r >= n_viable and c < n_curr:
+            # Birth: new track for detection c.
+            det_idx = curr.index[c]
+            df.at[det_idx, 'track_id'] = next_track_id
+            df.at[det_idx, 'link_cost'] = birth_cost
+            active[next_track_id] = {
+                'y': curr_y[c], 'x': curr_x[c], 'area': curr_a[c],
+                'last_frame': t, 'vy': 0.0, 'vx': 0.0,
+            }
+            next_track_id += 1
+        # else: death (r < n_viable, c >= n_curr) — track ends naturally
+    return next_track_id
 
 
 def _close_gaps_bayesian(

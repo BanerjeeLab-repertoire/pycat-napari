@@ -133,7 +133,17 @@ _LONG_FUNCTION_LIMIT = 120
 # unmodified, and a new serial-path characterization (`test_detect_beads_stack_characterization`) pins the
 # exact detection table — coordinates, order, area, counts — on a seeded synthetic stack. No number moved.
 # Count 127 → 126.
-_MAX_LONG_FUNCTIONS = 126
+# 125. (2026-07-20) `link_trajectories_bayesian` (dynamic_spatial_tools), the 245-line Bayesian/Hungarian
+# trajectory linker feeding every VPT viscosity, was split BY COMPUTATIONAL PHASE into pure helpers —
+# `_bayesian_cost_defaults` (resolve the None cost params), `_start_new_tracks` (open tracks when none are
+# viable), `_build_frame_cost_matrix` (the per-frame viable×detection cost block + death/birth/dummy
+# structure) and `_apply_frame_assignment` (the Hungarian solve written back onto the DataFrame + active
+# state) — leaving a ~50-line orchestrator. Two provably-dead locals (`_sigma2`, the `assigned_*` sets) were
+# dropped in the move. Pinned byte-identical by `test_bayesian_linker_assignment_is_byte_identical` (the
+# exact per-detection track_id + link_cost on a fixed births/links/bridged-gap/velocity/area scenario —
+# the Hungarian solve is sensitive to the cost matrix, so identical output proves the construction was
+# preserved); the existing purity/gap/ambiguity property tests pass unmodified. Count 126 → 125.
+_MAX_LONG_FUNCTIONS = 125
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

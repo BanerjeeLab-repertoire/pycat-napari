@@ -194,3 +194,59 @@ def test_the_bayesian_linker_wins_where_assignment_is_ambiguous():
     assert bayes[1] < greedy[1], (
         f"the Bayesian linker produced {bayes[1]} mixed tracks against greedy's {greedy[1]}"
     )
+
+
+# ── Byte-identical characterization: pins the EXACT assignment before/after a refactor ───────────
+#
+# The property tests above pin purity/mixing/track-count; this pins the exact per-detection assignment
+# (track_id + link_cost) on a fixed scenario, so a phase-split of `link_trajectories_bayesian` can be
+# proven to move no number. The scenario deliberately exercises every branch: four births, ongoing links,
+# a two-frame dropout that gap-closing must bridge (object C), directed motion (velocity prediction),
+# and distinct areas (the area-consistency cost block).
+
+def _characterization_scenario():
+    rng = np.random.default_rng(7)
+    rows = []
+    tracks = {
+        'A': dict(y=0.0, x=0.0, vy=0.0, vx=0.20, area=1.0, drop=set()),
+        'B': dict(y=0.0, x=3.0, vy=0.0, vx=-0.20, area=4.0, drop=set()),
+        'C': dict(y=5.0, x=5.0, vy=0.0, vx=0.0, area=1.0, drop={4, 5}),
+        'D': dict(y=2.0, x=2.0, vy=0.15, vx=0.15, area=2.0, drop=set()),
+    }
+    oid = 0
+    for frame in range(12):
+        for tr in tracks.values():
+            y = tr['y'] + tr['vy'] * frame + rng.normal(0, 0.02)
+            x = tr['x'] + tr['vx'] * frame + rng.normal(0, 0.02)
+            a = tr['area'] + rng.normal(0, 0.01)
+            if frame not in tr['drop']:
+                rows.append(dict(frame=frame, object_id=oid, y_um=y, x_um=x, area_um2=a))
+            oid += 1
+    return pd.DataFrame(rows)
+
+
+_GOLDEN_TRACK_IDS = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 3, 0, 1, 3, 0, 1, 2, 3,
+                     0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+_GOLDEN_LINK_COSTS = [4.5, 4.5, 4.5, 4.5, 0.139223, 0.218376, 0.023469, 0.171413, 0.126017, 0.058908,
+                      0.008896, 0.157319, 0.070922, 0.044404, 0.008999, 0.035688, 0.037136, 0.026978,
+                      0.063504, 0.004536, 0.018868, 0.00294, 0.014872, 0.010828, 0.006201, 0.010877,
+                      0.004217, 0.005407, 0.002022, 0.01026, 0.020213, 0.019068, 0.007057, 0.006103,
+                      0.011007, 0.019907, 0.02732, 0.003596, 0.002515, 0.015899, 0.027418, 0.014136,
+                      0.004566, 0.029801, 0.026932, 0.009697]
+
+
+@pytest.mark.core
+def test_bayesian_linker_assignment_is_byte_identical():
+    """The exact assignment on a fixed multi-branch scenario — a golden master. If a refactor of
+    `link_trajectories_bayesian` changes any track_id or link_cost, this fails: the Hungarian solve is
+    sensitive to the exact cost matrix, so byte-identical output proves the cost construction was
+    preserved. Guards the phase-split (births, links, a bridged dropout gap, velocity, area cost)."""
+    dst = pytest.importorskip("pycat.toolbox.dynamic_spatial_tools")
+    out = dst.link_trajectories_bayesian(
+        _characterization_scenario(), max_displacement_um=1.0, max_gap_frames=2,
+        area_weight=0.3, use_velocity=True)
+
+    assert out['track_id'].tolist() == _GOLDEN_TRACK_IDS, "the exact track assignment changed"
+    assert out['track_id'].nunique() == 4, "gap-closing must bridge C's dropout into ONE track, not two"
+    assert np.allclose(out['link_cost'].to_numpy(), _GOLDEN_LINK_COSTS, atol=1e-5, rtol=0), (
+        "a link cost changed — the cost-matrix construction was not preserved byte-for-byte")

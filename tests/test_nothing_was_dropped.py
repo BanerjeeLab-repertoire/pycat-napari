@@ -71,6 +71,13 @@ _DELIBERATE = {
     # existing VPT equivalence guards pass unmodified and a serial-path characterization
     # (`test_detect_beads_stack_characterization`) pins the exact detection table across the split.
     'vpt_tools.py::detect_beads_stack',
+    # 1.6.204 — `link_trajectories_bayesian` (the 245-line Bayesian/Hungarian trajectory linker) was split
+    # BY COMPUTATIONAL PHASE into `_bayesian_cost_defaults`, `_start_new_tracks`, `_build_frame_cost_matrix`
+    # and `_apply_frame_assignment`, leaving a ~50-line orchestrator. Nothing was removed: every phase MOVED
+    # into a named helper (two provably-dead locals were dropped in the move). Pinned byte-identical by
+    # `test_bayesian_linker_assignment_is_byte_identical` (exact track_id + link_cost on a fixed scenario);
+    # the existing purity/gap/ambiguity property tests pass unmodified.
+    'dynamic_spatial_tools.py::link_trajectories_bayesian',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line

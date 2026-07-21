@@ -1,3 +1,23 @@
+## [1.6.204] - 2026-07-20
+### Changed — **Complexity ratchet 126 → 125: `link_trajectories_bayesian` split by computational phase (byte-identical).**
+The 245-line Bayesian/Hungarian trajectory linker — which feeds every VPT viscosity PyCAT reports — was
+decomposed into pure per-phase helpers, leaving a ~50-line orchestrator. Lifecycle/complexity only; no
+number moved.
+
+- **Phases extracted:** `_bayesian_cost_defaults` (resolve the None-defaulted cost params),
+  `_start_new_tracks` (open tracks when none are viable), `_build_frame_cost_matrix` (the per-frame
+  viable×detection cost block + death/birth/dummy structure) and `_apply_frame_assignment` (the Hungarian
+  solve written back onto the DataFrame + active-track state). Two provably-dead locals (`_sigma2`, the
+  unused `assigned_*` sets) were dropped in the move.
+- **Pinned byte-identical** by a new `test_bayesian_linker_assignment_is_byte_identical` — it asserts the
+  exact per-detection `track_id` + `link_cost` on a fixed scenario exercising births, ongoing links, a
+  bridged dropout gap, velocity prediction and the area-consistency cost. The Hungarian solve is sensitive
+  to the exact cost matrix, so identical output proves the construction was preserved; the existing
+  purity/gap-closing/ambiguity property tests in `test_linkers.py` pass unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 126 → 125 (the ratchet only moves down). The linker's helpers are
+  allow-listed in the input-mutation guard (they write into the linker's OWN `active`/`df`, not a caller's
+  array) and the decomposition is recorded in the drop-guard's `_DELIBERATE` set.
+
 ## [1.6.203] - 2026-07-20
 ### Changed — **One figure module: the deprecated `figure_publication.FigureSpec` shim is removed (figurespec_merge cleanup).**
 The 1.6.192 merge made `figure_spec.FigureSpec` canonical but left `figure_publication.py` in place as the
