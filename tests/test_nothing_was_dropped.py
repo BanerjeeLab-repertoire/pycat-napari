@@ -90,6 +90,12 @@ _DELIBERATE = {
     # every phase MOVED into a named helper with its rationale. Pinned byte-identical by
     # `test_count_molecules_single_is_byte_identical`; the accuracy/pedestal property tests pass unmodified.
     'molecular_counting_tools.py::count_molecules_single',
+    # 1.6.207 — `topology_metrics` (the 192-line per-cell envelope metric) had its comment-dense basin-count
+    # phase extracted to `_topo_basin_metrics`, leaving a ~55-line orchestrator. Nothing was removed: the
+    # phase MOVED into a named helper with its rationale (the dead min_basin_distance/ball_radius default was
+    # dropped; the params stay in the signature). Pinned byte-identical by
+    # `test_topology_metrics_is_byte_identical`; the basin-count property tests pass unmodified.
+    'topology_tools.py::topology_metrics',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line

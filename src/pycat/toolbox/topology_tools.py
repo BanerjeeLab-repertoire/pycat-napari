@@ -139,6 +139,69 @@ def estimate_image_noise(image):
     return float(np.median(finite)) * 1.4826 / np.sqrt(2.0)
 
 
+def _topo_basin_metrics(envelope, mask, image_noise):
+    """Count basins by topological PERSISTENCE, with a range-vs-noise flat-field guard. Returns the
+    basin-related metric keys (to ``update`` onto the caller's dict); the flat branch deliberately omits
+    ``topo_noise_known``, and a failed persistence computation returns only ``topo_n_basins`` = 0.
+
+    ── A peak's PROMINENCE is topological, and that is what makes it work ──────
+    ``peak_local_max`` with only a ``min_distance`` accepts EVERY local maximum, however small. On a flat
+    field with nothing but noise it reported 6.3 basins — the same 6.3 at a noise sd of 5, 20 and 60. It
+    was a CONSTANT: it measured how many points of separation fit inside the mask, and "we found 7
+    chromatin domains" was a statement about the image dimensions. A global prominence gate (median + 1
+    MAD) made it WORSE — real structure raises the median, which then excludes the structure. What works
+    is a TOPOLOGICAL prominence: how far does a peak rise above the SADDLE that separates it from a higher
+    peak? Local and scale-free — a noise bump has a saddle right beside it; a real peak rises far above the
+    pass to its neighbours, and it cannot be excluded by its own presence. Measured: real peaks are ~100×
+    more persistent than noise bumps (3 peaks → 742, 502, 499 then a cliff to 5.6).
+
+    ── TWO questions, asked in ORDER ──────────────────────────────────────────
+    1. Is there ANY structure? A flat field's persistences are exactly proportional to its noise (largest
+    5.0 at sd 5, 20.0 at sd 20, 58.7 at sd 60) — the range IS the noise; six real peaks give a range of
+    295, an order of magnitude above. So the first question is answered by comparing the range to the
+    noise, NOT by looking at the peaks. **And the noise must come from the RAW IMAGE**, not the envelope:
+    the envelope is smoothed, so its own local differences measure the smoothing (see
+    ``estimate_image_noise``); without the raw noise a flat field cannot be distinguished from a real one
+    at all. When the caller does not supply it, the field is assumed to have structure and the result is
+    FLAGGED (``topo_noise_known``) rather than quietly trusted. 2. If there IS structure, which peaks are
+    features of it? THEN a fraction (5 %) of the real range is exactly right (3/6/9 peaks → 3/6/9). The
+    gate sits an order of magnitude between the populations: range/noise is 0.7 flat, 5.3 heavily-noisy
+    real, 9–13 normally — a flat field cannot reach 2.5, the noisiest real field is above it.
+    """
+    b = {}
+    try:
+        env_in = np.where(mask, envelope, -np.inf)
+        _peaks = _peak_persistence(env_in)
+
+        _inside = envelope[mask]
+        _range = float(np.ptp(_inside)) if _inside.size else 0.0
+
+        _local_var = np.abs(np.diff(np.where(mask, envelope, np.nan), axis=0))
+        _local_var = _local_var[np.isfinite(_local_var)]
+        _noise = (float(np.median(_local_var)) * 1.4826) if _local_var.size else 0.0
+        _noise = float(image_noise) if image_noise is not None else _noise
+        _noise_known = image_noise is not None
+
+        _structure_ratio = (_range / _noise) if _noise > 1e-9 else np.inf
+        if _noise_known and _structure_ratio < 2.5:
+            # The whole dynamic range is noise-sized. There is nothing here to have basins.
+            b['topo_n_basins'] = 0
+            b['topo_persistence_gate'] = float('nan')
+            b['topo_basin_persistences'] = []
+            b['topo_field_is_flat'] = True
+        else:
+            _gate = max(0.05 * _range, 1e-9)
+            b['topo_n_basins'] = int(sum(1 for p in _peaks if p >= _gate))
+            b['topo_persistence_gate'] = float(_gate)
+            b['topo_basin_persistences'] = [float(p) for p in _peaks[:12]]
+            b['topo_field_is_flat'] = False
+            b['topo_noise_known'] = bool(_noise_known)
+    except Exception as _exc:
+        debug_log('topology: the persistence computation failed', _exc)
+        b['topo_n_basins'] = 0
+    return b
+
+
 def topology_metrics(envelope, cell_mask, connectivity_percentile=50.0,
                      min_basin_distance=None, ball_radius=None, image_noise=None):
     """
@@ -196,129 +259,9 @@ def topology_metrics(envelope, cell_mask, connectivity_percentile=50.0,
     norm_env = normalize_within_mask(envelope, mask)
     out['topo_roughness'] = float(norm_env[mask].std())
 
-    # Basin count: local maxima of the envelope at the structural scale.
-    if min_basin_distance is None:
-        min_basin_distance = int(ball_radius) if ball_radius else 3
-    min_basin_distance = max(1, int(min_basin_distance))
-    # ── A peak's PROMINENCE is topological, and that is what makes it work ──────
-    #
-    # ``peak_local_max`` with only a ``min_distance`` accepts **every** local maximum, however
-    # small. On a **flat field with nothing but noise** it reported **6.3 basins** — and it
-    # reported 6.3 at a noise sd of 5, 20 and 60 alike. **It was a constant.** It was not measuring
-    # the field at all: it was measuring how many points of separation ``min_distance`` fit inside
-    # the mask, and *"we found 7 chromatin domains"* was a statement about the image dimensions.
-    #
-    # **A global prominence gate (median + 1 MAD) made it WORSE** — the flat field still reported
-    # 4, while a field with 6 genuine peaks dropped to 2.3. *Real structure raises the median,
-    # which then excludes the structure.* **A global threshold cannot work here.**
-    #
-    # What works is a **topological** prominence: **how far does a peak rise above the SADDLE that
-    # separates it from a higher peak?** That is local and scale-free — a noise bump has a saddle
-    # right beside it, while a real peak rises far above the pass connecting it to its neighbours.
-    # **It cannot be excluded by its own presence**, which is exactly what killed the global gate.
-    #
-    # The separation is not marginal. Measured:
-    #
-    #     0 true peaks -> persistences  15.1, 6.5, 6.2, ...        (all noise)
-    #     3 true peaks -> **742, 502, 499**, then a cliff to 5.6
-    #     6 true peaks -> **six values near 500**, then a cliff to 3.7
-    #
-    # **Real peaks are ~100x more persistent than noise bumps**, and the noise bumps' persistence
-    # tracks the noise level (3.8 at sd 5; 15.1 at sd 20; 45.4 at sd 60) — so the threshold is set
-    # from the **measured** noise rather than a magic number.
-    try:
-        env_in = np.where(mask, envelope, -np.inf)
-        _peaks = _peak_persistence(env_in)
-
-        # ── The gate is a FRACTION OF THE ENVELOPE'S OWN RANGE ──────────────
-        #
-        # A first attempt derived it from a MAD noise estimate, and **that reintroduced the very
-        # trap it was meant to escape**: the MAD is computed over the whole field, so **real
-        # structure inflates it** (0.12 on a flat field; 4.6 with six peaks) — and the gate then
-        # rises to exclude the structure that raised it. *Exactly the failure of the global
-        # median gate.*
-        #
-        # The envelope's **dynamic range** is the natural scale, and it is not a magic number: a
-        # peak that rises more than ~5 % of the full range is a feature of the field; one that
-        # does not is a ripple on it.
-        #
-        # Measured (persistences, largest first):
-        #
-        #     3 peaks   291, **40, 39**, 3, 1        -> range 291, gate 15  -> **3**
-        #     6 peaks   295, **43, 39, 39, 38, 33**  -> range 295, gate 15  -> **6**
-        #     9 peaks   245, 44, 43, 41, 41, 39...   -> range 245, gate 12  -> **9**
-        #
-        # **AND an absolute floor, because a flat field has no scale to normalise against.** Its
-        # range IS its noise (20 counts), so 5 % of it is 1.0 — and noise bumps clear that. A
-        # field whose entire dynamic range is noise-sized has **no basins**, and saying so needs
-        # a comparison against the noise, not against itself.
-        _inside = envelope[mask]
-        _range = float(np.ptp(_inside)) if _inside.size else 0.0
-
-        _local_var = np.abs(np.diff(np.where(mask, envelope, np.nan), axis=0))
-        _local_var = _local_var[np.isfinite(_local_var)]
-        _noise = (float(np.median(_local_var)) * 1.4826) if _local_var.size else 0.0
-
-        # ── TWO questions, and they must be asked in ORDER ───────────────────
-        #
-        # **1. Is there ANY structure?** A flat field's persistences are *exactly proportional to
-        # its noise* — measured, the largest is 5.0 at a noise sd of 5, 20.0 at sd 20, 58.7 at
-        # sd 60. **The range IS the noise.** A field with six real peaks has a range of **295**,
-        # an order of magnitude above.
-        #
-        # So the first question is answered by comparing the range to the noise, NOT by looking
-        # at the peaks — a flat field has no scale of its own to normalise against, and a gate
-        # expressed as a fraction of its range is a gate expressed as a fraction of its noise.
-        #
-        # **2. If there IS structure, which peaks are features of it?** THEN a fraction of the
-        # range is exactly right, because there is now a real range to take a fraction of:
-        #
-        #     3 peaks   291, **40, 39**, 3, 1        -> **3**
-        #     6 peaks   295, **43, 39, 39, 38, 33**  -> **6**
-        #     9 peaks   245, 44, 43, 41, 41, 39...   -> **9**
-        #
-        # *Asking them the other way round is what produced two failed gates: a threshold derived
-        # from a field with no structure is a threshold derived from noise.*
-        # ── The noise must come from the RAW IMAGE, not from the envelope ────
-        #
-        # The envelope is SMOOTHED, and its own local differences measure the smoothing rather
-        # than the noise (see ``estimate_image_noise``). Without the raw image's noise, a flat
-        # field cannot be distinguished from a real one **at all** — its persistence distribution
-        # is the same shape, only smaller.
-        #
-        # When the caller does not supply it, the field is assumed to have structure, and the
-        # result is FLAGGED as unverified rather than quietly trusted.
-        _noise = float(image_noise) if image_noise is not None else _noise
-        _noise_known = image_noise is not None
-
-        _structure_ratio = (_range / _noise) if _noise > 1e-9 else np.inf
-
-        # The gate sits between the two populations, and they are FAR apart. Measured:
-        #
-        #     FLAT field (any noise level)    range/noise = **0.7**
-        #     6 real peaks, heavy noise       range/noise = **5.3**
-        #     3-9 real peaks, normal noise    range/noise = **9-13**
-        #
-        # A flat field cannot reach 2, and the noisiest real field is above 5. **The separation
-        # is an order of magnitude**, which is what a threshold should look like when it is
-        # measuring something real rather than being tuned.
-        if _noise_known and _structure_ratio < 2.5:
-            # The whole dynamic range is noise-sized. There is nothing here to have basins.
-            out['topo_n_basins'] = 0
-            out['topo_persistence_gate'] = float('nan')
-            out['topo_basin_persistences'] = []
-            out['topo_field_is_flat'] = True
-        else:
-            _gate = max(0.05 * _range, 1e-9)
-            out['topo_n_basins'] = int(sum(1 for p in _peaks if p >= _gate))
-            out['topo_persistence_gate'] = float(_gate)
-            out['topo_basin_persistences'] = [float(p) for p in _peaks[:12]]
-            out['topo_field_is_flat'] = False
-            out['topo_noise_known'] = bool(_noise_known)
-    except Exception as _exc:
-        debug_log('topology: the persistence computation failed', _exc)
-        out['topo_n_basins'] = 0
-
+    # Basin count — local maxima at the structural scale, gated by topological PERSISTENCE with a
+    # range-vs-noise flat-field guard. See `_topo_basin_metrics` for the full measured rationale.
+    out.update(_topo_basin_metrics(envelope, mask, image_noise))
 
     # Connectivity / percolation at the percentile threshold.
     thr = float(np.percentile(vals, connectivity_percentile))

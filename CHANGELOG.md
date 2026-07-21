@@ -1,3 +1,22 @@
+## [1.6.207] - 2026-07-20
+### Changed — **Complexity ratchet 123 → 122: `topology_metrics` basin-count phase extracted (byte-identical).**
+The 192-line per-cell structural-envelope metric had its comment-dense basin-count phase — topological-
+persistence peak counting with a range-vs-noise flat-field guard — extracted into a pure helper, leaving a
+~55-line orchestrator (basic stats + connectivity). No number moved.
+
+- **`_topo_basin_metrics(envelope, mask, image_noise)`** returns the basin-related keys (the caller
+  `update`s them onto its dict), carrying the full measured rationale for why basins are gated by
+  topological persistence rather than a bare `min_distance` or a global prominence gate. The dead
+  `min_basin_distance` / `ball_radius` default computation (unused by the persistence method) was dropped in
+  the move; the parameters stay in the signature.
+- **Pinned byte-identical** by a new `test_topology_metrics_is_byte_identical` that feeds a **synthetic
+  numpy envelope directly** (bypassing the GPU-routed rolling-ball), so the pure numpy/scipy metric is
+  isolated and the golden values are platform-portable — exact basin count / persistence gate + list / cov
+  / roughness / components / largest-frac on a peaked field (structure branch) and a near-flat field (flat
+  branch, which omits `topo_noise_known`). The existing basin-count property tests pass unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 123 → 122 (the ratchet only moves down); recorded in the drop-guard's
+  `_DELIBERATE` set.
+
 ## [1.6.206] - 2026-07-20
 ### Changed — **Complexity ratchet 124 → 123: `count_molecules_single` split by computational phase (byte-identical).**
 The 214-line single-trace N&B molecule counter was decomposed into pure per-phase helpers, leaving a

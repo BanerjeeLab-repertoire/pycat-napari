@@ -163,7 +163,18 @@ _LONG_FUNCTION_LIMIT = 120
 # ν / N / bleach_r² / pedestal / read_noise_var / accepted / n_points on a clean trace — the through-origin
 # branch — AND a read-noise+pedestal trace — the free-intercept branch); the existing accuracy /
 # pedestal-removal property tests pass unmodified. Count 124 → 123.
-_MAX_LONG_FUNCTIONS = 123
+# 122. (2026-07-20) `topology_metrics` (topology_tools), the 192-line per-cell structural-envelope metric,
+# had its comment-dense basin-count phase — topological-persistence peak counting with a range-vs-noise
+# flat-field guard — extracted to a pure `_topo_basin_metrics(envelope, mask, image_noise)` returning the
+# basin keys, leaving a ~55-line orchestrator (basic stats + connectivity). The dead `min_basin_distance`
+# /`ball_radius` default computation (unused by the persistence method) was dropped in the move; the
+# parameters stay in the signature. Pinned byte-identical by `test_topology_metrics_is_byte_identical`,
+# which feeds a SYNTHETIC numpy envelope directly (bypassing the GPU-routed rolling-ball) so the pure
+# numpy/scipy metric is isolated and platform-portable — exact basin count / persistence gate + list /
+# cov / roughness / components / largest-frac on a peaked field (structure branch) and a near-flat field
+# (flat branch, which omits topo_noise_known); the existing basin-count property tests pass unmodified.
+# Count 123 → 122.
+_MAX_LONG_FUNCTIONS = 122
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
