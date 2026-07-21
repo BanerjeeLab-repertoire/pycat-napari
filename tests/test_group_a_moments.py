@@ -170,6 +170,31 @@ def test_molecule_counting_is_exact_on_a_clean_trace():
 
 
 @pytest.mark.core
+def test_count_molecules_single_is_byte_identical():
+    """Byte-identical characterization pinning the EXACT output on two deterministic traces, so a
+    phase-split of `count_molecules_single` can be proven to move no number. The CLEAN trace has no
+    read-noise floor (the through-origin ν fit); the NOISY+PEDESTAL trace does (the free-intercept ν
+    fit) — both branches, plus the tail-derived pedestal/read-noise and the p^fast-aware N."""
+    counting = pytest.importorskip("pycat.toolbox.molecular_counting_tools")
+
+    clean = counting.count_molecules_single(_bleaching_trace(seed=1))
+    assert clean['read_noise_var'] == 0.0 and clean['pedestal'] == 0.0     # through-origin branch
+    assert np.isclose(clean['nu'], 83.93101096589331, atol=1e-9)
+    assert np.isclose(clean['N'], 9.531637839142586, atol=1e-9)
+    assert np.isclose(clean['bleach_r2'], 0.9561560689211503, atol=1e-9)
+    assert clean['accepted'] is True and clean['n_points'] == 129
+
+    noisy = counting.count_molecules_single(_bleaching_trace(read_sd=15.0, pedestal=500.0, seed=1))
+    assert noisy['read_noise_var'] > 1.0                                    # free-intercept branch
+    assert np.isclose(noisy['nu'], 111.10906346844263, atol=1e-9)
+    assert np.isclose(noisy['N'], 7.1870716324335975, atol=1e-9)
+    assert np.isclose(noisy['bleach_r2'], 0.961719562506752, atol=1e-9)
+    assert np.isclose(noisy['pedestal'], 496.6538079735436, atol=1e-9)
+    assert np.isclose(noisy['read_noise_var'], 146.33447976062706, atol=1e-9)
+    assert noisy['accepted'] is True and noisy['n_points'] == 162
+
+
+@pytest.mark.core
 def test_the_pedestal_is_removed_before_the_variance_pairs_are_built():
     """The pedestal corrupted **ν**, not just the numerator.
 

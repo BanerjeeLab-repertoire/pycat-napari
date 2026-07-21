@@ -154,7 +154,16 @@ _LONG_FUNCTION_LIMIT = 120
 # constants / bootstrap agreement / radius change on Ostwald + arrested scenarios — the bootstrap is
 # seeded, so its agreement is deterministic); the existing arrest-classification property tests pass
 # unmodified. Count 125 → 124.
-_MAX_LONG_FUNCTIONS = 124
+# 123. (2026-07-20) `count_molecules_single` (molecular_counting_tools), the 214-line single-trace N&B
+# molecule counter, was split BY COMPUTATIONAL PHASE into pure helpers — `_estimate_pedestal_read_noise`
+# (the pedestal + read-noise floor read from the trace's own post-bleach tail) and `_fit_counting_nu`
+# (the ν = variance-vs-mean slope fit, free-intercept when a noise floor is present else through-origin,
+# with the read-noise fallback) — leaving a ~55-line orchestrator; each dense rationale block moved with
+# its phase. Pinned byte-identical by `test_count_molecules_single_is_byte_identical` (exact
+# ν / N / bleach_r² / pedestal / read_noise_var / accepted / n_points on a clean trace — the through-origin
+# branch — AND a read-noise+pedestal trace — the free-intercept branch); the existing accuracy /
+# pedestal-removal property tests pass unmodified. Count 124 → 123.
+_MAX_LONG_FUNCTIONS = 123
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

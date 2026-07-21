@@ -1,3 +1,20 @@
+## [1.6.206] - 2026-07-20
+### Changed — **Complexity ratchet 124 → 123: `count_molecules_single` split by computational phase (byte-identical).**
+The 214-line single-trace N&B molecule counter was decomposed into pure per-phase helpers, leaving a
+~55-line orchestrator. No number moved.
+
+- **Phases extracted:** `_estimate_pedestal_read_noise` (the two camera constants — pedestal and
+  read-noise floor — read from the trace's own post-bleach tail, the dark reference) and
+  `_fit_counting_nu` (the ν = variance-vs-mean slope fit: a free intercept when the trace has a noise
+  floor, else through the origin, with the read-noise-corrected fallback). Each dense measured-rationale
+  block moved with its phase.
+- **Pinned byte-identical** by a new `test_count_molecules_single_is_byte_identical` — exact
+  ν / N / bleach_r² / pedestal / read_noise_var / accepted / n_points on a clean trace (the through-origin
+  branch) and a read-noise+pedestal trace (the free-intercept branch), so both ν-fit paths are covered.
+  The existing accuracy and pedestal-removal property tests pass unmodified.
+- `_MAX_LONG_FUNCTIONS` lowered 124 → 123 (the ratchet only moves down); recorded in the drop-guard's
+  `_DELIBERATE` set.
+
 ## [1.6.205] - 2026-07-20
 ### Changed — **Complexity ratchet 125 → 124: `fit_coarsening` split by computational phase (byte-identical).**
 The 227-line coarsening-mechanism classifier (Ostwald ripening vs coalescence vs arrested) — the fifth and

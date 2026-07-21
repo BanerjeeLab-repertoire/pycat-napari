@@ -84,6 +84,12 @@ _DELIBERATE = {
     # locals, `noise` and `r2_gap`, were dropped in the move). Pinned byte-identical by
     # `test_fit_coarsening_output_is_byte_identical`; the arrest-classification property tests pass unmodified.
     'condensate_physics_tools.py::fit_coarsening',
+    # 1.6.206 — `count_molecules_single` (the 214-line single-trace N&B counter) was split BY COMPUTATIONAL
+    # PHASE into `_estimate_pedestal_read_noise` (pedestal + read-noise from the tail) and `_fit_counting_nu`
+    # (the free-intercept-vs-through-origin ν fit), leaving a ~55-line orchestrator. Nothing was removed:
+    # every phase MOVED into a named helper with its rationale. Pinned byte-identical by
+    # `test_count_molecules_single_is_byte_identical`; the accuracy/pedestal property tests pass unmodified.
+    'molecular_counting_tools.py::count_molecules_single',
 
     # 1.6.181 — `partition_measurement` (the 191-line Kp measurement-with-assumptions builder) had its
     # background-subtracted assessment extracted to `_partition_background_assumption`, leaving a 110-line
