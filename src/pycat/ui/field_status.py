@@ -151,6 +151,13 @@ class FieldRegistry:
     def __init__(self):
         # each entry: dict(widget, role, default, name_hint, circle, step, row_widget)
         self._fields = []
+        # Register with the central hub so a workspace CLEAR can reset this method widget's fields back to
+        # their defaults — coverage grows by construction, not by each builder remembering to wire it.
+        try:
+            from pycat.utils.field_registry_hub import register_field_registry
+            register_field_registry(self)
+        except Exception:  # broad-ok: registration is a convenience; never break a UI builder over it
+            pass
 
     def register(self, widget, role, default=None, name_hint=None, step=None,
                  row_widget=None):

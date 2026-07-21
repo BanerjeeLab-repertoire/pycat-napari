@@ -70,6 +70,16 @@ def _clear_everything(viewer, central_manager):
     except Exception:
         pass
 
+    # Reset every open method widget's fields to their defaults — the "~fresh open" state — so a cleared
+    # workspace does not still show the previous workflow's spin boxes, dropdowns and status circles
+    # populated (session_clear_reset Bug 2). The hub holds the registries weakly; Qt-free, so this import
+    # is safe even where PyQt5 is absent.
+    try:
+        from pycat.utils.field_registry_hub import active_field_registries
+        active_field_registries().reset_all()
+    except Exception:  # broad-ok: resetting method-widget fields is best-effort; never block the clear over it
+        pass
+
     # Reset the batch recording so the recorded-steps list starts empty for
     # the next dataset. The plain Clear button previously left the recording
     # intact (only Save & Clear reset it via terminate_recording); both paths

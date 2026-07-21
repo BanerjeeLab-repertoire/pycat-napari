@@ -1,6 +1,12 @@
 # Claude Code spec — Session load clears prior state; clear resets the method widget too
 
-> **◐ STATUS — Bug 1 DONE (shipped 1.6.193); Bug 2 is a documented follow-on.**
+> **✅ STATUS — Bug 1 DONE (shipped 1.6.193); Bug 2 DONE (shipped 1.6.200).**
+>
+> Bug 2 fix: a Qt-free `FieldRegistryHub` (`utils/field_registry_hub.py`) is the central handle over every
+> open method widget's `FieldRegistry`. Each registry auto-registers on construction (held weakly), and
+> `_clear_everything` calls `active_field_registries().reset_all()` so a workspace clear returns every method
+> widget to its "~fresh open" state (OPTIONAL/EXPERT fields to defaults; a user-supplied REQUIRED value with
+> no default is left alone). Pinned by `tests/test_field_registry_hub.py` (core).
 > **Bug 1 (session load stacks) — FIXED.** Both "Load Session" handlers in `ui/menu_manager.py`
 > (`_load_discovered_session` and the multi-stem folder loader `_on_load`) now call
 > `clear_all_without_saving(...)` **before** `load_session(...)`, so a loaded session REPLACES the workspace

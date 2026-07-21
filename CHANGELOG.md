@@ -1,3 +1,23 @@
+## [1.6.200] - 2026-07-20
+### Fixed — **Clearing the workspace now resets every open method widget's fields (session_clear_reset Bug 2).**
+Clearing reset the layers, the data repository and the status circles the clear path knew about, but left
+each toolbox method widget's spin boxes and dropdowns showing the previous workflow's values — because each
+UI builder created its own `FieldRegistry` (`ui/field_status.py`) as a local island the clear path could not
+find. The fix is a central handle every registry registers with.
+
+- **A Qt-free `FieldRegistryHub` (`utils/field_registry_hub.py`).** Holds the live field registries WEAKLY
+  (a closed widget's registry drops out on its own — no leak, no resetting a dead widget) and resets them as
+  one. One registry's `reset_all()` raising does not block clearing the rest. Being Qt-free, the clear
+  plumbing and its tests never drag in PyQt5.
+- **Coverage grows by construction, not by wiring.** `FieldRegistry.__init__` registers with the process-wide
+  hub, so a new method widget's fields reset on clear without its builder remembering to opt in.
+- **`_clear_everything` calls `active_field_registries().reset_all()`** — returning every open method widget
+  to its "~fresh open" state. Which fields reset is `FieldRegistry.reset_all`'s existing decision: OPTIONAL
+  and EXPERT fields return to defaults; a REQUIRED value the user supplied (no default) is left alone.
+- `tests/test_field_registry_hub.py` (core) pins the mechanism — register/reset/return-count, weak-ref prune,
+  idempotent registration, exception isolation, the singleton, `_clear_everything` calling the reset, and the
+  auto-registration wiring (Qt, importorskip). The spec's Bug 2 STATUS is updated to DONE.
+
 ## [1.6.199] - 2026-07-20
 ### Fixed — **Session loader: the freeze fix is confirmed complete; the `ui_modules` session-map re-export is completed.**
 Following up the session-loader spec's last open item (Bug 2, "the freeze"): the staged off-thread load is
