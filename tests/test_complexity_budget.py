@@ -268,10 +268,10 @@ _FILE_LINE_CEILINGS = {
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
     "toolbox/vpt_ui.py": 1139,
-    # 2834 -> 2585 -> 2429: the Stokes-Einstein viscosity domain moved to toolbox/vpt/viscosity.py (vpt decomposition steps 1-2
+    # 2834 -> ... -> 2156: the Stokes-Einstein viscosity domain moved to toolbox/vpt/viscosity.py (vpt decomposition steps 1-3
     # step 1, 1.6.235). A NEW ceiling established at the post-move size; it ratchets DOWN as the remaining
     # domains (detection, host, linking, drift, analysis) move out.
-    "toolbox/vpt_tools.py": 2429,
+    "toolbox/vpt_tools.py": 2155,
     # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
     # decomposition. The ratchet moves DOWN — it cannot grow back.
     "ui/ui_modules.py": 3268,

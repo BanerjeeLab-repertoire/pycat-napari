@@ -249,6 +249,14 @@ _DELIBERATE = {
     # No number changed (drift tests pass). Keys vanished from vpt_tools.py by the move.
     'vpt_tools.py::drift_correct_com',
     'vpt_tools.py::reclassify_by_temporal_stability',
+    # 1.6.237 — vpt decomposition step 3: the host-condensate domain (segment_host_condensate,
+    # erode_host_mask, infer_host_from_beads + _fit_clipped_radius) MOVED verbatim to toolbox/vpt/host.py;
+    # vpt_tools re-exports the three public entry points. No number changed. Registered ops → catalog
+    # regenerated. Keys vanished from vpt_tools.py by the move.
+    'vpt_tools.py::segment_host_condensate',
+    'vpt_tools.py::erode_host_mask',
+    'vpt_tools.py::infer_host_from_beads',
+    'vpt_tools.py::_fit_clipped_radius',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

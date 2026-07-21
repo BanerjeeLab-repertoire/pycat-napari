@@ -1,3 +1,14 @@
+## [1.6.237] - 2026-07-21
+### Changed — **vpt decomposition step 3: the host-condensate domain moves out (byte-identical).**
+`segment_host_condensate`, `erode_host_mask`, and `infer_host_from_beads` (the Mode-C host reconstruction
+from the bead distribution) moved **verbatim** into `toolbox/vpt/host.py`. `vpt_tools.py` re-exports the
+three; no number changed, VPT tests pass unmodified.
+
+- The host segmentation ops are registered navigator operations, so `operation_catalog.json` was
+  regenerated (their catalog source updated to `vpt/host.py`).
+- `vpt_tools.py` dropped **2429 -> 2155** lines; the per-file ceiling ratcheted to 2155. Moved keys in the
+  drop-guard's `_DELIBERATE`. Remaining: detection, linking, analysis.
+
 ## [1.6.236] - 2026-07-21
 ### Changed — **vpt decomposition step 2: the ensemble drift-correction domain moves out (byte-identical).**
 `drift_correct_com` (subtracts common-mode stage/sample drift so it is not read as bead diffusion) and
