@@ -1,3 +1,21 @@
+## [1.6.233] - 2026-07-21
+### Fixed — **A batch image whose consolidated-table append fails is no longer reported as a clean success (silent cohort corruption).**
+`exception_context_classification` spec, increment 1 — the batch_step category and its concrete offender.
+- **The bug:** `BatchWorker.run` marked an image `✓` even when adding its rows to `consolidated_long.csv`
+  failed — so that image's rows silently vanished from the consolidated cohort while the batch reported
+  success. A 93-of-100 cohort that looks complete is a silent scientific corruption. The success mark is now
+  **gated** on the consolidated append succeeding; on failure the image gets a visible `⚠` partial status
+  ("processed, but NOT added to the consolidated table — its rows are MISSING…"), so the drop is actionable.
+  The per-image output folder is still complete; only the consolidated aggregation is flagged.
+- **The category vocabulary:** `test_exception_budget.py` now recognizes the five handler categories
+  (`ui_cleanup` / `optional_probe` / `scientific_result` / `write` / `batch_step`) and validates the category
+  **when** a handler uses the `# broad-ok: <category> — <reason>` form — a typo'd category (a `write` that
+  reads `writes`) fails, so it can't silently escape its standard. Legacy plain `# broad-ok: <reason>`
+  handlers are unaffected; the batch handler above is annotated `# broad-ok: batch_step — …`.
+- Tests (`core`): `test_batch_step_visibility.py` (AST-guards the gated success + visible partial — the loop
+  is a QThread) and a category-validation case in `test_exception_budget.py`. **Follow-on** (recorded in the
+  spec): the full ~166-handler category sweep, the writer-scoped swallow guard, and writer conversions.
+
 ## [1.6.232] - 2026-07-21
 ### Added — **A general object-quality gate (backlog A2, part 1) — block / warn / downgrade, with reasons.**
 Every measurement has preconditions (a physical-unit result needs a real pixel size; a concentration needs a
