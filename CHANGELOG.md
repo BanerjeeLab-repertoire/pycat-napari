@@ -1,3 +1,22 @@
+## [1.6.230] - 2026-07-21
+### Added — **Process-wide user settings (backlog A1) — one corruption-safe, atomic home for cross-session preferences.**
+PyCAT had nowhere to remember a choice between sessions (no `QSettings`, no user-config file, no first-run
+flag), so the navigator mode, acquisition profiles, plot-backend preference, and dismissed QC warnings had
+nowhere to live. New `utils/user_settings.py` is that home — a general mechanism with **zero feature
+knowledge**; each feature registers its own defaults and reads/writes its own namespaced keys.
+- `UserSettings`: namespaced key/value store persisted to one JSON file in the OS user-config dir
+  (`platformdirs.user_config_dir('pycat')`, home-dir fallback). Registered defaults (a stored value always
+  wins), typed accessors (`get_bool`/`get_int`/`get_float`/`get_str`) that **coerce and fall back rather
+  than raise**, `set`/`reset`, and `subscribe(key, cb)` firing only on an actual change. Process-wide
+  instance via `settings()`.
+- **Two startup-critical guarantees:** a corrupt settings file **never crashes** — it falls back to
+  defaults and the bad file is quarantined (`.corrupt`), not deleted; and a write is **atomic** (temp file +
+  `os.replace` + `fsync`), with `set()` transactional — a mid-write failure rolls back the in-memory change
+  and leaves the previous good file intact.
+- Tests (`core`, `test_user_settings.py`): cross-session round-trip, default resolution, typed coercion +
+  fallback, change-only subscriptions, corruption-safety + quarantine, write atomicity, namespace
+  non-collision. Unblocks the navigator/beginner-mode work (A3) and is reusable everywhere.
+
 ## [1.6.229] - 2026-07-21
 ### Added — **Spectral / bleed-through unmixing is now a UI step — the C1 capability is user-reachable.**
 The linear unmixing shipped in 1.6.226 was API-only; it now has a toolbox step, so it is no longer an

@@ -11,6 +11,11 @@ apply to every item: **move/wire don't rewrite where possible; additive; one con
 ## TIER A — the navigator + visibility + settings arc (largest capability gap; nothing blocks it)
 
 ### A1. General user-settings persistence  *(prerequisite for A3, and reusable everywhere)*
+> **✅ DONE (shipped 1.6.230).** `utils/user_settings.py`: `UserSettings` (namespaced JSON store in
+> `platformdirs.user_config_dir('pycat')`, registered defaults, typed `get_bool`/`get_int`/`get_float`
+> coercing-with-fallback, `set`/`reset`, `subscribe` firing on change, process-wide `settings()`). Corrupt
+> file → defaults + quarantine (never crashes startup); writes atomic (temp + `os.replace` + `fsync`, `set`
+> transactional). `core`-tested (`test_user_settings.py`). Unblocks A3; consumed by A2/A3/profiles/QC-dismiss.
 **Verified missing:** no `QSettings`/`user_config`/`first_run` anywhere.
 Build `utils/user_settings.py`: a process-wide `UserSettings` singleton persisting **namespaced** keys
 to one **atomic** JSON file in the OS user-config dir (`platformdirs.user_config_dir('pycat')`), with
