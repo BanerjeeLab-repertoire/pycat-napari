@@ -123,6 +123,15 @@ garbage; report the negative fraction (the honesty check); clip for display only
 crosstalk only (not lambda-stack). Feeds honest coloc/ratio. Complements the landed ratiometric module.
 
 ### C2. Biological object model, increment 1
+> **◐ INCREMENT 1 DONE (shipped 1.6.227); the real cell/puncta join is increment 2.** `utils/object_graph.py`
+> is built + `core`-tested: `BiologicalObject` (keyed on the existing `_pycat_entity_id` — no parallel id
+> scheme) + `ObjectGraph` (get/parent_of/children_of/descendants/ancestors/roots/unrooted/of_type/filter) +
+> `objects_from_table` / `build_object_graph`. Read-only, mutates no table. Flat table → flat roots; an
+> object naming an absent parent → explicit `unrooted` bucket. **Design note (the wrinkle that gated this):**
+> `_pycat_entity_id` is opaque-by-design (dataset paths contain `/`, so it can't be parsed back into an
+> `EntityKey`), so the graph keys on the id STRING and takes the parent link from an explicit column — the
+> generic contract. The schema-specific adapter that derives a punctum's parent-cell id from the
+> cell-labelled-puncta mask (so real cell_df + puncta_df assemble into a graph) is increment 2.
 **Verified:** `EntityRef` has `parent_keys` + `make_entity_id` (parent-aware); analyses emit
 `cell_label`. But no `BiologicalObject`/`ObjectGraph`. Build `utils/object_graph.py`:
 `BiologicalObject` (key, entity_type, measurements, parent, children, provenance, qc_flags) +

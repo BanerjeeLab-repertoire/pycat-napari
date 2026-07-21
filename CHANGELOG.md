@@ -1,3 +1,22 @@
+## [1.6.227] - 2026-07-21
+### Added — **A first-class biological object graph, increment 1 (backlog C2) — objects + parent/child, read-only.**
+New `utils/object_graph.py`: every detected object as a persistent identity with a graph over it, instead of
+a mask label plus a disconnected DataFrame row. **Reuses the existing identity — no parallel id scheme:** a
+`BiologicalObject` is keyed on its `_pycat_entity_id` value (the canonical `EntityKey` string). **Read-only
+view** assembled from tables PyCAT already produces — it changes no table and re-runs no analysis.
+- `BiologicalObject` (key, entity_type, measurements, qc_flags, provenance, parent, children) +
+  `ObjectGraph` with `get`/`parent_of`/`children_of`/`descendants`/`ancestors`/`roots`/`unrooted`/`of_type`/
+  `filter` (cycle-guarded walks).
+- `objects_from_table(df, entity_type, *, id_col, parent_id_col, measurement_cols, qc_col)` builds objects
+  from one table; `build_object_graph(objects)` resolves the parent/child edges at construction.
+- **Honest structure:** a flat table (no parent info) → a flat graph of roots; an object naming a parent NOT
+  present → an explicit `unrooted` (orphan) bucket, never silently dropped or silently rerooted; roots and
+  orphans are distinct. Rows without a stable id are skipped.
+- Tests (`core`, `test_object_graph.py`): id-keyed objects + measurements, flat→roots, parent/child tree,
+  descendants/ancestors, missing-parent→unrooted, of_type/filter, source table never mutated.
+- Increment 1 is record + graph only. The schema-specific join that derives a punctum's parent-cell id from
+  the cell-labelled-puncta convention, and the linked-navigation/state-vector vision, are later increments.
+
 ## [1.6.226] - 2026-07-21
 ### Added — **Linear spectral / bleed-through unmixing (backlog C1) — from controls, refusing to invert garbage.**
 New `toolbox/unmixing_tools.py`: the general 2–4 channel form of the single-coefficient bleed-through knob
