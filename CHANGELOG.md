@@ -1,3 +1,16 @@
+## [1.6.235] - 2026-07-21
+### Changed — **vpt decomposition step 1: the Stokes-Einstein viscosity domain moves to its own module (byte-identical).**
+Begins decomposing the 2,834-line `vpt_tools.py` by domain. `viscosity_measurement`,
+`viscosity_from_diffusion`, `viscosity_interval_from_diffusion` (and the `_K_BOLTZMANN` constant) moved
+**verbatim** into the new `toolbox/vpt/viscosity.py`, alongside the existing VPT adapters.
+
+- **`vpt_tools.py` re-exports** all three for every caller (vpt_ui, the viscosity-chain tests). Move, not
+  rewrite — no number changed.
+- **Byte-identical:** the golden-master viscosity chain (viscosity to 3.2%) and the route-equivalence tests
+  pass unmodified; moved keys recorded in the drop-guard's `_DELIBERATE`.
+- `vpt_tools.py` dropped **2834 -> 2585** lines; a new per-file ceiling established there that ratchets down
+  as the remaining domains (detection, host, linking, drift, analysis) move out.
+
 ## [1.6.234] - 2026-07-21
 ### Fixed — **Three CI-hygiene / test-fixture correctness fixes (ci_hygiene_fixes).**
 - **Stale CI coverage comment corrected.** `core.yml` claimed the `core` marker "selects only the two guard

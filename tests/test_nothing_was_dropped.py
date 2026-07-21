@@ -237,6 +237,13 @@ _DELIBERATE = {
     'condensate_physics_tools.py::compute_moduli_evans_bootstrap',
     'condensate_physics_tools.py::extract_fusion_relaxation',
     'condensate_physics_tools.py::_iw_Jtilde',
+    # 1.6.235 — vpt decomposition step 1: the Stokes-Einstein viscosity domain (viscosity_measurement,
+    # viscosity_from_diffusion, viscosity_interval_from_diffusion) MOVED verbatim to toolbox/vpt/viscosity.py;
+    # vpt_tools re-exports all three. No number changed (golden-master viscosity chain passes). Keys vanished
+    # from vpt_tools.py by the move.
+    'vpt_tools.py::viscosity_measurement',
+    'vpt_tools.py::viscosity_from_diffusion',
+    'vpt_tools.py::viscosity_interval_from_diffusion',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
