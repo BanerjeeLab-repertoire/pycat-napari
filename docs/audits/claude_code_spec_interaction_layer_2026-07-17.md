@@ -1,7 +1,13 @@
 # Claude Code spec — Interaction layer: selection state model, honest hit-testing, adapter contract
 
+> **◐ GAP 1 state model + GAP 2 hit-tester (pure primitives) DONE. Wiring + Gaps 3/4/5 remain.** Gap 1
+> (shipped 1.6.273): `utils/selection_state.py::SelectionState` — immutable hover/selected/pinned/primary +
+> generation, with `select`/`toggle`(ctrl-click)/`hover`/`pin`/`unpin`/`clear`(keeps pins) each returning a
+> new state one generation on; `displayed` = selected ∪ pinned. `test_selection_state.py` (`core`). Wiring it
+> into `selection_service` behind the existing subscriber contract (back-compat) is the integration step.
+>
 > **◐ GAP 2's HONEST HIT-TESTER (pure primitive) DONE, shipped 1.6.272. The analysis_plots wiring + Gaps
-> 1/3/4/5 remain.** New Qt-free `utils/hit_testing.py`: `hit_test(curves, click_xy, *, tolerance_px,
+> 3/4/5 remain.** New Qt-free `utils/hit_testing.py`: `hit_test(curves, click_xy, *, tolerance_px,
 > ambiguity_px) -> HitResult` finds the nearest curve by point-to-segment distance over the curves'
 > DISPLAY-space coordinate arrays, and — the point — **refuses an ambiguous click** (best and second-best
 > within `ambiguity_px` → `primary=None`, `candidates` NAMES both, so the caller reports rather than guesses)

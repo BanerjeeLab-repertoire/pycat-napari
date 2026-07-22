@@ -1,3 +1,18 @@
+## [1.6.273] - 2026-07-22
+### Added — **Selection as a STATE: hover, multi-select, and pinning — independent and immutable (interaction_layer Gap 1).**
+A selection was one object with a string mode, so there was no ctrl-click comparison set, no pinning a track
+while exploring another, and no "clear the selection but keep the pins." New Qt-free
+`utils/selection_state.py::SelectionState` models it as an immutable value with four independent facets —
+`selected`, its `primary`, an independent `hovered`, and `pinned` — plus the `generation` counter.
+- Commands (`select`/`toggle`/`hover`/`pin`/`unpin`/`clear`) each return a NEW state one generation later
+  and never mutate the old one: `toggle` is ctrl-click (add/remove, primary falls back on removal), `hover`
+  never disturbs `selected`, and `clear` empties selected+hovered but **KEEPS pinned** (Escape keeps pins).
+  `displayed` is the union of selected + pinned (the set a view must render even outside a representative
+  sample).
+- Tests (`core`): select/toggle semantics, clear-keeps-pins, hover-independence, pin/unpin, one-command-one-
+  generation, immutability. This pins the semantics; wiring it into `selection_service` behind the existing
+  subscriber contract (back-compat preserved) is the integration follow-on.
+
 ## [1.6.272] - 2026-07-22
 ### Added — **Honest hit-testing for spaghetti plots — the nearest curve, or NOTHING when it's ambiguous (interaction_layer Gap 2).**
 Matplotlib's per-artist picker returns whichever line it hits first — arbitrary, and in a dense tangle of
