@@ -932,9 +932,9 @@ def run_temperature_batch(
                     _tf.imwrite(corr_path, corrected.astype(np.float32),
                                 compression='zlib')
                     row['corrected'] = os.path.basename(corr_path)
-                except Exception as _ce:
+                except Exception as _ce:  # broad-ok: write — the export error is recorded into the returned results row ('corrected error: …'), visible to the user in the output table
                     row['corrected'] = f'corrected error: {_ce}'
-        except Exception as e:
+        except Exception as e:  # broad-ok: batch_step — records the per-file failure as this row's status, so the failed item stays visible in the returned table rather than vanishing
             row['status'] = f'error: {e}'
         rows.append(row)
         if progress_callback:

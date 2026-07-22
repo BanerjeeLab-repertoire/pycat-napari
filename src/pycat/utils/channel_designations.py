@@ -91,7 +91,7 @@ def _save(store: Dict[str, dict]) -> bool:
             json.dump(store, f, indent=2)
         os.replace(tmp, path)   # atomic
         return True
-    except Exception as exc:
+    except Exception as exc:  # broad-ok: write — returns False, so the caller surfaces the failed designation persist rather than it vanishing silently
         debug_log('channel_designations: could not write store', exc)
         return False
 

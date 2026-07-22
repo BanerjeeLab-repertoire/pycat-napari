@@ -145,7 +145,7 @@ def discard_cache(source_file: str, ball_radius: Optional[int] = None,
                 meta = json.loads(paths['meta'].read_text())
                 meta.pop(key, None)
                 paths['meta'].write_text(json.dumps(meta, indent=2))
-            except Exception:
+            except Exception:  # broad-ok: write — best-effort cache-metadata prune during invalidation; the cache dir itself is already removed, so a stale meta entry is harmless
                 pass
     else:
         if root.exists():

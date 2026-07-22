@@ -1,3 +1,28 @@
+## [1.6.259] - 2026-07-22
+### Changed — **exception_context_classification Part 2: a swallowed WRITE no longer passes as success (the write-swallow guard + the writers-first conversion).**
+The scientific-result guard catches a broad `except` that returns a wrong *number*; this adds the guard for
+the other silent corruption that carries **no wrong number at all** — a save that fails into apparent success.
+The user clicks *Save*, the `except` eats the error, and the file is absent or truncated while everything
+looks fine.
+
+- **New `tests/test_no_silent_write_or_batch_swallowing.py` (`core`)** — an AST ratchet, conservative and
+  scoped to handlers wrapped around a KNOWN persist call (`to_csv` / `savefig` / `imwrite` / `json.dump` /
+  `open(..., 'w')` / `write_text` …). A broad handler there must make the failure **visible** — re-raise, or
+  surface it via a notifier whose name carries `warn`/`error`/`critical` — else it is flagged unless annotated
+  `# broad-ok: write — <reason>`. Treating any user notification as compliant is what keeps the many correct
+  UI save handlers (`napari_show_warning("Save failed: …")`) from being false-positived. Budget pinned at **0**.
+- **The writers-first conversion:** `write_session_outputs` swallowed two sidecar writes into `debug_log` — the
+  acquisition-metadata JSON (provenance) and the **session manifest that Load Session reads back**. Both now
+  surface via `notify.show_warning` (warn-and-continue: the result files themselves saved), so a failed
+  provenance/restore write is no longer invisible. Function kept under the 120-line complexity ceiling.
+- **Categorized the genuinely-safe swallows** (Part 1) with the `# broad-ok: <category> — <reason>` form:
+  `local_cache`'s two best-effort cache writes and `ts_cache_manager`'s cache prune (`write` — absence costs
+  nothing); `temperature_tools`' two batch-export handlers (`write`/`batch_step` — the error is recorded into
+  the returned results row, visible in the output table); `channel_designations._save` (`write` — returns
+  `False` so the caller surfaces the failed persist).
+- **Ratchets tightened** to match: `test_exception_budget` `file_io` 239→237, `toolbox` 498→491, `utils`
+  114→113. No scientific output changes. Full `pytest -m core` green (1631 passed, 2 skipped).
+
 ## [1.6.258] - 2026-07-22
 ### Changed — **redundancy_consolidation axis 3: the duplicated UI background-worker consolidated (behaviour-preserving).**
 Four analysis panels (condensate_physics, brightfield, invitro_bf, invitro_fluor) each defined a
