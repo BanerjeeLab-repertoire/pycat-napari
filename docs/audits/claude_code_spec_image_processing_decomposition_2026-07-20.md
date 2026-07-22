@@ -1,11 +1,10 @@
 # Claude Code spec — Decompose `image_processing_tools.py` by algorithm (coverage-gated, extra care)
 
-> **◐ STATUS — IN PROGRESS (characterization-FIRST). Steps 1-4 DONE (1.6.248-251): size_estimation, the shared
-> `_base.py`, `deblur.py`, and `filters.py` (the 2D/pseudo-3D Gaussian/Gabor/DoG/LoG/bilateral + peak-edge
-> enhancement family) — all byte-identical, each pinned by a characterization test written first.
-> image_processing_tools.py 2669 → 1619. Remaining (dependency-ordered): background (rb_gaussian/WBNS/
-> soft_foreground - now unblocked, peak_and_edge is in filters), preprocessing (pre_process_image), and
-> upscaling (run_upscaling_func).**
+> **◐ STATUS — IN PROGRESS (characterization-FIRST). Steps 1-5 DONE (1.6.248-252): size_estimation, `_base`,
+> `deblur`, `filters`, and `background` (the spec's highest-downstream-impact target — rolling-ball/Gaussian,
+> WBNS wavelet, soft foreground suppression, pinned on a known background field) — all byte-identical.
+> image_processing_tools.py 2669 → 732. Remaining: preprocessing (pre_process_image - now unblocked, its
+> soft_foreground_suppression/wbns_func deps are in background) and upscaling (run_upscaling_func).**
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Fourth-largest file
 (**2,669 lines**). Unlike segmentation/condensate-physics, its coverage is **thinner — only 6 test

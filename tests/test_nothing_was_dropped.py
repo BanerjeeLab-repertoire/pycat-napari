@@ -118,6 +118,28 @@ _DELIBERATE = {
     'image_processing_tools.py::apply_bilateral_filter',
     'image_processing_tools.py::run_apply_bilateral_filter',
 
+    # 1.6.252 — image_processing decomposition step 5: the BACKGROUND + NOISE removal family (rolling-ball/
+    # Gaussian background removal + inpainting/rolling-ball/subtract helpers, the edge-enhanced variant, WBNS
+    # wavelet background+noise separation, and realness-weighted soft foreground suppression + nested _norm01/
+    # _soft closures + FOREGROUND_SUPPRESSION_DEFAULTS, with run_ wrappers) MOVED verbatim to toolbox/image_
+    # processing/background.py. Pinned on a known background field by test_image_processing_background_
+    # characterization. Six registered ops → catalog regenerated. Builds on _base + filters.
+    'image_processing_tools.py::background_inpainting_func',
+    'image_processing_tools.py::compute_rolling_ball_background',
+    'image_processing_tools.py::subtract_background',
+    'image_processing_tools.py::rb_gaussian_background_removal',
+    'image_processing_tools.py::run_rb_gaussian_background_removal',
+    'image_processing_tools.py::rb_gaussian_bg_removal_with_edge_enhancement',
+    'image_processing_tools.py::_realness_weight',
+    'image_processing_tools.py::_norm01',
+    'image_processing_tools.py::_soft',
+    'image_processing_tools.py::soft_foreground_suppression',
+    'image_processing_tools.py::run_enhanced_rb_gaussian_bg_removal',
+    'image_processing_tools.py::wavelet_bg_and_noise_calculation',
+    'image_processing_tools.py::wbns_func',
+    'image_processing_tools.py::run_wbns',
+    'image_processing_tools.py::run_wavelet_noise_subtraction',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /

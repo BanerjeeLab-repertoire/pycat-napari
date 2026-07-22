@@ -1,3 +1,20 @@
+## [1.6.252] - 2026-07-22
+### Changed — **image_processing decomposition step 5: the background/noise-removal family moves out.**
+The spec's highest-downstream-impact target (background removal shapes every intensity measurement) moved
+**verbatim** to `toolbox/image_processing/background.py`: rolling-ball / Gaussian background removal
+(`rb_gaussian_background_removal` + inpainting / rolling-ball / subtract helpers), the edge-enhanced variant,
+WBNS wavelet background+noise separation (`wbns_func` + `wavelet_bg_and_noise_calculation`), and the
+realness-weighted soft foreground suppression (`_realness_weight` + `soft_foreground_suppression` +
+`FOREGROUND_SUPPRESSION_DEFAULTS`, nested `_norm01`/`_soft`) — each with its viewer wrapper.
+
+- **Characterization written first** (`test_image_processing_background_characterization`): exact output of
+  all nine estimators/removers on a **known background field** (four disks on a smooth gradient) — identical
+  before and after.
+- Now unblocked because its `peak_and_edge_enhancement_func` dependency moved to `filters` last step. Six
+  registered ops → `operation_catalog.json` regenerated. `image_processing_tools.py`: **1619 → 732**;
+  ceilings ratcheted (`image_processing_tools.py` 732, `background.py` 918). Remaining: preprocessing,
+  upscaling.
+
 ## [1.6.251] - 2026-07-22
 ### Changed — **image_processing decomposition step 4: the filter/enhancement family moves out.**
 The 2D and pseudo-3D linear filters and enhancement operators moved **verbatim** to
