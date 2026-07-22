@@ -1,12 +1,51 @@
 # Claude Code spec — Measurement Reliability Index (MRI)
 
-> **◐ STATUS — Core DONE. Surfacing DONE (4a Measurement display 1.6.254; 4b/4c table columns + QC-report
-> section 1.6.255). Batch AUTO-POPULATION DONE (1.6.257): the batch loop now computes each image's imaging-QC
-> factor (via _reliability_context_for → run_full_qc on the already-materialised image) and passes a
-> reliability_context to add_image — but ONLY for images carrying a scored-family measurement, so a
-> non-partition batch pays no QC cost. So reliability/reliability_reasons now populate in real exported
-> tables. Calibration is not yet threaded through the batch, so batch grades are honestly capped (calibration
-> in `missing`); threading it, and extending SCORED_FAMILY, are the remaining increments.**
+> **✅ STATUS — DONE for the batch as it exists. Core DONE; surfacing DONE (4a Measurement display 1.6.254;
+> 4b/4c table columns + QC-report section 1.6.255); batch auto-population DONE (1.6.257: `_reliability_context_for`
+> → `run_full_qc` on the already-materialised image, gated to scored-family images). Calibration is
+> **correctly N/A** for the batch, not a gap: the batch's only scored measurement is the UNCALIBRATED
+> intensity-ratio `partition_coefficient` (`replay_ivf_field_summary`), and the calibrated path
+> (`client_enrichment` → concentrations/ΔG, which carries the `calibration_validity` verdict) is stubbed in
+> headless mode. So calibration genuinely does not apply, and capping the uncalibrated proxy below `high` is
+> the honest, desirable signal — never treat an uncalibrated Kp as high reliability. Threading a real
+> calibration factor requires the deferred feature below (headless calibrated concentration), which is a new
+> analysis capability, not a wiring task. Extending SCORED_FAMILY beyond partition/concentration/ΔG remains
+> one registry entry each.**
+
+## Roadmap (deferred): calibration in the batch — headless calibrated concentration
+
+**Why deferred, captured so it is not re-investigated.** The reliability `calibration` factor
+(`check_calibration_validity` → valid/level/reason) only has a source when a *calibrated* measurement runs.
+That path does not run in the batch today, so there is nothing to thread. To close it, add headless
+calibrated concentration to the batch, then thread its verdict. Everything needed:
+
+- **The stub to replace.** `src/pycat/batch_step_registry.py:335` — `'client_enrichment'` is
+  `lambda s,p,pa,o: print('… skipped in headless mode (interactive layer selection)')`. The interactive
+  version is `_add_client_enrichment` (`toolbox/partition_enrichment_tools.py:431`); the pure analysis is
+  `client_enrichment(...)` (line 75) which takes a `calibration_curve=None` (line 83) and, when given, calls
+  `_calibrated_partition(curve, image_metadata, dense_c, dilute_c, T)` (line 261/268).
+- **Where the verdict is produced.** `_calibrated_partition` (line 268) calls
+  `check_calibration_validity(curve, image_metadata)` and returns `calibration_validity` = `{valid, level,
+  reason}` plus `dense_concentration` / `dilute_concentration` / `Kp_calibrated` / `delta_g_transfer`. These
+  are exactly the calibrated `SCORED_FAMILY` members (`utils/reliability.py:37`).
+- **The curve is persistable/loadable.** `utils/calibration.py:336 save_curve` / `:343 load_curve`; the
+  interactive UI already tracks a `_calibration_path` and loads via `load_curve` (`ui/ui_modules.py:~1588`,
+  status label `:1547`). So the batch config could record a calibration-curve path (or a batch-level
+  setting) and `load_curve` it per run.
+- **What the headless step must do.** Get the dense/dilute intensities from the droplet mask (the invitro
+  path already has `partition_coefficient_field` / `field_summary`), load the curve, call `client_enrichment`
+  with `calibration_curve=`, write the calibrated columns to the per-image CSV, and stash the verdict into
+  `state['_calibration_validity']`.
+- **The threading hook already exists.** `BatchProcessor._reliability_context_for` (`batch_processor.py`)
+  already builds the per-image `reliability_context` and is gated by `records_have_scored_family`. Once the
+  verdict is in `state`, `_process_file` stashes it (mirroring `self._last_image`) and
+  `_reliability_context_for` adds `calibration=self._last_calibration` alongside `image_qc`. The
+  consolidated-table `_row_reliability_factory` already consumes `reliability_context['calibration']`
+  (`utils/consolidated_table.py:165`) — no table change needed.
+- **Caveat / correctness.** Only calibrated measurements should carry the calibration factor. The
+  uncalibrated intensity-ratio `partition_coefficient` must stay capped (calibration in `missing`) — do not
+  attach a curve's verdict to it. Consider a per-measurement "calibration applies?" flag if both calibrated
+  and uncalibrated Kp coexist in one table.
 
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. The roadmap's
 *"unifying construct"* — every reported measurement carries a reliability score, and clicking it
