@@ -1,3 +1,13 @@
+## [1.6.277] - 2026-07-22
+### Added — **`plot_backends.scatter(backend='auto')` auto-selects the interactive backend by size (backend_parity Part 2).**
+The pyqtgraph backend, the `PyQtGraphScatterView` (a proper `SelectionView`), and the 4-backend
+`plot_backends.scatter` dispatcher already existed — the missing piece was the automatic default. `scatter`
+now accepts `backend='auto'`, resolving to **PyQtGraph above the point threshold where it is installed** and
+**matplotlib otherwise** (via `plot_backend_selection.choose_scatter_backend`). Matplotlib stays the explicit
+publication choice. Tests (`core`): a small frame resolves to a matplotlib figure with brushing enabled, and
+the size decision picks pyqtgraph above the threshold when available. The Plotly widget with click-to-napari
+(Part 3) remains the QtWebEngine-gated GUI follow-on.
+
 ## [1.6.276] - 2026-07-22
 ### Removed — **Two duplicate interaction-layer modules (correction): `utils/hit_testing.py` and `utils/selection_state.py`.**
 Honest correction. In 1.6.272 / 1.6.273 I added a standalone hit-tester and `SelectionState` for the

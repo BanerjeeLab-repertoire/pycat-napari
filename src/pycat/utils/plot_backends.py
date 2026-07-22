@@ -197,7 +197,14 @@ def scatter(df, x_col, y_col, *, backend='matplotlib', ax=None, hue=None, **kwar
 
     For ``backend='pyqtgraph'`` the first element is a Qt ``PlotWidget`` (not a matplotlib figure) and
     the second a ``ScatterPlotItem`` — the same 4-tuple shape, and the same row-order guarantee.
+
+    ``backend='auto'`` chooses the INTERACTIVE backend by size (backend_parity Part 2): PyQtGraph above the
+    point threshold where it is installed, matplotlib otherwise. Matplotlib stays the explicit publication
+    choice — pass it directly for a figure destined for print.
     """
+    if backend == 'auto':
+        from pycat.utils.plot_backend_selection import choose_scatter_backend
+        backend = choose_scatter_backend(len(df))
     if backend == 'pyqtgraph':
         from pycat.utils.plot_backend_pyqtgraph import pyqtgraph_available, pyqtgraph_scatter
         if not pyqtgraph_available():

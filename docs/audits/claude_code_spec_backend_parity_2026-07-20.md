@@ -23,8 +23,12 @@
 > `utils/plot_backend_selection.py`: `choose_scatter_backend` (PyQtGraph above the ~5000 threshold where
 > available, else matplotlib — publication stays matplotlib), `backend_provenance` (records which backend +
 > why), `plotly_interaction_scope` (`'click'` only where QtWebEngine exists, else `'hover_only'` — no dead
-> affordance), + non-crashing availability probes. `test_plot_backend_selection.py` (`core`). The interactive
-> substance below (PyQtGraph rendering + SelectionService wiring; the Plotly widget) is the remaining Qt work.
+> affordance), + non-crashing availability probes. `test_plot_backend_selection.py` (`core`). **Update
+> (1.6.277): the auto-default is now WIRED** — `plot_backends.scatter(backend='auto')` resolves to PyQtGraph
+> above the threshold where installed, else matplotlib (via `choose_scatter_backend`); the pyqtgraph backend +
+> `PyQtGraphScatterView` (a `SelectionView`) already existed, so **Part 2 is functionally complete**. Only
+> **Part 3** remains — the Plotly widget with click-to-napari, gated on QtWebEngine (`plotly_interaction_scope`
+> already scopes it honestly) — the GUI follow-on.
 >
 > **Parts 2–3 REMAIN, both interactive/Qt-bound** (deferred with the other UI specs): Part 2 (default to the
 > PyQtGraph backend above an ~N-point threshold for *interactive* scatter, matplotlib retained for
