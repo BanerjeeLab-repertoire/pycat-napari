@@ -64,6 +64,23 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.246 — timeseries decomposition step 3: the QThread/ProcessPool WORKER PLUMBING moved verbatim
+    # (behaviour-preserving, no threading semantics changed) to toolbox/timeseries/execution.py — the
+    # parallel subprocess frame helpers (_worker_read_frame, _process_frame_worker) and the two lazy
+    # QThread-worker factories (_make__stackprocessworker, _make_timeseriesworker) with their result caches
+    # and nested closures (_prepare_source_zarr / _source_descriptor / _dispatch / _cb / cancel). Qt/napari
+    # stay function-scoped so the module still imports headless. timeseries_condensate_tools re-exports the
+    # two factories, which the staying UI builders call.
+    'timeseries_condensate_tools.py::_worker_read_frame',
+    'timeseries_condensate_tools.py::_process_frame_worker',
+    'timeseries_condensate_tools.py::_make__stackprocessworker',
+    'timeseries_condensate_tools.py::_make_timeseriesworker',
+    'timeseries_condensate_tools.py::_prepare_source_zarr',
+    'timeseries_condensate_tools.py::_source_descriptor',
+    'timeseries_condensate_tools.py::_dispatch',
+    'timeseries_condensate_tools.py::_cb',
+    'timeseries_condensate_tools.py::cancel',
+
     # 1.6.245 — timeseries decomposition step 2 (scientific-core, part 2): the ANALYSIS entry point
     # (run_timeseries_condensate_analysis + the per-frame worker _ts_analyze_frame_worker + the drift/metrics
     # helpers _condensate_metrics_per_cell / _phase_shift / _apply_shift, plus the shared pool initializer

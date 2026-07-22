@@ -1,3 +1,19 @@
+## [1.6.246] - 2026-07-21
+### Changed — **timeseries decomposition step 3: the QThread/ProcessPool worker plumbing moves out.**
+Relocated the background-worker lifecycle to `toolbox/timeseries/execution.py`, **behaviour-preserving** (the
+spec's rule: relocate, do not re-engineer threading). Moved **verbatim**:
+
+- `_worker_read_frame` / `_process_frame_worker` — the parallel per-frame helpers that run in ProcessPool
+  subprocesses.
+- `_make__stackprocessworker` / `_make_timeseriesworker` — the two lazy QThread-worker factories (built on
+  first *use* so **Qt/napari stay function-scoped and the module still imports headless**), together with
+  their result caches and nested closures.
+
+No threading semantics changed; the workers still run, cancel, and report as before. Qt is not imported at
+module scope (`test_ci_dependencies` / `test_no_eager_reads` green). No registered ops (catalog unchanged).
+`timeseries_condensate_tools.py`: **1952 → 1410**; ceiling ratcheted to 1410, `execution.py` 581. Only the
+Qt UI builders remain (the last domain).
+
 ## [1.6.245] - 2026-07-21
 ### Changed — **timeseries decomposition step 2 (scientific-core): the analysis entry point moves out.**
 The centrepiece of the time-series scientific core — `run_timeseries_condensate_analysis` (per-frame

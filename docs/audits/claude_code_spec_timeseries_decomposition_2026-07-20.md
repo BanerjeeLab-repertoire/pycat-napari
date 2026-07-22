@@ -1,11 +1,12 @@
 # Claude Code spec — Decompose `timeseries_condensate_tools.py` by scientific domain
 
-> **◐ STATUS — IN PROGRESS. Scientific core DONE (1.6.244-245): frame_access + correlation + the ANALYSIS
-> entry point (run_timeseries_condensate_analysis + per-frame worker + drift/metrics helpers) split into
-> `toolbox/timeseries/` — byte-identical, analysis pinned BY A CHARACTERIZATION TEST WRITTEN FIRST
-> (test_timeseries_analysis_characterization: exact DataFrame + mask on a fixed scene).
-> timeseries_condensate_tools.py 2828 → 1952. Remaining: the Qt worker plumbing (_make__stackprocessworker,
-> _make_timeseriesworker) and the UI builders (_add_*), which are Qt-bound and left for a focused step.**
+> **◐ STATUS — IN PROGRESS. Scientific core + worker plumbing DONE (1.6.244-246): frame_access, correlation,
+> analysis, and the QThread/ProcessPool execution layer split into `toolbox/timeseries/` — all byte-identical
+> (analysis pinned by test_timeseries_analysis_characterization, workers relocated behaviour-preserving with
+> Qt kept function-scoped). timeseries_condensate_tools.py 2828 → 1410. Remaining: only the Qt UI builders
+> (_add_lazy_preprocess_stack, _add_run_timeseries_condensate_analysis, _add_ts_upscale_stack, _build_ts_
+> upscale_check_ui, _plot_condensate_fraction) + upscale_stack_to_zarr — the UI-builder step (attribute-
+> presence tests), where the preprocessing SCIENCE is still embedded inside _add_lazy_preprocess_stack.**
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. The scan's clearest
 fresh target: at **2,828 lines / 70 functions** it is the second-largest file, and it is a *repeat
