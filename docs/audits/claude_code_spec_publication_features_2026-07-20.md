@@ -18,8 +18,10 @@
 > (1.6.265): `font_family` (validated against installed fonts — a missing one warns + falls back, pure
 > `resolve_font_family`) and `transparent_background` (honoured by `export`'s savefig). Semantic colour +
 > dense-scatter rasterization DONE (1.6.266): `color_map` ({group: colour} tied to identity not position) and
-> `rasterize_points` (dense scatter → raster layer inside vector output). **Remaining Tier 2:**
-> legend control. **Remaining Tier 3:** export
+> `rasterize_points` (dense scatter → raster layer inside vector output). Export metadata DONE (1.6.267):
+> `export` embeds the PyCAT + dependency versions in the file (PNG `Software` / PDF-SVG `Creator`) and a
+> `_provenance` block in the spec JSON (`spec_from_dict` now tolerates it). **Remaining Tier 2:**
+> legend control. **Remaining Tier 3:** exact-regeneration-from-raw-data,
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing

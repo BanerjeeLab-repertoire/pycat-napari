@@ -235,3 +235,33 @@ def test_colour_map_and_rasterize_round_trip():
     spec = FigureSpec(color_map={'WT': '#123456'}, rasterize_points=True)
     back = spec_from_dict(spec_to_dict(spec))
     assert back.color_map == {'WT': '#123456'} and back.rasterize_points is True and back == spec
+
+
+# ── Tier 3: export metadata (reproducibility) ────────────────────────────────────────────────────
+def test_figure_export_metadata_names_pycat_and_its_versions():
+    from pycat.utils.figure_spec import figure_export_metadata
+    meta, sw = figure_export_metadata(FigureSpec(title='Fig 1'))
+    assert meta['Software'].startswith('pycat-napari') and meta['Title'] == 'Fig 1'
+    assert isinstance(sw, dict)                              # the software-versions record (may include numpy, …)
+
+
+def test_export_embeds_the_software_in_the_png_and_the_provenance_in_the_json(tmp_path):
+    from pycat.utils import figure_spec as fs
+    from PIL import Image
+    import json as _json
+    fig = render(_data({'WT': np.array([1.0, 2.0, 3.0])}), FigureSpec(title='T'))
+    out = fs.export(fig, tmp_path / 'fig.png', spec=FigureSpec(title='T'))
+    info = Image.open(out['png']).info                      # PNG tEXt chunks
+    assert 'pycat-napari' in info.get('Software', ''), "the PNG must record the software that made it"
+    doc = _json.loads(out['spec'].read_text(encoding='utf-8'))
+    assert 'software' in doc['_provenance']                 # the versions ride in the spec bundle too
+
+
+def test_the_exported_spec_json_still_regenerates_despite_the_provenance_key(tmp_path):
+    from pycat.utils import figure_spec as fs
+    import json as _json
+    spec = FigureSpec(title='T', y_scale='log', error_type='sem')
+    fig = render(_data({'WT': np.array([1.0, 2.0, 3.0])}), spec)
+    out = fs.export(fig, tmp_path / 'fig.png', spec=spec)
+    back = fs.spec_from_dict(_json.loads(out['spec'].read_text(encoding='utf-8')))
+    assert back == spec                                     # _provenance is tolerated, the spec round-trips

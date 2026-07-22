@@ -1,3 +1,15 @@
+## [1.6.267] - 2026-07-22
+### Added — **Publication figures: export embeds software/version metadata for reproducibility (publication_features Tier 3).**
+An exported figure now records the software that made it. `export()` writes the PyCAT + key-dependency
+versions into the file's metadata (PNG `Software` tEXt chunk / PDF+SVG `Creator`) and into a `_provenance`
+block in the spec-JSON bundle, so a figure carries its own reproducibility record.
+- New `figure_export_metadata(spec)` composes the record from `feature_provenance.software_versions()` (an
+  unavailable version is omitted, never guessed).
+- `spec_from_dict` now tolerates non-field keys, so the exported JSON — spec **plus** `_provenance` —
+  regenerates the exact `FigureSpec` unchanged.
+- Tests (`core`): the PNG carries `pycat-napari …` in its metadata, the JSON bundle carries the software
+  versions, and the spec round-trips despite the extra provenance key.
+
 ## [1.6.266] - 2026-07-22
 ### Added — **Publication figures: semantic colour mapping + dense-scatter rasterization (publication_features Tier 3).**
 - `FigureSpec.color_map` (`{group: colour}`) ties a colour to group IDENTITY, not plot position — so a

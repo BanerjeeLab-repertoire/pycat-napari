@@ -145,6 +145,23 @@ def resolve_y_scale(y_scale, value_arrays):
 ERROR_LABELS = {'sd': 'SD', 'sem': 'SEM', 'ci95': '95% CI'}
 
 
+def figure_export_metadata(spec):
+    """Reproducibility metadata for an exported figure: the PyCAT + key-dependency versions that produced it.
+
+    Returns ``(png_metadata, software_versions)`` — the first embedded in the file (PNG tEXt / PDF Creator),
+    the second also written into the spec-JSON bundle. An unavailable version is omitted, never guessed."""
+    try:
+        from pycat.utils.feature_provenance import software_versions
+        sw = software_versions()
+    except Exception:      # broad-ok: optional_probe — version enumeration is best-effort, never fail an export
+        sw = {}
+    ver = sw.get('pycat', '')
+    meta = {'Software': ('pycat-napari ' + ver).strip() if ver else 'pycat-napari'}
+    if getattr(spec, 'title', None):
+        meta['Title'] = str(spec.title)
+    return meta, sw
+
+
 def resolve_font_family(family):
     """The font family to actually use, and a warning if the requested one is not installed.
 
@@ -500,7 +517,9 @@ def spec_to_dict(spec) -> dict:
 
 
 def spec_from_dict(d) -> FigureSpec:
-    d = dict(d)
+    # Tolerate non-field keys (e.g. the exported bundle's '_provenance') so a written figure JSON regenerates.
+    _fields = {f.name for f in dataclasses.fields(FigureSpec)}
+    d = {k: v for k, v in dict(d).items() if k in _fields}
     for k in ('figure_size_in', 'x_limits', 'y_limits'):
         if d.get(k) is not None:
             d[k] = tuple(d[k])
@@ -528,12 +547,18 @@ def export(fig, path, *, spec, summary_df=None) -> dict:
     stem = pathlib.Path(path).with_suffix('')
     stem.parent.mkdir(parents=True, exist_ok=True)
     transparent = bool(getattr(spec, 'transparent_background', False))
+    png_meta, sw = figure_export_metadata(spec)          # software/version, for reproducibility
     out = {}
-    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'], transparent=transparent)
-    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'], transparent=transparent)
-    out['png'] = stem.with_suffix('.png'); fig.savefig(out['png'], dpi=spec.dpi, transparent=transparent)
+    # PDF/SVG take standard document keys; PNG takes arbitrary tEXt keys (so it carries the fuller record).
+    _doc_meta = {'Creator': png_meta['Software']}
+    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'], transparent=transparent, metadata=_doc_meta)
+    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'], transparent=transparent, metadata=_doc_meta)
+    out['png'] = stem.with_suffix('.png')
+    fig.savefig(out['png'], dpi=spec.dpi, transparent=transparent, metadata=png_meta)
     out['spec'] = stem.with_suffix('.json')
-    out['spec'].write_text(json.dumps(spec_to_dict(spec), indent=1), encoding='utf-8')
+    _spec_doc = spec_to_dict(spec)
+    _spec_doc['_provenance'] = {'software': sw}           # the versions that produced this figure
+    out['spec'].write_text(json.dumps(_spec_doc, indent=1), encoding='utf-8')
     if summary_df is not None:
         out['summary'] = stem.parent / (stem.name + '_summary.csv')
         summary_df.to_csv(out['summary'], index=False)
