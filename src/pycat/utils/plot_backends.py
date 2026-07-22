@@ -141,6 +141,51 @@ def _verify_row_order(artist_xy, df, x_col, y_col, tolerance=1e-9):
     return True, ''
 
 
+def _seaborn_subset_mappings(new_artists, df, x_col, y_col, hue):
+    """**When seaborn draws one artist per hue level, reconstruct a per-artist entity map — or refuse.**
+
+    A split means each artist holds a SUBSET of the table (the rows of one hue level), so an index into an
+    artist is an index into that subset, not the table — and a naive table index would resolve a click to
+    the wrong object. This matches every artist to exactly one hue subset using the SAME row-order check the
+    single-artist path uses (point count + coordinates, per subset), so each artist gets a *verified*
+    mapping or the whole plot is refused — never a plausible guess.
+
+    It matches by COORDINATES rather than assuming seaborn plots its artists in category order, so a future
+    ordering change cannot silently mis-map: an artist that does not match exactly one distinct subset
+    refuses the plot, exactly as the single-artist path refuses a reordered artist.
+
+    Returns ``(ok, mappings, message)``. ``mappings`` is a list of ``(artist, row_positions)`` where
+    ``row_positions`` are the POSITIONAL indices into ``df`` (hence into a 1:1 ``refs`` list) for that
+    artist's points, in artist-point order — so ``refs[row_positions[j]]`` is artist point ``j``'s object.
+    """
+    import pandas as pd
+
+    if hue is None or hue not in getattr(df, 'columns', ()):
+        return False, None, ("seaborn split the plot into several artists but no hue column was given to "
+                             "reconstruct which rows each one holds, so brushing is refused.")
+
+    hue_values = df[hue].values
+    subsets = [np.where(hue_values == level)[0] for level in pd.unique(hue_values)]   # positional, df order
+
+    used = set()
+    mappings = []
+    for art in new_artists:
+        xy = np.asarray(art.get_offsets(), dtype=float)
+        matches = [i for i, pos in enumerate(subsets)
+                   if i not in used and len(pos) == len(xy)
+                   and _verify_row_order(xy, df.iloc[pos], x_col, y_col)[0]]
+        if len(matches) != 1:
+            return False, None, (
+                f"a seaborn artist matched {len(matches)} hue subsets, not exactly one; brushing is "
+                "refused rather than risk a wrong index map.")
+        used.add(matches[0])
+        mappings.append((art, subsets[matches[0]]))
+
+    if len(used) != len(new_artists):
+        return False, None, "not every seaborn artist mapped to a distinct hue subset, so brushing is refused."
+    return True, mappings, ''
+
+
 # ── matplotlib and seaborn: the same canvas, the same event ──────────────────────────────
 
 def scatter(df, x_col, y_col, *, backend='matplotlib', ax=None, hue=None, **kwargs):
@@ -175,14 +220,22 @@ def scatter(df, x_col, y_col, *, backend='matplotlib', ax=None, hue=None, **kwar
         new = [c for c in ax.collections if id(c) not in before]
 
         if len(new) != 1:
-            # More than one artist means seaborn SPLIT the data (by hue, style, size). Then an
-            # artist index is an index into a SUBSET, not into the table — and resolving it
-            # against the table would point at the wrong object.
+            # More than one artist means seaborn SPLIT the data (by hue). Each artist is then a SUBSET
+            # of the table, so a table index into one is the wrong object. Instead of refusing outright,
+            # reconstruct a VERIFIED per-artist entity map (point count + coordinates per subset); if any
+            # artist can't be matched safely, fall back to the refusal. A verified map or an honest
+            # refusal — never a guess. (Modern seaborn keeps hue in ONE artist, so this branch is a
+            # defensive path for versions/plots that do split.)
+            ax.set_xlabel(x_col)
+            ax.set_ylabel(y_col)
+            ok_multi, mappings, msg = _seaborn_subset_mappings(new, df, x_col, y_col, hue)
+            if ok_multi:
+                return figure, mappings, True, (
+                    f"Seaborn split the data into {len(new)} artists (by hue); a per-artist entity "
+                    f"mapping was reconstructed and verified, so brushing works per artist. Wire it "
+                    f"with brushing.attach_brushing().")
             return figure, None, False, (
-                f"Seaborn drew {len(new)} separate artists (it split the data, probably by hue). "
-                f"**An index into one of them is not an index into the table**, so a click would "
-                f"resolve to the wrong object. Plot without the grouping to brush, or brush the "
-                f"groups separately.")
+                f"{msg} Plot without the grouping to brush, or brush the groups separately.")
         artist = new[0]
         drawn = artist.get_offsets()
 

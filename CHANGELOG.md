@@ -1,3 +1,27 @@
+## [1.6.260] - 2026-07-22
+### Added — **backend_parity Part 1: a seaborn hue split gets a VERIFIED per-artist brushing map, or an honest refusal.**
+When seaborn draws one artist per hue level, each artist holds a SUBSET of the table — so a table index into
+one artist resolves a click to the wrong object. The prior behaviour refused brushing outright for any
+multi-artist plot. This replaces the blunt refusal with a reconstruction that stays inside the exact
+scientific-safety property the audit praised: **a verified mapping or an honest refusal — never a guess.**
+
+- New `plot_backends._seaborn_subset_mappings(new_artists, df, x, y, hue)` — matches every artist to exactly
+  one hue subset by the SAME point-count + coordinate check the single-artist path uses, matching by
+  COORDINATES (not by assuming seaborn's artist order), and returns `(artist, row_positions)` per artist
+  where `row_positions` index a 1:1 `refs` list. If any artist can't be matched to exactly one distinct
+  subset, the whole plot falls back to the refusal.
+- `plot_backends.scatter()`'s multi-artist branch now returns the verified mappings (`ok=True`) instead of
+  refusing; a new `brushing.attach_brushing(figure, brushable, refs, **kw)` dispatches on whether the plot
+  is a single artist (1:1 with `refs`) or a verified hue split (per-artist subsets), so callers do not
+  special-case the split.
+- **Finding (recorded in the spec):** modern seaborn (0.13.2 here) keeps a hue plot in ONE artist in
+  DataFrame order, so `scatter()`'s single-artist path already brushes hue correctly and this multi-artist
+  path is a verified *fallback* for seaborn versions/plots that split. Its logic is covered by
+  `tests/test_seaborn_subset_brushing.py` (8 `core` tests, incl. count- and coordinate-mismatch refusals and
+  a real-seaborn end-to-end "brushable, not refused" check). No scientific output changes; full core green
+  (1639 passed). Parts 2–3 (PyQtGraph-default-for-large-scatter, Plotly QtWebEngine scoping) remain — both
+  interactive/Qt-bound.
+
 ## [1.6.259] - 2026-07-22
 ### Changed — **exception_context_classification Part 2: a swallowed WRITE no longer passes as success (the write-swallow guard + the writers-first conversion).**
 The scientific-result guard catches a broad `except` that returns a wrong *number*; this adds the guard for

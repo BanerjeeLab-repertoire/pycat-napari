@@ -1,5 +1,30 @@
 # Claude Code spec — Plot-backend parity: seaborn subsets, PyQtGraph default, Plotly scope
 
+> **◐ STATUS — Part 1 DONE (shipped 1.6.260). Parts 2–3 remain (both interactive/Qt-bound).**
+>
+> **Part 1 — seaborn per-artist subset mapping — DONE, with a premise correction.** The blunt multi-artist
+> refusal is replaced by `plot_backends._seaborn_subset_mappings`, which matches each artist to exactly one
+> hue subset by the SAME point-count + coordinate verification the single-artist path uses (matching by
+> COORDINATES, not by assuming seaborn's artist order, so a future ordering change cannot silently mis-map),
+> and falls back to the refusal if any artist can't be matched to exactly one distinct subset — **a verified
+> mapping or an honest refusal, never a guess**, exactly the property the audit praised. `scatter()`'s
+> multi-artist branch now returns the verified mappings; `brushing.attach_brushing()` dispatches single-artist
+> vs. verified-split so callers don't special-case it. Covered by `tests/test_seaborn_subset_brushing.py`
+> (8 `core` tests).
+>
+> **PREMISE CORRECTION:** modern seaborn (**0.13.2** in this env) keeps a hue plot in ONE `PathCollection`
+> in DataFrame order — `hue`/`style`/`size` do NOT split it into multiple artists. So `scatter()`'s existing
+> single-artist path ALREADY brushes hue correctly (verified by `_verify_row_order`), and the multi-artist
+> refusal the spec targeted **never triggers on this seaborn**. Part 1 is therefore a *verified fallback* for
+> seaborn versions/plots that do split, not a fix for a live bug — it removes a blunt refusal and future-proofs
+> the safety property, and the real-seaborn end-to-end test confirms a hue scatter is brushable, not refused.
+>
+> **Parts 2–3 REMAIN, both interactive/Qt-bound** (deferred with the other UI specs): Part 2 (default to the
+> PyQtGraph backend above an ~N-point threshold for *interactive* scatter, matplotlib retained for
+> publication, record which backend rendered) and Part 3 (Plotly scoped honestly — hover/identity always,
+> click-to-napari only where QtWebEngine is present, no dead affordances). The headless slices there are thin
+> (a threshold decision + a backend-provenance record); the substance is Qt interaction.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
 audit's §4: the four plot backends are not at parity. This spec closes the three concrete gaps it
 names, in priority order, without weakening the scientific-safety stance that makes the current
