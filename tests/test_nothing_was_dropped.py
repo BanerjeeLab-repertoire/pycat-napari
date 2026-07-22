@@ -355,6 +355,24 @@ _DELIBERATE = {
     'segmentation_tools.py::refine_labels_with_contours',
     'segmentation_tools.py::run_train_and_apply_rf_classifier',
 
+    # 1.6.242 — segmentation decomposition step 3: the filter-sensitivity-gated PUNCTA REFINEMENT family
+    # (SNR/kurtosis/contrast gate, per-object ring-radii/background helpers, and the two bit-identical
+    # fast/slow implementations behind puncta_refinement_func) MOVED verbatim to segmentation/
+    # puncta_refinement.py — no threshold, morphology, or operation order changed. The module owns the
+    # _PYCAT_REFINE_FAST/_DEBUG flags + _refine_debug_enabled it reads, and imports apply_watershed_labeling
+    # (watershed) + _to_uint16_safe (_common). Three tests had napari-notify / _local_ring_radii patch
+    # targets repointed to puncta_refinement (the module the moved filters resolve names in) — assertions
+    # unchanged. puncta_refinement_filtering_func is a registered op → catalog regen.
+    'segmentation_tools.py::_refine_debug_enabled',
+    'segmentation_tools.py::_local_ring_radii',
+    'segmentation_tools.py::_ring_masks',
+    'segmentation_tools.py::_robust_bg',
+    'segmentation_tools.py::_snr_conditions',
+    'segmentation_tools.py::_report_refinement_drops',
+    'segmentation_tools.py::puncta_refinement_filtering_func',
+    'segmentation_tools.py::puncta_refinement_filtering_func_fast',
+    'segmentation_tools.py::puncta_refinement_func',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was

@@ -1,3 +1,20 @@
+## [1.6.242] - 2026-07-21
+### Changed — **segmentation decomposition step 3: the puncta-refinement core moves out (byte-identical).**
+The most sensitive move: the filter-sensitivity-gated **puncta refinement** family — the SNR/kurtosis/
+contrast gate, the per-object local-ring background helpers, and the two bit-for-bit-identical
+implementations (windowed *fast* default + original *slow* reference) behind `puncta_refinement_func` —
+moved **verbatim** to `segmentation/puncta_refinement.py`. **No threshold, morphology, or operation order
+changed.** Pinned by `test_filter_sensitivity`, `test_refine_fast_slow_parity`, `test_local_ring_scales`,
+`test_puncta_refinement` — all green.
+
+- The module owns the `_PYCAT_REFINE_FAST`/`_DEBUG` flags it reads, and imports `apply_watershed_labeling`
+  (watershed) + `_to_uint16_safe` (_common) from their families — dependency-ordered, no cycles.
+- Three tests had patch targets repointed to `puncta_refinement` (the module the moved filters now resolve
+  `napari_show_warning`/`_local_ring_radii` in): `test_puncta_refinement`, `test_refine_fast_slow_parity`,
+  `test_filter_sensitivity` — assertions and pinned numbers unchanged.
+- `puncta_refinement_filtering_func` is a registered op → `operation_catalog.json` regenerated.
+  `segmentation_tools.py`: **1239 → 566**; ceiling ratcheted to 566. Only the subcellular family remains.
+
 ## [1.6.241] - 2026-07-21
 ### Changed — **segmentation decomposition step 2: the fz + cellpose families move out (byte-identical).**
 Continued the `segmentation_tools.py` split. Both families depend only on already-moved modules, so they

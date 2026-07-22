@@ -355,14 +355,16 @@ def _kept_by_the_OLD_fixed_ring(microns_per_pixel):
     one function the fix introduced, so forcing its old return value restores the old behaviour
     exactly, without keeping a second copy of the filter that could drift from the real one.
     """
-    from pycat.toolbox import segmentation_tools as seg
+    # _local_ring_radii moved to puncta_refinement.py (1.6.242); the filter resolves it in that
+    # module's namespace, so pin it there for the reconstruction to take effect.
+    from pycat.toolbox.segmentation import puncta_refinement as pr
 
-    real = seg._local_ring_radii
-    seg._local_ring_radii = lambda area, cell_area: (1, 1, 2)
+    real = pr._local_ring_radii
+    pr._local_ring_radii = lambda area, cell_area: (1, 1, 2)
     try:
         return _kept_by_production_ring(microns_per_pixel)
     finally:
-        seg._local_ring_radii = real
+        pr._local_ring_radii = real
 
 
 def test_the_MECHANISM_is_real_a_finer_pixel_size_makes_the_object_bigger_in_PIXELS():
