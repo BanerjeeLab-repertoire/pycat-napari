@@ -95,6 +95,10 @@ class FigureSpec:
     #                                             regardless of its position (semantic colour, Tier 3)
     rasterize_points: bool = False              # rasterize the dense scatter layer inside vector output (axes/
     #                                             text stay vector) — a 50k-point vector PDF is unusable otherwise
+    legend: bool = False                        # show a group→colour legend (off by default)
+    legend_loc: str = 'best'                    # 'best' | 'upper right' | 'lower left' | …
+    legend_ncol: int = 1                        # columns in the legend
+    legend_frame: bool = True                   # draw the legend's frame/box
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -255,6 +259,15 @@ def _render_on_axis(ax, fig_data, spec):
     if getattr(spec, 'error_type', 'none') in ERROR_LABELS:
         ax.text(0.98, 0.98, f"error bars: {ERROR_LABELS[spec.error_type]}", transform=ax.transAxes,
                 ha='right', va='top', fontsize=spec.font_size_pt * 0.8, color='#555555')
+    if getattr(spec, 'legend', False) and groups:
+        from matplotlib.lines import Line2D
+        handles = [Line2D([0], [0], marker='o', linestyle='', markersize=6, markeredgecolor='white',
+                          markerfacecolor=color_map.get(g, colors[i % len(colors)]), label=str(g))
+                   for i, g in enumerate(groups)]
+        ax.legend(handles=handles, loc=getattr(spec, 'legend_loc', 'best'),
+                  ncol=max(1, int(getattr(spec, 'legend_ncol', 1))),
+                  frameon=bool(getattr(spec, 'legend_frame', True)),
+                  fontsize=spec.font_size_pt * 0.85)
 
     fam, fam_warning = resolve_font_family(getattr(spec, 'font_family', None))
     if fam_warning:

@@ -22,8 +22,9 @@
 > `export` embeds the PyCAT + dependency versions in the file (PNG `Software` / PDF-SVG `Creator`) and a
 > `_provenance` block in the spec JSON (`spec_from_dict` now tolerates it). Exact regeneration DONE (1.6.268):
 > `render` stashes the raw plotted data, `export` writes `<name>_data.json`, and `regenerate(data, spec)`
-> reconstructs the exact figure (beyond the summary CSV). **Remaining Tier 2:** legend control. **Remaining
-> Tier 3 (the last, largest, least headless-verifiable):**
+> reconstructs the exact figure (beyond the summary CSV). Legend control DONE (1.6.269): `legend` +
+> `legend_loc`/`legend_ncol`/`legend_frame` (swatches follow the semantic `color_map`) — Tier 2 complete.
+> **Remaining Tier 3 (the last, largest, least headless-verifiable):**
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing

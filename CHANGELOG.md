@@ -1,3 +1,13 @@
+## [1.6.269] - 2026-07-22
+### Added — **Publication figures: legend control — placement, columns, frame (publication_features Tier 2).**
+`FigureSpec.legend` adds a group→colour legend (off by default), with `legend_loc` (position),
+`legend_ncol` (columns), and `legend_frame` (box on/off). The legend swatches use the semantic `color_map`
+where one is set, so the legend agrees with the points. All four fields round-trip through JSON.
+- Tests (`core`, Agg): no legend by default, one entry per group when on, frame + ncol honoured, swatches
+  follow the colour map, round-trip.
+- This closes the small remaining **Tier 2** item; what remains in `publication_features` is the Tier-3
+  image-panels/scale-bars surface (GUI-verified, its own follow-on) and minor polish.
+
 ## [1.6.268] - 2026-07-22
 ### Added — **Publication figures: exact regeneration from the raw plotted data (publication_features Tier 3).**
 A figure can now be reproduced EXACTLY, not just approximated from a summary. `render()` stashes the raw

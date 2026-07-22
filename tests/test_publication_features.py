@@ -291,3 +291,36 @@ def test_figdata_round_trips_through_its_dict():
     back = figdata_from_dict(figdata_to_dict(d))
     assert back.measurement == 'viscosity' and back.groups == ('a', 'b') and back.x_label == 'cond'
     assert np.allclose(back.values_by_group['a'], [1.0, 2.0])
+
+
+# ── Tier 2: legend control ───────────────────────────────────────────────────────────────────────
+def test_no_legend_by_default_and_one_entry_per_group_when_on():
+    d = FigureData(measurement='area', groups=('WT', 'KO', 'DKO'),
+                   values_by_group={'WT': np.array([1.0, 2.0]), 'KO': np.array([3.0]),
+                                    'DKO': np.array([4.0, 5.0])})
+    assert render(d, FigureSpec()).axes[0].get_legend() is None
+    leg = render(d, FigureSpec(legend=True)).axes[0].get_legend()
+    assert leg is not None and [t.get_text() for t in leg.get_texts()] == ['WT', 'KO', 'DKO']
+
+
+def test_legend_frame_and_ncol_are_honoured():
+    d = _data({'WT': np.array([1.0, 2.0]), 'KO': np.array([3.0, 4.0])})
+    framed = render(d, FigureSpec(legend=True, legend_frame=True)).axes[0].get_legend()
+    plain = render(d, FigureSpec(legend=True, legend_frame=False)).axes[0].get_legend()
+    assert framed.get_frame_on() is True and plain.get_frame_on() is False
+    leg2 = render(d, FigureSpec(legend=True, legend_ncol=2)).axes[0].get_legend()
+    assert getattr(leg2, '_ncols', getattr(leg2, '_ncol', 1)) == 2
+
+
+def test_legend_uses_the_semantic_colour_map():
+    from matplotlib.colors import to_rgba
+    d = FigureData(measurement='area', groups=('WT', 'KO'),
+                   values_by_group={'WT': np.array([1.0]), 'KO': np.array([2.0])})
+    leg = render(d, FigureSpec(legend=True, color_map={'WT': 'blue', 'KO': 'red'})).axes[0].get_legend()
+    handle_colors = [h.get_markerfacecolor() for h in leg.legend_handles]
+    assert to_rgba(handle_colors[0]) == to_rgba('blue') and to_rgba(handle_colors[1]) == to_rgba('red')
+
+
+def test_legend_fields_round_trip():
+    spec = FigureSpec(legend=True, legend_loc='upper left', legend_ncol=3, legend_frame=False)
+    assert spec_from_dict(spec_to_dict(spec)) == spec
