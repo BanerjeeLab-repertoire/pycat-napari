@@ -495,6 +495,10 @@ def _add_zstack_metrics(ui, layout):
 
         df = condensate_metrics_3d(mask, intensity, ui._mpx(), z_step_sp.value())
         ui._dr()['zstack_condensate_df'] = df
+        ui._record('zstack_3d_metrics', {
+            'mask_layer': mask_dd.currentText(), 'intensity_layer': int_dd.currentText(),
+            'z_step_um': z_step_sp.value(), 'n_condensates': len(df),
+        })
         _show("3D Condensate Metrics", [("Per-condensate 3D metrics", df)])
         if len(df):
             napari_show_info(

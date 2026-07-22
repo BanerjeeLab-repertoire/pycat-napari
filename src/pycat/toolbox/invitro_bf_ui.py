@@ -353,6 +353,10 @@ def _ivbf_od_field(ui, layout):
         # The 2D-projection caveat now rides IN the table, not only the napari message (wire_orphans B2).
         from pycat.toolbox.condensate_modes import annotate_summary_table
         summ_df = annotate_summary_table(summ_df, mask)
+        ui._record('ivbf_field_summary', {
+            'raw_layer': raw_dd.currentText(), 'mask_layer': mask_dd.currentText(),
+            'n_droplets': summ['n_droplets'],
+        })
         _show("IVBF Field Summary", [
             ("Field statistics", summ_df),
             ("Per-droplet OD metrics", per_drop),
@@ -430,6 +434,7 @@ def _ivbf_size_contact(ui, layout):
             napari_show_info(f"Size: {size_res.get('preferred_model','?')}, "
                               f"PDI={size_res.get('polydispersity_index',np.nan):.3f}")
 
+        ui._record('ivbf_size_distribution', {'mask_layer': mask_dd.currentText()})
         _show("IVBF Size & Contact Angle", tables)
     run.clicked.connect(_on_run)
     import skimage as sk
@@ -477,6 +482,7 @@ def _ivbf_spatial(ui, layout):
         def _done(res):
             if not res:
                 napari_show_warning("Need at least 2 droplets for spatial metrics."); return
+            ui._record('ivbf_spatial_metrology', {'mask_layer': mask_dd.currentText()})
             _show("IVBF Spatial", list(_results_to_dataframes(res).items()))
             napari_show_info("Spatial metrology done.")
         def _err(msg):
@@ -592,6 +598,9 @@ def _ivbf_dynamics(ui, layout):
             if 'fusions' in res and not res['fusions'].empty:
                 dr['ivbf_fusions'] = res['fusions']
                 tables.append(("Fusion relaxation", res['fusions']))
+            ui._record('ivbf_dynamics', {
+                'stack_layer': stack_dd.currentText(), 'frame_interval_s': dt,
+            })
             _show("IVBF Dynamics", tables)
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -645,6 +654,7 @@ def _ivbf_focus_qc(ui, layout):
             run.setEnabled(True)
             df = res['per_frame_df']; summ = res['summary']
             ui._dr()['ivbf_frame_qc'] = df
+            ui._record('ivbf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df)})
             summ_df = pd.DataFrame([{k:v for k,v in summ.items() if k!='recommendation'}])
             _show("IVBF Focus QC", [("Summary", summ_df), ("Per-frame", df)])
             n = summ['n_defocused_frames']

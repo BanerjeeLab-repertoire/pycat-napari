@@ -50,7 +50,10 @@ CONDENSATE_PIPELINE = [
     ('morphological_complexity','11. Morphological Complexity  [opt]'),
     ('dynamic_spatial',         '12. Dynamic Spatial Phenotyping  [opt]'),
     ('organizational_metrics',  '13. Organizational Metrics  [opt]'),
-    ('save_and_clear',          '14. Save & Clear'),
+    # save_and_clear is a generic, always-available action (Open/Save
+    # File(s) menu) rather than a step specific to this pipeline, so it does
+    # not occupy a number in the checklist -- confirmed by the user for
+    # cellular_bf/zstack; applied consistently across all pipelines.
 ]
 
 TIMESERIES_PIPELINE = [
@@ -64,7 +67,6 @@ TIMESERIES_PIPELINE = [
     ('cell_analysis',           '7.  Cell Analyzer'),
     ('timeseries_condensate_analysis', '8.  Time-Series Condensate Analysis'),
     ('export_timeseries_video', '9.  Export video  [opt]'),
-    ('save_and_clear',          '10. Save & Clear'),
 ]
 
 COLOC_PIPELINE = [
@@ -78,7 +80,6 @@ COLOC_PIPELINE = [
     ('condensate_segmentation', '8.  Condensate segmentation'),
     ('condensate_analysis',     '9.  Condensate analysis'),
     ('two_channel_condensate_coloc', '10. Two-Channel Colocalization'),
-    ('save_and_clear',          '11. Save & Clear'),
 ]
 
 CELLULAR_BF_PIPELINE = [
@@ -86,38 +87,45 @@ CELLULAR_BF_PIPELINE = [
     ('bf_preprocess',              '2.  Preprocess BF'),
     ('bf_cell_segmentation',       '3.  Cell segmentation  [opt]'),
     ('bf_condensate_segmentation', '4.  Segment condensate spots'),
-    ('',                           '5.  OD metrics & analysis'),
-    ('',                           '6.  Per-cell summary'),
-    ('',                           '7.  Spatial Metrology  [opt]'),
-    ('',                           '8.  Dynamics  [opt]'),
-    ('',                           '9.  Texture  [opt]'),
-    ('',                           '10. Frame Quality  [opt]'),
-    ('save_and_clear',             '11. Save & Clear'),
+    ('bf_od_metrics',              '5.  OD metrics & analysis'),
+    ('bf_per_cell_summary',        '6.  Per-cell summary'),
+    ('bf_spatial_metrology',       '7.  Spatial Metrology  [opt]'),
+    ('bf_dynamics',                '8.  Dynamics  [opt]'),
+    ('bf_texture',                 '9.  Texture  [opt]'),
+    ('bf_frame_qc',                '10. Frame Quality  [opt]'),
 ]
 
 INVITRO_FLUOR_PIPELINE = [
-    ('open_image',        '1.  Open fluorescence image'),
-    ('ivf_preprocess',    '2.  Preprocess'),
-    ('ivf_segmentation',  '3.  Segment droplets'),
-    ('',                  '4.  Field summary & partition coefficient'),
-    ('',                  '5.  Size distribution fit'),
-    ('',                  '6.  Spatial Metrology  [opt]'),
-    ('',                  '7.  Dynamics & coarsening  [opt]'),
-    ('',                  '8.  Phase diagram / C_sat  [opt]'),
-    ('',                  '9.  Frame Quality  [opt]'),
-    ('save_and_clear',    '10. Save & Clear'),
+    ('open_image',              '1.  Open fluorescence image'),
+    ('ivf_preprocess',          '2.  Preprocess'),
+    ('ivf_segmentation',        '3.  Segment droplets'),
+    ('ivf_field_summary',       '4.  Field summary & partition coefficient'),
+    ('ivf_size_distribution',   '5.  Size distribution fit'),
+    ('ivf_spatial_metrology',   '6.  Spatial Metrology  [opt]'),
+    ('ivf_phase_diagram',       '7.  Phase diagram / C_sat  [opt]'),
+    # ivf_dynamics and ivf_frame_qc are time-series-only bonus panels in this
+    # otherwise single-image pipeline (see invitro_fluor_ui.py) -- they don't
+    # occupy a step number and are intentionally not listed here.
+]
+
+TIMESERIES_INVITRO_FLUOR_PIPELINE = [
+    ('open_stack',                '1.  Open time-series image'),
+    ('',                          '2.  Preprocess (per frame)  [opt]'),
+    ('tsivf_segment_stack',       '3.  Segment droplets (every frame)'),
+    ('tsivf_link_condensates',    '4.  Link condensates (fusion-aware)'),
+    ('tsivf_object_trajectories', '5.  Per-condensate trajectories'),
+    ('tsivf_field_trajectories',  '6.  Field trajectories (Φ, partition, C_sat)'),
 ]
 
 INVITRO_BF_PIPELINE = [
-    ('open_image',        '1.  Open brightfield image'),
-    ('ivbf_preprocess',   '2.  Preprocess'),
-    ('ivbf_segmentation', '3.  Segment droplets'),
-    ('',                  '4.  OD & field summary'),
-    ('',                  '5.  Size distribution & contact angle'),
-    ('',                  '6.  Spatial Metrology  [opt]'),
-    ('',                  '7.  Dynamics & coarsening  [opt]'),
-    ('',                  '8.  Focus Quality  [opt]'),
-    ('save_and_clear',    '9.  Save & Clear'),
+    ('open_image',               '1.  Open brightfield image'),
+    ('ivbf_preprocess',          '2.  Preprocess'),
+    ('ivbf_segmentation',        '3.  Segment droplets'),
+    ('ivbf_field_summary',       '4.  OD & field summary'),
+    ('ivbf_size_distribution',   '5.  Size distribution & contact angle'),
+    ('ivbf_spatial_metrology',   '6.  Spatial Metrology  [opt]'),
+    ('ivbf_dynamics',            '7.  Dynamics & coarsening  [opt]'),
+    ('ivbf_frame_qc',            '8.  Focus Quality  [opt]'),
 ]
 
 FIBRIL_PIPELINE = [
@@ -134,7 +142,6 @@ FIBRIL_PIPELINE = [
     ('',                        '11. Measure binary mask'),
     ('morphological_complexity','12. Morphological Complexity  [opt]'),
     ('organizational_metrics',  '13. Organizational Metrics  [opt]'),
-    ('save_and_clear',          '14. Save & Clear'),
 ]
 
 ZSTACK_PIPELINE = [
@@ -142,8 +149,7 @@ ZSTACK_PIPELINE = [
     ('zstack_bg_removal',              '2.  3D Background Removal'),
     ('zstack_cell_segmentation',       '3.  3D Cell Segmentation  [opt]'),
     ('zstack_condensate_segmentation', '4.  3D Condensate Segmentation'),
-    ('',                               '5.  3D Metrics'),
-    ('save_and_clear',                 '6.  Save & Clear'),
+    ('zstack_3d_metrics',              '5.  3D Metrics'),
 ]
 
 VPT_PIPELINE = [
@@ -171,6 +177,7 @@ TEMPERATURE_PIPELINE = [
     ('temperature_sync',        '2.  Sync temperatures to frames'),
     ('temperature_turbidity',   '3.  Entropy turbidity → T_phase / T_clear'),
     ('temperature_export_video','4.  Scale bar & annotated export'),
+    ('temperature_batch',       '5.  Batch (folder of TIFFs)  [opt]'),
 ]
 
 FD_CURVE_PIPELINE = [
@@ -186,6 +193,7 @@ PIPELINE_DEFS = {
     'coloc':         COLOC_PIPELINE,
     'cellular_bf':   CELLULAR_BF_PIPELINE,
     'invitro_fluor': INVITRO_FLUOR_PIPELINE,
+    'timeseries_invitro_fluor': TIMESERIES_INVITRO_FLUOR_PIPELINE,
     'invitro_bf':    INVITRO_BF_PIPELINE,
     'fibril':        FIBRIL_PIPELINE,
     'zstack':        ZSTACK_PIPELINE,
@@ -202,6 +210,7 @@ PIPELINE_DISPLAY_NAMES = {
     'coloc':         'Colocalization',
     'cellular_bf':   'Cellular BF',
     'invitro_fluor': 'In Vitro (Fluor)',
+    'timeseries_invitro_fluor': 'Time-Series In Vitro (Fluor)',
     'invitro_bf':    'In Vitro (BF)',
     'fibril':        'Fibril',
     'zstack':        'Z-Stack (3D)',

@@ -100,6 +100,11 @@ class TimeSeriesInVitroFluorUI:
 
     # ── UI construction ───────────────────────────────────────────────────
     def setup_ui(self):
+        try:
+            self.central_manager.workflow_checklist.activate('timeseries_invitro_fluor')
+        except Exception:
+            pass
+
         layout = QVBoxLayout()
         layout.setSpacing(8)
         layout.setContentsMargins(4, 20, 4, 4)

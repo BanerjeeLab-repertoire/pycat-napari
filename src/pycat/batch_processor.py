@@ -647,9 +647,25 @@ class BatchProcessor:
     # ------------------------------------------------------------------
 
     def record(self, step_name: str, params: Dict[str, Any]):
-        """Append a step to the in-memory config log."""
+        """Append a step to the in-memory config log.
+
+        The workflow checklist's progress bar is a separate, always-on
+        feature from batch recording (an opt-in toggle for building a
+        replayable headless config) -- it must update regardless of whether
+        the user has recording enabled. Previously the checklist
+        notification lived after the `recording_enabled` early-return, so
+        with recording off (the default) EVERY step in EVERY pipeline was
+        silently dropped and the checklist never advanced past whatever
+        `WorkflowChecklistManager.activate()` marks at pipeline-switch time.
+        """
         if not self.recording_enabled:
-            print(f"[PyCAT Batch] Recording disabled — ignored step: {step_name}")
+            print(f"[PyCAT Batch] Recording disabled — step not saved to batch config: {step_name}")
+            try:
+                cm = getattr(self, '_central_manager', None)
+                if cm is not None:
+                    cm.workflow_checklist.on_step_recorded(step_name)
+            except Exception:
+                pass
             return
         params = dict(params or {})
         # Snapshot the active/all layer names at record time, to help diagnose
