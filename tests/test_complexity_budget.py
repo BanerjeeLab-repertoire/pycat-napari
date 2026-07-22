@@ -264,9 +264,9 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    # 2669 -> 2515 (step 1: size_estimation) -> 2285 (step 2, 1.6.249: the shared _base primitives). The
-    # ceiling ratchets DOWN as background/preprocessing/upscaling/deblur move out (characterization-first).
-    "toolbox/image_processing_tools.py": 2285,
+    # 2669 -> 2515 (size_estimation) -> 2285 (_base primitives) -> 2141 (step 3, 1.6.250: deblur). The
+    # ceiling ratchets DOWN as background/preprocessing/upscaling move out (characterization-first).
+    "toolbox/image_processing_tools.py": 2141,
     # 2828 -> 2600 (frame-access + correlation) -> 1952 (analysis) -> 1410 (worker plumbing) -> 180 (step 4,
     # 1.6.247: preprocessing science + Qt UI builders). timeseries_condensate_tools.py is now a PURE re-export
     # shim (no defs); ceiling locked at the shim size. The analysis / execution / ui modules get their own

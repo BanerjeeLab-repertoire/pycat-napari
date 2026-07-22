@@ -1,3 +1,13 @@
+## [1.6.250] - 2026-07-21
+### Changed — **image_processing decomposition step 3: deblur-by-pixel-reassignment moves out.**
+`deblur_by_pixel_reassignment` (DPR — sharpen by re-locating each pixel toward the local gradient on an
+upsampled grid) and its `run_dpr` viewer wrapper moved **verbatim** to `toolbox/image_processing/deblur.py`.
+Now unblocked because its only in-file dependency, `upscale_image_interp`, moved to `_base` in the previous
+step. Pinned BEFORE the move by `test_image_processing_deblur_characterization` (exact two-array output on a
+fixed synthetic scene); identical after. Registered op → `operation_catalog.json` regenerated.
+`image_processing_tools.py`: **2285 → 2141**; ceiling ratcheted to 2141. Remaining: filters/enhancement,
+background, preprocessing, upscaling.
+
 ## [1.6.249] - 2026-07-21
 ### Changed — **image_processing decomposition step 2 (foundation): the shared primitives move out.**
 The algorithm families (background, preprocessing, upscaling, deblur) all reuse a handful of low-level

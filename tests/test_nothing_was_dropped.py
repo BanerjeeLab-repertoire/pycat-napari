@@ -89,6 +89,13 @@ _DELIBERATE = {
     'image_processing_tools.py::invert_image',
     'image_processing_tools.py::upscale_image_interp',
 
+    # 1.6.250 — image_processing decomposition step 3: DEBLUR by pixel reassignment (deblur_by_pixel_
+    # reassignment + its run_dpr viewer wrapper) MOVED verbatim to toolbox/image_processing/deblur.py, now
+    # unblocked since its only in-file dep (upscale_image_interp) is in _base. Pinned by
+    # test_image_processing_deblur_characterization (exact two-array output). Registered op → catalog regen.
+    'image_processing_tools.py::deblur_by_pixel_reassignment',
+    'image_processing_tools.py::run_dpr',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /
