@@ -64,6 +64,17 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 2026-07-22 — redundancy_consolidation axis 3: four byte-identical `class _XWorker(QThread)` background
+    # workers (condensate_physics / brightfield / invitro_bf / invitro_fluor) were consolidated into ONE
+    # shared class built by `qt_worker.make_task_worker()`. Each local class (and its `run()` emitting
+    # finished(fn(**kwargs))/error(traceback)) was replaced by `_XWorker = make_task_worker()`, so the local
+    # NAME and every call site are unchanged and the non-modal semantics are byte-identical — the `run`
+    # method now lives once in the shared factory. Pinned by test_qt_worker (finished/error via qtbot).
+    'brightfield_ui.py::run',
+    'condensate_physics_ui.py::run',
+    'invitro_bf_ui.py::run',
+    'invitro_fluor_ui.py::run',
+
     # 1.6.248 — image_processing decomposition step 1 (highest-risk file, characterization-FIRST): the
     # automatic object-size estimators (estimate_object_size_px — the top-hat/Otsu batch estimator that feeds
     # downstream segmentation — its nested _equiv_diam helper, the brightfield variant, and the

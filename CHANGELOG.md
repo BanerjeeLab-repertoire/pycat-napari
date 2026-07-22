@@ -1,3 +1,22 @@
+## [1.6.258] - 2026-07-22
+### Changed — **redundancy_consolidation axis 3: the duplicated UI background-worker consolidated (behaviour-preserving).**
+Four analysis panels (condensate_physics, brightfield, invitro_bf, invitro_fluor) each defined a
+byte-identical `class _XWorker(QThread)` — a `finished(object)`/`error(str)` pair and a `run()` emitting
+`finished(fn(**kwargs))`/`error(traceback)`. That is the audit's "duplicated worker lifecycle." It now lives
+once, in `qt_worker.make_task_worker()` (a cached factory so the module still imports headless / Qt resolves
+lazily). Each local class was replaced by `_XWorker = make_task_worker()`, so the local name and all 20 call
+sites are unchanged and the non-modal semantics (inline spinner, GUI interactive) are byte-identical.
+
+**Deliberately NOT routed through `operation_runner`:** those panels keep the GUI interactive with an inline
+spinner, whereas `operation_runner` (via `run_with_progress`) is WINDOW-MODAL — a different UX contract.
+Swapping one for the other would be a behaviour change, which is exactly what this spec forbids; the two
+coexist. `_AdvancedAnalysisWorker` (progress+cancel contract) and `_SpatialWorker` (specialised) are
+genuinely distinct and left separate.
+
+Pinned by `test_qt_worker` (finished/error delivery via qtbot; one cached class). Also fixed a pre-existing
+brittle assertion in `test_ui_structure` (it string-matched a now-multi-line `MenuManager` re-export; made
+it AST-robust). Full core green (1536 passed).
+
 ## [1.6.257] - 2026-07-22
 ### Added — **MRI surfacing (step 3, batch wiring): reliability now populates automatically in exported tables.**
 The reliability columns added in 1.6.255 only filled when a caller supplied a `reliability_context`; the

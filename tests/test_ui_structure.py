@@ -145,5 +145,10 @@ def test_core_ui_classes_present():
     mm_src = (pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
               / 'menu_manager.py').read_text(encoding='utf-8')
     assert 'class MenuManager' in mm_src, "MenuManager missing from menu_manager.py"
-    assert 'from pycat.ui.menu_manager import MenuManager' in ui_src, (
+    # Robust to a single-line OR parenthesised multi-line re-export (the latter grew when other names
+    # joined the import): assert MenuManager is a re-exported name from menu_manager, not an exact string.
+    _mm_imports = {a.name for n in ast.walk(ast.parse(ui_src))
+                   if isinstance(n, ast.ImportFrom) and n.module == 'pycat.ui.menu_manager'
+                   for a in n.names}
+    assert 'MenuManager' in _mm_imports, (
         "ui_modules.py must re-export MenuManager so `from pycat.ui.ui_modules import MenuManager` works")

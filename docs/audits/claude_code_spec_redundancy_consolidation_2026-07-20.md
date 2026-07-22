@@ -29,13 +29,16 @@
 > **not recommended under the output-identical rule.** Add a new lazy-disk wrapper → wire the guard into its
 > `__array__` (the one real rule), which `test_lazy_sources_headless` already exercises.
 >
-> **Axis 3 (worker/thread lifecycle → `operation_runner`) — OPEN, the sole remaining item.** The
-> timeseries/VPT `execution.py` modules now exist (decompositions shipped 1.6.238/1.6.246), so the worker
-> plumbing is at least localised. But routing it through `operation_runner` is behaviour-preserving-only and
-> threading semantics (cancel timing, progress, thread affinity) are notoriously subtle — a consolidation
-> that shifts any of those is a behaviour change even if the numbers match. Do it deliberately, per-worker,
-> only where the semantics genuinely match; leave them separate otherwise. This is the one axis with real
-> code left, and it is the riskiest — it earns its own focused pass.
+> **Axis 3 (worker/thread lifecycle) — PARTIALLY DONE (2026-07-22).** Finding: the per-UI `_XWorker(QThread)`
+> classes are NON-modal (inline spinner, GUI interactive), semantically DISTINCT from `operation_runner`
+> (window-modal) — so the spec's named target is wrong for them; routing them through it would swap the UX.
+> The real duplication — four byte-identical simple workers (condensate_physics, brightfield, invitro_bf,
+> invitro_fluor) — was consolidated instead into one shared `qt_worker.make_task_worker()` (same non-modal
+> semantics, behaviour-preserving; local names + call sites unchanged; pinned by test_qt_worker via qtbot).
+> STILL OPEN: `_AdvancedAnalysisWorker` (passes progress_emit+should_cancel — a different contract) and
+> `_SpatialWorker` (specialised), plus the timeseries/VPT ProcessPool + `_make__stackprocessworker` workers,
+> which are genuinely distinct and left separate. No worker was routed through `operation_runner` — the
+> semantics do not match, exactly the behaviour-change the spec forbids.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. A different axis
 from decomposition: instead of splitting big files, this finds **duplicated logic** and routes it

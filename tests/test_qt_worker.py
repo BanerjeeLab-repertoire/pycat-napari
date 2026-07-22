@@ -219,3 +219,39 @@ def test_materialize_off_thread_survives_a_viewer_with_no_qt_window(monkeypatch)
         pass
 
     assert materialize_off_thread('d', viewer=_Viewer()) == 'decoded'
+
+
+# ── The shared task-worker factory (was re-derived per UI; redundancy_consolidation axis 3) ──────
+def test_make_task_worker_delivers_the_result_on_finished(qtbot):
+    """The shared worker runs fn(**kwargs) off-thread and emits `finished(result)` — the exact non-modal
+    pattern the per-UI _XWorker classes each re-derived."""
+    from pycat.utils.qt_worker import make_task_worker
+    W = make_task_worker()
+    got = []
+    w = W(lambda x, y: x + y, {'x': 2, 'y': 3})
+    w.finished.connect(got.append)
+    with qtbot.waitSignal(w.finished, timeout=2000):
+        w.start()
+    w.wait()
+    assert got == [5]
+
+
+def test_make_task_worker_routes_an_exception_to_error(qtbot):
+    """A raise inside fn reaches `error(traceback_str)` — not a crash, not a lost worker."""
+    from pycat.utils.qt_worker import make_task_worker
+    def boom():
+        raise ValueError('kaboom')
+    W = make_task_worker()
+    errs = []
+    w = W(boom)                       # kwargs omitted → defaults to {}
+    w.error.connect(errs.append)
+    with qtbot.waitSignal(w.error, timeout=2000):
+        w.start()
+    w.wait()
+    assert errs and 'kaboom' in errs[0] and 'ValueError' in errs[0]
+
+
+def test_make_task_worker_is_one_cached_class():
+    """Every caller shares one class (cached), so a `finished`/`error` connection is uniform."""
+    from pycat.utils.qt_worker import make_task_worker
+    assert make_task_worker() is make_task_worker()
