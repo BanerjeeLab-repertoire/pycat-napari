@@ -19,6 +19,13 @@
 > seaborn versions/plots that do split, not a fix for a live bug — it removes a blunt refusal and future-proofs
 > the safety property, and the real-seaborn end-to-end test confirms a hue scatter is brushable, not refused.
 >
+> **Parts 2–3: the headless slice DONE (shipped 1.6.274); the Qt interaction remains.** New Qt-free
+> `utils/plot_backend_selection.py`: `choose_scatter_backend` (PyQtGraph above the ~5000 threshold where
+> available, else matplotlib — publication stays matplotlib), `backend_provenance` (records which backend +
+> why), `plotly_interaction_scope` (`'click'` only where QtWebEngine exists, else `'hover_only'` — no dead
+> affordance), + non-crashing availability probes. `test_plot_backend_selection.py` (`core`). The interactive
+> substance below (PyQtGraph rendering + SelectionService wiring; the Plotly widget) is the remaining Qt work.
+>
 > **Parts 2–3 REMAIN, both interactive/Qt-bound** (deferred with the other UI specs): Part 2 (default to the
 > PyQtGraph backend above an ~N-point threshold for *interactive* scatter, matplotlib retained for
 > publication, record which backend rendered) and Part 3 (Plotly scoped honestly — hover/identity always,

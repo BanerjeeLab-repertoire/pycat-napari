@@ -1,3 +1,19 @@
+## [1.6.274] - 2026-07-22
+### Added — **Plot-backend decisions: interactive-scatter threshold, backend provenance, honest Plotly scope (backend_parity Parts 2–3, headless slice).**
+The Qt interaction is deferred, but the decisions are small and pure — new Qt-free
+`utils/plot_backend_selection.py`:
+- `choose_scatter_backend(n_points, *, threshold, pyqtgraph)` — an interactive scatter defaults to
+  **PyQtGraph** only above the threshold (~5000, configurable) AND where PyQtGraph is available; otherwise
+  **matplotlib**, which stays the canonical publication backend regardless.
+- `backend_provenance(...)` records WHICH backend rendered and why (the audit's "record which backend
+  rendered").
+- `plotly_interaction_scope(qtwebengine)` — Plotly advertises full click-to-napari (`'click'`) only where
+  QtWebEngine exists, else `'hover_only'` (identity-bearing hover, **no dead click affordance**). Availability
+  probes (`pyqtgraph_available`, `qtwebengine_available`) return a bool and never crash.
+- Tests (`core`): below-threshold→matplotlib (even if PyQtGraph present), above→PyQtGraph only when
+  available, configurable threshold, provenance record, honest Plotly scope. The interactive substance
+  (actual PyQtGraph/Plotly rendering + selection wiring) remains the Qt follow-on.
+
 ## [1.6.273] - 2026-07-22
 ### Added — **Selection as a STATE: hover, multi-select, and pinning — independent and immutable (interaction_layer Gap 1).**
 A selection was one object with a string mode, so there was no ctrl-click comparison set, no pinning a track
