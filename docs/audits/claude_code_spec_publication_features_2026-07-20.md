@@ -14,8 +14,10 @@
 > control, significance bracket-placement UI exposure. **Tier 2:** multi-panel +
 > panel labels DONE (1.6.264): `render_multipanel(panels, *, spec, n_cols, panel_labels)` grids several
 > `FigureData` with bold A/B/C… labels (per-panel spec override; per-axis plotting factored into a shared
-> `_render_on_axis`, so single-panel `render` is unchanged). **Remaining Tier 2:** legend control, validated
-> fonts, transparent background. **Tier 3:** dense-scatter rasterization, semantic colour, export
+> `_render_on_axis`, so single-panel `render` is unchanged). Validated fonts + transparent background DONE
+> (1.6.265): `font_family` (validated against installed fonts — a missing one warns + falls back, pure
+> `resolve_font_family`) and `transparent_background` (honoured by `export`'s savefig). **Remaining Tier 2:**
+> legend control. **Tier 3:** dense-scatter rasterization, semantic colour, export
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing

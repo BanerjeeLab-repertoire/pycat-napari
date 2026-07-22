@@ -163,3 +163,38 @@ def test_panel_labels_extend_past_Z():
 def test_empty_panels_is_refused():
     with pytest.raises(ValueError, match='at least one panel'):
         render_multipanel([])
+
+
+# ── Tier 2: validated fonts + transparent background ─────────────────────────────────────────────
+def test_resolve_font_family_accepts_installed_and_warns_on_missing():
+    from pycat.utils.figure_spec import resolve_font_family
+    fam, warn = resolve_font_family('DejaVu Sans')          # ships with matplotlib
+    assert fam == 'DejaVu Sans' and warn is None
+    fam2, warn2 = resolve_font_family('No Such Font 9000')
+    assert fam2 is None and warn2 and 'not installed' in warn2
+    assert resolve_font_family(None) == (None, None)
+
+
+def test_a_valid_font_family_is_applied_to_the_axis_text():
+    fig = render(_data({'WT': np.array([1.0, 2.0, 3.0])}), FigureSpec(font_family='DejaVu Sans'))
+    assert 'DejaVu Sans' in fig.axes[0].yaxis.label.get_fontfamily()
+
+
+def test_a_missing_font_WARNS_and_falls_back_not_silently():
+    with pytest.warns(UserWarning, match="not installed|Falling back"):
+        render(_data({'WT': np.array([1.0, 2.0])}), FigureSpec(font_family='No Such Font 9000'))
+
+
+def test_font_and_transparent_fields_round_trip():
+    spec = FigureSpec(font_family='DejaVu Sans', transparent_background=True)
+    back = spec_from_dict(spec_to_dict(spec))
+    assert back.font_family == 'DejaVu Sans' and back.transparent_background is True and back == spec
+
+
+def test_export_passes_transparent_to_savefig(tmp_path, monkeypatch):
+    from pycat.utils import figure_spec as fs
+    fig = render(_data({'WT': np.array([1.0, 2.0, 3.0])}), FigureSpec())
+    seen = []
+    monkeypatch.setattr(fig, 'savefig', lambda *a, **k: seen.append(k.get('transparent')))
+    fs.export(fig, tmp_path / 'f.png', spec=FigureSpec(transparent_background=True))
+    assert seen and all(t is True for t in seen), "every saved format must honour the transparent flag"

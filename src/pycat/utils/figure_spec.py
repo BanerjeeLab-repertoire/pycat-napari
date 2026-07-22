@@ -88,6 +88,9 @@ class FigureSpec:
     minor_ticks: bool = False                   # show minor ticks (default matplotlib ticks look unfinished in print)
     error_type: str = 'none'                    # 'none' | 'sd' | 'sem' | 'ci95' — a comparison figure without
     #                                             a STATED error is not publishable; the type is labelled on the axes
+    font_family: "str | None" = None            # validated against installed fonts; a missing one WARNS + falls
+    #                                             back (never a silent substitution that changes between machines)
+    transparent_background: bool = False        # ExportSpec: save with a transparent (vs white) background
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -136,6 +139,27 @@ def resolve_y_scale(y_scale, value_arrays):
 
 #: How each error type is labelled on the figure (stating the error is a publication requirement).
 ERROR_LABELS = {'sd': 'SD', 'sem': 'SEM', 'ci95': '95% CI'}
+
+
+def resolve_font_family(family):
+    """The font family to actually use, and a warning if the requested one is not installed.
+
+    A **silent** font substitution is the subtle bug: matplotlib quietly picks a replacement, and the figure
+    then looks different on the next machine with no indication why. So a missing font WARNS (stating that
+    consequence) and falls back to the default — the same validate-and-warn rule as the axis controls.
+    Returns ``(family or None, warning)``; ``None`` family means 'use the default'."""
+    if not family:
+        return None, None
+    try:
+        from matplotlib import font_manager
+        installed = {f.name for f in font_manager.fontManager.ttflist}
+    except Exception:      # broad-ok: font enumeration unavailable → fall back to the default, never crash
+        return None, None
+    if family in installed:
+        return family, None
+    return None, (
+        f"font family '{family}' is not installed; matplotlib would silently substitute a different font, "
+        "changing the figure between machines. Falling back to the default font.")
 
 
 def group_error(values, error_type):
@@ -205,9 +229,15 @@ def _render_on_axis(ax, fig_data, spec):
         ax.text(0.98, 0.98, f"error bars: {ERROR_LABELS[spec.error_type]}", transform=ax.transAxes,
                 ha='right', va='top', fontsize=spec.font_size_pt * 0.8, color='#555555')
 
+    fam, fam_warning = resolve_font_family(getattr(spec, 'font_family', None))
+    if fam_warning:
+        import warnings as _warnings
+        _warnings.warn(fam_warning)
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label]
                  + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(spec.font_size_pt)
+        if fam:
+            item.set_fontfamily(fam)
 
     # ── significance brackets (the merged gap: figure_spec.render() now HONOURS them) ────────────────
     # A bracket is drawn only for a pair the caller supplied (from replicate-level stats), never inferred
@@ -487,10 +517,11 @@ def export(fig, path, *, spec, summary_df=None) -> dict:
 
     stem = pathlib.Path(path).with_suffix('')
     stem.parent.mkdir(parents=True, exist_ok=True)
+    transparent = bool(getattr(spec, 'transparent_background', False))
     out = {}
-    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'])
-    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'])
-    out['png'] = stem.with_suffix('.png'); fig.savefig(out['png'], dpi=spec.dpi)
+    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'], transparent=transparent)
+    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'], transparent=transparent)
+    out['png'] = stem.with_suffix('.png'); fig.savefig(out['png'], dpi=spec.dpi, transparent=transparent)
     out['spec'] = stem.with_suffix('.json')
     out['spec'].write_text(json.dumps(spec_to_dict(spec), indent=1), encoding='utf-8')
     if summary_df is not None:

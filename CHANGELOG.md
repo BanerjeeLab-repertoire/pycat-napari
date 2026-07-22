@@ -1,3 +1,15 @@
+## [1.6.265] - 2026-07-22
+### Added — **Publication figures: validated font selection + transparent background (publication_features Tier 2).**
+Two ExportSpec/legibility controls, both honouring the "validate and warn, never silently substitute" rule:
+- `FigureSpec.font_family` — a chosen font is applied to the axis text, but **validated against the
+  installed fonts first**: a missing font WARNS (stating that matplotlib would otherwise silently pick a
+  replacement, changing the figure between machines) and falls back to the default rather than substituting
+  silently. The check is a pure, tested `resolve_font_family(family)` helper.
+- `FigureSpec.transparent_background` — `export()` now saves the PDF/SVG/PNG with `transparent=` honouring
+  this flag (default white, unchanged).
+- Both fields round-trip through JSON. Tests (`core`, Agg): installed font applied, missing font
+  warns-and-falls-back, transparent flag reaches every `savefig`, round-trip.
+
 ## [1.6.264] - 2026-07-22
 ### Added — **Publication figures: multi-panel layout with A/B/C panel labels (publication_features Tier 2).**
 The biggest structural gap the §8 audit named: the figure render was single-axis (`add_subplot(111)`), so a
