@@ -1,3 +1,21 @@
+## [1.6.262] - 2026-07-22
+### Added — **Publication figures: log / symlog y-scale + minor ticks on the canonical FigureSpec (publication_features Tier 1, first slice).**
+Condensate size and intensity distributions are often log-normal, so a linear axis misrepresents them — the
+first Tier-1 axis controls the audit's §8 flagged as missing:
+- `FigureSpec.y_scale` (`'linear'` | `'log'` | `'symlog'`), honoured by both `render()` and `refine()`, and
+  `FigureSpec.minor_ticks`. Both round-trip through JSON and apply through `refine` without recomputing the
+  data (the refine-not-recompute contract).
+- **Validate and warn, never silently substitute:** a `log` request on data with non-positive values (it
+  crosses or touches zero, which a log axis cannot show) falls back to **symlog** with a `UserWarning`
+  stating the consequence, rather than silently clipping or crashing. The decision is a pure, tested
+  `resolve_y_scale(y_scale, values)` helper.
+- Publication-sane default preserved: a bare spec renders exactly as before (linear). Every field goes
+  through the spec, so `refine`/JSON round-trip keep working.
+- Tests (`core`, matplotlib Agg): `test_publication_features.py` — log is actually log, symlog honoured,
+  non-positive→symlog-with-warning (render and refine), JSON round-trip, minor-ticks toggle, and refine
+  leaves the plotted data untouched. Remaining Tiers (multi-panel, error representation, fonts, rasterize,
+  …) ship as their own versions.
+
 ## [1.6.261] - 2026-07-22
 ### Added — **The Client-Enrichment UI now exposes the signal-free-region background mode (background_mode spec complete).**
 `client_enrichment` has long supported three background treatments and a guardrail that refuses to let a

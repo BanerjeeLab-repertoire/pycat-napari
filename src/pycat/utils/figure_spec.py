@@ -83,6 +83,9 @@ class FigureSpec:
     height_mm: "float | None" = None
     tick_format: "str | None" = None            # e.g. '%.2f' on the y axis
     significance_brackets: tuple = ()           # ({'x1','x2','y','label'}, ...) — render()/refine() draw them
+    y_scale: str = 'linear'                     # 'linear' | 'log' | 'symlog' — size/intensity are often
+    #                                             log-normal; a linear axis misrepresents them (publication_features Tier 1)
+    minor_ticks: bool = False                   # show minor ticks (default matplotlib ticks look unfinished in print)
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -109,6 +112,24 @@ def _resolve_labels(fig_data, spec):
     x = spec.x_label if spec.x_label is not None else (fig_data.x_label or 'condition')
     y = spec.y_label if spec.y_label is not None else ontology_y_label(fig_data.measurement)
     return x, y
+
+
+def resolve_y_scale(y_scale, value_arrays):
+    """The y-scale to actually apply, and a warning if the requested one is invalid for the data.
+
+    A **log** axis cannot show values ≤ 0 (log of a non-positive number is undefined), so requesting one on
+    data that crosses or touches zero would silently clip or blow up. Rather than substitute silently, this
+    falls back to **symlog** (which handles zero and negatives) and returns a warning stating the
+    consequence — the 'validate and warn, never silently substitute' rule. Returns ``(scale, warning)``."""
+    if y_scale == 'log':
+        finite = [np.asarray(v, dtype=float).ravel() for v in (value_arrays or [])]
+        allv = np.concatenate(finite) if finite else np.array([])
+        allv = allv[np.isfinite(allv)]
+        if allv.size and allv.min() <= 0:
+            return 'symlog', (
+                f"log y-scale requested, but the data has non-positive values (min {allv.min():.4g}); a log "
+                "axis cannot show values ≤ 0. Using symlog instead (it handles zero and negatives).")
+    return y_scale, None
 
 
 def render(fig_data, spec):
@@ -147,6 +168,14 @@ def render(fig_data, spec):
         ax.set_xlim(spec.x_limits)
     if spec.y_limits:
         ax.set_ylim(spec.y_limits)
+    if getattr(spec, 'y_scale', 'linear') != 'linear':
+        scale, warning = resolve_y_scale(spec.y_scale, list(plotted.values()))
+        ax.set_yscale(scale)
+        if warning:
+            import warnings as _warnings
+            _warnings.warn(warning)
+    if getattr(spec, 'minor_ticks', False):
+        ax.minorticks_on()
 
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label]
                  + ax.get_xticklabels() + ax.get_yticklabels()):
@@ -241,6 +270,18 @@ def apply_spec(fig, spec):
             ax.set_xlim(spec.x_limits)
         if spec.y_limits is not None:
             ax.set_ylim(spec.y_limits)
+        if getattr(spec, 'y_scale', 'linear') != 'linear':
+            # refine-not-recompute: read the y data already on the axis to validate a log request (no
+            # recomputation), then apply the (possibly-fallback) scale — same rule as render().
+            _yvals = [ln.get_ydata() for ln in ax.get_lines()] + \
+                     [c.get_offsets()[:, 1] for c in ax.collections if c.get_offsets() is not None]
+            scale, warning = resolve_y_scale(spec.y_scale, _yvals)
+            ax.set_yscale(scale)
+            if warning:
+                import warnings as _warnings
+                _warnings.warn(warning)
+        if getattr(spec, 'minor_ticks', False):
+            ax.minorticks_on()
         ax.tick_params(labelsize=font_size)
         for side in ('top', 'right', 'left', 'bottom'):
             ax.spines[side].set_visible(side in theme['spines'])

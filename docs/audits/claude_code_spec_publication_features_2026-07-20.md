@@ -1,5 +1,19 @@
 # Claude Code spec — General publication-figure features (the workstation gap)
 
+> **◐ TIER 1 STARTED (axis controls shipped 1.6.262). Rest of Tier 1 + Tiers 2–3 remain.** The prerequisite
+> (FigureSpec merge) landed in 1.6.192, so these attach to the canonical `figure_spec.FigureSpec`. Shipped
+> the first Tier-1 slice — the **axis controls reviewers notice immediately**: `y_scale` (`'linear'` |
+> `'log'` | `'symlog'`) honoured by `render()` and `refine()`, and `minor_ticks`. **Validate-and-warn, not
+> silent:** a `log` request on data with non-positive values falls back to `symlog` with a `UserWarning`
+> stating the consequence (pure `resolve_y_scale` helper), never a silent clip or crash. Both fields
+> round-trip through JSON (scalar → auto via `asdict`) and work through `refine` without recomputing.
+> Publication-sane default preserved (a bare spec renders linear, unchanged). `tests/test_publication_
+> features.py` (`core`, Agg). **Remaining Tier 1:** tick scientific-notation/exponent control, significance
+> bracket-placement UI exposure, error/CI representation (SEM/SD, `MarkSpec`). **Tier 2:** multi-panel +
+> panel labels (the big structural one — `render` is still single-axis `add_subplot(111)`), legend control,
+> validated fonts, transparent background. **Tier 3:** dense-scatter rasterization, semantic colour, export
+> metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
 audit's §8: the figure system is strong for simple grouped scatter/comparison plots but is *"not yet a
 complete general publication-figure workstation."* This spec fills the missing controls. **It must land
