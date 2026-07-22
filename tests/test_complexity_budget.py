@@ -283,8 +283,12 @@ _FILE_LINE_CEILINGS = {
     # PURE re-export shim (no defs). Ceiling locked at the shim size.
     "toolbox/segmentation_tools.py": 148,
     # puncta_refinement.py — the SNR/kurtosis/contrast gate + the two bit-identical implementations, moved
-    # here from segmentation_tools (1.6.242). Byte-identical; its own concentration ceiling.
-    "toolbox/segmentation/puncta_refinement.py": 715,
+    # here from segmentation_tools (1.6.242). 715 -> 747: the large-condensate exemption (Meet Raval's
+    # "Improved segmentation for large condensates", re-targeted here from the pre-decomposition
+    # segmentation_tools.py) added the `is_large_object` gate + its measured rationale to BOTH filters. This
+    # is a real, documented behaviour fix (the ratchet correctly FLAGGED the growth), not grandfathering an
+    # offender — the added lines are mostly the rationale comment, which is worth keeping.
+    "toolbox/segmentation/puncta_refinement.py": 747,
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
