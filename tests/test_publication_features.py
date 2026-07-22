@@ -265,3 +265,29 @@ def test_the_exported_spec_json_still_regenerates_despite_the_provenance_key(tmp
     out = fs.export(fig, tmp_path / 'fig.png', spec=spec)
     back = fs.spec_from_dict(_json.loads(out['spec'].read_text(encoding='utf-8')))
     assert back == spec                                     # _provenance is tolerated, the spec round-trips
+
+
+# ── Tier 3: exact regeneration from raw plotted data ─────────────────────────────────────────────
+def test_exact_regeneration_reproduces_the_plotted_values(tmp_path):
+    from pycat.utils import figure_spec as fs
+    d = fs.FigureData(measurement='area', groups=('WT', 'KO'),
+                      values_by_group={'WT': np.array([1.5, 2.5, 9.0]), 'KO': np.array([3.0, 4.0])})
+    spec = FigureSpec(y_scale='log', error_type='sd', title='Fig')
+    fig = render(d, spec)
+    out = fs.export(fig, tmp_path / 'fig.png', spec=spec)
+    assert out['data'].exists()
+    regen = fs.regenerate(out['data'], fs.spec_from_dict(
+        __import__('json').loads(out['spec'].read_text(encoding='utf-8'))))
+    # the regenerated figure plots the SAME raw values, and honours the same spec
+    for g in ('WT', 'KO'):
+        assert np.allclose(regen._pycat_plotted[g], d.values_by_group[g])
+    assert regen.axes[0].get_yscale() == 'log'
+
+
+def test_figdata_round_trips_through_its_dict():
+    from pycat.utils.figure_spec import figdata_to_dict, figdata_from_dict, FigureData
+    d = FigureData(measurement='viscosity', groups=('a', 'b'),
+                   values_by_group={'a': np.array([1.0, 2.0]), 'b': np.array([3.0])}, x_label='cond')
+    back = figdata_from_dict(figdata_to_dict(d))
+    assert back.measurement == 'viscosity' and back.groups == ('a', 'b') and back.x_label == 'cond'
+    assert np.allclose(back.values_by_group['a'], [1.0, 2.0])

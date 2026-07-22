@@ -298,7 +298,37 @@ def render(fig_data, spec):
         fig.tight_layout()
 
     fig._pycat_plotted = plotted
+    fig._pycat_source = figdata_to_dict(fig_data)     # the raw plotted data → exact regeneration
     return fig
+
+
+def figdata_to_dict(fig_data) -> dict:
+    """The already-plotted data as a JSON-serializable dict — enough to reproduce the EXACT figure (not just
+    a summary). Paired with :func:`figdata_from_dict` / :func:`regenerate`."""
+    return {
+        'measurement': fig_data.measurement,
+        'groups': list(fig_data.groups),
+        'values_by_group': {k: np.asarray(v, dtype=float).tolist()
+                            for k, v in fig_data.values_by_group.items()},
+        'x_label': fig_data.x_label,
+    }
+
+
+def figdata_from_dict(d) -> FigureData:
+    return FigureData(
+        measurement=d['measurement'], groups=tuple(d['groups']),
+        values_by_group={k: np.asarray(v, dtype=float) for k, v in d['values_by_group'].items()},
+        x_label=d.get('x_label'))
+
+
+def regenerate(data, spec):
+    """Reconstruct the EXACT figure from its exported raw plotted data + ``spec`` — reproducibility beyond the
+    summary CSV. ``data`` is the ``*_data.json`` dict (or a path to it)."""
+    import json as _json
+    import pathlib as _pathlib
+    if isinstance(data, (str, _pathlib.Path)):
+        data = _json.loads(_pathlib.Path(data).read_text(encoding='utf-8'))
+    return render(figdata_from_dict(data), spec)
 
 
 def render_multipanel(panels, *, spec=None, n_cols=None, panel_labels=True,
@@ -559,6 +589,10 @@ def export(fig, path, *, spec, summary_df=None) -> dict:
     _spec_doc = spec_to_dict(spec)
     _spec_doc['_provenance'] = {'software': sw}           # the versions that produced this figure
     out['spec'].write_text(json.dumps(_spec_doc, indent=1), encoding='utf-8')
+    # The raw plotted data, for EXACT regeneration (stronger than the summary CSV): spec + data → this figure.
+    if getattr(fig, '_pycat_source', None) is not None:
+        out['data'] = stem.parent / (stem.name + '_data.json')
+        out['data'].write_text(json.dumps(fig._pycat_source, indent=1), encoding='utf-8')
     if summary_df is not None:
         out['summary'] = stem.parent / (stem.name + '_summary.csv')
         summary_df.to_csv(out['summary'], index=False)

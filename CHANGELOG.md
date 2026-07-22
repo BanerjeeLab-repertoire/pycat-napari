@@ -1,3 +1,13 @@
+## [1.6.268] - 2026-07-22
+### Added — **Publication figures: exact regeneration from the raw plotted data (publication_features Tier 3).**
+A figure can now be reproduced EXACTLY, not just approximated from a summary. `render()` stashes the raw
+plotted data on the figure, `export()` writes it as `<name>_data.json`, and new
+`regenerate(data, spec)` reconstructs the exact figure from that data + the spec JSON — reproducibility
+beyond the summary CSV.
+- New `figdata_to_dict` / `figdata_from_dict` (JSON-serializable round-trip of `FigureData`) + `regenerate`.
+- Tests (`core`): export → regenerate reproduces the same plotted values and honours the same spec (log
+  scale, error type), and `FigureData` round-trips through its dict.
+
 ## [1.6.267] - 2026-07-22
 ### Added — **Publication figures: export embeds software/version metadata for reproducibility (publication_features Tier 3).**
 An exported figure now records the software that made it. `export()` writes the PyCAT + key-dependency

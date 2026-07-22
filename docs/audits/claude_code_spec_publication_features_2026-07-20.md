@@ -20,8 +20,10 @@
 > dense-scatter rasterization DONE (1.6.266): `color_map` ({group: colour} tied to identity not position) and
 > `rasterize_points` (dense scatter → raster layer inside vector output). Export metadata DONE (1.6.267):
 > `export` embeds the PyCAT + dependency versions in the file (PNG `Software` / PDF-SVG `Creator`) and a
-> `_provenance` block in the spec JSON (`spec_from_dict` now tolerates it). **Remaining Tier 2:**
-> legend control. **Remaining Tier 3:** exact-regeneration-from-raw-data,
+> `_provenance` block in the spec JSON (`spec_from_dict` now tolerates it). Exact regeneration DONE (1.6.268):
+> `render` stashes the raw plotted data, `export` writes `<name>_data.json`, and `regenerate(data, spec)`
+> reconstructs the exact figure (beyond the summary CSV). **Remaining Tier 2:** legend control. **Remaining
+> Tier 3 (the last, largest, least headless-verifiable):**
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
