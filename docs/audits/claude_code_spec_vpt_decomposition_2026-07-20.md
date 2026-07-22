@@ -1,5 +1,16 @@
 # Claude Code spec — Decompose `vpt_tools.py` scientific core by domain
 
+> **✅ STATUS — DONE (1.6.235–1.6.239). The whole VPT scientific core is decomposed into `toolbox/vpt/`
+> by domain — viscosity, drift, host, detection (incl. the two linking-condition probes), populations,
+> and the run_vpt_analysis orchestrator. Every move byte-identical; the golden-master viscosity chain and
+> the GPU/parallel equivalence guards intact. `vpt_tools.py` went 2834 → 95 lines (-97%): a PURE re-export
+> shim, no function defs.**
+> The Stokes-Einstein viscosity domain (`viscosity_measurement`, `viscosity_from_diffusion`,
+> `viscosity_interval_from_diffusion` + the `_K_BOLTZMANN` constant) moved VERBATIM to `toolbox/vpt/viscosity.py`,
+> re-exported for callers (vpt_ui, tests). Byte-identical — the golden-master viscosity chain (viscosity to
+> 3.2%) passes unmodified. A NEW per-file ceiling was established (2834→2585) that ratchets DOWN as the
+> remaining domains move out. One domain per commit.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. The engineering
 audit's other named domain-split target. At **2,834 lines** it is the largest file in the project. The
 UI adaptation was already extracted into `vpt/` (adapters, panels, docks), but the **scientific core**

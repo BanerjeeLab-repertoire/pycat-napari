@@ -46,8 +46,11 @@ _SL = (slice(30, 60), slice(30, 60))       # a 900px object
 @pytest.fixture
 def notices(monkeypatch):
     said = []
-    monkeypatch.setattr(seg, 'napari_show_info', lambda m: said.append(m))
-    monkeypatch.setattr(seg, 'napari_show_warning', lambda m: said.append(m))
+    # The refinement filters moved to puncta_refinement.py (1.6.242); they resolve the notify functions
+    # in THAT module's namespace, so patch there (not on the segmentation_tools shim).
+    from pycat.toolbox.segmentation import puncta_refinement as _pr
+    monkeypatch.setattr(_pr, 'napari_show_info', lambda m: said.append(m))
+    monkeypatch.setattr(_pr, 'napari_show_warning', lambda m: said.append(m))
     return said
 
 

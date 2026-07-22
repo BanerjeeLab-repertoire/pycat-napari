@@ -11,6 +11,11 @@ apply to every item: **move/wire don't rewrite where possible; additive; one con
 ## TIER A — the navigator + visibility + settings arc (largest capability gap; nothing blocks it)
 
 ### A1. General user-settings persistence  *(prerequisite for A3, and reusable everywhere)*
+> **✅ DONE (shipped 1.6.230).** `utils/user_settings.py`: `UserSettings` (namespaced JSON store in
+> `platformdirs.user_config_dir('pycat')`, registered defaults, typed `get_bool`/`get_int`/`get_float`
+> coercing-with-fallback, `set`/`reset`, `subscribe` firing on change, process-wide `settings()`). Corrupt
+> file → defaults + quarantine (never crashes startup); writes atomic (temp + `os.replace` + `fsync`, `set`
+> transactional). `core`-tested (`test_user_settings.py`). Unblocks A3; consumed by A2/A3/profiles/QC-dismiss.
 **Verified missing:** no `QSettings`/`user_config`/`first_run` anywhere.
 Build `utils/user_settings.py`: a process-wide `UserSettings` singleton persisting **namespaced** keys
 to one **atomic** JSON file in the OS user-config dir (`platformdirs.user_config_dir('pycat')`), with
@@ -22,6 +27,14 @@ resolution, subscription fires, corruption-safety, atomicity (mid-write failure 
 intact), namespace non-collision.
 
 ### A2. General object-quality gate + wire the navigator's measurement half  *(the generator unblock)*
+> **◐ PART 1 DONE (the gate, shipped 1.6.232); part 2 (catalog wiring) remains.** `utils/quality_gate.py`:
+> `evaluate_quality(objects, requirement, *, context) -> GateResult` composing `pixel_size` /
+> `check_calibration_validity` / `reliability` into BLOCK/WARN/DOWNGRADE/OK (unassessed ≠ pass; worst signal
+> wins; every outcome reported). `QualityRequirement` (needs_pixel_size / needs_calibration / min_reliability).
+> `core`-tested (`test_quality_gate.py`). **Remaining:** part 2 — bind each measurement op in
+> `operation_catalog.json` to its `public_api` symbol + a `QualityRequirement`, and have `planner.compile`
+> emit a terminal measurement step as runnable only when `evaluate_quality` passes (surfacing the reason when
+> blocked), so the oracle reproduces all 13 workflows end-to-end. That is the heavier catalog-wiring half.
 **Verified:** navigator catalog is **79 ops, all image→objects; zero measure/interpret/tracking**.
 Two joined pieces:
 1. **`utils/quality_gate.py`** — `evaluate_quality(objects, requirement, *, context) -> GateResult`
@@ -39,6 +52,13 @@ Two joined pieces:
    spine). `operation_id` must come from the spec, not hard-coded strings.
 
 ### A3. Navigator UI + general feature surfacing + beginner-default mode  *(depends on A1, A2)*
+> **◐ SUBSTRATE DONE (shipped 1.6.231); the beginner-home Qt dock remains.** `utils/app_mode.py` (AppMode
+> BEGINNER/ADVANCED over user-settings `app.mode`; first-run beginner; `current_mode`/`set_mode`/`toggle`/
+> `on_mode_change`) and `utils/feature_registry.py` (`FeatureCard` + `FeatureRegistry`; register/visible-by-
+> mode/by-category; duplicate-key refused; never invokes `entry`, so Qt-free) are built + `core`-tested. What
+> remains: pieces (1)/(2) below are done; (3) the beginner home dock (question-flow + capability cards +
+> mode toggle, `add_dock_widget`) is the heavy Qt piece, and populating cards for the currently-invisible
+> features is a follow-on that hangs off this registry.
 **Verified:** zero `AnalysisIntent`/`QuestionEngine`/`Planner` refs outside `navigator/`; and many
 features have **0 UI refs** (biological_qc, measurement_stability, ontology, feature_provenance,
 analysis_presets, scan_qc, figure_spec).

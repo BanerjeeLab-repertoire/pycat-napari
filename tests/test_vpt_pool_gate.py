@@ -26,7 +26,9 @@ above are the inputs, and they are pinned as the cases that actually occurred.
 import pytest
 
 # Local application imports
-from pycat.toolbox import vpt_tools as vpt
+# The detection/backend machinery moved to toolbox/vpt/detection.py (1.6.238). Alias points at its
+# new home so monkeypatch targets bind the same module the internal bare-name calls resolve against.
+from pycat.toolbox.vpt import detection as vpt
 
 pytestmark = pytest.mark.core
 

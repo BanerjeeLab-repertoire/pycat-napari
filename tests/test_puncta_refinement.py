@@ -116,21 +116,22 @@ def test_puncta_filter_reports_what_it_rejected():
         labels[((yy - cy) ** 2 + (xx - cx) ** 2) < 9] = i
     img = ndi.gaussian_filter(img, 1.0) + rng.normal(0, 5.0, (h, w))
 
-    # Patch the name AS BOUND IN segmentation_tools, not in pycat.utils.notify.
-    # `from pycat.utils.notify import show_warning as napari_show_warning` copies the
-    # reference at import time, so replacing it on the notify module has no effect — the
-    # first version of this test did exactly that and duly saw no messages.
+    # Patch the name AS BOUND IN the module that DEFINES the filter — puncta_refinement.py (the
+    # refinement family moved out of segmentation_tools in 1.6.242). `from pycat.utils.notify import
+    # show_warning as napari_show_warning` copies the reference at import time, so the filter resolves
+    # it in puncta_refinement's namespace; patching it anywhere else has no effect.
+    pr = pytest.importorskip("pycat.toolbox.segmentation.puncta_refinement")
     messages = []
-    real_warn = seg.napari_show_warning
-    real_info = seg.napari_show_info
-    seg.napari_show_warning = lambda msg, *a, **k: messages.append(msg)
-    seg.napari_show_info = lambda msg, *a, **k: messages.append(msg)
+    real_warn = pr.napari_show_warning
+    real_info = pr.napari_show_info
+    pr.napari_show_warning = lambda msg, *a, **k: messages.append(msg)
+    pr.napari_show_info = lambda msg, *a, **k: messages.append(msg)
     try:
         seg.puncta_refinement_filtering_func(
             img, img, labels > 0, cell.astype(np.int32), labels, 2)
     finally:
-        seg.napari_show_warning = real_warn
-        seg.napari_show_info = real_info
+        pr.napari_show_warning = real_warn
+        pr.napari_show_info = real_info
 
     joined = " ".join(messages)
     assert messages, (

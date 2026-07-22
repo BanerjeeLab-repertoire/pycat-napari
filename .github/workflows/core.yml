@@ -153,11 +153,19 @@ jobs:
         # A "just in case" fallback turns a clean signal into a confusing one. If the
         # marker selects nothing, that is a fact worth surfacing, not papering over.
         #
-        # `--cov` is deliberately NOT used here. The `core` marker currently selects only
-        # the two guard files, so a coverage report would be near-zero and meaningless —
-        # and pytest-cov then emits "No data was collected" warnings that look like
-        # failures. Coverage is worth adding when the numerical kernels themselves carry
-        # the marker; until then it is noise.
+        # `--cov` is deliberately NOT used in THIS CI job — but no longer because it is
+        # meaningless. Measured 2026-07-21: the `core` suite (now 200+ marked files,
+        # including the numerical kernels themselves) covers **30% of pycat** (46,882
+        # statements, ~1,500 tests) — a real, useful number, not the near-zero it was when
+        # only two guard files carried the marker.
+        #
+        # It is left off here for COST, not relevance: collecting coverage takes this job
+        # from ~4.5 min to ~7.5 min (+70% on every push) and nothing currently consumes the
+        # report (no coverage service upload, no threshold gate). Reporting a number no one
+        # reads, for a 70% time tax, is not worth it yet. Run it locally for the number:
+        #     pytest -m core --cov=pycat --cov-report=term
+        # Enable `--cov=pycat --cov-report=xml` here the day a coverage service or a
+        # threshold policy is wired up — that is the change that makes reporting it worthwhile.
         #
         # `--exitfirst` is off on purpose: when this breaks, seeing ALL the failures at
         # once is what told us the real cause (all 13 failing, including numpy-only

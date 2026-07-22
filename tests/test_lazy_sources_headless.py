@@ -125,7 +125,7 @@ def test_a_TiffPageStack_plane_is_BIT_IDENTICAL_to_a_full_read():
     wrapper = None
     try:
         truth = np.random.default_rng(0).integers(0, 4096, (5, 32, 48), dtype=np.uint16)
-        tifffile.imwrite(path, truth)
+        tifffile.imwrite(path, truth, photometric='minisblack')
 
         wrapper = lazy_sources._TiffPageStack(path, 5, 32, 48, truth.dtype,
                                               channel_idx=0, n_channels=1)
@@ -167,7 +167,7 @@ def test_a_TiffPageStack_still_REFUSES_an_implicit_full_read():
 
     wrapper = None
     try:
-        tifffile.imwrite(path, np.zeros((4, 16, 16), dtype=np.uint16))
+        tifffile.imwrite(path, np.zeros((4, 16, 16), dtype=np.uint16), photometric='minisblack')
         wrapper = lazy_sources._TiffPageStack(path, 4, 16, 16, np.dtype('uint16'),
                                               channel_idx=0, n_channels=1)
         with pytest.raises(RuntimeError, match="implicit full-stack read"):

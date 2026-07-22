@@ -293,6 +293,7 @@ class BatchWorker(QThread):
                 write_image_sample_metadata(_sample_resolver, image_path, file_output)
                 # Append this image's measurements to the top-level consolidated table, read from the
                 # per-image CSVs it just wrote. An image with no object tables contributes no rows.
+                _consolidated_ok = True
                 try:
                     _meta = (_sample_resolver.for_image(image_path)
                              if _sample_resolver is not None else None)
@@ -301,10 +302,20 @@ class BatchWorker(QThread):
                         records_from_output_dir(file_output, image_path.stem),
                         sample_metadata=_meta,
                         provenance={'pycat_version': _pycat_version})
-                except Exception as _cexc:
+                except Exception as _cexc:      # broad-ok: batch_step — per-image processing SUCCEEDED and
+                    # its own folder is written; only the consolidated-table append failed. This must be
+                    # VISIBLE, not a clean success: a silently dropped image makes a 93-of-100 cohort look
+                    # complete (the exception_context_classification spec's batch_step rule).
+                    _consolidated_ok = False
                     print(f"[PyCAT Batch] consolidated-table append failed for "
                           f"{image_path.name}: {_cexc}")
-                results.append(f"✓ {image_path.name}")
+                if _consolidated_ok:
+                    results.append(f"✓ {image_path.name}")
+                else:
+                    results.append(
+                        f"⚠ {image_path.name}: processed, but NOT added to the consolidated table — its "
+                        f"rows are MISSING from consolidated_long.csv (see terminal). The per-image output "
+                        f"folder is complete.")
             except Exception as exc:  # noqa: BLE001
                 tb = traceback.format_exc()
                 results.append(f"✗ {image_path.name}: {exc}")

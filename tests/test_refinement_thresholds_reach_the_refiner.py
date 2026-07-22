@@ -34,7 +34,9 @@ _NON_DEFAULT = dict(
 @pytest.fixture
 def spy(monkeypatch):
     """Record what `puncta_refinement_func` is actually handed."""
-    from pycat.toolbox import segmentation_tools as seg
+    # segment_subcellular_objects moved to segmentation/subcellular.py (1.6.243) and calls
+    # puncta_refinement_func as bound in THAT module's namespace, so patch it there.
+    from pycat.toolbox.segmentation import subcellular
 
     seen = {}
 
@@ -42,7 +44,7 @@ def spy(monkeypatch):
         seen.update(kwargs)
         return np.zeros_like(np.asarray(cell_mask), dtype=int)
 
-    monkeypatch.setattr(seg, 'puncta_refinement_func', _fake)
+    monkeypatch.setattr(subcellular, 'puncta_refinement_func', _fake)
     return seen
 
 

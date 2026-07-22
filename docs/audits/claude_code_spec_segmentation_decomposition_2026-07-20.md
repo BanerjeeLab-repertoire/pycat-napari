@@ -1,5 +1,13 @@
 # Claude Code spec — Decompose `segmentation_tools.py` by domain
 
+> **✅ STATUS — DONE (1.6.240-243). The whole segmentation scientific core is decomposed into
+> `toolbox/segmentation/` by family — _common, local_thresholding, watershed, morphology, intensity, fz,
+> cellpose, puncta_refinement, subcellular. Every move byte-identical; the filter-sensitivity invariances,
+> the fast/slow parity, and the cellpose optional-dep guard all intact (tests pass, patch/source targets
+> repointed to the moved modules — never adjusted to pass). `segmentation_tools.py` went 2692 → 148 lines
+> (-95%): a PURE re-export shim, no function defs. Dependency-ordered so family modules import each other,
+> never segmentation_tools.**
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Third-largest file
 (**2,692 lines**), and the **best-covered decomposition target in the codebase — 41 test files**. That
 coverage makes it the safest of the remaining large-file splits. Behaviour-preserving, coverage-gated.

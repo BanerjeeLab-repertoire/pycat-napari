@@ -18,6 +18,7 @@ just the swallow with extra characters.
 
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -25,6 +26,12 @@ pytestmark = pytest.mark.core
 
 _SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat"
 _MARKER = "# broad-ok:"
+
+# The exception_context_classification vocabulary: a broad-ok MAY carry a category as its first token
+# (``# broad-ok: <category> — <reason>``) saying WHAT it guards, so a write / batch-step swallow is held to
+# a stricter standard than a UI-cleanup one. When a category is present it must be one of these.
+_CATEGORIES = {'ui_cleanup', 'optional_probe', 'scientific_result', 'write', 'batch_step'}
+_CATEGORY_FORM = re.compile(r'^([a-z_]+)\s+(?:—|--)\s')
 
 # Un-annotated ``except Exception`` handlers allowed per package, at today's values. A RATCHET: it only
 # ever decreases. Convert a scientific handler to a typed raise, or annotate a deliberate one with
@@ -118,6 +125,25 @@ def test_every_broad_ok_annotation_carries_a_REASON():
         f"these `{_MARKER}` markers have no reason:\n  " + "\n  ".join(empty)
         + f"\n\n`{_MARKER}` excludes a handler from the ratchet, so it must justify itself — "
           f"`{_MARKER} Qt teardown during close, nothing to recover` — never a bare marker.")
+
+
+def test_a_categorized_broad_ok_names_a_VALID_category():
+    """The exception_context_classification convention: a broad-ok may carry a CATEGORY as its first token
+    (``# broad-ok: <category> — <reason>``) classifying WHAT it guards. When it does, the category must be a
+    known kind — a typo'd category silently mislabels the code's intent (a `write` that reads as `writes`
+    escapes the write standard). Legacy multi-word reasons (``metadata probe — …``) are not category
+    claims and are unaffected."""
+    _, markers = _scan()
+    bad = []
+    for f, ln, reason in markers:
+        m = _CATEGORY_FORM.match(reason)
+        if m and m.group(1) not in _CATEGORIES:
+            bad.append(f"{f}:{ln} — unknown category {m.group(1)!r}")
+    assert not bad, (
+        f"a `{_MARKER}` names an unknown category (must be one of {sorted(_CATEGORIES)}):\n  "
+        + "\n  ".join(bad)
+        + "\n\nUse `# broad-ok: <category> — <reason>` with a known category, or a plain "
+          "`# broad-ok: <reason>` for an as-yet-uncategorized handler.")
 
 
 def test_the_typed_error_FAMILY_exists():

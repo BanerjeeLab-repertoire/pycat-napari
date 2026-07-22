@@ -24,7 +24,9 @@ import numpy as np
 import pytest
 
 # Local application imports
-from pycat.toolbox import vpt_tools as vpt
+# gpu_matches_cpu + the equivalence cache/probe moved to toolbox/vpt/detection.py (1.6.238); alias
+# points there so monkeypatch targets bind the module the internal bare-name calls resolve against.
+from pycat.toolbox.vpt import detection as vpt
 
 pytestmark = pytest.mark.core
 

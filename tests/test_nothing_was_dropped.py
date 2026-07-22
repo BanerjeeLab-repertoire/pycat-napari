@@ -64,6 +64,50 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.246 — timeseries decomposition step 3: the QThread/ProcessPool WORKER PLUMBING moved verbatim
+    # (behaviour-preserving, no threading semantics changed) to toolbox/timeseries/execution.py — the
+    # parallel subprocess frame helpers (_worker_read_frame, _process_frame_worker) and the two lazy
+    # QThread-worker factories (_make__stackprocessworker, _make_timeseriesworker) with their result caches
+    # and nested closures (_prepare_source_zarr / _source_descriptor / _dispatch / _cb / cancel). Qt/napari
+    # stay function-scoped so the module still imports headless. timeseries_condensate_tools re-exports the
+    # two factories, which the staying UI builders call.
+    'timeseries_condensate_tools.py::_worker_read_frame',
+    'timeseries_condensate_tools.py::_process_frame_worker',
+    'timeseries_condensate_tools.py::_make__stackprocessworker',
+    'timeseries_condensate_tools.py::_make_timeseriesworker',
+    'timeseries_condensate_tools.py::_prepare_source_zarr',
+    'timeseries_condensate_tools.py::_source_descriptor',
+    'timeseries_condensate_tools.py::_dispatch',
+    'timeseries_condensate_tools.py::_cb',
+    'timeseries_condensate_tools.py::cancel',
+
+    # 1.6.245 — timeseries decomposition step 2 (scientific-core, part 2): the ANALYSIS entry point
+    # (run_timeseries_condensate_analysis + the per-frame worker _ts_analyze_frame_worker + the drift/metrics
+    # helpers _condensate_metrics_per_cell / _phase_shift / _apply_shift, plus the shared pool initializer
+    # _init_worker_threads) MOVED verbatim to toolbox/timeseries/analysis.py. No numerics or threading
+    # semantics changed — pinned BEFORE the move by test_timeseries_analysis_characterization (exact DataFrame
+    # + condensate mask on a fixed synthetic scene). timeseries_condensate_tools re-exports each; the staying
+    # preprocessing worker resolves _init_worker_threads via that re-export.
+    'timeseries_condensate_tools.py::run_timeseries_condensate_analysis',
+    'timeseries_condensate_tools.py::_ts_analyze_frame_worker',
+    'timeseries_condensate_tools.py::_condensate_metrics_per_cell',
+    'timeseries_condensate_tools.py::_phase_shift',
+    'timeseries_condensate_tools.py::_apply_shift',
+    'timeseries_condensate_tools.py::_init_worker_threads',
+
+    # 1.6.244 — timeseries decomposition step 1 (scientific-core, part 1): the lazy zarr FRAME-ACCESS layer
+    # (_session_zarr_dir / _read_source_frame / _compute_stack_global_range / _get_zarr_dir_path /
+    # _materialize_stack_to_zarr + the _ZarrStack wrapper) MOVED verbatim to toolbox/timeseries/frame_access.py,
+    # and estimate_temporal_correlation (numerically pinned by test_temporal_enhancement) MOVED to
+    # toolbox/timeseries/correlation.py. No read/materialize semantics changed. timeseries_condensate_tools
+    # re-exports each; correlation imports _read_source_frame from frame_access.
+    'timeseries_condensate_tools.py::_session_zarr_dir',
+    'timeseries_condensate_tools.py::_read_source_frame',
+    'timeseries_condensate_tools.py::_compute_stack_global_range',
+    'timeseries_condensate_tools.py::_get_zarr_dir_path',
+    'timeseries_condensate_tools.py::_materialize_stack_to_zarr',
+    'timeseries_condensate_tools.py::estimate_temporal_correlation',
+
     # 1.6.183 — `detect_beads_stack` (the 317-line VPT detection stage) was split BY PIPELINE STAGE into
     # `_choose_detection_backend`, `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames`
     # (+ `_fast_frame_rows` / `_precise_frame_rows`) and `_assemble_detections`, leaving a 116-line
@@ -237,6 +281,153 @@ _DELIBERATE = {
     'condensate_physics_tools.py::compute_moduli_evans_bootstrap',
     'condensate_physics_tools.py::extract_fusion_relaxation',
     'condensate_physics_tools.py::_iw_Jtilde',
+    # 1.6.235 — vpt decomposition step 1: the Stokes-Einstein viscosity domain (viscosity_measurement,
+    # viscosity_from_diffusion, viscosity_interval_from_diffusion) MOVED verbatim to toolbox/vpt/viscosity.py;
+    # vpt_tools re-exports all three. No number changed (golden-master viscosity chain passes). Keys vanished
+    # from vpt_tools.py by the move.
+    'vpt_tools.py::viscosity_measurement',
+    'vpt_tools.py::viscosity_from_diffusion',
+    'vpt_tools.py::viscosity_interval_from_diffusion',
+    # 1.6.236 — vpt decomposition step 2: the ensemble drift-correction domain (drift_correct_com,
+    # reclassify_by_temporal_stability) MOVED verbatim to toolbox/vpt/drift.py; vpt_tools re-exports both.
+    # No number changed (drift tests pass). Keys vanished from vpt_tools.py by the move.
+    'vpt_tools.py::drift_correct_com',
+    'vpt_tools.py::reclassify_by_temporal_stability',
+    # 1.6.237 — vpt decomposition step 3: the host-condensate domain (segment_host_condensate,
+    # erode_host_mask, infer_host_from_beads + _fit_clipped_radius) MOVED verbatim to toolbox/vpt/host.py;
+    # vpt_tools re-exports the three public entry points. No number changed. Registered ops → catalog
+    # regenerated. Keys vanished from vpt_tools.py by the move.
+    'vpt_tools.py::segment_host_condensate',
+    'vpt_tools.py::erode_host_mask',
+    'vpt_tools.py::infer_host_from_beads',
+    'vpt_tools.py::_fit_clipped_radius',
+
+    # 1.6.238 — vpt decomposition step 4: the ENTIRE bead-detection stack (LoG CPU+GPU blob detection,
+    # Airy/template PSF scoring, hot-pixel masking, ring-merge dedup, the detect_beads_stack orchestrator
+    # with its GPU/CPU-parallel backend chooser, and the two linking-condition probes) MOVED verbatim to
+    # toolbox/vpt/detection.py — 1754 lines, byte-identical, not a single detection or its order changed.
+    # vpt_tools re-exports every public entry point plus the two private helpers the parallel-equivalence
+    # test imports. detect_beads_stack is a registered op → catalog regenerated. These keys (incl. the
+    # nested closures _fit_sigma/_key/_time/g/local_intensity) vanished from vpt_tools.py by the move.
+    'vpt_tools.py::_assemble_detections',
+    'vpt_tools.py::_bead_first_frame',
+    'vpt_tools.py::_bead_hot_mask',
+    'vpt_tools.py::_bead_source_descriptor',
+    'vpt_tools.py::_choose_detection_backend',
+    'vpt_tools.py::_choose_detection_tier',
+    'vpt_tools.py::_classify_fast_template',
+    'vpt_tools.py::_classify_fast_template_refs',
+    'vpt_tools.py::_classify_gaussian_fit',
+    'vpt_tools.py::_detect_all_frames',
+    'vpt_tools.py::_detect_frame_worker',
+    'vpt_tools.py::_fast_frame_rows',
+    'vpt_tools.py::_fit_sigma',
+    'vpt_tools.py::_frame_costs_s',
+    'vpt_tools.py::_gpu_build_id',
+    'vpt_tools.py::_key',
+    'vpt_tools.py::_pool_predetect',
+    'vpt_tools.py::_pool_spawn_cost_s',
+    'vpt_tools.py::_pool_speedup',
+    'vpt_tools.py::_precise_frame_rows',
+    'vpt_tools.py::_read_frame_from_descriptor',
+    'vpt_tools.py::_run_gpu_equivalence_check',
+    'vpt_tools.py::_time',
+    'vpt_tools.py::assess_linking_conditions',
+    'vpt_tools.py::bead_half_from_size',
+    'vpt_tools.py::blob_log_gpu',
+    'vpt_tools.py::build_airy_template',
+    'vpt_tools.py::build_bead_template',
+    'vpt_tools.py::build_hot_pixel_mask',
+    'vpt_tools.py::dedup_detections',
+    'vpt_tools.py::dedup_detections_ring_merge',
+    'vpt_tools.py::detect_beads_frame',
+    'vpt_tools.py::estimate_linking_distance_um',
+    'vpt_tools.py::g',
+    'vpt_tools.py::gpu_matches_cpu',
+    'vpt_tools.py::local_intensity',
+    'vpt_tools.py::score_beads_template',
+
+    # 1.6.239 — vpt decomposition steps 5-6 (FINAL): the bead-population routing
+    # (split_bead_populations/select_bead_population/aggregate_population_stats) MOVED to
+    # toolbox/vpt/populations.py, and the run_vpt_analysis orchestrator (+ _link dispatch,
+    # compare_detection_variants sweep) MOVED to toolbox/vpt/analysis.py — both byte-identical. With these,
+    # vpt_tools.py is a PURE re-export shim (95 lines, no defs) over the toolbox/vpt/ package. These keys
+    # vanished from vpt_tools.py by the moves; the shim re-exports each (+ _link, imported by vpt_ui).
+    'vpt_tools.py::split_bead_populations',
+    'vpt_tools.py::select_bead_population',
+    'vpt_tools.py::aggregate_population_stats',
+    'vpt_tools.py::run_vpt_analysis',
+    'vpt_tools.py::_link',
+    'vpt_tools.py::compare_detection_variants',
+
+    # 1.6.240 — segmentation decomposition step 1 (leaf/foundation layer): five independent families MOVED
+    # verbatim out of segmentation_tools into toolbox/segmentation/ — _to_uint16_safe -> _common.py;
+    # local_thresholding_func/run_local_thresholding -> local_thresholding.py; apply_watershed_labeling/
+    # opencv_watershed_func -> watershed.py; cell_mask_stretching -> morphology.py; compute_image_intensity_
+    # stats/cell_has_punctate_signal (the RESTORED punctate-gate subsystem) -> intensity.py. No threshold,
+    # morphology, or operation-order change. Four are registered ops → catalog regenerated. segmentation_
+    # tools re-exports each. Keys vanished from segmentation_tools.py by the moves.
+    'segmentation_tools.py::_to_uint16_safe',
+    'segmentation_tools.py::local_thresholding_func',
+    'segmentation_tools.py::run_local_thresholding',
+    'segmentation_tools.py::apply_watershed_labeling',
+    'segmentation_tools.py::opencv_watershed_func',
+    'segmentation_tools.py::cell_mask_stretching',
+    'segmentation_tools.py::compute_image_intensity_stats',
+    'segmentation_tools.py::cell_has_punctate_signal',
+
+    # 1.6.241 — segmentation decomposition step 2: the FZ and CELLPOSE families MOVED verbatim out of
+    # segmentation_tools. fz.py (felzenszwalb_segmentation_and_merging + RAG merge_mean_color/
+    # _weight_mean_color + fz_segmentation_and_binarization + run_ wrapper) imports local_thresholding_func
+    # from the local_thresholding family; cellpose.py (the optional-dep cellpose wrapper with its version-
+    # aware model build + GPU/model caches, plus the RandomForest classifier + refine_labels_with_contours)
+    # imports opencv_watershed_func from the watershed family. No scale/sigma/threshold change; the optional-
+    # import guard is preserved exactly. Five registered ops moved → catalog regenerated.
+    'segmentation_tools.py::_weight_mean_color',
+    'segmentation_tools.py::merge_mean_color',
+    'segmentation_tools.py::felzenszwalb_segmentation_and_merging',
+    'segmentation_tools.py::run_fz_segmentation_and_merging',
+    'segmentation_tools.py::fz_segmentation_and_binarization',
+    'segmentation_tools.py::_get_cellpose_gpu',
+    'segmentation_tools.py::_cellpose_major_version',
+    'segmentation_tools.py::available_cellpose_models',
+    'segmentation_tools.py::default_cellpose_model',
+    'segmentation_tools.py::_build_cellpose_model',
+    'segmentation_tools.py::cellpose_segmentation',
+    'segmentation_tools.py::run_cellpose_segmentation',
+    'segmentation_tools.py::train_and_apply_rf_classifier',
+    'segmentation_tools.py::refine_labels_with_contours',
+    'segmentation_tools.py::run_train_and_apply_rf_classifier',
+
+    # 1.6.242 — segmentation decomposition step 3: the filter-sensitivity-gated PUNCTA REFINEMENT family
+    # (SNR/kurtosis/contrast gate, per-object ring-radii/background helpers, and the two bit-identical
+    # fast/slow implementations behind puncta_refinement_func) MOVED verbatim to segmentation/
+    # puncta_refinement.py — no threshold, morphology, or operation order changed. The module owns the
+    # _PYCAT_REFINE_FAST/_DEBUG flags + _refine_debug_enabled it reads, and imports apply_watershed_labeling
+    # (watershed) + _to_uint16_safe (_common). Three tests had napari-notify / _local_ring_radii patch
+    # targets repointed to puncta_refinement (the module the moved filters resolve names in) — assertions
+    # unchanged. puncta_refinement_filtering_func is a registered op → catalog regen.
+    'segmentation_tools.py::_refine_debug_enabled',
+    'segmentation_tools.py::_local_ring_radii',
+    'segmentation_tools.py::_ring_masks',
+    'segmentation_tools.py::_robust_bg',
+    'segmentation_tools.py::_snr_conditions',
+    'segmentation_tools.py::_report_refinement_drops',
+    'segmentation_tools.py::puncta_refinement_filtering_func',
+    'segmentation_tools.py::puncta_refinement_filtering_func_fast',
+    'segmentation_tools.py::puncta_refinement_func',
+
+    # 1.6.243 — segmentation decomposition step 4 (FINAL): the SUBCELLULAR orchestrator family
+    # (segment_subcellular_objects + run_ + _segment_core + compare_segmentation_speed) MOVED verbatim to
+    # segmentation/subcellular.py, importing the puncta / fz / intensity / morphology families it composes.
+    # No threshold or operation-order change. With this move segmentation_tools.py is a PURE re-export shim
+    # (no defs) over toolbox/segmentation/. segment_subcellular_objects is a registered op → catalog regen.
+    # test_refinement_thresholds' spy patch repointed to subcellular.puncta_refinement_func (the module the
+    # moved orchestrator resolves the name in) — assertions unchanged.
+    'segmentation_tools.py::segment_subcellular_objects',
+    'segmentation_tools.py::run_segment_subcellular_objects',
+    'segmentation_tools.py::_segment_core',
+    'segmentation_tools.py::compare_segmentation_speed',
 
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)

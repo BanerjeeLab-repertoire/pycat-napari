@@ -1,3 +1,289 @@
+## [1.6.246] - 2026-07-21
+### Changed — **timeseries decomposition step 3: the QThread/ProcessPool worker plumbing moves out.**
+Relocated the background-worker lifecycle to `toolbox/timeseries/execution.py`, **behaviour-preserving** (the
+spec's rule: relocate, do not re-engineer threading). Moved **verbatim**:
+
+- `_worker_read_frame` / `_process_frame_worker` — the parallel per-frame helpers that run in ProcessPool
+  subprocesses.
+- `_make__stackprocessworker` / `_make_timeseriesworker` — the two lazy QThread-worker factories (built on
+  first *use* so **Qt/napari stay function-scoped and the module still imports headless**), together with
+  their result caches and nested closures.
+
+No threading semantics changed; the workers still run, cancel, and report as before. Qt is not imported at
+module scope (`test_ci_dependencies` / `test_no_eager_reads` green). No registered ops (catalog unchanged).
+`timeseries_condensate_tools.py`: **1952 → 1410**; ceiling ratcheted to 1410, `execution.py` 581. Only the
+Qt UI builders remain (the last domain).
+
+## [1.6.245] - 2026-07-21
+### Changed — **timeseries decomposition step 2 (scientific-core): the analysis entry point moves out.**
+The centrepiece of the time-series scientific core — `run_timeseries_condensate_analysis` (per-frame
+condensate segmentation across a stack → tidy per-cell metrics DataFrame + condensate-mask stack), its
+per-frame worker `_ts_analyze_frame_worker`, and the drift/metrics helpers (`_condensate_metrics_per_cell`,
+`_phase_shift`, `_apply_shift`) — moved **verbatim** to `toolbox/timeseries/analysis.py`. The shared pool
+initializer `_init_worker_threads` moved with it and is re-exported so the staying preprocessing worker
+still resolves it.
+
+- **"No test, no move," honoured:** `run_timeseries_condensate_analysis` had no numeric characterization, so
+  `test_timeseries_analysis_characterization` was **written first** — it pins the exact output DataFrame
+  (per-frame/per-cell condensate areas, counts, fractions) and condensate-mask stack on a fixed synthetic
+  3-frame / 2-cell scene, on the serial path. It passes identically before and after the move.
+- Threading semantics unchanged (the spec's rule: relocate, don't re-engineer). The parallel path's
+  behaviour is byte-for-byte the same as before — verified against the pre-move build.
+- No registered ops involved (catalog unchanged). `timeseries_condensate_tools.py`: **2600 → 1952**; ceiling
+  ratcheted to 1952, `analysis.py` 685. Remaining: the Qt worker plumbing + UI builders (Qt-bound).
+
+## [1.6.244] - 2026-07-21
+### Changed — **timeseries decomposition step 1 (scientific-core): frame-access + correlation move out.**
+Began decomposing `timeseries_condensate_tools.py` (2,828 lines — the largest file) into a
+`toolbox/timeseries/` package, starting with the well-covered scientific pieces, **verbatim**:
+
+- `frame_access.py` — the lazy zarr scratch dir, the source-frame reader that honours the lazy-read guard
+  (no frame-0 collapse), the global intensity-range scan, and the `_ZarrStack` wrapper napari scrubs
+  without dask. Pure infrastructure, no napari/Qt dependency.
+- `correlation.py` — `estimate_temporal_correlation` (frame-pair sampling → regime + recommendation),
+  pinned by `test_temporal_enhancement` (it recovers the seeded correlation exactly). Reads frames via
+  `frame_access`.
+
+No read/materialize semantics changed; no registered ops involved. Honouring the spec's **"no test, no
+move"** rule, the analysis entry point (`run_timeseries_condensate_analysis`) is NOT moved yet — it needs a
+characterization test written first, and it shares worker-init plumbing with the Qt worker; that is the
+next step. `timeseries_condensate_tools.py`: **2828 → 2600**; a line ceiling was established at 2600 (it
+had none before) and will ratchet down as the remaining domains move.
+
+## [1.6.243] - 2026-07-21
+### Changed — **segmentation decomposition COMPLETE (step 4): segmentation_tools.py is now a pure shim.**
+The last family moved: the **subcellular** orchestrator (`segment_subcellular_objects` + its viewer wrapper
++ `_segment_core` + `compare_segmentation_speed`) moved **verbatim** to `segmentation/subcellular.py`,
+importing the puncta / fz / intensity / morphology families it composes.
+
+- **`segmentation_tools.py`: 2692 → 148 lines (-95%)** across the four steps (leaf families 1.6.240, fz +
+  cellpose 1.6.241, puncta refinement 1.6.242, subcellular 1.6.243). It now contains **no function
+  definitions** — only re-exports of the `toolbox/segmentation/` package, so every historical import path
+  keeps working unchanged.
+- Byte-identical throughout: the filter-sensitivity invariances, the fast/slow refiner parity, and the
+  cellpose optional-dependency guard are all intact. Where a moved function is called or patched across a
+  seam (`puncta_refinement_func`, `napari_show_warning`, `_local_ring_radii`, `_build_cellpose_model`), the
+  test's patch/source-inspection target was repointed to the module the code now lives in — assertions and
+  pinned numbers never changed.
+- `segment_subcellular_objects` is a registered op → `operation_catalog.json` regenerated. Ceiling locked at
+  148 (shim); `subcellular.py` 450. This closes the segmentation_decomposition audit spec.
+
+## [1.6.242] - 2026-07-21
+### Changed — **segmentation decomposition step 3: the puncta-refinement core moves out (byte-identical).**
+The most sensitive move: the filter-sensitivity-gated **puncta refinement** family — the SNR/kurtosis/
+contrast gate, the per-object local-ring background helpers, and the two bit-for-bit-identical
+implementations (windowed *fast* default + original *slow* reference) behind `puncta_refinement_func` —
+moved **verbatim** to `segmentation/puncta_refinement.py`. **No threshold, morphology, or operation order
+changed.** Pinned by `test_filter_sensitivity`, `test_refine_fast_slow_parity`, `test_local_ring_scales`,
+`test_puncta_refinement` — all green.
+
+- The module owns the `_PYCAT_REFINE_FAST`/`_DEBUG` flags it reads, and imports `apply_watershed_labeling`
+  (watershed) + `_to_uint16_safe` (_common) from their families — dependency-ordered, no cycles.
+- Three tests had patch targets repointed to `puncta_refinement` (the module the moved filters now resolve
+  `napari_show_warning`/`_local_ring_radii` in): `test_puncta_refinement`, `test_refine_fast_slow_parity`,
+  `test_filter_sensitivity` — assertions and pinned numbers unchanged.
+- `puncta_refinement_filtering_func` is a registered op → `operation_catalog.json` regenerated.
+  `segmentation_tools.py`: **1239 → 566**; ceiling ratcheted to 566. Only the subcellular family remains.
+
+## [1.6.241] - 2026-07-21
+### Changed — **segmentation decomposition step 2: the fz + cellpose families move out (byte-identical).**
+Continued the `segmentation_tools.py` split. Both families depend only on already-moved modules, so they
+move cleanly, **verbatim** — no scale/sigma/threshold change:
+
+- `fz.py` — `felzenszwalb_segmentation_and_merging` (+ the RAG `merge_mean_color`/`_weight_mean_color`
+  callbacks) and `fz_segmentation_and_binarization`; imports `local_thresholding_func` from the
+  `local_thresholding` family.
+- `cellpose.py` — the optional-dependency Cellpose wrapper (`cellpose_segmentation`, with torch/cellpose
+  imported LAZILY and the version-aware cyto2-vs-cpsam model build preserved exactly) plus the RandomForest
+  pixel classifier + `refine_labels_with_contours`; imports `opencv_watershed_func` from `watershed`. The
+  module owns the GPU/model caches it manages.
+
+Five registered ops moved → `operation_catalog.json` regenerated. Two source-inspection tests had their
+target repointed to the new module locations (`test_conditional_imports` → `cellpose.py`; the puncta-gate
+guard already scans the whole package) — assertions unchanged. `segmentation_tools.py`: **2030 → 1239**;
+ceiling ratcheted to 1239. Remaining families: puncta refinement, subcellular.
+
+## [1.6.240] - 2026-07-21
+### Changed — **segmentation decomposition step 1: the leaf/foundation families move out (byte-identical).**
+Began decomposing `segmentation_tools.py` (2,692 lines, the best-covered large file — 41 test files) into a
+`toolbox/segmentation/` package by family. This step moves the five families with no upward dependencies,
+**verbatim** — no threshold, morphology, or operation-order change:
+
+- `_common.py` — the shared `_to_uint16_safe` dtype helper.
+- `local_thresholding.py` — `local_thresholding_func` (registered op) + its viewer wrapper.
+- `watershed.py` — `apply_watershed_labeling` + `opencv_watershed_func` (both registered ops); imports
+  `_to_uint16_safe` from `_common`.
+- `morphology.py` — `cell_mask_stretching` (registered op, keeps its 50× gain ceiling).
+- `intensity.py` — `compute_image_intensity_stats` + `cell_has_punctate_signal`, the RESTORED
+  absolute-intensity punctate gate whose loss once caused spurious puncta (1.5.526).
+
+The move is **dependency-ordered**: family modules import from each other, never back from `segmentation_tools`,
+so there are no import cycles. Four registered ops moved → `operation_catalog.json` regenerated. The wiring
+guard `test_spurious_puncta_gate` now inspects the whole segmentation surface (package + shim) so "the gate
+exists and is wired in" is checked wherever the code lives — same assertions, stronger guarantee.
+`segmentation_tools.py`: **2692 → 2030**; ceiling ratcheted to 2030. Remaining families: fz, cellpose,
+puncta, subcellular.
+
+## [1.6.239] - 2026-07-21
+### Changed — **vpt decomposition COMPLETE (steps 5-6): vpt_tools.py is now a pure re-export shim.**
+The last two domains moved out **verbatim**: bead-population routing (`split_bead_populations`,
+`select_bead_population`, `aggregate_population_stats`) to `toolbox/vpt/populations.py`, and the
+`run_vpt_analysis` orchestrator (+ `_link` linker dispatch, `compare_detection_variants` sweep) to
+`toolbox/vpt/analysis.py`.
+
+- **`vpt_tools.py`: 2834 → 95 lines (-97%)** across the six steps (viscosity 1.6.235, drift 1.6.236,
+  host 1.6.237, detection 1.6.238, populations + analysis 1.6.239). It now contains **no function
+  definitions** — only re-exports of the `toolbox/vpt/` package, so every historical import path
+  (`from pycat.toolbox.vpt_tools import …`) keeps working unchanged.
+- Byte-identical throughout: the golden-master MSD→D→viscosity chain (~8.325 on the real bead file) and
+  the GPU / CPU-parallel equivalence guards are the net, all green. Revert condition unchanged: any drift
+  in detect_beads_stack's output/order or the viscosity number.
+- Ceilings ratcheted: `vpt_tools.py` → 95 (locked at shim size); `vpt/detection.py` 1773, `vpt/analysis.py`
+  228 get their own concentration ceilings. This closes the vpt_decomposition audit spec.
+
+## [1.6.238] - 2026-07-21
+### Changed — **vpt decomposition step 4: the entire bead-detection stack moves out (byte-identical).**
+The whole detection domain — LoG blob detection (CPU + GPU), Airy/template PSF scoring, hot-pixel masking,
+ring-merge dedup, bead classification, the `detect_beads_stack` orchestrator with its GPU/CPU-parallel
+backend chooser, and the two linking-condition probes (`assess_linking_conditions`,
+`estimate_linking_distance_um`) — moved **verbatim** (1754 lines) into `toolbox/vpt/detection.py`.
+
+- **Not a single detection or its order changed** — this is the validated detection path and downstream
+  linking is order-sensitive (revert condition: any change to detect_beads_stack's output or the parallel /
+  GPU equivalence guards). The linking probes are folded in because they *run* detection and are coupled to
+  it. `vpt_tools.py` re-exports every public entry point plus the two private helpers the
+  parallel-equivalence test imports.
+- `detect_beads_stack` is a registered navigator op → `operation_catalog.json` regenerated (its source
+  updated to `vpt/detection.py`).
+- Two VPT tests had their module alias repointed from `vpt_tools` to `vpt.detection` so their
+  `monkeypatch.setattr` targets bind the module the internal bare-name calls now resolve against
+  (`test_vpt_pool_gate`, `test_vpt_equivalence_guard_memo`) — assertions and pinned numbers unchanged.
+- `vpt_tools.py` dropped **2155 -> 405** lines (-81%); the per-file ceiling ratcheted to 405, and
+  `detection.py` got its own ceiling at 1773. Only population routing + `run_vpt_analysis` remain.
+
+## [1.6.237] - 2026-07-21
+### Changed — **vpt decomposition step 3: the host-condensate domain moves out (byte-identical).**
+`segment_host_condensate`, `erode_host_mask`, and `infer_host_from_beads` (the Mode-C host reconstruction
+from the bead distribution) moved **verbatim** into `toolbox/vpt/host.py`. `vpt_tools.py` re-exports the
+three; no number changed, VPT tests pass unmodified.
+
+- The host segmentation ops are registered navigator operations, so `operation_catalog.json` was
+  regenerated (their catalog source updated to `vpt/host.py`).
+- `vpt_tools.py` dropped **2429 -> 2155** lines; the per-file ceiling ratcheted to 2155. Moved keys in the
+  drop-guard's `_DELIBERATE`. Remaining: detection, linking, analysis.
+
+## [1.6.236] - 2026-07-21
+### Changed — **vpt decomposition step 2: the ensemble drift-correction domain moves out (byte-identical).**
+`drift_correct_com` (subtracts common-mode stage/sample drift so it is not read as bead diffusion) and
+`reclassify_by_temporal_stability` moved **verbatim** into `toolbox/vpt/drift.py`. `vpt_tools.py`
+re-exports both; no number changed, drift tests pass unmodified.
+
+- `drift_correct_com` is a registered navigator operation, so its catalog source updated from
+  `vpt_tools.py` to `vpt/drift.py` — the generated `operation_catalog.json` was regenerated (2 lines).
+- `vpt_tools.py` dropped **2585 -> 2429** lines; the per-file ceiling ratcheted to 2429. Moved keys in the
+  drop-guard's `_DELIBERATE`.
+
+## [1.6.235] - 2026-07-21
+### Changed — **vpt decomposition step 1: the Stokes-Einstein viscosity domain moves to its own module (byte-identical).**
+Begins decomposing the 2,834-line `vpt_tools.py` by domain. `viscosity_measurement`,
+`viscosity_from_diffusion`, `viscosity_interval_from_diffusion` (and the `_K_BOLTZMANN` constant) moved
+**verbatim** into the new `toolbox/vpt/viscosity.py`, alongside the existing VPT adapters.
+
+- **`vpt_tools.py` re-exports** all three for every caller (vpt_ui, the viscosity-chain tests). Move, not
+  rewrite — no number changed.
+- **Byte-identical:** the golden-master viscosity chain (viscosity to 3.2%) and the route-equivalence tests
+  pass unmodified; moved keys recorded in the drop-guard's `_DELIBERATE`.
+- `vpt_tools.py` dropped **2834 -> 2585** lines; a new per-file ceiling established there that ratchets down
+  as the remaining domains (detection, host, linking, drift, analysis) move out.
+
+## [1.6.234] - 2026-07-21
+### Fixed — **Three CI-hygiene / test-fixture correctness fixes (ci_hygiene_fixes).**
+- **Stale CI coverage comment corrected.** `core.yml` claimed the `core` marker "selects only the two guard
+  files, so coverage would be near-zero" — a fossil. Measured: the suite (~1,500 tests, 200+ marked files)
+  covers **30% of pycat**. The comment now states the real number; coverage stays off in CI for a real
+  reason (adds ~70% runtime with no report consumer), with the local command recorded.
+- **tifffile fixtures pinned to `minisblack`.** Two `imwrite` calls in `test_lazy_sources_headless.py` wrote
+  `(4,H,W)`/`(5,H,W)` arrays with no `photometric`, which a future tifffile default change could reinterpret
+  as RGBA planes — a latent test time-bomb. Now explicit grayscale (verified under `-W error`).
+- **`pywt` import deferred to function scope.** `from pywt import wavedecn, waverecn` moved out of
+  `image_processing_tools` module scope into the one wavelet function that uses it, so the 8 toolbox modules
+  that transitively import it no longer load PyWavelets on import (verified). Behaviour-identical.
+
+## [1.6.233] - 2026-07-21
+### Fixed — **A batch image whose consolidated-table append fails is no longer reported as a clean success (silent cohort corruption).**
+`exception_context_classification` spec, increment 1 — the batch_step category and its concrete offender.
+- **The bug:** `BatchWorker.run` marked an image `✓` even when adding its rows to `consolidated_long.csv`
+  failed — so that image's rows silently vanished from the consolidated cohort while the batch reported
+  success. A 93-of-100 cohort that looks complete is a silent scientific corruption. The success mark is now
+  **gated** on the consolidated append succeeding; on failure the image gets a visible `⚠` partial status
+  ("processed, but NOT added to the consolidated table — its rows are MISSING…"), so the drop is actionable.
+  The per-image output folder is still complete; only the consolidated aggregation is flagged.
+- **The category vocabulary:** `test_exception_budget.py` now recognizes the five handler categories
+  (`ui_cleanup` / `optional_probe` / `scientific_result` / `write` / `batch_step`) and validates the category
+  **when** a handler uses the `# broad-ok: <category> — <reason>` form — a typo'd category (a `write` that
+  reads `writes`) fails, so it can't silently escape its standard. Legacy plain `# broad-ok: <reason>`
+  handlers are unaffected; the batch handler above is annotated `# broad-ok: batch_step — …`.
+- Tests (`core`): `test_batch_step_visibility.py` (AST-guards the gated success + visible partial — the loop
+  is a QThread) and a category-validation case in `test_exception_budget.py`. **Follow-on** (recorded in the
+  spec): the full ~166-handler category sweep, the writer-scoped swallow guard, and writer conversions.
+
+## [1.6.232] - 2026-07-21
+### Added — **A general object-quality gate (backlog A2, part 1) — block / warn / downgrade, with reasons.**
+Every measurement has preconditions (a physical-unit result needs a real pixel size; a concentration needs a
+valid calibration; a trusted number needs its reliability assessed), and those signals already exist — but
+nothing composed them into one answer a navigator, batch run, QC advisor, and measurement UI could all
+consult. New `utils/quality_gate.py` is that composer — **feature-agnostic, and it invents no new metric**;
+it only combines `pixel_size`, `calibration.check_calibration_validity`, and `reliability`.
+- `evaluate_quality(objects, requirement, *, context) -> GateResult`, where `QualityRequirement` declares
+  what an op needs (`needs_pixel_size`, `needs_calibration`, `min_reliability`) and `context` supplies the
+  signal inputs. Only the requested signals are consulted; the op that needs nothing is OK.
+- Enforces the "refuse rather than lie" rules: **BLOCK ≠ WARN ≠ DOWNGRADE** (do-not-run / caveat-attached /
+  reduced-claim); **an unassessed signal is never a silent pass** (it WARNs); **report, don't drop** — every
+  signal's outcome is on the result and the overall verdict is the WORST of them (`runnable` is false only
+  on BLOCK).
+- Tests (`core`, `test_quality_gate.py`): missing pixel size blocks; unassessed pixel size / absent
+  calibration warn; invalid calibration blocks and a warn-level warns; an unreliable grade downgrades; a
+  below-floor grade warns; NaN reliability warns; the worst signal wins with all reported; and it composes
+  the real `reliability` signal from raw inputs. **Remaining A2:** binding the measurement ops into
+  `operation_catalog.json` with a `QualityRequirement` each, so the planner emits a measurement step as
+  runnable only when the gate passes — the heavier, catalog-wiring half.
+
+## [1.6.231] - 2026-07-21
+### Added — **App mode + feature registry (backlog A3 substrate) — beginner/advanced, and the catalogue of "what can PyCAT do."**
+The non-Qt foundation for the navigator/beginner-mode work, both consuming the 1.6.230 user-settings store
+and both `core`-tested. The heavy beginner-home Qt dock is the remaining A3 piece.
+- `utils/app_mode.py`: `AppMode` (BEGINNER/ADVANCED) persisted at `app.mode` — **first run is BEGINNER**,
+  every later run is the last choice. `current_mode`/`set_mode`/`is_beginner`/`is_advanced`/`toggle_mode`
+  and `on_mode_change(cb)` (fires on change). Owns no widget; any UI consults it. An unrecognized stored
+  value degrades to BEGINNER. The store is injectable, so it tests without touching the real config.
+- `utils/feature_registry.py`: `FeatureCard` (key, title, one-line summary, category, opaque `entry`
+  callable, docs anchor, `min_mode`) + `FeatureRegistry` — the single answer to "what can PyCAT do, and
+  where." A duplicate key is refused (two features can't claim one id); `visible_in(mode)` / `visible_now()`
+  filter by app mode (a beginner sees the beginner set, an advanced user sees everything); `by_category`
+  groups them. A **catalogue, not a launcher** — it never invokes `entry`, so it stays Qt-free. A future
+  capability becomes discoverable the moment it registers one card.
+- Tests (`core`): `test_app_mode.py` (first-run beginner, persistence, toggle, degrade, change-notify) and
+  `test_feature_registry.py` (register/retrieve, duplicate refused, mode-visibility, category grouping).
+
+## [1.6.230] - 2026-07-21
+### Added — **Process-wide user settings (backlog A1) — one corruption-safe, atomic home for cross-session preferences.**
+PyCAT had nowhere to remember a choice between sessions (no `QSettings`, no user-config file, no first-run
+flag), so the navigator mode, acquisition profiles, plot-backend preference, and dismissed QC warnings had
+nowhere to live. New `utils/user_settings.py` is that home — a general mechanism with **zero feature
+knowledge**; each feature registers its own defaults and reads/writes its own namespaced keys.
+- `UserSettings`: namespaced key/value store persisted to one JSON file in the OS user-config dir
+  (`platformdirs.user_config_dir('pycat')`, home-dir fallback). Registered defaults (a stored value always
+  wins), typed accessors (`get_bool`/`get_int`/`get_float`/`get_str`) that **coerce and fall back rather
+  than raise**, `set`/`reset`, and `subscribe(key, cb)` firing only on an actual change. Process-wide
+  instance via `settings()`.
+- **Two startup-critical guarantees:** a corrupt settings file **never crashes** — it falls back to
+  defaults and the bad file is quarantined (`.corrupt`), not deleted; and a write is **atomic** (temp file +
+  `os.replace` + `fsync`), with `set()` transactional — a mid-write failure rolls back the in-memory change
+  and leaves the previous good file intact.
+- Tests (`core`, `test_user_settings.py`): cross-session round-trip, default resolution, typed coercion +
+  fallback, change-only subscriptions, corruption-safety + quarantine, write atomicity, namespace
+  non-collision. Unblocks the navigator/beginner-mode work (A3) and is reusable everywhere.
+
 ## [1.6.229] - 2026-07-21
 ### Added — **Spectral / bleed-through unmixing is now a UI step — the C1 capability is user-reachable.**
 The linear unmixing shipped in 1.6.226 was API-only; it now has a toolbox step, so it is no longer an

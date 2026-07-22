@@ -264,10 +264,34 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
+    # 2828 -> 2600 (frame-access + correlation) -> 1952 (analysis) -> 1410 (step 3, 1.6.246: the QThread/
+    # ProcessPool worker plumbing). The ceiling ratchets DOWN as the remaining UI builders move out. The
+    # analysis + execution modules get their own concentration ceilings.
+    "toolbox/timeseries_condensate_tools.py": 1410,
+    "toolbox/timeseries/analysis.py": 685,
+    "toolbox/timeseries/execution.py": 581,
+    # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
+    # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
+    # PURE re-export shim (no defs). Ceiling locked at the shim size.
+    "toolbox/segmentation_tools.py": 148,
+    # puncta_refinement.py — the SNR/kurtosis/contrast gate + the two bit-identical implementations, moved
+    # here from segmentation_tools (1.6.242). Byte-identical; its own concentration ceiling.
+    "toolbox/segmentation/puncta_refinement.py": 715,
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.
     "toolbox/vpt_ui.py": 1139,
+    # 2834 -> 95 (-97%): the scientific core split into toolbox/vpt/ by domain — viscosity (1.6.235),
+    # drift (1.6.236), host (1.6.237), the whole detection stack (1.6.238), and finally population routing
+    # + the run_vpt_analysis orchestrator (1.6.239). vpt_tools.py is now a PURE re-export shim (no defs);
+    # the ceiling is locked at the shim size.
+    "toolbox/vpt_tools.py": 95,
+    # detection.py — the LoG/GPU/template detection stack + backend chooser + linking probes moved here
+    # from vpt_tools (1.6.238). Byte-identical; its own concentration ceiling, ratchets DOWN if split.
+    "toolbox/vpt/detection.py": 1773,
+    # analysis.py — the run_vpt_analysis orchestrator (host->detect->link->drift->MSD->viscosity) + _link
+    # + compare_detection_variants moved here from vpt_tools (1.6.239). Byte-identical; own ceiling.
+    "toolbox/vpt/analysis.py": 228,
     # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
     # decomposition. The ratchet moves DOWN — it cannot grow back.
     "ui/ui_modules.py": 3268,
