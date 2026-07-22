@@ -75,6 +75,20 @@ _DELIBERATE = {
     'image_processing_tools.py::_equiv_diam',
     'image_processing_tools.py::estimate_object_size_px_brightfield',
 
+    # 1.6.249 — image_processing decomposition step 2 (foundation): the shared PRIMITIVES every algorithm
+    # family reuses (apply_rescale_intensity, invert_image, upscale_image_interp — the three registered ops
+    # pinned by test_image_processing_base_characterization — plus _safe_equalize_adapthist, pseudo3d_tri_
+    # planar_filter, and the lazy-napari _add_image/_napari helpers) MOVED verbatim to toolbox/image_
+    # processing/_base.py. Dependency-ordered so the families can import them; napari stays function-scoped.
+    # Registered ops moved → catalog regenerated.
+    'image_processing_tools.py::_add_image',
+    'image_processing_tools.py::_napari',
+    'image_processing_tools.py::_safe_equalize_adapthist',
+    'image_processing_tools.py::pseudo3d_tri_planar_filter',
+    'image_processing_tools.py::apply_rescale_intensity',
+    'image_processing_tools.py::invert_image',
+    'image_processing_tools.py::upscale_image_interp',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /

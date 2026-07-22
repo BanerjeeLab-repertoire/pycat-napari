@@ -1,3 +1,18 @@
+## [1.6.249] - 2026-07-21
+### Changed — **image_processing decomposition step 2 (foundation): the shared primitives move out.**
+The algorithm families (background, preprocessing, upscaling, deblur) all reuse a handful of low-level
+primitives, so — dependency-ordered, like the segmentation split — those move first, **verbatim**, into
+`toolbox/image_processing/_base.py`: `apply_rescale_intensity`, `invert_image`, `upscale_image_interp` (the
+three registered ops), `_safe_equalize_adapthist`, `pseudo3d_tri_planar_filter`, and the lazy-napari display
+helpers `_add_image` / `_napari`.
+
+- **Characterization written first** (`test_image_processing_base_characterization`): exact output of
+  `apply_rescale_intensity`, `invert_image`, `upscale_image_interp`, `_safe_equalize_adapthist` and
+  `pseudo3d_tri_planar_filter` on fixed inputs — passes identically before and after.
+- napari stays function-scoped so `_base.py` imports headless. The three registered ops moved → `operation_
+  catalog.json` regenerated. `image_processing_tools.py`: **2515 → 2285**; ceiling ratcheted to 2285. With
+  the foundation in place the families can now import the shared primitives and move in dependency order.
+
 ## [1.6.248] - 2026-07-21
 ### Changed — **image_processing decomposition step 1 (characterization-first): object-size estimation moves out.**
 Began decomposing `image_processing_tools.py` (2,669 lines) — the **highest-risk** big-file split (only 6
