@@ -140,6 +140,20 @@ _DELIBERATE = {
     'image_processing_tools.py::run_wbns',
     'image_processing_tools.py::run_wavelet_noise_subtraction',
 
+    # 1.6.253 — image_processing decomposition step 6 (FINAL): the composite PREPROCESSING pipeline
+    # (pre_process_image + run_ + the flatfield/background-subtraction corrections) MOVED to toolbox/image_
+    # processing/preprocessing.py (pinned by test_image_processing_preprocessing_characterization), and the
+    # interactive image-adjustment/UPSCALING wrappers (run_apply_rescale_intensity, run_invert_image,
+    # run_upscaling_func) MOVED to toolbox/image_processing/upscaling.py. Both verbatim. With this,
+    # image_processing_tools.py is a PURE re-export shim (no defs). Three registered ops → catalog regen.
+    'image_processing_tools.py::pre_process_image',
+    'image_processing_tools.py::run_pre_process_image',
+    'image_processing_tools.py::apply_flatfield_correction',
+    'image_processing_tools.py::apply_background_subtraction',
+    'image_processing_tools.py::run_apply_rescale_intensity',
+    'image_processing_tools.py::run_invert_image',
+    'image_processing_tools.py::run_upscaling_func',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /

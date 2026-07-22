@@ -1,3 +1,20 @@
+## [1.6.253] - 2026-07-22
+### Changed — **image_processing decomposition COMPLETE (step 6): image_processing_tools.py is now a pure shim.**
+The last two domains moved, **verbatim**: the composite preprocessing pipeline (`pre_process_image` + its
+run wrapper + the flatfield / background-subtraction shading corrections) to
+`toolbox/image_processing/preprocessing.py`, and the interactive image-adjustment / upscaling wrappers
+(`run_apply_rescale_intensity`, `run_invert_image`, `run_upscaling_func`) to
+`toolbox/image_processing/upscaling.py` (napari stays function-scoped so it imports headless).
+
+- **`image_processing_tools.py`: 2669 → 221 lines (-92%)** across the six steps (size_estimation 1.6.248,
+  `_base` 1.6.249, deblur 1.6.250, filters 1.6.251, background 1.6.252, preprocessing + upscaling 1.6.253).
+  It now contains **no function definitions** — only re-exports of the `toolbox/image_processing/` package,
+  so every historical import path keeps working unchanged.
+- **Every moved function had a characterization test written first** — the discipline this thinly-covered
+  file demanded — pinning its exact output on fixed inputs; all passed identically before and after. Three
+  registered ops moved this step → `operation_catalog.json` regenerated. This closes the
+  image_processing_decomposition audit spec, the last of the four remaining god-file splits.
+
 ## [1.6.252] - 2026-07-22
 ### Changed — **image_processing decomposition step 5: the background/noise-removal family moves out.**
 The spec's highest-downstream-impact target (background removal shapes every intensity measurement) moved

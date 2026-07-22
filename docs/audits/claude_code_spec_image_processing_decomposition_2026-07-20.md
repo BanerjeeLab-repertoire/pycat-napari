@@ -1,10 +1,12 @@
 # Claude Code spec — Decompose `image_processing_tools.py` by algorithm (coverage-gated, extra care)
 
-> **◐ STATUS — IN PROGRESS (characterization-FIRST). Steps 1-5 DONE (1.6.248-252): size_estimation, `_base`,
-> `deblur`, `filters`, and `background` (the spec's highest-downstream-impact target — rolling-ball/Gaussian,
-> WBNS wavelet, soft foreground suppression, pinned on a known background field) — all byte-identical.
-> image_processing_tools.py 2669 → 732. Remaining: preprocessing (pre_process_image - now unblocked, its
-> soft_foreground_suppression/wbns_func deps are in background) and upscaling (run_upscaling_func).**
+> **✅ STATUS — DONE (1.6.248-253). The whole file is decomposed into `toolbox/image_processing/` by algorithm —
+> size_estimation, `_base` (shared primitives), deblur, filters, background, preprocessing, upscaling.
+> EVERY moved function had a characterization test written FIRST (test_image_processing_{size,base,deblur,
+> filters,background,preprocessing}_characterization) pinning its exact output; all byte-identical, all pass
+> identically before and after. Dependency-ordered (families import _base/each other, never back).
+> `image_processing_tools.py` went 2669 → 221 lines (-92%): a PURE re-export shim, no function defs. This was
+> the highest-risk big-file split (thin coverage); the characterization-first discipline held throughout.**
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Fourth-largest file
 (**2,669 lines**). Unlike segmentation/condensate-physics, its coverage is **thinner — only 6 test
