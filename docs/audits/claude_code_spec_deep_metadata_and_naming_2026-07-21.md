@@ -1,5 +1,24 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
+> **◐ STATUS — Part 3 (filename-aware naming) DONE, shipped in 1.6.280. Parts 1–2 remain.**
+>
+> **Part 3 — DONE.** `channel_naming.identify_channel` gained a `file_stem` argument, a **Tier 1c** (match
+> the stem with the existing `_match_fluorophore_name`, below real metadata but above the pixel/position
+> guess — `Image1-GFP.tif` → `EGFP` source `filename`; `Image1-DAPI.tif` → `DAPI`, distinct, no `(1)`), and
+> the **never-worse-than-input rule** (`_stem_distinguishing_text` keeps the user's text over a generic
+> modality word when nothing else matched, retaining the colormap bucket). The stem is threaded from all
+> four open paths (`image_reader_2d` + the IMS/structured/CZI-streaming openers). Real metadata still wins,
+> a purely generic stem still falls through to pixel classification, and no-stem callers are unchanged.
+> `tests/test_channel_naming_filename.py` (`core`, 6 tests); existing naming/extraction tests pass. Full
+> core green (1710).
+>
+> **Parts 1–2 REMAIN** (larger, and they touch `metadata_extract.py` which feeds the pixel-size gate —
+> "do not change any value that is already correct"): Part 1 (scoped per-element OME parse fixing the
+> `Pixels/@Type=='PMT'` bug, the per-channel `channels` schema, the instrument/objective block, contradiction
+> flagging) and Part 2 (`extract_metadata_merged` — decouple the metadata source from the pixel reader, with
+> per-field provenance + conflict reporting + bounded/lazy per-page TIFF metadata). Part 1 needs a real
+> Zeiss OME-TIFF fixture.
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. Three joined
 problems, all confirmed in code: (1) metadata is parsed **shallowly** for every format — an OME-TIFF
 carrying 29 distinct attributes yields 6, one of them **wrong**; (2) the metadata reader is **coupled

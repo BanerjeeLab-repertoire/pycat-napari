@@ -1,3 +1,26 @@
+## [1.6.280] - 2026-07-22
+### Fixed — **filename-aware channel naming: a channel's name is never worse than the file the user gave it (deep_metadata_and_naming Part 3).**
+`channel_naming.identify_channel` never saw the filename, so a plain 2D TIFF — which usually carries no
+channel metadata at all — had its fluorophore (present only in the name, `Image1-GFP.tif`) discarded in
+favour of a generic pixel guess: `Image1-GFP` and `Image1-DAPI` both became `Image1-Fluorescence`, and the
+second collided into `Fluorescence(1)`. The user's own labelling — often the only channel identity a plain
+TIFF has — was thrown away.
+
+- `identify_channel` gains a `file_stem` argument and a **Tier 1c**: below real metadata (OME Fluor,
+  channel name) but **above** the pixel/position guess, it matches the stem with the existing
+  `_match_fluorophore_name` — so `Image1-GFP.tif` → `EGFP` (source `filename`), and `Image1-DAPI.tif` →
+  `DAPI`, distinct with no `(1)` suffix.
+- **Never-worse-than-input rule:** when the only thing determinable was the modality (pixels) or a bare
+  position, but the stem carries distinguishing text (`_stem_distinguishing_text` skips generic/numeric
+  tokens like `Image1`/`stack_001`), the user's text is kept instead of a generic modality word — the
+  colormap bucket is retained so display still tracks the pixels.
+- The stem is threaded from all four open paths (`image_reader_2d`, the IMS/structured/CZI-streaming
+  openers). Real metadata still wins (a file named `...GFP` whose OME says `Fluor=DAPI` → DAPI), a purely
+  generic stem still falls through to the pixel classification, and callers passing no stem are unchanged.
+  New `tests/test_channel_naming_filename.py` (`core`, 6 tests); existing naming/extraction tests pass
+  (the extraction fake's signature tracks the real one, as it did for `pixel_frame`). Full core green (1710).
+  Parts 1–2 (deep per-element OME parse + reader-independent metadata merge) remain.
+
 ## [1.6.279] - 2026-07-22
 ### Added — **navigator wiring increment 2: the planner consults the quality gate — a plan now states when a measurement cannot be trusted, and why.**
 `utils/quality_gate.evaluate_quality` composes calibration, pixel size, and reliability into a

@@ -55,6 +55,11 @@ from pycat.file_io.stack_access import (       # noqa: F401  (re-exported for ca
 from pycat.file_io.napari_adapter import EAGER_DIAMETER_LAYERS  # noqa: F401
 
 
+def _stem_of(path):
+    """The file stem for filename-aware channel naming ('Image1-GFP' for Image1-GFP.tif), or None."""
+    return os.path.splitext(os.path.basename(path))[0] if path else None
+
+
 class _StackOpenersMixin:
     """Format-specific stack openers. Mixed into ``FileIOClass``; bodies unchanged."""
 
@@ -169,7 +174,9 @@ class _StackOpenersMixin:
 
             for channel_idx in channels_to_load:
                 with _suppress_ims_chunk_prints():
-                    _ch_info = extract_channel_info_from_ims(pos_reader, channel_idx)
+                    _ch_info = extract_channel_info_from_ims(
+                        pos_reader, channel_idx,
+                        file_stem=_stem_of(pos_path))
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
                 debug_log(f"file_io: IMS channel {channel_idx} -> "
@@ -466,9 +473,10 @@ class _StackOpenersMixin:
                 W   = getattr(image.dims, 'X', None)
                 channels_to_load = list(range(n_c))
 
+            _stem = _stem_of(file_path)
             for channel_idx in channels_to_load:
                 if reader_has_structure:
-                    _ch_info = extract_channel_info(image, channel_idx)
+                    _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem)
                 else:
                     _ch_info = {'layer_name': f'C{channel_idx}',
                                  'bucket': 'unknown', 'label': f'C{channel_idx}',
@@ -631,7 +639,7 @@ class _StackOpenersMixin:
 
         for channel_idx in range(n_c):
             try:
-                _ch_info = extract_channel_info(image, channel_idx) if image is not None else None
+                _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem_of(file_path)) if image is not None else None
             except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
                 _ch_info = None
             if not _ch_info:
