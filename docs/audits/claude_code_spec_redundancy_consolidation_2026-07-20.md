@@ -1,16 +1,41 @@
 # Claude Code spec — Redundancy consolidation (science-preserving, output-identical)
 
-> **◐ STATUS — Axis 1 (pixel-size accessors) DONE + now structurally guarded (1.6.212); axes 2–4 open.**
-> Every `_mpx()` in the tree routes through the canonical `pixel_size.pixel_size_um_or_default(dr,
-> context=...)` — the 10 UI accessors plus the two `_tools` copies (`intensity_profile_tools`,
-> `morphological_complexity_tools`) that were converted from `except Exception: return 1.0`. The missing
-> structural guard is now in place: `tests/test_pixel_size_single_accessor.py` (an AST check that every
-> function named `_mpx` calls the canonical accessor, with a canary), so a new UI cannot quietly reintroduce
-> a bespoke `dr.get('microns_per_pixel_sq') or 1.0` and re-open the silent-units hole.
-> **Remaining:** axis 2 (background-subtraction mechanics — read-and-classify: merge only true duplicates,
-> keep partition vs rolling-ball distinct), axis 3 (worker/thread lifecycle → `operation_runner`, to do
-> WITH the timeseries/VPT decompositions), axis 4 (the 41 `np.asarray(...data)` vs `materialize_stack`
-> stack-access sites — classify + route). Each remains bound by the output-identical rule.
+> **◐ STATUS — Axis 1 DONE + guarded (1.6.212). Axes 2 and 4 now RESOLVED by classification (2026-07-22);
+> axis 3 is the only genuine remaining opportunity.**
+>
+> **Axis 1 (pixel-size accessors) — DONE.** Every `_mpx()` routes through
+> `pixel_size.pixel_size_um_or_default(dr, context=...)`, structurally guarded by
+> `tests/test_pixel_size_single_accessor.py`.
+>
+> **Axis 2 (background subtraction) — CLASSIFIED, NO MERGE (the output-identical rule's expected outcome).**
+> Read-and-classify found NO true duplicates: `assess_background_region` (partition) is a background-region
+> *assessment*, not a subtraction; `apply_background_subtraction` clips to 0 (additive reference) while
+> `ratiometric_tools._prepare` deliberately does NOT clip (keeps negatives → NaN for ratiometric honesty) —
+> different clipping is different science; the rolling-ball family (`compute_rolling_ball_background`,
+> `subtract_background` w/ scaling/equalise/window, `rb_gaussian_*`) is spatial estimation, a distinct
+> algorithm. The `np.clip(x-y,0)` idiom recurs (brightfield `bg-img`, DoG `lo-hi`, peak/edge `pp-surround`,
+> bead `p-pmn`) but on different operands in different science — a trivial numpy pattern, not duplicated
+> logic. Each distinction is already documented in its docstring. **Merging any of these would be the exact
+> regression this spec forbids.** Nothing to consolidate.
+>
+> **Axis 4 (stack-access, `np.asarray(...data)`) — SUPERSEDED: the latent bug class it targets is already
+> closed at the source.** `file_io/lazy_guard.refuse_implicit_full_read` is called from every lazy-disk
+> wrapper's `__array__` (14 sites: lazy_sources ×6, multidim_io ×3, ims_reader ×3, czi_bioformats,
+> timeseries/frame_access) and RAISES loudly instead of silently returning frame 0. The one `__array__` that
+> does not refuse (`ts_cellpose_tools`) is a deliberate in-memory RAM→RAM expander that correctly returns the
+> full array. So the ~70 remaining `np.asarray(layer.data)` sites are SAFE: on a 2D/eager array they are
+> correct; on a lazy stack they now raise (loud, caught in dev/test), never silent frame-0. Routing them
+> through `materialize_stack` would be cosmetic uniformity with real per-site risk and ZERO bug-fix payoff —
+> **not recommended under the output-identical rule.** Add a new lazy-disk wrapper → wire the guard into its
+> `__array__` (the one real rule), which `test_lazy_sources_headless` already exercises.
+>
+> **Axis 3 (worker/thread lifecycle → `operation_runner`) — OPEN, the sole remaining item.** The
+> timeseries/VPT `execution.py` modules now exist (decompositions shipped 1.6.238/1.6.246), so the worker
+> plumbing is at least localised. But routing it through `operation_runner` is behaviour-preserving-only and
+> threading semantics (cancel timing, progress, thread affinity) are notoriously subtle — a consolidation
+> that shifts any of those is a behaviour change even if the numbers match. Do it deliberately, per-worker,
+> only where the semantics genuinely match; leave them separate otherwise. This is the one axis with real
+> code left, and it is the riskiest — it earns its own focused pass.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. A different axis
 from decomposition: instead of splitting big files, this finds **duplicated logic** and routes it
