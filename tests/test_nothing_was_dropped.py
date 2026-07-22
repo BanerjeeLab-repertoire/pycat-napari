@@ -96,6 +96,28 @@ _DELIBERATE = {
     'image_processing_tools.py::deblur_by_pixel_reassignment',
     'image_processing_tools.py::run_dpr',
 
+    # 1.6.251 — image_processing decomposition step 4: the FILTER/ENHANCEMENT family (2D + pseudo-3D Gaussian/
+    # Gabor/DoG filters, Laplacian-of-Gaussian filter+enhancement, edge-preserving bilateral, the combined
+    # peak/edge enhancer + its _convolve_k helper, and the run_ wrappers) MOVED verbatim to toolbox/image_
+    # processing/filters.py. Pinned by test_image_processing_filters_characterization (exact shape/dtype/sum/
+    # min/max per operator). Ten registered ops moved → catalog regenerated. Build on _base primitives.
+    'image_processing_tools.py::gaussian_smooth_2d',
+    'image_processing_tools.py::gaussian_smooth_3d_pseudo',
+    'image_processing_tools.py::gabor_filter_3d_pseudo',
+    'image_processing_tools.py::dog_blob_enhance_2d',
+    'image_processing_tools.py::dog_blob_enhance_3d_pseudo',
+    'image_processing_tools.py::gabor_filter_func',
+    'image_processing_tools.py::peak_and_edge_enhancement_func',
+    'image_processing_tools.py::_convolve_k',
+    'image_processing_tools.py::run_peak_and_edge_enhancement',
+    'image_processing_tools.py::apply_laplace_of_gauss_filter',
+    'image_processing_tools.py::apply_laplace_of_gauss_enhancement',
+    'image_processing_tools.py::run_apply_laplace_of_gauss_filter',
+    'image_processing_tools.py::run_morphological_gaussian_filter',
+    'image_processing_tools.py::run_clahe',
+    'image_processing_tools.py::apply_bilateral_filter',
+    'image_processing_tools.py::run_apply_bilateral_filter',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /

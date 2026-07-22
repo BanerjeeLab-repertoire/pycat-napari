@@ -1,3 +1,17 @@
+## [1.6.251] - 2026-07-22
+### Changed — **image_processing decomposition step 4: the filter/enhancement family moves out.**
+The 2D and pseudo-3D linear filters and enhancement operators moved **verbatim** to
+`toolbox/image_processing/filters.py`: Gaussian smoothing, Gabor texture filtering, difference-of-Gaussian
+blob enhancement, Laplacian-of-Gaussian filter/enhancement, edge-preserving bilateral filtering, and the
+combined peak/edge enhancer — each with its viewer wrapper, plus the `_GABOR_KERNELS` cache and the nested
+`_convolve_k` helper. They build on the `_base` primitives.
+
+- **Characterization written first** (`test_image_processing_filters_characterization`): exact shape / dtype
+  / sum / min / max of all ten filter operators on fixed synthetic inputs — identical before and after.
+- Ten registered ops moved → `operation_catalog.json` regenerated. `image_processing_tools.py`: **2141 →
+  1619**; ceilings ratcheted (`image_processing_tools.py` 1620, `filters.py` 564). Remaining: background
+  (now unblocked — its `peak_and_edge_enhancement_func` dependency is in `filters`), preprocessing, upscaling.
+
 ## [1.6.250] - 2026-07-21
 ### Changed — **image_processing decomposition step 3: deblur-by-pixel-reassignment moves out.**
 `deblur_by_pixel_reassignment` (DPR — sharpen by re-locating each pixel toward the local gradient on an
