@@ -1638,10 +1638,14 @@ _STATUS_LABEL = {'good': 'GOOD', 'warn': 'CHECK', 'bad': 'POOR',
                  'info': 'INFO', 'na': 'N/A'}
 
 
-def plot_qc_report(results, title='Data Quality Report', interactive=True):
+def plot_qc_report(results, title='Data Quality Report', interactive=True, reliability_scores=None):
     """Render a teaching QC report: a colour-coded scorecard plus a diagnostic
     panel for every metric that produced one, each captioned with how it is
-    measured and what good data looks like."""
+    measured and what good data looks like.
+
+    ``reliability_scores`` is an optional iterable of ``(label, ReliabilityScore)`` for the scored
+    measurement family; when given, a footer section lists the measurements whose reliability is capped
+    below `high` and why — so the report says which numbers to trust less."""
     import matplotlib
     if not interactive:
         matplotlib.use('Agg')
@@ -1931,6 +1935,15 @@ def plot_qc_report(results, title='Data Quality Report', interactive=True):
                    "optics/timing input. The italic line under each metric is what "
                    "good data looks like / how to improve it.",
                    fontsize=7.5, color='0.4', va='bottom')
+
+    # ── The reliability footer: which scored measurements are capped below 'high', and why ──────────
+    if reliability_scores:
+        from pycat.utils.reliability import reliability_report_section
+        section = reliability_report_section(reliability_scores)
+        if section:
+            fig.text(0.99, 0.005, section, fontsize=7, ha='right', va='bottom',
+                     family='monospace', color='#8B0000')
+
     if interactive:
         plt.show(block=False)
     return fig

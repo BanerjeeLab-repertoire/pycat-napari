@@ -1,3 +1,23 @@
+## [1.6.255] - 2026-07-22
+### Added — **MRI surfacing (steps 4b/4c): reliability in the consolidated table and the QC report.**
+Two more surfaces for the Measurement Reliability Index (option 2 — the factors are threaded to the table
+build, where image-level QC and object-level flags are both in hand):
+
+- **Consolidated long table** gains additive `reliability` / `reliability_reasons` columns for the scored
+  measurement family. The shared image factors (imaging QC, calibration validity) arrive per image in a
+  `reliability_context` threaded through `build_image_long_table` and `ConsolidatedLongWriter.add_image`;
+  the per-object differentiator is that object's own biological-QC flag (unflagged → 1.0, flagged → 0.5), so
+  a comparison can be **recomputed on high-reliability objects only** — the scientifically strongest use.
+  The columns ride at the END of the schema (purely additive, like `qc_flags`), are blank off the scored
+  family, and blank entirely without a context (an unmeasured factor is never assumed passing). To score a
+  single object, `_score_object_flags` now also accepts a per-object confidence float.
+- **QC report** (`plot_qc_report`) gains a footer section — `reliability_report_section` — listing the
+  measurements whose grade is capped below `high`, the factors that capped them, and the worst-first reason.
+
+`_condition_fields` was updated to exclude the new fixed columns so the comparative-figure UI never treats
+reliability as a condition dimension. Full core green (1534 passed). Remaining: the batch loop passing the
+per-image `reliability_context` (endpoints now accept it), and extending the scored family (one entry each).
+
 ## [1.6.254] - 2026-07-22
 ### Added — **Measurement Reliability Index surfacing (step 4a): every scored Measurement carries its grade.**
 The MRI core (`utils/reliability.py` — a decomposable 0..1 score composed from imaging QC, biological

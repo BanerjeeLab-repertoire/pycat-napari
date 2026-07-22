@@ -12,8 +12,10 @@ from __future__ import annotations
 def _condition_fields(columns):
     """The condition columns of a consolidated table — everything that is not the fixed stem / core /
     provenance schema (i.e. the SampleMetadata fields joined per row)."""
-    from pycat.utils.consolidated_table import _CORE_COLS, _DEFAULT_PROVENANCE_COLS, _QC_COLS
-    fixed = {'image_stem'} | set(_CORE_COLS) | set(_DEFAULT_PROVENANCE_COLS) | set(_QC_COLS)
+    from pycat.utils.consolidated_table import (_CORE_COLS, _DEFAULT_PROVENANCE_COLS, _QC_COLS,
+                                                 _RELIABILITY_COLS)
+    fixed = ({'image_stem'} | set(_CORE_COLS) | set(_DEFAULT_PROVENANCE_COLS) | set(_QC_COLS)
+             | set(_RELIABILITY_COLS))
     return [c for c in columns if c not in fixed]
 
 

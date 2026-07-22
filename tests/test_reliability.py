@@ -154,3 +154,35 @@ def test_an_unscored_measurement_shows_no_reliability_line():
     text = m.summary()
     assert 'reliability' not in text
     assert m.to_dict()['reliability'] is None
+
+
+def test_object_flags_accepts_a_precomputed_per_object_score():
+    """The consolidated table passes a per-OBJECT unflagged-confidence float (1.0 clean, lower when the
+    object was biological-QC flagged) rather than the population fraction, so one object's grade reflects
+    its own flag."""
+    clean = reliability('partition_coefficient', image_qc=_clean_qc(), calibration=_ok_calibration(),
+                        object_flags=1.0)
+    flagged = reliability('partition_coefficient', image_qc=_clean_qc(), calibration=_ok_calibration(),
+                          object_flags=0.5)
+    assert clean.contributions['object_flags'] == 1.0
+    assert flagged.contributions['object_flags'] == 0.5
+    assert flagged.value < clean.value
+    assert any('flagged by biological QC' in r for r in flagged.reasons)
+
+
+def test_the_qc_report_section_lists_only_capped_measurements_and_why():
+    """The QC-report section names each measurement whose grade is capped below `high`, the factors that
+    capped it, and its worst-first reason — and is EMPTY when everything is high (nothing to flag)."""
+    from pycat.utils.reliability import reliability_report_section
+    high = reliability('partition_coefficient', **_all_clean_kwargs())
+    # missing calibration (a core factor) caps below high; a refused one is unreliable
+    capped = reliability('client_enrichment', image_qc=_clean_qc(), object_flags=(0, 5),
+                         sensitivity='stable', benchmark=0.95)      # no calibration → capped
+    refused = reliability('dense_concentration', image_qc=_clean_qc(),
+                          calibration={'valid': False, 'reason': 'acquisition mismatch'})
+
+    assert reliability_report_section([('K_p', high)]) == ''        # all high → no section
+    text = reliability_report_section([('K_p', high), ('enrichment', capped), ('C_dense', refused)])
+    assert 'K_p' not in text                                        # the high one is not listed
+    assert 'enrichment' in text and 'calibration not assessed' in text
+    assert 'C_dense' in text and 'unreliable' in text

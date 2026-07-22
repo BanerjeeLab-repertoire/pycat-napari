@@ -1,12 +1,14 @@
 # Claude Code spec — Measurement Reliability Index (MRI)
 
-> **◐ STATUS — Core DONE (utils/reliability.py: ReliabilityScore + reliability() + per-factor scorers, 10
-> tests). Surfacing IN PROGRESS: step 4a DONE (1.6.254) — Measurement now carries an optional `reliability`
-> ReliabilityScore; `summary()` appends `(reliability: grade)` to the value line and lists the worst-first
-> reasons, and `to_dict()` emits grade/value/contributions/reasons/missing. Backward-compatible (None = not
-> scored). REMAINING: step 3 (compute + attach scores to the partition/concentration/ΔG Measurement objects),
-> then the consolidated-table `reliability`/`reliability_reasons` columns and the QC-report capped-measurement
-> section — both read the attached score this step added.**
+> **◐ STATUS — Core DONE. Surfacing: step 4a (Measurement display, 1.6.254) + step 4b/4c (1.6.255) DONE.
+> The consolidated long table now carries additive `reliability` / `reliability_reasons` columns for the
+> scored family — the shared image factors (QC, calibration) come from a per-image `reliability_context`
+> threaded through `build_image_long_table` / `ConsolidatedLongWriter.add_image`, and the per-object
+> differentiator is the object's own biological-QC flag, so a comparison can be recomputed on
+> high-reliability objects only. `plot_qc_report` gains a footer listing the measurements capped below
+> `high` and why (`reliability_report_section`). REMAINING: the batch loop computing image QC + calibration
+> per image and passing the `reliability_context` (the plumbing endpoints now accept it); extending the
+> scored family beyond partition/concentration/ΔG is one registry entry each.**
 
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. The roadmap's
 *"unifying construct"* — every reported measurement carries a reliability score, and clicking it
