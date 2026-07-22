@@ -78,3 +78,43 @@ def test_set_is_chainable_and_returns_the_controller():
     ctl = FigureRefineController(_fig())
     assert ctl.set(legend=True).set(minor_ticks=True) is ctl
     assert ctl.spec.legend is True and ctl.spec.minor_ticks is True
+
+
+# ── Reopen a saved bundle restores the refined state; brushing survives a refine ─────────────────
+def test_reopening_a_bundle_restores_the_refined_spec_and_figure(tmp_path):
+    from pycat.utils.figure_refine import FigureRefineController, load_bundle
+    from pycat.utils.figure_spec import render, FigureData
+    # a figure_spec.render() figure stashes its raw data, enabling EXACT regeneration on reopen
+    fd = FigureData(measurement='area', groups=('WT', 'KO'),
+                    values_by_group={'WT': np.array([1.0, 2.0, 3.0]), 'KO': np.array([2.0, 4.0])})
+    ctl = FigureRefineController(render(fd, FigureSpec()), FigureSpec(),
+                                 summary_df=pd.DataFrame({'c': ['WT'], 'm': [3.5]}))
+    ctl.set(title='Saved', y_scale='log', legend=True)
+    out = ctl.export_bundle(tmp_path / 'fig.png')
+
+    spec, figdata = load_bundle(out['spec'])
+    assert spec.title == 'Saved' and spec.y_scale == 'log' and spec.legend is True
+    assert figdata is not None                                   # raw data written for exact regeneration
+
+    reopened = FigureRefineController.from_bundle(out['spec'])
+    assert reopened.spec == spec
+    assert reopened.fig.axes[0].get_yscale() == 'log'            # the reopened figure IS the refined one
+
+
+def test_a_bundle_without_raw_data_reopens_spec_only(tmp_path):
+    import json
+    from pycat.utils.figure_refine import FigureRefineController
+    from pycat.utils.figure_spec import spec_to_dict
+    p = tmp_path / 'spec_only.json'
+    p.write_text(json.dumps(spec_to_dict(FigureSpec(title='S'))), encoding='utf-8')
+    ctl = FigureRefineController.from_bundle(p)
+    assert ctl.spec.title == 'S' and ctl.fig is None
+
+
+def test_brushing_callbacks_survive_a_refine():
+    fig = _fig()
+    fired = []
+    cid = fig.canvas.mpl_connect('button_press_event', lambda e: fired.append(1))
+    FigureRefineController(fig, FigureSpec()).set(title='X', y_scale='log', legend=True)
+    # refine restyles the figure; it does NOT tear down interaction — the callback is still connected
+    assert cid in fig.canvas.callbacks.callbacks.get('button_press_event', {})

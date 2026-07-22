@@ -50,3 +50,34 @@ class FigureRefineController:
         Returns the written paths."""
         self.apply()
         return export(self.fig, path, spec=self.spec, summary_df=self.summary_df)
+
+    @classmethod
+    def from_bundle(cls, spec_json_path) -> "FigureRefineController":
+        """Reopen a saved bundle: restore the refined `FigureSpec` and, from the ``*_data.json`` written
+        beside it, regenerate the exact figure — so closing and reopening a figure restores its refined
+        state (a reproducible figure). Falls back to a spec-only controller (no figure) if the raw data is
+        absent."""
+        spec, figdata = load_bundle(spec_json_path)
+        if figdata is None:
+            ctl = cls.__new__(cls)
+            ctl.fig, ctl.spec, ctl.summary_df = None, spec, None
+            return ctl
+        from pycat.utils.figure_spec import render
+        ctl = cls(render(figdata, spec), spec)
+        return ctl
+
+
+def load_bundle(spec_json_path):
+    """Restore ``(spec, figdata_or_None)`` from an exported bundle's spec JSON — and the raw plotted data
+    (``<name>_data.json``) beside it when present. Reopening a figure this way restores exactly what was
+    saved (the spec's ``_provenance`` key is tolerated by ``spec_from_dict``)."""
+    import json
+    import pathlib
+    from pycat.utils.figure_spec import spec_from_dict, figdata_from_dict
+    p = pathlib.Path(spec_json_path)
+    spec = spec_from_dict(json.loads(p.read_text(encoding='utf-8')))
+    data_path = p.with_name(p.stem + '_data.json')
+    figdata = None
+    if data_path.exists():
+        figdata = figdata_from_dict(json.loads(data_path.read_text(encoding='utf-8')))
+    return spec, figdata

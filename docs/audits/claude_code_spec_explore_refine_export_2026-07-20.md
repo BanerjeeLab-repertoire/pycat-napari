@@ -1,6 +1,11 @@
 # Claude Code spec — Comparative figure UX: one Explore → Refine → Export workflow
 
-> **◐ CORE WORKFLOW DONE (shipped 1.6.271); bundle-reopen is the follow-on.** The prerequisite (FigureSpec
+> **✅ DONE (core workflow 1.6.271; reopen + brushing-survives 1.6.275).** Reopen: `figure_refine.load_bundle`
+> / `FigureRefineController.from_bundle` restore the refined spec (+ regenerate the exact figure from the raw
+> data written beside it); brushing-survives-refine pinned (an interaction callback connected before refining
+> is still connected after). Only the visual acceptance of the on-screen panel is outside headless scope.
+>
+> _Original core-workflow note:_ The prerequisite (FigureSpec
 > merge) landed, and the publication-features controls it exposes are all in the tree. Built the engine and
 > wired the panel: Qt-free `utils/figure_refine.py::FigureRefineController` owns one figure + its canonical
 > `FigureSpec` — `set`/`size_preset` restyle the SAME figure (never recompute), `export_bundle` writes

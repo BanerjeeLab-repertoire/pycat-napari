@@ -1,3 +1,15 @@
+## [1.6.275] - 2026-07-22
+### Added — **Reopen a saved figure bundle to restore its refined state; brushing survives a refine (explore_refine_export complete).**
+Closes the explore_refine_export follow-ons.
+- `figure_refine.load_bundle(spec_json)` restores the refined `FigureSpec` from an exported bundle, and the
+  raw plotted data (`<name>_data.json`) beside it when present; `FigureRefineController.from_bundle(...)`
+  regenerates the EXACT refined figure from spec + data (a reproducible figure — reopening restores what was
+  saved), falling back to spec-only when no raw data was written.
+- Pinned that **brushing survives a refine**: a matplotlib interaction callback connected before refining is
+  still connected after — refine restyles the figure, it never tears down interaction.
+- Tests (`core`): bundle round-trips the refined spec and regenerates the figure (log scale honoured); a
+  spec-only bundle reopens without a figure; interaction callbacks persist across refine.
+
 ## [1.6.274] - 2026-07-22
 ### Added — **Plot-backend decisions: interactive-scatter threshold, backend provenance, honest Plotly scope (backend_parity Parts 2–3, headless slice).**
 The Qt interaction is deferred, but the decisions are small and pure — new Qt-free
