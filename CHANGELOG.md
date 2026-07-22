@@ -1,3 +1,26 @@
+## [1.6.256] - 2026-07-22
+### Changed — **Merge Meet Raval's branch (re-targeted): large-condensate segmentation fix + pipeline progress bar.**
+Two changes from Meet Raval's branch, brought onto the post-decomposition tree.
+
+- **Large-condensate segmentation fix (re-targeted).** Meet's "Improved segmentation for large condensates"
+  edited `segmentation_tools.py`, which is now a re-export shim (segmentation decomposition, 1.6.240-243) —
+  his fix had been silently overwritten when he merged the decomposition into his own branch. It is
+  re-applied here to where the code now lives, `toolbox/segmentation/puncta_refinement.py`, in both
+  `puncta_refinement_filtering_func` and `..._fast`: objects with `area >= 150 px` are exempted from
+  `local_intensity_condition` and `gradient_condition`, whose fixed 1-4 px rim scale is correct for
+  point-like puncta but misfires on large condensates. All other checks (kurtosis, ellipticity,
+  cell-intensity, SNR, area/solidity) still apply. Small puncta are unaffected; every science pin
+  (filter-sensitivity, fast/slow parity, puncta-refinement, spurious-puncta gate, local-ring scales) passes
+  unchanged. The `puncta_refinement.py` complexity ceiling was raised 715 -> 747 for the documented fix.
+- **Workflow-checklist progress bar (cherry-picked).** The checklist now advances across all pipelines,
+  updating even when batch recording is off; pipeline steps carry real keys; a new `timeseries_invitro_fluor`
+  pipeline is added. The three checklist-notify swallows were annotated `# broad-ok: ui_cleanup` so the
+  exception-budget ratchet stays at 498.
+
+Behaviour note: large condensates (area >= 150 px) that the fixed-scale rim checks previously rejected now
+survive refinement — a real behaviour change, validated by Meet on the bundled example dataset (the CI pins
+exercise the small-puncta regime). Full core green (1534 passed).
+
 ## [1.6.255] - 2026-07-22
 ### Added — **MRI surfacing (steps 4b/4c): reliability in the consolidated table and the QC report.**
 Two more surfaces for the Measurement Reliability Index (option 2 — the factors are threaded to the table
