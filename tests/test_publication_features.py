@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from pycat.utils.figure_spec import (
-    FigureData, FigureSpec, render, refine, resolve_y_scale, spec_to_dict, spec_from_dict)
+    FigureData, FigureSpec, render, refine, resolve_y_scale, group_error, spec_to_dict, spec_from_dict)
 
 pytestmark = pytest.mark.core
 
@@ -78,6 +78,27 @@ def test_refine_log_on_nonpositive_also_falls_back_with_a_warning():
         warnings.simplefilter('always')
         refine(fig, FigureSpec(y_scale='log'))
     assert fig.axes[0].get_yscale() == 'symlog' and any('non-positive' in str(x.message) for x in w)
+
+
+def test_group_error_computes_sd_sem_and_ci_and_needs_two_points():
+    v = np.array([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])                 # sd = 2.138 (ddof=1)
+    sd = group_error(v, 'sd')
+    assert abs(sd - float(np.std(v, ddof=1))) < 1e-9
+    assert abs(group_error(v, 'sem') - sd / np.sqrt(v.size)) < 1e-9
+    assert abs(group_error(v, 'ci95') - 1.96 * sd / np.sqrt(v.size)) < 1e-9
+    assert group_error(np.array([3.0]), 'sd') == 0.0                       # one point → no spread
+    assert group_error(v, 'bogus') == 0.0
+
+
+def test_error_bars_are_drawn_only_when_requested_and_the_type_is_LABELLED():
+    d = _data({'WT': np.array([1.0, 2.0, 3.0, 4.0]), 'KO': np.array([2.0, 4.0, 6.0])})
+    none = render(d, FigureSpec())
+    assert not none.axes[0].containers                                    # no error bars by default
+    sem = render(d, FigureSpec(error_type='sem'))
+    assert sem.axes[0].containers                                         # an ErrorbarContainer is present
+    labels = [t.get_text() for t in sem.axes[0].texts]
+    assert any('SEM' in t for t in labels), "the error type must be stated on the figure"
+    assert spec_from_dict(spec_to_dict(FigureSpec(error_type='ci95'))).error_type == 'ci95'
 
 
 def test_minor_ticks_are_off_by_default_and_on_when_requested():

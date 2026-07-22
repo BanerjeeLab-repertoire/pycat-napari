@@ -8,8 +8,10 @@
 > stating the consequence (pure `resolve_y_scale` helper), never a silent clip or crash. Both fields
 > round-trip through JSON (scalar → auto via `asdict`) and work through `refine` without recomputing.
 > Publication-sane default preserved (a bare spec renders linear, unchanged). `tests/test_publication_
-> features.py` (`core`, Agg). **Remaining Tier 1:** tick scientific-notation/exponent control, significance
-> bracket-placement UI exposure, error/CI representation (SEM/SD, `MarkSpec`). **Tier 2:** multi-panel +
+> features.py` (`core`, Agg). Error/CI representation also DONE (1.6.263): `error_type`
+> (`none`/`sd`/`sem`/`ci95`) draws an error bar on each group mean and LABELS the type on the figure (pure
+> `group_error` helper; SD ddof=1 / SEM / 1.96·SEM). **Remaining Tier 1:** tick scientific-notation/exponent
+> control, significance bracket-placement UI exposure. **Tier 2:** multi-panel +
 > panel labels (the big structural one — `render` is still single-axis `add_subplot(111)`), legend control,
 > validated fonts, transparent background. **Tier 3:** dense-scatter rasterization, semantic colour, export
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.

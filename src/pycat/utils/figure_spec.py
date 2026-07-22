@@ -86,6 +86,8 @@ class FigureSpec:
     y_scale: str = 'linear'                     # 'linear' | 'log' | 'symlog' — size/intensity are often
     #                                             log-normal; a linear axis misrepresents them (publication_features Tier 1)
     minor_ticks: bool = False                   # show minor ticks (default matplotlib ticks look unfinished in print)
+    error_type: str = 'none'                    # 'none' | 'sd' | 'sem' | 'ci95' — a comparison figure without
+    #                                             a STATED error is not publishable; the type is labelled on the axes
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -132,6 +134,30 @@ def resolve_y_scale(y_scale, value_arrays):
     return y_scale, None
 
 
+#: How each error type is labelled on the figure (stating the error is a publication requirement).
+ERROR_LABELS = {'sd': 'SD', 'sem': 'SEM', 'ci95': '95% CI'}
+
+
+def group_error(values, error_type):
+    """The error-bar half-length for one group under ``error_type`` (``'sd'`` | ``'sem'`` | ``'ci95'``).
+
+    SD is the sample standard deviation (ddof=1); SEM is SD/√n; the 95% CI half-width is ``1.96·SEM`` (the
+    normal approximation). Fewer than two finite values → 0 (no spread to show). An unknown type → 0."""
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 2:
+        return 0.0
+    sd = float(np.std(v, ddof=1))
+    if error_type == 'sd':
+        return sd
+    sem = sd / np.sqrt(v.size)
+    if error_type == 'sem':
+        return sem
+    if error_type == 'ci95':
+        return 1.96 * sem
+    return 0.0
+
+
 def render(fig_data, spec):
     """Render ``fig_data`` under ``spec`` and return a matplotlib Figure. **Reads the data, never recomputes
     it** — the plotted values are stashed on ``fig._pycat_plotted`` so the refine-not-recompute contract is
@@ -153,6 +179,10 @@ def render(fig_data, spec):
                    edgecolor='white', linewidth=0.4, zorder=2)
         if vals.size:
             ax.plot([i - 0.2, i + 0.2], [np.mean(vals)] * 2, color='#333333', lw=1.5, zorder=3)
+            if getattr(spec, 'error_type', 'none') != 'none':
+                err = group_error(vals, spec.error_type)
+                ax.errorbar(i, float(np.mean(vals)), yerr=err, color='#333333',
+                            capsize=4, lw=1.5, zorder=3)
         if spec.annotate_n and vals.size:
             ax.annotate(f"n={vals.size}", (i, np.max(vals)), textcoords='offset points',
                         xytext=(0, 4), ha='center', fontsize=spec.font_size_pt * 0.8)
@@ -176,6 +206,10 @@ def render(fig_data, spec):
             _warnings.warn(warning)
     if getattr(spec, 'minor_ticks', False):
         ax.minorticks_on()
+    # State the error type on the figure — an unlabelled error bar is unpublishable (is it SD? SEM? CI?).
+    if getattr(spec, 'error_type', 'none') in ERROR_LABELS:
+        ax.text(0.98, 0.98, f"error bars: {ERROR_LABELS[spec.error_type]}", transform=ax.transAxes,
+                ha='right', va='top', fontsize=spec.font_size_pt * 0.8, color='#555555')
 
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label]
                  + ax.get_xticklabels() + ax.get_yticklabels()):

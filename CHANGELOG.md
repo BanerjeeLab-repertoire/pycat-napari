@@ -1,3 +1,14 @@
+## [1.6.263] - 2026-07-22
+### Added — **Publication figures: error/confidence representation with the type STATED (publication_features Tier 1).**
+A comparison figure without a stated error is not publishable. `FigureSpec.error_type` (`'none'` | `'sd'` |
+`'sem'` | `'ci95'`) draws an error bar on each group's mean and **labels the type on the figure** ("error
+bars: SEM"), so an error bar is never ambiguous about whether it is SD, SEM, or a CI.
+- The half-length is a pure, tested `group_error(values, error_type)`: SD (ddof=1), SEM (SD/√n), or the 95%
+  CI (`1.96·SEM`); fewer than two finite values → 0 (no spread to show). Round-trips through JSON.
+- Default `none` (no error bars), so a bare spec renders exactly as before.
+- Tests (`core`, Agg): SD/SEM/CI computation + the two-point floor, error bars drawn only when requested, and
+  the type is present as figure text.
+
 ## [1.6.262] - 2026-07-22
 ### Added — **Publication figures: log / symlog y-scale + minor ticks on the canonical FigureSpec (publication_features Tier 1, first slice).**
 Condensate size and intensity distributions are often log-normal, so a linear axis misrepresents them — the
