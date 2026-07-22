@@ -1,5 +1,14 @@
 # Claude Code spec — Decompose `image_processing_tools.py` by algorithm (coverage-gated, extra care)
 
+> **◐ STATUS — IN PROGRESS (characterization-FIRST). Step 1 DONE (1.6.248): the automatic object-size
+> estimators (estimate_object_size_px + brightfield variant + validity gate) split into
+> `toolbox/image_processing/size_estimation.py` — byte-identical, pinned BEFORE the move by
+> test_image_processing_size_characterization (exact object_size_px / ball_radius / n_objects).
+> image_processing_tools.py 2669 → 2515. NEXT (highest downstream impact, pin first): background removal
+> (rb_gaussian / WBNS / soft_foreground_suppression), then preprocessing, upscaling, deblur. NOTE: the
+> filter/background functions share helpers (apply_rescale_intensity, _safe_equalize_adapthist,
+> upscale_image_interp), so moves must be dependency-ordered like the segmentation split.**
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Fourth-largest file
 (**2,669 lines**). Unlike segmentation/condensate-physics, its coverage is **thinner — only 6 test
 files** — so this split needs the most characterization-test work up front and should be sequenced

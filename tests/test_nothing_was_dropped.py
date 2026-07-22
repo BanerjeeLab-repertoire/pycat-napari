@@ -64,6 +64,17 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.248 — image_processing decomposition step 1 (highest-risk file, characterization-FIRST): the
+    # automatic object-size estimators (estimate_object_size_px — the top-hat/Otsu batch estimator that feeds
+    # downstream segmentation — its nested _equiv_diam helper, the brightfield variant, and the
+    # auto_object_size_valid / AUTO_OBJECT_SIZE_VALID_WORKFLOWS validity gate) MOVED verbatim to toolbox/
+    # image_processing/size_estimation.py. Pinned BEFORE the move by test_image_processing_size_
+    # characterization (exact object_size_px / ball_radius / n_objects on a fixed scene). No threshold change.
+    'image_processing_tools.py::auto_object_size_valid',
+    'image_processing_tools.py::estimate_object_size_px',
+    'image_processing_tools.py::_equiv_diam',
+    'image_processing_tools.py::estimate_object_size_px_brightfield',
+
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
     # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /

@@ -1,3 +1,21 @@
+## [1.6.248] - 2026-07-21
+### Changed — **image_processing decomposition step 1 (characterization-first): object-size estimation moves out.**
+Began decomposing `image_processing_tools.py` (2,669 lines) — the **highest-risk** big-file split (only 6
+test files), so the discipline here is strict: **no characterization test, no move.** This step moves the
+self-contained object-size estimators, **verbatim**:
+
+- `estimate_object_size_px` — the headless/batch top-hat + Otsu estimator (median equivalent diameter →
+  ball_radius) that feeds downstream segmentation, plus its nested `_equiv_diam` helper.
+- `estimate_object_size_px_brightfield` — the experimental edge-based variant.
+- `auto_object_size_valid` + `AUTO_OBJECT_SIZE_VALID_WORKFLOWS` — the workflow-validity gate.
+
+→ `toolbox/image_processing/size_estimation.py`. A new **characterization test written first**
+(`test_image_processing_size_characterization`) pins the exact `object_size_px` / `ball_radius` /
+`n_objects` on a fixed synthetic scene; it passes identically before and after the move. No threshold change,
+no registered ops (catalog unchanged). `image_processing_tools.py`: **2669 → 2515**; a line ceiling was
+established at 2515. Remaining (dependency-ordered, shared helpers): background, preprocessing, upscaling,
+deblur.
+
 ## [1.6.247] - 2026-07-21
 ### Changed — **timeseries decomposition COMPLETE (step 4): timeseries_condensate_tools.py is now a pure shim.**
 The last two domains moved, **verbatim**: the preprocessing science (`upscale_stack_to_zarr`,
