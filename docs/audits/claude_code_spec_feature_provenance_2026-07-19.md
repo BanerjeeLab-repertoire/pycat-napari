@@ -1,5 +1,12 @@
 # Claude Code spec — Per-feature provenance: attach the workflow chain to each measurement
 
+> **✅ STATUS — DONE (done-but-unstamped; verified 2026-07-22). `utils/feature_provenance.py` — a
+> `FeatureProvenance` dataclass carrying operation_id, input_layers, step_indices, parameters, software and
+> acquisition, each DERIVED from an existing source (operation_context tags, layer-tag identities, recorded
+> config, environment/metadata). Independent branches are discriminated ('all steps is not provenance' — it
+> reports only the feature's actual ancestors, or None when the lineage is unknown); underivable fields are
+> absent with a reason, never guessed; no computed value changes. `test_feature_provenance` green. DoD met.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Elevates the
 existing workflow-level recording to the **feature level**, so any reported number can be traced to
 the exact chain that produced it. The roadmap frames it as *"elevate existing batch recording to

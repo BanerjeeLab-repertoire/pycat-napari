@@ -1,5 +1,16 @@
 # Claude Code spec — Split long SCIENCE functions, coverage-gated
 
+> **✅ STATUS — DONE for the six-function scope (verified 2026-07-22). The named Tier-1 targets are split
+> BY PHASE and pinned byte-identical: fit_anomalous_diffusion 394→98 (msd.py), partition_coefficient_local
+> 394→108 (invitro/partition.py); plus count_molecules_single, topology_metrics, qc_focus, field_summary,
+> fit_photobleaching, fit_frap_recovery, fit_size_distribution_mle, fit_coarsening, classify_beads and
+> detect_beads_stack were split during the science-split programme (see CHANGELOG 1.6.173–1.6.209/1.6.234),
+> each governed by an existing numeric test or a byte-identity characterization written first. Tier-2 item 3
+> `run_timeseries_condensate_analysis` was CHARACTERIZED (test_timeseries_analysis_characterization) and
+> RELOCATED to timeseries/analysis.py, but NOT split by phase: its parallel ProcessPool path is not
+> deterministically characterizable headless (spawn), so a phase-split is DEFERRED per the spec's 'cannot be
+> characterized → do not split' rule. The six-function scope is met.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Companion to the
 UI-builder splitting spec. This half is harder and must be governed by a different rule: **a numerical
 function may only be split if a test can prove the numbers did not change.**
