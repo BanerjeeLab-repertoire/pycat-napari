@@ -64,6 +64,20 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.245 — timeseries decomposition step 2 (scientific-core, part 2): the ANALYSIS entry point
+    # (run_timeseries_condensate_analysis + the per-frame worker _ts_analyze_frame_worker + the drift/metrics
+    # helpers _condensate_metrics_per_cell / _phase_shift / _apply_shift, plus the shared pool initializer
+    # _init_worker_threads) MOVED verbatim to toolbox/timeseries/analysis.py. No numerics or threading
+    # semantics changed — pinned BEFORE the move by test_timeseries_analysis_characterization (exact DataFrame
+    # + condensate mask on a fixed synthetic scene). timeseries_condensate_tools re-exports each; the staying
+    # preprocessing worker resolves _init_worker_threads via that re-export.
+    'timeseries_condensate_tools.py::run_timeseries_condensate_analysis',
+    'timeseries_condensate_tools.py::_ts_analyze_frame_worker',
+    'timeseries_condensate_tools.py::_condensate_metrics_per_cell',
+    'timeseries_condensate_tools.py::_phase_shift',
+    'timeseries_condensate_tools.py::_apply_shift',
+    'timeseries_condensate_tools.py::_init_worker_threads',
+
     # 1.6.244 — timeseries decomposition step 1 (scientific-core, part 1): the lazy zarr FRAME-ACCESS layer
     # (_session_zarr_dir / _read_source_frame / _compute_stack_global_range / _get_zarr_dir_path /
     # _materialize_stack_to_zarr + the _ZarrStack wrapper) MOVED verbatim to toolbox/timeseries/frame_access.py,

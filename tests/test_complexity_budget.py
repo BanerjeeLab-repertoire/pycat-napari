@@ -264,10 +264,11 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    # 2828 -> 2600: the scientific-core extraction begins — the lazy zarr frame-access layer + the temporal
-    # correlation estimator split into toolbox/timeseries/ (timeseries decomposition step 1, 1.6.244). A NEW
-    # ceiling at the post-move size; it ratchets DOWN as the analysis/worker/UI domains move out.
-    "toolbox/timeseries_condensate_tools.py": 2600,
+    # 2828 -> 2600 (step 1: frame-access + correlation) -> 1952 (step 2, 1.6.245: the analysis entry point +
+    # per-frame worker + drift/metrics helpers). The ceiling ratchets DOWN as the remaining worker/UI domains
+    # move out. analysis.py gets its own concentration ceiling.
+    "toolbox/timeseries_condensate_tools.py": 1952,
+    "toolbox/timeseries/analysis.py": 685,
     # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
     # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
     # PURE re-export shim (no defs). Ceiling locked at the shim size.

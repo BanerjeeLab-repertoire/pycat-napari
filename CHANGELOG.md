@@ -1,3 +1,21 @@
+## [1.6.245] - 2026-07-21
+### Changed — **timeseries decomposition step 2 (scientific-core): the analysis entry point moves out.**
+The centrepiece of the time-series scientific core — `run_timeseries_condensate_analysis` (per-frame
+condensate segmentation across a stack → tidy per-cell metrics DataFrame + condensate-mask stack), its
+per-frame worker `_ts_analyze_frame_worker`, and the drift/metrics helpers (`_condensate_metrics_per_cell`,
+`_phase_shift`, `_apply_shift`) — moved **verbatim** to `toolbox/timeseries/analysis.py`. The shared pool
+initializer `_init_worker_threads` moved with it and is re-exported so the staying preprocessing worker
+still resolves it.
+
+- **"No test, no move," honoured:** `run_timeseries_condensate_analysis` had no numeric characterization, so
+  `test_timeseries_analysis_characterization` was **written first** — it pins the exact output DataFrame
+  (per-frame/per-cell condensate areas, counts, fractions) and condensate-mask stack on a fixed synthetic
+  3-frame / 2-cell scene, on the serial path. It passes identically before and after the move.
+- Threading semantics unchanged (the spec's rule: relocate, don't re-engineer). The parallel path's
+  behaviour is byte-for-byte the same as before — verified against the pre-move build.
+- No registered ops involved (catalog unchanged). `timeseries_condensate_tools.py`: **2600 → 1952**; ceiling
+  ratcheted to 1952, `analysis.py` 685. Remaining: the Qt worker plumbing + UI builders (Qt-bound).
+
 ## [1.6.244] - 2026-07-21
 ### Changed — **timeseries decomposition step 1 (scientific-core): frame-access + correlation move out.**
 Began decomposing `timeseries_condensate_tools.py` (2,828 lines — the largest file) into a
