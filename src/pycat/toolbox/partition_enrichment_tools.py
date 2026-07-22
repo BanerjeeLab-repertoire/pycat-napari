@@ -472,8 +472,17 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
 
     bg_spin = QDoubleSpinBox(); bg_spin.setRange(0, 1e6); bg_spin.setValue(0.0)
     bg_spin.setDecimals(2)
-    bg_spin.setToolTip("Constant background subtracted from the client image before ratioing.")
-    form.addRow("Background subtract:", bg_spin)
+    bg_spin.setToolTip("Instrument offset (scalar): a constant camera/background offset subtracted from the "
+                       "client image before ratioing. Leave 0 for raw means.")
+    form.addRow("Background offset (scalar):", bg_spin)
+
+    bg_region_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
+    bg_region_dd.setToolTip(
+        "Optional instrument offset FROM A REGION: a SIGNAL-FREE mask (OUTSIDE the cell, or a dark/blank "
+        "frame) whose mean becomes the offset. This is the only legitimate background. Do NOT pick a region "
+        "inside the cell — the dilute phase is client SIGNAL, not background, and subtracting it destroys "
+        "the measurement (you'll be warned if the region looks like dilute phase). Overrides the scalar.")
+    form.addRow("Background offset (from region):", bg_region_dd)
 
     prog = QProgressBar(); prog.setVisible(False)
     btn  = QPushButton("▶  Compute Enrichment")
@@ -506,21 +515,33 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
         if cname != 'None' and cname in layers:
             cell_labels = _np.asarray(ui_instance.viewer.layers[cname].data)
 
+        # Instrument offset: a signal-free REGION mask (its mean) overrides the scalar — the region path
+        # also fires the guardrail inside client_enrichment (a region that is really dilute phase is
+        # flagged, because subtracting it would destroy the measurement). The per-condensate/per-cell
+        # variants take a scalar, so the region's own mean is passed to them for the same offset.
+        rname = bg_region_dd.currentText()
+        bg_mask = None
+        if rname != 'None' and rname in layers:
+            _region = _np.asarray(ui_instance.viewer.layers[rname].data) > 0
+            if _region.any():
+                bg_mask = _region
+        _bg_scalar = float(client[bg_mask].mean()) if bg_mask is not None else bg_spin.value()
+
         prog.setVisible(True); prog.setRange(0, 0)
         try:
             per_cond = client_enrichment_per_condensate(
                 client, dense_labels,
                 cell_mask=(cell_labels > 0) if cell_labels is not None else None,
-                shell_px=shell_spin.value(), background=bg_spin.value())
+                shell_px=shell_spin.value(), background=_bg_scalar)
             glob = client_enrichment(
                 client, dense_labels,
                 cell_mask=(cell_labels > 0) if cell_labels is not None else None,
-                background=bg_spin.value())
+                background=bg_spin.value(), background_mask=bg_mask)
             per_cell = None
             if cell_labels is not None:
                 per_cell = client_enrichment_per_cell(
                     client, dense_labels, cell_labels,
-                    shell_px=shell_spin.value(), background=bg_spin.value())
+                    shell_px=shell_spin.value(), background=_bg_scalar)
         except Exception as e:
             prog.setVisible(False)
             _warn(f"Enrichment failed: {e}")
@@ -554,6 +575,10 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
                 'dilute mean': round(glob['dilute_mean'], 2) if glob['dilute_mean']==glob['dilute_mean'] else None,
                 'n condensates': len(per_cond),
                 'median per-condensate enrichment': round(per_cond['enrichment'].median(), 3) if len(per_cond) else None,
+                # The background choice travels with the result: a K computed with an offset and one raw are
+                # DIFFERENT measurements, and a reader must be able to tell them apart (spec Part C).
+                'background mode': glob.get('background_mode'),
+                'background source': glob.get('background_source'),
             }])
             tables = [('Overview', overview), ('Per-condensate', per_cond.round(3))]
             if per_cell is not None and not per_cell.empty:
@@ -562,7 +587,9 @@ def _add_client_enrichment(ui_instance, layout=None, separate_widget=False):
         except Exception:
             pass
         _info(f"Global client enrichment = {glob['enrichment']:.2f}× "
-              f"across {len(per_cond)} condensates.")
+              f"across {len(per_cond)} condensates (background: {glob.get('background_mode')}).")
+        if glob.get('background_warning'):
+            _warn("Background region — " + glob['background_warning'])
 
     btn.clicked.connect(_on_run)
 

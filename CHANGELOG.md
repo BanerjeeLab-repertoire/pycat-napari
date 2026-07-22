@@ -1,3 +1,21 @@
+## [1.6.261] - 2026-07-22
+### Added — **The Client-Enrichment UI now exposes the signal-free-region background mode (background_mode spec complete).**
+`client_enrichment` has long supported three background treatments and a guardrail that refuses to let a
+"background" region that is really dilute phase destroy the partition measurement — but the UI only offered
+the scalar offset, so the wired guardrail could never fire from the GUI. Now it can:
+- `_add_client_enrichment` gains a **"Background offset (from region)"** layer dropdown — a signal-free mask
+  (OUTSIDE the cell, or a dark/blank frame) whose mean becomes the instrument offset (`background_mask`),
+  overriding the scalar; its mean also feeds the per-condensate/per-cell scalar so all three agree. The
+  scalar offset is relabelled and kept **visually separate** from the dilute-shell reference (conflating
+  "instrument offset" and "dilute reference" is the exact error the guardrail warns about).
+- Picking a region that is really dilute phase fires the **consequence-stating** warning ("subtracting it
+  will subtract the dilute phase from itself and DESTROY the partition measurement…") at the moment of the
+  mistake, and the chosen `background mode` / `background source` now ride in the emitted overview table so a
+  reader can tell an offset-corrected K from a raw one.
+- The science (the guardrail, the mode/source in the result, the ontology caveat) was already present and
+  `core`-tested; this adds the UI exposure + `tests/test_background_mode_ui.py` (`integration`, end-to-end).
+  **Default stays `none`** — existing results are unchanged.
+
 ## [1.6.260] - 2026-07-22
 ### Added — **backend_parity Part 1: a seaborn hue split gets a VERIFIED per-artist brushing map, or an honest refusal.**
 When seaborn draws one artist per hue level, each artist holds a SUBSET of the table — so a table index into
