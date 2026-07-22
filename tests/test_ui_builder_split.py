@@ -26,9 +26,11 @@ _BUILDER_ATTRS = {
     ('advanced_analysis_ui.py', '_add_advanced_analysis'): {'_morph_worker', '_org_worker'},
     ('condensate_physics_ui.py', '_add_condensate_physics'): {'_hist_worker', '_msd_worker', '_qc_worker'},
     ('ts_cellpose_tools.py', '_add_run_ts_cellpose'): {'_ts_cellpose_worker'},
-    ('timeseries_condensate_tools.py', '_add_lazy_preprocess_stack'):
+    # The two time-series builders moved to the timeseries/ui.py family module (1.6.247); same attribute
+    # reference sets, parsed at their new location.
+    ('timeseries/ui.py', '_add_lazy_preprocess_stack'):
         {'_ts_workers', '_ts_zarr_bgrem', '_ts_zarr_preproc'},
-    ('timeseries_condensate_tools.py', '_add_run_timeseries_condensate_analysis'): set(),
+    ('timeseries/ui.py', '_add_run_timeseries_condensate_analysis'): set(),
 }
 
 

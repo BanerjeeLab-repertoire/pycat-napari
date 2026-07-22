@@ -64,6 +64,42 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
+    # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS
+    # (_add_ts_upscale_stack / _build_ts_upscale_check_ui / _add_lazy_preprocess_stack /
+    # _add_run_timeseries_condensate_analysis / _plot_condensate_fraction, with all their nested widget
+    # callbacks) MOVED to toolbox/timeseries/ui.py — both verbatim, napari/Qt kept function-scoped so ui.py
+    # imports headless. With this, timeseries_condensate_tools.py is a PURE re-export shim (no defs). The
+    # builders are re-exported (the menu/UI wiring calls them); test_ui_builder_split's attribute contract
+    # was repointed to timeseries/ui.py unchanged.
+    'timeseries_condensate_tools.py::upscale_stack_to_zarr',
+    'timeseries_condensate_tools.py::_cellpose_min_diameter_px',
+    'timeseries_condensate_tools.py::_add_lazy_preprocess_stack',
+    'timeseries_condensate_tools.py::_add_run_timeseries_condensate_analysis',
+    'timeseries_condensate_tools.py::_plot_condensate_fraction',
+    # nested widget callbacks / worker-lifecycle closures inside the two big builders:
+    'timeseries_condensate_tools.py::_after_bg',
+    'timeseries_condensate_tools.py::_after_preproc',
+    'timeseries_condensate_tools.py::_apply_dissolution',
+    'timeseries_condensate_tools.py::_apply_steady_state',
+    'timeseries_condensate_tools.py::_done',
+    'timeseries_condensate_tools.py::_dspin',
+    'timeseries_condensate_tools.py::_err',
+    'timeseries_condensate_tools.py::_load_from_cache',
+    'timeseries_condensate_tools.py::_on_build',
+    'timeseries_condensate_tools.py::_on_cancel',
+    'timeseries_condensate_tools.py::_on_check',
+    'timeseries_condensate_tools.py::_on_check_correlation',
+    'timeseries_condensate_tools.py::_on_discard_cache',
+    'timeseries_condensate_tools.py::_on_error',
+    'timeseries_condensate_tools.py::_on_finished',
+    'timeseries_condensate_tools.py::_on_progress',
+    'timeseries_condensate_tools.py::_on_run',
+    'timeseries_condensate_tools.py::_prog',
+    'timeseries_condensate_tools.py::_start_bg',
+    'timeseries_condensate_tools.py::_start_worker',
+    'timeseries_condensate_tools.py::run',
+
     # 1.6.246 — timeseries decomposition step 3: the QThread/ProcessPool WORKER PLUMBING moved verbatim
     # (behaviour-preserving, no threading semantics changed) to toolbox/timeseries/execution.py — the
     # parallel subprocess frame helpers (_worker_read_frame, _process_frame_worker) and the two lazy

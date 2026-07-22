@@ -1,3 +1,23 @@
+## [1.6.247] - 2026-07-21
+### Changed — **timeseries decomposition COMPLETE (step 4): timeseries_condensate_tools.py is now a pure shim.**
+The last two domains moved, **verbatim**: the preprocessing science (`upscale_stack_to_zarr`,
+`_cellpose_min_diameter_px`) to `toolbox/timeseries/preprocessing.py`, and the Qt UI builders
+(`_add_ts_upscale_stack`, `_build_ts_upscale_check_ui`, `_add_lazy_preprocess_stack`,
+`_add_run_timeseries_condensate_analysis`, `_plot_condensate_fraction`, with all their nested widget
+callbacks) to `toolbox/timeseries/ui.py`. napari/Qt/matplotlib stay imported LAZILY inside the builders, so
+`ui.py` still imports headless (`test_ci_dependencies` / `test_no_eager_reads` green).
+
+- **`timeseries_condensate_tools.py`: 2828 → 180 lines (-94%)** across the four steps (frame-access +
+  correlation 1.6.244, analysis 1.6.245, worker plumbing 1.6.246, preprocessing + UI 1.6.247). It now
+  contains **no function definitions** — only re-exports of the `toolbox/timeseries/` package, so every
+  historical import path keeps working unchanged.
+- `test_ui_builder_split`'s attribute contract for the two big builders was repointed to `timeseries/ui.py`,
+  reference sets unchanged. No registered ops (catalog untouched).
+- **Not done (deliberately):** the preprocessing *science* still embedded inside the 519-line
+  `_add_lazy_preprocess_stack` builder was NOT extracted — separating it is a refactor (surgery on a Qt
+  builder), not a verbatim move, so the builder moved whole to `ui.py` and the embedded-science extraction is
+  left as a future refinement. This closes the timeseries_decomposition audit spec's structural goal.
+
 ## [1.6.246] - 2026-07-21
 ### Changed — **timeseries decomposition step 3: the QThread/ProcessPool worker plumbing moves out.**
 Relocated the background-worker lifecycle to `toolbox/timeseries/execution.py`, **behaviour-preserving** (the

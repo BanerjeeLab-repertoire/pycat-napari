@@ -1,12 +1,14 @@
 # Claude Code spec — Decompose `timeseries_condensate_tools.py` by scientific domain
 
-> **◐ STATUS — IN PROGRESS. Scientific core + worker plumbing DONE (1.6.244-246): frame_access, correlation,
-> analysis, and the QThread/ProcessPool execution layer split into `toolbox/timeseries/` — all byte-identical
-> (analysis pinned by test_timeseries_analysis_characterization, workers relocated behaviour-preserving with
-> Qt kept function-scoped). timeseries_condensate_tools.py 2828 → 1410. Remaining: only the Qt UI builders
-> (_add_lazy_preprocess_stack, _add_run_timeseries_condensate_analysis, _add_ts_upscale_stack, _build_ts_
-> upscale_check_ui, _plot_condensate_fraction) + upscale_stack_to_zarr — the UI-builder step (attribute-
-> presence tests), where the preprocessing SCIENCE is still embedded inside _add_lazy_preprocess_stack.**
+> **✅ STATUS — DONE (1.6.244-247). The whole file is decomposed into `toolbox/timeseries/` by domain —
+> frame_access, correlation, analysis, execution (worker plumbing), preprocessing (science), and ui (the Qt
+> builders). Every move byte-identical; the analysis entry point pinned by a characterization test WRITTEN
+> FIRST (test_timeseries_analysis_characterization), the workers relocated behaviour-preserving with Qt kept
+> function-scoped, and the UI builders' attribute contract (test_ui_builder_split) repointed unchanged.
+> `timeseries_condensate_tools.py` went 2828 → 180 lines (-94%): a PURE re-export shim, no defs. NOTE: the
+> preprocessing SCIENCE still embedded inside the 519-line _add_lazy_preprocess_stack UI builder was NOT
+> extracted — that is a refactor (surgery on a Qt builder), not a verbatim move, and is left as a future
+> refinement; the builder moved whole to ui.py.**
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. The scan's clearest
 fresh target: at **2,828 lines / 70 functions** it is the second-largest file, and it is a *repeat
