@@ -1,3 +1,22 @@
+## [1.6.272] - 2026-07-22
+### Added — **Honest hit-testing for spaghetti plots — the nearest curve, or NOTHING when it's ambiguous (interaction_layer Gap 2).**
+Matplotlib's per-artist picker returns whichever line it hits first — arbitrary, and in a dense tangle of
+curves scientifically dishonest (a click near a crossing gives a confident answer the data can't support).
+New Qt-free `utils/hit_testing.py` replaces that with one deliberate hit-test:
+- `hit_test(curves, click_xy, *, tolerance_px, ambiguity_px) -> HitResult` finds the nearest curve by
+  point-to-segment distance over the curves' DISPLAY-space coordinate arrays, and **refuses an ambiguous
+  click** — when the best and second-best are within `ambiguity_px`, it selects NOTHING and `candidates`
+  NAMES both, so the caller reports the tie instead of guessing. A miss beyond `tolerance_px` selects
+  nothing too.
+- `point_segment_distance` clamps the projection to the segment endpoints (a click past an end measures to
+  the end, not the infinite line); `nearest_distance_to_curve` scans a polyline and skips non-finite
+  vertices. Pure geometry, backend-neutral — the caller supplies display coordinates (a log-log MSD plot
+  must be hit-tested in pixels, not data units).
+- Tests (`core`): nearest-wins, empty→nothing, ambiguous→nothing+candidates, endpoint clamping, one click →
+  at most one selection, log handled in display space. This primitive backs the matplotlib wiring (removing
+  the per-line pickers) and the future pyqtgraph adapter; that wiring + the other interaction-layer gaps are
+  the follow-on.
+
 ## [1.6.271] - 2026-07-22
 ### Added — **Comparative figures gain an Explore → Refine → Export workflow (explore_refine_export).**
 The comparative-figure dialog was a plotting dialog, not a publication editor: the refinement/export

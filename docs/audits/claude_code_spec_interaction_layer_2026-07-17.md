@@ -1,5 +1,21 @@
 # Claude Code spec — Interaction layer: selection state model, honest hit-testing, adapter contract
 
+> **◐ GAP 2's HONEST HIT-TESTER (pure primitive) DONE, shipped 1.6.272. The analysis_plots wiring + Gaps
+> 1/3/4/5 remain.** New Qt-free `utils/hit_testing.py`: `hit_test(curves, click_xy, *, tolerance_px,
+> ambiguity_px) -> HitResult` finds the nearest curve by point-to-segment distance over the curves'
+> DISPLAY-space coordinate arrays, and — the point — **refuses an ambiguous click** (best and second-best
+> within `ambiguity_px` → `primary=None`, `candidates` NAMES both, so the caller reports rather than guesses)
+> and a miss beyond `tolerance_px`. `point_segment_distance` clamps to endpoints (a click past an end
+> measures to the end, not the infinite line). Pure geometry, backend-neutral — the same primitive backs the
+> matplotlib wiring and the future pyqtgraph adapter. `test_hit_testing.py` (`core`) pins nearest-wins,
+> empty→nothing, ambiguous→nothing+candidates, endpoint clamping, one-click-one-selection, log-in-display.
+> **Remaining:** wire it into `analysis_plots.py` (remove the per-line `set_picker`, one `button_press_event`
+> per axes calling `hit_test` on the coordinate arrays) — the Qt integration; and Gap 1 (`SelectionState`
+> hover/selected/pinned, back-compat-preserving), Gap 3 (promote a non-sampled selected track), Gap 4
+> (LineCollection background + overlay artists), Gap 5 (the `SelectionView` adapter protocol + contract
+> suite). This primitive is the foundation the wiring and the pyqtgraph adapter build on (per the spec's
+> sequencing note).
+
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. Derived from an
 architecture review of PyCAT's brushing layer. **~60% of that review describes what already
 exists** — this spec covers ONLY the verified gaps. Additive; no rewrite of the landed brushing arc.
