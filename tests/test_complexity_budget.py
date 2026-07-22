@@ -264,10 +264,10 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    # 2692 -> 2030 (step 1: leaf families) -> 1239 (step 2: fz + cellpose) -> 566 (step 3, 1.6.242: the
-    # filter-sensitivity-gated puncta refinement core). The ceiling ratchets DOWN as subcellular moves out
-    # toward the pure-shim end state.
-    "toolbox/segmentation_tools.py": 566,
+    # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
+    # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
+    # PURE re-export shim (no defs). Ceiling locked at the shim size.
+    "toolbox/segmentation_tools.py": 148,
     # puncta_refinement.py — the SNR/kurtosis/contrast gate + the two bit-identical implementations, moved
     # here from segmentation_tools (1.6.242). Byte-identical; its own concentration ceiling.
     "toolbox/segmentation/puncta_refinement.py": 715,

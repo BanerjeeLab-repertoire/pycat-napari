@@ -373,6 +373,18 @@ _DELIBERATE = {
     'segmentation_tools.py::puncta_refinement_filtering_func_fast',
     'segmentation_tools.py::puncta_refinement_func',
 
+    # 1.6.243 — segmentation decomposition step 4 (FINAL): the SUBCELLULAR orchestrator family
+    # (segment_subcellular_objects + run_ + _segment_core + compare_segmentation_speed) MOVED verbatim to
+    # segmentation/subcellular.py, importing the puncta / fz / intensity / morphology families it composes.
+    # No threshold or operation-order change. With this move segmentation_tools.py is a PURE re-export shim
+    # (no defs) over toolbox/segmentation/. segment_subcellular_objects is a registered op → catalog regen.
+    # test_refinement_thresholds' spy patch repointed to subcellular.puncta_refinement_func (the module the
+    # moved orchestrator resolves the name in) — assertions unchanged.
+    'segmentation_tools.py::segment_subcellular_objects',
+    'segmentation_tools.py::run_segment_subcellular_objects',
+    'segmentation_tools.py::_segment_core',
+    'segmentation_tools.py::compare_segmentation_speed',
+
     # 1.6.173 — `classify_beads` (the 306-line bead classifier) was split into its two independent
     # branches — `_classify_fast_template` (with a `_classify_fast_template_refs` reference-stats phase)
     # and `_classify_gaussian_fit` — leaving the function a 68-line empty-guard + dispatch. Nothing was

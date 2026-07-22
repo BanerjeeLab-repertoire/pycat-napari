@@ -1094,13 +1094,13 @@
         "image"
       ],
       "kind": "toolbox",
-      "module": "segmentation_tools",
+      "module": "subcellular",
       "op": "subcellular_segment",
       "produces": "labels",
       "requirements": [],
       "role": "labels",
       "role_declared": "labels",
-      "source": "src/pycat/toolbox/segmentation_tools.py",
+      "source": "src/pycat/toolbox/segmentation/subcellular.py",
       "summary": "Subcellular object segmentation within cells",
       "target": null
     },

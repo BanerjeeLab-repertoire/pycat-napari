@@ -1,3 +1,21 @@
+## [1.6.243] - 2026-07-21
+### Changed — **segmentation decomposition COMPLETE (step 4): segmentation_tools.py is now a pure shim.**
+The last family moved: the **subcellular** orchestrator (`segment_subcellular_objects` + its viewer wrapper
++ `_segment_core` + `compare_segmentation_speed`) moved **verbatim** to `segmentation/subcellular.py`,
+importing the puncta / fz / intensity / morphology families it composes.
+
+- **`segmentation_tools.py`: 2692 → 148 lines (-95%)** across the four steps (leaf families 1.6.240, fz +
+  cellpose 1.6.241, puncta refinement 1.6.242, subcellular 1.6.243). It now contains **no function
+  definitions** — only re-exports of the `toolbox/segmentation/` package, so every historical import path
+  keeps working unchanged.
+- Byte-identical throughout: the filter-sensitivity invariances, the fast/slow refiner parity, and the
+  cellpose optional-dependency guard are all intact. Where a moved function is called or patched across a
+  seam (`puncta_refinement_func`, `napari_show_warning`, `_local_ring_radii`, `_build_cellpose_model`), the
+  test's patch/source-inspection target was repointed to the module the code now lives in — assertions and
+  pinned numbers never changed.
+- `segment_subcellular_objects` is a registered op → `operation_catalog.json` regenerated. Ceiling locked at
+  148 (shim); `subcellular.py` 450. This closes the segmentation_decomposition audit spec.
+
 ## [1.6.242] - 2026-07-21
 ### Changed — **segmentation decomposition step 3: the puncta-refinement core moves out (byte-identical).**
 The most sensitive move: the filter-sensitivity-gated **puncta refinement** family — the SNR/kurtosis/
