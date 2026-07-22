@@ -43,10 +43,17 @@ _TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "tool
 
 # Modules whose job is to produce a NUMBER a scientist will report.
 _SCIENCE = [
-    "condensate_physics_tools", "invitro_tools", "vpt_tools", "frap_tools", "fusion_tools",
-    "nb_tools", "spida_tools", "molecular_counting_tools", "partition_enrichment_tools",
-    "pixel_wise_corr_analysis_tools", "spatial_metrology_tools", "gaussian_localization_tools",
-    "brightfield_tools", "partial_volume_tools",
+    # Still-monolithic science modules:
+    "frap_tools", "fusion_tools", "nb_tools", "spida_tools", "molecular_counting_tools",
+    "partition_enrichment_tools", "pixel_wise_corr_analysis_tools", "spatial_metrology_tools",
+    "gaussian_localization_tools", "brightfield_tools", "partial_volume_tools",
+    # DECOMPOSED (2026-07-22): condensate_physics/invitro/vpt moved their science into packages, so the
+    # old *_tools.py are now empty shims — this guard must follow the science to where it lives.
+    "condensate_physics/coarsening", "condensate_physics/frame_quality", "condensate_physics/intensity",
+    "condensate_physics/moduli", "condensate_physics/msd", "condensate_physics/photobleaching",
+    "condensate_physics/relaxation", "condensate_physics/survival",
+    "vpt/analysis", "vpt/detection", "vpt/drift", "vpt/host", "vpt/populations", "vpt/viscosity",
+    "invitro/analysis", "invitro/field_summary", "invitro/partition", "invitro/size_distribution",
 ]
 
 # A handler that returns one of these is ANNOUNCING failure, which is the correct behaviour.
