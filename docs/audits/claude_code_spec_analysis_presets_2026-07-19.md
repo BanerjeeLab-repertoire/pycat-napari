@@ -1,5 +1,31 @@
 # Claude Code spec — Analysis presets: unify the scattered preset idea
 
+> **◐ STATUS — headless CORE DONE, shipped in 1.6.162 (verified 2026-07-22). Part A + the Qt-free half of
+> Parts B/C are complete and guarded; the UI picker + its live batch-record wiring are the only residual,
+> and both are Qt-bound.**
+>
+> **Built and green (`utils/analysis_presets.py` + `tests/test_analysis_presets.py`, 8 `core` tests):**
+> - **Part A** — the frozen `AnalysisPreset` (key, applies_to, parameters, mandatory `provenance`,
+>   `validated` + `validation_ref`, `requirements`, `caveats`) and the sparsely/honestly seeded
+>   `ANALYSIS_PRESETS` registry (3 grounded presets: a validated condensate SNR gate, the VPT 200-frame
+>   bead case, an explicitly-unvalidated 63×/1.4 confocal starting point).
+> - **The two honesty invariants, enforced at import** (`_validate_registry`): non-empty `provenance`, and
+>   `validated=True` ⇒ a linked `validation_ref` that must point at a real `VALIDATED_CASES` id — so
+>   `validated` can never become decorative.
+> - **The drift guard** (`orphan_parameter_keys`): a preset may only set parameters the workflow's LIVE
+>   function signature actually has, read from `inspect.signature` at import so it cannot silently rot.
+> - **Requirements gating** (`preset_availability`) REUSES `operation_spec.runnability` — the single
+>   requirements vocabulary, never a second gate.
+> - **Populate-never-lock** (`PresetApplication`): seeds the values, tracks per-key deviation, reports
+>   `"modified from <preset>"` once edited, and `record()` emits the `{preset_key, modified_parameters,
+>   is_modified, parameters}` dict shaped for `batch_processor.record`.
+>
+> **Residual (Qt-bound, deferred with the other UI specs):** Part B's preset-picker widget in the grounded
+> workflows (the populate-not-lock control + showing description/provenance/caveats + the greyed-out reason
+> from `preset_availability`), and Part 3's LIVE recording — calling `PresetApplication.record()` into the
+> actual workflow via `batch_processor.record` — which only fires once the UI produces a `PresetApplication`.
+> `record()`'s output shape is already pinned by test; only the wiring to a live session remains.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Turns
 "reasonable starting parameters" from tribal knowledge into a declared, versioned, inspectable object.
 Modest to build; disproportionately useful for new users and for the reproducibility story.
