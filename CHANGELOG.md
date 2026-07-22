@@ -1,3 +1,16 @@
+## [1.6.270] - 2026-07-22
+### Added — **A real comparative figure refines + exports without recomputing (publication_figures headline DoD pinned).**
+`publication_figures` (the origin of the FigureSpec architecture) is complete at the module level — it
+shipped through the FigureSpec merge and the publication_features tiers. This closes its **headline
+Definition of Done** with a test against the ACTUAL comparative figure, not just synthetic data:
+`test_publication_figures.py` builds a `condition_comparison_figure`, then
+- **refines** it (title + log scale) and asserts every plotted datum (collection offsets + line ydata) is
+  byte-for-byte unchanged — refinement changes presentation, never recomputes the analysis (the contract);
+- **exports** the full reproducible bundle (vector PDF/SVG with embedded text fonts, high-DPI PNG, the
+  regenerating spec JSON, and the summary CSV alongside).
+The in-UI refinement panel (spec fields as live controls) is the one remaining piece and is tracked as the
+`explore_refine_export` workflow.
+
 ## [1.6.269] - 2026-07-22
 ### Added — **Publication figures: legend control — placement, columns, frame (publication_features Tier 2).**
 `FigureSpec.legend` adds a group→colour legend (off by default), with `legend_loc` (position),
