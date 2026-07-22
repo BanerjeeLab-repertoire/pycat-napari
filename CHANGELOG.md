@@ -1,3 +1,27 @@
+## [1.6.279] - 2026-07-22
+### Added — **navigator wiring increment 2: the planner consults the quality gate — a plan now states when a measurement cannot be trusted, and why.**
+`utils/quality_gate.evaluate_quality` composes calibration, pixel size, and reliability into a
+block/warn/downgrade verdict with reasons, and had **zero consumers**. This wires it into the planner —
+and does so with **no change to `compile`**: a measurement's `QualityRequirement` is turned into ordinary
+`Assumption` gates on its contract, so the planner's existing machinery does the rest (it already evaluates
+`step.module.assumptions` into `gate_report`, already blocks a plan on a VIOLATED **blocker** gate, and
+already prepends a QC probe for an UNKNOWN gate that names one).
+
+- New `navigator/quality_gates.py`: `quality_assumptions(requirement, op)` builds one gate per signal —
+  pixel size and calibration as **blockers**, reliability as a **warning** that names the `snr` probe —
+  and `gate_context(ctx)` maps an `AnalysisContext` onto the signal inputs (unasserted ⇒ unassessed, never
+  a silent pass). The four verdicts fold onto the three gate states the planner already understands:
+  BLOCK→VIOLATED (not runnable, reason in `blockers()`), WARN→UNKNOWN (runnable; probes if a probe is
+  named), DOWNGRADE→VIOLATED on a warning gate (runnable, reported), OK→SATISFIED.
+- `_measure_op_contract` attaches these gates when a measurement declares a `QualityRequirement`.
+  `vpt.microrheology` now requires a pixel size (a viscosity in pixels is meaningless) and probes when
+  reliability was never assessed; `partition_enrichment.client` blocks a ΔG/concentration on an invalid
+  calibration. So a viscosity plan without a set scale is **not runnable and says why**, and an unassessed
+  reliability **prepends `data_qc.assess`** rather than passing.
+- `evaluate_quality` is unchanged; non-measurement (and measurement-without-a-QualityRequirement, e.g.
+  `size`) plans are untouched. New `tests/navigator/test_quality_gate_planning.py` (`core`, 7 tests); all
+  existing navigator + gate tests pass unmodified. Full `pytest -m core` green (1704 passed).
+
 ## [1.6.278] - 2026-07-22
 ### Added — **navigator wiring increment 1: the operation catalog now contains the ANSWERS, not just the layers.**
 The catalog held only operations that produce an image or a label layer, so the planner could build a

@@ -1,5 +1,23 @@
 # Claude Code spec — Navigator wiring increment 2: the planner consults the quality gate
 
+> **✅ STATUS — DONE, shipped in 1.6.279.** The quality gate is wired in with **no change to `compile`** —
+> the planner already had the machinery, it just needed the gates. A measurement's `QualityRequirement`
+> becomes ordinary `Assumption`s on its `ModuleContract` (new `navigator/quality_gates.py`:
+> `quality_assumptions` + `gate_context`), so the EXISTING loop evaluates them into `gate_report`, blocks
+> the plan on a VIOLATED blocker, and prepends a QC probe for an UNKNOWN gate — reusing the structure, not a
+> parallel one. Verdict→status: BLOCK→VIOLATED (not runnable, reason in `blockers()`), WARN→UNKNOWN
+> (runnable; probes when a probe is named), DOWNGRADE→VIOLATED on a warning gate (runnable, reported),
+> OK→SATISFIED. Attached to two representative measurements: `vpt.microrheology` (pixel-size blocker +
+> reliability probe) and `partition_enrichment.client` (calibration blocker). `evaluate_quality` unchanged;
+> non-measurement and quality-req-free plans untouched. New `tests/navigator/test_quality_gate_planning.py`
+> (`core`, 7 tests); all existing navigator/gate tests pass unmodified; full core green (1704).
+>
+> **Note on the two representations:** the planner backward-chains over the CAPABILITY registry
+> (`_measure_ops()` / `ModuleContract`), not the lightweight `operation_catalog.json` from increment 1 — so
+> the `QualityRequirement`s were attached to the `_measure_ops()` entries the planner actually reaches. The
+> remaining measurements can gain a `QualityRequirement` the same way as they're validated; more can be
+> added op-by-op without touching the wiring.
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. **Increment 2 of
 4.** Depends on increment 1 (measurement ops in the catalog). One function, one integration point —
 deliberately small enough to ship alone.
