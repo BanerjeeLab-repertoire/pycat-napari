@@ -1,3 +1,19 @@
+## [1.6.271] - 2026-07-22
+### Added — **Comparative figures gain an Explore → Refine → Export workflow (explore_refine_export).**
+The comparative-figure dialog was a plotting dialog, not a publication editor: the refinement/export
+utilities existed but weren't reachable as a workflow. Now they are.
+- New Qt-free `utils/figure_refine.py::FigureRefineController` — the engine over one figure: `set()` /
+  `size_preset()` mutate the canonical `FigureSpec` and re-apply presentation to the SAME figure (**never
+  recomputing** the comparison), and `export_bundle()` writes exactly the refined preview (**WYSIWYG** by
+  construction — the same spec drives preview and export). Core-tested (`test_figure_refine.py`).
+- The comparative dialog gains a **Refine row** (size preset with preview at final print width, title,
+  y-scale, legend) and an **Export bundle…** button (vector PDF/SVG + high-DPI PNG + spec JSON + summary
+  CSV). Refining restyles the figure without re-running the analysis; the analytical Explore mode is
+  untouched (its stats title survives unless a refine title is set). `test_explore_refine_export_ui.py`
+  (`integration`) drives the controls end-to-end and the export button.
+- Follow-on (tracked): reopening a saved bundle to restore the refined spec, and an explicit
+  brushing-survives-refine test — the analysis and export contracts are done.
+
 ## [1.6.270] - 2026-07-22
 ### Added — **A real comparative figure refines + exports without recomputing (publication_figures headline DoD pinned).**
 `publication_figures` (the origin of the FigureSpec architecture) is complete at the module level — it
