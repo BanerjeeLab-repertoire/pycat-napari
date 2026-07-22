@@ -1,5 +1,11 @@
 # Claude Code spec — Decompose `image_processing_tools.py` by algorithm (coverage-gated, extra care)
 
+> **◐ STATUS — IN PROGRESS (characterization-FIRST). Steps 1-3 DONE (1.6.248-250): size_estimation, the shared
+> foundation `_base.py`, and `deblur.py` (DPR) — all byte-identical, each pinned by a characterization test
+> written first. image_processing_tools.py 2669 → 2141. Remaining (dependency-ordered): filters/enhancement
+> (gabor/dog/laplace/gaussian/bilateral/peak_and_edge), then background (rb_gaussian/WBNS/soft_foreground),
+> preprocessing (pre_process_image), and upscaling (run_upscaling_func).**
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. Fourth-largest file
 (**2,669 lines**). Unlike segmentation/condensate-physics, its coverage is **thinner — only 6 test
 files** — so this split needs the most characterization-test work up front and should be sequenced

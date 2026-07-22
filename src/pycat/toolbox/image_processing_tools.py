@@ -35,37 +35,20 @@ from pycat.utils.notify import show_warning as napari_show_warning
 from pycat.utils.notify import show_info as napari_show_info
 
 
-def _add_image(image, viewer, operation=None, **kw):
-    """Lazy wrapper for the viewer helper, plus the intensity-semantics tag.
-
-    **This used to call ITSELF** — ``return _add_image(image, viewer, **kw)`` — which is
-    infinite recursion, and every one of the 19 call sites in this module would have blown
-    the stack. It was meant to lazily import ``add_image_with_default_colormap`` (importing
-    it at module scope would pull in Qt and block the headless import of this module's array
-    functions).
-
-    ``operation`` records what produced this layer, so that measurements can refuse an input
-    whose intensity semantics have been destroyed. See ``pycat.utils.intensity_semantics``:
-    a white top-hat removes the background, a Laplacian-of-Gaussian is signed and centred on
-    zero (giving a NEGATIVE partition coefficient), and CLAHE measures the contrast-
-    enhancement algorithm rather than the sample. The information is in the provenance, not
-    the pixels — so it is recorded here, where the operation happens.
-    """
-    from pycat.ui.ui_utils import add_image_with_default_colormap
-    layer = add_image_with_default_colormap(image, viewer, **kw)
-    if operation is not None and layer is not None:
-        try:
-            from pycat.utils.intensity_semantics import mark_intensity_semantics
-            mark_intensity_semantics(layer, operation)
-        except Exception:
-            pass          # tagging must never break the operation itself
-    return layer
+# ---------------------------------------------------------------------------
+# napari image-add helper  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    _add_image)
 
 
-def _napari():
-    """Lazy napari import, for the viewer-facing helpers in this module."""
-    import napari
-    return napari
+
+# ---------------------------------------------------------------------------
+# lazy napari accessor  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    _napari)
+
 import scipy.ndimage as ndi
 from scipy.interpolate import RectBivariateSpline
 import SimpleITK as sitk
@@ -75,23 +58,12 @@ from pycat.utils.general_utils import dtype_conversion_func, get_default_intensi
 # ui_utils pulls in Qt -> imported at CALL time inside _add_image().
 
 
-def _safe_equalize_adapthist(img, **kwargs):
-    """CLAHE that is safe across skimage versions.
+# ---------------------------------------------------------------------------
+# version-safe CLAHE (equalize_adapthist)  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    _safe_equalize_adapthist)
 
-    ``skimage.exposure.equalize_adapthist`` requires float input in [0, 1].
-    On skimage >= 0.26 an out-of-range float raises ValueError; on older
-    versions it silently clips everything to the maximum, collapsing the image
-    to a near-uniform field (the "yellow field / everything in one bin" bug).
-    Background-subtracted and enhanced images here are in the ORIGINAL intensity
-    scale (values far above 1), so we min-max normalise to [0, 1] before running
-    CLAHE. A constant image is returned as zeros (nothing to equalise).
-    """
-    a = np.asarray(img, dtype=np.float32)
-    lo = float(a.min()); hi = float(a.max())
-    if hi <= lo:
-        return np.zeros_like(a)
-    a = (a - lo) / (hi - lo)
-    return sk.exposure.equalize_adapthist(a, **kwargs)
 
 
 
@@ -122,77 +94,12 @@ def _safe_equalize_adapthist(img, **kwargs):
 # watershed, morphological tophat — do not have the same orthogonal-
 # averaging justification and should stay per-XY-slice only.
 
-def pseudo3d_tri_planar_filter(volume: np.ndarray, filter_2d_fn, **filter_kwargs) -> np.ndarray:
-    """
-    Apply a 2D linear filter to a (Z, H, W) volume in pseudo-3D mode:
-    run the same filter along all three orthogonal slicing directions
-    (XY, XZ, YZ) and average the three results.
+# ---------------------------------------------------------------------------
+# pseudo-3D tri-planar filter wrapper  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    pseudo3d_tri_planar_filter)
 
-    Parameters
-    ----------
-    volume : np.ndarray, shape (Z, H, W)
-        Input volume, float32.
-    filter_2d_fn : callable(2D array, **kwargs) -> 2D array
-        A genuinely linear 2D filter, e.g. a Gaussian smoothing wrapper,
-        the Gabor bank convolution, or a DoG blob-enhancement function.
-        Must accept and return arrays of the same 2D shape.
-    **filter_kwargs :
-        Passed through to filter_2d_fn unchanged for every slice/plane.
-
-    Returns
-    -------
-    np.ndarray, shape (Z, H, W), float32 — the averaged tri-planar result.
-
-    Notes
-    -----
-    For a single 2D image (no real Z-stack), pass a volume with Z=1 and
-    this degrades gracefully to the plain 2D filter response (the XZ and
-    YZ passes become 1-pixel-thin "planes" that filter_2d_fn still handles,
-    though the averaging benefit only manifests with a genuine multi-slice
-    Z-stack — this function is intended for Z>1 volumes).
-
-    IMPORTANT — index-space kernel, not physical-distance-space:
-    The identical 2D kernel/sigma is applied to all three planes (XY, XZ,
-    YZ) in *index* units (pixels along X/Y, slices along Z or frames along
-    T) — it is NOT rescaled per axis to account for anisotropic physical
-    spacing. Z-step in a Z-stack is very often several times larger than
-    the XY pixel size, and a frame interval in a time series has no
-    physical length at all. This is the standard simplification used in
-    tri-planar filtering (matching the request this was built from: "3
-    identical filters concatenated") — the technique is justified by
-    genuine sample-to-sample *correlation* between adjacent planes, not by
-    achieving isotropic smoothing in physical distance. Do not assume the
-    XZ/YZ (or XT/YT) passes represent the same physical blur radius as the
-    XY pass; verify the acquisition is in a genuinely correlated regime
-    (see estimate_temporal_correlation for the time-series case) before
-    relying on this for quantitative measurements.
-    """
-    volume = np.asarray(volume).astype(np.float32)
-    Z, H, W = volume.shape
-
-    # ── Pass 1: XY planes (standard per-Z-slice filtering) ────────────────
-    xy_result = np.empty_like(volume)
-    for z in range(Z):
-        xy_result[z] = filter_2d_fn(volume[z], **filter_kwargs)
-
-    if Z == 1:
-        # No genuine Z extent — XZ/YZ passes would degenerate to filtering
-        # single-row/column strips, which adds noise rather than signal.
-        return xy_result
-
-    # ── Pass 2: XZ planes — fix Y, filter each (Z, X) slice ───────────────
-    xz_result = np.empty_like(volume)
-    for y in range(H):
-        plane = volume[:, y, :]                       # (Z, X)
-        xz_result[:, y, :] = filter_2d_fn(plane, **filter_kwargs)
-
-    # ── Pass 3: YZ planes — fix X, filter each (Z, Y) slice ───────────────
-    yz_result = np.empty_like(volume)
-    for x in range(W):
-        plane = volume[:, :, x]                        # (Z, Y)
-        yz_result[:, :, x] = filter_2d_fn(plane, **filter_kwargs)
-
-    return (xy_result + xz_result + yz_result) / 3.0
 
 
 @tags_layer('gaussian', role='preprocessed', inputs=('image',),
@@ -248,63 +155,12 @@ def dog_blob_enhance_3d_pseudo(volume: np.ndarray, sigma_lo: float = 2.0,
 
 # Image adjustments #
 
-@tags_layer('rescale', role='preprocessed',
-            summary='Intensity rescaling to a target range')
-def apply_rescale_intensity(image, out_min=None, out_max=None):
-    """
-    Rescales the intensity of an image to a specified range, adjusting its pixel values accordingly.
+# ---------------------------------------------------------------------------
+# intensity rescaling (registered op)  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    apply_rescale_intensity)
 
-    This function modifies the intensity values of the image so that the output image's pixel intensities
-    are scaled between `out_min` and `out_max`. This is useful for enhancing image contrast or normalizing
-    image data.
-
-    Parameters
-    ----------
-    image : numpy.ndarray
-        The input image whose intensities are to be rescaled.
-
-    out_min : float, optional
-        The minimum intensity value for the output image. If not provided, defaults to the minimum value
-        supported by the input image's data type.
-
-    out_max : float, optional
-        The maximum intensity value for the output image. If not provided, defaults to the maximum value
-        supported by the input image's data type.
-
-    Returns
-    -------
-    rescaled_image : numpy.ndarray
-        The image with rescaled intensity values.
-
-    Notes
-    -----
-    It is crucial not to set `out_min` and `out_max` to the same value to avoid a division by zero error.
-    Also, ensure that the output range does not exceed the input image's data type range; for example,
-    scaling an 8-bit image to values outside 0-255 will lead to clipping and potential data loss.
-    """
-
-
-    input_dtype = str(image.dtype)  # Store the input image data type
-
-    # Get the default intensity range for the input image data type
-    default_min, default_max = get_default_intensity_range(input_dtype)
-
-    # Ensure the output range is within the input dtype range
-    out_min = int(default_min) if out_min is None or (out_min < default_min) else out_min
-    out_max = int(default_max) if out_max is None or (out_max > default_max) else out_max
-
-    # Ensure the output range does not have the same minimum and maximum values
-    if out_min == out_max:
-        napari_show_warning("The output range cannot have the same minimum and maximum values.")
-
-    # Rescale the intensity of the image to the specified range
-    out_range = (out_min, out_max)
-    rescaled_image = sk.exposure.rescale_intensity(image, out_range=out_range).astype(image.dtype)
-
-    # Ensure the image is the same dtype as the input
-    rescaled_image = dtype_conversion_func(rescaled_image, input_dtype)  
-
-    return rescaled_image
 
 
 def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
@@ -366,38 +222,12 @@ def run_apply_rescale_intensity(out_min_input, out_max_input, viewer):
     _add_image(rescaled_image, viewer, name=f"Intensity Rescaled {active_layer.name}", operation='rescale_intensity')
 
 
-@tags_layer('invert', role='preprocessed', inputs=('image',),
-            summary='Intensity inversion (dark <-> bright)')
-def invert_image(image):
-    """
-    Inverts the intensity of an image, mapping dark regions to light and vice versa, suitable for different data types.
+# ---------------------------------------------------------------------------
+# image inversion (registered op)  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    invert_image)
 
-    This function applies an inversion transformation where each pixel's intensity is subtracted from the maximum 
-    possible value for its data type, effectively reversing its brightness. This operation is tailored for different
-    data types to maintain the integrity of the image's contrast and appearance.
-
-    Parameters
-    ----------
-    image : numpy.ndarray
-        The input image to be processed. The image can be of any data type that is supported by the function.
-
-    Returns
-    -------
-    inverted_image : numpy.ndarray
-        The intensity-inverted image, matching the input image's data type and dimensions.
-
-    Notes
-    -----
-    The inversion logic varies by data type:
-    - Unsigned integers: Subtract pixel values from their maximum possible value.
-    - Signed integers: Subtract pixel values from -1, flipping their sign.
-    - Floats (0 to 1 range): Subtract pixel values from 1.
-
-    This function assumes the input image's pixel values are appropriately scaled for their data type.
-    """
-
-    inverted_image = sk.util.invert(image)
-    return inverted_image
 
 
 def run_invert_image(viewer):
@@ -435,72 +265,12 @@ def run_invert_image(viewer):
     _add_image(inverted_image, viewer, name=f"Inverted {active_layer.name}", operation='rescale_intensity')
 
 
-@tags_layer('upscale', role='preprocessed',
-            summary='Bicubic upscaling')
-def upscale_image_interp(image, num_row_initial, num_col_initial, upscale_factor=2, pad=False):
-    """
-    Upscales an image using bicubic interpolation to enhance its resolution. This function increases the density
-    of image pixels based on the given upscale factor, applying bicubic spline interpolation to estimate the pixel
-    values at new grid points.
+# ---------------------------------------------------------------------------
+# bicubic upscaling (registered op)  ->  moved to _base.py (1.6.249)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing._base import (  # noqa: E402,F401
+    upscale_image_interp)
 
-    Parameters
-    ----------
-    image : numpy.ndarray
-        The input image array to be upscaled.
-    num_row_initial : int
-        The number of rows in the input image.
-    num_col_initial : int
-        The number of columns in the input image.
-    upscale_factor : int, optional
-        The factor by which the image resolution is to be increased, doubling the dimensions by default.
-    pad : bool, optional
-        If True, retains a constant border padding of 10 pixels to mitigate edge artifacts. Default is False,
-        which removes the padding from the final output.
-
-    Returns
-    -------
-    magnified_image : numpy.ndarray
-        The upscaled image with increased resolution. If padding is not removed, the returned image includes a
-        10-pixel border around the edges.
-
-    Note
-    ----
-    The function pads the upscaled image with a constant border of 10 pixels to mitigate edge artifacts, unless
-    specified otherwise by the `pad` parameter. This is important for applications where edge continuity is critical.
-    """
-
-    # Output grid size.
-    n_row_out = int(np.round(upscale_factor * num_row_initial))
-    n_col_out = int(np.round(upscale_factor * num_col_initial))
-
-    # Separable 2-D Akima interpolation (columns, then rows). Akima is a local,
-    # shape-preserving interpolant: unlike a bicubic spline it does NOT overshoot
-    # at sharp intensity edges, so it produces no ringing halos or negative
-    # values around bright puncta (the bicubic path could dip hundreds of counts
-    # below background). Falls back to the bicubic spline if Akima is unavailable.
-    try:
-        from scipy.interpolate import Akima1DInterpolator
-        col0 = np.arange(num_col_initial, dtype=float)
-        row0 = np.arange(num_row_initial, dtype=float)
-        col1 = np.linspace(0, num_col_initial - 1, n_col_out)
-        row1 = np.linspace(0, num_row_initial - 1, n_row_out)
-        tmp = Akima1DInterpolator(col0, np.asarray(image, dtype=float),
-                                  axis=1)(col1)          # (H, n_col_out)
-        magnified_image = Akima1DInterpolator(row0, tmp, axis=0)(row1)  # (n_row_out, n_col_out)
-    except Exception:
-        x0 = np.linspace(-0.5, 0.5, num_col_initial)
-        y0 = np.linspace(-0.5, 0.5, num_row_initial)
-        x = np.linspace(-0.5, 0.5, n_col_out)
-        y = np.linspace(-0.5, 0.5, n_row_out)
-        interp_func = RectBivariateSpline(y0, x0, image)
-        magnified_image = interp_func(y, x)
-
-    # Clean up by setting negative values to zero and padding the image
-    magnified_image = np.asarray(magnified_image)
-    magnified_image[magnified_image < 0] = 0
-    magnified_image = np.pad(magnified_image, 10, mode='constant')
-
-    return magnified_image[10:-10, 10:-10]  if not pad else magnified_image # Remove the padding if not requested
 
 
 
@@ -1103,156 +873,12 @@ def run_clahe(clip_input, k_size_input, viewer):
     _add_image(CLAHE_img, viewer, name=f"CLAHE Contrast EQed {active_layer.name}", operation='clahe')
 
 
-@tags_layer('dpr', role='preprocessed',
-            summary='Deblurring by pixel reassignment', aliases=('pixel_reassignment',))
-def deblur_by_pixel_reassignment(I_in, PSF, gain, window_radius):
-    """
-    Performs Deblurring by Pixel Reassignment, adapted from MATLAB code, enhancing microscopy image quality by reducing
-    blurriness and improving visualization of microscopic entities [dpr_1]_.
+# ---------------------------------------------------------------------------
+# Deblurring by pixel reassignment (DPR) + run wrapper  ->  moved to deblur.py (1.6.250)
+# ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing.deblur import (  # noqa: E402,F401
+    deblur_by_pixel_reassignment, run_dpr)
 
-    Parameters
-    ----------
-    I_in : numpy.ndarray
-        The input image array to be processed.
-    PSF : float
-        Point Spread Function width, quantifying blurriness in terms of pixels.
-    gain : float
-        Gain factor to adjust the intensity of pixel displacement.
-    window_radius : int
-        Radius in pixels for the local minimum filter, enhancing local contrast.
-
-    Returns
-    -------
-    single_frame_I_out : numpy.ndarray
-        The DPR processed deblurred image.
-    single_frame_I_magnified : numpy.ndarray
-        The magnified input image.
-
-    Notes
-    -----
-    The function adapts MATLAB code to Python, implementing modifications to suit Pythonic nuances and the specific data.
-    Modifications include scaling down the gain to reduce artifacts introduced by integer gain values in Python,
-    which differ from MATLAB's handling.
-
-    References
-    ----------
-    .. [dpr_1] MATLAB code source: [DPR Project](https://github.com/biomicroscopy/DPR-Project)
-        - Related paper: "Advanced Photonics, Vol. 5, Issue 6, 066004 (October 2023)", available at https://doi.org/10.1117/1.AP.5.6.066004
-    """
-
-    # Initial setup: calculate the upscale factor and prepare the Sobel filters for edge detection
-    num_row_initial, num_col_initial = I_in.shape
-    upscale_factor = 5 / PSF  # Upscaled image has 5 pixels per PSF (1/e beam radius) 
-    sobelY = np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]])  # Vertical edge detection
-    sobelX = np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])  # Horizontal edge detection
-
-    # Preprocessing: Subtract local minimum for local contrast enhancement
-    single_frame_I_in = I_in - I_in.min()
-    local_minimum = np.zeros_like(I_in)
-    single_frame_I_in_localmin = np.zeros_like(I_in)
-
-    # Calculate local minimum for each pixel
-    for u in range(num_row_initial):
-        for v in range(num_col_initial):
-            sub_window = single_frame_I_in[max(0, u - window_radius):min(num_row_initial, u + window_radius + 1),
-                                           max(0, v - window_radius):min(num_col_initial, v + window_radius + 1)]
-            local_minimum[u, v] = sub_window.min()
-            single_frame_I_in_localmin[u, v] = single_frame_I_in[u, v] - local_minimum[u, v]
-
-    # Upscale images using interpolation to enhance details
-    single_frame_localmin_magnified = upscale_image_interp(single_frame_I_in_localmin, num_row_initial, num_col_initial, upscale_factor=upscale_factor, pad=True)
-    single_frame_I_magnified = upscale_image_interp(single_frame_I_in, num_row_initial, num_col_initial, upscale_factor=upscale_factor, pad=True)
-
-    # Normalize and calculate gradients for displacement calculation
-    I_normalized = single_frame_localmin_magnified / (ndi.gaussian_filter(single_frame_localmin_magnified, 10) + 0.000001)
-    gradient_x = ndi.convolve(I_normalized, sobelX, mode='nearest')
-    gradient_y = ndi.convolve(I_normalized, sobelY, mode='nearest')
-    gradient_x /= (I_normalized + 0.000001)
-    gradient_y /= (I_normalized + 0.000001)
-
-    # Apply gain and limit the displacements
-    gain_value = 0.1 * gain
-    displacement_x = gain_value * gradient_x
-    displacement_y = gain_value * gradient_y
-    displacement_x[np.abs(displacement_x) > 10] = 0  # Limit displacements to prevent artifacts
-    displacement_y[np.abs(displacement_y) > 10] = 0
-
-    # Weighted pixel displacement for image reconstruction
-    single_frame_I_out = np.zeros_like(single_frame_I_magnified)
-    num_row, num_col = single_frame_I_magnified.shape
-
-    for nx in range(10, num_row - 10):
-        for ny in range(10, num_col - 10):
-            # Process displacement and calculate weights for reconstruction
-            disp_x = displacement_x[nx, ny]
-            disp_y = displacement_y[nx, ny]
-
-            # Calculating the integer parts of the displacements
-            int_disp_x = int(np.fix(disp_x))
-            int_disp_y = int(np.fix(disp_y))
-
-            # Weights based on the fractional part of the displacement
-            weighted1 = (1 - abs(disp_x - int_disp_x)) * (1 - abs(disp_y - int_disp_y))
-            weighted2 = (1 - abs(disp_x - int_disp_x)) * abs(disp_y - int_disp_y)
-            weighted3 = abs(disp_x - int_disp_x) * (1 - abs(disp_y - int_disp_y))
-            weighted4 = abs(disp_x - int_disp_x) * abs(disp_y - int_disp_y)
-
-            # Calculating the coordinates for pixel reassignment
-            coordinate1 = (int_disp_x, int_disp_y)
-            coordinate2 = (int_disp_x, int(int_disp_y + np.sign(disp_y)))
-            coordinate3 = (int(int_disp_x + np.sign(disp_x)), int_disp_y)
-            coordinate4 = (int(int_disp_x + np.sign(disp_x)), int(int_disp_y + np.sign(disp_y)))
-
-            # Assigning the weighted pixel values to reconstruct the image
-            # To shift I-local_min use 'single_frame_localmin_magnified', to shift raw image use 'single_frame_I_magnified'
-            single_frame_I_out[nx + coordinate1[0], ny + coordinate1[1]] += weighted1 * single_frame_I_magnified[nx, ny]
-            single_frame_I_out[nx + coordinate2[0], ny + coordinate2[1]] += weighted2 * single_frame_I_magnified[nx, ny]
-            single_frame_I_out[nx + coordinate3[0], ny + coordinate3[1]] += weighted3 * single_frame_I_magnified[nx, ny]
-            single_frame_I_out[nx + coordinate4[0], ny + coordinate4[1]] += weighted4 * single_frame_I_magnified[nx, ny]
-
-    # Crop the borders added by displacement
-    single_frame_I_out = single_frame_I_out[10:-10, 10:-10]
-    single_frame_I_magnified = single_frame_I_magnified[10:-10, 10:-10]
-
-    return single_frame_I_out, single_frame_I_magnified
-
-def run_dpr(psf_input, gain_input, data_instance, viewer):
-    """
-    Executes the Deblurring by Pixel Reassignment (DPR) process on a selected layer within a napari viewer, using user-defined
-    PSF and gain settings to improve image clarity and detail.
-
-    Parameters
-    ----------
-    psf_input : QLineEdit
-        Widget for inputting the PSF value.
-    gain_input : QLineEdit
-        Widget for inputting the gain value.
-    data_instance : object
-        Contains data and metadata, such as cell diameter.
-    viewer : napari.Viewer
-        Viewer instance where images are displayed.
-
-    Raises
-    ------
-    Error
-        If no active image layer is selected in the viewer.
-    """
-    
-    # Ensure an active layer is selected
-    active_layer = viewer.layers.selection.active
-    if active_layer is None:
-        raise ValueError("No active layer selected")
-    
-    # Read PSF and gain from inputs, defaulting to preset values if empty
-    psf_0 = int(psf_input.text()) if psf_input.text() else 3
-    gain_0 = int(gain_input.text()) if gain_input.text() else 2
-    window_size = math.ceil(data_instance.data_repository['cell_diameter'] / 2)
-    
-    # Apply DPR processing on the selected image layer
-    DPR_img, _ = deblur_by_pixel_reassignment(active_layer.data, psf_0, gain_0, window_size)
-
-    # Display the processed image in the viewer
-    _add_image(DPR_img, viewer, name=f"DPR Corrected {active_layer.name}", operation='preprocess')
 
 
 # Background and Noise Correction # 
@@ -2507,166 +2133,8 @@ def apply_background_subtraction(image, background):
 
 
 # ---------------------------------------------------------------------------
-# Automatic object-size → ball_radius estimation (for headless / batch use)
+# Automatic object-size estimation (top-hat/Otsu + brightfield variant) + validity gate  ->  moved to size_estimation.py (1.6.248)
 # ---------------------------------------------------------------------------
+from pycat.toolbox.image_processing.size_estimation import (  # noqa: E402,F401
+    AUTO_OBJECT_SIZE_VALID_WORKFLOWS, auto_object_size_valid, estimate_object_size_px, estimate_object_size_px_brightfield)
 
-# Workflows for which intensity-threshold-based object-size estimation is VALID.
-# The estimator assumes discrete high-intensity objects on a thresholdable
-# background — true for fluorescence puncta/condensates/droplets, NOT for
-# brightfield (edge/phase contrast, no intensity hierarchy), time-series (object
-# size drifts as objects grow/coarsen so a single median is wrong), or z-stacks
-# (a 2D-projection diameter is not the 3D object size).
-AUTO_OBJECT_SIZE_VALID_WORKFLOWS = frozenset({
-    'condensate',       # 2D cellular fluorescence
-    'invitro_fluor',    # 2D in-vitro fluorescence
-})
-
-
-def auto_object_size_valid(workflow: str) -> bool:
-    """Whether automatic (top-hat + Otsu) object-size estimation is valid for a
-    given workflow identity. See AUTO_OBJECT_SIZE_VALID_WORKFLOWS."""
-    return str(workflow) in AUTO_OBJECT_SIZE_VALID_WORKFLOWS
-
-
-def estimate_object_size_px(image, workflow=None, min_area_px=4,
-                            tophat_radius=None, return_diagnostics=False):
-    """Estimate a representative object diameter (px) and ball_radius from a
-    fluorescence image, without a human in the loop (for batch processing).
-
-    Pipeline (Meet Raval's validated approach):
-      1. White top-hat to isolate small bright objects from background.
-      2. Otsu threshold on the top-hat response → foreground objects.
-      3. Label; keep objects >= min_area_px.
-      4. object_size = median equivalent diameter over kept objects.
-      5. ball_radius = round(object_size / 2) (native px), clamped >= 1.
-
-    VALIDITY: this is only meaningful where discrete bright objects sit on a
-    thresholdable background (fluorescence). If ``workflow`` is supplied and is
-    not in AUTO_OBJECT_SIZE_VALID_WORKFLOWS, this raises ValueError — the caller
-    must not apply it to brightfield / time-series / z-stack data.
-
-    # TODO(optimize-on-real-data): the top-hat radius, Otsu vs multi-Otsu choice,
-    # and min_area cutoff are first-pass defaults. Validate/tune against a real
-    # cellular- and in-vitro-fluorescence batch (see Meet's STEP 2 diagnostic).
-
-    Parameters
-    ----------
-    image : 2D array (a single fluorescence frame/channel).
-    workflow : optional workflow id for the validity guard.
-    min_area_px : ignore objects smaller than this (noise).
-    tophat_radius : white-top-hat disk radius (px). Default: ~ min(H,W)//50,
-        clamped to [3, 25] — big enough to pass typical puncta, small enough to
-        suppress cell-scale background.
-    return_diagnostics : if True, also return a dict with the object-diameter
-        array and intermediate masks (for a diagnostic figure).
-
-    Returns
-    -------
-    dict with keys: object_size_px, ball_radius, n_objects, (and 'diagnostics'
-    if requested). Returns object_size_px=None / ball_radius=None if no objects
-    are found (caller should fall back to its default).
-    """
-    if workflow is not None and not auto_object_size_valid(workflow):
-        raise ValueError(
-            f"Automatic object-size estimation is not valid for workflow "
-            f"'{workflow}'. Valid: {sorted(AUTO_OBJECT_SIZE_VALID_WORKFLOWS)}.")
-
-    arr = np.asarray(image, dtype=np.float32)
-    if arr.ndim != 2:
-        # Reduce to 2D defensively (take max projection over leading axes).
-        arr = np.max(arr, axis=tuple(range(arr.ndim - 2)))
-
-    # Normalise to [0, 1] for a stable Otsu.
-    mn, mx = float(arr.min()), float(arr.max())
-    norm = (arr - mn) / (mx - mn) if mx > mn else np.zeros_like(arr)
-
-    if tophat_radius is None:
-        tophat_radius = int(np.clip(min(norm.shape) // 50, 3, 25))
-    footprint = sk.morphology.disk(int(max(1, tophat_radius)))
-    tophat = sk.morphology.white_tophat(norm, footprint)
-
-    result = {'object_size_px': None, 'ball_radius': None, 'n_objects': 0}
-    if tophat.max() <= tophat.min():
-        return (result if not return_diagnostics
-                else {**result, 'diagnostics': {'tophat': tophat}})
-
-    try:
-        thr = sk.filters.threshold_otsu(tophat[tophat > 0])
-    except Exception:
-        thr = sk.filters.threshold_otsu(tophat)
-    fg = tophat > thr
-
-    labels = sk.measure.label(fg)
-    props = sk.measure.regionprops(labels)
-
-    def _equiv_diam(p):
-        # skimage renamed equivalent_diameter → equivalent_diameter_area (0.26+).
-        d = getattr(p, 'equivalent_diameter_area', None)
-        return d if d is not None else p.equivalent_diameter
-
-    diams = np.array([_equiv_diam(p) for p in props
-                      if p.area >= min_area_px], dtype=float)
-    if diams.size == 0:
-        return (result if not return_diagnostics
-                else {**result, 'diagnostics': {'tophat': tophat, 'fg': fg}})
-
-    object_size = float(np.median(diams))
-    ball_radius = max(1, int(round(object_size / 2.0)))
-    result = {'object_size_px': object_size,
-              'ball_radius': ball_radius,
-              'n_objects': int(diams.size)}
-    if return_diagnostics:
-        result['diagnostics'] = {'tophat': tophat, 'fg': fg, 'diameters': diams}
-    return result
-
-
-def estimate_object_size_px_brightfield(image, min_area_px=4,
-                                        return_diagnostics=False):
-    """EXPERIMENTAL edge/texture-based object-size estimator for BRIGHTFIELD.
-
-    Brightfield contrast is edge/phase, not intensity, so the fluorescence
-    top-hat + Otsu estimator (`estimate_object_size_px`) is NOT valid on it.
-    This variant instead segments via local gradient magnitude (Sobel) + Otsu
-    on the edge-energy image, then measures object diameters the same way.
-
-    ⚠️ NOT VALIDATED. This is a first-pass approach that must be checked against
-    real brightfield data before use in an automated pipeline — brightfield
-    regimes vary widely (dense/sparse, in/out of focus, ring-like). It is
-    intentionally NOT wired into the batch auto-estimation path; enable only
-    after validation.
-    # TODO(validate-on-real-data): confirm on representative brightfield batches
-    # (sparse+large droplets, dense small, out-of-focus/ring) before trusting.
-
-    Returns the same dict shape as estimate_object_size_px.
-    """
-    arr = np.asarray(image, dtype=np.float32)
-    if arr.ndim != 2:
-        arr = np.max(arr, axis=tuple(range(arr.ndim - 2)))
-    mn, mx = float(arr.min()), float(arr.max())
-    norm = (arr - mn) / (mx - mn) if mx > mn else np.zeros_like(arr)
-
-    edges = sk.filters.sobel(norm)
-    result = {'object_size_px': None, 'ball_radius': None, 'n_objects': 0}
-    if edges.max() <= edges.min():
-        return result
-    thr = sk.filters.threshold_otsu(edges)
-    fg = edges > thr
-    # Close edge rings into filled objects.
-    fg = ndi.binary_fill_holes(sk.morphology.binary_closing(
-        fg, sk.morphology.disk(2)))
-    labels = sk.measure.label(fg)
-
-    def _equiv_diam(p):
-        d = getattr(p, 'equivalent_diameter_area', None)
-        return d if d is not None else p.equivalent_diameter
-    diams = np.array([_equiv_diam(p) for p in sk.measure.regionprops(labels)
-                      if p.area >= min_area_px], dtype=float)
-    if diams.size == 0:
-        return result
-    object_size = float(np.median(diams))
-    result = {'object_size_px': object_size,
-              'ball_radius': max(1, int(round(object_size / 2.0))),
-              'n_objects': int(diams.size)}
-    if return_diagnostics:
-        result['diagnostics'] = {'edges': edges, 'fg': fg, 'diameters': diams}
-    return result

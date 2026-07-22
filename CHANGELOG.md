@@ -1,3 +1,66 @@
+## [1.6.250] - 2026-07-21
+### Changed — **image_processing decomposition step 3: deblur-by-pixel-reassignment moves out.**
+`deblur_by_pixel_reassignment` (DPR — sharpen by re-locating each pixel toward the local gradient on an
+upsampled grid) and its `run_dpr` viewer wrapper moved **verbatim** to `toolbox/image_processing/deblur.py`.
+Now unblocked because its only in-file dependency, `upscale_image_interp`, moved to `_base` in the previous
+step. Pinned BEFORE the move by `test_image_processing_deblur_characterization` (exact two-array output on a
+fixed synthetic scene); identical after. Registered op → `operation_catalog.json` regenerated.
+`image_processing_tools.py`: **2285 → 2141**; ceiling ratcheted to 2141. Remaining: filters/enhancement,
+background, preprocessing, upscaling.
+
+## [1.6.249] - 2026-07-21
+### Changed — **image_processing decomposition step 2 (foundation): the shared primitives move out.**
+The algorithm families (background, preprocessing, upscaling, deblur) all reuse a handful of low-level
+primitives, so — dependency-ordered, like the segmentation split — those move first, **verbatim**, into
+`toolbox/image_processing/_base.py`: `apply_rescale_intensity`, `invert_image`, `upscale_image_interp` (the
+three registered ops), `_safe_equalize_adapthist`, `pseudo3d_tri_planar_filter`, and the lazy-napari display
+helpers `_add_image` / `_napari`.
+
+- **Characterization written first** (`test_image_processing_base_characterization`): exact output of
+  `apply_rescale_intensity`, `invert_image`, `upscale_image_interp`, `_safe_equalize_adapthist` and
+  `pseudo3d_tri_planar_filter` on fixed inputs — passes identically before and after.
+- napari stays function-scoped so `_base.py` imports headless. The three registered ops moved → `operation_
+  catalog.json` regenerated. `image_processing_tools.py`: **2515 → 2285**; ceiling ratcheted to 2285. With
+  the foundation in place the families can now import the shared primitives and move in dependency order.
+
+## [1.6.248] - 2026-07-21
+### Changed — **image_processing decomposition step 1 (characterization-first): object-size estimation moves out.**
+Began decomposing `image_processing_tools.py` (2,669 lines) — the **highest-risk** big-file split (only 6
+test files), so the discipline here is strict: **no characterization test, no move.** This step moves the
+self-contained object-size estimators, **verbatim**:
+
+- `estimate_object_size_px` — the headless/batch top-hat + Otsu estimator (median equivalent diameter →
+  ball_radius) that feeds downstream segmentation, plus its nested `_equiv_diam` helper.
+- `estimate_object_size_px_brightfield` — the experimental edge-based variant.
+- `auto_object_size_valid` + `AUTO_OBJECT_SIZE_VALID_WORKFLOWS` — the workflow-validity gate.
+
+→ `toolbox/image_processing/size_estimation.py`. A new **characterization test written first**
+(`test_image_processing_size_characterization`) pins the exact `object_size_px` / `ball_radius` /
+`n_objects` on a fixed synthetic scene; it passes identically before and after the move. No threshold change,
+no registered ops (catalog unchanged). `image_processing_tools.py`: **2669 → 2515**; a line ceiling was
+established at 2515. Remaining (dependency-ordered, shared helpers): background, preprocessing, upscaling,
+deblur.
+
+## [1.6.247] - 2026-07-21
+### Changed — **timeseries decomposition COMPLETE (step 4): timeseries_condensate_tools.py is now a pure shim.**
+The last two domains moved, **verbatim**: the preprocessing science (`upscale_stack_to_zarr`,
+`_cellpose_min_diameter_px`) to `toolbox/timeseries/preprocessing.py`, and the Qt UI builders
+(`_add_ts_upscale_stack`, `_build_ts_upscale_check_ui`, `_add_lazy_preprocess_stack`,
+`_add_run_timeseries_condensate_analysis`, `_plot_condensate_fraction`, with all their nested widget
+callbacks) to `toolbox/timeseries/ui.py`. napari/Qt/matplotlib stay imported LAZILY inside the builders, so
+`ui.py` still imports headless (`test_ci_dependencies` / `test_no_eager_reads` green).
+
+- **`timeseries_condensate_tools.py`: 2828 → 180 lines (-94%)** across the four steps (frame-access +
+  correlation 1.6.244, analysis 1.6.245, worker plumbing 1.6.246, preprocessing + UI 1.6.247). It now
+  contains **no function definitions** — only re-exports of the `toolbox/timeseries/` package, so every
+  historical import path keeps working unchanged.
+- `test_ui_builder_split`'s attribute contract for the two big builders was repointed to `timeseries/ui.py`,
+  reference sets unchanged. No registered ops (catalog untouched).
+- **Not done (deliberately):** the preprocessing *science* still embedded inside the 519-line
+  `_add_lazy_preprocess_stack` builder was NOT extracted — separating it is a refactor (surgery on a Qt
+  builder), not a verbatim move, so the builder moved whole to `ui.py` and the embedded-science extraction is
+  left as a future refinement. This closes the timeseries_decomposition audit spec's structural goal.
+
 ## [1.6.246] - 2026-07-21
 ### Changed — **timeseries decomposition step 3: the QThread/ProcessPool worker plumbing moves out.**
 Relocated the background-worker lifecycle to `toolbox/timeseries/execution.py`, **behaviour-preserving** (the
