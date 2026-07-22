@@ -538,6 +538,10 @@ def _add_bf_od_metrics(ui, layout):
         def _done(df):
             prog.setVisible(False); run.setEnabled(True)
             ui._dr()['bf_condensate_df'] = df
+            ui._record('bf_od_metrics', {
+                'raw_layer': raw_dd.currentText(), 'mask_layer': mask_dd.currentText(),
+                'cell_layer': cell_dd.currentText(), 'n_condensates': len(df),
+            })
             from pycat.ui.ui_utils import show_dataframes_dialog
             show_dataframes_dialog("BF Condensate Metrics",
                                     [("Per-condensate OD metrics", df.round(4))])
@@ -595,6 +599,7 @@ def _add_bf_per_cell_summary(ui, layout):
 
         df = bf_per_cell_summary(cond_df, cells, ui._mpx())
         ui._dr()['bf_per_cell_df'] = df
+        ui._record('bf_per_cell_summary', {'cell_layer': cell_dd.currentText(), 'n_cells': len(df)})
         from pycat.ui.ui_utils import show_dataframes_dialog
         show_dataframes_dialog("BF Per-Cell Summary", [("Per-cell metrics", df.round(4))])
         napari_show_info(
@@ -669,6 +674,9 @@ def _add_bf_spatial(ui, layout):
                                      "spatial metrics need at least 2 points per group.")
                 return
             dfs = _results_to_dataframes(results)
+            ui._record('bf_spatial_metrology', {
+                'mask_layer': mask_dd.currentText(), 'cell_layer': cell_dd.currentText(),
+            })
             from pycat.ui.ui_utils import show_dataframes_dialog
             show_dataframes_dialog("BF Spatial Metrology",
                                     [(k, v.round(4)) for k, v in dfs.items()])
@@ -837,6 +845,10 @@ def _add_bf_dynamics(ui, layout):
             if 'merge_fission' in res and not res['merge_fission'].empty:
                 tables.append(("Merge/fission events", res['merge_fission'].round(4)))
 
+            ui._record('bf_dynamics', {
+                'stack_layer': stack_dd.currentText(), 'frame_interval_s': dt,
+                'n_tracks': len(res['tracks']),
+            })
             from pycat.ui.ui_utils import show_dataframes_dialog
             show_dataframes_dialog("BF Dynamics", tables)
 
@@ -898,6 +910,10 @@ def _add_bf_texture(ui, layout):
 
         df = bf_texture_features(od, mask, cells)
         ui._dr()['bf_texture_df'] = df
+        ui._record('bf_texture', {
+            'od_layer': od_dd.currentText(), 'mask_layer': mask_dd.currentText(),
+            'n_regions': len(df),
+        })
         from pycat.ui.ui_utils import show_dataframes_dialog
         show_dataframes_dialog("BF OD Texture",
                                 [("OD texture features", df.round(4))])
@@ -968,6 +984,7 @@ def _add_bf_frame_qc(ui, layout):
             df   = result['per_frame_df']
             summ = result['summary']
             ui._dr()['bf_frame_quality'] = df
+            ui._record('bf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df)})
             n_def = summ['n_defocused_frames']
             from pycat.ui.ui_utils import show_dataframes_dialog
             summ_df = pd.DataFrame([{k: v for k, v in summ.items()

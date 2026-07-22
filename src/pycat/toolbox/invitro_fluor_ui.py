@@ -896,7 +896,10 @@ def _ivf_spatial(ui, layout):
 
 
 def _ivf_dynamics(ui, layout):
-    grp  = QGroupBox("Step 7 — Dynamics & Coarsening (time-series)")
+    # Not part of the numbered sequence: this is a time-series-only bonus
+    # analysis, not applicable to the single-image in-vitro fluorescence
+    # pipeline it's bolted onto, so it doesn't occupy a step number.
+    grp  = QGroupBox("Dynamics & Coarsening (time-series, optional)")
     ui._ivf_dynamics_grp = grp
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
@@ -1075,7 +1078,7 @@ def _ivf_dynamics(ui, layout):
 
 
 def _ivf_phase_diagram(ui, layout):
-    grp  = QGroupBox("Step 8 — Phase Diagram / C_sat")
+    grp  = QGroupBox("Step 7 — Phase Diagram / C_sat")
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)
     form.addRow(QLabel(
@@ -1164,7 +1167,9 @@ def _ivf_phase_diagram(ui, layout):
 
 
 def _ivf_frame_qc(ui, layout):
-    grp  = QGroupBox("Step 9 — Frame Quality (bleaching + focus)")
+    # Not part of the numbered sequence: time-series-only QC, not applicable
+    # to the single-image pipeline (see _ivf_dynamics above).
+    grp  = QGroupBox("Frame Quality (bleaching + focus, time-series, optional)")
     ui._ivf_qc_grp = grp
     form = QFormLayout(grp)
     form.setContentsMargins(9, 20, 9, 6)

@@ -865,6 +865,9 @@ class TemperatureDependentUI:
         except Exception:
             pass
         napari_show_info(f"Batch complete: {n_ok}/{len(df)} TIFFs processed successfully.")
+        self._record('temperature_batch', {
+            'tiff_root': tiff_root, 'temp_root': temp_root, 'n_files': len(df), 'n_ok': n_ok,
+        })
 
         # Phase diagram from the batch (parse filenames for the swept variable).
         if getattr(self, '_batch_phase_diagram', None) and self._batch_phase_diagram.isChecked():
