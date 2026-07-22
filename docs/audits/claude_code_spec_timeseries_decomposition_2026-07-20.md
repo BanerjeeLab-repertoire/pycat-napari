@@ -1,5 +1,12 @@
 # Claude Code spec — Decompose `timeseries_condensate_tools.py` by scientific domain
 
+> **◐ STATUS — IN PROGRESS (scientific-core first). Step 1 DONE (1.6.244): the lazy zarr FRAME-ACCESS
+> layer (frame_access.py) + the temporal-correlation estimator (correlation.py) split into
+> `toolbox/timeseries/` — byte-identical, correlation pinned by test_temporal_enhancement.
+> timeseries_condensate_tools.py 2828 → 2600. NEXT: write a characterization test for
+> run_timeseries_condensate_analysis + _ts_analyze_frame_worker (no test, no move), then move analysis.py
+> (handling the _init_worker_threads shared helper). UI builders + Qt worker plumbing stay for later.**
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.203 · Verified against the 1.6.203 tree. The scan's clearest
 fresh target: at **2,828 lines / 70 functions** it is the second-largest file, and it is a *repeat
 offender* — **five of the ten longest functions in the entire codebase live in this one file**. The

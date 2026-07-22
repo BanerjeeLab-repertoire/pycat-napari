@@ -64,6 +64,19 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 1.6.244 — timeseries decomposition step 1 (scientific-core, part 1): the lazy zarr FRAME-ACCESS layer
+    # (_session_zarr_dir / _read_source_frame / _compute_stack_global_range / _get_zarr_dir_path /
+    # _materialize_stack_to_zarr + the _ZarrStack wrapper) MOVED verbatim to toolbox/timeseries/frame_access.py,
+    # and estimate_temporal_correlation (numerically pinned by test_temporal_enhancement) MOVED to
+    # toolbox/timeseries/correlation.py. No read/materialize semantics changed. timeseries_condensate_tools
+    # re-exports each; correlation imports _read_source_frame from frame_access.
+    'timeseries_condensate_tools.py::_session_zarr_dir',
+    'timeseries_condensate_tools.py::_read_source_frame',
+    'timeseries_condensate_tools.py::_compute_stack_global_range',
+    'timeseries_condensate_tools.py::_get_zarr_dir_path',
+    'timeseries_condensate_tools.py::_materialize_stack_to_zarr',
+    'timeseries_condensate_tools.py::estimate_temporal_correlation',
+
     # 1.6.183 — `detect_beads_stack` (the 317-line VPT detection stage) was split BY PIPELINE STAGE into
     # `_choose_detection_backend`, `_pool_predetect`, `_bead_hot_mask`, `_detect_all_frames`
     # (+ `_fast_frame_rows` / `_precise_frame_rows`) and `_assemble_detections`, leaving a 116-line

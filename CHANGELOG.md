@@ -1,3 +1,21 @@
+## [1.6.244] - 2026-07-21
+### Changed — **timeseries decomposition step 1 (scientific-core): frame-access + correlation move out.**
+Began decomposing `timeseries_condensate_tools.py` (2,828 lines — the largest file) into a
+`toolbox/timeseries/` package, starting with the well-covered scientific pieces, **verbatim**:
+
+- `frame_access.py` — the lazy zarr scratch dir, the source-frame reader that honours the lazy-read guard
+  (no frame-0 collapse), the global intensity-range scan, and the `_ZarrStack` wrapper napari scrubs
+  without dask. Pure infrastructure, no napari/Qt dependency.
+- `correlation.py` — `estimate_temporal_correlation` (frame-pair sampling → regime + recommendation),
+  pinned by `test_temporal_enhancement` (it recovers the seeded correlation exactly). Reads frames via
+  `frame_access`.
+
+No read/materialize semantics changed; no registered ops involved. Honouring the spec's **"no test, no
+move"** rule, the analysis entry point (`run_timeseries_condensate_analysis`) is NOT moved yet — it needs a
+characterization test written first, and it shares worker-init plumbing with the Qt worker; that is the
+next step. `timeseries_condensate_tools.py`: **2828 → 2600**; a line ceiling was established at 2600 (it
+had none before) and will ratchet down as the remaining domains move.
+
 ## [1.6.243] - 2026-07-21
 ### Changed — **segmentation decomposition COMPLETE (step 4): segmentation_tools.py is now a pure shim.**
 The last family moved: the **subcellular** orchestrator (`segment_subcellular_objects` + its viewer wrapper
