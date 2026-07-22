@@ -297,11 +297,13 @@ class BatchWorker(QThread):
                 try:
                     _meta = (_sample_resolver.for_image(image_path)
                              if _sample_resolver is not None else None)
+                    _records = records_from_output_dir(file_output, image_path.stem)
                     _consolidated.add_image(
                         image_path.stem,
-                        records_from_output_dir(file_output, image_path.stem),
+                        _records,
                         sample_metadata=_meta,
-                        provenance={'pycat_version': _pycat_version})
+                        provenance={'pycat_version': _pycat_version},
+                        reliability_context=self._reliability_context_for(_records, image_path.name))
                 except Exception as _cexc:      # broad-ok: batch_step — per-image processing SUCCEEDED and
                     # its own folder is written; only the consolidated-table append failed. This must be
                     # VISIBLE, not a clean success: a silently dropped image makes a 93-of-100 cohort look
@@ -344,6 +346,26 @@ class BatchWorker(QThread):
             f"Output: {output_dir}\n\n{summary}"
         )
 
+    def _reliability_context_for(self, records, image_name):
+        """This image's reliability factors for the consolidated table's reliability columns — or None.
+
+        Computes the imaging-QC factor so the reliability/reliability_reasons columns populate, but ONLY
+        when the image carries a scored-family measurement (partition / concentration / ΔG), so a
+        non-partition batch pays no QC cost. The raw image was stashed by `_process_file` (already
+        materialised), so there is no re-load and no frame-0 risk. Calibration is not threaded through the
+        batch, so it stays in `missing` and the grade is honestly capped — never assumed passing."""
+        from pycat.utils.consolidated_table import records_have_scored_family
+        img = getattr(self, '_last_image', None)
+        if img is None or not records_have_scored_family(records):
+            return None
+        try:
+            from pycat.toolbox.data_qc_tools import run_full_qc
+            return {'image_qc': run_full_qc(img)}
+        except Exception as _qexc:      # broad-ok: batch_step — reliability QC is additive; its failure
+            # must never drop the image from the consolidated table.
+            print(f"[PyCAT Batch] reliability QC skipped for {image_name}: {_qexc}")
+            return None
+
     def _process_file(self, image_path: Path, output_dir: Path):
         """
         Replay each recorded step for a single image file in headless mode.
@@ -363,6 +385,7 @@ class BatchWorker(QThread):
         created in one PyCAT version remain forward-compatible.
         """
         state: Dict = {}  # shared across all steps for this file
+        self._last_image = None   # reset per file so a failed load never leaks the previous image's QC
         # Propagate the batch-level auto-ball_radius decision so the open_image
         # replay can estimate it per image when appropriate.
         state['_auto_ball_radius'] = getattr(self, '_auto_ball_radius', False)
@@ -381,6 +404,9 @@ class BatchWorker(QThread):
                       f"{image_path.name}:\n{traceback.format_exc()}")
                 print(f"[PyCAT Batch] Skipping remaining steps for this file.")
                 break
+        # Stash the raw image (set by the open_image step) so the consolidation step can compute this
+        # image's reliability imaging-QC factor without re-loading it — used only for scored-family images.
+        self._last_image = state.get('image')
 
 
 # ---------------------------------------------------------------------------

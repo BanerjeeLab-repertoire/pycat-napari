@@ -1,14 +1,12 @@
 # Claude Code spec — Measurement Reliability Index (MRI)
 
-> **◐ STATUS — Core DONE. Surfacing: step 4a (Measurement display, 1.6.254) + step 4b/4c (1.6.255) DONE.
-> The consolidated long table now carries additive `reliability` / `reliability_reasons` columns for the
-> scored family — the shared image factors (QC, calibration) come from a per-image `reliability_context`
-> threaded through `build_image_long_table` / `ConsolidatedLongWriter.add_image`, and the per-object
-> differentiator is the object's own biological-QC flag, so a comparison can be recomputed on
-> high-reliability objects only. `plot_qc_report` gains a footer listing the measurements capped below
-> `high` and why (`reliability_report_section`). REMAINING: the batch loop computing image QC + calibration
-> per image and passing the `reliability_context` (the plumbing endpoints now accept it); extending the
-> scored family beyond partition/concentration/ΔG is one registry entry each.**
+> **◐ STATUS — Core DONE. Surfacing DONE (4a Measurement display 1.6.254; 4b/4c table columns + QC-report
+> section 1.6.255). Batch AUTO-POPULATION DONE (1.6.257): the batch loop now computes each image's imaging-QC
+> factor (via _reliability_context_for → run_full_qc on the already-materialised image) and passes a
+> reliability_context to add_image — but ONLY for images carrying a scored-family measurement, so a
+> non-partition batch pays no QC cost. So reliability/reliability_reasons now populate in real exported
+> tables. Calibration is not yet threaded through the batch, so batch grades are honestly capped (calibration
+> in `missing`); threading it, and extending SCORED_FAMILY, are the remaining increments.**
 
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. The roadmap's
 *"unifying construct"* — every reported measurement carries a reliability score, and clicking it

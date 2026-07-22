@@ -1,3 +1,24 @@
+## [1.6.257] - 2026-07-22
+### Added — **MRI surfacing (step 3, batch wiring): reliability now populates automatically in exported tables.**
+The reliability columns added in 1.6.255 only filled when a caller supplied a `reliability_context`; the
+batch never did. Now the batch consolidation computes each image's imaging-QC reliability factor and threads
+it through:
+
+- `BatchProcessor._process_file` stashes the raw image it already loaded (`state['image']`), so QC needs no
+  re-load and there is no frame-0 collapse risk.
+- A new `_reliability_context_for(records, image_name)` computes `run_full_qc` on that image and passes
+  `{'image_qc': ...}` to `ConsolidatedLongWriter.add_image` — but **only when the image carries a
+  scored-family measurement** (partition / concentration / ΔG), gated by the new
+  `records_have_scored_family`, so a non-partition batch pays no QC cost.
+- Calibration is not threaded through the batch, so it stays in `missing` and the grade is **honestly
+  capped** — never silently treated as passing (rule 1). The per-object biological-QC flag still
+  differentiates objects, so a comparison can be recomputed on high-reliability objects.
+
+The QC failure path is `# broad-ok: batch_step` (additive — must never drop an image from the table). The
+new logic is extracted into `_reliability_context_for` rather than inlined, keeping `run()` under the
+120-line ratchet (the ratchet caught the inline growth; the honest response was to split it out, not raise
+the ceiling). Full core green (1536 passed).
+
 ## [1.6.256] - 2026-07-22
 ### Changed — **Merge Meet Raval's branch (re-targeted): large-condensate segmentation fix + pipeline progress bar.**
 Two changes from Meet Raval's branch, brought onto the post-decomposition tree.

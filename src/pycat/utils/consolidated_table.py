@@ -139,6 +139,16 @@ def _object_qc_flags(wide, object_type, id_col, *, labels=None, parent_labels=No
         return {}
 
 
+def records_have_scored_family(records) -> bool:
+    """Whether any of these ``(object_type, wide_df)`` records carries a measurement in the reliability
+    SCORED_FAMILY (partition / concentration / ΔG). The batch uses this to compute imaging QC — and thus
+    populate the reliability columns — ONLY for images whose measurements are actually scored, so a
+    non-partition batch pays no QC cost."""
+    from pycat.utils.reliability import SCORED_FAMILY
+    fam = set(SCORED_FAMILY)
+    return any(fam & set(map(str, getattr(df, 'columns', []))) for _, df in (records or []))
+
+
 def _row_reliability_factory(reliability_context):
     """Return ``(measurement, flagged) -> (grade, reasons_str)`` for the scored measurement family, or None
     when reliability is not being computed (no context).
