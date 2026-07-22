@@ -158,18 +158,12 @@ def group_error(values, error_type):
     return 0.0
 
 
-def render(fig_data, spec):
-    """Render ``fig_data`` under ``spec`` and return a matplotlib Figure. **Reads the data, never recomputes
-    it** — the plotted values are stashed on ``fig._pycat_plotted`` so the refine-not-recompute contract is
-    checkable. Presentation (labels, limits, palette, fonts, footnote) comes entirely from ``spec``."""
-    import matplotlib
-    matplotlib.use('Agg', force=False)
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=tuple(spec.figure_size_in), dpi=spec.dpi)
-    ax = fig.add_subplot(111)
+def _render_on_axis(ax, fig_data, spec):
+    """Draw one ``fig_data`` onto ``ax`` under ``spec`` (points, group means, optional error bars, labels,
+    scale, ticks, significance brackets). Returns the plotted ``{group: values}``. Shared by the
+    single-panel :func:`render` and the multi-panel :func:`render_multipanel`, so a panel is styled
+    identically however many there are."""
     colors = _PALETTES.get(spec.palette, _PALETTES['colorblind_safe'])
-
     plotted = {}
     groups = list(fig_data.groups)
     for i, g in enumerate(groups):
@@ -216,14 +210,26 @@ def render(fig_data, spec):
         item.set_fontsize(spec.font_size_pt)
 
     # ── significance brackets (the merged gap: figure_spec.render() now HONOURS them) ────────────────
-    # The old figure_spec carried a `significance` mode string that render() never acted on; the working
-    # bracket implementation lived only in figure_publication. It is now driven from here, so a spec that
-    # requests brackets actually gets them. The honesty stays upstream: a bracket is drawn only for a pair
-    # the caller supplied (from replicate-level stats), never inferred from a pixel-level test.
+    # A bracket is drawn only for a pair the caller supplied (from replicate-level stats), never inferred
+    # from a pixel-level test — the honesty stays upstream.
     if spec.significance_brackets:
         for ann in spec.significance_brackets:
             add_significance_bracket(ax, ann['x1'], ann['x2'], ann['y'],
                                      ann.get('label', ''), font_size=spec.font_size_pt)
+    return plotted
+
+
+def render(fig_data, spec):
+    """Render ``fig_data`` under ``spec`` and return a matplotlib Figure. **Reads the data, never recomputes
+    it** — the plotted values are stashed on ``fig._pycat_plotted`` so the refine-not-recompute contract is
+    checkable. Presentation (labels, limits, palette, fonts, footnote) comes entirely from ``spec``."""
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=tuple(spec.figure_size_in), dpi=spec.dpi)
+    ax = fig.add_subplot(111)
+    plotted = _render_on_axis(ax, fig_data, spec)
 
     if spec.caveats_shown:
         caveats = ontology_caveats(fig_data.measurement)
@@ -236,6 +242,55 @@ def render(fig_data, spec):
 
     fig._pycat_plotted = plotted
     return fig
+
+
+def render_multipanel(panels, *, spec=None, n_cols=None, panel_labels=True,
+                      figure_size_in=None, dpi=None):
+    """Render several `FigureData` as a labelled grid of panels — the general publication multi-panel figure.
+
+    ``panels`` is a sequence where each item is a ``FigureData`` or a ``(FigureData, FigureSpec)`` pair (a
+    per-panel spec overrides the shared ``spec``). Panels fill a grid of ``n_cols`` columns (default: as
+    square as possible), and unless ``panel_labels=False`` each gets a bold **A / B / C …** label in its
+    top-left corner (the standard figure requirement). Reads the data, never recomputes it; the per-panel
+    plotted values are stashed on ``fig._pycat_plotted`` as a list. A single panel is a 1×1 grid — the
+    single-axis :func:`render` remains the direct path for the common case."""
+    import math
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    base = spec or FigureSpec()
+    items = [(p if isinstance(p, tuple) else (p, base)) for p in panels]
+    if not items:
+        raise ValueError("render_multipanel needs at least one panel.")
+    n = len(items)
+    n_cols = n_cols or max(1, math.ceil(math.sqrt(n)))
+    n_rows = math.ceil(n / n_cols)
+    size = tuple(figure_size_in) if figure_size_in is not None else \
+        (base.figure_size_in[0] * n_cols, base.figure_size_in[1] * n_rows)
+    fig = plt.figure(figsize=size, dpi=dpi or base.dpi)
+
+    plotted = []
+    for idx, (fig_data, panel_spec) in enumerate(items):
+        ax = fig.add_subplot(n_rows, n_cols, idx + 1)
+        plotted.append(_render_on_axis(ax, fig_data, panel_spec or base))
+        if panel_labels:
+            ax.text(-0.12, 1.06, _panel_label(idx), transform=ax.transAxes,
+                    fontsize=(base.title_size_pt or base.font_size_pt + 2), fontweight='bold',
+                    ha='left', va='bottom')
+    fig.tight_layout()
+    fig._pycat_plotted = plotted
+    return fig
+
+
+def _panel_label(idx) -> str:
+    """Panel label for index 0,1,2,… → 'A','B','C',…, then 'AA','AB',… past 26 (Excel-style, no gaps)."""
+    label = ''
+    idx += 1
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        label = chr(ord('A') + rem) + label
+    return label
 
 
 def refine(fig, spec):

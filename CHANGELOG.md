@@ -1,3 +1,18 @@
+## [1.6.264] - 2026-07-22
+### Added — **Publication figures: multi-panel layout with A/B/C panel labels (publication_features Tier 2).**
+The biggest structural gap the §8 audit named: the figure render was single-axis (`add_subplot(111)`), so a
+multi-panel journal figure was impossible. New `render_multipanel(panels, *, spec, n_cols, panel_labels)`:
+- Lays several `FigureData` out in a grid (`n_cols` columns, default as-square-as-possible) and, unless
+  turned off, gives each panel a bold **A / B / C …** label in its top-left corner (Excel-style past Z:
+  AA, AB, …). Each item may be a `FigureData` or a `(FigureData, FigureSpec)` pair, so a per-panel spec
+  (e.g. a log axis on one panel) overrides the shared one.
+- The per-axis plotting is now a shared `_render_on_axis` helper, so a panel is styled identically however
+  many there are, and single-panel `render()` is unchanged (it delegates to the same helper — existing
+  figure tests pass untouched). Reads the data, never recomputes it; per-panel plotted values stash on
+  `fig._pycat_plotted` as a list.
+- Tests (`core`, Agg): one axis per panel with A/B/C labels, `n_cols` grid respected, labels toggle off,
+  per-panel spec override, single-panel grid, and labels past Z.
+
 ## [1.6.263] - 2026-07-22
 ### Added — **Publication figures: error/confidence representation with the type STATED (publication_features Tier 1).**
 A comparison figure without a stated error is not publishable. `FigureSpec.error_type` (`'none'` | `'sd'` |

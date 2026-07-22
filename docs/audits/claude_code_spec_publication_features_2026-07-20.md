@@ -12,8 +12,10 @@
 > (`none`/`sd`/`sem`/`ci95`) draws an error bar on each group mean and LABELS the type on the figure (pure
 > `group_error` helper; SD ddof=1 / SEM / 1.96·SEM). **Remaining Tier 1:** tick scientific-notation/exponent
 > control, significance bracket-placement UI exposure. **Tier 2:** multi-panel +
-> panel labels (the big structural one — `render` is still single-axis `add_subplot(111)`), legend control,
-> validated fonts, transparent background. **Tier 3:** dense-scatter rasterization, semantic colour, export
+> panel labels DONE (1.6.264): `render_multipanel(panels, *, spec, n_cols, panel_labels)` grids several
+> `FigureData` with bold A/B/C… labels (per-panel spec override; per-axis plotting factored into a shared
+> `_render_on_axis`, so single-panel `render` is unchanged). **Remaining Tier 2:** legend control, validated
+> fonts, transparent background. **Tier 3:** dense-scatter rasterization, semantic colour, export
 > metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
 
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing

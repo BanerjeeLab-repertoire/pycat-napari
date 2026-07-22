@@ -13,7 +13,8 @@ import numpy as np
 import pytest
 
 from pycat.utils.figure_spec import (
-    FigureData, FigureSpec, render, refine, resolve_y_scale, group_error, spec_to_dict, spec_from_dict)
+    FigureData, FigureSpec, render, refine, render_multipanel, resolve_y_scale, group_error,
+    spec_to_dict, spec_from_dict)
 
 pytestmark = pytest.mark.core
 
@@ -108,3 +109,57 @@ def test_minor_ticks_are_off_by_default_and_on_when_requested():
     # matplotlib reports minor ticks only once they are enabled and the axis has range
     assert len(on.axes[0].yaxis.get_minorticklocs()) > len(off.axes[0].yaxis.get_minorticklocs())
     assert spec_from_dict(spec_to_dict(FigureSpec(minor_ticks=True))).minor_ticks is True
+
+
+# ── Tier 2: multi-panel layout + panel labels ────────────────────────────────────────────────────
+def _panels(n):
+    return [FigureData(measurement='area', groups=('WT', 'KO'),
+                       values_by_group={'WT': np.array([1.0, 2.0, 3.0]),
+                                        'KO': np.array([2.0, 4.0])}) for _ in range(n)]
+
+
+def test_multipanel_makes_one_axis_per_panel_labelled_A_B_C():
+    fig = render_multipanel(_panels(3))
+    assert len(fig.axes) == 3
+    corner = [t.get_text() for ax in fig.axes for t in ax.texts]
+    assert 'A' in corner and 'B' in corner and 'C' in corner
+
+
+def test_multipanel_respects_n_cols_for_the_grid():
+    fig = render_multipanel(_panels(4), n_cols=2)
+    # a 2x2 grid: every axis spans one cell of a 2-col, 2-row gridspec
+    geoms = {ax.get_subplotspec().get_geometry()[:2] for ax in fig.axes}
+    assert geoms == {(2, 2)}                                # (nrows, ncols) == 2x2 for all four
+
+
+def test_panel_labels_can_be_turned_off():
+    # the n= annotations are always present; assert only that no A/B/… panel label was added
+    fig = render_multipanel(_panels(2), panel_labels=False)
+    assert not any(t.get_text() in ('A', 'B') for ax in fig.axes for t in ax.texts)
+
+
+def test_a_per_panel_spec_overrides_the_shared_one():
+    panels = [(_panels(1)[0], FigureSpec(y_scale='log')), _panels(1)[0]]
+    fig = render_multipanel(panels, spec=FigureSpec())
+    assert fig.axes[0].get_yscale() == 'log' and fig.axes[1].get_yscale() == 'linear'
+
+
+def test_multipanel_stashes_per_panel_data_and_recomputes_nothing():
+    fig = render_multipanel(_panels(2))
+    assert isinstance(fig._pycat_plotted, list) and len(fig._pycat_plotted) == 2
+    assert set(fig._pycat_plotted[0]) == {'WT', 'KO'}
+
+
+def test_a_single_panel_grid_still_renders():
+    fig = render_multipanel(_panels(1))
+    assert len(fig.axes) == 1
+
+
+def test_panel_labels_extend_past_Z():
+    from pycat.utils.figure_spec import _panel_label
+    assert (_panel_label(0), _panel_label(25), _panel_label(26)) == ('A', 'Z', 'AA')
+
+
+def test_empty_panels_is_refused():
+    with pytest.raises(ValueError, match='at least one panel'):
+        render_multipanel([])
