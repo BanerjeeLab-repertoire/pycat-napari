@@ -1,3 +1,16 @@
+## [1.6.276] - 2026-07-22
+### Removed — **Two duplicate interaction-layer modules (correction): `utils/hit_testing.py` and `utils/selection_state.py`.**
+Honest correction. In 1.6.272 / 1.6.273 I added a standalone hit-tester and `SelectionState` for the
+`interaction_layer` spec **without first verifying the current tree** — which had already implemented that
+spec in full, far past its 1.6.90 target: `selection_service.py` holds the canonical integrated
+`SelectionState` (with `select_entity`/`toggle`/`hover`/`pin`/`clear` and back-compat), `analysis_plots.py`
+already uses one `button_press_event` with nearest-curve **cycling** (a deliberately better model than the
+spec's ambiguity-refusal), the MSD background is a `LineCollection` with promotion overlays, and a
+`SelectionView` Protocol + contract suite exists. My two modules were pure parallel duplicates — exactly the
+second-implementation the spec's own cautions forbid — and were imported by nothing. Removed them and their
+tests; the `interaction_layer` spec is verified DONE in the tree. (The lesson is the discipline's own:
+verify the premise against the current tree before building.)
+
 ## [1.6.275] - 2026-07-22
 ### Added — **Reopen a saved figure bundle to restore its refined state; brushing survives a refine (explore_refine_export complete).**
 Closes the explore_refine_export follow-ons.

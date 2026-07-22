@@ -1,26 +1,24 @@
 # Claude Code spec — Interaction layer: selection state model, honest hit-testing, adapter contract
 
-> **◐ GAP 1 state model + GAP 2 hit-tester (pure primitives) DONE. Wiring + Gaps 3/4/5 remain.** Gap 1
-> (shipped 1.6.273): `utils/selection_state.py::SelectionState` — immutable hover/selected/pinned/primary +
-> generation, with `select`/`toggle`(ctrl-click)/`hover`/`pin`/`unpin`/`clear`(keeps pins) each returning a
-> new state one generation on; `displayed` = selected ∪ pinned. `test_selection_state.py` (`core`). Wiring it
-> into `selection_service` behind the existing subscriber contract (back-compat) is the integration step.
+> **✅ STATUS — DONE (verified against 1.6.275): every gap was already implemented in the tree, which has
+> advanced far past this spec's 1.6.90 target.** Verified in place: **Gap 1** — `selection_service.py` holds
+> an immutable `SelectionState` (selected/primary/hovered/pinned/generation) with `select_entity`/`toggle`/
+> `hover`/`pin`/`unpin`/`clear_selection`/`clear`, and it *quacks like* the old `Selection` (`entity_ids`/
+> `primary_id`/`source_view`) so every existing subscriber keeps working — the mandated back-compat. **Gap
+> 2** — `analysis_plots.py` already replaced per-line `set_picker` with ONE `button_press_event`, and chose
+> a BETTER model than the spec's ambiguity-refusal: *always pick the nearest and CYCLE through overlapping
+> curves on repeat clicks* (the code documents why refusal "meant nothing ever got selected" in dense data).
+> **Gaps 3 & 4** — the MSD background is ONE `LineCollection` with a selection/promotion OVERLAY, and a
+> selected non-sampled track is promoted to a focus curve (`promote`/`demote_line`). **Gap 5** — a
+> `SelectionView` `Protocol` (`apply_selection(state)` + `close()`) with a shared adapter contract suite
+> (`tests/selection_view_contract.py`), and the pyqtgraph backend (`plot_backend_pyqtgraph.py`) already built
+> against it.
 >
-> **◐ GAP 2's HONEST HIT-TESTER (pure primitive) DONE, shipped 1.6.272. The analysis_plots wiring + Gaps
-> 3/4/5 remain.** New Qt-free `utils/hit_testing.py`: `hit_test(curves, click_xy, *, tolerance_px,
-> ambiguity_px) -> HitResult` finds the nearest curve by point-to-segment distance over the curves'
-> DISPLAY-space coordinate arrays, and — the point — **refuses an ambiguous click** (best and second-best
-> within `ambiguity_px` → `primary=None`, `candidates` NAMES both, so the caller reports rather than guesses)
-> and a miss beyond `tolerance_px`. `point_segment_distance` clamps to endpoints (a click past an end
-> measures to the end, not the infinite line). Pure geometry, backend-neutral — the same primitive backs the
-> matplotlib wiring and the future pyqtgraph adapter. `test_hit_testing.py` (`core`) pins nearest-wins,
-> empty→nothing, ambiguous→nothing+candidates, endpoint clamping, one-click-one-selection, log-in-display.
-> **Remaining:** wire it into `analysis_plots.py` (remove the per-line `set_picker`, one `button_press_event`
-> per axes calling `hit_test` on the coordinate arrays) — the Qt integration; and Gap 1 (`SelectionState`
-> hover/selected/pinned, back-compat-preserving), Gap 3 (promote a non-sampled selected track), Gap 4
-> (LineCollection background + overlay artists), Gap 5 (the `SelectionView` adapter protocol + contract
-> suite). This primitive is the foundation the wiring and the pyqtgraph adapter build on (per the spec's
-> sequencing note).
+> _Correction:_ in 1.6.272 / 1.6.273 I shipped standalone `utils/hit_testing.py` and
+> `utils/selection_state.py` implementing this spec's Gap 2 / Gap 1 — WITHOUT first verifying the tree, which
+> already had both (better). They were pure parallel duplicates (exactly the "second implementation" this
+> spec's own cautions forbid) and imported by nothing; **removed in 1.6.276.** The lesson is the spec's own:
+> verify the premise against the current tree before building.
 
 **Date:** 2026-07-17 · **Target tree:** 1.6.90 · Verified against the 1.6.90 tree. Derived from an
 architecture review of PyCAT's brushing layer. **~60% of that review describes what already
