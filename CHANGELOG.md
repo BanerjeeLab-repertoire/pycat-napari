@@ -1,3 +1,14 @@
+## [1.6.266] - 2026-07-22
+### Added — **Publication figures: semantic colour mapping + dense-scatter rasterization (publication_features Tier 3).**
+- `FigureSpec.color_map` (`{group: colour}`) ties a colour to group IDENTITY, not plot position — so a
+  condition keeps the same colour across every figure it appears in, however the groups are ordered.
+  Unmapped groups fall back to the palette by order (unchanged default).
+- `FigureSpec.rasterize_points` rasterizes the dense scatter layer inside vector output (axes and text stay
+  vector), so a 50k-point figure exports as a usable PDF instead of an enormous unopenable one. Off by
+  default.
+- Both round-trip through JSON. Tests (`core`, Agg): a group keeps its assigned colour regardless of order,
+  the scatter layer is flagged rasterized only when requested, round-trip.
+
 ## [1.6.265] - 2026-07-22
 ### Added — **Publication figures: validated font selection + transparent background (publication_features Tier 2).**
 Two ExportSpec/legibility controls, both honouring the "validate and warn, never silently substitute" rule:

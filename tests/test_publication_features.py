@@ -198,3 +198,40 @@ def test_export_passes_transparent_to_savefig(tmp_path, monkeypatch):
     monkeypatch.setattr(fig, 'savefig', lambda *a, **k: seen.append(k.get('transparent')))
     fs.export(fig, tmp_path / 'f.png', spec=FigureSpec(transparent_background=True))
     assert seen and all(t is True for t in seen), "every saved format must honour the transparent flag"
+
+
+# ── Tier 3: semantic colour mapping + dense-scatter rasterization ────────────────────────────────
+def test_semantic_colour_map_gives_each_group_its_assigned_colour():
+    from matplotlib.colors import to_rgba
+    d = FigureData(measurement='area', groups=('WT', 'KO'),
+                   values_by_group={'WT': np.array([1.0, 2.0]), 'KO': np.array([3.0, 4.0])})
+    fig = render(d, FigureSpec(color_map={'WT': 'blue', 'KO': 'red'}))
+    cols = fig.axes[0].collections                          # [WT scatter, KO scatter], in plot order
+    assert np.allclose(cols[0].get_facecolor()[0], to_rgba('blue'))
+    assert np.allclose(cols[1].get_facecolor()[0], to_rgba('red'))
+
+
+def test_a_group_keeps_its_colour_regardless_of_order():
+    from matplotlib.colors import to_rgba
+    cmap = {'WT': 'blue', 'KO': 'red'}
+    # KO first this time — it must still be red (colour follows identity, not position)
+    d = FigureData(measurement='area', groups=('KO', 'WT'),
+                   values_by_group={'KO': np.array([3.0, 4.0]), 'WT': np.array([1.0, 2.0])})
+    fig = render(d, FigureSpec(color_map=cmap))
+    assert np.allclose(fig.axes[0].collections[0].get_facecolor()[0], to_rgba('red'))   # KO
+
+
+def test_rasterize_points_flags_the_scatter_layer_only_when_requested():
+    d = _data({'WT': np.array([1.0, 2.0, 3.0])})
+    assert fig_scatter(render(d, FigureSpec())).get_rasterized() in (False, None)
+    assert fig_scatter(render(d, FigureSpec(rasterize_points=True))).get_rasterized() is True
+
+
+def fig_scatter(fig):
+    return fig.axes[0].collections[0]
+
+
+def test_colour_map_and_rasterize_round_trip():
+    spec = FigureSpec(color_map={'WT': '#123456'}, rasterize_points=True)
+    back = spec_from_dict(spec_to_dict(spec))
+    assert back.color_map == {'WT': '#123456'} and back.rasterize_points is True and back == spec

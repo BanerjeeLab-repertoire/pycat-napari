@@ -91,6 +91,10 @@ class FigureSpec:
     font_family: "str | None" = None            # validated against installed fonts; a missing one WARNS + falls
     #                                             back (never a silent substitution that changes between machines)
     transparent_background: bool = False        # ExportSpec: save with a transparent (vs white) background
+    color_map: "dict | None" = None             # {group: colour} — a condition keeps its colour across figures,
+    #                                             regardless of its position (semantic colour, Tier 3)
+    rasterize_points: bool = False              # rasterize the dense scatter layer inside vector output (axes/
+    #                                             text stay vector) — a 50k-point vector PDF is unusable otherwise
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -188,13 +192,19 @@ def _render_on_axis(ax, fig_data, spec):
     single-panel :func:`render` and the multi-panel :func:`render_multipanel`, so a panel is styled
     identically however many there are."""
     colors = _PALETTES.get(spec.palette, _PALETTES['colorblind_safe'])
+    color_map = getattr(spec, 'color_map', None) or {}
+    rasterize = bool(getattr(spec, 'rasterize_points', False))
     plotted = {}
     groups = list(fig_data.groups)
     for i, g in enumerate(groups):
         vals = np.asarray(fig_data.values_by_group[g], dtype=float)
         plotted[g] = vals
-        ax.scatter(np.full(vals.size, i), vals, s=18, color=colors[i % len(colors)],
-                   edgecolor='white', linewidth=0.4, zorder=2)
+        # Semantic colour: a group keeps its assigned colour wherever it appears; else the palette by order.
+        color = color_map.get(g, colors[i % len(colors)])
+        sc = ax.scatter(np.full(vals.size, i), vals, s=18, color=color,
+                        edgecolor='white', linewidth=0.4, zorder=2)
+        if rasterize:
+            sc.set_rasterized(True)          # dense points become a raster layer; axes/text stay vector
         if vals.size:
             ax.plot([i - 0.2, i + 0.2], [np.mean(vals)] * 2, color='#333333', lw=1.5, zorder=3)
             if getattr(spec, 'error_type', 'none') != 'none':
