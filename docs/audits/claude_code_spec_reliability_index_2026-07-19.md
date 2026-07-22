@@ -1,5 +1,13 @@
 # Claude Code spec — Measurement Reliability Index (MRI)
 
+> **◐ STATUS — Core DONE (utils/reliability.py: ReliabilityScore + reliability() + per-factor scorers, 10
+> tests). Surfacing IN PROGRESS: step 4a DONE (1.6.254) — Measurement now carries an optional `reliability`
+> ReliabilityScore; `summary()` appends `(reliability: grade)` to the value line and lists the worst-first
+> reasons, and `to_dict()` emits grade/value/contributions/reasons/missing. Backward-compatible (None = not
+> scored). REMAINING: step 3 (compute + attach scores to the partition/concentration/ΔG Measurement objects),
+> then the consolidated-table `reliability`/`reliability_reasons` columns and the QC-report capped-measurement
+> section — both read the attached score this step added.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. The roadmap's
 *"unifying construct"* — every reported measurement carries a reliability score, and clicking it
 explains why. Deferred for good reason until its inputs existed. **They now all do**, which is what

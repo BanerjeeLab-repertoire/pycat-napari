@@ -124,3 +124,33 @@ def test_it_composes_with_the_real_stability_result():
                         object_flags=(0, 10), sensitivity=unstable, benchmark=1.0)
     assert score.contributions['sensitivity'] == 0.2
     assert any('sensitivity' in r for r in score.reasons)
+
+
+# ── Surfacing on the Measurement (the number carries its grade) ──────────────────────────────────
+def test_a_measurement_surfaces_its_reliability_grade_and_reasons():
+    """A scored measurement shows `(reliability: grade)` on its value line and lists the worst-first
+    reasons — the grade is decomposable wherever the number is reported, not just in a helper."""
+    from pycat.utils.measurement import Measurement
+    score = reliability('partition_coefficient', image_qc=_clean_qc(), object_flags=(9, 42),
+                        calibration=_ok_calibration(), sensitivity='sensitive', benchmark=0.95)
+    m = Measurement(name='K_p', value=4.2, units='', reliability=score)
+    text = m.summary()
+    assert f"(reliability: {score.grade})" in text.splitlines()[0]
+    # every worst-first reason is surfaced, in order
+    reason_lines = [l.split('reliability: ', 1)[1] for l in text.splitlines() if '    reliability:' in l]
+    assert reason_lines == list(score.reasons)
+
+    d = m.to_dict()
+    assert d['reliability']['grade'] == score.grade
+    assert d['reliability']['reasons'] == list(score.reasons)
+    assert d['reliability']['missing'] == list(score.missing)
+
+
+def test_an_unscored_measurement_shows_no_reliability_line():
+    """Backward-compatible: a Measurement with no reliability reports exactly as before — no grade, no
+    reliability rows, and a null in the dict."""
+    from pycat.utils.measurement import Measurement
+    m = Measurement(name='K_p', value=4.2, units='')
+    text = m.summary()
+    assert 'reliability' not in text
+    assert m.to_dict()['reliability'] is None

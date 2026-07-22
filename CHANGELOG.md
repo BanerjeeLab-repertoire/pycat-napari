@@ -1,3 +1,21 @@
+## [1.6.254] - 2026-07-22
+### Added — **Measurement Reliability Index surfacing (step 4a): every scored Measurement carries its grade.**
+The MRI core (`utils/reliability.py` — a decomposable 0..1 score composed from imaging QC, biological
+plausibility, calibration validity, parameter sensitivity and benchmark agreement) already existed but was
+unsurfaced. This wires it onto the `Measurement` value object:
+
+- `Measurement` gains an optional `reliability: ReliabilityScore` field. `summary()` appends
+  `(reliability: <grade>)` to the value line (e.g. `K_p = 4.2 (reliability: moderate)`) and lists the
+  **worst-first reasons** beneath it, so the number reports WHY its reliability is what it is — never an
+  opaque grade. `to_dict()` emits the grade, value, per-factor contributions, reasons and the `missing`
+  factors.
+- Fully backward-compatible: an unscored Measurement (`reliability=None`) reports exactly as before — no
+  grade line, a null in the dict. Reliability is REPORTED, never a silent filter (the biological-QC contract).
+
+This is the attachment point the remaining surfaces read. Still to come: attaching scores to the
+partition / concentration / ΔG measurements (spec step 3), then the consolidated-table columns and the
+QC-report capped-measurement section. Full core green (1530 passed).
+
 ## [1.6.253] - 2026-07-22
 ### Changed — **image_processing decomposition COMPLETE (step 6): image_processing_tools.py is now a pure shim.**
 The last two domains moved, **verbatim**: the composite preprocessing pipeline (`pre_process_image` + its
