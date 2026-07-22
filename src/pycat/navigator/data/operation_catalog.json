@@ -1,5 +1,5 @@
 {
-  "count": 79,
+  "count": 89,
   "operations": [
     {
       "aliases": [],
@@ -310,6 +310,60 @@
     },
     {
       "aliases": [],
+      "function": "client_enrichment",
+      "inputs": [
+        "labels",
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "partition_enrichment_tools",
+      "op": "client_enrichment",
+      "produces": "result",
+      "requirements": [],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/partition_enrichment_tools.py",
+      "summary": "Client enrichment / partitioning into segmented condensates",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "fit_coarsening",
+      "inputs": [],
+      "kind": "toolbox",
+      "module": "condensate_physics_tools",
+      "op": "coarsening_fit",
+      "produces": "result",
+      "requirements": [
+        "time_axis"
+      ],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/condensate_physics_tools.py",
+      "summary": "Coarsening-kinetics fit (characteristic size versus time)",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "pearsons_correlation",
+      "inputs": [
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "pixel_wise_corr_analysis_tools",
+      "op": "colocalization",
+      "produces": "result",
+      "requirements": [
+        "two_channels"
+      ],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/pixel_wise_corr_analysis_tools.py",
+      "summary": "Pixel-wise Pearson / Manders colocalisation between two channels",
+      "target": null
+    },
+    {
+      "aliases": [],
       "function": "opencv_contour_func",
       "inputs": [],
       "kind": "toolbox",
@@ -515,6 +569,23 @@
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing/preprocessing.py",
       "summary": "Flat-field (illumination) correction",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "fit_frap_recovery",
+      "inputs": [],
+      "kind": "toolbox",
+      "module": "frap_tools",
+      "op": "frap_recovery",
+      "produces": "result",
+      "requirements": [
+        "time_axis"
+      ],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/frap_tools.py",
+      "summary": "FRAP recovery fit (mobile fraction and recovery time)",
       "target": null
     },
     {
@@ -860,6 +931,23 @@
     },
     {
       "aliases": [],
+      "function": "compute_msd",
+      "inputs": [],
+      "kind": "toolbox",
+      "module": "condensate_physics_tools",
+      "op": "msd_diffusion",
+      "produces": "result",
+      "requirements": [
+        "time_axis"
+      ],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/condensate_physics_tools.py",
+      "summary": "Mean-squared-displacement diffusion analysis of tracked objects",
+      "target": null
+    },
+    {
+      "aliases": [],
       "function": "_register_ui_operations",
       "inputs": [],
       "kind": "ui",
@@ -907,6 +995,24 @@
     },
     {
       "aliases": [],
+      "function": "partition_coefficient_local",
+      "inputs": [
+        "labels",
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "invitro_tools",
+      "op": "partition_coefficient",
+      "produces": "result",
+      "requirements": [],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/invitro_tools.py",
+      "summary": "Local partition coefficient (dense/dilute intensity ratio) per droplet",
+      "target": null
+    },
+    {
+      "aliases": [],
       "function": "peak_and_edge_enhancement_func",
       "inputs": [],
       "kind": "toolbox",
@@ -949,6 +1055,24 @@
       "source": "src/pycat/toolbox/segmentation/puncta_refinement.py",
       "summary": "Puncta filtering by size/shape/intensity",
       "target": "punctum"
+    },
+    {
+      "aliases": [],
+      "function": "run_cell_analysis_func",
+      "inputs": [
+        "labels",
+        "image"
+      ],
+      "kind": "toolbox",
+      "module": "feature_analysis_tools",
+      "op": "region_properties",
+      "produces": "result",
+      "requirements": [],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/feature_analysis_tools.py",
+      "summary": "Per-object morphology and intensity feature table",
+      "target": null
     },
     {
       "aliases": [],
@@ -1040,6 +1164,40 @@
       "role_declared": "reference",
       "source": "src/pycat/toolbox/image_processing/background.py",
       "summary": "Rolling-ball background ESTIMATE (the background itself)",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "fit_size_distribution",
+      "inputs": [
+        "labels"
+      ],
+      "kind": "toolbox",
+      "module": "invitro_tools",
+      "op": "size_distribution",
+      "produces": "result",
+      "requirements": [],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/invitro_tools.py",
+      "summary": "Droplet size-distribution MLE fit (and saturation concentration)",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "ripleys_l",
+      "inputs": [
+        "labels"
+      ],
+      "kind": "toolbox",
+      "module": "spatial_metrology_tools",
+      "op": "spatial_statistics",
+      "produces": "result",
+      "requirements": [],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/spatial_metrology_tools.py",
+      "summary": "Ripley's L / spatial-clustering statistics of object positions",
       "target": null
     },
     {
@@ -1198,6 +1356,24 @@
       "role_declared": "preprocessed",
       "source": "src/pycat/toolbox/image_processing/_base.py",
       "summary": "Bicubic upscaling",
+      "target": null
+    },
+    {
+      "aliases": [],
+      "function": "viscosity_from_diffusion",
+      "inputs": [],
+      "kind": "toolbox",
+      "module": "vpt_tools",
+      "op": "viscosity",
+      "produces": "result",
+      "requirements": [
+        "pixel_size",
+        "time_axis"
+      ],
+      "role": "result",
+      "role_declared": "result",
+      "source": "src/pycat/toolbox/vpt_tools.py",
+      "summary": "Microrheology viscosity from a diffusion coefficient (Stokes-Einstein)",
       "target": null
     },
     {

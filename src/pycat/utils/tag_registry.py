@@ -462,4 +462,65 @@ def _register_ui_operations():
             pass
 
 
+def _register_measurement_operations():
+    """The operations whose output is a MEASUREMENT/result — the ANSWERS, not layers. **Registered
+    explicitly** (navigator wiring increment 1).
+
+    The catalog could build a workflow's segmentation spine but held no operation that *produces a
+    number*, so the planner could reach a mask and stop short of the answer. These close the most-used
+    question paths. Each one:
+
+    - **binds to a real function** — ``registered_by`` names its implementation as
+      ``<dotted.module>.<function>`` (the toolbox-op shape), so the catalog's provenance derivation
+      yields the right module/function and ``navigator.operation_spec.resolve_operation`` can import the
+      callable. A stale binding fails the resolve test loudly, which is the intended guard.
+    - **produces role ``result``** (``'measurement'`` maps onto it) — a TERMINAL product that nothing
+      consumes, so the operation graph stays traversable (measurements are leaves).
+    - **declares honest requirements** from the controlled vocabulary only, so a consumer can gate the op
+      with a stated reason (``needs a time axis``) instead of letting it fail at run time. This increment
+      does NOT gate — increment 2 wires the quality gate; here the requirement is only *declared*.
+
+    Row: ``(op, summary, inputs, requirements, registered_by)``. ``inputs`` are declared conservatively —
+    an object-and-intensity measurement consumes ``('labels', 'image')``; a measurement computed from a
+    tracking/fit result (MSD, coarsening, FRAP, viscosity) consumes no LAYER, so it declares none rather
+    than guess (the vocabulary has no ``trajectories`` role — an absent input is honest, a guessed one is
+    drift).
+    """
+    _MEASURE_OPS = [
+        # ---- object + intensity -> a table/number -------------------------------------------
+        ('region_properties', 'Per-object morphology and intensity feature table',
+         ('labels', 'image'), (), 'pycat.toolbox.feature_analysis_tools.run_cell_analysis_func'),
+        ('partition_coefficient', 'Local partition coefficient (dense/dilute intensity ratio) per droplet',
+         ('labels', 'image'), (), 'pycat.toolbox.invitro_tools.partition_coefficient_local'),
+        ('client_enrichment', 'Client enrichment / partitioning into segmented condensates',
+         ('labels', 'image'), (), 'pycat.toolbox.partition_enrichment_tools.client_enrichment'),
+        ('size_distribution', 'Droplet size-distribution MLE fit (and saturation concentration)',
+         ('labels',), (), 'pycat.toolbox.invitro_tools.fit_size_distribution'),
+        ('spatial_statistics', "Ripley's L / spatial-clustering statistics of object positions",
+         ('labels',), (), 'pycat.toolbox.spatial_metrology_tools.ripleys_l'),
+        # ---- two channels -> overlap --------------------------------------------------------
+        ('colocalization', 'Pixel-wise Pearson / Manders colocalisation between two channels',
+         ('image',), ('two_channels',), 'pycat.toolbox.pixel_wise_corr_analysis_tools.pearsons_correlation'),
+        # ---- a tracking/fit result -> a physical number (consume no layer; need a time axis) -
+        ('msd_diffusion', 'Mean-squared-displacement diffusion analysis of tracked objects',
+         (), ('time_axis',), 'pycat.toolbox.condensate_physics_tools.compute_msd'),
+        ('coarsening_fit', 'Coarsening-kinetics fit (characteristic size versus time)',
+         (), ('time_axis',), 'pycat.toolbox.condensate_physics_tools.fit_coarsening'),
+        ('frap_recovery', 'FRAP recovery fit (mobile fraction and recovery time)',
+         (), ('time_axis',), 'pycat.toolbox.frap_tools.fit_frap_recovery'),
+        ('viscosity', 'Microrheology viscosity from a diffusion coefficient (Stokes-Einstein)',
+         (), ('pixel_size', 'time_axis'), 'pycat.toolbox.vpt_tools.viscosity_from_diffusion'),
+    ]
+
+    for op, summary, inputs, requirements, registered_by in _MEASURE_OPS:
+        try:
+            register_operation(op, role='measurement', summary=summary,
+                               inputs=inputs, requirements=requirements)
+            _OPERATIONS[op]['registered_by'] = registered_by
+        except TagCollision:
+            # Already registered by a toolbox function -- that is fine and correct.
+            pass
+
+
 _register_ui_operations()
+_register_measurement_operations()

@@ -1,3 +1,26 @@
+## [1.6.278] - 2026-07-22
+### Added — **navigator wiring increment 1: the operation catalog now contains the ANSWERS, not just the layers.**
+The catalog held only operations that produce an image or a label layer, so the planner could build a
+workflow's segmentation spine but had no operation whose output is a *measurement* — it could reach a mask
+and stop short of the number. This adds ten measurement operations that close the most-used question paths,
+each bound to a real, already-tested function.
+
+- New `tag_registry._register_measurement_operations()` registers ten `result`-producing ops through the
+  SAME path the UI ops use, so they flow into `operation_catalog.json` on regeneration and resolve via
+  `navigator.operation_spec.resolve_operation`: `region_properties`, `partition_coefficient`,
+  `client_enrichment`, `size_distribution`, `spatial_statistics`, `colocalization`, `msd_diffusion`,
+  `coarsening_fit`, `frap_recovery`, `viscosity`. Each names its implementation as `<module>.<function>`
+  in `registered_by`, so a stale binding fails `resolve_operation` loudly (the intended guard).
+- **Honest requirements, declared not gated:** the time-series measurements (MSD, coarsening, FRAP,
+  viscosity) declare `time_axis`; colocalisation declares `two_channels`; viscosity also declares
+  `pixel_size` (Stokes–Einstein needs a physical scale). Gating on these is increment 2 — here they are
+  only declared, from the controlled `REQUIREMENTS` vocabulary so a consumer can render each reason.
+- **Measurements are terminal** (`produces='result'`, consumed by nothing), so the operation graph stays
+  traversable; the catalog rose 79 → 89. Data-only: no UI, planner, or scientific behaviour changed.
+  Regenerated `operation_catalog.json`; new `tests/navigator/test_measurement_ops.py` (`core`) pins the set,
+  its real bindings, the terminal property, and the requirement vocabulary. Full `pytest -m core` green
+  (1697 passed).
+
 ## [1.6.277] - 2026-07-22
 ### Added — **`plot_backends.scatter(backend='auto')` auto-selects the interactive backend by size (backend_parity Part 2).**
 The pyqtgraph backend, the `PyQtGraphScatterView` (a proper `SelectionView`), and the 4-backend

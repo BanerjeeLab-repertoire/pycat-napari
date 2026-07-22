@@ -1,5 +1,22 @@
 # Claude Code spec — Navigator wiring increment 1: measurement operations in the catalog
 
+> **✅ STATUS — DONE, shipped in 1.6.278.** Ten measurement operations added to the catalog, each bound to a
+> real function and producing the terminal `result` role. `tag_registry._register_measurement_operations()`
+> registers them through the SAME path the UI ops use, so they flow into `operation_catalog.json` on
+> regeneration (79 → 89) and resolve via `resolve_operation`: `region_properties`, `partition_coefficient`,
+> `client_enrichment`, `size_distribution`, `spatial_statistics`, `colocalization`, `msd_diffusion`,
+> `coarsening_fit`, `frap_recovery`, `viscosity`. Honest requirements declared (time_axis for the
+> time-series fits, two_channels for coloc, pixel_size for viscosity) but NOT gated — gating is increment 2.
+> All existing navigator guards pass unmodified (drift/graph/requirements/resolve); new
+> `tests/navigator/test_measurement_ops.py` (`core`) pins the set. Full core green (1697).
+>
+> **Two premise notes:** (1) the catalog already had two `result`-producing ops (`topology_envelope`,
+> `optical_density`) — the "no measurement operations" framing was slightly off, but the ten
+> question-path ops it names were genuinely absent. (2) The measurement functions aren't `@tags_layer`
+> layers, so they're registered explicitly via `registered_by='<module>.<function>'` (the toolbox-op
+> provenance shape) rather than decorated — the one small mechanism this increment adds. `_measure_ops()`
+> in `op_catalog.py` is a SEPARATE capability-tree representation and was left untouched.
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. **This is
 increment 1 of 4**, deliberately re-cut into small independently-shippable pieces. The navigator arc
 has been specced as one integration spec three times and has not moved in ~50 versions, while
