@@ -1,3 +1,21 @@
+## [1.6.302] - 2026-07-23
+### Fixed — **Python 3.13 is no longer declared installable: the ceiling now matches reality (python313_ceiling_revert).**
+`requires-python` was `">=3.12,<3.14"`, permitting Python 3.13 while advertising only a 3.12 classifier — and worse, 3.13 cannot actually install: `cellpose<4` (a base dep) pulls `numpy<2.1`,
+which ships no cp313 wheels, so pip falls to a numpy source build and dies for want of a C compiler. A 3.13
+user got a confusing meson traceback pointing at nothing.
+- **Reverted the ceiling** to `requires-python = ">=3.12,<3.13"`, so pip now refuses 3.13 cleanly ("requires a
+  different Python") instead of failing three layers down. The ceiling carries an explanatory comment: the
+  real (upstream) cause, the finding that the `cellpose<4` numpy pin is STALE (cellpose 3 segments
+  byte-identically on numpy 2.3.5), and the unblock pointer (MouseLand/cellpose#1095, `known_issues.md`).
+- **Docs corrected**: `installation.rst` wrongly claimed "supported range 3.12–3.13" — now states 3.13 is not
+  yet supported and links `known_issues`. `known_issues.md` updated to `<3.13` with an explicit **Re-enable
+  procedure** (bump ceiling → add the 3.13 classifier → re-verify byte-identical segmentation on real data →
+  add a 3.13 CI lane).
+- **Guard added**: `tests/test_python_version_ceiling.py` (`core`, 2) asserts `requires-python` and the
+  `Programming Language :: Python ::` classifiers agree in both directions — every permitted minor is
+  advertised, nothing advertised is outside the ceiling — the check that would have caught the original
+  inconsistency and keeps the pair from drifting again. No scientific behaviour changes.
+
 ## [1.6.301] - 2026-07-23
 ### Added — **Metadata contradictions are now surfaced: the metadata button warns concretely (tag_confidence Part 3).**
 The contradiction engine shipped in 1.6.293 (`utils/metadata_contradictions.py`) was wired to nothing — it

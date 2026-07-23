@@ -4,10 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.301"
+version = "1.6.302"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
-requires-python = ">=3.12,<3.14"
+# 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
+# cellpose 3 declares numpy<2.1; numpy ships no cp313 wheels below 2.1, so `pip install` on 3.13 walks
+# numpy down to 2.0.2, attempts a source build, and dies for want of a C compiler. We pin cellpose<4
+# because Cellpose 4 removed the cyto2 CNN models. Verified 2026-07-23: the cellpose pin is STALE
+# (cellpose 3 segments byte-identically on numpy 2.3.5), so the unblock is UPSTREAM relaxing it — see
+# docs/source/known_issues.md and MouseLand/cellpose#1095. Declaring 3.13 support that fails at install
+# is worse than a clean refusal, so the ceiling matches what actually installs.
+requires-python = ">=3.12,<3.13"
 license = {file = "LICENSE"}
 include-package-data = true
 authors = [

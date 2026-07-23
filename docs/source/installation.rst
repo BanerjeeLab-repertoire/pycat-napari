@@ -42,7 +42,10 @@ Minimum Requirements
 * **Python Version**: 3.12.x (Required)
 
 .. warning::
-   PyCAT-Napari requires Python 3.12 (supported range 3.12–3.13). Earlier versions, including 3.9, are no longer supported as of v1.5.39.
+   PyCAT-Napari requires **Python 3.12**. Earlier versions, including 3.9, are no longer supported as of
+   v1.5.39. **Python 3.13 is not yet supported** — a normal ``pip install`` on 3.13 fails (an upstream
+   ``cellpose`` / ``numpy`` wheel conflict, not PyCAT's own code). See :doc:`known_issues` for the reason
+   and the condition that will unblock it.
 
 * **RAM**: 8GB (16GB recommended)
 * **Disk Space**: ~100MB (including dependencies)
