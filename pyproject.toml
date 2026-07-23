@@ -280,6 +280,9 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 addopts = "-v --cov=pycat --cov-report=term-missing"
 testpaths = ["tests"]
+# qt_api is consumed by pytest-qt (the `integration` lane and local `.[test]` runs). In the minimal
+# headless `core` lane pytest-qt is absent, so pytest emits a harmless "Unknown config option: qt_api"
+# warning there — acceptable, because that lane no longer ERRORS on Qt (the Qt tests are `integration`).
 qt_api = "pyqt5"
 # Two test tiers. The scientific kernels must be verifiable WITHOUT a GUI stack --
 # a viscosity calculation, an MSD fit or a colocalization coefficient should be

@@ -65,6 +65,21 @@ user answers outrank guesses but never overwrite real metadata.
 - In-vitro session-load re-mount (the cellular case re-mounts in 1.6.288; the in-vitro augmented droplet
   table would first need to be persisted into the repository so a reloaded session can rebuild it).
 
+## E. Deferred — a GUI integration CI lane (from the qtbot-marker spec, Part B)
+
+The `qtbot`-marker spec (2026-07-23, 1.6.291) is done except for one deliberately-deferred piece. Parts A/C/D
+landed: the Qt-requiring brushing/plot tests were re-marked `integration` (per-test, across
+`test_batch_brushing`, `test_cellular_brushable`, `test_brushable_workspace`, `test_plot_backend_pyqtgraph`);
+the `core` lane is now provably headless; and `tests/test_ci_dependencies.py` gained two guards that fail if a
+`core` test requests a pytest-qt fixture or a core-test file imports the GUI stack at module scope.
+
+**Not done:** a **second CI lane** that installs `pip install -e ".[test]"` (which includes pytest-qt +
+napari/Qt) and runs `pytest -m integration`. It was deferred because it needs offscreen-Qt infrastructure
+(`QT_QPA_PLATFORM=offscreen` / xvfb) plus the heavy napari/torch/cellpose install, and a lane that can't be
+validated green from a dev box is worse added than deferred. Until it exists, the integration tests run
+**locally only** (via `.[test]`). The `core` lane's minimal install is now correct and honest on its own
+(it deliberately omits pytest-qt; the new guard keeps it that way), so this is a coverage addition, not a bug.
+
 ---
 
 *When a GUI check surfaces a bug or a UX change, note it here (or open a spec) so the fix is scoped against

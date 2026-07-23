@@ -16,7 +16,9 @@ from pycat.utils.entity_ref import ENTITY_ID_COLUMN, finalize_entity_table
 from pycat.utils.selection_service import SelectionService
 from pycat.toolbox.feature_analysis_tools import puncta_analysis_func, mount_cellular_workspace
 
-pytestmark = pytest.mark.core
+# NOTE: not a file-level `pytestmark` — this file mixes headless kernels (core) with tests that mount real
+# Qt widgets and request the `qtbot` fixture (integration). Each test is marked individually so the `core`
+# lane stays genuinely headless (test_core_lane_is_headless enforces this). See the qtbot-marker spec.
 
 
 class _FakeDI:
@@ -31,6 +33,7 @@ class _FakeDI:
         self.data_repository[key] = value
 
 
+@pytest.mark.core
 def test_puncta_analysis_paints_a_globally_unique_perpunctum_layer():
     labeled_cells = np.zeros((40, 40), dtype=np.int32)
     labeled_cells[2:18, 2:18] = 1
@@ -97,6 +100,7 @@ def _fake_cm(repo):
         active_data_class=types.SimpleNamespace(data_repository=repo))
 
 
+@pytest.mark.integration
 def test_session_load_remounts_the_cellular_panel(qtbot):
     """A reloaded cellular session (cell table + cell-labels layer restored) re-opens the brushable panel,
     so it brushes exactly like a fresh analysis — no persisted panel needed."""
@@ -106,11 +110,15 @@ def test_session_load_remounts_the_cellular_panel(qtbot):
     assert 'cell.table' in cm.selection._subscribers
 
 
-def test_a_session_without_a_cell_table_does_not_remount(qtbot):
+@pytest.mark.core
+def test_a_session_without_a_cell_table_does_not_remount():
+    # Genuinely headless: the guard returns False before mount_cellular_workspace is imported or any Qt
+    # widget is created (session_loader._remount_brushable_panel), so this needs no qtbot.
     from pycat.file_io.session_loader import _remount_brushable_panel
     assert _remount_brushable_panel(_fake_viewer(with_layers=False), _fake_cm({})) is False
 
 
+@pytest.mark.integration
 def test_mount_cellular_workspace_wires_both_tiers(qtbot):
     service = SelectionService(defer=lambda fn: fn())
     cell_df, puncta_df = _cell_df(), _puncta_df()

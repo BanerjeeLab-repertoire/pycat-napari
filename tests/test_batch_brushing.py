@@ -17,7 +17,9 @@ from pycat.utils.selection_service import SelectionService
 from pycat.utils.batch_brushing import (SOURCE_PATH_COLUMN, assemble_batch_object_tables,
                                         mount_batch_workspace)
 
-pytestmark = pytest.mark.core
+# NOTE: not a file-level `pytestmark` — the assemble/resolve-offline tests are headless (core); the
+# mount_batch_workspace test builds real Qt widgets and requests `qtbot` (integration). Marked per test so
+# the `core` lane stays genuinely headless (test_core_lane_is_headless enforces this).
 
 _BBOX = (5, 5, 11, 11)          # y0, x0, y1, x1 of the bright square in each synthetic image
 
@@ -47,6 +49,7 @@ def _make_batch(tmp_path):
     return out, source_paths
 
 
+@pytest.mark.core
 def test_assemble_tags_each_row_with_its_source_image(tmp_path):
     out, srcs = _make_batch(tmp_path)
     tables = assemble_batch_object_tables(out, srcs)
@@ -56,6 +59,7 @@ def test_assemble_tags_each_row_with_its_source_image(tmp_path):
     assert cell[ENTITY_ID_COLUMN].nunique() == 2
 
 
+@pytest.mark.core
 def test_a_batch_row_resolves_to_its_image_offline(tmp_path):
     out, srcs = _make_batch(tmp_path)
     cell = assemble_batch_object_tables(out, srcs)['cell']
@@ -71,6 +75,7 @@ def test_a_batch_row_resolves_to_its_image_offline(tmp_path):
     assert np.asarray(crop).max() >= 1000                  # the crop contains the object's bright square
 
 
+@pytest.mark.integration
 def test_mount_batch_workspace_pulls_up_the_image_on_selection(tmp_path, qtbot):
     out, srcs = _make_batch(tmp_path)
     service = SelectionService(defer=lambda fn: fn())

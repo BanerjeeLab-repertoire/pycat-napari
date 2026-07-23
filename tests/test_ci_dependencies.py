@@ -278,3 +278,135 @@ def test_no_undeclared_module_scope_imports():
           "If the package is an OPTIONAL feature, move the import inside the function that "
           "uses it — that is what the other twelve undeclared packages do, correctly."
     )
+
+
+# ── The core lane must stay HEADLESS: no core test may reach for Qt ───────────────────────
+#
+# `core` is declared "no napari, no Qt, no GPU. Must pass headlessly." Four brushing tests were
+# marked `core` while requesting the `qtbot` fixture (pytest-qt). It passed wherever pytest-qt
+# happened to be installed and turned into a hard `fixture 'qtbot' not found` collection ERROR in
+# the minimal CI lane that deliberately omits it. Installing pytest-qt would have hidden the
+# mis-marking and left `core` silently Qt-dependent — so instead the mis-marked tests moved to
+# `integration`, and this guard makes the contract enforceable so it can't drift back.
+
+_TESTS_DIR = _ROOT / "tests"
+_QT_FIXTURES = {"qtbot", "qapp", "qapp_args", "qtlog", "qtmodeltester"}
+_GUI_MODULES = {"napari", "PyQt5", "PyQt6", "qtpy", "pytestqt"}
+
+
+def _mark_names(expr):
+    """The mark names in a `pytest.mark.<name>` (or `pytest.mark.<name>(...)`) expression, or a
+    list/tuple of them — used for both the `pytestmark = ...` assignment and `@pytest.mark.*` decorators."""
+    names = set()
+    for e in (expr.elts if isinstance(expr, (ast.List, ast.Tuple)) else [expr]):
+        target = e.func if isinstance(e, ast.Call) else e          # unwrap `pytest.mark.core()`
+        if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Attribute)
+                and target.value.attr == "mark"):
+            names.add(target.attr)
+    return names
+
+
+def _module_level_marks(tree):
+    """Marks applied to the whole module via `pytestmark = ...` (empty if none)."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "pytestmark" for t in node.targets):
+            return _mark_names(node.value)
+    return set()
+
+
+def _is_core_selected(func, module_marks):
+    """Would `pytest -m core` select this test? True if it carries the `core` mark from its own
+    decorators OR the module-level `pytestmark` (marks are additive — a per-test `integration`
+    does NOT cancel a module-level `core`, which is exactly why blanket `pytestmark` is unsafe here)."""
+    decorator_marks = set()
+    for d in func.decorator_list:
+        decorator_marks |= _mark_names(d)
+    return "core" in decorator_marks or "core" in module_marks
+
+
+def _local_fixtures(tree):
+    """Names of fixtures DEFINED in this file (a `@pytest.fixture`-decorated function). A file that
+    supplies its own Qt fixture — e.g. a `qapp` guarded by `importorskip('PyQt5')`, which SKIPS rather
+    than errors when Qt is absent — is self-sufficient and headless-safe; it is not relying on pytest-qt."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for d in node.decorator_list:
+                target = d.func if isinstance(d, ast.Call) else d
+                if isinstance(target, ast.Attribute) and target.attr == "fixture":
+                    names.add(node.name)
+                elif isinstance(target, ast.Name) and target.id == "fixture":
+                    names.add(node.name)
+    return names
+
+
+@pytest.mark.core
+def test_no_core_marked_test_requests_a_qt_fixture():
+    """A `core` test must run headlessly, so it may not depend on a pytest-qt-provided fixture.
+
+    Only fixtures NOT defined in the same file count: a file that defines its own `qapp` via
+    `importorskip` skips (never errors) when Qt is absent, which is the safe headless pattern. It is
+    reliance on pytest-qt to supply `qtbot`/`qapp` that turned into a hard collection error in CI."""
+    offenders = []
+    for path in sorted(_TESTS_DIR.rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        module_marks = _module_level_marks(tree)
+        supplied_locally = _local_fixtures(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                if not _is_core_selected(node, module_marks):
+                    continue
+                params = {a.arg for a in node.args.args} | {a.arg for a in node.args.kwonlyargs}
+                for qt in sorted((params & _QT_FIXTURES) - supplied_locally):
+                    offenders.append(f"{path.name}::{node.name}  requests '{qt}' (from pytest-qt)")
+
+    assert not offenders, (
+        "These `core`-marked tests depend on a pytest-qt fixture, but `core` is declared headless "
+        "(no napari/Qt/GPU) and CI's minimal lane omits pytest-qt — so this is a hard "
+        "`fixture not found` collection error there:\n  " + "\n  ".join(offenders)
+        + "\n\nMove the test to `integration` (it needs a real QApplication), or — if it does NOT "
+          "actually create a Qt widget — drop the fixture so it stays genuinely headless. Do NOT "
+          "'fix' this by installing pytest-qt into the core lane: that hides the mis-marking and "
+          "leaves core Qt-dependent, so it breaks again on the next minimal run."
+    )
+
+
+@pytest.mark.core
+def test_no_core_test_file_imports_the_gui_stack_at_module_scope():
+    """A file containing a `core` test may not import napari/PyQt at module scope — that import
+    fails at COLLECTION time in the headless lane, erroring every test in the file (core ones
+    included) before any of them runs. GUI imports for integration tests must be lazy (in-function)."""
+    offenders = []
+    for path in sorted(_TESTS_DIR.rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        module_marks = _module_level_marks(tree)
+        has_core = any(
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+            and _is_core_selected(n, module_marks)
+            for n in ast.walk(tree))
+        if not has_core:
+            continue
+        for node in tree.body:                       # MODULE SCOPE only
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                if name.split(".")[0] in _GUI_MODULES:
+                    offenders.append(f"{path.name}  imports '{name}' at module scope")
+
+    assert not offenders, (
+        "These files contain a `core` test but import the GUI stack at MODULE SCOPE:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nThe import runs at collection time and fails in the headless core lane (which omits "
+          "napari/Qt on purpose), erroring the file's core tests for the wrong reason. Move the GUI "
+          "import inside the integration test that needs it."
+    )

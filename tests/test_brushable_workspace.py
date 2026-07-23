@@ -20,7 +20,9 @@ from pycat.utils.selection_service import SelectionService, SelectionState
 from pycat.ui.brushable_workspace import BrushablePlot
 from tests.selection_view_contract import assert_selection_view_contract
 
-pytestmark = pytest.mark.core
+# NOTE: not a file-level `pytestmark` — the BrushablePlot tests run on a headless matplotlib Agg canvas
+# (core), while the workspace-assembly tests build a real BrushableWorkspace QWidget and request `qtbot`
+# (integration). Marked per test so the `core` lane stays headless (test_core_lane_is_headless enforces it).
 
 
 def _service():
@@ -52,6 +54,7 @@ def _click_point(view, i):
 
 
 # ── the contract ────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.core
 def test_the_plot_satisfies_the_selection_view_contract():
     service = _service()
     df = _cell_df()
@@ -68,6 +71,7 @@ def test_the_plot_satisfies_the_selection_view_contract():
         other_state=SelectionState(selected=frozenset({'x/y/z/9/9'}), primary='x/y/z/9/9'))
 
 
+@pytest.mark.core
 def test_a_plot_click_selects_the_nearest_object_everywhere():
     service = _service()
     seen = []
@@ -81,6 +85,7 @@ def test_a_plot_click_selects_the_nearest_object_everywhere():
     view.close()
 
 
+@pytest.mark.core
 def test_an_inbound_selection_rings_the_point_without_emitting():
     service = _service()
     commands = []
@@ -95,6 +100,7 @@ def test_an_inbound_selection_rings_the_point_without_emitting():
 
 
 # ── the workspace assembly (needs a QApplication) ─────────────────────────────────────────────────
+@pytest.mark.integration
 def test_a_plot_and_a_table_over_the_same_data_brush_together(qtbot):
     from pycat.ui.brushable_workspace import BrushableWorkspace
     service = _service()
@@ -116,6 +122,7 @@ def test_a_plot_and_a_table_over_the_same_data_brush_together(qtbot):
     ws.detach()
 
 
+@pytest.mark.integration
 def test_the_viewer_level_dispatcher_picks_the_finest_tier_regardless_of_active_layer(qtbot):
     """One viewer-level handler tries the tiers finest-first, so a click on a condensate brushes the
     condensate and a click on bare cell brushes the cell — without switching the active napari layer."""
@@ -151,6 +158,7 @@ def test_the_viewer_level_dispatcher_picks_the_finest_tier_regardless_of_active_
     assert ws._viewer_cb not in viewer.mouse_drag_callbacks     # handler removed on teardown
 
 
+@pytest.mark.integration
 def test_two_entity_tiers_are_independent_on_one_service(qtbot):
     """A cell selection lights the cell views; a condensate selection lights the condensate table — one
     does not fire the other's views (they are different entity keys)."""

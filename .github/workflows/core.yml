@@ -79,6 +79,13 @@ jobs:
           # (following pycat.toolbox imports transitively) and fails if any is missing here.
           # Hand-maintaining it is exactly how sklearn got left out.
           pip install scikit-learn
+          # pytest + pytest-cov + ruff only — NOT pytest-qt. This lane runs `-m core`, which is
+          # declared headless (no napari/Qt/GPU). Qt-requiring tests are marked `integration` and run
+          # elsewhere (locally via `pip install -e ".[test]"`, which DOES include pytest-qt; a dedicated
+          # GUI CI lane is the natural next step). tests/test_ci_dependencies.py now enforces this both
+          # ways: no `core` test may request a pytest-qt fixture, and no core-test file may import the GUI
+          # stack at module scope — so installing pytest-qt here is unnecessary and would silently let
+          # `core` drift back to Qt-dependent.
           pip install pytest pytest-cov ruff
           # PyCAT uses a SRC-LAYOUT (src/pycat/), so `import pycat` does NOT work from a
           # checkout — the package must be installed. Without this, every test that
