@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.305"
+version = "1.6.306"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -295,10 +295,10 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 addopts = "-v --cov=pycat --cov-report=term-missing"
 testpaths = ["tests"]
-# Run `pytest` from a fresh clone WITHOUT `PYTHONPATH=src`. CI still installs the package (`pip install
-# --no-deps -e .`) so its lane tests real imports; this only makes a bare local `pytest` work. NOTE: a
-# dedicated wheel-install CI lane (import the built artifact, not src/) is the outstanding half of
-# release_engineering Part B — until it lands, `pythonpath` must not be treated as packaging verification.
+# Run `pytest` from a fresh clone WITHOUT `PYTHONPATH=src`. This is a source-lane convenience only, and it is
+# BACKED by the `wheel` CI job in .github/workflows/core.yml, which runs the same `-m core` suite against the
+# INSTALLED wheel (`-o pythonpath=` there clears this so `import pycat` resolves to the artifact, not src/).
+# So `pythonpath` cannot hide a packaging error: the source lane and the wheel lane must agree.
 pythonpath = ["src"]
 # qt_api is consumed by pytest-qt (the `integration` lane and local `.[test]` runs). In the minimal
 # headless `core` lane pytest-qt is absent, so pytest emits a harmless "Unknown config option: qt_api"

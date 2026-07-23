@@ -1,3 +1,21 @@
+## [1.6.306] - 2026-07-23
+### Added — **A wheel-install CI lane backs the `pythonpath` convenience (release_engineering Part B, complete).**
+1.6.305 added `pythonpath = ["src"]` so a bare `pytest` runs from a clone, but the spec is explicit that this
+must be backed by a lane that tests the built artifact — otherwise the source lane can pass while the wheel is
+broken (a module or package-data file present in `src/` but missing from the artifact). This adds that lane.
+- New **`wheel` job** in `.github/workflows/core.yml`: installs the same minimal compute deps as the `core`
+  job, builds the wheel, installs it **`--no-deps` (not editable, not `src/`)**, and runs the **same `-m core`
+  suite** against the installed package. `PYCAT_ALLOW_INSTALLED=1` satisfies the conftest working-tree guard
+  (which otherwise refuses to test an installed copy), and `-o pythonpath=` clears the `["src"]` setting so
+  `import pycat` resolves to the **wheel**, not `src/` — the whole point of the lane. The source lane and the
+  wheel lane must agree.
+- **Verified locally before landing** (a GitHub-only YAML change is otherwise unverifiable): installed the
+  built wheel to an isolated directory, confirmed `import pycat` resolves to it (not `src/`), and ran the full
+  `-m core` suite against it — **1816 passed**, identical to the source lane, including the packaging-sensitive
+  tests (`test_headless_science` imports every toolbox module; `test_tag_resolver` uses the shipped binding
+  table; `test_distribution_size` checks wheel contents). This is exactly what the CI job automates.
+- release_engineering Part B is now complete; only Part C (finer marker tiers) remains.
+
 ## [1.6.305] - 2026-07-23
 ### Changed — **Correctness lint is now BLOCKING, and the Development Status is Beta (release_engineering Parts A + D).**
 - **Part A — correctness ruff selection blocks CI.** The `F821,F823,F601,F811,B006,B023,B904` selection was

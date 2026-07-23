@@ -1,18 +1,20 @@
 # Claude Code spec — Release-engineering hardening
 
-> **◐ STATUS — Parts A + D DONE (1.6.305); Parts B (partial) + C remain.**
+> **◐ STATUS — Parts A + B + D DONE (A/D 1.6.305, B 1.6.306); Part C remains.**
 > **Part A — DONE.** Ran the real correctness selection: **65 findings** (NOT near-zero as the spec expected)
 > — 62 F811 redundant re-imports + 3 B023 closures (the B023 in the 1.6.295 `parse_ome_channels_and_instrument`).
 > Drove all to zero (redundant imports removed; one cross-module re-import verified same-object before removal;
 > `_pick` binds its loop vars), then removed `|| true` from the correctness step in `core.yml` — it is now
 > BLOCKING. F841 + style stay advisory.
 > **Part D — DONE.** `Development Status :: 4 - Beta`.
-> **Part B — PARTIAL.** `pythonpath = ["src"]` added (bare `pytest` runs from a clone). The **wheel-install CI
-> lane** that must back it (import the built artifact, not `src/`; needs the conftest working-tree-guard escape
-> hatch) is NOT yet added — flagged in the pyproject comment so `pythonpath` is not mistaken for packaging
-> verification. **Part C (finer marker tiers: core/base/gui/…) remains** — a large re-marking that is its own
-> increment; note the recent minimal-lane failures (1.6.303) are exactly what a true minimal `core` tier
-> formalises.
+> **Part B — DONE.** `pythonpath = ["src"]` (1.6.305) + the **`wheel` CI job** (1.6.306) that builds the wheel,
+> installs it `--no-deps` (not editable, not src/), and runs the same `-m core` suite against the artifact
+> (`PYCAT_ALLOW_INSTALLED=1` for the working-tree-guard escape hatch, `-o pythonpath=` so `import pycat`
+> resolves to the wheel not src/). Verified locally before landing: installed the wheel to an isolated dir,
+> confirmed `pycat` imports from it, ran the FULL `-m core` — 1816 passed, identical to the source lane. The
+> source and wheel lanes must agree.
+> **Part C (finer marker tiers: core/base/gui/…) remains** — a large re-marking that is its own increment;
+> the recent minimal-lane failures (1.6.303) are exactly what a true minimal `core` tier formalises.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.297 · Verified against the 1.6.297 tree. The CI/config
 cluster from the engineering audit, still largely unaddressed. Individually small; collectively they are
