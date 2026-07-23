@@ -20,6 +20,7 @@ Table of Contents
    installation
    usage/index
    features
+   known_issues
    api/index
    development/index
    development/contributing
