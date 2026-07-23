@@ -1,3 +1,21 @@
+## [1.6.290] - 2026-07-23
+### Added — **A shared metadata validity filter: a present-but-meaningless value can no longer masquerade as real (tag_confidence_and_metadata_validity Part 2).**
+A present-but-meaningless metadata value is worse than an absent one -- it looks authoritative, suppresses the
+prompt that would have asked, and silently satisfies gates meant to catch missing information. Real files show
+it: a Zeiss export writes `Detector Model=""`, `PositionX="NaN"`.
+
+- New `utils/metadata_validity.py`: `is_meaningful(field, value)` rejects empty/whitespace strings,
+  placeholder tokens (`unknown`, `N/A`, `none`, `null`, `-`, `?`, ...), non-finite numbers, and field-aware
+  sentinels -- a `pixel_size` of 1.0, a `gain`/`magnification`/`NA` of 0 -- while NEVER blanket-rejecting the
+  number 1 (`binning`, `amplification_gain`). The zero rule is precise, not a substring smear (`channel_name`
+  is untouched). `rejection_reason` explains a discard so it is visible, not silent. A rejected value leaves
+  the field None, which correctly triggers the existing gates.
+- Applied at the metadata write guard (`parse_description_blob`), so placeholder values in a MicroManager
+  summary are dropped rather than recorded.
+- `tests/test_metadata_validity.py` (`core`, 28 tests) covering the placeholder set, the field-aware
+  sentinels, and the guard application. Full `pytest -m core` green (1747). Parts 1 (evidence-graded
+  confidence) and 3 (contradiction surfacing) of the spec remain.
+
 ## [1.6.289] - 2026-07-23
 ### Added — **Sidecar metadata discovery + the ISS Vista parser (sidecar_metadata Parts 2-3): a companion file's channel identity is found and read, bounded and never gating.**
 Some images carry no channel identity at all (a plain 2-D TIFF from ISS Vista), but a companion file beside

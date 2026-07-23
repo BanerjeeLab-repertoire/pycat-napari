@@ -1,5 +1,8 @@
 # Claude Code spec — Evidence-based confidence, metadata validity filtering, and contradiction surfacing that doesn't numb the user
 
+> **◐ STATUS — Part 2 (the `is_meaningful` validity filter) DONE, shipped 1.6.290: `utils/metadata_validity.py` (empty/placeholder/non-finite + field-aware pixel_size=1.0 / gain·magnification·NA=0 sentinels, never blanket-rejecting the number 1), applied at the metadata write guard; `tests/test_metadata_validity.py` (28 core tests). Part 1 (evidence-graded confidence) + Part 3 (contradiction surfacing) remain.**
+
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. Three joined
 problems in the tag/metadata layer: confidence numbers that carry **no information**, **no filter** on
 generic-but-invalid metadata values, and **no visible signal** when metadata contradicts itself or the

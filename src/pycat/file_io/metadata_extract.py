@@ -113,7 +113,10 @@ def parse_description_blob(text):
                 for k, v in data.items():
                     if isinstance(v, (dict, list)):
                         continue   # skip nested containers in the flat view
-                    if v is not None and str(v) != '':
+                    # A present-but-meaningless value (empty, a placeholder like 'N/A', NaN) is worse than
+                    # an absent one — it looks authoritative and suppresses the prompt. Keep only meaningful.
+                    from pycat.utils.metadata_validity import is_meaningful
+                    if is_meaningful(str(k), v):
                         out[str(k)] = v
                 if out:
                     return out
