@@ -1,7 +1,7 @@
 # Claude Code spec — Sidecar metadata discovery, the ISS case, and a last-resort channel-identity dialog
 
 > **◐ STATUS — Part 1 (both immediate bug fixes) DONE: Step 1a shipped 1.6.285, Step 1b shipped 1.6.286.
-> Parts 2–4 (sidecar discovery, ISS parser, channel dialog) remain — they need the real ISS fixture files.**
+> Parts 2-3 CORE DONE (sidecar discovery mechanism + ISS parser, shipped 1.6.289; built and tested against a synthetic fbs matching the spec format). Load-path integration + Part 4 dialog remain (see the GUI/follow-ons TODO).**
 >
 > **Step 1b — DONE.** `metadata_extract._parse_voxelsize` parses `VoxelSize=X x Y x Z` (µm) out of a TIFF
 > `PageName`; `extract_tiff_metadata` fills `z_step_um` from Z (the 19 µm the structured pixel-size object

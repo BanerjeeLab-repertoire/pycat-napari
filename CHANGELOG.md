@@ -1,3 +1,23 @@
+## [1.6.289] - 2026-07-23
+### Added — **Sidecar metadata discovery + the ISS Vista parser (sidecar_metadata Parts 2-3): a companion file's channel identity is found and read, bounded and never gating.**
+Some images carry no channel identity at all (a plain 2-D TIFF from ISS Vista), but a companion file beside
+them does (`im-1-FUS-PLD-1_fbs.xml` next to `im-1-FUS-PLD-1_Ch1.tif`). This adds the mechanism to find and
+read it.
+
+- New `file_io/sidecar_discovery.py`: a `SidecarParser` registry, `discover_sidecar(image_path)` (progressive
+  stem matching — the full stem, then with a channel/position suffix stripped, then with a known sidecar tag;
+  the image's OWN directory only, no recursion, a hard entry cap), and `sidecar_metadata_for` (discover +
+  parse). **Never raises, never gates** — a miss/failure/slow scan just means the image loads with its in-file
+  metadata. New instruments are added by registering a parser, not editing the loader.
+- The ISS Vista `_fbs.xml` parser (Part 3, proving the mechanism): parses the sectioned free-text
+  `<fromComments>` into per-channel records — Ch1 647/57 nm + APD, Ch2 525/50 nm — plus lasers (488, 635),
+  objective magnification (60), and dwell time, and records `modality='fluorescence'` justified by the
+  emission filters + APD detectors (never a bare assertion, never brightfield).
+- `tests/test_sidecar_discovery.py` (`core`, 6 tests) incl. the bounded-scan (no recursion) and non-gating
+  (absent → nothing, never raises) guarantees. Full `pytest -m core` green (1719). REMAINING: wiring
+  discovery into the live load path + the naming tiers, and the last-resort channel-identity dialog (Part 4)
+  — recorded in docs/audits/TODO_gui_verification_and_followons.md.
+
 ## [1.6.288] - 2026-07-23
 ### Changed — **Brushable workspace polish: image picking no longer depends on the active napari layer, and a reloaded session re-opens its brushable panel.**
 Two follow-ons to the brushable-results-workspace feature.
