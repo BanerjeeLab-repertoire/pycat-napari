@@ -35,7 +35,7 @@ from pycat.utils.notify import show_warning as napari_show_warning
 
 # Local application imports
 from pycat.toolbox.label_and_mask_tools import binary_morph_operation, opencv_contour_func
-from pycat.utils.general_utils import dtype_conversion_func, crop_bounding_box, create_overlay_image
+from pycat.utils.general_utils import dtype_conversion_func, crop_bounding_box, create_overlay_image, debug_log
 from pycat.utils.math_utils import remove_outliers_iqr
 # ui_utils pulls in the Qt/napari stack; imported at CALL time so the measurement
 # functions in this module (cell_analysis_func, puncta_analysis_func) stay testable
@@ -723,6 +723,12 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
     """
     # Initialize an array to store puncta labels corresponding to their cells
     cell_labeled_puncta = np.zeros_like(labeled_cells)
+    # A parallel array where each punctum carries a GLOBALLY-unique label (not its per-cell one). The
+    # per-cell labels restart at 1 in every cell, so they cannot key a click in the image; this can. The
+    # `global_punctum_label` column stamped below maps each puncta_df row to its label here, so clicking a
+    # punctum resolves to the right row. `_global` is the running offset that makes the labels unique.
+    global_labeled_puncta = np.zeros_like(labeled_cells)
+    _global = 0
     # Define the properties to measure for each object and create an empty list to store additional properties
     properties = ('label', 'area', 'intensity_mean', 'axis_major_length', 'axis_minor_length', 'eccentricity', 'perimeter', 'bbox')
     puncta_prop_list = []
@@ -753,6 +759,13 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         # Label individual puncta within the cell for property measurements
         labeled_puncta = sk.measure.label(puncta_mask_holder)
 
+        # Paint this cell's puncta into the GLOBAL layer with unique labels (local label + running offset),
+        # so each punctum in the frame has a distinct value a click can resolve.
+        _local_max = int(labeled_puncta.max())
+        if _local_max:
+            _pos = labeled_puncta > 0
+            global_labeled_puncta[_pos] = labeled_puncta[_pos] + _global
+
         # Measure properties of labeled puncta
         df = pd.DataFrame(sk.measure.regionprops_table(labeled_puncta, intensity_image=image, properties=properties))
         df = normalise_bbox_columns(df)    # bbox-0..3 -> bbox_y0..x1, so a row can be brushed
@@ -763,6 +776,9 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
         df['circularity'] = (circularity - np.min(circularity)) / (np.max(circularity) - np.min(circularity))
         df['micron area'] = df['area'] * data_instance.data_repository['microns_per_pixel_sq']
         df['cell label'] = label
+        # The global label matching global_labeled_puncta above — the key a click in the image maps through.
+        df['global_punctum_label'] = df['label'] + _global
+        _global += _local_max
 
         # Compute this cell's puncta + dilute-phase statistics and write them onto its cell_df row.
         # Extracted to a helper so the per-cell loop stays within the review-length budget.
@@ -774,6 +790,9 @@ def puncta_analysis_func(puncta_masks, image, labeled_cells, data_instance, prog
 
         if progress_callback is not None and (_i % _stride == 0 or _i + 1 == _total):
             progress_callback(_i + 1, _total)
+
+    # Stash the global per-punctum labels so the orchestrator can add a pickable per-punctum layer.
+    data_instance.data_repository['puncta_labels_global'] = global_labeled_puncta
 
     _finalise_puncta_table(puncta_prop_list, data_instance)
 
@@ -864,6 +883,18 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     # fully resolvable by bbox (`crop_for_ref` / `resolve_offline` need no labels layer at all), and
     # `resolve_in_viewer` degrades to its announced guess rather than a silent wrong answer.
     viewer.add_labels(cell_labeled_puncta.astype(int), name="Cell Labeled Puncta Mask")
+
+    # A GLOBALLY-labeled per-punctum layer, so a click in the image resolves to the right punctum (the mask
+    # above is CELL-labeled and cannot). Bound to puncta_df via `global_punctum_label` + `attach_layer_id`, so
+    # a punctum keeps its identity across a save→load (the label array + the entity-stamped table both persist).
+    _global_puncta = data_instance.data_repository.get('puncta_labels_global')
+    if _global_puncta is not None and np.any(_global_puncta):
+        _punctum_layer = viewer.add_labels(_global_puncta.astype(int), name="Condensate Labels")
+        try:
+            from pycat.utils.entity_ref import attach_layer_id
+            attach_layer_id(data_instance.data_repository.get('puncta_df'), _punctum_layer)
+        except Exception as _le:                       # broad-ok: optional_probe — the punctum layer id is best-effort
+            debug_log('feature_analysis: could not bind the puncta table to the condensate-labels layer', _le)
 
     # Create the in-viewer "Overlay Image" exactly as in v1.0.0. This sequence
     # is byte-for-byte the released code that rendered correctly for years:
@@ -962,3 +993,47 @@ def run_puncta_analysis_func(puncta_mask_layer, image_layer, data_instance, view
     window_title = "Analysis Results"
     from pycat.ui.ui_utils import show_dataframes_dialog
     show_dataframes_dialog(window_title, tables_info)
+
+
+def mount_cellular_workspace(viewer, central_manager):
+    """**The two-tier brushable cellular panel.** Two cell-level plots on the left (Csat: condensate vs
+    total intensity; and dilute-vs-nucleus), the cell-wise and condensate-wise tables on the right, and TWO
+    interleaved image tiers — the cell-labels layer and the global per-punctum ('Condensate Labels') layer —
+    so clicking a cell OR a condensate in the image, a plot, or a table lights up the matching object
+    everywhere. Called from the UI after `run_puncta_analysis_func` (it needs `central_manager.selection`,
+    which the science function has no access to). Returns the workspace, or None if it cannot mount."""
+    from pycat.ui.brushable_workspace import BrushableWorkspace
+
+    service = getattr(central_manager, 'selection', None)
+    dr = central_manager.active_data_class.data_repository
+    cell_df = dr.get('cell_df')
+    puncta_df = dr.get('puncta_df')
+    if service is None or cell_df is None or len(cell_df) == 0:
+        return None
+
+    src = dr.get('file_path') or None
+    ws = BrushableWorkspace(service)
+    if 'puncta_intensity_total' in cell_df.columns:
+        ws.add_plot(cell_df, 'intensity_total', 'puncta_intensity_total', 'cell.plot.csat',
+                    title='Csat — condensate vs total intensity')
+    if 'cell_xor_puncta_int_total' in cell_df.columns:
+        ws.add_plot(cell_df, 'intensity_total', 'cell_xor_puncta_int_total', 'cell.plot.dilute',
+                    title='Dilute phase vs total intensity')
+    ws.add_table(cell_df, 'cell.table', title='Cells')
+    if puncta_df is not None and len(puncta_df) > 0:
+        ws.add_table(puncta_df, 'condensate.table', title='Condensates')
+
+    if 'Labeled Cell Mask' in viewer.layers:
+        ws.add_image_tier(viewer, viewer.layers['Labeled Cell Mask'], cell_df, 'cell.image',
+                          label_col='label', source_path=src)
+    if (puncta_df is not None and 'global_punctum_label' in getattr(puncta_df, 'columns', ())
+            and 'Condensate Labels' in viewer.layers):
+        ws.add_image_tier(viewer, viewer.layers['Condensate Labels'], puncta_df, 'condensate.image',
+                          label_col='global_punctum_label', source_path=src, reveal='overlay')
+
+    try:
+        dock = viewer.window.add_dock_widget(ws, name='Cellular Object Results', area='right')
+        central_manager._cellular_results_dock = (dock, ws)      # keep alive; detach on close
+    except Exception as exc:                             # broad-ok: no viewer window headless — the workspace is still returned
+        debug_log('feature_analysis: could not dock the cellular workspace', exc)
+    return ws

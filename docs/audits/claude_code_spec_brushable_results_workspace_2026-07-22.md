@@ -119,9 +119,18 @@ WorkspaceSpec(
    there is no selection service). `tests/test_invitro_brushable.py` (`core`, 3 tests): the augmentation adds
    size/circularity/bbox/identity without changing any droplet number; a click on a droplet selects its
    entity; the image tier passes `assert_selection_view_contract`. Full core green (1712).
-3. **Cellular (Pipeline A)** — the two-tier instantiation. `cell_df`/`puncta_df` are already brush-ready;
-   add a per-punctum **condensate pick target** (Decision 2); mount at `feature_analysis_tools.py:960` with
-   2 cell plots + cell table + condensate table + two image tiers (cell labels, condensate picker).
+3. **Cellular (Pipeline A) — DONE (shipped 1.6.284).** Two-tier. `puncta_analysis_func` now paints a
+   GLOBALLY-unique per-punctum labels array (the cell-labeled mask cannot key a click to a punctum) and
+   stamps a `global_punctum_label` column mapping each row to it; `run_puncta_analysis_func` adds the
+   `'Condensate Labels'` layer + `attach_layer_id`, so a punctum keeps its identity across save→load (the
+   label array + the entity-stamped table both persist, and the entity id is deterministic from the durable
+   `dataset_id`). `mount_cellular_workspace(viewer, central_manager)` (called from the UI, which alone has
+   `central_manager.selection`) builds the panel: Csat + dilute plots left, cell + condensate tables right,
+   and TWO image tiers — cell labels (`reveal='resolve'`) and per-punctum (`reveal='overlay'`, a new
+   `BrushableImageTier` mode: bbox rectangle, since the punctum layer's labels are global but the row's
+   object_id is per-cell). `tests/test_cellular_brushable.py` (`core`, 2 tests): the global layer is unique
+   while per-cell labels restart; the mount wires all six views and the cell/condensate tiers are
+   independent. Additive — no cell/puncta number changes. Full core green (1714).
 4. **Batch** — feed the workspace from batch outputs at run end; add the offline-crop seam (per-image-CSV
    bbox join + `source_path` reconstruction → `resolve_offline`). Reuse `comparative_figures` where it fits.
 

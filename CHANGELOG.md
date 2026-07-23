@@ -1,3 +1,23 @@
+## [1.6.284] - 2026-07-23
+### Added — **Cellular object analysis (Fluorescence): a two-tier brushable panel — cell AND condensate both brush the plots, tables, and image (Phase 3).**
+Meet's primary ask. The Csat plot (condensate vs total intensity) and the dilute-vs-total plot stack on the
+left; the cell-wise and condensate-wise tables stack on the right; and TWO interleaved image tiers — the
+cell-labels layer and a new per-punctum labels layer — let a click on a cell OR a condensate in the image, a
+plot point, or a table row light up the matching object everywhere.
+
+- `puncta_analysis_func` now paints a GLOBALLY-unique per-punctum labels array alongside the existing
+  cell-labeled one (whose values are cell labels and so cannot key a click to a punctum), and stamps a
+  `global_punctum_label` column mapping each `puncta_df` row to it. `run_puncta_analysis_func` adds the
+  `'Condensate Labels'` layer and `attach_layer_id`s it — so a **punctum keeps its identity across a
+  save→load** (the label array and the entity-stamped table both persist, and the entity id is deterministic
+  from the durable `dataset_id`). Additive: no cell/puncta number changes.
+- `mount_cellular_workspace` (called from the UI, which alone has `central_manager.selection`) builds the
+  panel and wires both image tiers. New `BrushableImageTier` `reveal='overlay'` mode draws the bbox rectangle
+  (robust when a layer's label values are not the row's object_id — the per-punctum case).
+- `tests/test_cellular_brushable.py` (`core`, 2 tests): the global layer is unique while per-cell labels
+  restart; the mount wires all six views and the cell/condensate tiers stay independent. Full `pytest -m
+  core` green (1714). Phase 4 (batch) is the remaining piece.
+
 ## [1.6.283] - 2026-07-22
 ### Added — **In-vitro fluorescence: a brushable droplet workspace — click a droplet in the image, a plot, or the table and the others light up (Phase 2).**
 The in-vitro field-summary produced a per-droplet table you could only look at — no bounding box, no

@@ -176,13 +176,17 @@ class BrushableImageTier:
     """
 
     def __init__(self, viewer, labels_layer, df, service, view_id, *,
-                 label_col, source_path=None, entity_col=ENTITY_ID_COLUMN):
+                 label_col, source_path=None, entity_col=ENTITY_ID_COLUMN, reveal='resolve'):
         from pycat.utils.object_ref import ObjectRef
 
         self.viewer = viewer
         self.labels_layer = labels_layer
         self.service = service
         self.view_id = str(view_id)
+        # 'resolve' highlights via the layer's selected_label (its label values ARE the object ids —
+        # cells, droplets). 'overlay' draws the bbox rectangle instead — for a layer whose label values
+        # are NOT the row's object_id (the global per-punctum layer, where the row's label is per-cell).
+        self.reveal = reveal
         self._label_to_eid = {}
         self._eid_to_ref = {}
         self._cb = None
@@ -236,10 +240,10 @@ class BrushableImageTier:
         if not refs:
             return
         try:
-            if len(refs) == 1:
-                resolve_in_viewer(refs[0], self.viewer, centre=False)
+            if self.reveal == 'overlay' or len(refs) > 1:
+                show_selection(self.viewer, refs)       # bbox rectangle — robust when label != object_id
             else:
-                show_selection(self.viewer, refs)
+                resolve_in_viewer(refs[0], self.viewer, centre=False)
         except Exception as exc:                         # broad-ok: the reveal is best-effort; never fail a selection over it
             debug_log('brushable_workspace: could not reveal the selection in the image', exc)
 
@@ -320,11 +324,11 @@ class BrushableWorkspace(QWidget):
             self._views.append(brushable)
         return brushable
 
-    def add_image_tier(self, viewer, labels_layer, df, view_id, *, label_col, source_path=None):
+    def add_image_tier(self, viewer, labels_layer, df, view_id, *, label_col, source_path=None, reveal='resolve'):
         """Add a napari labels layer as a brushing tier (click an object ↔ the plots/tables). Two tiers
         (cell labels + condensate labels) over one viewer are just two of these. Returns the tier view."""
         tier = BrushableImageTier(viewer, labels_layer, df, self.service, view_id,
-                                  label_col=label_col, source_path=source_path)
+                                  label_col=label_col, source_path=source_path, reveal=reveal)
         self._views.append(tier)
         return tier
 

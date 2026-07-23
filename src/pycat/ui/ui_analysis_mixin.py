@@ -115,6 +115,16 @@ class _AnalysisWidgetsMixin:
                 'labels_layer': puncta_measure_dropdown_labels.currentText(),
                 'image_layer': puncta_measure_dropdown_images.currentText(),
             })
+            # Mount the two-tier brushable panel (plots + cell/condensate tables + cell & punctum image
+            # tiers). Done here because it needs central_manager.selection, which the science function cannot
+            # reach; best-effort so a brushing hiccup never costs the user their analysis.
+            try:
+                from pycat.toolbox.feature_analysis_tools import mount_cellular_workspace
+                mount_cellular_workspace(self.viewer, self.central_manager)
+            except Exception as _wexc:   # broad-ok: a brushing-mount hiccup must never cost the user their analysis
+
+                from pycat.utils.general_utils import debug_log
+                debug_log('cellular analysis: could not mount the brushable workspace', _wexc)
         puncta_measure_button.clicked.connect(_on_puncta_analysis)
         try:
             from pycat.ui.field_status import button_with_circle
