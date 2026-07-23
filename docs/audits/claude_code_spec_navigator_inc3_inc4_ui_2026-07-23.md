@@ -1,7 +1,19 @@
 # Claude Code spec — Navigator increments 3 & 4: make the generator reachable
 
-> **◐ STATUS — Increment 3 DONE (1.6.308). Increment 4 IN PROGRESS: part 1 (feature-card layer) DONE
-> (1.6.309); part 2 (beginner home dock) remains.**
+> **✅ STATUS — DONE. Increment 3 (1.6.308); increment 4 part 1 feature-card layer (1.6.309) + part 2 the
+> beginner Home dock (1.6.310). Navigator increments 1–4 all shipped.**
+> **Increment 4 part 2 (1.6.310).** `ui/home_dock.py` — `build_home_widget(central_manager)` composes the
+> increment-3 navigator + the capability cards (grouped, mode-filtered) + a Guided/Full toggle that flips &
+> persists `app_mode` and live-re-renders; `install_home_action` mounts a '🏠 Home' menu action (tabify) and
+> greets on a GENUINE first run once (persists the beginner default so it never re-opens automatically or
+> disrupts an existing user). Wired guarded into `central_manager`. `tests/test_home_dock.py` (`integration`,
+> 2 Qt-smoke). **Deliberately conservative vs the spec on two points, both flagged for live GUI validation:**
+> (a) first-run auto-open is once, not every beginner launch (the spec's "default surface when is_beginner()"
+> would re-open every launch — trivially switchable if wanted); (b) advanced mode does NOT reconfigure/hide
+> existing panels at runtime — the menus always stay ("guide, don't cage"); the mode governs the Home card
+> set + the first-run greeting. **Follow-on (unchanged):** the compute-only capabilities (measurement
+> stability, SMLM, kymographs, ratiometric, feature provenance, analysis presets) still need real openers
+> built before they can earn a card.
 > **Increment 4 part 1 (1.6.309).** `utils/feature_cards.py` — `register_default_feature_cards(central_manager)`
 > registers a `FeatureCard` for each capability with a VERIFIED real opener (Data Quality dashboard, Control
 > Validation, Spectral Unmixing, Comparative & Publication Figures, and the never-wired Feature Explorer),

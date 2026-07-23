@@ -131,6 +131,15 @@ class CentralManager:
         except Exception as exc:      # broad-ok: ui_cleanup — feature-card registration must never break startup
             from pycat.utils.general_utils import debug_log
             debug_log("feature cards: registration failed", exc)
+        # The beginner Home dock (navigator inc 4 part 2): guided analysis + the capability cards + the
+        # Guided/Full toggle. Installs a menu action and, on a genuine first run, greets with it once.
+        # Guarded so neither the action nor the first-run auto-open can break launch.
+        try:
+            from pycat.ui.home_dock import install_home_action
+            self._home_action = install_home_action(self)
+        except Exception as exc:      # broad-ok: ui_cleanup — the Home dock must never break startup
+            from pycat.utils.general_utils import debug_log
+            debug_log("home dock: install failed", exc)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)

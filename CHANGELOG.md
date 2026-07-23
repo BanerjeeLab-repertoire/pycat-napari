@@ -1,3 +1,22 @@
+## [1.6.310] - 2026-07-23
+### Added — **The beginner Home dock: guided analysis + every capability as a card, with a Guided/Full toggle (navigator increment 4, part 2 — the increment is complete).**
+The navigator, the feature-card catalogue, and the app-mode were all built and unreachable. This is the front
+door that composes them, so a newcomer is greeted with a guided surface and can *see* what PyCAT can do.
+
+- New `ui/home_dock.py`: `build_home_widget(central_manager)` renders the increment-3 **navigator**
+  question-flow, the **capability cards** grouped by category (filtered to the current mode), and a
+  **Guided/Full** toggle that flips and persists `app_mode` and re-renders live via its change signal.
+  Headless-safe (returns `None` without Qt); all logic lives in the composed pieces, so the file is thin.
+- `install_home_action(central_manager)` adds a '🏠 Home' menu action (tabify mount, 1.6.297) and, on a
+  **genuine first run only**, greets the user with the dock once — conservative by design: it persists the
+  beginner default so later launches don't auto-open, and it never changes the surface for anyone who has
+  already chosen a mode. The menu action reopens it any time; nothing is ever hidden ("guide, don't cage").
+- Wired into `central_manager` startup after the card registration, guarded so neither the action nor the
+  auto-open can break launch.
+- `tests/test_home_dock.py` (`integration`, 2 Qt-smoke): cards render and an advanced-only card is hidden in
+  the beginner view; the toggle flips + persists the mode and reveals the advanced card; a card click invokes
+  its real entry. Full `pytest -m "core or base"` green. **Navigator increments 1–4 are now all shipped.**
+
 ## [1.6.309] - 2026-07-23
 ### Added — **The feature-card layer: every shipped-but-hidden capability with a real opener is now catalogued (navigator increment 4, part 1).**
 `utils/feature_registry.py` and `utils/app_mode.py` were built and tested with **zero consumers**. This adds
