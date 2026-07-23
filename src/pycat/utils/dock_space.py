@@ -78,11 +78,19 @@ def _apply_collapse(window, dock):
     qt = getattr(window, '_qt_window', None)
     if qt is None or dock is None or not hasattr(qt, 'resizeDocks'):
         return
+    # ``Qt.Orientation.Vertical`` is the integer 2. Resolve it from qtpy when present, but fall back to the raw
+    # value so this does NOT hard-require the Qt stack — the minimal headless `core` lane has no qtpy, and a
+    # qtpy ImportError here must not silently turn the collapse into a no-op (which would only surface as a
+    # failing test in that lane, exactly as it did).
     try:
         from qtpy.QtCore import Qt as _Qt
+        vertical = _Qt.Vertical
+    except Exception:      # broad-ok: optional_probe — no qtpy (headless core) → use the raw enum value
+        vertical = 2
+    try:
         # A very large target height maxes the results dock; Qt shrinks the siblings (the tall method panel)
         # to their minimum. This gives the results the freed vertical space without closing the method panel.
-        qt.resizeDocks([dock], [1_000_000], _Qt.Vertical)
+        qt.resizeDocks([dock], [1_000_000], vertical)
     except Exception:      # broad-ok: ui_cleanup — collapse is cosmetic; a failure just leaves the stacking
         pass
 

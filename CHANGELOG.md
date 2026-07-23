@@ -1,3 +1,17 @@
+## [1.6.303] - 2026-07-23
+### Fixed — **Dock collapse no longer silently no-ops in the minimal (no-qtpy) core lane.**
+The `collapse` reflow mode's `_apply_collapse` did `from qtpy.QtCore import Qt` before calling `resizeDocks`.
+In the minimal CI `core` lane — which deliberately excludes the GUI stack, so **qtpy is absent** — that import
+raised, the broad-except swallowed it, and `resizeDocks` was never called, turning the collapse into a silent
+no-op. It surfaced as a failing `core` test (`test_collapse_mode_mounts_stacked_then_grows_the_results_dock`)
+in that lane while passing everywhere qtpy happened to be installed.
+- `_apply_collapse` now resolves `Qt.Orientation.Vertical` from qtpy when present but **falls back to the raw
+  integer value (2)** when qtpy cannot be imported, so the collapse fires regardless of the Qt stack. (This
+  path only ever runs against a real napari window in production, which always has qtpy; the fallback exists so
+  the logic is not hard-coupled to the import, and the minimal-lane test exercises it.)
+- Added a regression test (`test_collapse_fires_the_resize_even_when_qtpy_is_absent`) that blocks the qtpy
+  import and asserts `resizeDocks` still fires — pinning the minimal-lane contract so it cannot drift back.
+
 ## [1.6.302] - 2026-07-23
 ### Fixed — **Python 3.13 is no longer declared installable: the ceiling now matches reality (python313_ceiling_revert).**
 `requires-python` was `">=3.12,<3.14"`, permitting Python 3.13 while advertising only a 3.12 classifier — and worse, 3.13 cannot actually install: `cellpose<4` (a base dep) pulls `numpy<2.1`,

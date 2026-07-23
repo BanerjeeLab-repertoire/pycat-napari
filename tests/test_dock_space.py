@@ -142,6 +142,23 @@ def test_collapse_mode_mounts_stacked_then_grows_the_results_dock(tmp_path):
 
 
 @pytest.mark.core
+def test_collapse_fires_the_resize_even_when_qtpy_is_absent(tmp_path, monkeypatch):
+    # The minimal `core` CI lane has NO qtpy. `_apply_collapse` must still call resizeDocks (Qt.Vertical is
+    # just the int 2) rather than silently no-op because `from qtpy.QtCore import Qt` failed — that swallowed
+    # ImportError only surfaced as a failing test in the minimal lane (the regression this pins).
+    import sys
+    monkeypatch.setitem(sys.modules, 'qtpy', None)
+    monkeypatch.setitem(sys.modules, 'qtpy.QtCore', None)
+    store = _store(tmp_path)
+    set_reflow_mode(store, 'collapse')
+    win = _FakeWindow(with_qt=True)
+    dock = add_results_dock(win, 'W', name='VPT Results', settings=store)
+    assert len(win._qt_window.resizes) == 1                        # resize fired despite no qtpy
+    resized_docks, sizes = win._qt_window.resizes[0]
+    assert resized_docks == [dock] and sizes[0] > 0
+
+
+@pytest.mark.core
 def test_collapse_mode_is_a_clean_noop_without_a_qt_window(tmp_path):
     # no _qt_window (e.g. a stripped/headless window object) → stacked mount, resize simply skipped, no crash
     store = _store(tmp_path)
