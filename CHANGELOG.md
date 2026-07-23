@@ -1,3 +1,19 @@
+## [1.6.285] - 2026-07-23
+### Fixed — **a 2-D TIFF whose pixel size came from the file now shows a µm scale bar, not "px" (sidecar_metadata Step 1a; reported by Meet Raval on an ISS Vista file).**
+The pixel size and its provenance were both read correctly, but the 2-D load path set
+`pixel_size_from_metadata` True only inside the 1.0-sentinel recovery branch. A file whose scale came
+straight from `tiff_tags` (the reader succeeded, so no recovery ran) kept the flag False, and
+`napari_adapter._is_calibrated` then rendered a `px` scale bar on a correctly-calibrated image.
+
+- `file_io.py`'s 2-D path now routes the flag through the ONE provenance helper
+  `_calibration_is_from_metadata` (which reads `pixel_size_source`) whenever a real (non-sentinel) pixel size
+  is present — the same helper the stack path already uses. Guarded on the 1.0 sentinel so a scale rejected as
+  implausible is never resurrected.
+- New `tests/test_sidecar_metadata_step1.py` (`core`, 4 tests) including the spec's guard that **no site sets
+  `pixel_size_from_metadata` by a bare value comparison** (the one documented fallback lives inside the
+  helper). Full `pytest -m core` green (1714). The larger sidecar-discovery / ISS-parser / channel-dialog
+  parts of the spec remain (they need the real ISS fixture files).
+
 ## [1.6.284] - 2026-07-23
 ### Added — **Cellular object analysis (Fluorescence): a two-tier brushable panel — cell AND condensate both brush the plots, tables, and image (Phase 3).**
 Meet's primary ask. The Csat plot (condensate vs total intensity) and the dilute-vs-total plot stack on the

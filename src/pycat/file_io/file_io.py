@@ -429,6 +429,20 @@ class FileIOClass(_StackOpenersMixin):
             except Exception as _pxe:
                 debug_log("file_io: 2D pixel-size recovery failed", _pxe)
 
+            # Provenance flag from the ONE helper the stack path uses — whenever a real (non-sentinel)
+            # pixel size is in the repository, not only inside the recovery branch above. A 2-D TIFF whose
+            # scale came from tiff_tags (the reader succeeded, so no recovery ran) was leaving this False,
+            # and the scale bar then read 'px' on a correctly-calibrated image (the reported ISS-file bug).
+            # Guarded on the sentinel so a rejected-corrupt scale (set to 1.0) is never re-marked as real.
+            try:
+                _dr2 = self.central_manager.active_data_class.data_repository
+                _mpp_sq = float(_dr2.get('microns_per_pixel_sq', 1))
+                if abs(_mpp_sq - 1.0) > 1e-9:
+                    from pycat.file_io.tagging import _calibration_is_from_metadata
+                    _dr2['pixel_size_from_metadata'] = _calibration_is_from_metadata(_dr2, _mpp_sq ** 0.5)
+            except Exception as _fe:   # broad-ok: the provenance flag is best-effort; a failure must not break the load
+                debug_log("file_io: 2D pixel-size provenance flag failed", _fe)
+
             # A 2-D image has ONE frame. Recorded OUTSIDE the metadata `try` below: if extraction
             # fails, the PREVIOUS file's frame count would otherwise still be sitting in the
             # repository, and a stale time axis is worse than an absent one.
