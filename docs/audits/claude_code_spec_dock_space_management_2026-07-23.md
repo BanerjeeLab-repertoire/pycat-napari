@@ -14,10 +14,11 @@
 > **Follow-ons:** ✅ Qt-smoke test of the real tabbed mount (1.6.298 — a live `QMainWindow` verifies tabify
 > genuinely tabs + method state survives, and collapse invokes real `resizeDocks`). ✅ `'collapse'` mode
 > (1.6.298 — a real third mode via `QMainWindow.resizeDocks`, grows the results dock so the method panel
-> shrinks while staying open/reversible/state-preserving). ⏸ **Deferred:** exposing the preference in a
-> settings UI — the codebase has no preferences panel, and the only menu surface is the contract-locked
-> `menu_manager` god-file already flagged for decomposition; the right home is a future small preferences
-> panel, not more accretion there. The preference works today via `dock_space.set_reflow_mode`.
+> shrinks while staying open/reversible/state-preserving). ✅ **Settings-UI exposure — DONE (1.6.299):**
+> built the small preferences panel that was missing (Qt-free `utils/preferences.py` registry + thin
+> `ui/preferences_dialog.py` + a '⚙ Preferences' menu action installed from `central_manager`, NOT the
+> line-capped menu god-file). Results-dock placement (tabify/collapse/stack) is the second control there,
+> alongside the interface level. **All three follow-ons are now complete.**
 >
 > **Note:** the spec's line references (`ui_modules.py:762…`, `vpt/results_dock.py:182`) are from the 1.6.281
 > tree; the results mounts now live under `toolbox/` — the shared-helper fix is location-independent.

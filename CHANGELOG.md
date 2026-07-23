@@ -1,3 +1,27 @@
+## [1.6.299] - 2026-07-23
+### Added — **A preferences panel: the persisted user preferences finally have a surface (unblocks the dock_space follow-on).**
+PyCAT had accumulated persisted user preferences — `app_mode`'s beginner/advanced interface level and
+`dock_space`'s results-dock placement — that were settable only in code, each owned by its own module with no
+UI a user could reach. This adds the small preferences surface they were missing:
+- New Qt-free **`utils/preferences.py`** registry: `list_preferences()` enumerates every user-adjustable
+  preference as a `PreferenceView` (stable key, label, help text, discrete options, current value), and
+  `set_preference(key, value)` forwards a change to the owning module (`app_mode` / `dock_space`), which
+  validates and persists it. Unknown keys / out-of-range values raise rather than silently no-op. Adding a
+  future preference is one registry entry — the UI needs no change. Core-tested (no widgets).
+- New thin **`ui/preferences_dialog.py`**: `build_preferences_dialog()` renders one radio group per
+  preference from the registry with the current value pre-checked; a change applies immediately through
+  `set_preference` (matching how the underlying preferences already notify subscribers live).
+- **Entry point without touching the god-file**: `install_preferences_action(viewer)` adds a '⚙ Preferences'
+  menu-bar action, installed once from `central_manager` right after the menu bar is built — deliberately
+  NOT accreted onto `menu_manager.py`, which is pinned at its line-count ceiling. Headless-safe (no
+  `_qt_window` → clean no-op).
+- This delivers the third `dock_space_management` follow-on (exposing the reflow preference in a settings UI),
+  previously deferred for want of a preferences panel — the results-dock placement is now the second control
+  in that panel, alongside the interface level.
+- Tests: `test_preferences.py` (`core`, 6 — registry list/forward/validation/options-cover-the-owner) and
+  `test_preferences_dialog.py` (`integration`, 5 — the dialog renders + persists, and the installer adds a
+  real menu action / is headless-safe). Full core green (1770).
+
 ## [1.6.298] - 2026-07-23
 ### Added — **Dock-space follow-ons: a real `collapse` mode and a Qt-smoke test of the actual tabbed mount.**
 Two of the three follow-ons noted on the `dock_space_management` spec:

@@ -109,6 +109,10 @@ class CentralManager:
         self.toolbox_functions_ui = ToolboxFunctionsUI(self.viewer, self)
         self.analysis_methods_ui = AnalysisMethodsUI(self.viewer, self)
         self.menu_manager = MenuManager(self.viewer, self)
+        # Preferences panel entry point — installed here rather than in the menu god-file (pinned at its line
+        # ceiling) so the '⚙ Preferences' action lives beside the panel it opens.
+        from pycat.ui.preferences_dialog import install_preferences_action
+        self._preferences_action = install_preferences_action(self.viewer)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)
