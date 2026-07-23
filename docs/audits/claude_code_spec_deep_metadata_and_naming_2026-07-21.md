@@ -1,7 +1,7 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
-> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 element-scoped OME parse DONE (1.6.294). Part 1 per-channel
-> schema + instrument block, and Part 2, remain.**
+> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (element-scoped parse 1.6.294, per-channel + instrument
+> schema 1.6.295). Part 2 (reader-independent merge) remains.**
 >
 > **Part 1 (element-scoped OME parse) — DONE, shipped 1.6.294.** New `_parse_ome_xml_scoped` reads each
 > attribute from the element it belongs to (`ElementTree`, namespace-agnostic): the first `<Pixels>` element's
@@ -10,8 +10,18 @@
 > first-match cross-contamination. The scoped value wins; the whole-string regex remains a gap-filler so
 > nothing already-correct regresses; unparseable OME → `{}` → regex fallback (never crashes). OME-XML is now
 > detected BEFORE the ImageJ `key=value` branch (line-wrapped attributes were mis-parsed as key=value).
-> `tests/test_ome_xml_scoped_parse.py` (`core`, 6 tests). **Remaining in Part 1:** the per-channel `channels`
-> schema and the instrument/objective block. **Part 2** (reader-independent `extract_metadata_merged`) remains.
+> `tests/test_ome_xml_scoped_parse.py` (`core`, 6 tests).
+>
+> **Part 1 (per-channel + instrument schema) — DONE, shipped 1.6.295.** New `parse_ome_channels_and_instrument`
+> (Qt-free, additive) exposes the `channels` list (per-`<Channel>` name/fluor/excitation/emission/contrast/
+> acquisition-mode/detector-id/gain/offset/binning/amplification-gain/color, with detector settings resolving
+> DetectorSettings-then-referenced-Detector) and the `instrument` block (lens_na, nominal_magnification,
+> immersion, medium, refractive_index, dimension_order — the oil-vs-air contradiction recorded, not resolved).
+> Numeric coercion is int/float/None (missing stays missing). Wired into `extract_reader_metadata`
+> (`raw['channels']`/`raw['instrument']`; objective NA lifts into flat `common['numerical_aperture']`).
+> `tests/test_ome_channels_and_instrument.py` (`core`, 7 tests). **Item 4 (deepen CZI/LIF/ND2/IMS readers to
+> the same `channels` shape) and item 5's Qt surface remain as follow-ons.** **Part 2** (reader-independent
+> `extract_metadata_merged`) remains.
 >
 > **Part 3 — DONE.** `channel_naming.identify_channel` gained a `file_stem` argument, a **Tier 1c** (match
 > the stem with the existing `_match_fluorophore_name`, below real metadata but above the pixel/position

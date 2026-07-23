@@ -125,6 +125,113 @@ def _parse_ome_xml_scoped(xml_string):
     return out
 
 
+#: Canonical per-channel keys, always present (None when the file is silent — "missing stays missing").
+_OME_CHANNEL_KEYS = ('index', 'name', 'fluor', 'excitation_nm', 'emission_nm', 'contrast_method',
+                     'acquisition_mode', 'detector_id', 'gain', 'offset', 'binning',
+                     'amplification_gain', 'color')
+#: Canonical instrument/objective keys, always present (None when absent).
+_OME_INSTRUMENT_KEYS = ('lens_na', 'nominal_magnification', 'immersion', 'medium',
+                        'refractive_index', 'dimension_order')
+
+
+def _ome_num(v):
+    """OME numeric attribute → int if integral, float if not, None if absent/unparseable. Never a default —
+    an absent value stays None so it cannot masquerade as a real reading (the pixel-size 'unknown is NaN not
+    one' contract, generalised)."""
+    if v in (None, ''):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return int(f) if f.is_integer() else f
+
+
+def parse_ome_channels_and_instrument(xml_string):
+    """Parse the OME hierarchy that the flat schema cannot express: the **per-channel** acquisition parameters
+    (Ch1 = 405/447 DAPI on Detector:1 at gain 600; Ch3 = a transmitted PMT at a different gain) and the
+    **instrument/objective** block. Purely ADDITIVE — the flat `excitation_nm`/`emission_nm`/etc. stay as they
+    are; this exposes the structure alongside them.
+
+    Reads each ``<Channel>`` from the element it belongs to and resolves its detector: a ``<DetectorSettings>``
+    child carries the per-channel gain/offset/binning, falling back to the referenced ``<Detector>`` element
+    for anything the settings omit (gain lives on one or the other depending on the vendor export). The
+    instrument block reads ``<Objective>`` (LensNA/NominalMagnification/Immersion) and ``<ObjectiveSettings>``
+    (Medium/RefractiveIndex — recorded even when it CONTRADICTS the objective's immersion; contradictions are
+    surfaced, never silently resolved) and the ``<Pixels>`` DimensionOrder.
+
+    Returns ``{'channels': [...], 'instrument': {...}}`` — each channel dict and the instrument dict carry the
+    full canonical key set with ``None`` for anything absent (missing stays missing). Returns empty channels /
+    all-None instrument if the XML cannot be parsed; never raises. Namespace-agnostic. Qt-free, core-tested."""
+    import xml.etree.ElementTree as _ET
+    empty = {'channels': [], 'instrument': {k: None for k in _OME_INSTRUMENT_KEYS}}
+    if not xml_string or not isinstance(xml_string, str):
+        return empty
+    try:
+        root = _ET.fromstring(xml_string)
+    except Exception:      # broad-ok: optional_probe — unparseable OME → empty structure, never crash
+        return empty
+
+    def _ln(tag):
+        return tag.rsplit('}', 1)[-1] if isinstance(tag, str) else tag
+
+    def _find_all(name):
+        return [e for e in root.iter() if _ln(e.tag) == name]
+
+    def _find_first(name):
+        return next((e for e in root.iter() if _ln(e.tag) == name), None)
+
+    # Detector elements by ID — the fallback source for per-channel gain/offset/binning the settings omit.
+    detectors = {}
+    for det in _find_all('Detector'):
+        did = det.attrib.get('ID')
+        if did:
+            detectors[did] = det.attrib
+
+    channels = []
+    for i, ch in enumerate(_find_all('Channel')):
+        a = ch.attrib
+        ds = next((c for c in ch if _ln(c.tag) == 'DetectorSettings'), None)
+        ds_attr = ds.attrib if ds is not None else {}
+        det_id = ds_attr.get('ID')
+        det_attr = detectors.get(det_id, {})
+
+        def _pick(key):   # DetectorSettings wins (per-channel); the Detector element fills the gap.
+            return ds_attr.get(key) if key in ds_attr else det_attr.get(key)
+
+        channels.append({
+            'index': i,
+            'name': a.get('Name'),
+            'fluor': a.get('Fluor'),
+            'excitation_nm': _ome_num(a.get('ExcitationWavelength')),
+            'emission_nm': _ome_num(a.get('EmissionWavelength')),
+            'contrast_method': a.get('ContrastMethod'),
+            'acquisition_mode': a.get('AcquisitionMode'),
+            'detector_id': det_id,
+            'gain': _ome_num(_pick('Gain')),
+            'offset': _ome_num(_pick('Offset')),
+            'binning': _pick('Binning'),
+            'amplification_gain': _ome_num(_pick('AmplificationGain')),
+            'color': _ome_num(a.get('Color')),
+        })
+
+    obj = _find_first('Objective')
+    obj_a = obj.attrib if obj is not None else {}
+    settings = _find_first('ObjectiveSettings')
+    set_a = settings.attrib if settings is not None else {}
+    pixels = _find_first('Pixels')
+
+    instrument = {
+        'lens_na': _ome_num(obj_a.get('LensNA')),
+        'nominal_magnification': _ome_num(obj_a.get('NominalMagnification')),
+        'immersion': obj_a.get('Immersion'),
+        'medium': set_a.get('Medium'),
+        'refractive_index': _ome_num(set_a.get('RefractiveIndex')),
+        'dimension_order': pixels.attrib.get('DimensionOrder') if pixels is not None else None,
+    }
+    return {'channels': channels, 'instrument': instrument}
+
+
 def parse_description_blob(text):
     """Turn a metadata 'description' blob into a flat dict of fields, so a wall
     of unparsed text becomes queryable structured metadata.
@@ -933,6 +1040,19 @@ def extract_reader_metadata(file_path, image=None):
                         _e = _safe_float(_exp)
                         if _e is not None:
                             common['exposure_s'] = _e / 1e3 if _e > 5 else _e
+                # Per-channel + instrument hierarchy the flat schema cannot express (additive — the flat
+                # fields above are untouched). Only attach non-empty structure so a non-OME blob adds nothing.
+                if _blob.lstrip()[:5].lower().startswith('<?xml') or '<ome' in _blob.lower():
+                    _struct = parse_ome_channels_and_instrument(_blob)
+                    if _struct['channels']:
+                        raw['channels'] = _struct['channels']
+                    _inst = {k: v for k, v in _struct['instrument'].items() if v is not None}
+                    if _inst:
+                        raw['instrument'] = _inst
+                        # Lift the objective NA into the flat schema when it was otherwise unknown (a real
+                        # consumer: the Nyquist/diffraction-limit QC that had numerical_aperture=None).
+                        if common.get('numerical_aperture') is None and _inst.get('lens_na') is not None:
+                            common['numerical_aperture'] = _inst['lens_na']
         except Exception:
             pass
     except Exception:

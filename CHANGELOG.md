@@ -1,3 +1,29 @@
+## [1.6.295] - 2026-07-23
+### Added — **Per-channel + instrument OME schema: the hierarchy the flat schema cannot express (deep_metadata_and_naming Part 1, cont.).**
+OME metadata is hierarchical and per-channel (Instrument → Detector → Channel → DetectorSettings). The flat
+`_empty_common` schema flattened a three-channel Zeiss LSM export — Ch1 = 405/447 DAPI on Detector:1 at gain
+600; Ch3 = a transmitted PMT (ContrastMethod "Other") at a different gain — down to one excitation/emission
+pair, discarding exactly the per-channel acquisition parameters the calibration fingerprint and modality
+gating need. New `parse_ome_channels_and_instrument(xml_string)` is **purely additive** — the flat fields are
+untouched — and exposes the structure alongside them:
+- **`channels`**: one dict per `<Channel>`, read from its own element: `index, name, fluor, excitation_nm,
+  emission_nm, contrast_method, acquisition_mode, detector_id, gain, offset, binning, amplification_gain,
+  color`. Detector settings resolve **per channel** — a `<DetectorSettings>` child wins, falling back to the
+  referenced `<Detector>` element for anything it omits (gain lives on one or the other by vendor). The
+  transmitted PMT channel is distinguishable by `contrast_method == 'Other'` with no dye.
+- **`instrument`**: `lens_na, nominal_magnification, immersion, medium, refractive_index, dimension_order`.
+  The objective's `Immersion="Oil"` and ObjectiveSettings' `Medium="Air"` (RI 1.518 = oil) are **both
+  recorded** — the real ZEN-export contradiction is surfaced, never silently resolved.
+- **Missing stays missing**: numeric attributes coerce to int-if-integral / float / `None` (never a default,
+  generalising the pixel-size "unknown is NaN not one" contract); every channel and the instrument dict carry
+  the full canonical key set.
+- Wired into `extract_reader_metadata`: `raw['channels']` / `raw['instrument']` attach only for OME blobs
+  with real structure, and the objective NA lifts into flat `common['numerical_aperture']` when it was
+  otherwise unknown (the Nyquist/diffraction-limit QC consumer).
+- Tests (`core`, `test_ome_channels_and_instrument.py`, 7 tests): per-channel read, the transmitted-PMT
+  distinction, detector-gain resolution order (settings-then-detector), numeric coercion, the recorded
+  contradiction, the canonical key set, malformed/non-OME → empty. Full core green (1759).
+
 ## [1.6.294] - 2026-07-23
 ### Fixed — **OME-XML metadata is read from the RIGHT element, and XML is no longer mis-parsed as ImageJ key=value (deep_metadata_and_naming Part 1).**
 The OME-XML branch of `parse_description_blob` regexed the WHOLE document for 10 fixed attribute names and
