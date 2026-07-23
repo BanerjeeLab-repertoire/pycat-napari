@@ -81,7 +81,18 @@ class TreeState:
 
 class ScientificTree:
     def __init__(self, nodes: Optional[Dict[str, QNode]] = None):
-        self.nodes = nodes if nodes is not None else load_question_tree()
+        # Load the curated question tree LAZILY — on first access, not at construction. `load_question_tree`
+        # reads the shipped workbook via openpyxl (optional), so an eager load coupled merely CONSTRUCTING a
+        # NavigatorSession to that optional dependency, even for a session that only edits/compiles a plan and
+        # never asks a question. Deferring it keeps session construction workbook-free; only actually DRIVING
+        # the tree needs openpyxl.
+        self._nodes = nodes
+
+    @property
+    def nodes(self) -> Dict[str, QNode]:
+        if self._nodes is None:
+            self._nodes = load_question_tree()
+        return self._nodes
 
     # ------------------------------------------------------------------ #
     def node(self, qid: str) -> Optional[QNode]:

@@ -16,7 +16,9 @@ from pycat.navigator.op_catalog import build_operation_registry
 from pycat.navigator.planner import Planner
 from pycat.navigator.session import NavigatorSession, plan_rows, PlanRow, GateNote
 
-pytestmark = pytest.mark.base
+# NOTE: not a file-level `pytestmark` — one test DRIVES the curated question tree (loaded from the shipped
+# workbook via the optional openpyxl), so it is `integration`; the rest build only the registry/planner
+# (curated in code, workbook-free) and stay `base`. Session construction is now workbook-free (lazy tree).
 
 
 def _ctx(**facts):
@@ -39,6 +41,7 @@ def _quality_plan(observable, target='bead', **facts):
 
 # ── the drive loop reaches a leaf and compiles ───────────────────────────────────────────────────────
 
+@pytest.mark.integration
 def test_answering_the_questions_reaches_a_leaf_and_compiles_a_runnable_plan():
     session = NavigatorSession(ctx=_ctx())
     asked = 0
@@ -55,6 +58,7 @@ def test_answering_the_questions_reaches_a_leaf_and_compiles_a_runnable_plan():
 
 # ── plan_rows folds the gate verdicts in ─────────────────────────────────────────────────────────────
 
+@pytest.mark.base
 def test_a_blocked_step_renders_the_blocking_reason_and_is_not_runnable():
     plan = _quality_plan('viscosity', pixel_size=0)          # viscosity in pixels is meaningless → blocker
     rows = plan_rows(plan)
@@ -66,6 +70,7 @@ def test_a_blocked_step_renders_the_blocking_reason_and_is_not_runnable():
     assert 'pixel' in note.reason.lower() or 'pixel' in note.gate_id.lower()
 
 
+@pytest.mark.base
 def test_a_downgraded_step_renders_its_reason_but_stays_runnable():
     plan = _quality_plan('viscosity', pixel_size=0.1,
                          reliability_score=SimpleNamespace(grade='unreliable', value=0.2))
@@ -75,6 +80,7 @@ def test_a_downgraded_step_renders_its_reason_but_stays_runnable():
     assert any(n.kind == 'downgraded' for r in dg for n in r.gates)
 
 
+@pytest.mark.base
 def test_an_unknown_gate_renders_its_probe_and_the_probe_is_a_row():
     plan = _quality_plan('viscosity', pixel_size=0.1)        # reliability never assessed → UNKNOWN + probe
     rows = plan_rows(plan)
@@ -85,6 +91,7 @@ def test_an_unknown_gate_renders_its_probe_and_the_probe_is_a_row():
     assert probes and rows.index(probes[0]) < len(rows) and probes[0].state == 'probe'
 
 
+@pytest.mark.base
 def test_a_fully_satisfied_step_carries_no_gate_notes_and_stays_runnable():
     # every quality gate SATISFIED (pixel size present, reliability high) → the measurement step is clean:
     # SATISFIED gates must NOT produce a note (only VIOLATED / UNKNOWN do).
@@ -96,6 +103,7 @@ def test_a_fully_satisfied_step_carries_no_gate_notes_and_stays_runnable():
     assert measure.state == 'ok' and measure.runnable and measure.gates == ()
 
 
+@pytest.mark.base
 def test_the_row_order_is_execution_order_probes_first():
     plan = _quality_plan('viscosity', pixel_size=0.1)
     rows = plan_rows(plan)
@@ -106,6 +114,7 @@ def test_the_row_order_is_execution_order_probes_first():
 
 # ── editing is a pin + recompile ─────────────────────────────────────────────────────────────────────
 
+@pytest.mark.base
 def test_editing_is_a_pin_and_recompile_that_revalidates():
     session = NavigatorSession(ctx=_ctx())
     session.intent.observables = ['count']                   # skip the tree; set the goal directly
@@ -120,3 +129,23 @@ def test_editing_is_a_pin_and_recompile_that_revalidates():
     assert session.pins == {'nonexistent_kind': 'nonexistent_module'}
     session.unpin('nonexistent_kind')
     assert session.pins == {}
+
+
+# ── the minimal-lane contract: no openpyxl needed to build, edit, or compile ─────────────────────────
+
+@pytest.mark.base
+def test_the_navigator_builds_edits_and_compiles_without_openpyxl(monkeypatch):
+    """`openpyxl` (the workbook reader) is optional at the minimal tier: constructing a session, building the
+    standalone seed registry, and editing/compiling a plan must all work without it — only DRIVING the curated
+    question tree needs it (the `integration` test above). Simulate openpyxl absent so this holds in a minimal
+    environment and can't silently regress into a hidden dependency again."""
+    import sys
+    monkeypatch.setitem(sys.modules, 'openpyxl', None)       # any `import openpyxl` now raises ImportError
+
+    from pycat.navigator.modules import build_registry
+    assert len(build_registry()) > 0                          # the documented standalone seed needs no workbook
+
+    session = NavigatorSession(ctx=_ctx())                    # constructs workbook-free (the tree loads lazily)
+    session.intent.observables = ['count']
+    session.intent.target = 'cell'
+    assert session.compile_plan().steps                       # edit/compile path is openpyxl-independent

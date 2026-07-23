@@ -499,3 +499,89 @@ def test_no_test_exercises_an_option_the_module_does_not_declare():
           "test should not assert working behaviour for it. If you are testing that the value is REJECTED, "
           "wrap the call in `with pytest.raises(...)`."
     )
+
+
+# ── Undeclared AND unguarded LAZY (function-scope) imports: the class the module-scope guard can't see ──
+#
+# The guards above walk only `# module scope ONLY` imports. A package imported INSIDE a function is invisible
+# to them — yet a test that calls that function still needs it. This is the THIRD failure of that class (after
+# the `qtbot` fixture and the marker/environment mismatch): a `core`/`base` navigator test reached
+# `navigator/loader._rows`'s lazy `import openpyxl`, which was undeclared and unguarded, and CI went red.
+#
+# Rule (the same declared-or-fallback discipline, extended to the imports the module-scope guard cannot see):
+# a function-scope third-party import must be (a) a DECLARED dependency, (b) guarded by a try/except so an
+# absent package degrades to a fallback, or (c) a known lazy-by-design package.
+_LAZY_OK = {
+    # (c1) optional backends — GPU / Java bridge / legacy readers / optional plot backends, feature-gated at
+    # call sites (declared in pyproject's optional-dependencies extras, not the base set).
+    "cellpose", "torch", "cupy", "cupyx", "numba", "trackmate", "jpype", "stardist", "imagej",
+    "lumicks", "bioformats", "aicsimageio", "scyjava", "plotly", "pyqtgraph",
+    # (c2) present TRANSITIVELY via a declared reader/plotter (scikit-image / matplotlib / bioio) and imported
+    # directly at call sites. Declaring each EXPLICITLY is a separate dependency-hygiene audit (flagged in the
+    # openpyxl spec, not silently patched here), so they are allow-listed rather than mislabelled optional.
+    "tifffile", "pillow", "imageio", "packaging",
+}
+
+
+def _import_is_try_guarded(node, tree):
+    """True if ``node`` sits inside a ``try:`` whose handlers include ImportError/ModuleNotFoundError/Exception
+    — i.e. an absent package has a fallback path rather than crashing at import."""
+    for anc in ast.walk(tree):
+        if not isinstance(anc, ast.Try):
+            continue
+        if any(node is n for n in ast.walk(anc)) and node not in anc.finalbody:
+            for h in anc.handlers:
+                t = h.type
+                if t is None:
+                    return True
+                names = ([t.id] if isinstance(t, ast.Name)
+                         else [e.id for e in getattr(t, "elts", []) if isinstance(e, ast.Name)])
+                if {"ImportError", "ModuleNotFoundError", "Exception"} & set(names):
+                    return True
+    return False
+
+
+@pytest.mark.core
+def test_no_undeclared_unguarded_lazy_import():
+    """A function-scope (lazy) third-party import must be DECLARED, GUARDED by a fallback, or known-lazy — the
+    declared-or-fallback contract, extended to the imports the module-scope guard cannot see. This is what
+    would have caught the `openpyxl` failure at the source instead of in CI."""
+    import sys
+
+    declared = _declared_packages()
+    stdlib = set(sys.stdlib_module_names)
+    offenders = {}
+
+    for path in sorted((_ROOT / "src" / "pycat").rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                    names = [node.module]
+                else:
+                    continue
+                for name in names:
+                    top = name.split(".")[0]
+                    if top in stdlib or top == "pycat":
+                        continue
+                    key = _ALIAS.get(top, top.lower().replace("-", "_"))
+                    if key in declared or top in _LAZY_OK or key in _LAZY_OK:
+                        continue
+                    if _import_is_try_guarded(node, tree):
+                        continue
+                    offenders.setdefault(top, set()).add(path.name)
+
+    assert not offenders, (
+        "These packages are imported at FUNCTION scope (lazy) but are neither declared in pyproject, guarded "
+        "by a try/except fallback, nor known-lazy:\n  "
+        + "\n  ".join(f"{pkg}  ({', '.join(sorted(files))})" for pkg, files in sorted(offenders.items()))
+        + "\n\nA lazy import a `core`/`base` test can reach must be DECLARED (so it is installed) or GUARDED "
+          "(so an absent package degrades to a fallback) — `openpyxl` was neither, and CI went red on it. "
+          "Declare it, wrap the import in try/except with a fallback, or — if it is a genuinely optional "
+          "backend — add it to _LAZY_OK with a one-line justification."
+    )

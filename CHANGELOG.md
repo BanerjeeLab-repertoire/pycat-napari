@@ -1,3 +1,24 @@
+## [1.6.313] - 2026-07-23
+### Fixed — **The minimal test lanes no longer require the optional `openpyxl`, and the dependency guard now covers lazy imports (openpyxl-lazy-import spec).**
+Two `base`-lane navigator tests failed with `ModuleNotFoundError: openpyxl` — the third failure of the class
+where a minimal-lane test reaches a lazy optional import the module-scope dependency guard can't see. The fix
+is not to install openpyxl into the minimal lane (that makes an optional dependency mandatory for the tier
+whose purpose is proving PyCAT runs without extras); it is to decouple the minimal path from it.
+
+- `navigator/scientific_tree.py`: the curated question tree (read from the shipped workbook via openpyxl) now
+  loads **lazily** — on first access, not at construction. Merely constructing a `NavigatorSession` to edit or
+  compile a plan no longer touches openpyxl; only actually DRIVING the question tree does.
+- `tests/navigator/test_navigator_session.py`: the one test that drives the tree is re-marked `integration`
+  (it genuinely needs the curated workbook); the rest stay `base`. A new `base` test asserts the navigator
+  constructs, builds the standalone seed registry, and edits/compiles a plan with **openpyxl simulated absent**
+  — the minimal-lane contract, now regression-proof.
+- `tests/test_ci_dependencies.py`: new `test_no_undeclared_unguarded_lazy_import` extends the dependency guard
+  to FUNCTION-scope imports — a lazy third-party import must be declared, guarded by a try/except fallback, or
+  a documented known-lazy backend. This is what would have caught openpyxl at the source instead of in CI.
+- openpyxl stays declared (the full navigator loads the curated tree); the minimal tier simply no longer
+  depends on it. Full `pytest -m "core or base"` green. Flagged for a follow-on audit: several packages
+  (`tifffile`, `pillow`, `imageio`, `packaging`) are imported directly but present only transitively.
+
 ## [1.6.312] - 2026-07-23
 ### Added — **A closed results dock reopens without recomputing, and clicking an off-page bead pages the plots to its track (results-dock spec Parts 2 & 3).**
 Two more defects in the VPT results dock reported alongside the reflow bug.

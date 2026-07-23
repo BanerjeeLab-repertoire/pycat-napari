@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.312"
+version = "1.6.313"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
