@@ -57,10 +57,49 @@ STATE_ORDER = (
 # the workbook recommends ("add pipeline to VALID_SOURCES with ~0.95 confidence
 # or use source='derived'").
 VALID_SOURCES = ("user", "pipeline", "derived", "metadata", "inferred", "default")
+
+# ── The confidence SCALE — a number must MEAN something, not decorate ────────────────────────────────
+# Confidence answers "how much do I trust this tag's VALUE", and it scores the EVIDENCE, not merely the
+# source label. The documented meaning of each band (so a reader can interpret a value, not guess):
+#
+#   1.00   a human explicitly answered / confirmed          (source='user')
+#   0.99   the FILE DECLARES it in a dedicated field          (metadata, evidence='declarative')
+#   0.95   written by a pipeline step that actually ran      (source='pipeline')
+#   0.90   unambiguous DERIVED evidence, e.g. emission nm -> spectral bucket  (metadata, evidence='derived')
+#   0.85   derived from another layer                        (source='derived')
+#   0.80   metadata of UNSTATED evidence kind (a fallback — grade it when the kind is known)
+#   0.70   a WEAK / indirect hint: a name substring, a filename token         (metadata, evidence='weak')
+#   0.50   a coin-flip / chance-level guess                  (source='inferred')
+#   0.30   an assumed default                                (source='default')
+#
+# A present-but-generic/placeholder metadata value is filtered out entirely by utils.metadata_validity
+# (is_meaningful) BEFORE it can become a tag, so it never reaches this scale.
 _SOURCE_CONFIDENCE = {
     "user": 1.0, "pipeline": 0.95, "derived": 0.85,
     "metadata": 0.8, "inferred": 0.5, "default": 0.3,
 }
+
+# Grading WITHIN the metadata source: the flat 0.8 above is only a fallback for a metadata tag that does
+# not say what evidence it rests on. A metadata tag SHOULD declare its evidence kind, which sets its
+# confidence — a file that DECLARES `ContrastMethod="Fluorescence"` deserves ~0.99, not the same 0.8 as a
+# vague filename hint. `user: 1.0` stays reserved for an explicit human answer.
+METADATA_EVIDENCE_CONFIDENCE = {
+    "declarative": 0.99,   # a dedicated field states the answer (ContrastMethod, AcquisitionMode, Fluor)
+    "derived":     0.90,   # unambiguous derived evidence (emission wavelength -> spectral bucket)
+    "weak":        0.70,   # a name substring / filename hint
+}
+VALID_METADATA_EVIDENCE = tuple(METADATA_EVIDENCE_CONFIDENCE)
+
+
+def confidence_for(source: str, evidence: Optional[str] = None) -> float:
+    """The confidence to record for a tag from ``source``. When ``source == 'metadata'`` and ``evidence``
+    names a known kind (declarative / derived / weak), it grades WITHIN the metadata source per
+    ``METADATA_EVIDENCE_CONFIDENCE``; otherwise the per-source default in ``_SOURCE_CONFIDENCE`` applies
+    (0.5 for an unmapped source). See the documented scale above — this is the single place that maps
+    evidence to a number, so the value stays interpretable rather than decorative."""
+    if source == "metadata" and evidence in METADATA_EVIDENCE_CONFIDENCE:
+        return METADATA_EVIDENCE_CONFIDENCE[evidence]
+    return _SOURCE_CONFIDENCE.get(source, 0.5)
 
 # lineage relations. The workbook lists derived_from, belongs_to, supersedes,
 # pairs_with, registered_to, measured_from, tracks; the Findings sheet also
@@ -114,6 +153,9 @@ class TagSet:
     assumptions: Optional[str] = None           # named model assumptions (e.g. "passive tracer")
     source: str = "pipeline"
     confidence: Optional[float] = None
+    # For a metadata source, the KIND of evidence (declarative / derived / weak) that grades the
+    # confidence within the source — see confidence_for / METADATA_EVIDENCE_CONFIDENCE. None = unstated.
+    evidence: Optional[str] = None
 
     def __post_init__(self):
         if self.source not in VALID_SOURCES:
@@ -122,7 +164,7 @@ class TagSet:
             # record that it happened rather than hiding it.
             self.source = "inferred"
         if self.confidence is None:
-            self.confidence = _SOURCE_CONFIDENCE.get(self.source, 0.5)
+            self.confidence = confidence_for(self.source, self.evidence)
 
     def get(self, key: str) -> Any:
         if key in LINEAGE_RELATIONS:

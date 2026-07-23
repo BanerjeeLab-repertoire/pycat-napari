@@ -52,11 +52,34 @@ def _robust_norm(a):
     return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
 
 
+# ── Confidence scale — a number must MEAN something, not decorate ────────────────────────────────────
+# A pixel-inferred modality is "inferred from real evidence", never "declared", so a DECIDED call is
+# reported in the band [0.70, 0.95]. Below that band a 2-way (fluorescence-vs-transmitted) call sits at or
+# near its 0.5 chance level and carries no information — it is reported as None (no decision), NOT as a
+# low-confidence number that reads like a coin flip. 0.95+ is reserved for metadata that DECLARES the
+# modality (see navigator/tags.confidence_for). The finer transmitted sub-type is a genuine 3-way call, so
+# it may legitimately sit between its 1/3 chance and ~0.90.
+_EVIDENCE_MIN, _EVIDENCE_MAX = 0.70, 0.95
+_SUBTYPE_MAX = 0.90
+
+
+def _binary_confidence(winner, loser):
+    """Confidence for a DECIDED 2-way call, mapped into the inferred-evidence band [0.70, 0.95] by the
+    winner's margin over the loser. Returns None when the call is NOT decisive — the winner is below the
+    0.5 chance level, or ties the loser — because a 2-way answer at chance is no information and must not
+    be dressed up as a low-confidence value."""
+    if winner < 0.5 or winner <= loser:
+        return None
+    margin = min(1.0, winner - loser)
+    return round(_EVIDENCE_MIN + (_EVIDENCE_MAX - _EVIDENCE_MIN) * margin, 3)
+
+
 def classify_channel_from_pixels(frame):
     """Return ``(modality, confidence)`` for a single channel's pixels.
 
     modality   : 'fluorescence' | 'brightfield' | 'dic' | 'phase' | 'transmitted' | None
-    confidence : float in [0, 1]; None modality means "couldn't tell".
+    confidence : float; None modality = "couldn't tell" (0.0). A decided binary call is in the band
+                 [0.70, 0.95]; an at/below-chance call returns None (see the confidence-scale note above).
 
     The label is meant to feed a layer name, so it stays coarse and honest: an uncertain
     transmitted image resolves to 'transmitted' rather than a guessed sub-type.
@@ -98,12 +121,13 @@ def classify_channel_from_pixels(frame):
         if skew < 0.5:
             trans_score += 0.3
 
-        if fluor_score >= trans_score and fluor_score >= 0.5:
-            return 'fluorescence', min(1.0, fluor_score)
-
-        if trans_score < 0.5:
-            # neither picture is clear
-            return None, 0.0
+        # 2-WAY call: report a confidence only when decisive, else None (see _binary_confidence).
+        fluor_conf = _binary_confidence(fluor_score, trans_score)
+        if fluor_conf is not None:
+            return 'fluorescence', fluor_conf
+        trans_conf = _binary_confidence(trans_score, fluor_score)
+        if trans_conf is None:
+            return None, 0.0                    # neither picture is clear (below chance, or a tie)
 
         # ── Transmitted sub-type: brightfield / DIC / phase ──
         # Directional derivatives for DIC's shadow-cast asymmetry.
@@ -115,7 +139,7 @@ def classify_channel_from_pixels(frame):
         gmag = np.hypot(gx, gy)
         edge = gmag > np.percentile(gmag, 90)    # edge pixels
         if edge.sum() < 16:
-            return 'transmitted', min(1.0, trans_score)
+            return 'transmitted', trans_conf
 
         # DIC signature: at edges the SIGNED directional derivative is skewed
         # (bright-then-dark relief), i.e. |skew of directional deriv| is high AND
@@ -163,7 +187,8 @@ def classify_channel_from_pixels(frame):
         others = sorted(scores.values(), reverse=True)
         margin = others[0] - (others[1] if len(others) > 1 else 0.0)
         if best_score >= 0.6 and margin >= 0.2:
-            return best, min(1.0, 0.5 + best_score / 2.0)
-        return 'transmitted', min(1.0, trans_score)
+            # A genuine 3-way call — it may sit between its 1/3 chance and ~0.90.
+            return best, round(min(_SUBTYPE_MAX, 0.5 + best_score / 2.0), 3)
+        return 'transmitted', trans_conf
     except Exception:
         return None, 0.0

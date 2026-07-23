@@ -1,3 +1,25 @@
+## [1.6.292] - 2026-07-23
+### Changed — **Confidence scores the EVIDENCE, not the source label (tag_confidence Part 1): a binary pixel call is decisive or `None`, and metadata is graded within its source.**
+Confidence numbers were a coin flip. `classify_channel_from_pixels` reported a heuristic sum (0.5–0.7) for a
+binary fluorescence-vs-transmitted call — but a coin flip on a 2-way question is already 0.5, so those
+numbers carried no information. And `navigator/tags._SOURCE_CONFIDENCE` gave a flat `metadata: 0.8` whether
+the file *declared* `ContrastMethod="Fluorescence"` or merely hinted it in a filename.
+
+- **`utils/channel_modality.py`**: a DECIDED binary call is now reported in the inferred-evidence band
+  **[0.70, 0.95]** (via `_binary_confidence`, scaled by the winner's margin); a call at/below its 0.5 chance
+  level — or a tie — returns modality **`None`** (no decision), never a near-chance number dressed up as low
+  confidence. The finer transmitted sub-type is a genuine 3-way call, so it may sit between its 1/3 chance
+  and ~0.90. Garbage still degrades to `(None, 0.0)`; the caller's `conf >= 0.5` gate is unaffected.
+- **`navigator/tags.py`**: new `confidence_for(source, evidence)` grades WITHIN the metadata source —
+  declarative field → **0.99**, unambiguous derived evidence (emission nm → spectral bucket) → **0.90**, a
+  weak name/filename hint → **0.70** — with the flat `0.8` kept only as the fallback for a metadata tag of
+  unstated evidence kind. `TagSet` gained an `evidence` field that threads through the factory. The full
+  confidence scale is now documented in-code so a value is interpretable, not decorative. `user: 1.0`,
+  `pipeline: 0.95`, `derived: 0.85` are **unchanged** (per the spec).
+- `tests/test_tag_confidence.py` (`core`, 9 tests): the binary band + None-below-chance invariant, the
+  metadata grading, the unchanged source values, and that the documented scale matches the emitted numbers.
+  Full `pytest -m core` green (1742). Part 2 shipped 1.6.290; Part 3 (contradiction surfacing) remains.
+
 ## [1.6.291] - 2026-07-23
 ### Fixed — **Batch replay now mirrors the interactive GUI it is replaying (merge of Meet Raval's `Meet-Raval-fixes`).**
 A batch run is supposed to reproduce the recorded interactive session exactly. Meet Raval's commit fixes a

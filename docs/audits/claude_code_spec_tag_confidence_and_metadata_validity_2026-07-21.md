@@ -1,6 +1,18 @@
 # Claude Code spec — Evidence-based confidence, metadata validity filtering, and contradiction surfacing that doesn't numb the user
 
-> **◐ STATUS — Part 2 (the `is_meaningful` validity filter) DONE, shipped 1.6.290: `utils/metadata_validity.py` (empty/placeholder/non-finite + field-aware pixel_size=1.0 / gain·magnification·NA=0 sentinels, never blanket-rejecting the number 1), applied at the metadata write guard; `tests/test_metadata_validity.py` (28 core tests). Part 1 (evidence-graded confidence) + Part 3 (contradiction surfacing) remain.**
+> **◐ STATUS — Parts 1 & 2 DONE; Part 3 (contradiction surfacing) + Part 4 (anti-numbing) remain.**
+> **Part 2** (the `is_meaningful` validity filter) shipped 1.6.290: `utils/metadata_validity.py`
+> (empty/placeholder/non-finite + field-aware pixel_size=1.0 / gain·magnification·NA=0 sentinels, never
+> blanket-rejecting the number 1), applied at the metadata write guard; `tests/test_metadata_validity.py`
+> (28 core tests).
+> **Part 1** (evidence-graded confidence) shipped 1.6.292: `channel_modality.classify_channel_from_pixels`
+> floors a binary call at chance — decisive → band [0.70, 0.95] (`_binary_confidence`), at/below chance or a
+> tie → modality `None`; the 3-way sub-type may sit between its 1/3 chance and ~0.90. `navigator/tags.py`
+> gained `confidence_for(source, evidence)` grading WITHIN metadata (declarative 0.99 / derived 0.90 / weak
+> 0.70; flat 0.8 fallback for unstated), a `TagSet.evidence` field, and the documented scale in-code;
+> `user`/`pipeline`/`derived` unchanged. `tests/test_tag_confidence.py` (9 core tests).
+> **Part 3 + Part 4** (contradiction detection + severity, the metadata-button indicator, and the
+> per-pattern "expected for this instrument" anti-numbing store) remain — largely interactive/Qt-bound.
 
 
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. Three joined
