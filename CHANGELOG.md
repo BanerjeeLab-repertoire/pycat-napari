@@ -1,3 +1,32 @@
+## [1.6.291] - 2026-07-23
+### Fixed — **Batch replay now mirrors the interactive GUI it is replaying (merge of Meet Raval's `Meet-Raval-fixes`).**
+A batch run is supposed to reproduce the recorded interactive session exactly. Meet Raval's commit fixes a
+class of bugs where a replay step ignored the recorded `method`/parameter and always ran one hardcoded path,
+so the batch silently produced different data than the session it claimed to replay.
+
+- **SACF** replay imported `sacf_per_cell_per_slice`, which does not exist anywhere -- every batch SACF run
+  raised `ImportError`. It now dispatches on the recorded `mode` (LIR / whole-image / drawn-rectangle, the
+  last skipped with an explicit message since the ROI is drawn interactively).
+- **IVF preprocessing** now honours the recorded `method` (gaussian / LoG / rolling-ball) instead of always
+  running the rolling-ball pipeline; **IVF field summary** honours the recorded `image_layer` and dark
+  reference and uses `partition_coefficient_local` -- matching the GUI (`invitro_fluor_ui`), not the older
+  percentile-based `partition_coefficient_field`.
+- **Brightfield / IVBF**: flat-field reference layers are resolved from split-file/channel state; IVBF
+  segmentation dispatches on the recorded `method` instead of always running `intensity`.
+- **Preprocessing** recomputes the rolling-ball size cap per image (the GUI caps it but never persisted the
+  capped value) and scales `object_size` on upscale; **split-file recordings** (separate `open_image` steps)
+  no longer reload the primary file twice -- each companion is located per batch sample.
+- **Segmentation** (`fz`): large-condensate rim-closing now also requires few contributing components and a
+  bounded fill ratio, so a dense field of genuinely separate puncta is not merged into one blob.
+- The interactive UI records the `method` / `sigma` / `image_layer` / dark-reference / suppression params the
+  replay fixes consume.
+
+Merged with Meet's authorship preserved. The `ivf_segmentation` operation mapping was removed (a fixed op
+tuple was misleading for 4 of its 5 recorded methods), lowering `_MIN_STEPS_DECLARED` 10→9 -- a deliberate
+correction, not a neglect regression. Integration commit kept the complexity/exception-budget ratchets intact
+(extracted `_replay_split_file_companion`, condensed comments) rather than raising them. Full `pytest -m core`
+green (1747).
+
 ## [1.6.290] - 2026-07-23
 ### Added — **A shared metadata validity filter: a present-but-meaningless value can no longer masquerade as real (tag_confidence_and_metadata_validity Part 2).**
 A present-but-meaningless metadata value is worse than an absent one -- it looks authoritative, suppresses the

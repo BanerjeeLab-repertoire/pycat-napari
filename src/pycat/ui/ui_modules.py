@@ -1475,8 +1475,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 'window_size':  int(dr.get('cell_diameter', 100)) // 2,
                 'suppress_foreground': bool(dr.get('suppress_foreground', True)),
             }
-            # Only record suppression params when the user has overridden defaults,
-            # so unmodified configs stay clean and forward-compatible.
+            # Record suppression params only when the user overrode defaults (keeps clean configs clean).
             sp = dr.get('foreground_suppression_params', None)
             if sp:
                 rec['foreground_suppression_params'] = dict(sp)
@@ -1493,19 +1492,11 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
                 self.on_general_button_clicked(
                     run_enhanced_rb_gaussian_bg_removal, None,
                     self.central_manager.active_data_class, self.viewer)
-                bg_rec = {
+                self._record('background_removal', {
                     'active_layer': pp_name or active_name,
                     'ball_radius': int(dr.get('ball_radius', 50)),
-                }
-                # run_enhanced_rb_gaussian_bg_removal's "already enhanced" branch
-                # (the common case right after preprocessing) reads the SAME
-                # foreground_suppression_params override from data_repository
-                # that the preprocessing step above just recorded -- without it
-                # here too, replay_background_removal falls back to {} (library
-                # defaults) instead of the user's tuned slider values.
-                if sp:
-                    bg_rec['foreground_suppression_params'] = dict(sp)
-                self._record('background_removal', bg_rec)
+                    **({'foreground_suppression_params': dict(sp)} if sp else {}),  # replay needs the recorded override, else defaults
+                })
             except Exception as e:
                 from napari.utils.notifications import show_warning
                 show_warning(f"Background removal step failed: {e}")

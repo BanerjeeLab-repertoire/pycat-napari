@@ -602,10 +602,8 @@ def _ivbf_dynamics(ui, layout):
             ui._record('ivbf_dynamics', {
                 'stack_layer': stack_dd.currentText(), 'frame_interval_s': dt,
                 'max_displacement_um': disp_sp.value(),
-                'run_coarsening': cb_coarse.isChecked(),
-                'run_sedimentation': cb_sed.isChecked(),
-                'run_msd': cb_msd.isChecked(),
-                'run_fusion_fit': cb_fuse.isChecked(),
+                'run_coarsening': cb_coarse.isChecked(), 'run_sedimentation': cb_sed.isChecked(),
+                'run_msd': cb_msd.isChecked(), 'run_fusion_fit': cb_fuse.isChecked(),
             })
             _show("IVBF Dynamics", tables)
         def _err(msg):
