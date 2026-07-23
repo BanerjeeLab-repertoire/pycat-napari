@@ -1,7 +1,20 @@
 # Claude Code spec — Results docks: reflow on resize, reopen after close, and page to the selected track
 
-> **◐ STATUS — Part 1 (reflow on resize) DONE, shipped 1.6.311. Parts 2 (reopen from retained payload) and 3
-> (page-to-selection) remain.**
+> **✅ STATUS — DONE (Parts 1–3). Part 1 reflow (1.6.311); Parts 3 page-to-selection + 2 reopen-from-payload
+> (1.6.312).**
+> **Part 3 (1.6.312).** `results_dock._vpt_page_to_selected_track` + `_vpt_drawn_tids`, hooked into
+> `table_adapter._select_track`: an off-page selection moves the pager to the bucket containing the track
+> (index recomputed from `all_tids` and the current bucket size, never cached) and re-renders through the
+> existing re-highlight path; an on-page selection (incl. a page-0 ensemble track) does not move the view.
+> `tests/test_vpt_page_to_selection.py` (`core`, 8).
+> **Part 2 (1.6.312).** Shared `utils/results_store.py` (retain/reopen/has/disabled_reason/reopen_most_recent)
+> + `dock_space.install_show_results_action` ('📊 Show results' menu action, wired in central_manager). VPT
+> retains its payload (its `_show_vpt_results` args) and a reopen restores page/bucket; reopen reuses the
+> dock-replacement path (idempotent, no recompute). `tests/test_results_store.py` (`core`, 8).
+> **Deliberately deferred (flagged):** (a) the stale-vs-current LABEL on a reopened payload whose source data
+> changed — the `stamp` field carries the token but VPT does not yet compare/annotate it; (b) cellular/batch
+> ADOPTING the shared mechanism — they only need to call `retain_results` in their mount, which is a small
+> per-workflow addition, not new mechanism.
 > **Part 1 (1.6.311).** `toolbox/vpt/results_dock.py`: new `_new_results_figure()` returns a
 > `Figure(layout='constrained')` (reflows subplot geometry on every resize) instead of the fixed
 > `figsize=(11, 8.5)` laid out once with `tight_layout` at draw — the reported "squashed plots that won't

@@ -124,3 +124,41 @@ def add_results_dock(window, widget, *, name, settings=None, area='right', alrea
     if action == 'collapse':
         _apply_collapse(window, dock)                               # then grow the results dock to shrink method
     return dock
+
+
+def install_show_results_action(central_manager):
+    """A SHARED '📊 Show results' menu action that reopens the most-recently-retained results dock from its
+    payload (:mod:`pycat.utils.results_store`) — **never recomputing**. Any workflow that calls
+    ``retain_results`` is reachable through this one action, so the reopen is a mechanism, not a per-method
+    button. When nothing has been retained it states the refusal ("run the analysis first") rather than
+    silently starting a long analysis. Installed from ``central_manager``; returns the ``QAction`` or ``None``
+    (headless)."""
+    try:
+        from PyQt5.QtWidgets import QAction
+    except Exception:      # broad-ok: optional_probe — no Qt (headless) → no action
+        return None
+    viewer = getattr(central_manager, "viewer", None)
+    qt = getattr(getattr(viewer, "window", None), "_qt_window", None)
+    if qt is None:
+        return None
+
+    def _open(*_):
+        from pycat.utils.results_store import reopen_most_recent
+        if reopen_most_recent():
+            return
+        try:
+            from napari.utils.notifications import show_info
+            show_info("Run an analysis first — there are no results to show yet.")
+        except Exception:      # broad-ok: optional_probe — the notification is best-effort
+            pass
+
+    try:
+        action = QAction("\U0001f4ca  Show results", qt)     # 📊
+        action.setToolTip("Reopen the most recent results dock from its retained data — never recomputes.")
+        action.triggered.connect(_open)
+        qt.menuBar().addAction(action)
+        return action
+    except Exception as exc:      # broad-ok: ui_cleanup — a missing menu bar must never break startup
+        from pycat.utils.general_utils import debug_log
+        debug_log("show-results: could not install the menu action", exc)
+        return None

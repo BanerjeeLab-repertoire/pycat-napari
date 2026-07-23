@@ -140,10 +140,13 @@ class _VptResultsDockMixin:
 
     # ── The dock itself ──────────────────────────────────────────────────────────
     def _show_vpt_results(self, ptc, msd_df, fit, mod, tracks, per_track_metrics,
-                          frame_dt, van_hove_lag=1):
+                          frame_dt, van_hove_lag=1, *, restore_page=0, restore_bucket=None):
         """Open (or replace) the combined VPT results dock: figure left, table right,
         with a bucket pager over the tracks. Everything the pop-out path drew, in one
-        persistent widget so the brushing highlight targets stay alive."""
+        persistent widget so the brushing highlight targets stay alive.
+
+        ``restore_page`` / ``restore_bucket`` land a REOPENED dock (Part 2's "Show results") back where the
+        user left it, rather than resetting to page 0 — they are passed only on a reopen, not a fresh run."""
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
         from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                                      QLabel, QPushButton, QSpinBox, QSizePolicy)
@@ -169,7 +172,7 @@ class _VptResultsDockMixin:
         page_lbl = QLabel(""); page_lbl.setAlignment(Qt.AlignCenter)
         size_spin = QSpinBox()
         size_spin.setRange(10, 5000); size_spin.setSingleStep(10)
-        size_spin.setValue(self._VPT_BUCKET_DEFAULT)
+        size_spin.setValue(int(restore_bucket) if restore_bucket else self._VPT_BUCKET_DEFAULT)
         size_spin.setPrefix("bucket "); size_spin.setSuffix(" tracks")
         pager = QHBoxLayout()
         pager.addWidget(prev_btn); pager.addWidget(page_lbl, 1)
@@ -219,6 +222,9 @@ class _VptResultsDockMixin:
             'label': page_lbl, 'prev_btn': prev_btn, 'next_btn': next_btn,
             'size_spin': size_spin,
         }
+        # Restore the page a reopen asked for (clamped to the current bucket count).
+        self._vpt_results['page'] = min(max(0, int(restore_page or 0)),
+                                        self._vpt_nbuckets(self._vpt_results))
 
         prev_btn.clicked.connect(lambda: self._vpt_page_step(-1))
         next_btn.clicked.connect(lambda: self._vpt_page_step(+1))
@@ -226,6 +232,22 @@ class _VptResultsDockMixin:
 
         self._ensure_selection_views()               # image/plot/table/centered all subscribed
         self._vpt_render_page()
+
+        # Part 2: retain the payload so a CLOSED dock can be reopened from "Show results" with NO recompute.
+        # The rebuild reads the CURRENT page/bucket off _vpt_results (which survives a close), so a reopen
+        # lands where the user left it. The rebuild reuses this same method, which removes the stale dock
+        # first — so reopening is idempotent and never stacks duplicates.
+        try:
+            from pycat.utils.results_store import retain_results
+            _payload = (ptc, msd_df, fit, mod, tracks, per_track_metrics, frame_dt, van_hove_lag)
+
+            def _rebuild():
+                _st = getattr(self, '_vpt_results', None) or {}
+                self._show_vpt_results(*_payload, restore_page=_st.get('page', 0),
+                                       restore_bucket=_st.get('bucket_size'))
+            retain_results('vpt', _rebuild, label='VPT microrheology')
+        except Exception:                            # broad-ok: results retention is a convenience, never gating
+            pass
 
     def _vpt_nbuckets(self, st):
         n = len(st['all_tids']); size = max(1, int(st['bucket_size']))
@@ -245,6 +267,47 @@ class _VptResultsDockMixin:
         st['bucket_size'] = int(v)
         st['page'] = min(st['page'], self._vpt_nbuckets(st))
         self._vpt_render_page()
+
+    def _vpt_drawn_tids(self):
+        """The track ids actually DRAWN on the current page. For a bucket page (k ≥ 1) it is exactly the
+        bucket slice of ``all_tids``; for the ensemble (page 0) the panels draw a representative SAMPLE, whose
+        ids the centered/MSD registries record under ``'coords'``. Used to tell an on-page selection (already
+        visible → don't move) from an off-page one (navigate)."""
+        st = getattr(self, '_vpt_results', None)
+        if not st:
+            return set()
+        if st['page'] != 0:
+            size = max(1, int(st['bucket_size']))
+            a = (st['page'] - 1) * size
+            return set(int(t) for t in st['all_tids'][a:a + size])
+        drawn = set()
+        for attr in ('_centered_registry', '_msd_line_registry'):
+            reg = getattr(self, attr, None) or {}
+            drawn |= set(int(k) for k in (reg.get('coords') or {}).keys())
+        return drawn
+
+    def _vpt_page_to_selected_track(self, track_id):
+        """Part 3: when a selection arrives for a track that is NOT on the current page, move the pager to the
+        bucket that contains it and re-render, so the picked track lands AMONG ITS NEIGHBOURS instead of being
+        promoted alone onto some other bucket's page (which leaves the pager label naming a range that excludes
+        it). An on-page selection — including a track visible in the page-0 ensemble — does not move the view.
+        The bucket index is recomputed from the CURRENT bucket size every time, never cached, so a bucket-size
+        change followed by a selection still lands on the right page."""
+        st = getattr(self, '_vpt_results', None)
+        if not st:
+            return                                   # no results dock → clean no-op (existing contract)
+        try:
+            tid = int(track_id)
+        except (TypeError, ValueError):
+            return
+        all_tids = st['all_tids']
+        if tid not in all_tids:
+            return                                   # unknown / not a paged track → nothing to page to
+        if tid in self._vpt_drawn_tids():
+            return                                   # already visible on the current page → don't yank the view
+        size = max(1, int(st['bucket_size']))
+        st['page'] = all_tids.index(tid) // size + 1  # 1-based; page 0 is the ensemble, buckets follow
+        self._vpt_render_page()                       # re-render; the existing re-highlight path then fires
 
     def _vpt_update_pager_label(self):
         st = self._vpt_results

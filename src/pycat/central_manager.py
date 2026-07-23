@@ -140,6 +140,14 @@ class CentralManager:
         except Exception as exc:      # broad-ok: ui_cleanup — the Home dock must never break startup
             from pycat.utils.general_utils import debug_log
             debug_log("home dock: install failed", exc)
+        # 'Show results' (results_figure_reflow Part 2): reopen the most recent results dock from its
+        # retained payload, no recompute. Shared across workflows via utils.results_store.
+        try:
+            from pycat.utils.dock_space import install_show_results_action
+            self._show_results_action = install_show_results_action(self)
+        except Exception as exc:      # broad-ok: ui_cleanup — the reopen action must never break startup
+            from pycat.utils.general_utils import debug_log
+            debug_log("show-results: install failed", exc)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)

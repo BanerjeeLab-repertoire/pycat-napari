@@ -1,3 +1,27 @@
+## [1.6.312] - 2026-07-23
+### Added — **A closed results dock reopens without recomputing, and clicking an off-page bead pages the plots to its track (results-dock spec Parts 2 & 3).**
+Two more defects in the VPT results dock reported alongside the reflow bug.
+
+**Part 3 — page-to-selection.** VPT pages thousands of tracks in buckets, and every bead is clickable —
+including beads whose track is not in the displayed bucket. Clicking one used to promote its curve alone onto
+the current page while the pager label still named a range that excluded it. Now a selection for an off-page
+track moves the pager to the bucket that contains it (`_vpt_page_to_selected_track`, index recomputed from
+`all_tids` and the *current* bucket size, never cached), re-renders, and re-highlights through the existing
+path; an on-page selection — including a track visible in the page-0 ensemble — does not move the view.
+`tests/test_vpt_page_to_selection.py` (`core`, 8) incl. bucket boundaries and a bucket-size-change-then-select.
+
+**Part 2 — reopen a closed results dock.** Closing the panel left PyCAT holding a full set of computed results
+and no way to see them short of re-running the analysis. New shared `utils/results_store.py`
+(`retain_results` / `reopen_results` / `has_results` / `disabled_reason`): a workflow registers how to REBUILD
+its dock from the retained payload, and a shared **'📊 Show results'** menu action
+(`dock_space.install_show_results_action`) reopens the most recent — **never recomputing**; when nothing is
+retained it states the refusal rather than silently starting a long run. VPT registers its payload and a
+reopen restores the page/bucket the user left. Reopen reuses the existing dock-replacement path, so it is
+idempotent (no stacked duplicates). `tests/test_results_store.py` (`core`, 8). Full `pytest -m "core or base"`
+green. **The results-dock spec (Parts 1–3) is complete.** Follow-ons: labelling a payload whose source data
+has since changed as "from an earlier run" (the `stamp` field exists for it), and cellular/batch adopting the
+same `retain_results` call.
+
 ## [1.6.311] - 2026-07-23
 ### Fixed — **VPT results plots now reflow when you resize the dock (reported by Shamli Manasvi).**
 The 2×2 microrheology plots were squashed to hairlines with overlapping axis labels, and dragging the dock

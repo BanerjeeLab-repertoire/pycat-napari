@@ -64,6 +64,15 @@ class _VptTableMixin:
         self._selected_track_id = tid
         if not service.select(selection):
             self._selected_track_id = previous      # suppressed — nothing was propagated
+        else:
+            # Part 3: bring the plots to the selected track's bucket if it is off the current page, so the
+            # selection lands among its neighbours (page-to-selection). An on-page pick does not move the view.
+            page_to = getattr(self, '_vpt_page_to_selected_track', None)
+            if callable(page_to):
+                try:
+                    page_to(tid)
+                except Exception:                   # broad-ok: paging-to-selection is a convenience, never gating
+                    pass
 
     def _highlight_track_in_table(self, track_id):
         """Select the track's row in the summary table (if the linked table is
