@@ -56,7 +56,6 @@ def _process_frame_worker(args):
     Reads one pre-normalised frame from a filesystem zarr store,
     applies the named processing function, and returns (t, result).
     """
-    import warnings
     import os
     # Suppress CuPy CUDA path warnings before any imports can trigger them.
     # Must use both filterwarnings AND env var because different Python

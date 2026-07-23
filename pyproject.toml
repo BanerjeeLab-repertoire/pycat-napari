@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.304"
+version = "1.6.305"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -34,7 +34,10 @@ keywords = [
 ]
 
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    # Beta while the install matrix, Python-version support, and release pipeline are still stabilising —
+    # the 3.13 situation (a declared ceiling that could not install, reverted in 1.6.302) shows the packaging
+    # is not yet "stable". Revisit → Production/Stable when the clean-install matrix and a 3.13 lane are green.
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
@@ -292,6 +295,11 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 addopts = "-v --cov=pycat --cov-report=term-missing"
 testpaths = ["tests"]
+# Run `pytest` from a fresh clone WITHOUT `PYTHONPATH=src`. CI still installs the package (`pip install
+# --no-deps -e .`) so its lane tests real imports; this only makes a bare local `pytest` work. NOTE: a
+# dedicated wheel-install CI lane (import the built artifact, not src/) is the outstanding half of
+# release_engineering Part B — until it lands, `pythonpath` must not be treated as packaging verification.
+pythonpath = ["src"]
 # qt_api is consumed by pytest-qt (the `integration` lane and local `.[test]` runs). In the minimal
 # headless `core` lane pytest-qt is absent, so pytest emits a harmless "Unknown config option: qt_api"
 # warning there — acceptable, because that lane no longer ERRORS on Qt (the Qt tests are `integration`).

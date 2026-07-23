@@ -99,7 +99,7 @@ jobs:
           # its compute dependencies are the explicit list above.
           pip install --no-deps -e .
 
-      - name: Ruff — correctness rules (ADVISORY until first seen green)
+      - name: Ruff — correctness rules (BLOCKING)
         # This subset is where every rule has caught a real, shipped bug here:
         #
         #   F821 undefined name           -> `progress_emit`, `mask_name`
@@ -110,19 +110,15 @@ jobs:
         #   B023 loop variable in a closure (the classic Qt-callback bug)
         #   B904 raise-without-from in except (destroys the original traceback)
         #
-        # It is ADVISORY (`|| true`) for now, deliberately. Ruff could not be installed in
-        # the environment where this workflow was written, so F811/F601/B006/B904 were
-        # verified against a hand-written AST re-implementation and F821/F823/B023 against
-        # the guard tests below — but real Ruff has edge cases those approximations do not.
-        #
-        # Staking the build on a step that has never actually been RUN is how you get a red
-        # pipeline that teaches nothing. Once this step is observed green in a real run,
-        # delete the `|| true` and it becomes blocking. The AST guards below already cover
-        # the same bug classes and ARE blocking, so nothing is unguarded in the meantime.
+        # BLOCKING as of 1.6.305: the selection was run with real Ruff and driven to zero
+        # (62 F811 redundant re-imports removed, 3 B023 closures bound), so the `|| true`
+        # hedge — kept only until the step was observed green in a real run — was removed.
+        # The canonical linter now STOPS these classes, not just watches them. Style and
+        # F841 stay advisory below (they need individual review, per their own comments).
         run: |
           ruff check src \
             --select F821,F823,F601,F811,B006,B023,B904 \
-            --output-format=github || true
+            --output-format=github
 
       - name: Ruff — unused locals (ADVISORY — do not auto-fix)
         # F841 currently reports ~34 findings, and the audit is right that they must be

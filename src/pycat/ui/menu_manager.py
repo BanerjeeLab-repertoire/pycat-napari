@@ -43,7 +43,7 @@ class _FileDropFilter(QObject):
 
     def eventFilter(self, obj, event):
         from PyQt5.QtCore import QEvent
-        from PyQt5.QtWidgets import QLineEdit, QTextEdit, QAbstractSpinBox
+        from PyQt5.QtWidgets import QTextEdit, QAbstractSpinBox
         et = event.type()
         if et not in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
             return False
@@ -945,8 +945,7 @@ class MenuManager:
         Displays the curated 'common' fields by default, with a checkbox that
         reveals the full raw metadata dump. Also offers a JSON export button.
         """
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
-                                      QLabel, QPushButton, QCheckBox,
+        from PyQt5.QtWidgets import (QDialog, QHBoxLayout,
                                       QTableWidget, QTableWidgetItem, QHeaderView,
                                       QFileDialog)
         from napari.utils.notifications import (show_info as _info,
@@ -1131,14 +1130,10 @@ class MenuManager:
 
     def _open_session_loader(self):
         """Open a folder browser to select a PyCAT output directory and reload."""
-        from PyQt5.QtWidgets import (QFileDialog, QDialog, QVBoxLayout,
-                                      QListWidget, QPushButton, QLabel,
-                                      QHBoxLayout, QCheckBox,
-                                      QAbstractItemView)
+        from PyQt5.QtWidgets import (QFileDialog, QDialog, QListWidget, QHBoxLayout, QAbstractItemView)
         from pathlib import Path
         from napari.utils.notifications import (
             show_info as napari_show_info,
-            show_warning as napari_show_warning,
         )
         from pycat.file_io.session_loader import (
             scan_output_folder, load_session, session_load_messages)
@@ -1295,8 +1290,7 @@ class MenuManager:
         step expands to reveal the layers/parameters it captured, so the user
         can review exactly what will be replayed.
         """
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                                      QPushButton, QTreeWidget, QTreeWidgetItem,
+        from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
                                       QHeaderView)
         from napari.utils.notifications import show_info as _info
 
@@ -1705,7 +1699,6 @@ class MenuManager:
 
         Idempotent and re-entrancy-safe.
         """
-        import math
         if getattr(self, '_grid_applying', False):
             return
         self._grid_applying = True

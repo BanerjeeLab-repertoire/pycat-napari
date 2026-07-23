@@ -58,7 +58,6 @@ def _ask_copy_to_local(file_path, verdict):
         from PyQt5.QtWidgets import QMessageBox, QCheckBox
     except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return 'no'
-    import os as _os
     try:
         size_mb = (verdict.size_bytes or 0) / (1024 * 1024)
     except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
@@ -86,8 +85,6 @@ def _copy_to_local_with_progress(file_path, verdict):
     """Copy a (slow-storage) file to a local temp dir in chunks, showing a Qt
     progress bar (the copy IS the slow I/O, so this doubles as the slow-load
     progress indicator). Returns the local path, or None on failure/cancel."""
-    import os as _os
-    import tempfile
     try:
         from PyQt5.QtWidgets import QProgressDialog
         from PyQt5.QtCore import Qt
@@ -202,7 +199,6 @@ def _ask_multipage_axis(file_path, n_pages):
                                      QButtonGroup)
     except Exception:  # broad-ok: Qt/layer-inspection best-effort — a UI probe that fails degrades gracefully
         return None
-    import os as _os
     dlg = QDialog()
     dlg.setWindowTitle("Unlabelled multipage TIFF")
     v = QVBoxLayout(dlg)

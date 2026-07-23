@@ -160,8 +160,7 @@ def _relax_min_widths(widget):
     to elide/wrap lets the layout compress gracefully. Call once on the root widget
     of any dock that lives inside a horizontal-scroll-disabled QScrollArea.
     """
-    from PyQt5.QtWidgets import (QPushButton, QComboBox as _QCB, QLineEdit,
-                                  QLabel as _QLbl)
+    from PyQt5.QtWidgets import (QPushButton, QComboBox as _QCB, QLabel as _QLbl)
     for w in widget.findChildren((QPushButton, _QCB, QLineEdit)):
         try:
             w.setMinimumWidth(0)
@@ -1098,7 +1097,6 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
 
     def _add_measure_line(self, layout=None, separate_widget=False):
         """Add a widget for measuring object diameters with drawn lines, optionally in a separate dock."""
-        from PyQt5.QtWidgets import QCheckBox
         measure_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(measure_layout, 'Measure Object Diameters', bold=True) # Add widget title label
         # Single cycling button: Draw Lines → Measure Lines → Clear Lines → …
@@ -1372,7 +1370,7 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
         Both the 'preprocessing' and 'background_removal' batch steps are recorded
         so replay reproduces both layers.
         """
-        from PyQt5.QtWidgets import QCheckBox, QSlider, QLabel as _QLabel, QWidget as _QWidget, QFormLayout
+        from PyQt5.QtWidgets import QLabel as _QLabel, QWidget as _QWidget, QFormLayout
         from PyQt5.QtCore import Qt
         from pycat.toolbox.image_processing_tools import FOREGROUND_SUPPRESSION_DEFAULTS
 
@@ -2121,7 +2119,7 @@ class TimeSeriesCondensateUI(AnalysisMethodsUI):
         the source file or loading the whole stack into memory.
         """
         from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QSpinBox,
-                                      QPushButton, QCheckBox, QLabel)
+                                      QPushButton, QLabel)
         import numpy as np
 
         group = QGroupBox("Step 2 — Reference Frame & Analysis Range")

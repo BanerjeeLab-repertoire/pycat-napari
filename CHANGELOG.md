@@ -1,3 +1,22 @@
+## [1.6.305] - 2026-07-23
+### Changed — **Correctness lint is now BLOCKING, and the Development Status is Beta (release_engineering Parts A + D).**
+- **Part A — correctness ruff selection blocks CI.** The `F821,F823,F601,F811,B006,B023,B904` selection was
+  advisory (`|| true`) "until observed green in a real run". Running real Ruff surfaced **65 findings** (not
+  the near-zero the spec expected): 62 F811 redundant re-imports and 3 B023 closure-over-loop-variable — the
+  latter three in the 1.6.295 `parse_ome_channels_and_instrument` (`_pick` now binds `ds_attr`/`det_attr` as
+  defaults). All 65 were driven to zero (the redundant imports removed; one cross-module re-import confirmed to
+  be the same re-exported object before removal), so the `|| true` was deleted — the canonical linter now
+  **stops** these bug classes rather than only watching them. F841 (unused locals) and style stay advisory,
+  per their existing review-required rationale.
+- **Part D — `Development Status :: 4 - Beta`** (was `5 - Production/Stable`): accurate while the install
+  matrix and Python-version support stabilise (the 3.13 ceiling that could not install, reverted in 1.6.302,
+  is the case in point). Revisit when the clean-install matrix and a 3.13 lane are green.
+- **Part B (partial) — `pythonpath = ["src"]`** so a bare `pytest` runs from a fresh clone. The dedicated
+  wheel-install CI lane that must back it (import the built artifact, not `src/`) is the outstanding half of
+  Part B and is explicitly noted as not-yet-packaging-verification. Part C (finer marker tiers) remains.
+- No scientific behaviour changes; the removed imports were all redundant (the module-scope import already
+  bound the name). Full core green.
+
 ## [1.6.304] - 2026-07-23
 ### Added — **Two guards against spec-drift test failures (collapse_mode_and_test_guards).**
 The `collapse` reflow mode (Part 1 of the spec) was already implemented in 1.6.298 and hardened in 1.6.303;

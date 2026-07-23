@@ -466,7 +466,6 @@ def extract_fusion_relaxation(
         t0_frame, time_s (from the merge), aspect_ratio, R_um (equivalent
         radius of the merged droplet — a natural default characteristic length).
     """
-    import skimage as sk
     from pycat.toolbox.dynamic_spatial_tools import detect_merge_fission
     events = detect_merge_fission(mask_stack, microns_per_pixel, proximity_um)
     if events.empty:

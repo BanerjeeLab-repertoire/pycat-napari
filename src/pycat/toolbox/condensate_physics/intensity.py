@@ -120,7 +120,6 @@ def intensity_decomposition_per_cell(
     microns_per_pixel: float = 1.0,
 ) -> pd.DataFrame:
     """Run bimodal intensity decomposition for each labeled cell."""
-    import skimage as sk
     rows = []
     for prop in sk.measure.regionprops(labeled_cells):
         cmask = (labeled_cells == prop.label)

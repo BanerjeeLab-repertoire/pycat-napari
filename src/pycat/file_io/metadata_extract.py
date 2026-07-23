@@ -196,7 +196,9 @@ def parse_ome_channels_and_instrument(xml_string):
         det_id = ds_attr.get('ID')
         det_attr = detectors.get(det_id, {})
 
-        def _pick(key):   # DetectorSettings wins (per-channel); the Detector element fills the gap.
+        # Bind this channel's attrs as defaults so the closure captures THIS iteration's values, not the
+        # loop variables (it is only called within the iteration, but binding makes that explicit — B023).
+        def _pick(key, ds_attr=ds_attr, det_attr=det_attr):   # DetectorSettings wins; Detector fills the gap.
             return ds_attr.get(key) if key in ds_attr else det_attr.get(key)
 
         channels.append({

@@ -265,7 +265,7 @@ def status_row(form, registry, label, widget, role, default=None,
 
 # ── Step 1 (file I/O) + pixel-size gate ─────────────────────────────────────
 
-from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QDoubleSpinBox, QPushButton,
+from PyQt5.QtWidgets import (QGroupBox, QFormLayout, QPushButton,
                              QSizePolicy)
 
 

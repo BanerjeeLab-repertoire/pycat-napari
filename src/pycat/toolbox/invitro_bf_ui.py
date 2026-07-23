@@ -397,7 +397,6 @@ def _ivbf_size_contact(ui, layout):
     def _on_run():
         from pycat.toolbox.invitro_tools import (
             fit_size_distribution, estimate_contact_angle)
-        import skimage as sk
         try:
             mask = np.asarray(ui.viewer.layers[mask_dd.currentText()].data)
         except KeyError as e: napari_show_warning(str(e)); return

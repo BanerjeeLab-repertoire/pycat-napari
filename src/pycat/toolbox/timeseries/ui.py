@@ -103,7 +103,6 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
     # GUI imported here, not at module scope — the analysis in this module needs none.
     from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout
     import napari
-    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QSpinBox, QLabel
 
     grp, form, stack_dropdown, factor_spin = _build_ts_upscale_check_ui(ui_instance)
 
@@ -188,7 +187,6 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     # GUI imported here, not at module scope — the analysis in this module needs none.
     from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QWidget
     import napari
-    from PyQt5.QtWidgets import QGroupBox, QFormLayout, QPushButton, QCheckBox
 
     grp = QGroupBox("Lazy Stack Pre-processing")
     form = QFormLayout(grp)
@@ -238,7 +236,8 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     form.addRow(pseudo3d_temporal_cb)
 
     def _on_check_correlation():
-        from pycat.toolbox.timeseries_condensate_tools import estimate_temporal_correlation
+        # `estimate_temporal_correlation` is already imported at module scope (from timeseries.correlation,
+        # which timeseries_condensate_tools re-exports — verified the same object), so no local re-import.
         layer_name = stack_dropdown.currentText()
         try:
             layer = ui_instance.viewer.layers[layer_name]

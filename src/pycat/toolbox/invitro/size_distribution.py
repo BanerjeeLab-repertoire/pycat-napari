@@ -269,7 +269,7 @@ def fit_size_distribution_mle(radii_um, xmin=None, candidates=None):
       verdict               : a plain-English statement of what can and cannot be
                               concluded
     """
-    from scipy import optimize, stats as _st
+    from scipy import stats as _st
 
     r = np.asarray(radii_um, dtype=float)
     r = r[np.isfinite(r) & (r > 0)]
