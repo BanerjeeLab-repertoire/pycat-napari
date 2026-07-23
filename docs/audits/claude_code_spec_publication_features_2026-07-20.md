@@ -1,5 +1,32 @@
 # Claude Code spec — General publication-figure features (the workstation gap)
 
+> **◐ TIER 1 STARTED (axis controls shipped 1.6.262). Rest of Tier 1 + Tiers 2–3 remain.** The prerequisite
+> (FigureSpec merge) landed in 1.6.192, so these attach to the canonical `figure_spec.FigureSpec`. Shipped
+> the first Tier-1 slice — the **axis controls reviewers notice immediately**: `y_scale` (`'linear'` |
+> `'log'` | `'symlog'`) honoured by `render()` and `refine()`, and `minor_ticks`. **Validate-and-warn, not
+> silent:** a `log` request on data with non-positive values falls back to `symlog` with a `UserWarning`
+> stating the consequence (pure `resolve_y_scale` helper), never a silent clip or crash. Both fields
+> round-trip through JSON (scalar → auto via `asdict`) and work through `refine` without recomputing.
+> Publication-sane default preserved (a bare spec renders linear, unchanged). `tests/test_publication_
+> features.py` (`core`, Agg). Error/CI representation also DONE (1.6.263): `error_type`
+> (`none`/`sd`/`sem`/`ci95`) draws an error bar on each group mean and LABELS the type on the figure (pure
+> `group_error` helper; SD ddof=1 / SEM / 1.96·SEM). **Remaining Tier 1:** tick scientific-notation/exponent
+> control, significance bracket-placement UI exposure. **Tier 2:** multi-panel +
+> panel labels DONE (1.6.264): `render_multipanel(panels, *, spec, n_cols, panel_labels)` grids several
+> `FigureData` with bold A/B/C… labels (per-panel spec override; per-axis plotting factored into a shared
+> `_render_on_axis`, so single-panel `render` is unchanged). Validated fonts + transparent background DONE
+> (1.6.265): `font_family` (validated against installed fonts — a missing one warns + falls back, pure
+> `resolve_font_family`) and `transparent_background` (honoured by `export`'s savefig). Semantic colour +
+> dense-scatter rasterization DONE (1.6.266): `color_map` ({group: colour} tied to identity not position) and
+> `rasterize_points` (dense scatter → raster layer inside vector output). Export metadata DONE (1.6.267):
+> `export` embeds the PyCAT + dependency versions in the file (PNG `Software` / PDF-SVG `Creator`) and a
+> `_provenance` block in the spec JSON (`spec_from_dict` now tolerates it). Exact regeneration DONE (1.6.268):
+> `render` stashes the raw plotted data, `export` writes `<name>_data.json`, and `regenerate(data, spec)`
+> reconstructs the exact figure (beyond the summary CSV). Legend control DONE (1.6.269): `legend` +
+> `legend_loc`/`legend_ncol`/`legend_frame` (swatches follow the semantic `color_map`) — Tier 2 complete.
+> **Remaining Tier 3 (the last, largest, least headless-verifiable):**
+> metadata, exact regeneration, image panels/scale bars. Ship each as its own version.
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
 audit's §8: the figure system is strong for simple grouped scatter/comparison plots but is *"not yet a
 complete general publication-figure workstation."* This spec fills the missing controls. **It must land

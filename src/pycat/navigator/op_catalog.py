@@ -38,6 +38,8 @@ import json
 import os
 from typing import Dict, List, Optional
 
+from pycat.utils.quality_gate import QualityRequirement
+
 from .capabilities import Capability, InformationRole, Representation, cap
 from .contracts import CostModel, ModuleContract
 from .gates import probe_gate
@@ -274,13 +276,21 @@ def _measure_ops() -> List[dict]:
              requires=[cap(R.TRAJECTORIES, "target:bead")], context=["calibrated"],
              observables=["viscosity", "diffusion"], propagate=False, preference=0.6,
              purpose="Bead-tracking MSD -> viscosity / moduli.",
-             api="vpt_tools.run_vpt_microrheology"),
+             api="vpt_tools.run_vpt_microrheology",
+             # A viscosity in pixels is meaningless (Stokes-Einstein needs a physical scale), and the fit
+             # is only as trustworthy as its reliability grade — so the planner blocks it without a pixel
+             # size and probes (QC) when reliability was never assessed.
+             quality=QualityRequirement(needs_pixel_size=True, min_reliability='moderate',
+                                        measurement_key='viscosity')),
         dict(id="partition_enrichment.client", module="partition_enrichment_tools",
              role=InformationRole.MEASURE, provides=cap(R.MEASUREMENT_TABLE, T, "observable:partitioning"),
              requires=[cap(R.INSTANCE_LABELS, T)], context=[],
              observables=["partitioning"], propagate=True, preference=0.6,
              purpose="Client enrichment / partition coefficient.",
-             api="partition_enrichment_tools.client_enrichment"),
+             api="partition_enrichment_tools.client_enrichment",
+             # A partition coefficient turned into a ΔG / concentration is only valid against a validated
+             # calibration curve — the planner blocks the interpretation when calibration is invalid.
+             quality=QualityRequirement(needs_calibration=True, measurement_key='client_enrichment')),
         dict(id="invitro.size_distribution", module="invitro_tools",
              role=InformationRole.INTERPRET, provides=cap(R.MODEL_FIT, T, "observable:size"),
              requires=[cap(R.INSTANCE_LABELS, T)], context=[],
@@ -347,6 +357,14 @@ def _layer_op_contract(o: dict) -> ModuleContract:
 def _measure_op_contract(o: dict) -> ModuleContract:
     provides = o["provides"]
     provides = provides if isinstance(provides, list) else [provides]
+    # A measurement may declare a QualityRequirement (calibration / pixel size / reliability floor). It is
+    # turned into ordinary planner Assumptions so `compile`'s existing gate machinery evaluates it — the
+    # planner "consulting the quality gate" is exactly these gates being on the contract (navigator inc 2).
+    assumptions = list(o.get("assumptions", []))
+    quality = o.get("quality")
+    if quality is not None:
+        from .quality_gates import quality_assumptions
+        assumptions += quality_assumptions(quality, o["id"])
     return ModuleContract(
         name=o["id"],
         info_role=o["role"],
@@ -355,6 +373,7 @@ def _measure_op_contract(o: dict) -> ModuleContract:
         requires_inputs=list(o.get("requires", [])),
         requires_context=list(o.get("context", [])),
         observables=list(o.get("observables", [])),
+        assumptions=assumptions,
         propagates_tags=frozenset({"target"}) if o.get("propagate") else frozenset(),
         preference=o.get("preference", 0.5),
         public_api=o.get("api", ""),

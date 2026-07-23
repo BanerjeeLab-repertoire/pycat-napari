@@ -1,5 +1,8 @@
 # Claude Code spec — PyCAT Validation Suite: a standing per-release regression benchmark
 
+> **✅ STATUS — DONE (done-but-unstamped; verified 2026-07-22). The standing per-release regression bench
+> exists and is green (`test_validation_suite`, 8 tests). No computed value changes.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Turns the
 existing scattered correctness tests into a **tracked, per-release benchmark** whose metrics are
 compared across versions. The roadmap describes it as *"a standing per-release regression benchmark…

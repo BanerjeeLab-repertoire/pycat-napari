@@ -105,3 +105,31 @@ def test_the_batch_loop_WIRES_the_consolidated_writer():
     assert 'ConsolidatedLongWriter' in names, "the batch loop never constructs the consolidated writer"
     assert 'records_from_output_dir' in names, "the batch loop never reads the per-image tables"
     assert 'add_image' in names, "the batch loop never streams an image into the consolidated table"
+
+
+def test_records_have_scored_family_gates_the_reliability_qc():
+    """Only images carrying a scored-family measurement (partition/concentration/ΔG) trigger the batch's
+    imaging-QC computation — a non-partition batch pays no QC cost."""
+    from pycat.utils.consolidated_table import records_have_scored_family
+    partition = pd.DataFrame({'object_id': [1], 'partition_coefficient': [4.2]})
+    plain = pd.DataFrame({'object_id': [1], 'area': [12.0], 'intensity': [100.0]})
+    assert records_have_scored_family([('droplet', partition)]) is True
+    assert records_have_scored_family([('cell', plain)]) is False
+    assert records_have_scored_family([]) is False
+
+
+def test_the_batch_loop_COMPUTES_reliability_only_for_scored_family_images():
+    """AST: the batch consolidation must (a) gate on `records_have_scored_family`, (b) compute `run_full_qc`
+    for those images, and (c) pass a `reliability_context` to `add_image` — so the reliability columns
+    actually populate in real exports (not only when a test supplies a context)."""
+    src = (pathlib.Path(__file__).resolve().parents[1] / 'src' / 'pycat'
+           / 'batch_processor.py').read_text(encoding='utf-8')
+    tree = ast.parse(src)
+    called = {getattr(c.func, 'id', None) or getattr(c.func, 'attr', None)
+              for c in ast.walk(tree) if isinstance(c, ast.Call)}
+    assert 'records_have_scored_family' in called, "reliability QC is not gated to scored-family images"
+    assert 'run_full_qc' in called, "the batch never computes the imaging-QC reliability factor"
+    add_image_calls = [c for c in ast.walk(tree) if isinstance(c, ast.Call)
+                       and getattr(c.func, 'attr', None) == 'add_image']
+    assert any(k.arg == 'reliability_context' for c in add_image_calls for k in c.keywords), \
+        "add_image is never passed a reliability_context — the columns stay blank in real batches"

@@ -102,7 +102,7 @@ class TimeSeriesInVitroFluorUI:
     def setup_ui(self):
         try:
             self.central_manager.workflow_checklist.activate('timeseries_invitro_fluor')
-        except Exception:
+        except Exception:  # broad-ok: ui_cleanup — the workflow checklist is an additive progress aid; it must never break UI setup
             pass
 
         layout = QVBoxLayout()

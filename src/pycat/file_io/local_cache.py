@@ -113,7 +113,7 @@ def _save_manifest(m):
     try:
         with open(_manifest_path(), 'w', encoding='utf-8') as f:
             json.dump(m, f, indent=2)
-    except Exception as exc:
+    except Exception as exc:  # broad-ok: write — best-effort cache manifest; its absence only loses the origin-display convenience, the cached file itself is intact
         debug_log('local_cache: could not write manifest', exc)
 
 
@@ -149,7 +149,7 @@ def _save_protected(p):
     try:
         with open(_protected_path(), 'w', encoding='utf-8') as f:
             json.dump(p, f, indent=2)
-    except Exception as exc:
+    except Exception as exc:  # broad-ok: write — best-effort cache retention metadata; on failure the file is simply re-exposed to normal pruning, no user data is lost
         debug_log('local_cache: could not write protected set', exc)
 
 

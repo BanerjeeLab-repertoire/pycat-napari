@@ -124,3 +124,65 @@ def test_it_composes_with_the_real_stability_result():
                         object_flags=(0, 10), sensitivity=unstable, benchmark=1.0)
     assert score.contributions['sensitivity'] == 0.2
     assert any('sensitivity' in r for r in score.reasons)
+
+
+# ── Surfacing on the Measurement (the number carries its grade) ──────────────────────────────────
+def test_a_measurement_surfaces_its_reliability_grade_and_reasons():
+    """A scored measurement shows `(reliability: grade)` on its value line and lists the worst-first
+    reasons — the grade is decomposable wherever the number is reported, not just in a helper."""
+    from pycat.utils.measurement import Measurement
+    score = reliability('partition_coefficient', image_qc=_clean_qc(), object_flags=(9, 42),
+                        calibration=_ok_calibration(), sensitivity='sensitive', benchmark=0.95)
+    m = Measurement(name='K_p', value=4.2, units='', reliability=score)
+    text = m.summary()
+    assert f"(reliability: {score.grade})" in text.splitlines()[0]
+    # every worst-first reason is surfaced, in order
+    reason_lines = [l.split('reliability: ', 1)[1] for l in text.splitlines() if '    reliability:' in l]
+    assert reason_lines == list(score.reasons)
+
+    d = m.to_dict()
+    assert d['reliability']['grade'] == score.grade
+    assert d['reliability']['reasons'] == list(score.reasons)
+    assert d['reliability']['missing'] == list(score.missing)
+
+
+def test_an_unscored_measurement_shows_no_reliability_line():
+    """Backward-compatible: a Measurement with no reliability reports exactly as before — no grade, no
+    reliability rows, and a null in the dict."""
+    from pycat.utils.measurement import Measurement
+    m = Measurement(name='K_p', value=4.2, units='')
+    text = m.summary()
+    assert 'reliability' not in text
+    assert m.to_dict()['reliability'] is None
+
+
+def test_object_flags_accepts_a_precomputed_per_object_score():
+    """The consolidated table passes a per-OBJECT unflagged-confidence float (1.0 clean, lower when the
+    object was biological-QC flagged) rather than the population fraction, so one object's grade reflects
+    its own flag."""
+    clean = reliability('partition_coefficient', image_qc=_clean_qc(), calibration=_ok_calibration(),
+                        object_flags=1.0)
+    flagged = reliability('partition_coefficient', image_qc=_clean_qc(), calibration=_ok_calibration(),
+                          object_flags=0.5)
+    assert clean.contributions['object_flags'] == 1.0
+    assert flagged.contributions['object_flags'] == 0.5
+    assert flagged.value < clean.value
+    assert any('flagged by biological QC' in r for r in flagged.reasons)
+
+
+def test_the_qc_report_section_lists_only_capped_measurements_and_why():
+    """The QC-report section names each measurement whose grade is capped below `high`, the factors that
+    capped it, and its worst-first reason — and is EMPTY when everything is high (nothing to flag)."""
+    from pycat.utils.reliability import reliability_report_section
+    high = reliability('partition_coefficient', **_all_clean_kwargs())
+    # missing calibration (a core factor) caps below high; a refused one is unreliable
+    capped = reliability('client_enrichment', image_qc=_clean_qc(), object_flags=(0, 5),
+                         sensitivity='stable', benchmark=0.95)      # no calibration → capped
+    refused = reliability('dense_concentration', image_qc=_clean_qc(),
+                          calibration={'valid': False, 'reason': 'acquisition mismatch'})
+
+    assert reliability_report_section([('K_p', high)]) == ''        # all high → no section
+    text = reliability_report_section([('K_p', high), ('enrichment', capped), ('C_dense', refused)])
+    assert 'K_p' not in text                                        # the high one is not listed
+    assert 'enrichment' in text and 'calibration not assessed' in text
+    assert 'C_dense' in text and 'unreliable' in text

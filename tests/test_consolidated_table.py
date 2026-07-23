@@ -231,3 +231,45 @@ def test_the_provenance_sidecar_is_written_beside_the_table_keyed_by_feature(tmp
 def test_no_sidecar_when_no_measurements_were_written(tmp_path):
     w = ConsolidatedLongWriter(tmp_path / 'empty.csv', condition_fields=['g'])
     assert w.write_provenance_sidecar() is None
+
+
+# ── Measurement Reliability Index columns (additive, per-object, scored family only) ─────────────
+def _clean_reliability_context():
+    return {'image_qc': [{'name': 'SNR', 'status': 'good', 'headline': 'ok'}],
+            'calibration': {'valid': True, 'level': 'ok', 'reason': 'acquisition matches'}}
+
+
+def test_reliability_columns_grade_the_scored_family_per_object():
+    """With clean image QC + valid calibration in the context, an unflagged partition_coefficient object
+    scores `high`; a biological-QC-flagged object scores lower — so a comparison can be recomputed on
+    high-reliability objects only."""
+    wide = pd.DataFrame({'object_id': [1, 2],
+                         'partition_coefficient': [4.2, 3.9],
+                         'qc_flags': ['touches image border', '']})
+    out = build_image_long_table([('droplet', wide)], image_stem='img1',
+                                 reliability_context=_clean_reliability_context())
+    assert {'reliability', 'reliability_reasons'} <= set(out.columns)
+    by_obj = {oid: (g, r) for oid, g, r in
+              zip(out['object_id'], out['reliability'], out['reliability_reasons'])}
+    # Unflagged + clean core factors → high; its reasons honestly note the non-core factors not assessed
+    # (rule 1: an unmeasured factor is stated, never assumed passing), but no biological-QC flag.
+    assert by_obj[2][0] == 'high'
+    assert 'flagged by biological QC' not in by_obj[2][1]
+    assert 'sensitivity not assessed' in by_obj[2][1]
+    assert by_obj[1][0] in ('low', 'moderate')                    # flagged → capped down
+    assert 'flagged by biological QC' in by_obj[1][1]
+
+
+def test_reliability_is_blank_off_the_scored_family_and_without_context():
+    """Reliability is one family first: a measurement outside SCORED_FAMILY is blank even with a context,
+    and WITHOUT a context nothing is scored (an unmeasured factor is never assumed passing). The columns
+    are always present so the streamed schema is stable."""
+    wide = pd.DataFrame({'object_id': [1], 'area': [12.0], 'partition_coefficient': [4.2]})
+    scored = build_image_long_table([('droplet', wide)], image_stem='i',
+                                    reliability_context=_clean_reliability_context())
+    rel = dict(zip(scored['measurement'], scored['reliability']))
+    assert rel['partition_coefficient'] == 'high' and rel['area'] == ''      # only the family is scored
+
+    none_ctx = build_image_long_table([('droplet', wide)], image_stem='i')
+    assert set(none_ctx['reliability']) == {''}                              # no context → nothing scored
+    assert 'reliability' in consolidated_columns([]) and 'reliability_reasons' in consolidated_columns([])

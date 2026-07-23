@@ -490,7 +490,10 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
                 with open(save_name + '_metadata.json', 'w', encoding='utf-8') as _mf:
                     _json.dump(file_metadata, _mf, indent=2, default=str)
         except Exception as _mde:
+            # Silent provenance loss otherwise: the results saved, but the metadata sidecar didn't and nobody is told.
             debug_log("file_io: metadata JSON export failed", _mde)
+            from pycat.utils import notify
+            notify.show_warning(f"Acquisition metadata sidecar was NOT saved ({_mde}); the results saved fine, only the provenance JSON is missing.")
 
         # Write the session manifest so Load Session can restore this state.
         try:
@@ -498,7 +501,10 @@ def write_session_outputs(central_manager, layers_by_name, selected_layers,
                 _write_session_manifest(session_dir, central_manager, source_path,
                                         manifest_layers, manifest_dfs, stem)
         except Exception as _me:
+            # The manifest is what Load Session reads back — a silent failure here makes the session unrestorable.
             debug_log("file_io: session manifest write failed", _me)
+            from pycat.utils import notify
+            notify.show_warning(f"Session manifest was NOT written ({_me}) — this session may not be restorable via Load Session; the result files did save.")
 
     return {'manifest_layers': manifest_layers, 'manifest_dfs': manifest_dfs}
 

@@ -81,6 +81,25 @@ SCIENTIFIC_MODULES = [
     "fd_curve_tools",
     "fft_bandpass_tools",
     "intensity_profile_tools",
+    # 1.6.256 (2026-07-22): the six god-file decompositions moved the actual science OUT of the
+    # *_tools.py shims above (which now just re-export) into these package modules. The shim entries
+    # above are now vacuous for this check — a module-scope napari import lives in the PACKAGE now, not
+    # the shim — so this guard must name the science where it lives. Only the science modules are listed;
+    # the packages' UI members (vpt/{panels,results_dock,*_adapter}, timeseries/ui) import Qt at module
+    # scope by design and are deliberately excluded. `path = _TOOLBOX / f"{mod}.py"` resolves the subpath.
+    "vpt/analysis", "vpt/detection", "vpt/drift", "vpt/host", "vpt/populations", "vpt/viscosity",
+    "condensate_physics/coarsening", "condensate_physics/frame_quality", "condensate_physics/intensity",
+    "condensate_physics/moduli", "condensate_physics/msd", "condensate_physics/photobleaching",
+    "condensate_physics/relaxation", "condensate_physics/survival",
+    "invitro/analysis", "invitro/field_summary", "invitro/partition", "invitro/size_distribution",
+    "segmentation/_common", "segmentation/cellpose", "segmentation/fz", "segmentation/intensity",
+    "segmentation/local_thresholding", "segmentation/morphology", "segmentation/puncta_refinement",
+    "segmentation/subcellular", "segmentation/watershed",
+    "image_processing/_base", "image_processing/background", "image_processing/deblur",
+    "image_processing/filters", "image_processing/preprocessing", "image_processing/size_estimation",
+    "image_processing/upscaling",
+    "timeseries/analysis", "timeseries/correlation", "timeseries/execution", "timeseries/frame_access",
+    "timeseries/preprocessing",
 ]
 
 _FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
@@ -156,8 +175,11 @@ def test_module_actually_imports(mod):
     """Each guarded module must import in the headless CI environment."""
     import importlib
 
+    # Decomposed-package members are listed as "pkg/module" (so the AST check can resolve the source
+    # path); the dotted import path needs the separator normalised.
+    dotted = mod.replace("/", ".")
     try:
-        importlib.import_module(f"pycat.toolbox.{mod}")
+        importlib.import_module(f"pycat.toolbox.{dotted}")
     except ImportError as exc:
         pytest.fail(
             f"pycat.toolbox.{mod} cannot be imported in the headless environment: "

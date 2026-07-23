@@ -1,5 +1,19 @@
 # Claude Code spec — Exception conversion increment 2: the scientific paths
 
+> **◐ STATUS — Tier-1 (scientific fabrication swallows) DONE; guard coverage RESTORED (2026-07-22).**
+> A thorough audit of the Tier-1 categories (calibration, all fit routines, metadata→physical-units,
+> segmentation/detection gates) found NO silent scientific-number fabrications remaining: every handler
+> returns an honest failure signal (NaN/inf/None + a flag), a documented fallback (e.g. keep the log-log MSD
+> estimate when the non-linear fit fails), or routes through the canonical pixel-size accessor. The Tier-1
+> wiring was accomplished by the 1.6.139 typed-error work, the file_io decomposition (284→239), the NaN+flag
+> conventions, and `test_no_scientific_result_swallowing`. **A real gap was found and fixed:** the six god-file
+> decompositions moved the science OUT of `vpt_tools`/`condensate_physics_tools`/`invitro_tools` (now shims)
+> into packages, so the swallow-guard's `_SCI_MODULES` was checking empty shims — it is now repointed at the
+> 18 decomposed science modules (+ the two still-monolithic), staying at budget 0 because the byte-identical
+> moves carried every `# broad-ok:` classification along. The toolbox broad-except ratchet has also already
+> dropped 514→498 via the decompositions. Remaining Tier-2/3 handlers are legitimate (UI cleanup, optional
+> backend, metadata probes) and guarded against growth by `test_exception_budget`.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Continues the
 typed-failure work: the ratchet and the error hierarchy shipped in 1.6.139, and the `file_io`
 decomposition converted 45 handlers as it moved code (284 → 239). This increment targets the largest

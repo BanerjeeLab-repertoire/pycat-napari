@@ -1,5 +1,19 @@
 # Claude Code spec — Background mode selector (surface an existing capability, with its guardrail)
 
+> **✅ STATUS — DONE (Part A shipped 1.6.261; Parts B–D were already in the tree).** Re-verified against
+> 1.6.260: the guardrail `assess_background_region` (Part B), the mode/offset/source travelling in the
+> `client_enrichment` result (Part C), and the `partition_coefficient` ontology caveat (Part D) were already
+> present and `core`-tested (`test_background_mode.py`). The only gap was **Part A — the UI never exposed the
+> signal-free-REGION mode**, so the wired guardrail could never fire from the GUI. Fixed in
+> `_add_client_enrichment`: added a "Background offset (from region)" layer dropdown (a signal-free mask →
+> `background_mask`; its mean also feeds the per-condensate/per-cell scalar), relabelled the scalar as an
+> instrument offset (kept visually separate from the dilute-shell reference, per the caution), surfaced the
+> guardrail warning, and put `background mode` / `background source` in the emitted overview table. Picking a
+> dilute-phase region now fires the consequence-stating warning at the moment of the mistake.
+> `tests/test_background_mode_ui.py` (`integration`) drives it end-to-end. Default stays `none`; existing
+> numbers unchanged. An explicit None/Scalar/Region radio was not added — the scalar spin + region dropdown
+> (region overrides scalar, matching `client_enrichment`'s precedence) cover the modes; a radio is cosmetic.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. A UI-exposure
 gap, not a missing capability — and one where the *reasoning* already written in the code is more
 valuable than the control itself. Small, contained, high scientific value.

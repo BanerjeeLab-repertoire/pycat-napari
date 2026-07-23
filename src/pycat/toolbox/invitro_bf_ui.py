@@ -43,15 +43,11 @@ except Exception:
     label_with_circle = lambda t,**k: t
 
 
-class _IVBFWorker(QThread):
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
-    def __init__(self, fn):
-        super().__init__(); self._fn = fn
-    def run(self):
-        try:    self.finished.emit(self._fn())
-        except Exception:
-            import traceback; self.error.emit(traceback.format_exc())
+# _IVBFWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
+# finished(result)/error(traceback). Was a byte-identical local class; now the one shared class, same
+# non-modal semantics (inline spinner, GUI interactive). NOT operation_runner — that is window-modal.
+from pycat.utils.qt_worker import make_task_worker as _make_task_worker
+_IVBFWorker = _make_task_worker()
 
 
 class InVitroBFUI:

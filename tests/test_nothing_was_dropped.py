@@ -64,6 +64,17 @@ _SHRINK_THRESHOLD = 0.70
 # This list is not an escape hatch — it is **the record of what was removed and why.** A future
 # reader should be able to check every entry.
 _DELIBERATE = {
+    # 2026-07-22 — redundancy_consolidation axis 3: four byte-identical `class _XWorker(QThread)` background
+    # workers (condensate_physics / brightfield / invitro_bf / invitro_fluor) were consolidated into ONE
+    # shared class built by `qt_worker.make_task_worker()`. Each local class (and its `run()` emitting
+    # finished(fn(**kwargs))/error(traceback)) was replaced by `_XWorker = make_task_worker()`, so the local
+    # NAME and every call site are unchanged and the non-modal semantics are byte-identical — the `run`
+    # method now lives once in the shared factory. Pinned by test_qt_worker (finished/error via qtbot).
+    'brightfield_ui.py::run',
+    'condensate_physics_ui.py::run',
+    'invitro_bf_ui.py::run',
+    'invitro_fluor_ui.py::run',
+
     # 1.6.248 — image_processing decomposition step 1 (highest-risk file, characterization-FIRST): the
     # automatic object-size estimators (estimate_object_size_px — the top-hat/Otsu batch estimator that feeds
     # downstream segmentation — its nested _equiv_diam helper, the brightfield variant, and the
@@ -95,6 +106,64 @@ _DELIBERATE = {
     # test_image_processing_deblur_characterization (exact two-array output). Registered op → catalog regen.
     'image_processing_tools.py::deblur_by_pixel_reassignment',
     'image_processing_tools.py::run_dpr',
+
+    # 1.6.251 — image_processing decomposition step 4: the FILTER/ENHANCEMENT family (2D + pseudo-3D Gaussian/
+    # Gabor/DoG filters, Laplacian-of-Gaussian filter+enhancement, edge-preserving bilateral, the combined
+    # peak/edge enhancer + its _convolve_k helper, and the run_ wrappers) MOVED verbatim to toolbox/image_
+    # processing/filters.py. Pinned by test_image_processing_filters_characterization (exact shape/dtype/sum/
+    # min/max per operator). Ten registered ops moved → catalog regenerated. Build on _base primitives.
+    'image_processing_tools.py::gaussian_smooth_2d',
+    'image_processing_tools.py::gaussian_smooth_3d_pseudo',
+    'image_processing_tools.py::gabor_filter_3d_pseudo',
+    'image_processing_tools.py::dog_blob_enhance_2d',
+    'image_processing_tools.py::dog_blob_enhance_3d_pseudo',
+    'image_processing_tools.py::gabor_filter_func',
+    'image_processing_tools.py::peak_and_edge_enhancement_func',
+    'image_processing_tools.py::_convolve_k',
+    'image_processing_tools.py::run_peak_and_edge_enhancement',
+    'image_processing_tools.py::apply_laplace_of_gauss_filter',
+    'image_processing_tools.py::apply_laplace_of_gauss_enhancement',
+    'image_processing_tools.py::run_apply_laplace_of_gauss_filter',
+    'image_processing_tools.py::run_morphological_gaussian_filter',
+    'image_processing_tools.py::run_clahe',
+    'image_processing_tools.py::apply_bilateral_filter',
+    'image_processing_tools.py::run_apply_bilateral_filter',
+
+    # 1.6.252 — image_processing decomposition step 5: the BACKGROUND + NOISE removal family (rolling-ball/
+    # Gaussian background removal + inpainting/rolling-ball/subtract helpers, the edge-enhanced variant, WBNS
+    # wavelet background+noise separation, and realness-weighted soft foreground suppression + nested _norm01/
+    # _soft closures + FOREGROUND_SUPPRESSION_DEFAULTS, with run_ wrappers) MOVED verbatim to toolbox/image_
+    # processing/background.py. Pinned on a known background field by test_image_processing_background_
+    # characterization. Six registered ops → catalog regenerated. Builds on _base + filters.
+    'image_processing_tools.py::background_inpainting_func',
+    'image_processing_tools.py::compute_rolling_ball_background',
+    'image_processing_tools.py::subtract_background',
+    'image_processing_tools.py::rb_gaussian_background_removal',
+    'image_processing_tools.py::run_rb_gaussian_background_removal',
+    'image_processing_tools.py::rb_gaussian_bg_removal_with_edge_enhancement',
+    'image_processing_tools.py::_realness_weight',
+    'image_processing_tools.py::_norm01',
+    'image_processing_tools.py::_soft',
+    'image_processing_tools.py::soft_foreground_suppression',
+    'image_processing_tools.py::run_enhanced_rb_gaussian_bg_removal',
+    'image_processing_tools.py::wavelet_bg_and_noise_calculation',
+    'image_processing_tools.py::wbns_func',
+    'image_processing_tools.py::run_wbns',
+    'image_processing_tools.py::run_wavelet_noise_subtraction',
+
+    # 1.6.253 — image_processing decomposition step 6 (FINAL): the composite PREPROCESSING pipeline
+    # (pre_process_image + run_ + the flatfield/background-subtraction corrections) MOVED to toolbox/image_
+    # processing/preprocessing.py (pinned by test_image_processing_preprocessing_characterization), and the
+    # interactive image-adjustment/UPSCALING wrappers (run_apply_rescale_intensity, run_invert_image,
+    # run_upscaling_func) MOVED to toolbox/image_processing/upscaling.py. Both verbatim. With this,
+    # image_processing_tools.py is a PURE re-export shim (no defs). Three registered ops → catalog regen.
+    'image_processing_tools.py::pre_process_image',
+    'image_processing_tools.py::run_pre_process_image',
+    'image_processing_tools.py::apply_flatfield_correction',
+    'image_processing_tools.py::apply_background_subtraction',
+    'image_processing_tools.py::run_apply_rescale_intensity',
+    'image_processing_tools.py::run_invert_image',
+    'image_processing_tools.py::run_upscaling_func',
 
     # 1.6.247 — timeseries decomposition step 4 (FINAL): the preprocessing SCIENCE (upscale_stack_to_zarr,
     # _cellpose_min_diameter_px) MOVED to toolbox/timeseries/preprocessing.py and the Qt UI BUILDERS

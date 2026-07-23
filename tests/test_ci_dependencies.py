@@ -89,8 +89,15 @@ def _every_toolbox_module():
     **were not on it.**
     """
     toolbox = _ROOT / "src" / "pycat" / "toolbox"
-    return sorted(path.stem for path in toolbox.glob("*.py")
-                  if not path.stem.startswith('_'))
+    # rglob, dotted names: the six god-file decompositions (1.6.256) moved module-scope COMPUTE
+    # imports (SimpleITK, scikit-learn, cv2 …) down into sub-packages. A non-recursive glob would
+    # see only the re-export shims and miss every one of them — the exact "list drifts as the code
+    # moves underneath it" failure this guard was rewritten to prevent. `_module_scope_dependencies`
+    # resolves the dotted name back to its file.
+    return sorted(
+        str(path.relative_to(toolbox).with_suffix("")).replace("\\", "/").replace("/", ".")
+        for path in toolbox.rglob("*.py")
+        if path.name != "__init__.py")
 
 
 def _module_scope_dependencies(module, seen=None):
@@ -101,7 +108,7 @@ def _module_scope_dependencies(module, seen=None):
         return set()
     seen.add(module)
 
-    path = _TOOLBOX / f"{module}.py"
+    path = _TOOLBOX / f"{module.replace('.', '/')}.py"   # dotted sub-package name -> file path
     if not path.exists():
         return set()
 
@@ -121,7 +128,9 @@ def _module_scope_dependencies(module, seen=None):
                 # A guarded module that imports another guarded module inherits its
                 # dependencies. This is how two_channel_coloc_tools gets sklearn.
                 if name.startswith("pycat.toolbox."):
-                    found |= _module_scope_dependencies(name.split(".")[-1], seen)
+                    # keep the full sub-package path (e.g. "vpt.detection"), not just the leaf, so the
+                    # recursion resolves to the right file after the decompositions.
+                    found |= _module_scope_dependencies(name[len("pycat.toolbox."):], seen)
                 continue
             if top in _STDLIB or top in _GUI or top in _LAZY_BY_DESIGN:
                 continue

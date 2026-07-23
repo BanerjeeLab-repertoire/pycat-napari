@@ -264,9 +264,12 @@ def test_the_number_of_unreviewable_functions_does_not_GROW():
 # it. This alone stops the measured drift at zero refactoring cost — the highest-value/lowest-cost part
 # of the vpt_ui decomposition spec.
 _FILE_LINE_CEILINGS = {
-    # 2669 -> 2515 (size_estimation) -> 2285 (_base primitives) -> 2141 (step 3, 1.6.250: deblur). The
-    # ceiling ratchets DOWN as background/preprocessing/upscaling move out (characterization-first).
-    "toolbox/image_processing_tools.py": 2141,
+    # 2669 -> 2515 (size) -> 2285 (_base) -> 2141 (deblur) -> 1620 (filters) -> 732 (background) -> 221
+    # (step 6, 1.6.253: preprocessing + upscaling). image_processing_tools.py is now a PURE re-export shim
+    # (no defs); ceiling locked at the shim size. The family modules get their own concentration ceilings.
+    "toolbox/image_processing_tools.py": 221,
+    "toolbox/image_processing/filters.py": 564,
+    "toolbox/image_processing/background.py": 918,
     # 2828 -> 2600 (frame-access + correlation) -> 1952 (analysis) -> 1410 (worker plumbing) -> 180 (step 4,
     # 1.6.247: preprocessing science + Qt UI builders). timeseries_condensate_tools.py is now a PURE re-export
     # shim (no defs); ceiling locked at the shim size. The analysis / execution / ui modules get their own
@@ -280,8 +283,12 @@ _FILE_LINE_CEILINGS = {
     # PURE re-export shim (no defs). Ceiling locked at the shim size.
     "toolbox/segmentation_tools.py": 148,
     # puncta_refinement.py — the SNR/kurtosis/contrast gate + the two bit-identical implementations, moved
-    # here from segmentation_tools (1.6.242). Byte-identical; its own concentration ceiling.
-    "toolbox/segmentation/puncta_refinement.py": 715,
+    # here from segmentation_tools (1.6.242). 715 -> 747: the large-condensate exemption (Meet Raval's
+    # "Improved segmentation for large condensates", re-targeted here from the pre-decomposition
+    # segmentation_tools.py) added the `is_large_object` gate + its measured rationale to BOTH filters. This
+    # is a real, documented behaviour fix (the ratchet correctly FLAGGED the growth), not grandfathering an
+    # offender — the added lines are mostly the rationale comment, which is worth keeping.
+    "toolbox/segmentation/puncta_refinement.py": 747,
     # vpt_ui.py: 2458 -> 1778 (panels) -> 1375 (napari) -> 1246 (table) -> 1139 (msd) as the four
     # adapter modules absorbed its responsibilities (decomposition steps 2-3). A 54% reduction. The
     # ratchet moving DOWN is the point — the file cannot grow back to where it was.

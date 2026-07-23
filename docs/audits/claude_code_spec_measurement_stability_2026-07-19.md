@@ -1,5 +1,12 @@
 # Claude Code spec — Per-measurement parameter stability
 
+> **✅ STATUS — DONE (done-but-unstamped; verified 2026-07-22). `toolbox/measurement_stability.py` reports
+> per-measurement relative variation with a stated verdict (<5% stable / 5–20% sensitive / >20% unstable,
+> a documented convention), distinguishes population change from instability via the `n_objects` guard
+> ('population-change' verdict), leaves underivable cases 'undefined' with a reason, and feeds the MRI as
+> the sensitivity factor (`reliability._score_sensitivity` → `stability_factor`). `test_measurement_stability`
+> green. All DoD checkpoints met.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Answers a question
 PyCAT cannot currently answer: *"if I nudge this parameter, does the number I am about to report
 change?"* Direct input to the Measurement Reliability Index, and a rigor claim in its own right.

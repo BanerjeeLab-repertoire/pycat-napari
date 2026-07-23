@@ -69,7 +69,14 @@ def _score_qc(qc_results):
 
 def _score_object_flags(object_flags):
     """From ``(n_flagged, n_total)`` (or a biological_qc result DataFrame) → (score, reasons). Score is the
-    unflagged fraction. None if there are no objects."""
+    unflagged fraction. None if there are no objects.
+
+    Also accepts a bare float in 0..1 — a **pre-computed per-object** unflagged-confidence (the consolidated
+    table passes this per row: 1.0 for an object biological QC did not flag, lower when it did), so a single
+    object's reliability reflects its own flag rather than the population rate."""
+    if isinstance(object_flags, (int, float)) and not isinstance(object_flags, bool):
+        s = float(object_flags)
+        return s, ([] if s >= 0.85 else ['object flagged by biological QC'])
     if hasattr(object_flags, 'attrs') and hasattr(object_flags, 'columns'):
         n_total = len(object_flags)
         report = object_flags.attrs.get('qc_report', {})
@@ -197,3 +204,22 @@ def format_with_reliability(name, value, units, score) -> str:
     ``K_p = 4.2 (reliability: moderate)``."""
     base = f"{name} = {value} {units}".strip()
     return f"{base} (reliability: {score.grade})"
+
+
+def reliability_report_section(scored) -> str:
+    """A QC-report section listing the scored measurements whose reliability grade is **capped below
+    `high`, and WHY** — so the report says which numbers to trust less and what pulled them down.
+
+    ``scored`` is an iterable of ``(label, ReliabilityScore)``. Returns a text block, or ``''`` when every
+    scored measurement is `high` (nothing to flag). Each capped line names the grade, the missing factors
+    that capped it (rule 4), and the single worst-first reason — concrete, not "quality is low"."""
+    lines = []
+    for label, score in scored:
+        if getattr(score, 'grade', 'high') == 'high':
+            continue
+        cap = f" [capped: {', '.join(score.missing)} not assessed]" if score.missing else ''
+        top = f" — {score.reasons[0]}" if score.reasons else ''
+        lines.append(f"  {label}: {score.grade}{cap}{top}")
+    if not lines:
+        return ''
+    return "Measurement reliability (capped below 'high'):\n" + "\n".join(lines)

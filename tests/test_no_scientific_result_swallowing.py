@@ -34,11 +34,29 @@ _MARKER = "# broad-ok:"
 # The modules whose return value is the published scientific number. Extensible — add a module here as it
 # is cleaned, and lower the budget by what it contributed.
 _SCI_MODULES = [
-    "toolbox/vpt_tools.py",
-    "toolbox/condensate_physics_tools.py",
+    # frap + partition_enrichment are still monolithic; the others were DECOMPOSED into packages (vpt,
+    # condensate_physics, invitro) — the science (fits, measures) moved OUT of the old *_tools.py shims into
+    # these modules, so the guard must follow it there or it would be checking empty shims (2026-07-22).
     "toolbox/frap_tools.py",
-    "toolbox/invitro_tools.py",
     "toolbox/partition_enrichment_tools.py",
+    "toolbox/condensate_physics/coarsening.py",
+    "toolbox/condensate_physics/frame_quality.py",
+    "toolbox/condensate_physics/intensity.py",
+    "toolbox/condensate_physics/moduli.py",
+    "toolbox/condensate_physics/msd.py",
+    "toolbox/condensate_physics/photobleaching.py",
+    "toolbox/condensate_physics/relaxation.py",
+    "toolbox/condensate_physics/survival.py",
+    "toolbox/vpt/analysis.py",
+    "toolbox/vpt/detection.py",
+    "toolbox/vpt/drift.py",
+    "toolbox/vpt/host.py",
+    "toolbox/vpt/populations.py",
+    "toolbox/vpt/viscosity.py",
+    "toolbox/invitro/analysis.py",
+    "toolbox/invitro/field_summary.py",
+    "toolbox/invitro/partition.py",
+    "toolbox/invitro/size_distribution.py",
 ]
 
 # Un-converted result-swallowing broad handlers, at today's value. A RATCHET — it only ever decreases.
@@ -48,8 +66,13 @@ _SCI_MODULES = [
 # were classified and annotated. The finding: NONE of the five scientific modules fabricates a plausible
 # default on failure. Each flagged handler reports the failure honestly — an all-NaN fit + fit_success flag,
 # an explicit verdict string, a fall-back to an already-measured value (equivalent radius / power-law
-# retained when the confined model fails), or an optional-backend/optional-check probe. The budget is now
-# ZERO: any NEW broad handler that returns a fabricated scientific default is caught.
+# retained when the confined model fails), or an optional-backend/optional-check probe.
+# STILL 0 (2026-07-22): three of the five modules (vpt/condensate_physics/invitro) were DECOMPOSED into
+# packages, so the guard was checking their now-empty *_tools.py shims. `_SCI_MODULES` was repointed at the
+# 18 decomposed science modules (+ the two still-monolithic, frap/partition_enrichment). It stays ZERO
+# because the decompositions were byte-identical — every `# broad-ok:` classification travelled WITH the
+# handler into its new module — so the guard now covers the real science code, and a NEW fabricated
+# scientific default anywhere in it is caught.
 _RESULT_SWALLOW_BUDGET = 0
 
 

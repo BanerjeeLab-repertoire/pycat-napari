@@ -207,3 +207,24 @@ def test_an_unavailable_backend_says_WHY():
         assert 'QtWebEngine' in message and 'hover' in message, (
             f"plotly-without-a-bridge must explain what does and does not work; got: {message!r}"
         )
+
+
+@pytest.mark.core
+def test_backend_auto_resolves_to_matplotlib_for_a_small_frame():
+    """backend='auto' picks the interactive backend by size (backend_parity Part 2): a small frame stays on
+    matplotlib (well below the PyQtGraph threshold), returning a matplotlib figure with brushing enabled."""
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.figure
+    backends = pytest.importorskip("pycat.utils.plot_backends")
+    fig, artist, ok, msg = backends.scatter(_table(), 'x', 'y', backend='auto')
+    assert isinstance(fig, matplotlib.figure.Figure) and ok
+
+
+@pytest.mark.core
+def test_backend_auto_would_pick_pyqtgraph_above_the_threshold_when_available():
+    """The auto decision itself: above the threshold and where PyQtGraph is available, 'auto' resolves to
+    pyqtgraph (the actual render is the interactive path). Decision pinned via the pure chooser."""
+    from pycat.utils.plot_backend_selection import choose_scatter_backend
+    assert choose_scatter_backend(50_000, pyqtgraph=True) == 'pyqtgraph'
+    assert choose_scatter_backend(50, pyqtgraph=True) == 'matplotlib'

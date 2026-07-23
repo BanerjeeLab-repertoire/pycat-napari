@@ -115,6 +115,34 @@ def _match_fluorophore_name(name: Optional[str]) -> Optional[tuple[str, str]]:
     return None
 
 
+_GENERIC_STEM_TOKENS = frozenset({
+    'image', 'img', 'stack', 'file', 'channel', 'chan', 'scan', 'series', 'untitled',
+    'export', 'ome', 'tif', 'tiff', 'data', 'acquisition', 'position', 'pos', 'crop', 'copy',
+})
+
+
+def _stem_distinguishing_text(file_stem: Optional[str]) -> Optional[str]:
+    """The part of a file stem that actually identifies the content, or ``None`` if the stem is only
+    generic/numeric.
+
+    Splits on the usual separators and keeps tokens carrying real text — not a bare number, not a generic
+    word like ``image``/``stack``. ``'Image1-mysample'`` -> ``'mysample'``; ``'Image1'`` / ``'stack_001'``
+    -> ``None``. This is what decides whether the user's own filename beats a generic pixel/position guess:
+    a name the user chose is information; ``'Image1'`` is not.
+    """
+    if not file_stem:
+        return None
+    kept = []
+    for tok in re.split(r'[^A-Za-z0-9]+', str(file_stem)):
+        alpha = re.sub(r'\d+', '', tok)          # strip digits: 'image1' -> 'image'
+        if len(alpha) < 2:                        # a bare number or single letter distinguishes nothing
+            continue
+        if alpha.lower() in _GENERIC_STEM_TOKENS:
+            continue
+        kept.append(tok)
+    return '-'.join(kept) if kept else None
+
+
 def _match_wavelength(emission_nm: Optional[float]) -> Optional[tuple[str, str]]:
     """Bucket an emission wavelength into a spectral region.
     Returns (label, bucket) or None if no match / out of range."""
@@ -137,6 +165,7 @@ def identify_channel(
     emission_wavelength: Optional[float] = None,
     excitation_wavelength: Optional[float] = None,
     pixel_frame=None,
+    file_stem: Optional[str] = None,
 ) -> dict:
     """
     Identify a channel's display label using a three-tier strategy.
@@ -157,12 +186,16 @@ def identify_channel(
         Excitation wavelength in nm — used only for the transmitted-light
         heuristic when emission is unavailable (PMT/transmitted channels
         often only record excitation).
+    file_stem : str, optional
+        The source file's stem ('Image1-GFP'). Matched below real metadata but above the pixel/
+        position guess; its distinguishing text is kept when nothing else matches, so a derived
+        name is never worse than the one the user gave the file.
 
     Returns
     -------
     dict with keys:
         label    : str   — short display label, e.g. "DAPI", "EGFP", "C2-Red"
-        source   : str   — how it was determined: "name", "wavelength", or "position"
+        source   : str   — how it was determined: "name", "filename", "wavelength", "pixels", or "position"
         bucket   : str   — spectral bucket: blue/green/red/far_red/transmitted/unknown
         layer_name : str — full suggested napari layer name, e.g. "C0-DAPI"
     """
@@ -173,6 +206,13 @@ def identify_channel(
     # Tier 1b: generic channel name (some software only populates this)
     if result is None:
         result = _match_fluorophore_name(channel_name)
+
+    # Tier 1c: the FILENAME. A plain 2D TIFF often carries the fluorophore ONLY here ('Image1-GFP.tif');
+    # the user's own label beats the pixel/position guess but stays under real metadata (Tiers 1/1b/2).
+    if result is None and file_stem:
+        result = _match_fluorophore_name(file_stem)
+        if result is not None:
+            source = "filename"
 
     # Tier 2: emission wavelength
     if result is None:
@@ -218,6 +258,15 @@ def identify_channel(
             result = (f"Ch{channel_index}", "unknown")
 
     label, bucket = result
+
+    # Never produce a name WORSE than the input: if only the modality (pixels) or a bare position was
+    # found but the file stem carries real text, keep it (the bucket is retained so the colormap tracks).
+    if source in ("pixels", "position"):
+        stem_text = _stem_distinguishing_text(file_stem)
+        if stem_text:
+            label = stem_text
+            source = "filename"
+
     layer_name = f"C{channel_index}-{label}"
 
     return {
@@ -248,7 +297,7 @@ def suggest_colormap(bucket: str) -> str:
 # Metadata extraction helpers for specific sources
 # ---------------------------------------------------------------------------
 
-def extract_channel_info(image, channel_index: int, pixel_frame=None) -> dict:
+def extract_channel_info(image, channel_index: int, pixel_frame=None, file_stem=None) -> dict:
     """
     Extract whatever channel metadata AICSImage exposes (works for OME-TIFF,
     CZI, and other Bio-Formats-compatible formats) and run it through
@@ -298,10 +347,11 @@ def extract_channel_info(image, channel_index: int, pixel_frame=None) -> dict:
         emission_wavelength=emission,
         excitation_wavelength=excitation,
         pixel_frame=pixel_frame,
+        file_stem=file_stem,
     )
 
 
-def extract_channel_info_from_ims(reader, channel_index: int) -> dict:
+def extract_channel_info_from_ims(reader, channel_index: int, file_stem=None) -> dict:
     """
     Extract channel metadata from an imaris_ims_file_reader `ims` instance
     and run it through identify_channel().
@@ -386,4 +436,5 @@ def extract_channel_info_from_ims(reader, channel_index: int) -> dict:
         channel_name=chan_name,
         emission_wavelength=emission,
         excitation_wavelength=excitation,
+        file_stem=file_stem,
     )

@@ -83,6 +83,22 @@ class FigureSpec:
     height_mm: "float | None" = None
     tick_format: "str | None" = None            # e.g. '%.2f' on the y axis
     significance_brackets: tuple = ()           # ({'x1','x2','y','label'}, ...) — render()/refine() draw them
+    y_scale: str = 'linear'                     # 'linear' | 'log' | 'symlog' — size/intensity are often
+    #                                             log-normal; a linear axis misrepresents them (publication_features Tier 1)
+    minor_ticks: bool = False                   # show minor ticks (default matplotlib ticks look unfinished in print)
+    error_type: str = 'none'                    # 'none' | 'sd' | 'sem' | 'ci95' — a comparison figure without
+    #                                             a STATED error is not publishable; the type is labelled on the axes
+    font_family: "str | None" = None            # validated against installed fonts; a missing one WARNS + falls
+    #                                             back (never a silent substitution that changes between machines)
+    transparent_background: bool = False        # ExportSpec: save with a transparent (vs white) background
+    color_map: "dict | None" = None             # {group: colour} — a condition keeps its colour across figures,
+    #                                             regardless of its position (semantic colour, Tier 3)
+    rasterize_points: bool = False              # rasterize the dense scatter layer inside vector output (axes/
+    #                                             text stay vector) — a 50k-point vector PDF is unusable otherwise
+    legend: bool = False                        # show a group→colour legend (off by default)
+    legend_loc: str = 'best'                    # 'best' | 'upper right' | 'lower left' | …
+    legend_ncol: int = 1                        # columns in the legend
+    legend_frame: bool = True                   # draw the legend's frame/box
 
 
 def apply_size_preset(spec, name) -> FigureSpec:
@@ -111,27 +127,111 @@ def _resolve_labels(fig_data, spec):
     return x, y
 
 
-def render(fig_data, spec):
-    """Render ``fig_data`` under ``spec`` and return a matplotlib Figure. **Reads the data, never recomputes
-    it** — the plotted values are stashed on ``fig._pycat_plotted`` so the refine-not-recompute contract is
-    checkable. Presentation (labels, limits, palette, fonts, footnote) comes entirely from ``spec``."""
-    import matplotlib
-    matplotlib.use('Agg', force=False)
-    import matplotlib.pyplot as plt
+def resolve_y_scale(y_scale, value_arrays):
+    """The y-scale to actually apply, and a warning if the requested one is invalid for the data.
 
-    fig = plt.figure(figsize=tuple(spec.figure_size_in), dpi=spec.dpi)
-    ax = fig.add_subplot(111)
+    A **log** axis cannot show values ≤ 0 (log of a non-positive number is undefined), so requesting one on
+    data that crosses or touches zero would silently clip or blow up. Rather than substitute silently, this
+    falls back to **symlog** (which handles zero and negatives) and returns a warning stating the
+    consequence — the 'validate and warn, never silently substitute' rule. Returns ``(scale, warning)``."""
+    if y_scale == 'log':
+        finite = [np.asarray(v, dtype=float).ravel() for v in (value_arrays or [])]
+        allv = np.concatenate(finite) if finite else np.array([])
+        allv = allv[np.isfinite(allv)]
+        if allv.size and allv.min() <= 0:
+            return 'symlog', (
+                f"log y-scale requested, but the data has non-positive values (min {allv.min():.4g}); a log "
+                "axis cannot show values ≤ 0. Using symlog instead (it handles zero and negatives).")
+    return y_scale, None
+
+
+#: How each error type is labelled on the figure (stating the error is a publication requirement).
+ERROR_LABELS = {'sd': 'SD', 'sem': 'SEM', 'ci95': '95% CI'}
+
+
+def figure_export_metadata(spec):
+    """Reproducibility metadata for an exported figure: the PyCAT + key-dependency versions that produced it.
+
+    Returns ``(png_metadata, software_versions)`` — the first embedded in the file (PNG tEXt / PDF Creator),
+    the second also written into the spec-JSON bundle. An unavailable version is omitted, never guessed."""
+    try:
+        from pycat.utils.feature_provenance import software_versions
+        sw = software_versions()
+    except Exception:      # broad-ok: optional_probe — version enumeration is best-effort, never fail an export
+        sw = {}
+    ver = sw.get('pycat', '')
+    meta = {'Software': ('pycat-napari ' + ver).strip() if ver else 'pycat-napari'}
+    if getattr(spec, 'title', None):
+        meta['Title'] = str(spec.title)
+    return meta, sw
+
+
+def resolve_font_family(family):
+    """The font family to actually use, and a warning if the requested one is not installed.
+
+    A **silent** font substitution is the subtle bug: matplotlib quietly picks a replacement, and the figure
+    then looks different on the next machine with no indication why. So a missing font WARNS (stating that
+    consequence) and falls back to the default — the same validate-and-warn rule as the axis controls.
+    Returns ``(family or None, warning)``; ``None`` family means 'use the default'."""
+    if not family:
+        return None, None
+    try:
+        from matplotlib import font_manager
+        installed = {f.name for f in font_manager.fontManager.ttflist}
+    except Exception:      # broad-ok: font enumeration unavailable → fall back to the default, never crash
+        return None, None
+    if family in installed:
+        return family, None
+    return None, (
+        f"font family '{family}' is not installed; matplotlib would silently substitute a different font, "
+        "changing the figure between machines. Falling back to the default font.")
+
+
+def group_error(values, error_type):
+    """The error-bar half-length for one group under ``error_type`` (``'sd'`` | ``'sem'`` | ``'ci95'``).
+
+    SD is the sample standard deviation (ddof=1); SEM is SD/√n; the 95% CI half-width is ``1.96·SEM`` (the
+    normal approximation). Fewer than two finite values → 0 (no spread to show). An unknown type → 0."""
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 2:
+        return 0.0
+    sd = float(np.std(v, ddof=1))
+    if error_type == 'sd':
+        return sd
+    sem = sd / np.sqrt(v.size)
+    if error_type == 'sem':
+        return sem
+    if error_type == 'ci95':
+        return 1.96 * sem
+    return 0.0
+
+
+def _render_on_axis(ax, fig_data, spec):
+    """Draw one ``fig_data`` onto ``ax`` under ``spec`` (points, group means, optional error bars, labels,
+    scale, ticks, significance brackets). Returns the plotted ``{group: values}``. Shared by the
+    single-panel :func:`render` and the multi-panel :func:`render_multipanel`, so a panel is styled
+    identically however many there are."""
     colors = _PALETTES.get(spec.palette, _PALETTES['colorblind_safe'])
-
+    color_map = getattr(spec, 'color_map', None) or {}
+    rasterize = bool(getattr(spec, 'rasterize_points', False))
     plotted = {}
     groups = list(fig_data.groups)
     for i, g in enumerate(groups):
         vals = np.asarray(fig_data.values_by_group[g], dtype=float)
         plotted[g] = vals
-        ax.scatter(np.full(vals.size, i), vals, s=18, color=colors[i % len(colors)],
-                   edgecolor='white', linewidth=0.4, zorder=2)
+        # Semantic colour: a group keeps its assigned colour wherever it appears; else the palette by order.
+        color = color_map.get(g, colors[i % len(colors)])
+        sc = ax.scatter(np.full(vals.size, i), vals, s=18, color=color,
+                        edgecolor='white', linewidth=0.4, zorder=2)
+        if rasterize:
+            sc.set_rasterized(True)          # dense points become a raster layer; axes/text stay vector
         if vals.size:
             ax.plot([i - 0.2, i + 0.2], [np.mean(vals)] * 2, color='#333333', lw=1.5, zorder=3)
+            if getattr(spec, 'error_type', 'none') != 'none':
+                err = group_error(vals, spec.error_type)
+                ax.errorbar(i, float(np.mean(vals)), yerr=err, color='#333333',
+                            capsize=4, lw=1.5, zorder=3)
         if spec.annotate_n and vals.size:
             ax.annotate(f"n={vals.size}", (i, np.max(vals)), textcoords='offset points',
                         xytext=(0, 4), ha='center', fontsize=spec.font_size_pt * 0.8)
@@ -147,20 +247,59 @@ def render(fig_data, spec):
         ax.set_xlim(spec.x_limits)
     if spec.y_limits:
         ax.set_ylim(spec.y_limits)
+    if getattr(spec, 'y_scale', 'linear') != 'linear':
+        scale, warning = resolve_y_scale(spec.y_scale, list(plotted.values()))
+        ax.set_yscale(scale)
+        if warning:
+            import warnings as _warnings
+            _warnings.warn(warning)
+    if getattr(spec, 'minor_ticks', False):
+        ax.minorticks_on()
+    # State the error type on the figure — an unlabelled error bar is unpublishable (is it SD? SEM? CI?).
+    if getattr(spec, 'error_type', 'none') in ERROR_LABELS:
+        ax.text(0.98, 0.98, f"error bars: {ERROR_LABELS[spec.error_type]}", transform=ax.transAxes,
+                ha='right', va='top', fontsize=spec.font_size_pt * 0.8, color='#555555')
+    if getattr(spec, 'legend', False) and groups:
+        from matplotlib.lines import Line2D
+        handles = [Line2D([0], [0], marker='o', linestyle='', markersize=6, markeredgecolor='white',
+                          markerfacecolor=color_map.get(g, colors[i % len(colors)]), label=str(g))
+                   for i, g in enumerate(groups)]
+        ax.legend(handles=handles, loc=getattr(spec, 'legend_loc', 'best'),
+                  ncol=max(1, int(getattr(spec, 'legend_ncol', 1))),
+                  frameon=bool(getattr(spec, 'legend_frame', True)),
+                  fontsize=spec.font_size_pt * 0.85)
 
+    fam, fam_warning = resolve_font_family(getattr(spec, 'font_family', None))
+    if fam_warning:
+        import warnings as _warnings
+        _warnings.warn(fam_warning)
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label]
                  + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(spec.font_size_pt)
+        if fam:
+            item.set_fontfamily(fam)
 
     # ── significance brackets (the merged gap: figure_spec.render() now HONOURS them) ────────────────
-    # The old figure_spec carried a `significance` mode string that render() never acted on; the working
-    # bracket implementation lived only in figure_publication. It is now driven from here, so a spec that
-    # requests brackets actually gets them. The honesty stays upstream: a bracket is drawn only for a pair
-    # the caller supplied (from replicate-level stats), never inferred from a pixel-level test.
+    # A bracket is drawn only for a pair the caller supplied (from replicate-level stats), never inferred
+    # from a pixel-level test — the honesty stays upstream.
     if spec.significance_brackets:
         for ann in spec.significance_brackets:
             add_significance_bracket(ax, ann['x1'], ann['x2'], ann['y'],
                                      ann.get('label', ''), font_size=spec.font_size_pt)
+    return plotted
+
+
+def render(fig_data, spec):
+    """Render ``fig_data`` under ``spec`` and return a matplotlib Figure. **Reads the data, never recomputes
+    it** — the plotted values are stashed on ``fig._pycat_plotted`` so the refine-not-recompute contract is
+    checkable. Presentation (labels, limits, palette, fonts, footnote) comes entirely from ``spec``."""
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=tuple(spec.figure_size_in), dpi=spec.dpi)
+    ax = fig.add_subplot(111)
+    plotted = _render_on_axis(ax, fig_data, spec)
 
     if spec.caveats_shown:
         caveats = ontology_caveats(fig_data.measurement)
@@ -172,7 +311,86 @@ def render(fig_data, spec):
         fig.tight_layout()
 
     fig._pycat_plotted = plotted
+    fig._pycat_source = figdata_to_dict(fig_data)     # the raw plotted data → exact regeneration
     return fig
+
+
+def figdata_to_dict(fig_data) -> dict:
+    """The already-plotted data as a JSON-serializable dict — enough to reproduce the EXACT figure (not just
+    a summary). Paired with :func:`figdata_from_dict` / :func:`regenerate`."""
+    return {
+        'measurement': fig_data.measurement,
+        'groups': list(fig_data.groups),
+        'values_by_group': {k: np.asarray(v, dtype=float).tolist()
+                            for k, v in fig_data.values_by_group.items()},
+        'x_label': fig_data.x_label,
+    }
+
+
+def figdata_from_dict(d) -> FigureData:
+    return FigureData(
+        measurement=d['measurement'], groups=tuple(d['groups']),
+        values_by_group={k: np.asarray(v, dtype=float) for k, v in d['values_by_group'].items()},
+        x_label=d.get('x_label'))
+
+
+def regenerate(data, spec):
+    """Reconstruct the EXACT figure from its exported raw plotted data + ``spec`` — reproducibility beyond the
+    summary CSV. ``data`` is the ``*_data.json`` dict (or a path to it)."""
+    import json as _json
+    import pathlib as _pathlib
+    if isinstance(data, (str, _pathlib.Path)):
+        data = _json.loads(_pathlib.Path(data).read_text(encoding='utf-8'))
+    return render(figdata_from_dict(data), spec)
+
+
+def render_multipanel(panels, *, spec=None, n_cols=None, panel_labels=True,
+                      figure_size_in=None, dpi=None):
+    """Render several `FigureData` as a labelled grid of panels — the general publication multi-panel figure.
+
+    ``panels`` is a sequence where each item is a ``FigureData`` or a ``(FigureData, FigureSpec)`` pair (a
+    per-panel spec overrides the shared ``spec``). Panels fill a grid of ``n_cols`` columns (default: as
+    square as possible), and unless ``panel_labels=False`` each gets a bold **A / B / C …** label in its
+    top-left corner (the standard figure requirement). Reads the data, never recomputes it; the per-panel
+    plotted values are stashed on ``fig._pycat_plotted`` as a list. A single panel is a 1×1 grid — the
+    single-axis :func:`render` remains the direct path for the common case."""
+    import math
+    import matplotlib
+    matplotlib.use('Agg', force=False)
+    import matplotlib.pyplot as plt
+
+    base = spec or FigureSpec()
+    items = [(p if isinstance(p, tuple) else (p, base)) for p in panels]
+    if not items:
+        raise ValueError("render_multipanel needs at least one panel.")
+    n = len(items)
+    n_cols = n_cols or max(1, math.ceil(math.sqrt(n)))
+    n_rows = math.ceil(n / n_cols)
+    size = tuple(figure_size_in) if figure_size_in is not None else \
+        (base.figure_size_in[0] * n_cols, base.figure_size_in[1] * n_rows)
+    fig = plt.figure(figsize=size, dpi=dpi or base.dpi)
+
+    plotted = []
+    for idx, (fig_data, panel_spec) in enumerate(items):
+        ax = fig.add_subplot(n_rows, n_cols, idx + 1)
+        plotted.append(_render_on_axis(ax, fig_data, panel_spec or base))
+        if panel_labels:
+            ax.text(-0.12, 1.06, _panel_label(idx), transform=ax.transAxes,
+                    fontsize=(base.title_size_pt or base.font_size_pt + 2), fontweight='bold',
+                    ha='left', va='bottom')
+    fig.tight_layout()
+    fig._pycat_plotted = plotted
+    return fig
+
+
+def _panel_label(idx) -> str:
+    """Panel label for index 0,1,2,… → 'A','B','C',…, then 'AA','AB',… past 26 (Excel-style, no gaps)."""
+    label = ''
+    idx += 1
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        label = chr(ord('A') + rem) + label
+    return label
 
 
 def refine(fig, spec):
@@ -241,6 +459,18 @@ def apply_spec(fig, spec):
             ax.set_xlim(spec.x_limits)
         if spec.y_limits is not None:
             ax.set_ylim(spec.y_limits)
+        if getattr(spec, 'y_scale', 'linear') != 'linear':
+            # refine-not-recompute: read the y data already on the axis to validate a log request (no
+            # recomputation), then apply the (possibly-fallback) scale — same rule as render().
+            _yvals = [ln.get_ydata() for ln in ax.get_lines()] + \
+                     [c.get_offsets()[:, 1] for c in ax.collections if c.get_offsets() is not None]
+            scale, warning = resolve_y_scale(spec.y_scale, _yvals)
+            ax.set_yscale(scale)
+            if warning:
+                import warnings as _warnings
+                _warnings.warn(warning)
+        if getattr(spec, 'minor_ticks', False):
+            ax.minorticks_on()
         ax.tick_params(labelsize=font_size)
         for side in ('top', 'right', 'left', 'bottom'):
             ax.spines[side].set_visible(side in theme['spines'])
@@ -330,7 +560,9 @@ def spec_to_dict(spec) -> dict:
 
 
 def spec_from_dict(d) -> FigureSpec:
-    d = dict(d)
+    # Tolerate non-field keys (e.g. the exported bundle's '_provenance') so a written figure JSON regenerates.
+    _fields = {f.name for f in dataclasses.fields(FigureSpec)}
+    d = {k: v for k, v in dict(d).items() if k in _fields}
     for k in ('figure_size_in', 'x_limits', 'y_limits'):
         if d.get(k) is not None:
             d[k] = tuple(d[k])
@@ -357,12 +589,23 @@ def export(fig, path, *, spec, summary_df=None) -> dict:
 
     stem = pathlib.Path(path).with_suffix('')
     stem.parent.mkdir(parents=True, exist_ok=True)
+    transparent = bool(getattr(spec, 'transparent_background', False))
+    png_meta, sw = figure_export_metadata(spec)          # software/version, for reproducibility
     out = {}
-    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'])
-    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'])
-    out['png'] = stem.with_suffix('.png'); fig.savefig(out['png'], dpi=spec.dpi)
+    # PDF/SVG take standard document keys; PNG takes arbitrary tEXt keys (so it carries the fuller record).
+    _doc_meta = {'Creator': png_meta['Software']}
+    out['pdf'] = stem.with_suffix('.pdf'); fig.savefig(out['pdf'], transparent=transparent, metadata=_doc_meta)
+    out['svg'] = stem.with_suffix('.svg'); fig.savefig(out['svg'], transparent=transparent, metadata=_doc_meta)
+    out['png'] = stem.with_suffix('.png')
+    fig.savefig(out['png'], dpi=spec.dpi, transparent=transparent, metadata=png_meta)
     out['spec'] = stem.with_suffix('.json')
-    out['spec'].write_text(json.dumps(spec_to_dict(spec), indent=1), encoding='utf-8')
+    _spec_doc = spec_to_dict(spec)
+    _spec_doc['_provenance'] = {'software': sw}           # the versions that produced this figure
+    out['spec'].write_text(json.dumps(_spec_doc, indent=1), encoding='utf-8')
+    # The raw plotted data, for EXACT regeneration (stronger than the summary CSV): spec + data → this figure.
+    if getattr(fig, '_pycat_source', None) is not None:
+        out['data'] = stem.parent / (stem.name + '_data.json')
+        out['data'].write_text(json.dumps(fig._pycat_source, indent=1), encoding='utf-8')
     if summary_df is not None:
         out['summary'] = stem.parent / (stem.name + '_summary.csv')
         summary_df.to_csv(out['summary'], index=False)

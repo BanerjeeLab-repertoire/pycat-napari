@@ -1,3 +1,525 @@
+## [1.6.281] - 2026-07-22
+### Fixed — **the frame-0 landmine, in four more places: a lazy stack held in an `active`/`mask` variable no longer silently collapses to one frame (close_partial_specs Part C).**
+`np.asarray(layer.data)` on one of PyCAT's lazy wrappers returns **frame 0 only** — nothing errors, the
+analysis just runs on a single frame while reporting it as the whole movie. The guard against this only
+caught variables literally named `…layer…`; four real sites held the layer in `active`/`lmask` and slipped
+through:
+
+- **Brightfield best-slice** (`brightfield_tools`) — needs a `(Z/T,H,W)` stack, but `np.asarray(active.data)`
+  gave frame 0, so a correct lazy stack was rejected with *"Best-slice needs a 3D stack."* (the same class as
+  the N&B "your time-series is 2D" bug). Now `materialize_stack(active.data, dtype=None)`.
+- **CLEAN spot detection** (`clean_spot_detection_tools`) and the **flatfield/background corrector**
+  (`ui_modules`) — both ran on frame 0 of a lazy stack. Now materialize the full stack.
+- **`general_image_tools`** — the image was frame-extracted safely via `extract_2d_plane` but the paired
+  mask used `np.asarray`, so a lazy mask paired frame `fi` of the image with frame 0 of the mask; the mask
+  now uses `extract_2d_plane` too.
+- All conversions are **output-identical on eager 2D/3D data** (`materialize_stack(dtype=None)` /
+  `extract_2d_plane` return the same array `np.asarray` did) and only change behaviour on a lazy stack —
+  where they fix the collapse.
+- **The guard is broadened** (`test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero`): it now
+  flags `np.asarray(<var>.data)` for `active`/`image`/`mask`-named vars, not just `layer`, so this bug class
+  is caught regardless of the variable name. `ui_diagnostics_mixin` (a diagnostic dump) stays allowlisted.
+  Full `pytest -m core` green (1712). Part C's remaining ~2D-safe `asarray` sites are correct as-is.
+
+## [1.6.280] - 2026-07-22
+### Fixed — **filename-aware channel naming: a channel's name is never worse than the file the user gave it (deep_metadata_and_naming Part 3).**
+`channel_naming.identify_channel` never saw the filename, so a plain 2D TIFF — which usually carries no
+channel metadata at all — had its fluorophore (present only in the name, `Image1-GFP.tif`) discarded in
+favour of a generic pixel guess: `Image1-GFP` and `Image1-DAPI` both became `Image1-Fluorescence`, and the
+second collided into `Fluorescence(1)`. The user's own labelling — often the only channel identity a plain
+TIFF has — was thrown away.
+
+- `identify_channel` gains a `file_stem` argument and a **Tier 1c**: below real metadata (OME Fluor,
+  channel name) but **above** the pixel/position guess, it matches the stem with the existing
+  `_match_fluorophore_name` — so `Image1-GFP.tif` → `EGFP` (source `filename`), and `Image1-DAPI.tif` →
+  `DAPI`, distinct with no `(1)` suffix.
+- **Never-worse-than-input rule:** when the only thing determinable was the modality (pixels) or a bare
+  position, but the stem carries distinguishing text (`_stem_distinguishing_text` skips generic/numeric
+  tokens like `Image1`/`stack_001`), the user's text is kept instead of a generic modality word — the
+  colormap bucket is retained so display still tracks the pixels.
+- The stem is threaded from all four open paths (`image_reader_2d`, the IMS/structured/CZI-streaming
+  openers). Real metadata still wins (a file named `...GFP` whose OME says `Fluor=DAPI` → DAPI), a purely
+  generic stem still falls through to the pixel classification, and callers passing no stem are unchanged.
+  New `tests/test_channel_naming_filename.py` (`core`, 6 tests); existing naming/extraction tests pass
+  (the extraction fake's signature tracks the real one, as it did for `pixel_frame`). Full core green (1710).
+  Parts 1–2 (deep per-element OME parse + reader-independent metadata merge) remain.
+
+## [1.6.279] - 2026-07-22
+### Added — **navigator wiring increment 2: the planner consults the quality gate — a plan now states when a measurement cannot be trusted, and why.**
+`utils/quality_gate.evaluate_quality` composes calibration, pixel size, and reliability into a
+block/warn/downgrade verdict with reasons, and had **zero consumers**. This wires it into the planner —
+and does so with **no change to `compile`**: a measurement's `QualityRequirement` is turned into ordinary
+`Assumption` gates on its contract, so the planner's existing machinery does the rest (it already evaluates
+`step.module.assumptions` into `gate_report`, already blocks a plan on a VIOLATED **blocker** gate, and
+already prepends a QC probe for an UNKNOWN gate that names one).
+
+- New `navigator/quality_gates.py`: `quality_assumptions(requirement, op)` builds one gate per signal —
+  pixel size and calibration as **blockers**, reliability as a **warning** that names the `snr` probe —
+  and `gate_context(ctx)` maps an `AnalysisContext` onto the signal inputs (unasserted ⇒ unassessed, never
+  a silent pass). The four verdicts fold onto the three gate states the planner already understands:
+  BLOCK→VIOLATED (not runnable, reason in `blockers()`), WARN→UNKNOWN (runnable; probes if a probe is
+  named), DOWNGRADE→VIOLATED on a warning gate (runnable, reported), OK→SATISFIED.
+- `_measure_op_contract` attaches these gates when a measurement declares a `QualityRequirement`.
+  `vpt.microrheology` now requires a pixel size (a viscosity in pixels is meaningless) and probes when
+  reliability was never assessed; `partition_enrichment.client` blocks a ΔG/concentration on an invalid
+  calibration. So a viscosity plan without a set scale is **not runnable and says why**, and an unassessed
+  reliability **prepends `data_qc.assess`** rather than passing.
+- `evaluate_quality` is unchanged; non-measurement (and measurement-without-a-QualityRequirement, e.g.
+  `size`) plans are untouched. New `tests/navigator/test_quality_gate_planning.py` (`core`, 7 tests); all
+  existing navigator + gate tests pass unmodified. Full `pytest -m core` green (1704 passed).
+
+## [1.6.278] - 2026-07-22
+### Added — **navigator wiring increment 1: the operation catalog now contains the ANSWERS, not just the layers.**
+The catalog held only operations that produce an image or a label layer, so the planner could build a
+workflow's segmentation spine but had no operation whose output is a *measurement* — it could reach a mask
+and stop short of the number. This adds ten measurement operations that close the most-used question paths,
+each bound to a real, already-tested function.
+
+- New `tag_registry._register_measurement_operations()` registers ten `result`-producing ops through the
+  SAME path the UI ops use, so they flow into `operation_catalog.json` on regeneration and resolve via
+  `navigator.operation_spec.resolve_operation`: `region_properties`, `partition_coefficient`,
+  `client_enrichment`, `size_distribution`, `spatial_statistics`, `colocalization`, `msd_diffusion`,
+  `coarsening_fit`, `frap_recovery`, `viscosity`. Each names its implementation as `<module>.<function>`
+  in `registered_by`, so a stale binding fails `resolve_operation` loudly (the intended guard).
+- **Honest requirements, declared not gated:** the time-series measurements (MSD, coarsening, FRAP,
+  viscosity) declare `time_axis`; colocalisation declares `two_channels`; viscosity also declares
+  `pixel_size` (Stokes–Einstein needs a physical scale). Gating on these is increment 2 — here they are
+  only declared, from the controlled `REQUIREMENTS` vocabulary so a consumer can render each reason.
+- **Measurements are terminal** (`produces='result'`, consumed by nothing), so the operation graph stays
+  traversable; the catalog rose 79 → 89. Data-only: no UI, planner, or scientific behaviour changed.
+  Regenerated `operation_catalog.json`; new `tests/navigator/test_measurement_ops.py` (`core`) pins the set,
+  its real bindings, the terminal property, and the requirement vocabulary. Full `pytest -m core` green
+  (1697 passed).
+
+## [1.6.277] - 2026-07-22
+### Added — **`plot_backends.scatter(backend='auto')` auto-selects the interactive backend by size (backend_parity Part 2).**
+The pyqtgraph backend, the `PyQtGraphScatterView` (a proper `SelectionView`), and the 4-backend
+`plot_backends.scatter` dispatcher already existed — the missing piece was the automatic default. `scatter`
+now accepts `backend='auto'`, resolving to **PyQtGraph above the point threshold where it is installed** and
+**matplotlib otherwise** (via `plot_backend_selection.choose_scatter_backend`). Matplotlib stays the explicit
+publication choice. Tests (`core`): a small frame resolves to a matplotlib figure with brushing enabled, and
+the size decision picks pyqtgraph above the threshold when available. The Plotly widget with click-to-napari
+(Part 3) remains the QtWebEngine-gated GUI follow-on.
+
+## [1.6.276] - 2026-07-22
+### Removed — **Two duplicate interaction-layer modules (correction): `utils/hit_testing.py` and `utils/selection_state.py`.**
+Honest correction. In 1.6.272 / 1.6.273 I added a standalone hit-tester and `SelectionState` for the
+`interaction_layer` spec **without first verifying the current tree** — which had already implemented that
+spec in full, far past its 1.6.90 target: `selection_service.py` holds the canonical integrated
+`SelectionState` (with `select_entity`/`toggle`/`hover`/`pin`/`clear` and back-compat), `analysis_plots.py`
+already uses one `button_press_event` with nearest-curve **cycling** (a deliberately better model than the
+spec's ambiguity-refusal), the MSD background is a `LineCollection` with promotion overlays, and a
+`SelectionView` Protocol + contract suite exists. My two modules were pure parallel duplicates — exactly the
+second-implementation the spec's own cautions forbid — and were imported by nothing. Removed them and their
+tests; the `interaction_layer` spec is verified DONE in the tree. (The lesson is the discipline's own:
+verify the premise against the current tree before building.)
+
+## [1.6.275] - 2026-07-22
+### Added — **Reopen a saved figure bundle to restore its refined state; brushing survives a refine (explore_refine_export complete).**
+Closes the explore_refine_export follow-ons.
+- `figure_refine.load_bundle(spec_json)` restores the refined `FigureSpec` from an exported bundle, and the
+  raw plotted data (`<name>_data.json`) beside it when present; `FigureRefineController.from_bundle(...)`
+  regenerates the EXACT refined figure from spec + data (a reproducible figure — reopening restores what was
+  saved), falling back to spec-only when no raw data was written.
+- Pinned that **brushing survives a refine**: a matplotlib interaction callback connected before refining is
+  still connected after — refine restyles the figure, it never tears down interaction.
+- Tests (`core`): bundle round-trips the refined spec and regenerates the figure (log scale honoured); a
+  spec-only bundle reopens without a figure; interaction callbacks persist across refine.
+
+## [1.6.274] - 2026-07-22
+### Added — **Plot-backend decisions: interactive-scatter threshold, backend provenance, honest Plotly scope (backend_parity Parts 2–3, headless slice).**
+The Qt interaction is deferred, but the decisions are small and pure — new Qt-free
+`utils/plot_backend_selection.py`:
+- `choose_scatter_backend(n_points, *, threshold, pyqtgraph)` — an interactive scatter defaults to
+  **PyQtGraph** only above the threshold (~5000, configurable) AND where PyQtGraph is available; otherwise
+  **matplotlib**, which stays the canonical publication backend regardless.
+- `backend_provenance(...)` records WHICH backend rendered and why (the audit's "record which backend
+  rendered").
+- `plotly_interaction_scope(qtwebengine)` — Plotly advertises full click-to-napari (`'click'`) only where
+  QtWebEngine exists, else `'hover_only'` (identity-bearing hover, **no dead click affordance**). Availability
+  probes (`pyqtgraph_available`, `qtwebengine_available`) return a bool and never crash.
+- Tests (`core`): below-threshold→matplotlib (even if PyQtGraph present), above→PyQtGraph only when
+  available, configurable threshold, provenance record, honest Plotly scope. The interactive substance
+  (actual PyQtGraph/Plotly rendering + selection wiring) remains the Qt follow-on.
+
+## [1.6.273] - 2026-07-22
+### Added — **Selection as a STATE: hover, multi-select, and pinning — independent and immutable (interaction_layer Gap 1).**
+A selection was one object with a string mode, so there was no ctrl-click comparison set, no pinning a track
+while exploring another, and no "clear the selection but keep the pins." New Qt-free
+`utils/selection_state.py::SelectionState` models it as an immutable value with four independent facets —
+`selected`, its `primary`, an independent `hovered`, and `pinned` — plus the `generation` counter.
+- Commands (`select`/`toggle`/`hover`/`pin`/`unpin`/`clear`) each return a NEW state one generation later
+  and never mutate the old one: `toggle` is ctrl-click (add/remove, primary falls back on removal), `hover`
+  never disturbs `selected`, and `clear` empties selected+hovered but **KEEPS pinned** (Escape keeps pins).
+  `displayed` is the union of selected + pinned (the set a view must render even outside a representative
+  sample).
+- Tests (`core`): select/toggle semantics, clear-keeps-pins, hover-independence, pin/unpin, one-command-one-
+  generation, immutability. This pins the semantics; wiring it into `selection_service` behind the existing
+  subscriber contract (back-compat preserved) is the integration follow-on.
+
+## [1.6.272] - 2026-07-22
+### Added — **Honest hit-testing for spaghetti plots — the nearest curve, or NOTHING when it's ambiguous (interaction_layer Gap 2).**
+Matplotlib's per-artist picker returns whichever line it hits first — arbitrary, and in a dense tangle of
+curves scientifically dishonest (a click near a crossing gives a confident answer the data can't support).
+New Qt-free `utils/hit_testing.py` replaces that with one deliberate hit-test:
+- `hit_test(curves, click_xy, *, tolerance_px, ambiguity_px) -> HitResult` finds the nearest curve by
+  point-to-segment distance over the curves' DISPLAY-space coordinate arrays, and **refuses an ambiguous
+  click** — when the best and second-best are within `ambiguity_px`, it selects NOTHING and `candidates`
+  NAMES both, so the caller reports the tie instead of guessing. A miss beyond `tolerance_px` selects
+  nothing too.
+- `point_segment_distance` clamps the projection to the segment endpoints (a click past an end measures to
+  the end, not the infinite line); `nearest_distance_to_curve` scans a polyline and skips non-finite
+  vertices. Pure geometry, backend-neutral — the caller supplies display coordinates (a log-log MSD plot
+  must be hit-tested in pixels, not data units).
+- Tests (`core`): nearest-wins, empty→nothing, ambiguous→nothing+candidates, endpoint clamping, one click →
+  at most one selection, log handled in display space. This primitive backs the matplotlib wiring (removing
+  the per-line pickers) and the future pyqtgraph adapter; that wiring + the other interaction-layer gaps are
+  the follow-on.
+
+## [1.6.271] - 2026-07-22
+### Added — **Comparative figures gain an Explore → Refine → Export workflow (explore_refine_export).**
+The comparative-figure dialog was a plotting dialog, not a publication editor: the refinement/export
+utilities existed but weren't reachable as a workflow. Now they are.
+- New Qt-free `utils/figure_refine.py::FigureRefineController` — the engine over one figure: `set()` /
+  `size_preset()` mutate the canonical `FigureSpec` and re-apply presentation to the SAME figure (**never
+  recomputing** the comparison), and `export_bundle()` writes exactly the refined preview (**WYSIWYG** by
+  construction — the same spec drives preview and export). Core-tested (`test_figure_refine.py`).
+- The comparative dialog gains a **Refine row** (size preset with preview at final print width, title,
+  y-scale, legend) and an **Export bundle…** button (vector PDF/SVG + high-DPI PNG + spec JSON + summary
+  CSV). Refining restyles the figure without re-running the analysis; the analytical Explore mode is
+  untouched (its stats title survives unless a refine title is set). `test_explore_refine_export_ui.py`
+  (`integration`) drives the controls end-to-end and the export button.
+- Follow-on (tracked): reopening a saved bundle to restore the refined spec, and an explicit
+  brushing-survives-refine test — the analysis and export contracts are done.
+
+## [1.6.270] - 2026-07-22
+### Added — **A real comparative figure refines + exports without recomputing (publication_figures headline DoD pinned).**
+`publication_figures` (the origin of the FigureSpec architecture) is complete at the module level — it
+shipped through the FigureSpec merge and the publication_features tiers. This closes its **headline
+Definition of Done** with a test against the ACTUAL comparative figure, not just synthetic data:
+`test_publication_figures.py` builds a `condition_comparison_figure`, then
+- **refines** it (title + log scale) and asserts every plotted datum (collection offsets + line ydata) is
+  byte-for-byte unchanged — refinement changes presentation, never recomputes the analysis (the contract);
+- **exports** the full reproducible bundle (vector PDF/SVG with embedded text fonts, high-DPI PNG, the
+  regenerating spec JSON, and the summary CSV alongside).
+The in-UI refinement panel (spec fields as live controls) is the one remaining piece and is tracked as the
+`explore_refine_export` workflow.
+
+## [1.6.269] - 2026-07-22
+### Added — **Publication figures: legend control — placement, columns, frame (publication_features Tier 2).**
+`FigureSpec.legend` adds a group→colour legend (off by default), with `legend_loc` (position),
+`legend_ncol` (columns), and `legend_frame` (box on/off). The legend swatches use the semantic `color_map`
+where one is set, so the legend agrees with the points. All four fields round-trip through JSON.
+- Tests (`core`, Agg): no legend by default, one entry per group when on, frame + ncol honoured, swatches
+  follow the colour map, round-trip.
+- This closes the small remaining **Tier 2** item; what remains in `publication_features` is the Tier-3
+  image-panels/scale-bars surface (GUI-verified, its own follow-on) and minor polish.
+
+## [1.6.268] - 2026-07-22
+### Added — **Publication figures: exact regeneration from the raw plotted data (publication_features Tier 3).**
+A figure can now be reproduced EXACTLY, not just approximated from a summary. `render()` stashes the raw
+plotted data on the figure, `export()` writes it as `<name>_data.json`, and new
+`regenerate(data, spec)` reconstructs the exact figure from that data + the spec JSON — reproducibility
+beyond the summary CSV.
+- New `figdata_to_dict` / `figdata_from_dict` (JSON-serializable round-trip of `FigureData`) + `regenerate`.
+- Tests (`core`): export → regenerate reproduces the same plotted values and honours the same spec (log
+  scale, error type), and `FigureData` round-trips through its dict.
+
+## [1.6.267] - 2026-07-22
+### Added — **Publication figures: export embeds software/version metadata for reproducibility (publication_features Tier 3).**
+An exported figure now records the software that made it. `export()` writes the PyCAT + key-dependency
+versions into the file's metadata (PNG `Software` tEXt chunk / PDF+SVG `Creator`) and into a `_provenance`
+block in the spec-JSON bundle, so a figure carries its own reproducibility record.
+- New `figure_export_metadata(spec)` composes the record from `feature_provenance.software_versions()` (an
+  unavailable version is omitted, never guessed).
+- `spec_from_dict` now tolerates non-field keys, so the exported JSON — spec **plus** `_provenance` —
+  regenerates the exact `FigureSpec` unchanged.
+- Tests (`core`): the PNG carries `pycat-napari …` in its metadata, the JSON bundle carries the software
+  versions, and the spec round-trips despite the extra provenance key.
+
+## [1.6.266] - 2026-07-22
+### Added — **Publication figures: semantic colour mapping + dense-scatter rasterization (publication_features Tier 3).**
+- `FigureSpec.color_map` (`{group: colour}`) ties a colour to group IDENTITY, not plot position — so a
+  condition keeps the same colour across every figure it appears in, however the groups are ordered.
+  Unmapped groups fall back to the palette by order (unchanged default).
+- `FigureSpec.rasterize_points` rasterizes the dense scatter layer inside vector output (axes and text stay
+  vector), so a 50k-point figure exports as a usable PDF instead of an enormous unopenable one. Off by
+  default.
+- Both round-trip through JSON. Tests (`core`, Agg): a group keeps its assigned colour regardless of order,
+  the scatter layer is flagged rasterized only when requested, round-trip.
+
+## [1.6.265] - 2026-07-22
+### Added — **Publication figures: validated font selection + transparent background (publication_features Tier 2).**
+Two ExportSpec/legibility controls, both honouring the "validate and warn, never silently substitute" rule:
+- `FigureSpec.font_family` — a chosen font is applied to the axis text, but **validated against the
+  installed fonts first**: a missing font WARNS (stating that matplotlib would otherwise silently pick a
+  replacement, changing the figure between machines) and falls back to the default rather than substituting
+  silently. The check is a pure, tested `resolve_font_family(family)` helper.
+- `FigureSpec.transparent_background` — `export()` now saves the PDF/SVG/PNG with `transparent=` honouring
+  this flag (default white, unchanged).
+- Both fields round-trip through JSON. Tests (`core`, Agg): installed font applied, missing font
+  warns-and-falls-back, transparent flag reaches every `savefig`, round-trip.
+
+## [1.6.264] - 2026-07-22
+### Added — **Publication figures: multi-panel layout with A/B/C panel labels (publication_features Tier 2).**
+The biggest structural gap the §8 audit named: the figure render was single-axis (`add_subplot(111)`), so a
+multi-panel journal figure was impossible. New `render_multipanel(panels, *, spec, n_cols, panel_labels)`:
+- Lays several `FigureData` out in a grid (`n_cols` columns, default as-square-as-possible) and, unless
+  turned off, gives each panel a bold **A / B / C …** label in its top-left corner (Excel-style past Z:
+  AA, AB, …). Each item may be a `FigureData` or a `(FigureData, FigureSpec)` pair, so a per-panel spec
+  (e.g. a log axis on one panel) overrides the shared one.
+- The per-axis plotting is now a shared `_render_on_axis` helper, so a panel is styled identically however
+  many there are, and single-panel `render()` is unchanged (it delegates to the same helper — existing
+  figure tests pass untouched). Reads the data, never recomputes it; per-panel plotted values stash on
+  `fig._pycat_plotted` as a list.
+- Tests (`core`, Agg): one axis per panel with A/B/C labels, `n_cols` grid respected, labels toggle off,
+  per-panel spec override, single-panel grid, and labels past Z.
+
+## [1.6.263] - 2026-07-22
+### Added — **Publication figures: error/confidence representation with the type STATED (publication_features Tier 1).**
+A comparison figure without a stated error is not publishable. `FigureSpec.error_type` (`'none'` | `'sd'` |
+`'sem'` | `'ci95'`) draws an error bar on each group's mean and **labels the type on the figure** ("error
+bars: SEM"), so an error bar is never ambiguous about whether it is SD, SEM, or a CI.
+- The half-length is a pure, tested `group_error(values, error_type)`: SD (ddof=1), SEM (SD/√n), or the 95%
+  CI (`1.96·SEM`); fewer than two finite values → 0 (no spread to show). Round-trips through JSON.
+- Default `none` (no error bars), so a bare spec renders exactly as before.
+- Tests (`core`, Agg): SD/SEM/CI computation + the two-point floor, error bars drawn only when requested, and
+  the type is present as figure text.
+
+## [1.6.262] - 2026-07-22
+### Added — **Publication figures: log / symlog y-scale + minor ticks on the canonical FigureSpec (publication_features Tier 1, first slice).**
+Condensate size and intensity distributions are often log-normal, so a linear axis misrepresents them — the
+first Tier-1 axis controls the audit's §8 flagged as missing:
+- `FigureSpec.y_scale` (`'linear'` | `'log'` | `'symlog'`), honoured by both `render()` and `refine()`, and
+  `FigureSpec.minor_ticks`. Both round-trip through JSON and apply through `refine` without recomputing the
+  data (the refine-not-recompute contract).
+- **Validate and warn, never silently substitute:** a `log` request on data with non-positive values (it
+  crosses or touches zero, which a log axis cannot show) falls back to **symlog** with a `UserWarning`
+  stating the consequence, rather than silently clipping or crashing. The decision is a pure, tested
+  `resolve_y_scale(y_scale, values)` helper.
+- Publication-sane default preserved: a bare spec renders exactly as before (linear). Every field goes
+  through the spec, so `refine`/JSON round-trip keep working.
+- Tests (`core`, matplotlib Agg): `test_publication_features.py` — log is actually log, symlog honoured,
+  non-positive→symlog-with-warning (render and refine), JSON round-trip, minor-ticks toggle, and refine
+  leaves the plotted data untouched. Remaining Tiers (multi-panel, error representation, fonts, rasterize,
+  …) ship as their own versions.
+
+## [1.6.261] - 2026-07-22
+### Added — **The Client-Enrichment UI now exposes the signal-free-region background mode (background_mode spec complete).**
+`client_enrichment` has long supported three background treatments and a guardrail that refuses to let a
+"background" region that is really dilute phase destroy the partition measurement — but the UI only offered
+the scalar offset, so the wired guardrail could never fire from the GUI. Now it can:
+- `_add_client_enrichment` gains a **"Background offset (from region)"** layer dropdown — a signal-free mask
+  (OUTSIDE the cell, or a dark/blank frame) whose mean becomes the instrument offset (`background_mask`),
+  overriding the scalar; its mean also feeds the per-condensate/per-cell scalar so all three agree. The
+  scalar offset is relabelled and kept **visually separate** from the dilute-shell reference (conflating
+  "instrument offset" and "dilute reference" is the exact error the guardrail warns about).
+- Picking a region that is really dilute phase fires the **consequence-stating** warning ("subtracting it
+  will subtract the dilute phase from itself and DESTROY the partition measurement…") at the moment of the
+  mistake, and the chosen `background mode` / `background source` now ride in the emitted overview table so a
+  reader can tell an offset-corrected K from a raw one.
+- The science (the guardrail, the mode/source in the result, the ontology caveat) was already present and
+  `core`-tested; this adds the UI exposure + `tests/test_background_mode_ui.py` (`integration`, end-to-end).
+  **Default stays `none`** — existing results are unchanged.
+
+## [1.6.260] - 2026-07-22
+### Added — **backend_parity Part 1: a seaborn hue split gets a VERIFIED per-artist brushing map, or an honest refusal.**
+When seaborn draws one artist per hue level, each artist holds a SUBSET of the table — so a table index into
+one artist resolves a click to the wrong object. The prior behaviour refused brushing outright for any
+multi-artist plot. This replaces the blunt refusal with a reconstruction that stays inside the exact
+scientific-safety property the audit praised: **a verified mapping or an honest refusal — never a guess.**
+
+- New `plot_backends._seaborn_subset_mappings(new_artists, df, x, y, hue)` — matches every artist to exactly
+  one hue subset by the SAME point-count + coordinate check the single-artist path uses, matching by
+  COORDINATES (not by assuming seaborn's artist order), and returns `(artist, row_positions)` per artist
+  where `row_positions` index a 1:1 `refs` list. If any artist can't be matched to exactly one distinct
+  subset, the whole plot falls back to the refusal.
+- `plot_backends.scatter()`'s multi-artist branch now returns the verified mappings (`ok=True`) instead of
+  refusing; a new `brushing.attach_brushing(figure, brushable, refs, **kw)` dispatches on whether the plot
+  is a single artist (1:1 with `refs`) or a verified hue split (per-artist subsets), so callers do not
+  special-case the split.
+- **Finding (recorded in the spec):** modern seaborn (0.13.2 here) keeps a hue plot in ONE artist in
+  DataFrame order, so `scatter()`'s single-artist path already brushes hue correctly and this multi-artist
+  path is a verified *fallback* for seaborn versions/plots that split. Its logic is covered by
+  `tests/test_seaborn_subset_brushing.py` (8 `core` tests, incl. count- and coordinate-mismatch refusals and
+  a real-seaborn end-to-end "brushable, not refused" check). No scientific output changes; full core green
+  (1639 passed). Parts 2–3 (PyQtGraph-default-for-large-scatter, Plotly QtWebEngine scoping) remain — both
+  interactive/Qt-bound.
+
+## [1.6.259] - 2026-07-22
+### Changed — **exception_context_classification Part 2: a swallowed WRITE no longer passes as success (the write-swallow guard + the writers-first conversion).**
+The scientific-result guard catches a broad `except` that returns a wrong *number*; this adds the guard for
+the other silent corruption that carries **no wrong number at all** — a save that fails into apparent success.
+The user clicks *Save*, the `except` eats the error, and the file is absent or truncated while everything
+looks fine.
+
+- **New `tests/test_no_silent_write_or_batch_swallowing.py` (`core`)** — an AST ratchet, conservative and
+  scoped to handlers wrapped around a KNOWN persist call (`to_csv` / `savefig` / `imwrite` / `json.dump` /
+  `open(..., 'w')` / `write_text` …). A broad handler there must make the failure **visible** — re-raise, or
+  surface it via a notifier whose name carries `warn`/`error`/`critical` — else it is flagged unless annotated
+  `# broad-ok: write — <reason>`. Treating any user notification as compliant is what keeps the many correct
+  UI save handlers (`napari_show_warning("Save failed: …")`) from being false-positived. Budget pinned at **0**.
+- **The writers-first conversion:** `write_session_outputs` swallowed two sidecar writes into `debug_log` — the
+  acquisition-metadata JSON (provenance) and the **session manifest that Load Session reads back**. Both now
+  surface via `notify.show_warning` (warn-and-continue: the result files themselves saved), so a failed
+  provenance/restore write is no longer invisible. Function kept under the 120-line complexity ceiling.
+- **Categorized the genuinely-safe swallows** (Part 1) with the `# broad-ok: <category> — <reason>` form:
+  `local_cache`'s two best-effort cache writes and `ts_cache_manager`'s cache prune (`write` — absence costs
+  nothing); `temperature_tools`' two batch-export handlers (`write`/`batch_step` — the error is recorded into
+  the returned results row, visible in the output table); `channel_designations._save` (`write` — returns
+  `False` so the caller surfaces the failed persist).
+- **Ratchets tightened** to match: `test_exception_budget` `file_io` 239→237, `toolbox` 498→491, `utils`
+  114→113. No scientific output changes. Full `pytest -m core` green (1631 passed, 2 skipped).
+
+## [1.6.258] - 2026-07-22
+### Changed — **redundancy_consolidation axis 3: the duplicated UI background-worker consolidated (behaviour-preserving).**
+Four analysis panels (condensate_physics, brightfield, invitro_bf, invitro_fluor) each defined a
+byte-identical `class _XWorker(QThread)` — a `finished(object)`/`error(str)` pair and a `run()` emitting
+`finished(fn(**kwargs))`/`error(traceback)`. That is the audit's "duplicated worker lifecycle." It now lives
+once, in `qt_worker.make_task_worker()` (a cached factory so the module still imports headless / Qt resolves
+lazily). Each local class was replaced by `_XWorker = make_task_worker()`, so the local name and all 20 call
+sites are unchanged and the non-modal semantics (inline spinner, GUI interactive) are byte-identical.
+
+**Deliberately NOT routed through `operation_runner`:** those panels keep the GUI interactive with an inline
+spinner, whereas `operation_runner` (via `run_with_progress`) is WINDOW-MODAL — a different UX contract.
+Swapping one for the other would be a behaviour change, which is exactly what this spec forbids; the two
+coexist. `_AdvancedAnalysisWorker` (progress+cancel contract) and `_SpatialWorker` (specialised) are
+genuinely distinct and left separate.
+
+Pinned by `test_qt_worker` (finished/error delivery via qtbot; one cached class). Also fixed a pre-existing
+brittle assertion in `test_ui_structure` (it string-matched a now-multi-line `MenuManager` re-export; made
+it AST-robust). Full core green (1536 passed).
+
+## [1.6.257] - 2026-07-22
+### Added — **MRI surfacing (step 3, batch wiring): reliability now populates automatically in exported tables.**
+The reliability columns added in 1.6.255 only filled when a caller supplied a `reliability_context`; the
+batch never did. Now the batch consolidation computes each image's imaging-QC reliability factor and threads
+it through:
+
+- `BatchProcessor._process_file` stashes the raw image it already loaded (`state['image']`), so QC needs no
+  re-load and there is no frame-0 collapse risk.
+- A new `_reliability_context_for(records, image_name)` computes `run_full_qc` on that image and passes
+  `{'image_qc': ...}` to `ConsolidatedLongWriter.add_image` — but **only when the image carries a
+  scored-family measurement** (partition / concentration / ΔG), gated by the new
+  `records_have_scored_family`, so a non-partition batch pays no QC cost.
+- Calibration is not threaded through the batch, so it stays in `missing` and the grade is **honestly
+  capped** — never silently treated as passing (rule 1). The per-object biological-QC flag still
+  differentiates objects, so a comparison can be recomputed on high-reliability objects.
+
+The QC failure path is `# broad-ok: batch_step` (additive — must never drop an image from the table). The
+new logic is extracted into `_reliability_context_for` rather than inlined, keeping `run()` under the
+120-line ratchet (the ratchet caught the inline growth; the honest response was to split it out, not raise
+the ceiling). Full core green (1536 passed).
+
+## [1.6.256] - 2026-07-22
+### Changed — **Merge Meet Raval's branch (re-targeted): large-condensate segmentation fix + pipeline progress bar.**
+Two changes from Meet Raval's branch, brought onto the post-decomposition tree.
+
+- **Large-condensate segmentation fix (re-targeted).** Meet's "Improved segmentation for large condensates"
+  edited `segmentation_tools.py`, which is now a re-export shim (segmentation decomposition, 1.6.240-243) —
+  his fix had been silently overwritten when he merged the decomposition into his own branch. It is
+  re-applied here to where the code now lives, `toolbox/segmentation/puncta_refinement.py`, in both
+  `puncta_refinement_filtering_func` and `..._fast`: objects with `area >= 150 px` are exempted from
+  `local_intensity_condition` and `gradient_condition`, whose fixed 1-4 px rim scale is correct for
+  point-like puncta but misfires on large condensates. All other checks (kurtosis, ellipticity,
+  cell-intensity, SNR, area/solidity) still apply. Small puncta are unaffected; every science pin
+  (filter-sensitivity, fast/slow parity, puncta-refinement, spurious-puncta gate, local-ring scales) passes
+  unchanged. The `puncta_refinement.py` complexity ceiling was raised 715 -> 747 for the documented fix.
+- **Workflow-checklist progress bar (cherry-picked).** The checklist now advances across all pipelines,
+  updating even when batch recording is off; pipeline steps carry real keys; a new `timeseries_invitro_fluor`
+  pipeline is added. The three checklist-notify swallows were annotated `# broad-ok: ui_cleanup` so the
+  exception-budget ratchet stays at 498.
+
+Behaviour note: large condensates (area >= 150 px) that the fixed-scale rim checks previously rejected now
+survive refinement — a real behaviour change, validated by Meet on the bundled example dataset (the CI pins
+exercise the small-puncta regime). Full core green (1534 passed).
+
+## [1.6.255] - 2026-07-22
+### Added — **MRI surfacing (steps 4b/4c): reliability in the consolidated table and the QC report.**
+Two more surfaces for the Measurement Reliability Index (option 2 — the factors are threaded to the table
+build, where image-level QC and object-level flags are both in hand):
+
+- **Consolidated long table** gains additive `reliability` / `reliability_reasons` columns for the scored
+  measurement family. The shared image factors (imaging QC, calibration validity) arrive per image in a
+  `reliability_context` threaded through `build_image_long_table` and `ConsolidatedLongWriter.add_image`;
+  the per-object differentiator is that object's own biological-QC flag (unflagged → 1.0, flagged → 0.5), so
+  a comparison can be **recomputed on high-reliability objects only** — the scientifically strongest use.
+  The columns ride at the END of the schema (purely additive, like `qc_flags`), are blank off the scored
+  family, and blank entirely without a context (an unmeasured factor is never assumed passing). To score a
+  single object, `_score_object_flags` now also accepts a per-object confidence float.
+- **QC report** (`plot_qc_report`) gains a footer section — `reliability_report_section` — listing the
+  measurements whose grade is capped below `high`, the factors that capped them, and the worst-first reason.
+
+`_condition_fields` was updated to exclude the new fixed columns so the comparative-figure UI never treats
+reliability as a condition dimension. Full core green (1534 passed). Remaining: the batch loop passing the
+per-image `reliability_context` (endpoints now accept it), and extending the scored family (one entry each).
+
+## [1.6.254] - 2026-07-22
+### Added — **Measurement Reliability Index surfacing (step 4a): every scored Measurement carries its grade.**
+The MRI core (`utils/reliability.py` — a decomposable 0..1 score composed from imaging QC, biological
+plausibility, calibration validity, parameter sensitivity and benchmark agreement) already existed but was
+unsurfaced. This wires it onto the `Measurement` value object:
+
+- `Measurement` gains an optional `reliability: ReliabilityScore` field. `summary()` appends
+  `(reliability: <grade>)` to the value line (e.g. `K_p = 4.2 (reliability: moderate)`) and lists the
+  **worst-first reasons** beneath it, so the number reports WHY its reliability is what it is — never an
+  opaque grade. `to_dict()` emits the grade, value, per-factor contributions, reasons and the `missing`
+  factors.
+- Fully backward-compatible: an unscored Measurement (`reliability=None`) reports exactly as before — no
+  grade line, a null in the dict. Reliability is REPORTED, never a silent filter (the biological-QC contract).
+
+This is the attachment point the remaining surfaces read. Still to come: attaching scores to the
+partition / concentration / ΔG measurements (spec step 3), then the consolidated-table columns and the
+QC-report capped-measurement section. Full core green (1530 passed).
+
+## [1.6.253] - 2026-07-22
+### Changed — **image_processing decomposition COMPLETE (step 6): image_processing_tools.py is now a pure shim.**
+The last two domains moved, **verbatim**: the composite preprocessing pipeline (`pre_process_image` + its
+run wrapper + the flatfield / background-subtraction shading corrections) to
+`toolbox/image_processing/preprocessing.py`, and the interactive image-adjustment / upscaling wrappers
+(`run_apply_rescale_intensity`, `run_invert_image`, `run_upscaling_func`) to
+`toolbox/image_processing/upscaling.py` (napari stays function-scoped so it imports headless).
+
+- **`image_processing_tools.py`: 2669 → 221 lines (-92%)** across the six steps (size_estimation 1.6.248,
+  `_base` 1.6.249, deblur 1.6.250, filters 1.6.251, background 1.6.252, preprocessing + upscaling 1.6.253).
+  It now contains **no function definitions** — only re-exports of the `toolbox/image_processing/` package,
+  so every historical import path keeps working unchanged.
+- **Every moved function had a characterization test written first** — the discipline this thinly-covered
+  file demanded — pinning its exact output on fixed inputs; all passed identically before and after. Three
+  registered ops moved this step → `operation_catalog.json` regenerated. This closes the
+  image_processing_decomposition audit spec, the last of the four remaining god-file splits.
+
+## [1.6.252] - 2026-07-22
+### Changed — **image_processing decomposition step 5: the background/noise-removal family moves out.**
+The spec's highest-downstream-impact target (background removal shapes every intensity measurement) moved
+**verbatim** to `toolbox/image_processing/background.py`: rolling-ball / Gaussian background removal
+(`rb_gaussian_background_removal` + inpainting / rolling-ball / subtract helpers), the edge-enhanced variant,
+WBNS wavelet background+noise separation (`wbns_func` + `wavelet_bg_and_noise_calculation`), and the
+realness-weighted soft foreground suppression (`_realness_weight` + `soft_foreground_suppression` +
+`FOREGROUND_SUPPRESSION_DEFAULTS`, nested `_norm01`/`_soft`) — each with its viewer wrapper.
+
+- **Characterization written first** (`test_image_processing_background_characterization`): exact output of
+  all nine estimators/removers on a **known background field** (four disks on a smooth gradient) — identical
+  before and after.
+- Now unblocked because its `peak_and_edge_enhancement_func` dependency moved to `filters` last step. Six
+  registered ops → `operation_catalog.json` regenerated. `image_processing_tools.py`: **1619 → 732**;
+  ceilings ratcheted (`image_processing_tools.py` 732, `background.py` 918). Remaining: preprocessing,
+  upscaling.
+
+## [1.6.251] - 2026-07-22
+### Changed — **image_processing decomposition step 4: the filter/enhancement family moves out.**
+The 2D and pseudo-3D linear filters and enhancement operators moved **verbatim** to
+`toolbox/image_processing/filters.py`: Gaussian smoothing, Gabor texture filtering, difference-of-Gaussian
+blob enhancement, Laplacian-of-Gaussian filter/enhancement, edge-preserving bilateral filtering, and the
+combined peak/edge enhancer — each with its viewer wrapper, plus the `_GABOR_KERNELS` cache and the nested
+`_convolve_k` helper. They build on the `_base` primitives.
+
+- **Characterization written first** (`test_image_processing_filters_characterization`): exact shape / dtype
+  / sum / min / max of all ten filter operators on fixed synthetic inputs — identical before and after.
+- Ten registered ops moved → `operation_catalog.json` regenerated. `image_processing_tools.py`: **2141 →
+  1619**; ceilings ratcheted (`image_processing_tools.py` 1620, `filters.py` 564). Remaining: background
+  (now unblocked — its `peak_and_edge_enhancement_func` dependency is in `filters`), preprocessing, upscaling.
+
 ## [1.6.250] - 2026-07-21
 ### Changed — **image_processing decomposition step 3: deblur-by-pixel-reassignment moves out.**
 `deblur_by_pixel_reassignment` (DPR — sharpen by re-locating each pixel toward the local gradient on an

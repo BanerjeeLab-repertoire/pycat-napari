@@ -47,7 +47,10 @@ def _clean_population():
 def test_the_consolidated_schema_gains_qc_flags_at_the_end():
     from pycat.utils.consolidated_table import consolidated_columns
     cols = consolidated_columns(['genotype'])
-    assert cols[-1] == 'qc_flags', "qc_flags must ride at the END so the change is purely additive"
+    # qc_flags rides after the core/provenance schema (purely additive); the later reliability columns
+    # (1.6.255) form the final additive block behind it, so qc_flags never moves ahead of the core schema.
+    assert 'qc_flags' in cols and cols.index('qc_flags') > cols.index('units')
+    assert cols[-2:] == ['reliability', 'reliability_reasons']
     # the pre-existing schema is untouched ahead of it
     assert 'measurement' in cols and 'value' in cols and 'units' in cols
 

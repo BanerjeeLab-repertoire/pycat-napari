@@ -253,6 +253,22 @@ def make_pickable(figure, artist, refs, *, hub=None, on_select=None, viewer=None
     return figure
 
 
+def attach_brushing(figure, brushable, refs, **kwargs):
+    """**Wire brushing for whatever ``plot_backends.scatter`` handed back as its second element.**
+
+    A plot is either one artist that maps 1:1 to ``refs``, or — when seaborn split by hue and the split was
+    *verified* — a list of ``(artist, row_positions)`` where each artist maps to a SUBSET of ``refs``. This
+    dispatches on which it is, so every point ends up carrying its own ``ObjectRef`` either way and callers
+    do not special-case the split. ``kwargs`` (``hub`` / ``on_select`` / ``viewer`` / ``central_manager``)
+    pass straight through to :func:`make_pickable`.
+    """
+    if isinstance(brushable, list):
+        for artist, positions in brushable:
+            make_pickable(figure, artist, [refs[i] for i in positions], **kwargs)
+        return figure
+    return make_pickable(figure, brushable, refs, **kwargs)
+
+
 def _wire_pickable(figure, on_pick, on_key, state, refs) -> None:
     """Connect the pick/key/close callbacks and stash the teardown handles on ``figure``.
 

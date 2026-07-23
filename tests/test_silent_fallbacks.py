@@ -43,10 +43,17 @@ _TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "tool
 
 # Modules whose job is to produce a NUMBER a scientist will report.
 _SCIENCE = [
-    "condensate_physics_tools", "invitro_tools", "vpt_tools", "frap_tools", "fusion_tools",
-    "nb_tools", "spida_tools", "molecular_counting_tools", "partition_enrichment_tools",
-    "pixel_wise_corr_analysis_tools", "spatial_metrology_tools", "gaussian_localization_tools",
-    "brightfield_tools", "partial_volume_tools",
+    # Still-monolithic science modules:
+    "frap_tools", "fusion_tools", "nb_tools", "spida_tools", "molecular_counting_tools",
+    "partition_enrichment_tools", "pixel_wise_corr_analysis_tools", "spatial_metrology_tools",
+    "gaussian_localization_tools", "brightfield_tools", "partial_volume_tools",
+    # DECOMPOSED (2026-07-22): condensate_physics/invitro/vpt moved their science into packages, so the
+    # old *_tools.py are now empty shims — this guard must follow the science to where it lives.
+    "condensate_physics/coarsening", "condensate_physics/frame_quality", "condensate_physics/intensity",
+    "condensate_physics/moduli", "condensate_physics/msd", "condensate_physics/photobleaching",
+    "condensate_physics/relaxation", "condensate_physics/survival",
+    "vpt/analysis", "vpt/detection", "vpt/drift", "vpt/host", "vpt/populations", "vpt/viscosity",
+    "invitro/analysis", "invitro/field_summary", "invitro/partition", "invitro/size_distribution",
 ]
 
 # A handler that returns one of these is ANNOUNCING failure, which is the correct behaviour.
@@ -216,8 +223,14 @@ def test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero():
             if not node.args:
                 continue
             argument = node.args[0]
-            if (isinstance(argument, ast.Attribute) and argument.attr == 'data'
-                    and 'layer' in str(getattr(argument.value, 'id', '')).lower()):
+            if not (isinstance(argument, ast.Attribute) and argument.attr == 'data'):
+                continue
+            # A napari layer is not always in a variable literally named `layer` — the frame-0 bug bit on
+            # `active.data` (brightfield best-slice, CLEAN, the flatfield corrector) and `lmask.data`, none
+            # of which the old `'layer' in name` heuristic caught. Match the image-layer variable names that
+            # actually hold layers, so the guard covers the bug class regardless of what the var is called.
+            _var = str(getattr(argument.value, 'id', '')).lower()
+            if any(_t in _var for _t in ('layer', 'active', 'image', 'mask')):
                 offenders.append(f"{relative}:{node.lineno}")
 
     assert not offenders, (

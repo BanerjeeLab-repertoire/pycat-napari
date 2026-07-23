@@ -42,17 +42,23 @@ _BUDGET = {
     'batch_step_registry.py': 5,
     'central_manager.py': 2,
     'data': 3,
-    'file_io': 239,   # 284 -> 239: 45 broad handlers in the decomposed code (naming/dialogs/openers)
+    'file_io': 237,   # 284 -> 239: 45 broad handlers in the decomposed code (naming/dialogs/openers)
                       # annotated `# broad-ok:` with body-matched reasons (metadata probes, UI
                       # robustness, format-open log-and-continue) during the 1.6.146 decomposition.
+                      # 239 -> 237 (1.6.259): local_cache's two best-effort cache writes annotated
+                      # `# broad-ok: write` during the write-swallow sweep. See test_no_silent_write_or_batch_swallowing.
     'navigator': 1,
     'run_pycat.py': 30,
-    'toolbox': 498,   # 514 -> 509 -> 498: the 15 scientific result-path handlers (frap 4 @1.6.210; then
+    'toolbox': 491,   # 514 -> 509 -> 498: the 15 scientific result-path handlers (frap 4 @1.6.210; then
                       # condensate_physics 5 / invitro 3 / vpt 3 @1.6.211) annotated `# broad-ok:` after
                       # classification found each reports its failure honestly (NaN + flag, verdict, prior-
                       # measurement fallback, or optional-backend probe). See test_no_scientific_result_swallowing.
+                      # 498 -> 491 (1.6.259): the write-swallow sweep annotated ts_cache_manager's cache prune +
+                      # temperature_tools' two batch-export handlers (error recorded into the returned row), and
+                      # tracks four prior unclaimed reductions. See test_no_silent_write_or_batch_swallowing.
     'ui': 252,
-    'utils': 114,
+    'utils': 113,     # 114 -> 113 (1.6.259): channel_designations._save annotated `# broad-ok: write` (it
+                      # returns False so the caller surfaces the failed persist). See test_no_silent_write_or_batch_swallowing.
 }
 
 

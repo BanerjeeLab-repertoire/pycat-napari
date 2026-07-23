@@ -111,6 +111,9 @@ def read_2d_image_channels(file_path):
 
     channel_info = []
     single_page = (num_pages <= 1)
+    # The file stem is often the ONLY channel identity a plain 2D TIFF carries ('Image1-GFP.tif'):
+    # pass it so naming prefers the user's own label over a generic pixel/position guess.
+    _stem = os.path.splitext(os.path.basename(file_path))[0] if file_path else None
     for ch_num in range(num_channels):
         try:
             # Give the identifier this channel's pixels so, when metadata is
@@ -120,7 +123,7 @@ def read_2d_image_channels(file_path):
             # positionally; on the multi-page path the mapping is ambiguous, so
             # pass no frame there (metadata/position tiers still apply).
             _frame = channels[ch_num][0] if (single_page and ch_num < len(channels)) else None
-            channel_info.append(extract_channel_info(image, ch_num, pixel_frame=_frame))
+            channel_info.append(extract_channel_info(image, ch_num, pixel_frame=_frame, file_stem=_stem))
         except Exception:
             pass
 

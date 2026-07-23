@@ -190,3 +190,47 @@ def materialize_off_thread(layer_data, *, viewer=None, parent=None,
     return run_with_progress(
         lambda progress: materialize_stack(layer_data, progress_callback=progress, **materialize_kw),
         title=title, text=text, parent=parent)
+
+
+# ── The shared async task-worker (was re-derived per UI) ──────────────────────────────────────────
+#
+# Several analysis panels (condensate_physics, brightfield, invitro_bf, invitro_fluor) each defined a
+# byte-identical `class _XWorker(QThread)`: a `finished(object)` / `error(str)` pair and a `run()` that
+# emits `finished(fn(**kwargs))` or `error(traceback)`. That is the audit's "duplicated worker lifecycle" —
+# so it lives here once.
+#
+# It is DELIBERATELY NOT `operation_runner`. Those panels keep the GUI interactive with an inline
+# indeterminate spinner + a disabled run button; `operation_runner` (via `run_with_progress`) is
+# WINDOW-MODAL — a nested event loop that blocks a second operation. Routing these through it would swap a
+# non-modal background UX for a modal one — a behaviour change, not a consolidation. So the shared shape is
+# this worker, not the runner; the two coexist because they are two different UX contracts.
+_TASK_WORKER_CLS = None
+
+
+def make_task_worker():
+    """The shared background task-worker class (built on first use so Qt is resolved lazily and this module
+    still imports headless). A `QThread` that runs ``fn(**kwargs)`` off the GUI thread and emits
+    ``finished(result)`` or ``error(traceback_str)`` — the exact non-modal pattern the per-UI ``_XWorker``
+    classes each re-derived. Cached, so every caller shares one class."""
+    global _TASK_WORKER_CLS
+    if _TASK_WORKER_CLS is None:
+        from PyQt5.QtCore import QThread, pyqtSignal
+
+        class _TaskWorker(QThread):
+            finished = pyqtSignal(object)
+            error = pyqtSignal(str)
+
+            def __init__(self, fn, kwargs=None):
+                super().__init__()
+                self._fn = fn
+                self._kw = kwargs or {}
+
+            def run(self):
+                try:
+                    self.finished.emit(self._fn(**self._kw))
+                except Exception:
+                    import traceback
+                    self.error.emit(traceback.format_exc())
+
+        _TASK_WORKER_CLS = _TaskWorker
+    return _TASK_WORKER_CLS

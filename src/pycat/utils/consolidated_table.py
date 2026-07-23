@@ -53,6 +53,20 @@ _DEFAULT_PROVENANCE_COLS = ('channel', 'frame', 'pixel_size_um', 'pycat_version'
 # upstream table already stamped ``qc_flags`` (where the mask lived) or when ``masks`` is supplied.
 _QC_COLS = ('qc_flags',)
 
+# ── Measurement Reliability Index columns (utils.reliability) ─────────────────────────────────
+#
+# Two per-row observations for the scored measurement family (partition / concentration / ΔG): the
+# reliability GRADE and its worst-first REASONS. Like ``qc_flags`` they ride at the END of the schema,
+# purely additive — every existing reader is untouched — and they are an OBSERVATION, never a filter: no
+# row is dropped for a low grade. The scientifically honest use is exactly the spec's: recompute a
+# comparative figure on high-reliability objects only and SHOW the difference.
+#
+# The image-level factors (imaging QC, calibration validity) are SHARED across the image and arrive in a
+# ``reliability_context``; the per-object differentiator is the object's own biological-QC flag, so a
+# flagged object scores lower than an unflagged one. Blank for measurements outside the scored family, and
+# blank entirely when no ``reliability_context`` is supplied (an unmeasured factor is never assumed passing).
+_RELIABILITY_COLS = ('reliability', 'reliability_reasons')
+
 
 def melt_object_measurements(df, object_type, *, id_col='object_id', value_cols=None,
                              units=None) -> pd.DataFrame:
@@ -125,9 +139,57 @@ def _object_qc_flags(wide, object_type, id_col, *, labels=None, parent_labels=No
         return {}
 
 
+def records_have_scored_family(records) -> bool:
+    """Whether any of these ``(object_type, wide_df)`` records carries a measurement in the reliability
+    SCORED_FAMILY (partition / concentration / ΔG). The batch uses this to compute imaging QC — and thus
+    populate the reliability columns — ONLY for images whose measurements are actually scored, so a
+    non-partition batch pays no QC cost."""
+    from pycat.utils.reliability import SCORED_FAMILY
+    fam = set(SCORED_FAMILY)
+    return any(fam & set(map(str, getattr(df, 'columns', []))) for _, df in (records or []))
+
+
+def _row_reliability_factory(reliability_context):
+    """Return ``(measurement, flagged) -> (grade, reasons_str)`` for the scored measurement family, or None
+    when reliability is not being computed (no context).
+
+    The image-level factors (``image_qc``, ``calibration``, and optionally a ``{measurement: sensitivity}``
+    map and a ``benchmark`` value) are shared per image and come from ``reliability_context``; the per-object
+    ``object_flags`` factor is 1.0 for an unflagged object and 0.5 for a flagged one, so a flagged object
+    scores lower. Absent factors are NEVER treated as passing — they go in ``missing`` and cap the grade.
+    Memoised on ``(measurement, flagged)`` — at most two flag states per family measurement per image."""
+    if reliability_context is None:
+        return None
+    from pycat.utils.reliability import reliability, SCORED_FAMILY
+    image_qc = reliability_context.get('image_qc')
+    calibration = reliability_context.get('calibration')
+    sensitivity = reliability_context.get('sensitivity')
+    benchmark = reliability_context.get('benchmark')
+    cache = {}
+
+    def compute(measurement, flagged):
+        if measurement not in SCORED_FAMILY:
+            return '', ''
+        key = (measurement, flagged)
+        if key not in cache:
+            sens = sensitivity.get(measurement) if isinstance(sensitivity, dict) else sensitivity
+            try:
+                score = reliability(measurement, image_qc=image_qc, calibration=calibration,
+                                    object_flags=(0.5 if flagged else 1.0),
+                                    sensitivity=sens, benchmark=benchmark)
+                cache[key] = (score.grade, "; ".join(score.reasons))
+            except Exception as exc:      # broad-ok: additive reliability must never break the table build
+                _warn(f"Consolidated table: reliability skipped for {measurement}: {exc}")
+                cache[key] = ('', '')
+        return cache[key]
+
+    return compute
+
+
 def build_image_long_table(records, *, image_stem, sample_metadata=None, provenance=None,
                            condition_fields=None, provenance_cols=_DEFAULT_PROVENANCE_COLS,
-                           units=None, masks=None, qc=True, qc_k=3.5) -> pd.DataFrame:
+                           units=None, masks=None, qc=True, qc_k=3.5,
+                           reliability_context=None) -> pd.DataFrame:
     """One image's full long table: its objects melted, with condition + provenance columns attached.
 
     ``records`` is a list of ``(object_type, wide_df)`` or ``(object_type, wide_df, id_col)``. The
@@ -184,13 +246,28 @@ def build_image_long_table(records, *, image_stem, sample_metadata=None, provena
     out['qc_flags'] = ([qc_map.get((t, oid), '')
                         for t, oid in zip(out['object_type'], out['object_id'])]
                        if len(out) else [])
+
+    # ── The additive reliability columns: a grade + worst-first reasons for the scored family ──────
+    # Per-object: the shared image factors (from reliability_context) combined with THIS object's own
+    # biological-QC flag, so a comparison can be recomputed on high-reliability objects only.
+    compute_rel = _row_reliability_factory(reliability_context)
+    if compute_rel is not None and len(out):
+        grades, reasons = [], []
+        for t, oid, meas in zip(out['object_type'], out['object_id'], out['measurement']):
+            g, r = compute_rel(meas, bool(qc_map.get((t, oid), '')))
+            grades.append(g)
+            reasons.append(r)
+        out['reliability'], out['reliability_reasons'] = grades, reasons
+    else:
+        out['reliability'] = [''] * len(out)
+        out['reliability_reasons'] = [''] * len(out)
     return out
 
 
 def consolidated_columns(condition_fields, provenance_cols=_DEFAULT_PROVENANCE_COLS):
     """The full, ordered column schema — so the streaming writer and any reader agree."""
     return (['image_stem'] + list(condition_fields) + list(_CORE_COLS)
-            + list(provenance_cols) + list(_QC_COLS))
+            + list(provenance_cols) + list(_QC_COLS) + list(_RELIABILITY_COLS))
 
 
 #: The per-object measurement tables PyCAT writes to a data repository, keyed ``<type>_df``. Kept an
@@ -264,13 +341,19 @@ class ConsolidatedLongWriter:
         self.n_rows = 0
         self._measurements_seen = set()   # feature vocabulary, for the provenance sidecar
 
-    def add_image(self, image_stem, records, *, sample_metadata=None, provenance=None, masks=None):
-        """Melt one image's objects and append them. Returns the number of rows written."""
+    def add_image(self, image_stem, records, *, sample_metadata=None, provenance=None, masks=None,
+                  reliability_context=None):
+        """Melt one image's objects and append them. Returns the number of rows written.
+
+        ``reliability_context`` is this image's shared reliability factors (``image_qc``, ``calibration``,
+        optionally ``sensitivity``/``benchmark``) — supplied per image because QC and calibration are
+        per-image. When given, the scored measurement family gets its ``reliability``/``reliability_reasons``
+        columns; omitted, those columns stay blank (an unmeasured factor is never assumed passing)."""
         table = build_image_long_table(
             records, image_stem=image_stem, sample_metadata=sample_metadata,
             provenance=provenance, condition_fields=self.condition_fields,
             provenance_cols=self.provenance_cols, units=self.units,
-            masks=masks, qc=self.qc, qc_k=self.qc_k)
+            masks=masks, qc=self.qc, qc_k=self.qc_k, reliability_context=reliability_context)
         # Reindex to the fixed schema so append can never drift a column.
         table = table.reindex(columns=self._columns)
         if 'measurement' in table.columns:      # remember the features present, for the sidecar

@@ -1,7 +1,32 @@
 # Claude Code spec — Exception handler classification by context category
 
-> **◐ INCREMENT 1 DONE (shipped 1.6.233): the concrete batch_step fix + the category vocabulary. The full
-> categorization sweep + the writer guard remain.** Delivered the spec's highest-value, stand-alone piece:
+> **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). The full categorization sweep (Part 1, all
+> ~166 handlers) remains.**
+>
+> **The batch_step rule is now STRUCTURALLY GUARDED (via close_partial_specs Part B; test-only guard).**
+> `tests/test_no_silent_batch_step_swallowing.py` (`core`) flags a broad handler directly inside a multi-file
+> batch loop that neither re-raises nor records the item's outcome (a `✗`/`⚠` row, a status flag, a
+> `BatchStepResult`, or an assignment into the returned row), ratchet-pinned at 0. So all three swallow
+> categories with no wrong number — scientific_result (`test_no_scientific_result_swallowing`), write
+> (`test_no_silent_write_or_batch_swallowing`), and now batch_step — are guarded.
+>
+> **INCREMENT 2 — the write rule (Part 2 guard + writers-first Part 3 conversion), shipped 1.6.259.** New
+> `test_no_silent_write_or_batch_swallowing.py` (`core`): an AST ratchet, conservative, scoped to broad
+> handlers wrapped around a KNOWN persist call, that flags any which neither re-raise NOR surface (a notifier
+> whose name carries `warn`/`error`/`critical`) NOR are annotated `# broad-ok: write` — budget pinned at **0**.
+> Treating a user notification as compliant is what stops the many correct UI save handlers being
+> false-positived. The one genuine silent loss — `write_session_outputs`' metadata-JSON + session-manifest
+> sidecars, which only `debug_log`'d — was CONVERTED to surface via `notify.show_warning` (warn-and-continue;
+> results themselves are safe). The genuinely-best-effort swallows were CATEGORIZED (Part 1, this slice):
+> `local_cache` ×2 + `ts_cache_manager` cache writes (`write` — absence costs nothing), `temperature_tools` ×2
+> batch exports (`write`/`batch_step` — error recorded into the returned row), `channel_designations._save`
+> (`write` — returns False so the caller surfaces it). Ratchets tightened: `file_io` 239→237, `toolbox`
+> 498→491, `utils` 114→113. Full core green (1631). **STILL REMAINING:** make the category MANDATORY on all
+> ~166 annotated handlers (Part 1 in full — a per-handler judgement pass), and `BatchStepResult` adoption for
+> the broader batch-step sweep (Part 3 batch half; the concrete `BatchWorker.run` offender is already guarded
+> by `test_batch_step_visibility.py`).
+>
+> **INCREMENT 1 DONE (shipped 1.6.233): the concrete batch_step fix + the category vocabulary.** Delivered the spec's highest-value, stand-alone piece:
 > the **batch cohort-corruption bug is fixed** — `BatchWorker.run` used to mark an image `✓` even when its
 > consolidated-table append failed, silently dropping its rows from `consolidated_long.csv` (a 93-of-100
 > cohort looking complete). The success mark is now gated on the append succeeding, with a visible `⚠`

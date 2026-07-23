@@ -1,5 +1,20 @@
 # Claude Code spec — Comparative phenotyping increment 4: publication figure refinement
 
+> **✅ STATUS — DONE at the module level (verified 1.6.270); the refinement UI panel is the
+> `explore_refine_export` follow-on.** This spec is the ORIGIN of the `FigureSpec` architecture, and it
+> shipped through `figurespec_merge` (1.6.192) + the `publication_features` tiers (1.6.262–269). Re-verified
+> every Definition-of-Done item against the current tree: `FigureSpec` + `render` + `export` live in the
+> Qt-free `utils/figure_spec.py`; axis labels/units default from the measurement ontology with a caveats
+> footnote; size presets (single/1.5/double column, honestly labelled "sizes not compliance") and the
+> colour-blind-safe palette exist; `export` writes vector PDF/SVG with **embedded text fonts**
+> (`pdf.fonttype=42`, `svg.fonttype='none'`), a high-DPI PNG, the spec JSON (regenerates identically), and
+> the summary CSV alongside; and refinement re-renders but **never recomputes** (the contract). All seven
+> DoD contract tests pass (`test_figure_spec.py`), and `test_publication_figures.py` (new) pins the headline
+> against a REAL `condition_comparison_figure`: it refines (title/log scale) with every plotted datum
+> unchanged, and exports the full reproducible bundle. **Only remaining:** step 5 — the in-UI refinement
+> panel (spec fields as controls + live preview + export) — which is exactly the `explore_refine_export`
+> spec's Explore→Refine→Export workflow, tracked there.
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. The last
 increment of the comparative-phenotyping arc: take any PyCAT figure and refine it to publication
 quality **without re-running the analysis**. Prerequisites all landed — increment 1

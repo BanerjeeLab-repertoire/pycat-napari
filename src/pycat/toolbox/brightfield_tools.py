@@ -883,7 +883,8 @@ def run_best_slice(method_dropdown, viewer):
     if active is None or not isinstance(active, napari.layers.Image):
         _warn("Select an active image layer first.")
         return
-    data = np.asarray(active.data)
+    from pycat.file_io.stack_access import materialize_stack
+    data = materialize_stack(active.data, dtype=None)   # full (Z/T,H,W) stack; a lazy wrapper's __array__ gives only frame 0
     if data.ndim != 3:
         _warn("Best-slice needs a 3D (Z/T, H, W) stack.")
         return

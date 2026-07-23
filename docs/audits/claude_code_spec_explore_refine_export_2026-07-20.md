@@ -1,5 +1,25 @@
 # Claude Code spec — Comparative figure UX: one Explore → Refine → Export workflow
 
+> **✅ DONE (core workflow 1.6.271; reopen + brushing-survives 1.6.275).** Reopen: `figure_refine.load_bundle`
+> / `FigureRefineController.from_bundle` restore the refined spec (+ regenerate the exact figure from the raw
+> data written beside it); brushing-survives-refine pinned (an interaction callback connected before refining
+> is still connected after). Only the visual acceptance of the on-screen panel is outside headless scope.
+>
+> _Original core-workflow note:_ The prerequisite (FigureSpec
+> merge) landed, and the publication-features controls it exposes are all in the tree. Built the engine and
+> wired the panel: Qt-free `utils/figure_refine.py::FigureRefineController` owns one figure + its canonical
+> `FigureSpec` — `set`/`size_preset` restyle the SAME figure (never recompute), `export_bundle` writes
+> exactly the refined preview (WYSIWYG by construction, same spec drives both). The comparative dialog gained
+> a **Refine row** (size preset → preview at final print width, title, y-scale, legend) + an **Export
+> bundle…** button (vector PDF/SVG + PNG + spec JSON + summary CSV). Explore is untouched (its analytical
+> stats title survives unless a refine title is set); refining re-applies after an explore re-render, so the
+> refinement persists. Controls all have backing features (nothing to grey out). Tests:
+> `test_figure_refine.py` (`core` — refine-not-recompute, size-preset-to-final-size, WYSIWYG bundle) +
+> `test_explore_refine_export_ui.py` (`integration` — the Refine controls + Export button drive the
+> controller). **Remaining:** reopening a saved bundle to restore the refined spec (a load flow), and an
+> explicit brushing-survives-the-mode-switch test (brushing lives in Explore and refine doesn't remove its
+> callbacks, so it survives — just not yet pinned).
+
 **Date:** 2026-07-20 · **Target tree:** 1.6.176 · Verified against the 1.6.176 tree. The brushing
 audit's §9: the comparative-figure dialog is scientifically thoughtful but behaves like a *plotting
 dialog*, not a *publication editor* — the publication utilities exist but are not exposed through one

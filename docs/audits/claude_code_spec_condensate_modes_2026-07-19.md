@@ -1,5 +1,13 @@
 # Claude Code spec — Explicit 2D / 3D / time-series condensate modes
 
+> **✅ STATUS — DONE (done-but-unstamped; verified 2026-07-22). `toolbox/condensate_modes.py` models the
+> approximation the code previously only admitted in a transient napari string: `CondensateMode`
+> (FIELD_2D / ZSTACK_3D / TIMESERIES), `resolve_condensate_mode(data, declared=, axis_kind=)` (declared
+> wins, else derived from dimensionality, ambiguous z-vs-t routed to the existing disambiguation — never
+> silently assumed), and a per-mode output-validity table so a projected_area_fraction is labelled a 2-D
+> projection proxy (not a volume fraction) wherever it travels. field_summary carries the caveats on its
+> result dict. `test_condensate_modes` green (9). DoD met.**
+
 **Date:** 2026-07-19 · **Target tree:** 1.6.156 · Verified against the 1.6.156 tree. Closes an
 approximation the codebase already admits to in a UI string but does not model. Scientific
 correctness, not a feature.

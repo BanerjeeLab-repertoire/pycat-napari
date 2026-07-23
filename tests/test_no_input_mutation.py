@@ -113,7 +113,10 @@ def test_no_TOOLBOX_function_writes_into_a_parameter_array():
     toolbox = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
 
     offenders = []
-    for path in sorted(toolbox.glob("*.py")):
+    # rglob, not glob: the six god-file decompositions moved the science into sub-packages
+    # (toolbox/vpt, condensate_physics, invitro, segmentation, timeseries, image_processing). A
+    # non-recursive glob would only see the now-empty *_tools.py shims and miss all of it (2026-07-22).
+    for path in sorted(toolbox.rglob("*.py")):
         source = path.read_text(encoding='utf-8', errors='ignore')
         try:
             tree = ast.parse(source)

@@ -28,18 +28,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QThread, pyqtSignal
 
 
-class _PhysicsWorker(QThread):
-    finished = pyqtSignal(object)
-    error    = pyqtSignal(str)
-    def __init__(self, fn, kwargs):
-        super().__init__()
-        self._fn, self._kw = fn, kwargs
-    def run(self):
-        try:
-            self.finished.emit(self._fn(**self._kw))
-        except Exception:
-            import traceback
-            self.error.emit(traceback.format_exc())
+# _PhysicsWorker is the shared background task-worker (redundancy_consolidation axis 3): a QThread emitting
+# finished(result)/error(traceback). Was a byte-identical local class; now the one shared class, same
+# non-modal semantics (inline spinner, GUI interactive). NOT operation_runner — that is window-modal.
+from pycat.utils.qt_worker import make_task_worker as _make_task_worker
+_PhysicsWorker = _make_task_worker()
 
 
 

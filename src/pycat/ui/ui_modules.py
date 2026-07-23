@@ -1599,13 +1599,13 @@ class ToolboxFunctionsUI(BaseUIClass, _DiagnosticsWidgetsMixin, _FilteringWidget
             active = self.viewer.layers.selection.active
             if active is None or not isinstance(active, napari.layers.Image):
                 _warn("Select an image layer to correct."); return
-            img = _np.asarray(active.data, dtype=_np.float32)
+            from pycat.file_io.stack_access import materialize_stack
+            img = materialize_stack(active.data, dtype=_np.float32)   # full stack; a lazy wrapper gives only frame 0
             if img.shape[-2:] != ref.shape[-2:]:
                 _warn(f"Calibration shape {ref.shape} doesn't match image "
                       f"{tuple(img.shape[-2:])} — use a reference from the same acquisition.")
                 return
-            from pycat.toolbox.image_processing_tools import (
-                apply_flatfield_correction, apply_background_subtraction)
+            from pycat.toolbox.image_processing_tools import apply_flatfield_correction, apply_background_subtraction
             if method_dd.currentIndex() == 0:
                 corrected = apply_flatfield_correction(img, ref); suffix = "flatfield-corrected"; mkey = "flatfield"
             else:

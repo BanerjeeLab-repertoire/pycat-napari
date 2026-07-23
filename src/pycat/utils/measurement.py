@@ -54,7 +54,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pycat.utils.reliability import ReliabilityScore
 
 
 class ParameterSource(str, Enum):
@@ -147,6 +150,10 @@ class Measurement:
     validation: ValidationLevel = ValidationLevel.IMPLEMENTED
     notes: list = field(default_factory=list)
 
+    # The Measurement Reliability Index for this number, when it was scored (utils.reliability). REPORTED,
+    # never a silent filter: it appears in the summary and the dict, and the user decides. None = not scored.
+    reliability: Optional["ReliabilityScore"] = None
+
     # ---- status -----------------------------------------------------------
 
     @property
@@ -183,11 +190,19 @@ class Measurement:
             v += f" ± {self.uncertainty:.3g}"
         else:
             v += "   (no uncertainty reported)"
+        if self.reliability is not None:
+            v += f"   (reliability: {self.reliability.grade})"
         lines.append(v)
 
         state = self.interpretability
         lines.append(f"  status: {state.value.replace('_', ' ')}"
                      f"   |  method: {self.validation.value.replace('_', ' ')}")
+
+        # The reliability grade is decomposable: show the worst-first reasons and any factors that could
+        # not be assessed, so the number never hides WHY its reliability is what it is.
+        if self.reliability is not None:
+            for r in self.reliability.reasons:
+                lines.append(f"    reliability: {r}")
 
         for a in self.assumptions:
             mark = {"HOLDS": "ok  ", "VIOLATED": "FAIL", "UNCHECKED": "?   "}[a.status]
@@ -221,4 +236,9 @@ class Measurement:
                               status=a.status, detail=a.detail)
                          for a in self.assumptions],
             notes=list(self.notes),
+            reliability=(None if self.reliability is None else dict(
+                grade=self.reliability.grade, value=self.reliability.value,
+                contributions=dict(self.reliability.contributions),
+                reasons=list(self.reliability.reasons),
+                missing=list(self.reliability.missing))),
         )
