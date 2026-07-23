@@ -1,3 +1,20 @@
+## [1.6.311] - 2026-07-23
+### Fixed — **VPT results plots now reflow when you resize the dock (reported by Shamli Manasvi).**
+The 2×2 microrheology plots were squashed to hairlines with overlapping axis labels, and dragging the dock
+wider did not fix them. Cause: the figure was authored at a fixed 11×8.5 inch print size and laid out **once**
+with `tight_layout` at draw, so the canvas stretched with the dock but the axes kept their old geometry.
+
+- `toolbox/vpt/results_dock.py`: new `_new_results_figure()` builds a `Figure(layout='constrained')`, which
+  recomputes subplot geometry on **every resize event** (and accounts for the suptitle, so the one-shot
+  `tight_layout` is gone). The figure no longer carries the fixed print size — the canvas drives it.
+- The canvas has an **Expanding** size policy and a **minimum size** below which the 2×2 grid is unreadable,
+  so the dock can't be dragged into an unusable state; and the results dock is explicitly **floatable** with a
+  tooltip — floating escapes the right-panel width entirely, the real answer for detailed inspection.
+- `tests/test_vpt_results_reflow.py` (`base`, 3): constrained layout is enabled and the axes MOVE on resize
+  (the core regression — the test resizes, it does not just check the first draw). Drawn content is unchanged.
+- Part 1 of the results-dock spec; Parts 2 (reopen a closed results dock from retained results, no recompute)
+  and 3 (clicking an off-page bead pages the plots to its track) remain. Full `pytest -m "core or base"` green.
+
 ## [1.6.310] - 2026-07-23
 ### Added — **The beginner Home dock: guided analysis + every capability as a card, with a Guided/Full toggle (navigator increment 4, part 2 — the increment is complete).**
 The navigator, the feature-card catalogue, and the app-mode were all built and unreachable. This is the front

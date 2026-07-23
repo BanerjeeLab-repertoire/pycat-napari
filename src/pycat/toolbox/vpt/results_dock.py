@@ -25,6 +25,23 @@ import math
 
 import numpy as np
 
+# Below this the 2×2 grid of microrheology plots is not readable, so the dock cannot be dragged into an
+# unusable state silently (floating the dock escapes the right-panel width entirely — the real fix for detail).
+_RESULTS_CANVAS_MIN_W = 520
+_RESULTS_CANVAS_MIN_H = 360
+
+
+def _new_results_figure():
+    """A 2×2 results figure that **reflows on every resize** via constrained layout, instead of being authored
+    at a fixed 11×8.5 print size and laid out once at draw. That one-shot layout was the reported bug: the
+    canvas stretched with the dock but the axes kept their old geometry ("won't stretch", overlapping labels).
+    Constrained layout recomputes subplot geometry on each resize event, with no event plumbing. Returns
+    ``(fig, axes)`` — the caller wraps it in a Qt canvas with an expanding size policy."""
+    from matplotlib.figure import Figure
+    fig = Figure(layout='constrained')      # NOT figsize=(11, 8.5): the canvas drives the size, not the print
+    axes = fig.subplots(2, 2)
+    return fig, axes
+
 
 class _VptResultsDockMixin:
     """VPT combined-results dock + bucket pager + centered-trajectory selection.
@@ -127,10 +144,9 @@ class _VptResultsDockMixin:
         """Open (or replace) the combined VPT results dock: figure left, table right,
         with a bucket pager over the tracks. Everything the pop-out path drew, in one
         persistent widget so the brushing highlight targets stay alive."""
-        from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
         from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-                                     QLabel, QPushButton, QSpinBox)
+                                     QLabel, QPushButton, QSpinBox, QSizePolicy)
         from PyQt5.QtCore import Qt
 
         all_tids = []
@@ -141,9 +157,12 @@ class _VptResultsDockMixin:
             all_tids = []
 
         # ── left: pager row + the 2×2 figure canvas ──
-        fig = Figure(figsize=(11.0, 8.5))
-        axes = fig.subplots(2, 2)
+        # A constrained-layout figure (reflows on resize) in a canvas that EXPANDS with the dock and has a
+        # minimum size below which the 2×2 grid is unreadable — the fix for "squashed plots that won't stretch".
+        fig, axes = _new_results_figure()
         canvas = FigureCanvasQTAgg(fig)
+        canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        canvas.setMinimumSize(_RESULTS_CANVAS_MIN_W, _RESULTS_CANVAS_MIN_H)
 
         prev_btn = QPushButton("◀ Prev")
         next_btn = QPushButton("Next ▶")
@@ -182,6 +201,15 @@ class _VptResultsDockMixin:
         from pycat.utils.dock_space import add_results_dock
         self._vpt_results_dock = add_results_dock(
             self.viewer.window, splitter, name="VPT Results")
+        # Floating the dock escapes the right-panel width entirely — the real answer for detailed inspection.
+        try:
+            from PyQt5.QtWidgets import QDockWidget
+            _d = self._vpt_results_dock
+            _d.setFeatures(_d.features() | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetMovable)
+            _d.setToolTip("Drag wider to reflow the plots — or float this dock (double-click its title bar) "
+                          "for a full-size view.")
+        except Exception:                            # broad-ok: ui_cleanup — floatable is a convenience, never gating
+            pass
 
         self._vpt_results = {
             'ptc': ptc, 'msd_df': msd_df, 'fit': fit, 'mod': mod, 'tracks': tracks,
@@ -277,10 +305,9 @@ class _VptResultsDockMixin:
                               on_pick_track=lambda tid: self._select_track(tid, source='centered'))
         _draw_van_hove(axes[1, 1], st['tracks'], st['van_hove_lag'], st['frame_dt'])
         fig.suptitle("VPT microrheology", fontweight='bold', fontsize=12)
-        try:
-            fig.tight_layout(rect=[0, 0.02, 1, 0.96])
-        except Exception:                            # broad-ok: tight_layout can fail on degenerate axes
-            pass
+        # No tight_layout here: the figure uses constrained layout (see _new_results_figure), which reflows on
+        # every resize AND accounts for the suptitle. A one-shot tight_layout at draw was exactly the bug — it
+        # never re-ran when the user dragged the dock wider, so the axes stayed squashed.
 
         # MSD plot→other brushing (emit) + promote/demote for other→plot (receive),
         # the SAME overlay hooks the pop-out path wires.
