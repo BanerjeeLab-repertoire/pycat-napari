@@ -1,7 +1,18 @@
 # Claude Code spec — Close the three partially-landed specs
 
-> **◐ STATUS — Part A DONE (backend_parity 2&3, shipped 1.6.274/1.6.277). Part B DONE (the batch_step
-> guard, added as a `core` guard, test-only (no version bump)). Part C (the stack-access axis, ~27 sites) remains.**
+> **✅ STATUS — ALL THREE PARTS DONE. Part A (backend_parity 2&3, 1.6.274/1.6.277); Part B (the batch_step
+> guard, test-only); Part C (the stack-access axis, shipped 1.6.281).**
+>
+> **Part C — the stack-access axis — DONE.** The `np.asarray(layer.data)` → frame-0 collapse guard only
+> caught variables literally named `…layer…`; four real frame-0 bugs held the layer in `active`/`lmask` and
+> slipped through — brightfield best-slice (rejected a correct lazy stack as "needs a 3D stack", the N&B
+> class), CLEAN spot detection, the `ui_modules` flatfield corrector, and the paired mask in
+> `general_image_tools`. All four now route through `materialize_stack(active.data, dtype=None)` /
+> `extract_2d_plane` — **output-identical on eager 2D/3D** (same array `np.asarray` returned) and correct on a
+> lazy stack. The guard is **broadened** to flag `np.asarray(<var>.data)` for `active`/`image`/`mask`-named
+> vars, so the bug class is caught regardless of variable name; `ui_diagnostics_mixin` (a diagnostic dump)
+> stays allowlisted. The remaining `asarray(<x>.data)` sites are genuinely 2D (FRAP force/distance traces,
+> etc.) and correct as-is. Full core green (1712).
 >
 > **Part B — the batch_step guard — DONE.** New `tests/test_no_silent_batch_step_swallowing.py` (`core`): an
 > AST ratchet, sibling to the write-swallow guard, that flags a broad handler directly inside a MULTI-FILE

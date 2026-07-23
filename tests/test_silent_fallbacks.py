@@ -223,8 +223,14 @@ def test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero():
             if not node.args:
                 continue
             argument = node.args[0]
-            if (isinstance(argument, ast.Attribute) and argument.attr == 'data'
-                    and 'layer' in str(getattr(argument.value, 'id', '')).lower()):
+            if not (isinstance(argument, ast.Attribute) and argument.attr == 'data'):
+                continue
+            # A napari layer is not always in a variable literally named `layer` — the frame-0 bug bit on
+            # `active.data` (brightfield best-slice, CLEAN, the flatfield corrector) and `lmask.data`, none
+            # of which the old `'layer' in name` heuristic caught. Match the image-layer variable names that
+            # actually hold layers, so the guard covers the bug class regardless of what the var is called.
+            _var = str(getattr(argument.value, 'id', '')).lower()
+            if any(_t in _var for _t in ('layer', 'active', 'image', 'mask')):
                 offenders.append(f"{relative}:{node.lineno}")
 
     assert not offenders, (

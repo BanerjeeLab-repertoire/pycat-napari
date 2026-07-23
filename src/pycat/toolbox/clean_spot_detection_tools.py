@@ -277,7 +277,8 @@ def run_clean_detection(threshold_input, damping_input, sigma_input,
     if active is None or not isinstance(active, napari.layers.Image):
         napari_show_warning("Select an active image layer first.")
         return
-    data = np.asarray(active.data)
+    from pycat.file_io.stack_access import materialize_stack
+    data = materialize_stack(active.data, dtype=None)   # full stack; a lazy wrapper's __array__ gives only frame 0
     if data.ndim not in (2, 3):
         napari_show_warning("CLEAN needs a 2D or 3D image.")
         return

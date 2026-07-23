@@ -942,9 +942,9 @@ def _add_partial_volume_measure(ui_instance, layout=None, separate_widget=False)
             except Exception:
                 fi = 0
         img = extract_2d_plane(limg.data, frame_index=fi, dtype=None)
-        mask = np.asarray(lmask.data)
-        if mask.ndim == 3:
-            mask = mask[min(fi, mask.shape[0] - 1)]
+        # Match the image's frame extraction: np.asarray on a lazy mask stack returns frame 0, so it would
+        # pair frame `fi` of the image with frame 0 of the mask. extract_2d_plane reads the same frame.
+        mask = extract_2d_plane(lmask.data, frame_index=fi, dtype=None)
 
         f = int(factor.value())
         exp = (img.shape[0] * f, img.shape[1] * f)

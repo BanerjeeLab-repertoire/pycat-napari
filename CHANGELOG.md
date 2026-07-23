@@ -1,3 +1,26 @@
+## [1.6.281] - 2026-07-22
+### Fixed — **the frame-0 landmine, in four more places: a lazy stack held in an `active`/`mask` variable no longer silently collapses to one frame (close_partial_specs Part C).**
+`np.asarray(layer.data)` on one of PyCAT's lazy wrappers returns **frame 0 only** — nothing errors, the
+analysis just runs on a single frame while reporting it as the whole movie. The guard against this only
+caught variables literally named `…layer…`; four real sites held the layer in `active`/`lmask` and slipped
+through:
+
+- **Brightfield best-slice** (`brightfield_tools`) — needs a `(Z/T,H,W)` stack, but `np.asarray(active.data)`
+  gave frame 0, so a correct lazy stack was rejected with *"Best-slice needs a 3D stack."* (the same class as
+  the N&B "your time-series is 2D" bug). Now `materialize_stack(active.data, dtype=None)`.
+- **CLEAN spot detection** (`clean_spot_detection_tools`) and the **flatfield/background corrector**
+  (`ui_modules`) — both ran on frame 0 of a lazy stack. Now materialize the full stack.
+- **`general_image_tools`** — the image was frame-extracted safely via `extract_2d_plane` but the paired
+  mask used `np.asarray`, so a lazy mask paired frame `fi` of the image with frame 0 of the mask; the mask
+  now uses `extract_2d_plane` too.
+- All conversions are **output-identical on eager 2D/3D data** (`materialize_stack(dtype=None)` /
+  `extract_2d_plane` return the same array `np.asarray` did) and only change behaviour on a lazy stack —
+  where they fix the collapse.
+- **The guard is broadened** (`test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero`): it now
+  flags `np.asarray(<var>.data)` for `active`/`image`/`mask`-named vars, not just `layer`, so this bug class
+  is caught regardless of the variable name. `ui_diagnostics_mixin` (a diagnostic dump) stays allowlisted.
+  Full `pytest -m core` green (1712). Part C's remaining ~2D-safe `asarray` sites are correct as-is.
+
 ## [1.6.280] - 2026-07-22
 ### Fixed — **filename-aware channel naming: a channel's name is never worse than the file the user gave it (deep_metadata_and_naming Part 3).**
 `channel_naming.identify_channel` never saw the filename, so a plain 2D TIFF — which usually carries no
