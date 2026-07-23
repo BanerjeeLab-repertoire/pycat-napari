@@ -83,6 +83,34 @@ def _puncta_df():
     return finalize_entity_table(df, 'puncta_analysis', source_path='cellular_test.tif')
 
 
+def _fake_viewer(with_layers=True):
+    layers = ({'Labeled Cell Mask': _fake_layer(), 'Condensate Labels': _fake_layer()}
+              if with_layers else {})
+    return types.SimpleNamespace(
+        layers=layers, mouse_drag_callbacks=[],
+        window=types.SimpleNamespace(add_dock_widget=lambda w, name=None, area=None: object()))
+
+
+def _fake_cm(repo):
+    return types.SimpleNamespace(
+        selection=SelectionService(defer=lambda fn: fn()),
+        active_data_class=types.SimpleNamespace(data_repository=repo))
+
+
+def test_session_load_remounts_the_cellular_panel(qtbot):
+    """A reloaded cellular session (cell table + cell-labels layer restored) re-opens the brushable panel,
+    so it brushes exactly like a fresh analysis — no persisted panel needed."""
+    from pycat.file_io.session_loader import _remount_brushable_panel
+    cm = _fake_cm({'cell_df': _cell_df(), 'puncta_df': _puncta_df(), 'file_path': 't.tif'})
+    assert _remount_brushable_panel(_fake_viewer(), cm) is True
+    assert 'cell.table' in cm.selection._subscribers
+
+
+def test_a_session_without_a_cell_table_does_not_remount(qtbot):
+    from pycat.file_io.session_loader import _remount_brushable_panel
+    assert _remount_brushable_panel(_fake_viewer(with_layers=False), _fake_cm({})) is False
+
+
 def test_mount_cellular_workspace_wires_both_tiers(qtbot):
     service = SelectionService(defer=lambda fn: fn())
     cell_df, puncta_df = _cell_df(), _puncta_df()

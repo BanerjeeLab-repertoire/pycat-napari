@@ -458,6 +458,24 @@ def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None
     return payload
 
 
+def _remount_brushable_panel(viewer, central_manager) -> bool:
+    """Re-open the two-tier cellular brushable panel for a just-loaded session, if it carries the cell
+    table + the cell-labels layer. Reads everything from the restored repository + named layers, so it needs
+    no persisted panel — just the entity-stamped tables and labels layers the session already round-trips.
+    Returns True if it mounted one."""
+    if central_manager is None or viewer is None:
+        return False
+    try:
+        dr = central_manager.active_data_class.data_repository
+    except Exception:   # broad-ok: no repository → nothing to re-mount
+        return False
+    cell_df = dr.get('cell_df') if hasattr(dr, 'get') else None
+    if cell_df is None or 'Labeled Cell Mask' not in getattr(viewer, 'layers', []):
+        return False
+    from pycat.toolbox.feature_analysis_tools import mount_cellular_workspace
+    return mount_cellular_workspace(viewer, central_manager) is not None
+
+
 def _apply_session_payload(payload, viewer, data_instance, central_manager=None) -> dict:
     """Turn a read payload into napari layers + repository entries — **on the caller's thread.**
 
@@ -530,6 +548,15 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
                       f"{len(workflow.get('steps') or [])} step(s)")
         except Exception as e:  # broad-ok: a failed workflow restore is noted as skipped, not fatal to the load
             skipped.append(('recorded workflow', str(e)))
+
+    # Re-mount the brushable results panel if this session carries a cellular object table, so a reloaded
+    # session brushes exactly like a fresh analysis. The panel is not persisted, but the entity-stamped
+    # cell/puncta tables + the cell and per-punctum labels layers all are — and a punctum keeps its identity
+    # (the entity id is deterministic from the durable dataset_id), so the same object resolves the same way.
+    try:
+        _remount_brushable_panel(viewer, central_manager)
+    except Exception as e:  # broad-ok: the brushable panel is a convenience; its absence never fails a load
+        skipped.append(('brushable results panel', str(e)))
 
     return dict(
         loaded_layers=loaded_layers,

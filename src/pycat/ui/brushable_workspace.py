@@ -176,13 +176,18 @@ class BrushableImageTier:
     """
 
     def __init__(self, viewer, labels_layer, df, service, view_id, *,
-                 label_col, source_path=None, entity_col=ENTITY_ID_COLUMN, reveal='resolve'):
+                 label_col, source_path=None, entity_col=ENTITY_ID_COLUMN, reveal='resolve',
+                 install_callback=True):
         from pycat.utils.object_ref import ObjectRef
 
         self.viewer = viewer
         self.labels_layer = labels_layer
         self.service = service
         self.view_id = str(view_id)
+        # When a workspace owns several tiers over one viewer it installs ONE viewer-level pick handler and
+        # sets this False — napari only delivers a LAYER's mouse callbacks to the ACTIVE layer, so per-layer
+        # picking would make "which tier picks" depend on which layer happens to be selected.
+        self._install_callback = install_callback
         # 'resolve' highlights via the layer's selected_label (its label values ARE the object ids —
         # cells, droplets). 'overlay' draws the bbox rectangle instead — for a layer whose label values
         # are NOT the row's object_id (the global per-punctum layer, where the row's label is per-cell).
@@ -212,27 +217,36 @@ class BrushableImageTier:
             register_view(self.service, self)
         except Exception as exc:                         # broad-ok: an image tier that can't subscribe still shows the layer
             debug_log('brushable_workspace: could not register the image tier', exc)
+        if not self._install_callback:
+            return                                       # the workspace dispatches clicks at the viewer level
         try:
             self._cb = self._on_click
             self.labels_layer.mouse_drag_callbacks.append(self._cb)
         except Exception as exc:                         # broad-ok: no live layer callbacks headless — reveal still works
             debug_log('brushable_workspace: could not wire the image click', exc)
 
-    def _on_click(self, layer, event):
-        """A click on the labels layer selects the object under the cursor."""
+    def pick_at(self, position) -> bool:
+        """Read the label of THIS tier's layer at ``position`` and, if it maps to an object, select that
+        object's entity. Returns True if it handled the click (an object was there) — so a viewer-level
+        dispatcher can try finer tiers first and stop at the first hit."""
         if self.service.is_busy:
-            return
+            return False
         try:
-            value = layer.get_value(event.position, world=True)
+            value = self.labels_layer.get_value(position, world=True)
         except Exception as exc:                         # broad-ok: a click outside the data / mid-transition
             debug_log('brushable_workspace: could not read the clicked label', exc)
-            return
+            return False
         eid = self._label_to_eid.get(int(value)) if value else None
         if eid is None:
-            return
+            return False
         self.service.select(Selection(
             entity_ids=(eid,), primary_id=eid, mode='selected',
             source_view=self.view_id, generation=self.service.next_generation()))
+        return True
+
+    def _on_click(self, layer, event):
+        """A click on this tier's layer (per-layer path, single-tier / tests)."""
+        self.pick_at(event.position)
 
     def apply_selection(self, state):
         """Reveal the selected object(s) in the image — a programmatic reveal, it emits no command."""
@@ -360,6 +374,9 @@ class BrushableWorkspace(QWidget):
         super().__init__(parent)
         self.service = service
         self._views = []                                # every SelectionView, for teardown
+        self._image_tiers = []                          # image tiers, in add order (finest last)
+        self._viewer = None
+        self._viewer_cb = None                          # the ONE viewer-level pick handler
         self._plots_holder, self._plots_layout = _vertical_stack()
         self._tables_holder, self._tables_layout = _vertical_stack()
         self.splitter = QSplitter(Qt.Horizontal, self)
@@ -406,11 +423,37 @@ class BrushableWorkspace(QWidget):
 
     def add_image_tier(self, viewer, labels_layer, df, view_id, *, label_col, source_path=None, reveal='resolve'):
         """Add a napari labels layer as a brushing tier (click an object ↔ the plots/tables). Two tiers
-        (cell labels + condensate labels) over one viewer are just two of these. Returns the tier view."""
+        (cell labels + condensate labels) over one viewer are just two of these; the workspace dispatches
+        clicks at the VIEWER level so picking never depends on the active layer. Returns the tier view."""
         tier = BrushableImageTier(viewer, labels_layer, df, self.service, view_id,
-                                  label_col=label_col, source_path=source_path, reveal=reveal)
+                                  label_col=label_col, source_path=source_path, reveal=reveal,
+                                  install_callback=False)
         self._views.append(tier)
+        self._image_tiers.append(tier)
+        self._install_viewer_pick(viewer)
         return tier
+
+    def _install_viewer_pick(self, viewer):
+        """One viewer-level mouse handler that tries the image tiers **finest-first** (the last-added tier —
+        the condensate layer — before the cell layer), so a click resolves to the most specific object under
+        the cursor regardless of which napari layer is active."""
+        if viewer is None or self._viewer_cb is not None:
+            return
+        self._viewer = viewer
+
+        def _pick(_viewer, event):
+            for tier in reversed(self._image_tiers):    # finest tier (added last) wins
+                try:
+                    if tier.pick_at(event.position):
+                        return
+                except Exception as exc:                # broad-ok: a tier that can't read a click is skipped
+                    debug_log('brushable_workspace: a tier failed to pick', exc)
+
+        try:
+            viewer.mouse_drag_callbacks.append(_pick)
+            self._viewer_cb = _pick
+        except Exception as exc:                        # broad-ok: no viewer callbacks headless — tiers still reveal
+            debug_log('brushable_workspace: could not install the viewer pick handler', exc)
 
     def add_offline_crop_view(self, df, view_id, *, title=None):
         """Add the batch 'image' — a `BatchCropView` that shows the selected object's crop read offline from
@@ -423,10 +466,17 @@ class BrushableWorkspace(QWidget):
         return crop_view
 
     def detach(self):
-        """Unsubscribe every view from the dispatcher (the dock closed). Idempotent."""
+        """Unsubscribe every view from the dispatcher and remove the viewer pick handler. Idempotent."""
+        if self._viewer is not None and self._viewer_cb is not None:
+            try:
+                self._viewer.mouse_drag_callbacks.remove(self._viewer_cb)
+            except Exception:                            # broad-ok: a callback already removed / viewer gone
+                pass
+            self._viewer_cb = None
         for view in self._views:
             try:
                 view.close()
             except Exception as exc:                     # broad-ok: teardown is best-effort; never raise on close
                 debug_log('brushable_workspace: a view failed to close', exc)
         self._views = []
+        self._image_tiers = []

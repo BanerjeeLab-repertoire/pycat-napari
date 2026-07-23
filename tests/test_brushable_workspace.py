@@ -116,6 +116,41 @@ def test_a_plot_and_a_table_over_the_same_data_brush_together(qtbot):
     ws.detach()
 
 
+def test_the_viewer_level_dispatcher_picks_the_finest_tier_regardless_of_active_layer(qtbot):
+    """One viewer-level handler tries the tiers finest-first, so a click on a condensate brushes the
+    condensate and a click on bare cell brushes the cell — without switching the active napari layer."""
+    import types
+    from pycat.ui.brushable_workspace import BrushableWorkspace
+    service = _service()
+
+    cells = pd.DataFrame({'clabel': [1, 2], ENTITY_ID_COLUMN: ['ds/op/cell/0/1', 'ds/op/cell/0/2']})
+    conds = pd.DataFrame({'plabel': [7], ENTITY_ID_COLUMN: ['ds/op/punctum/0/1/7']})
+    viewer = types.SimpleNamespace(mouse_drag_callbacks=[], layers={})
+    cell_layer = types.SimpleNamespace(metadata={'pycat_layer_id': 'Lc'}, mouse_drag_callbacks=[],
+                                       get_value=lambda position, world=True: 1)      # always over cell 1
+    cond_state = {'v': 7}
+    cond_layer = types.SimpleNamespace(metadata={'pycat_layer_id': 'Lp'}, mouse_drag_callbacks=[],
+                                       get_value=lambda position, world=True: cond_state['v'])
+
+    ws = BrushableWorkspace(service)
+    qtbot.addWidget(ws)
+    ws.add_image_tier(viewer, cell_layer, cells, 'cell.image', label_col='clabel')      # coarse (added first)
+    ws.add_image_tier(viewer, cond_layer, conds, 'cond.image', label_col='plabel')      # fine (added last)
+    assert ws._viewer_cb is not None and ws._viewer_cb in viewer.mouse_drag_callbacks
+    assert cell_layer._cb is None if hasattr(cell_layer, '_cb') else True                # no per-layer callback
+
+    event = types.SimpleNamespace(position=(1, 1))
+    ws._viewer_cb(viewer, event)                                # a condensate is here → condensate wins
+    assert service.state.primary_id == 'ds/op/punctum/0/1/7'
+
+    cond_state['v'] = 0                                          # no condensate here now → the cell wins
+    ws._viewer_cb(viewer, event)
+    assert service.state.primary_id == 'ds/op/cell/0/1'
+
+    ws.detach()
+    assert ws._viewer_cb not in viewer.mouse_drag_callbacks     # handler removed on teardown
+
+
 def test_two_entity_tiers_are_independent_on_one_service(qtbot):
     """A cell selection lights the cell views; a condensate selection lights the condensate table — one
     does not fire the other's views (they are different entity keys)."""

@@ -1,3 +1,21 @@
+## [1.6.288] - 2026-07-23
+### Changed — **Brushable workspace polish: image picking no longer depends on the active napari layer, and a reloaded session re-opens its brushable panel.**
+Two follow-ons to the brushable-results-workspace feature.
+
+- **Viewer-level pick dispatcher.** napari delivers a *layer's* mouse callbacks only to the ACTIVE layer, so
+  per-layer picking made "which tier picks" depend on which layer happened to be selected. The workspace now
+  installs ONE viewer-level handler that tries its image tiers **finest-first** (the condensate layer before
+  the cell layer), so a click resolves to the most specific object under the cursor regardless of the active
+  layer. `BrushableImageTier` gained a reusable `pick_at(position)` and an `install_callback` flag; the
+  handler is removed on `detach()`.
+- **Session-load re-mount.** Loading a saved cellular session now re-opens the two-tier brushable panel
+  (`_remount_brushable_panel` in `session_loader`), reading the restored entity-stamped cell/puncta tables +
+  the cell and per-punctum labels layers — no persisted panel needed, and a punctum keeps its identity
+  (deterministic from the durable `dataset_id`).
+- `tests/test_brushable_workspace.py` + `tests/test_cellular_brushable.py` gain the dispatcher (finest-tier,
+  active-layer-independent, removed on teardown) and the remount (mounts for a cellular session, no-ops
+  without a cell table). Full `pytest -m core` green (1719).
+
 ## [1.6.287] - 2026-07-23
 ### Added — **Batch brushable results — the same plots+tables over every image, where a point pulls up its object's image OFFLINE (brushable-workspace Phase 4; feature complete).**
 `consolidated_long.csv` carries a stable `entity_id` (enough to brush plots ↔ tables) but the bbox was melted
