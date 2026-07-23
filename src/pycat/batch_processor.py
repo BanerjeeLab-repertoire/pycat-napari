@@ -592,6 +592,8 @@ class BatchDialog(QDialog):
             return
 
         output_dir = Path(folder) / "pycat_batch_results"
+        self._last_files = files              # kept so _on_finished can open the brushable results workspace
+        self._last_output_dir = output_dir
         self._log.append(
             f"Starting batch: {len(files)} file(s) → {output_dir}"
         )
@@ -632,6 +634,31 @@ class BatchDialog(QDialog):
         self._run_btn.setEnabled(True)
         self._log.append(summary)
         QMessageBox.information(self, "Batch Complete", summary)
+        self._open_brushable_results()
+
+    def _open_brushable_results(self):
+        """Open the brushable batch workspace — the same plots+tables as a single image, but over EVERY
+        image's objects, where clicking a point/row pulls that object's crop offline from its source file.
+        Best-effort: a brushing failure must never taint a completed batch."""
+        try:
+            from pycat.utils.batch_brushing import mount_batch_workspace
+            cm = getattr(self.processor, '_central_manager', None)
+            files = getattr(self, '_last_files', None)
+            out_dir = getattr(self, '_last_output_dir', None)
+            viewer = getattr(self.processor, 'viewer', None)
+            if cm is None or not files or out_dir is None:
+                return
+            workspace = mount_batch_workspace(out_dir, files, cm)
+            if workspace is None:
+                return
+            window = getattr(viewer, 'window', None)
+            if window is not None:
+                window.add_dock_widget(workspace, name='Batch Results (brushable)', area='right')
+                cm._batch_results_workspace = workspace     # keep alive
+                self._log.append("Brushable batch results opened — plots + tables + offline object crops.")
+        except Exception as _bwe:   # broad-ok: a brushing failure must never taint a completed batch
+            from pycat.utils.general_utils import debug_log
+            debug_log('batch: could not open the brushable results workspace', _bwe)
 
     def _on_error(self, msg: str):
         self._progress_bar.setVisible(False)

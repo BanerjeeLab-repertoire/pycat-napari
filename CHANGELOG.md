@@ -1,3 +1,25 @@
+## [1.6.287] - 2026-07-23
+### Added — **Batch brushable results — the same plots+tables over every image, where a point pulls up its object's image OFFLINE (brushable-workspace Phase 4; feature complete).**
+`consolidated_long.csv` carries a stable `entity_id` (enough to brush plots ↔ tables) but the bbox was melted
+away and the source path never stored, so a batch point could not become an image. The per-image
+`<stem>_cell_df.csv` / `puncta_df.csv` files DO keep the bbox and entity id — this reads them back and closes
+the loop.
+
+- New `utils/batch_brushing.py`: `assemble_batch_object_tables` reads every image's per-image object CSVs,
+  tags each row with its originating image path (`_pycat_source_path`), and concatenates by object type — so
+  each row's `ObjectRef` is `is_resolvable_offline()` (source path + bbox). `mount_batch_workspace` builds the
+  plots + cell/condensate tables + a `BatchCropView` (the batch "image": a selection resolves the object's
+  crop via `crop_for_ref(viewer=None)` → `resolve_offline`, opening the source file and slicing the bbox —
+  no session, no re-segmentation).
+- Wired into `batch_processor._on_finished` (best-effort; a brushing failure never taints a completed batch).
+  `BrushableImageTier` now reads a per-row `_pycat_source_path` too.
+- `tests/test_batch_brushing.py` (`core`, 3 tests): assemble tags each row; a batch row resolves to its image
+  offline; the mounted workspace pulls up the correct image on selection. Full `pytest -m core` green (1717).
+
+This completes the brushable-results-workspace feature: one reusable panel (plots left, tables right, one
+selection service) drives the in-vitro, cellular two-tier, and batch cases; live brushing reveals in napari,
+batch brushing pulls crops offline.
+
 ## [1.6.286] - 2026-07-23
 ### Fixed — **a z-step hidden in a TIFF PageName is now recovered, with a pixel-size cross-check (sidecar_metadata Step 1b).**
 `PageName = "…, VoxelSize=0.0977x0.0977x19.0000"` carries the 19 µm z-step (and confirms the in-plane pixel

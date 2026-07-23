@@ -131,8 +131,24 @@ WorkspaceSpec(
    object_id is per-cell). `tests/test_cellular_brushable.py` (`core`, 2 tests): the global layer is unique
    while per-cell labels restart; the mount wires all six views and the cell/condensate tiers are
    independent. Additive — no cell/puncta number changes. Full core green (1714).
-4. **Batch** — feed the workspace from batch outputs at run end; add the offline-crop seam (per-image-CSV
-   bbox join + `source_path` reconstruction → `resolve_offline`). Reuse `comparative_figures` where it fits.
+4. **Batch — DONE (shipped 1.6.287).** New `utils/batch_brushing.py`: `assemble_batch_object_tables` reads
+   every image's per-image `<stem>_cell_df.csv`/`puncta_df.csv` (which keep the bbox + `_pycat_entity_id`,
+   unlike the melted `consolidated_long.csv`), tags each row with its source image path (`_pycat_source_path`
+   — the reconstruction seam), and concatenates by object type, so each row's `ObjectRef` is
+   `is_resolvable_offline()`. `mount_batch_workspace` builds the plots + cell/condensate tables + a new
+   `BatchCropView` (the batch "image": on selection it `crop_for_ref(viewer=None)` → `resolve_offline`, opening
+   the source file and slicing the crop — no session, no re-segmentation). Wired into `batch_processor`'s
+   `_on_finished` (best-effort; a brushing failure never taints a completed batch). `BrushableImageTier` now
+   reads a per-row `_pycat_source_path` too. `tests/test_batch_brushing.py` (`core`, 3 tests): assemble tags
+   each row; a batch row resolves to its image offline; the mount pulls up the right image on selection.
+
+## ✅ STATUS — COMPLETE. All four phases shipped (1.6.282 core, 1.6.283 in-vitro, 1.6.284 cellular two-tier,
+1.6.287 batch). One reusable `BrushableWorkspace` (plots-left / tables-right on the one `SelectionService`,
+keyed on `_pycat_entity_id`) drives the in-vitro droplet panel, the cellular cell+condensate two-tier panel,
+and the batch panel; the plot view's `_object_points`/`_draw` seam leaves VPT refactorable onto it. Live
+brushing reveals via the napari overlay; batch brushing pulls each object's crop offline from its source
+file. **Follow-ons noted in the phase reports:** a viewer-level pick dispatcher so image picking doesn't
+depend on the active layer; auto-rebuilding a single-image panel on session load.
 
 ## Decisions — RESOLVED by Gable (2026-07-22)
 1. **Build order:** Core → in-vitro → cellular → batch. **Added constraint:** VPT's brushing IS the

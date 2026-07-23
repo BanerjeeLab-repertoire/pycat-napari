@@ -199,7 +199,10 @@ class BrushableImageTier:
             except (TypeError, ValueError):
                 continue
             try:
-                self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=source_path)
+                # A batch row carries its OWN source image in _pycat_source_path (each row a different
+                # image); a single-image tier passes one source_path for all.
+                _src = row.get('_pycat_source_path') or source_path
+                self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=_src)
             except Exception as exc:                     # broad-ok: a row without a resolvable bbox just can't reveal
                 debug_log('brushable_workspace: could not build an ObjectRef for a row', exc)
         self._connect()
@@ -258,6 +261,83 @@ class BrushableImageTier:
             except Exception:                            # broad-ok: a callback already removed / layer gone
                 pass
             self._cb = None
+
+
+def _crop_to_pixmap(crop):
+    """A 2-D numpy crop → a grayscale ``QPixmap`` (contrast-stretched). None if it cannot render."""
+    import numpy as np
+    from PyQt5.QtGui import QImage, QPixmap
+
+    a = np.asarray(crop)
+    if a.ndim != 2 or a.size == 0:
+        return None
+    a = a.astype(float)
+    lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
+    g = (((a - lo) / (hi - lo)) * 255).astype('uint8') if hi > lo else np.zeros(a.shape, dtype='uint8')
+    g = np.ascontiguousarray(g)
+    h, w = g.shape
+    return QPixmap.fromImage(QImage(g.tobytes(), w, h, w, QImage.Format_Grayscale8))
+
+
+class BatchCropView:
+    """**The batch 'image' — the crop of the selected object, read OFFLINE from its source file.**
+
+    At batch end there is no live viewer, so an object cannot be revealed in a napari layer. Instead, a
+    selection resolves the object's :class:`ObjectRef` (source path + bbox, both carried on the row) and
+    ``crop_for_ref(viewer=None)`` → ``resolve_offline`` opens that image and slices the crop — no session,
+    no re-segmentation. This closes the loop the spec calls out: a batch plot point / table row pulls up its
+    originating image.
+    """
+
+    def __init__(self, df, service, view_id, *, entity_col=ENTITY_ID_COLUMN):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QLabel
+        from pycat.utils.object_ref import ObjectRef
+
+        self.service = service
+        self.view_id = str(view_id)
+        self.label = QLabel("Select an object to see its image")
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setMinimumSize(180, 180)
+        self.last_crop = None
+        self._eid_to_ref = {}
+        for _, row in df.iterrows():
+            eid = row.get(entity_col)
+            if eid is None:
+                continue
+            try:
+                self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=row.get('_pycat_source_path'))
+            except Exception as exc:                     # broad-ok: a row without a resolvable bbox just can't crop
+                debug_log('brushable_workspace: batch ref build failed', exc)
+        try:
+            register_view(self.service, self)
+        except Exception as exc:                         # broad-ok: a crop view that can't subscribe still shows
+            debug_log('brushable_workspace: could not register the batch crop view', exc)
+
+    def apply_selection(self, state):
+        from pycat.utils.brushing import crop_for_ref
+        from PyQt5.QtCore import Qt
+
+        refs = [self._eid_to_ref[e] for e in (getattr(state, 'entity_ids', ()) or ()) if e in self._eid_to_ref]
+        if not refs:
+            return
+        try:
+            crop, message = crop_for_ref(refs[0], viewer=None)
+        except Exception as exc:                         # broad-ok: an unreadable source file just shows nothing
+            debug_log('brushable_workspace: offline crop failed', exc)
+            return
+        self.last_crop = crop
+        pixmap = _crop_to_pixmap(crop) if crop is not None else None
+        if pixmap is not None:
+            self.label.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        elif message:
+            self.label.setText(str(message))
+
+    def close(self):
+        try:
+            self.service.unsubscribe(self.view_id)
+        except Exception as exc:                         # broad-ok: teardown is best-effort; never raise on close
+            debug_log('brushable_workspace: batch crop unsubscribe failed', exc)
 
 
 def _vertical_stack():
@@ -331,6 +411,16 @@ class BrushableWorkspace(QWidget):
                                   label_col=label_col, source_path=source_path, reveal=reveal)
         self._views.append(tier)
         return tier
+
+    def add_offline_crop_view(self, df, view_id, *, title=None):
+        """Add the batch 'image' — a `BatchCropView` that shows the selected object's crop read offline from
+        its source file (source path + bbox carried on the row). Placed on the left (the image side)."""
+        crop_view = BatchCropView(df, self.service, view_id)
+        if title:
+            self._plots_layout.addWidget(QLabel(f"<b>{title}</b>"))
+        self._plots_layout.addWidget(crop_view.label)
+        self._views.append(crop_view)
+        return crop_view
 
     def detach(self):
         """Unsubscribe every view from the dispatcher (the dock closed). Idempotent."""
