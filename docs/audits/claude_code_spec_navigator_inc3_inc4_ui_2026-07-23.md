@@ -1,6 +1,17 @@
 # Claude Code spec — Navigator increments 3 & 4: make the generator reachable
 
-> **◐ STATUS — Increment 3 DONE (shipped 1.6.308). Increment 4 remains.**
+> **◐ STATUS — Increment 3 DONE (1.6.308). Increment 4 IN PROGRESS: part 1 (feature-card layer) DONE
+> (1.6.309); part 2 (beginner home dock) remains.**
+> **Increment 4 part 1 (1.6.309).** `utils/feature_cards.py` — `register_default_feature_cards(central_manager)`
+> registers a `FeatureCard` for each capability with a VERIFIED real opener (Data Quality dashboard, Control
+> Validation, Spectral Unmixing, Comparative & Publication Figures, and the never-wired Feature Explorer),
+> wired into `central_manager` startup (guarded). Reality check from the entry-point audit: most "invisible"
+> candidates in the spec (measurement stability, SMLM, kymographs, ratiometric, feature provenance, analysis
+> presets) are **compute-only with no UI opener** — per the spec's own "a placeholder is worse than an absent
+> card" they are deliberately NOT carded and each needs a real opener BUILT first (a follow-on, not wiring).
+> `tests/test_feature_cards.py` (`core`, 5) incl. the enumerated presence contract (`EXPECTED_CARD_KEYS`).
+> **Part 2 remains:** the beginner home dock rendering these cards + the Guided/Full mode toggle + the
+> increment-3 navigator, with a guarded first-run auto-open; `app_mode` wired to the UI.
 > **Increment 3 (minimal navigator dock).** Qt-free `navigator/session.py` (`NavigatorSession` drives the
 > existing `HybridQuestionEngine` + `Planner`: next_question → answer → is_ready → compile_plan; editing is a
 > pin + recompile) + `plan_rows()` which renders a `Plan` with each step's quality-gate verdict INLINE

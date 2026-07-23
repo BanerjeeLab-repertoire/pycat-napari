@@ -122,6 +122,15 @@ class CentralManager:
         # not the line-capped menu god-file. on_run is left None until the plan-execution bridge lands.
         from pycat.ui.navigator_dock import install_navigator_action
         self._navigator_action = install_navigator_action(self.viewer)
+        # Populate the feature registry so any consumer (the beginner home dock, a capability query) sees
+        # every surfaced-but-otherwise-hidden feature (navigator inc 4). Guarded: a registration hiccup must
+        # never break startup, and the cards' openers import Qt/toolbox lazily so this stays cheap.
+        try:
+            from pycat.utils.feature_cards import register_default_feature_cards
+            register_default_feature_cards(self)
+        except Exception as exc:      # broad-ok: ui_cleanup — feature-card registration must never break startup
+            from pycat.utils.general_utils import debug_log
+            debug_log("feature cards: registration failed", exc)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)

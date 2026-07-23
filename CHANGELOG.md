@@ -1,3 +1,24 @@
+## [1.6.309] - 2026-07-23
+### Added — **The feature-card layer: every shipped-but-hidden capability with a real opener is now catalogued (navigator increment 4, part 1).**
+`utils/feature_registry.py` and `utils/app_mode.py` were built and tested with **zero consumers**. This adds
+the first consumer — the registration that populates the catalogue at startup — so the beginner home dock
+(part 2) has cards to render.
+
+- New `utils/feature_cards.py`: `register_default_feature_cards(central_manager)` registers a `FeatureCard`
+  for each capability that has a **verified real opener** — Data Quality dashboard, Control Validation,
+  Spectral/Bleed-through Unmixing, Comparative & Publication Figures, and the **Feature Explorer** (a finished
+  dock that had never been wired). Each card's `entry` lazily imports its opener, so the module stays Qt-free
+  and `core`-testable; the registry never invokes an entry. `EXPECTED_CARD_KEYS` is the enumerated contract.
+- **No placeholder cards.** Per the spec ("a card that opens nothing is worse than none"), capabilities that
+  are compute-only with no UI surface — measurement stability, SMLM, kymographs, ratiometric, feature
+  provenance, analysis presets — are deliberately NOT carded; each needs a real opener built first (follow-on).
+- Wired into `central_manager` startup, guarded so a registration hiccup can never break launch.
+- `tests/test_feature_cards.py` (`core`, 5 tests): the presence enumeration (a capability that forgets its
+  card is caught), the no-placeholder rule (every entry is a real callable), idempotent-safe registration,
+  categories, and beginner-visibility. Full `pytest -m "core or base"` green.
+- **Remaining (part 2):** the beginner home dock that renders these cards + the Guided/Full mode toggle +
+  the increment-3 navigator, with a guarded first-run auto-open.
+
 ## [1.6.308] - 2026-07-23
 ### Added — **The Navigator is reachable: a guided-analysis dock that drives the engine to a quality-gated, editable plan (navigator increment 3).**
 The question engine, planner, and quality gates were all built and tested — and no user could reach them. This
