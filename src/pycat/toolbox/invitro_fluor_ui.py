@@ -624,6 +624,87 @@ def _ivf_segmentation(ui, layout):
 
 
 
+def _ivf_source_path(ui, img_layer_name):
+    """Best-effort on-disk path of the fluorescence image, for offline (batch) resolution. None is fine
+    for live brushing — the reveal goes through the layer id."""
+    try:
+        src = getattr(getattr(ui.viewer.layers[img_layer_name], 'source', None), 'path', None)
+        if src:
+            return str(src)
+    except Exception as exc:                            # broad-ok: optional_probe — a missing source path just means no offline crop
+        debug_log('invitro_fluor: could not read the image source path', exc)
+    try:
+        return ui._dr().get('source_path') or ui._dr().get('file_path')
+    except Exception:                                  # broad-ok: optional_probe — no repository path available
+        return None
+
+
+def _finalize_droplet_table(part_df, mask_int, mpx, mask_layer, source_path):
+    """**Make the per-droplet table brush-ready, additively.** Adds ``area_um2`` (size), ``circularity``,
+    and the bbox — all keyed by ``droplet_label`` (robust to row order) — then stamps identity
+    (``condensate_analysis``) and binds the rows to the droplet mask layer, so a row ↔ a labeled droplet.
+    No existing droplet number changes."""
+    import math
+    import skimage as sk
+    from pycat.utils.entity_ref import attach_layer_id, finalize_entity_table
+    from pycat.utils.object_ref import bbox_columns_from_regionprops
+    from pycat.utils.layer_tags import layer_tag_id
+
+    if part_df is None or len(part_df) == 0 or 'droplet_label' not in part_df.columns:
+        return part_df
+    part_df = part_df.copy()                           # augment a copy; never mutate the caller's stored table
+
+    props = {int(p.label): p for p in sk.measure.regionprops(mask_int)}
+    boxes = {lbl: bbox_columns_from_regionprops(p) for lbl, p in props.items()}
+
+    def _circ(p):
+        if p is None or getattr(p, 'perimeter', 0) <= 0:
+            return float('nan')
+        return min(1.0, 4.0 * math.pi * p.area / (p.perimeter ** 2))
+
+    labels = [int(v) for v in part_df['droplet_label']]
+    part_df['area_um2'] = [(props[l].area * mpx ** 2) if l in props else float('nan') for l in labels]
+    part_df['circularity'] = [_circ(props.get(l)) for l in labels]
+    for key in ('bbox_y0', 'bbox_x0', 'bbox_y1', 'bbox_x1'):
+        part_df[key] = [boxes[l][key] if l in boxes else -1 for l in labels]
+    part_df['label'] = labels                          # the condensate_analysis spec keys on 'label'
+
+    try:
+        layer_tag_id(mask_layer)                       # ensure the mask carries a stable pycat_layer_id
+    except Exception as exc:                           # broad-ok: optional_probe — reveal falls back to the layer name
+        debug_log('invitro_fluor: could not stamp the droplet mask layer id', exc)
+    part_df = finalize_entity_table(part_df, 'condensate_analysis', source_path=source_path)
+    attach_layer_id(part_df, mask_layer)
+    return part_df.drop(columns=['label'])             # redundant with droplet_label for display
+
+
+def _mount_droplet_workspace(ui, part_df, summ_df, mask_layer, source_path):
+    """Mount the brushable results workspace: intensity-vs-size + intensity-vs-circularity on the left, the
+    per-droplet table (brushable) + field statistics on the right, and the droplet mask as an image tier."""
+    from pycat.ui.brushable_workspace import BrushableWorkspace
+
+    service = getattr(ui.central_manager, 'selection', None)
+    if service is None or part_df is None or len(part_df) == 0:
+        return None
+    intensity = 'I_dense' if 'I_dense' in part_df.columns else (
+        'mean_intensity' if 'mean_intensity' in part_df.columns else 'partition_coefficient')
+
+    ws = BrushableWorkspace(service)
+    ws.add_plot(part_df, 'area_um2', intensity, 'ivf.plot.size', title='Condensate intensity vs size')
+    ws.add_plot(part_df, 'circularity', intensity, 'ivf.plot.circ', title='Condensate intensity vs circularity')
+    ws.add_table(part_df, 'ivf.table.droplet', title='Per-droplet properties')
+    if summ_df is not None:
+        ws.add_table(summ_df, 'ivf.table.field', title='Field statistics')
+    ws.add_image_tier(ui.viewer, mask_layer, part_df, 'ivf.image',
+                      label_col='droplet_label', source_path=source_path)
+    try:
+        dock = ui.viewer.window.add_dock_widget(ws, name='IVF Droplet Results', area='right')
+        ui._ivf_results_dock = (dock, ws)              # keep alive; detach the views if it closes
+    except Exception as exc:                           # broad-ok: no viewer window headless — the workspace is still returned
+        debug_log('invitro_fluor: could not dock the droplet workspace', exc)
+    return ws
+
+
 def _ivf_field_summary(ui, layout):
     grp  = QGroupBox("Step 4 — Field Summary & Partition Coefficient")
     form = QFormLayout(grp)
@@ -769,14 +850,18 @@ def _ivf_field_summary(ui, layout):
         # not only in the transient napari message below (wire_orphans B2 — condensate_modes).
         from pycat.toolbox.condensate_modes import annotate_summary_table
         summ_df = annotate_summary_table(summ_df, mask)
-        part_df = part['per_droplet_df']
-        part_df['area_um2'] = [
-            p.area * mpx**2 for p in sk.measure.regionprops(mask.astype(np.int32))
-        ] if len(part_df) > 0 else []
-        _show("IVF Field Summary", [
-            ("Field statistics", summ_df),
-            ("Per-droplet partition", part_df),
-        ])
+        # Make the per-droplet table brush-ready (area/circularity/bbox/identity), then mount the brushable
+        # workspace: plots (intensity vs size, intensity vs circularity) left, tables right, droplet mask as
+        # an image tier — click a droplet in the image, the plots, or the table and the others light up.
+        _mask_layer = ui.viewer.layers[mask_dd.currentText()]
+        _src = _ivf_source_path(ui, img_dd.currentText())
+        part_df = _finalize_droplet_table(part['per_droplet_df'], mask.astype(np.int32), mpx,
+                                          _mask_layer, _src)
+        if _mount_droplet_workspace(ui, part_df, summ_df, _mask_layer, _src) is None:
+            _show("IVF Field Summary", [                # fallback (no selection service / no droplets)
+                ("Field statistics", summ_df),
+                ("Per-droplet partition", part_df),
+            ])
         _kp = part.get('partition_coefficient', float('nan'))
         _true = bool(part.get('is_true_kp', False))
         _label = ("K\u209a" if _true else

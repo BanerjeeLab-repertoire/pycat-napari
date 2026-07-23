@@ -162,6 +162,100 @@ class BrushablePlot:
             self._cid = None
 
 
+class BrushableImageTier:
+    """**A napari labels layer as one brushing tier over the image.**
+
+    Click a labeled object → select its entity everywhere; a selection arriving from another view reveals
+    that object in the image (the selection overlay). This is the "brush FROM the image" half, and the piece
+    that makes two *interleaved* tiers possible: a cell-labels tier and a condensate-labels tier are two of
+    these on one viewer, each with its own ``view_id`` and entity type, so a click on either brushes only its
+    own tier.
+
+    Requires the table rows to carry ``_pycat_entity_id`` and a ``label_col`` whose values are the layer's
+    label values (so the clicked label maps to a row), plus a bbox (for the reveal / offline resolve).
+    """
+
+    def __init__(self, viewer, labels_layer, df, service, view_id, *,
+                 label_col, source_path=None, entity_col=ENTITY_ID_COLUMN):
+        from pycat.utils.object_ref import ObjectRef
+
+        self.viewer = viewer
+        self.labels_layer = labels_layer
+        self.service = service
+        self.view_id = str(view_id)
+        self._label_to_eid = {}
+        self._eid_to_ref = {}
+        self._cb = None
+        for _, row in df.iterrows():
+            eid = row.get(entity_col)
+            if eid is None:
+                continue
+            try:
+                self._label_to_eid[int(row[label_col])] = str(eid)
+            except (TypeError, ValueError):
+                continue
+            try:
+                self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=source_path)
+            except Exception as exc:                     # broad-ok: a row without a resolvable bbox just can't reveal
+                debug_log('brushable_workspace: could not build an ObjectRef for a row', exc)
+        self._connect()
+
+    def _connect(self):
+        try:
+            register_view(self.service, self)
+        except Exception as exc:                         # broad-ok: an image tier that can't subscribe still shows the layer
+            debug_log('brushable_workspace: could not register the image tier', exc)
+        try:
+            self._cb = self._on_click
+            self.labels_layer.mouse_drag_callbacks.append(self._cb)
+        except Exception as exc:                         # broad-ok: no live layer callbacks headless — reveal still works
+            debug_log('brushable_workspace: could not wire the image click', exc)
+
+    def _on_click(self, layer, event):
+        """A click on the labels layer selects the object under the cursor."""
+        if self.service.is_busy:
+            return
+        try:
+            value = layer.get_value(event.position, world=True)
+        except Exception as exc:                         # broad-ok: a click outside the data / mid-transition
+            debug_log('brushable_workspace: could not read the clicked label', exc)
+            return
+        eid = self._label_to_eid.get(int(value)) if value else None
+        if eid is None:
+            return
+        self.service.select(Selection(
+            entity_ids=(eid,), primary_id=eid, mode='selected',
+            source_view=self.view_id, generation=self.service.next_generation()))
+
+    def apply_selection(self, state):
+        """Reveal the selected object(s) in the image — a programmatic reveal, it emits no command."""
+        from pycat.utils.object_ref import resolve_in_viewer
+        from pycat.utils.selection_overlay import show_selection
+
+        refs = [self._eid_to_ref[e] for e in (getattr(state, 'entity_ids', ()) or ()) if e in self._eid_to_ref]
+        if not refs:
+            return
+        try:
+            if len(refs) == 1:
+                resolve_in_viewer(refs[0], self.viewer, centre=False)
+            else:
+                show_selection(self.viewer, refs)
+        except Exception as exc:                         # broad-ok: the reveal is best-effort; never fail a selection over it
+            debug_log('brushable_workspace: could not reveal the selection in the image', exc)
+
+    def close(self):
+        try:
+            self.service.unsubscribe(self.view_id)
+        except Exception as exc:                         # broad-ok: teardown is best-effort; never raise on close
+            debug_log('brushable_workspace: image tier unsubscribe failed', exc)
+        if self._cb is not None:
+            try:
+                self.labels_layer.mouse_drag_callbacks.remove(self._cb)
+            except Exception:                            # broad-ok: a callback already removed / layer gone
+                pass
+            self._cb = None
+
+
 def _vertical_stack():
     holder = QWidget()
     layout = QVBoxLayout(holder)
@@ -225,6 +319,14 @@ class BrushableWorkspace(QWidget):
         if brushable is not None:
             self._views.append(brushable)
         return brushable
+
+    def add_image_tier(self, viewer, labels_layer, df, view_id, *, label_col, source_path=None):
+        """Add a napari labels layer as a brushing tier (click an object ↔ the plots/tables). Two tiers
+        (cell labels + condensate labels) over one viewer are just two of these. Returns the tier view."""
+        tier = BrushableImageTier(viewer, labels_layer, df, self.service, view_id,
+                                  label_col=label_col, source_path=source_path)
+        self._views.append(tier)
+        return tier
 
     def detach(self):
         """Unsubscribe every view from the dispatcher (the dock closed). Idempotent."""

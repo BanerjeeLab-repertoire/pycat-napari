@@ -110,9 +110,15 @@ WorkspaceSpec(
    emitting; a plot + table over one df brush together; two entity *types* (cell vs condensate) are
    independent tiers on one service. No pipeline wired yet; no image tier yet (lands with a real layer in
    Phase 2/3).
-2. **In-vitro (Pipeline B)** — the simplest instantiation (1 table, 2 plots, 1 tier). Make `per_droplet_df`
-   brush-ready (bbox + circularity + `finalize_entity_table('condensate_analysis')` + `attach_layer_id`);
-   mount the workspace at `invitro_fluor_ui.py:776`. Plots: intensity-vs-`area_um2`, intensity-vs-circularity.
+2. **In-vitro (Pipeline B) — DONE (shipped 1.6.283).** `_finalize_droplet_table` makes `per_droplet_df`
+   brush-ready additively (a copy; `area_um2` + `circularity` + bbox keyed by `droplet_label`, then
+   `finalize_entity_table('condensate_analysis')` + `attach_layer_id`); `_mount_droplet_workspace` docks a
+   `BrushableWorkspace` — plots (intensity-vs-size, intensity-vs-circularity) left, per-droplet + field-stats
+   tables right, and the droplet mask as an image tier (the new `BrushableImageTier`: click a droplet ↔ the
+   plots/tables ↔ the image reveal). Wired at `invitro_fluor_ui._on_run` (falls back to the old dialog if
+   there is no selection service). `tests/test_invitro_brushable.py` (`core`, 3 tests): the augmentation adds
+   size/circularity/bbox/identity without changing any droplet number; a click on a droplet selects its
+   entity; the image tier passes `assert_selection_view_contract`. Full core green (1712).
 3. **Cellular (Pipeline A)** — the two-tier instantiation. `cell_df`/`puncta_df` are already brush-ready;
    add a per-punctum **condensate pick target** (Decision 2); mount at `feature_analysis_tools.py:960` with
    2 cell plots + cell table + condensate table + two image tiers (cell labels, condensate picker).

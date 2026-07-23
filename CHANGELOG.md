@@ -1,3 +1,24 @@
+## [1.6.283] - 2026-07-22
+### Added — **In-vitro fluorescence: a brushable droplet workspace — click a droplet in the image, a plot, or the table and the others light up (Phase 2).**
+The in-vitro field-summary produced a per-droplet table you could only look at — no bounding box, no
+circularity, no identity, so a row could not be turned back into an image. This makes it brush-ready and
+mounts the reusable workspace: two plots on the left (condensate intensity vs size, intensity vs
+circularity), the per-droplet + field-statistics tables on the right, and the droplet mask as an image tier.
+
+- New `_finalize_droplet_table` (`invitro_fluor_ui.py`): augments `per_droplet_df` **additively on a copy** —
+  `area_um2`, `circularity` (4π·area/perimeter²), and the bbox, all keyed by `droplet_label` (robust to row
+  order, not positional as before) — then `finalize_entity_table('condensate_analysis')` stamps
+  `_pycat_entity_id` and `attach_layer_id` binds each row to the droplet mask layer. No existing droplet
+  number changes.
+- New `BrushableImageTier` (`ui/brushable_workspace.py`) + `BrushableWorkspace.add_image_tier`: a napari
+  labels layer as a brushing tier — a click on a labeled object selects its entity everywhere, and an inbound
+  selection reveals the object via the selection overlay. Two of these over one viewer = the two interleaved
+  tiers the cellular case needs.
+- Mounted at `invitro_fluor_ui._on_run` (falls back to the old dialog with no selection service).
+  `tests/test_invitro_brushable.py` (`core`, 3 tests): the augmentation, a droplet click → correct entity,
+  and the image tier passing `assert_selection_view_contract`. Full `pytest -m core` green (1712). Phases 3
+  (cellular two-tier) and 4 (batch) build on this.
+
 ## [1.6.282] - 2026-07-22
 ### Added — **a reusable brushable results workspace (plots left, tables right) — Phase 1 of the plots+tables+image brushing feature.**
 The foundation for Meet's request: one panel that stacks scatter plots down the left and results tables down
