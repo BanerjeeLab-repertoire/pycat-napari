@@ -1062,6 +1062,124 @@ def extract_reader_metadata(file_path, image=None):
 
 
 # ---------------------------------------------------------------------------
+# Reader-independent metadata merge (Part 2 — the metadata source is not the pixel reader)
+# ---------------------------------------------------------------------------
+
+#: Numeric fields where a small relative disagreement between sources is rounding, not a real conflict.
+_MERGE_NUMERIC_TOL = 1e-3
+#: Fields whose conflict must SURFACE loudly (a wrong scale corrupts every physical measurement downstream).
+_MERGE_SURFACE_CONFLICT = ('pixel_size_um',)
+
+
+def _values_conflict(a, b, *, tol=_MERGE_NUMERIC_TOL):
+    """Whether two meaningful values disagree. Numbers within a relative tolerance do NOT conflict (0.1035 vs
+    0.10350001 is the same reading); strings compare case-insensitively trimmed; everything else by equality."""
+    fa, fb = _safe_float(a), _safe_float(b)
+    if fa is not None and fb is not None:
+        if fa == 0 and fb == 0:
+            return False
+        denom = max(abs(fa), abs(fb)) or 1.0
+        return abs(fa - fb) / denom > tol
+    if isinstance(a, str) and isinstance(b, str):
+        return a.strip().lower() != b.strip().lower()
+    return a != b
+
+
+def merge_metadata_sources(sources, *, surface_conflict_fields=_MERGE_SURFACE_CONFLICT):
+    """Merge several metadata sources by **field-level precedence**, recording where each field came from and
+    every disagreement — so the metadata source is decoupled from the pixel reader (the best reader for pixels
+    is not always the best for metadata).
+
+    ``sources`` is an ordered list of ``(source_name, common_dict)``, **highest precedence first**. For each
+    field the first source with a *meaningful* value (``metadata_validity.is_meaningful``) wins. When a
+    later source offers a DIFFERENT meaningful value that is a **finding**, not something to resolve quietly:
+    it is recorded with both values, the winner, and the reason. A ``pixel_size_um`` conflict is marked
+    ``surfaced`` so the pixel-size gate sees it rather than it being buried.
+
+    Returns ``{'common': {field: winner}, 'sources': {field: source_name}, 'conflicts': [...]}``. Pure and
+    Qt-free — the orchestration that decides WHICH readers to ask lives in ``extract_metadata_merged``."""
+    from pycat.utils.metadata_validity import is_meaningful
+
+    merged, provenance, conflicts = {}, {}, []
+    all_fields = []
+    for _name, common in sources:
+        for f in (common or {}):
+            if f not in all_fields:
+                all_fields.append(f)
+
+    for field in all_fields:
+        # Every source that offers a meaningful value for this field, in precedence order.
+        offered = [(name, (common or {})[field]) for name, common in sources
+                   if field in (common or {}) and is_meaningful(field, (common or {})[field])]
+        if not offered:
+            continue
+        winner_name, winner_val = offered[0]
+        merged[field] = winner_val
+        provenance[field] = winner_name
+
+        disagreeing = [(n, v) for n, v in offered[1:] if _values_conflict(winner_val, v)]
+        if disagreeing:
+            conflicts.append({
+                'field': field,
+                'values': {winner_name: winner_val, **{n: v for n, v in disagreeing}},
+                'winner': winner_val,
+                'winner_source': winner_name,
+                'reason': f"field-level precedence: '{winner_name}' over "
+                          + ', '.join(f"'{n}'" for n, _ in disagreeing),
+                'surfaced': field in surface_conflict_fields,
+            })
+    return {'common': merged, 'sources': provenance, 'conflicts': conflicts}
+
+
+def _default_metadata_sources(file_path, *, image=None, reader=None, width_px=None):
+    """The ordered ``(name, callable)`` metadata sources to try for ``file_path``, independent of which reader
+    displays the pixels best. Each callable returns a ``{'common','raw'}`` result (or raises — the caller
+    records the failure with a reason, never swallows it). Ordered highest-precedence first per format."""
+    ext = os.path.splitext(file_path)[1].lower() if file_path else ''
+    if ext == '.ims':
+        return [('ims_hdf5', lambda: extract_ims_metadata(file_path, reader=reader, width_px=width_px))]
+    if ext in ('.tif', '.tiff'):
+        # tifffile reads baseline tags the structured reader skips; the structured/OME reader parses fields
+        # tifffile cannot. Ask BOTH — metadata is a one-time pull, so a second parse is cheap next to a load.
+        return [('tifffile', lambda: extract_tiff_metadata(file_path)),
+                ('ome_structured', lambda: extract_reader_metadata(file_path, image=image))]
+    return [('ome_structured', lambda: extract_reader_metadata(file_path, image=image))]
+
+
+def extract_metadata_merged(file_path, *, image=None, reader=None, width_px=None, sources=None):
+    """Metadata pulled from wherever it parses best, independent of the pixel reader (Part 2). Asks each
+    available source, merges by field-level precedence with recorded per-field provenance and reported
+    conflicts, and — critically — **skips a failing source with a recorded reason instead of a bare
+    ``except: pass``**. The pixel reader is unaffected; display still goes through whichever reader handles
+    the pixels best.
+
+    ``sources`` (an ordered list of ``(name, callable)`` each returning ``{'common','raw'}``) is injectable
+    for testing; by default it is resolved from the extension. Returns the usual ``{'common','raw'}`` with the
+    merge trail under ``raw['metadata_sources']`` / ``raw['metadata_conflicts']`` / ``raw['source_failures']``,
+    and the winning-source raw blobs preserved under ``raw['raw_by_source']``."""
+    srcs = sources if sources is not None else _default_metadata_sources(
+        file_path, image=image, reader=reader, width_px=width_px)
+
+    commons, raw_by_source, failures = [], {}, []
+    for name, fn in srcs:
+        try:
+            res = fn() or {}
+            commons.append((name, res.get('common') or {}))
+            raw_by_source[name] = res.get('raw') or {}
+        except Exception as exc:      # broad-ok: optional_probe — one source failing must not lose the others
+            failures.append({'source': name, 'error': f"{type(exc).__name__}: {exc}"})
+
+    merged = merge_metadata_sources(commons)
+
+    raw = {'raw_by_source': raw_by_source,
+           'metadata_sources': merged['sources'],
+           'metadata_conflicts': merged['conflicts']}
+    if failures:
+        raw['source_failures'] = failures
+    return _fill_scan_acquisition_fields({'common': merged['common'], 'raw': raw})
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 

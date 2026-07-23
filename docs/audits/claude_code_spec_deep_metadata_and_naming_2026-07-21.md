@@ -1,7 +1,20 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
-> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (element-scoped parse 1.6.294, per-channel + instrument
-> schema 1.6.295). Part 2 (reader-independent merge) remains.**
+> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (1.6.294 + 1.6.295); Part 2 merge policy DONE (1.6.296).
+> Remaining: deepen CZI/LIF/ND2/IMS readers to the same `channels` shape (item 4), the Qt provenance/conflict
+> surface, full dispatcher adoption of the merge, and lazy/bounded per-page TIFF metadata.**
+>
+> **Part 2 (reader-independent merge) — merge policy DONE, shipped 1.6.296.** New `merge_metadata_sources`
+> (pure, Qt-free) merges an ordered `(name, common)` list by field-level precedence (first *meaningful* value
+> wins, `is_meaningful` reused so `'N/A'` never beats a real value), records per-field provenance, and reports
+> every two-source disagreement as a finding (both values + winner + reason; `pixel_size_um` conflicts marked
+> `surfaced` for the gate; rounding within 1e-3 is not a conflict). `extract_metadata_merged(file_path, *,
+> sources=None)` orchestrates it and **skips a failing source with a recorded reason** (`raw['source_failures']`)
+> instead of the old bare `except: pass`; the merge trail rides in `raw['metadata_sources']` /
+> `['metadata_conflicts']` / `['raw_by_source']`. Additive — `extract_metadata` unchanged. `sources` injectable
+> for testing. `tests/test_metadata_merge.py` (`core`, 8 tests). **Remaining:** wiring the dispatcher to prefer
+> the merged result, the Qt surface for provenance/conflicts, and lazy/bounded per-page TIFF metadata (item 6 —
+> the `_extract_mm_frame_times_from_tiff` `max_pages` bounding already exists as the pattern).
 >
 > **Part 1 (element-scoped OME parse) — DONE, shipped 1.6.294.** New `_parse_ome_xml_scoped` reads each
 > attribute from the element it belongs to (`ElementTree`, namespace-agnostic): the first `<Pixels>` element's

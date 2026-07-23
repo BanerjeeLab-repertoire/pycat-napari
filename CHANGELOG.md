@@ -1,3 +1,28 @@
+## [1.6.296] - 2026-07-23
+### Added — **Reader-independent metadata merge: metadata from wherever it parses best, with per-field provenance and reported conflicts (deep_metadata_and_naming Part 2).**
+The best reader for pixels is not always the best for metadata, but today they are the same choice — a format
+that displays well can lock you out of metadata another library would parse fully. The seed already existed
+(`extract_metadata` tries a second reader for `pixel_size_um` alone, TIFF-only, wrapped in a bare
+`except: pass`). This generalises it into a real merge policy:
+- New **`merge_metadata_sources(sources)`** (pure, Qt-free) merges an ordered `(name, common)` list by
+  **field-level precedence**: the first source with a *meaningful* value (reusing `metadata_validity.
+  is_meaningful`, so a `'N/A'` placeholder never beats a real value from a lower source) wins each field, and
+  **`sources[field]` records where it came from** — a user can see "NA came from OME-XML; pixel size from
+  tifffile tags".
+- **A two-source disagreement is a finding, not a silent merge**: recorded with both values, the winner, and
+  the reason. A `pixel_size_um` conflict is marked `surfaced` so the pixel-size gate sees it (a wrong scale
+  corrupts every physical measurement). Rounding differences (0.1035 vs 0.10350001) are not a conflict.
+- New **`extract_metadata_merged(file_path, *, sources=None)`** orchestrates it, asking each source for the
+  format (tifffile + OME-structured for TIFF; IMS HDF5 for `.ims`) — and **skips a failing source with a
+  recorded reason** (`raw['source_failures']` naming the source and the exception) instead of the old bare
+  `except: pass` that swallowed it. The pixel reader is unaffected; display still routes through whichever
+  reader shows the pixels best. `sources` is injectable for testing.
+- The merge trail rides in `raw`: `metadata_sources` (per-field provenance), `metadata_conflicts`, and
+  `raw_by_source` (each source's raw blob preserved). Additive — `extract_metadata` is unchanged.
+- Tests (`core`, `test_metadata_merge.py`, 8 tests): precedence + provenance, placeholder-skipping, the
+  recorded/surfaced conflict, rounding-is-not-conflict, a failing source recorded not swallowed, the
+  preserved merge trail. Full core green (1759).
+
 ## [1.6.295] - 2026-07-23
 ### Added — **Per-channel + instrument OME schema: the hierarchy the flat schema cannot express (deep_metadata_and_naming Part 1, cont.).**
 OME metadata is hierarchical and per-channel (Instrument → Detector → Channel → DetectorSettings). The flat
