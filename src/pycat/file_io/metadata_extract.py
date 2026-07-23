@@ -364,6 +364,22 @@ def extract_ims_metadata(file_path, reader=None, width_px=None):
 # TIFF / OME-TIFF
 # ---------------------------------------------------------------------------
 
+def _parse_voxelsize(page_name):
+    """Parse ``VoxelSize=0.0977x0.0977x19.0000`` (µm) out of a TIFF ``PageName`` tag. Returns
+    ``(x, y, z)`` floats or ``None`` when the tag carries no VoxelSize. ISS Vista writes the z-step here,
+    where the structured pixel-size object never sees it."""
+    if not page_name:
+        return None
+    import re
+    m = re.search(r'VoxelSize\s*=\s*([\d.]+)\s*[xX]\s*([\d.]+)\s*[xX]\s*([\d.]+)', str(page_name))
+    if not m:
+        return None
+    try:
+        return (float(m.group(1)), float(m.group(2)), float(m.group(3)))
+    except ValueError:
+        return None
+
+
 def extract_tiff_metadata(file_path):
     """Extract normalised metadata from a TIFF / OME-TIFF using tifffile."""
     common = _empty_common(file_path)
@@ -407,6 +423,26 @@ def extract_tiff_metadata(file_path):
                         if 1e-4 < px < 1e4:
                             common['pixel_size_um'] = px
                             common['pixel_size_source'] = 'tiff_tags'
+
+            # PageName may carry 'VoxelSize=X x Y x Z' (µm) — the z-step (which the structured pixel-size
+            # object misses) plus a CROSS-CHECK on the in-plane size. Fill z_step_um if absent; reconcile X
+            # against XResolution — agreement confirms it, a disagreement beyond tolerance is recorded as a
+            # conflict rather than silently preferring one (per the metadata-validity rule).
+            _pn = page.tags.get('PageName')
+            _vox = _parse_voxelsize(_safe_str(_pn.value)) if _pn is not None else None
+            if _vox is not None:
+                _vx, _vy, _vz = _vox
+                if _vz and _vz > 0 and common.get('z_step_um') is None:
+                    common['z_step_um'] = _vz
+                if _vx and _vx > 0:
+                    _existing = common.get('pixel_size_um')
+                    if _existing is None:
+                        common['pixel_size_um'] = _vx
+                        common['pixel_size_source'] = 'page_name_voxelsize'
+                    elif abs(_vx - _existing) / max(_existing, 1e-9) > 0.02:
+                        common.setdefault('conflicts', []).append(
+                            f"pixel size: XResolution {_existing:.5f} µm/px vs PageName VoxelSize "
+                            f"{_vx:.5f} µm/px disagree by more than 2%")
 
             # Curated string fields.
             def _tagval(name):

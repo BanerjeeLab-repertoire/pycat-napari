@@ -1,7 +1,13 @@
 # Claude Code spec — Sidecar metadata discovery, the ISS case, and a last-resort channel-identity dialog
 
-> **◐ STATUS — Step 1a DONE (the reported scale-bar regression, shipped 1.6.285). Steps 1b + Parts 2–4
-> remain.**
+> **◐ STATUS — Part 1 (both immediate bug fixes) DONE: Step 1a shipped 1.6.285, Step 1b shipped 1.6.286.
+> Parts 2–4 (sidecar discovery, ISS parser, channel dialog) remain — they need the real ISS fixture files.**
+>
+> **Step 1b — DONE.** `metadata_extract._parse_voxelsize` parses `VoxelSize=X x Y x Z` (µm) out of a TIFF
+> `PageName`; `extract_tiff_metadata` fills `z_step_um` from Z (the 19 µm the structured pixel-size object
+> never sees) and cross-checks the in-plane X against XResolution — agreement confirms it, a disagreement
+> beyond 2% is recorded in `common['conflicts']` rather than silently resolved (XResolution keeps the value).
+> `tests/test_pagename_voxelsize.py` (`core`, 4 tests).
 >
 > **Step 1a — DONE.** The 2-D load path (`file_io.py`) now routes `pixel_size_from_metadata` through the ONE
 > provenance helper `_calibration_is_from_metadata` (which reads `pixel_size_source`) whenever a real

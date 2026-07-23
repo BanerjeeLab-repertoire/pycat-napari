@@ -1,3 +1,16 @@
+## [1.6.286] - 2026-07-23
+### Fixed — **a z-step hidden in a TIFF PageName is now recovered, with a pixel-size cross-check (sidecar_metadata Step 1b).**
+`PageName = "…, VoxelSize=0.0977x0.0977x19.0000"` carries the 19 µm z-step (and confirms the in-plane pixel
+size) that the structured pixel-size object never sees, so `z_step_um` came back `None`.
+
+- `metadata_extract._parse_voxelsize` parses `VoxelSize=X x Y x Z` (µm) from the `PageName` tag;
+  `extract_tiff_metadata` fills `z_step_um` from Z and, for the in-plane size, cross-checks X against
+  XResolution — agreement confirms it; a disagreement beyond 2% is recorded in `common['conflicts']` (with
+  XResolution keeping the value) rather than silently resolved, per the metadata-validity rule.
+- New `tests/test_pagename_voxelsize.py` (`core`, 4 tests). This completes Part 1 (the two immediate bug
+  fixes) of the sidecar-metadata spec; the sidecar-discovery / ISS-parser / channel-dialog parts remain and
+  need the real ISS fixture files.
+
 ## [1.6.285] - 2026-07-23
 ### Fixed — **a 2-D TIFF whose pixel size came from the file now shows a µm scale bar, not "px" (sidecar_metadata Step 1a; reported by Meet Raval on an ISS Vista file).**
 The pixel size and its provenance were both read correctly, but the 2-D load path set
