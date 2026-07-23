@@ -1,7 +1,14 @@
 # Claude Code spec — Exception handler classification by context category
 
-> **◐ INCREMENTS 1–2 DONE. The full categorization sweep (Part 1, all ~166 handlers) + the broader batch
-> guard remain.**
+> **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). The full categorization sweep (Part 1, all
+> ~166 handlers) remains.**
+>
+> **The batch_step rule is now STRUCTURALLY GUARDED (via close_partial_specs Part B; test-only guard).**
+> `tests/test_no_silent_batch_step_swallowing.py` (`core`) flags a broad handler directly inside a multi-file
+> batch loop that neither re-raises nor records the item's outcome (a `✗`/`⚠` row, a status flag, a
+> `BatchStepResult`, or an assignment into the returned row), ratchet-pinned at 0. So all three swallow
+> categories with no wrong number — scientific_result (`test_no_scientific_result_swallowing`), write
+> (`test_no_silent_write_or_batch_swallowing`), and now batch_step — are guarded.
 >
 > **INCREMENT 2 — the write rule (Part 2 guard + writers-first Part 3 conversion), shipped 1.6.259.** New
 > `test_no_silent_write_or_batch_swallowing.py` (`core`): an AST ratchet, conservative, scoped to broad

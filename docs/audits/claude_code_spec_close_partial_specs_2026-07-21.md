@@ -1,5 +1,18 @@
 # Claude Code spec — Close the three partially-landed specs
 
+> **◐ STATUS — Part A DONE (backend_parity 2&3, shipped 1.6.274/1.6.277). Part B DONE (the batch_step
+> guard, added as a `core` guard, test-only (no version bump)). Part C (the stack-access axis, ~27 sites) remains.**
+>
+> **Part B — the batch_step guard — DONE.** New `tests/test_no_silent_batch_step_swallowing.py` (`core`): an
+> AST ratchet, sibling to the write-swallow guard, that flags a broad handler directly inside a MULTI-FILE
+> batch loop (`for … in self.files` / `tiffs` / `image_paths` …) which neither re-raises nor records the
+> item's outcome — a per-item result/marker (`✗`/`⚠`), a status flag, a `BatchStepResult`, or an assignment
+> into the returned row (`row['status'] = …`). Budget pinned at **0**: the batch-item loops that exist
+> (`BatchWorker.run` over `self.files`; `temperature_tools` over its tiffs) already record every failure, so
+> a NEW silent drop — the 93-of-100 cohort that looks complete — is what it catches. No offenders to convert;
+> the guard pins the compliant state. (`test_batch_step_visibility.py` still guards the concrete
+> `BatchWorker.run` fix; this generalises the rule to any file/image batch loop.)
+
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. Three specs are
 **half done** — each shipped its first part and stalled. Finishing them is cheap, and a half-finished
 guard is worse than none because it implies coverage that isn't there. Independent parts; ship each
