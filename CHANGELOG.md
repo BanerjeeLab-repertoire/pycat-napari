@@ -1,3 +1,29 @@
+## [1.6.308] - 2026-07-23
+### Added — **The Navigator is reachable: a guided-analysis dock that drives the engine to a quality-gated, editable plan (navigator increment 3).**
+The question engine, planner, and quality gates were all built and tested — and no user could reach them. This
+is the last mile (increment 3 of the arc; it ships alone). It also fixes a latent gap: the engine loads its
+scientific question tree from the shipped `navigator/data/*.xlsx` workbooks and needed **openpyxl**, which was
+never declared — so the engine could not even construct on a clean install. openpyxl is now a dependency.
+- New Qt-free **`navigator/session.py`**: `NavigatorSession` drives the existing `HybridQuestionEngine` +
+  `Planner` — `next_question()` → `answer()` until `is_ready()`, then `compile_plan()`; editing is a **pin +
+  recompile** (the planner re-validates every contract). `plan_rows()` renders a compiled `Plan` as ordered
+  rows with each step's **quality-gate verdict inline**: a *blocked* step names why it cannot run, a
+  *downgraded* step names its caveat but stays runnable, an *unknown* names the QC probe that will decide it —
+  making increment 2's gate report visible instead of wasted.
+- New thin **`ui/navigator_dock.py`**: renders the question flow (prompt + one button per choice), then the
+  plan as step rows colour-coded by gate state (⛔ blocked / ⚠ downgraded / ⏳ probe), with a Run button that
+  hands the compiled plan to the caller's executor and a Start-over button. `install_navigator_action` adds a
+  '🧭 Navigator' menu action (from `central_manager`, not the line-capped menu god-file) that mounts the dock
+  with the tabify behaviour (1.6.297). Headless-safe.
+- **Reuse, not rebuild**: no new engine, gating vocabulary, or plan model — those exist. This is the
+  presentation + drive layer the arc was missing.
+- Tests: `tests/navigator/test_navigator_session.py` (`base`, 7 — the drive reaches a leaf and compiles; the
+  blocked/downgraded/unknown reasons render; a satisfied step is clean; editing is a pin + recompile) and
+  `tests/test_navigator_dock.py` (`integration`, 4 — the dock drives questions to a rendered plan, Run hands
+  over the plan, Start-over resets, the installer mounts with tabify + is headless-safe). Full core green.
+- **Follow-ons** (noted): the plan-execution bridge (`on_run` is wired but left `None` until a plan→ops
+  executor lands) and increment 4 (beginner mode + feature-card surfacing).
+
 ## [1.6.307] - 2026-07-23
 ### Changed — **Finer test-marker tiers: `core` is now a true minimal lane; `base` for the scientific stack (release_engineering Part C).**
 `core` used to mean "any headless test" and pulled the full scientific stack, so there was no way to check

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.307"
+version = "1.6.308"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -100,6 +100,11 @@ dependencies = [
     # A transitive dependency you rely on is a dependency you have not declared.
     "networkx",
     "scipy",
+    # openpyxl: the Navigator's scientific question tree + module contracts are loaded from the shipped
+    # `navigator/data/*.xlsx` workbooks at runtime (navigator/loader.py). Without it the whole guided-analysis
+    # engine cannot construct — it was UNDECLARED, so the Navigator dock could never have worked on a clean
+    # install even though the workbooks ship. A pure-Python, lightweight dependency.
+    "openpyxl",
     "largestinteriorrectangle",
     "imaris-ims-file-reader",
     "av",

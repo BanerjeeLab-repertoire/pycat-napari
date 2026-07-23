@@ -118,6 +118,10 @@ class CentralManager:
         self._cache_menu_action = install_cache_menu_action(
             getattr(self.menu_manager, 'file_menu', None),
             getattr(getattr(self.viewer, 'window', None), '_qt_window', None))
+        # Navigator: guided-analysis dock (question flow -> quality-gated, editable plan). Entry point here,
+        # not the line-capped menu god-file. on_run is left None until the plan-execution bridge lands.
+        from pycat.ui.navigator_dock import install_navigator_action
+        self._navigator_action = install_navigator_action(self.viewer)
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)
