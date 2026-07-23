@@ -11,8 +11,18 @@
 > gained `confidence_for(source, evidence)` grading WITHIN metadata (declarative 0.99 / derived 0.90 / weak
 > 0.70; flat 0.8 fallback for unstated), a `TagSet.evidence` field, and the documented scale in-code;
 > `user`/`pipeline`/`derived` unchanged. `tests/test_tag_confidence.py` (9 core tests).
-> **Part 3 + Part 4** (contradiction detection + severity, the metadata-button indicator, and the
-> per-pattern "expected for this instrument" anti-numbing store) remain — largely interactive/Qt-bound.
+> **Part 3 + Part 4 — the CORE ENGINE DONE (shipped 1.6.293); the Qt surface remains.** New Qt-free
+> `utils/metadata_contradictions.py`: `detect_contradictions` (immersion-vs-medium = critical with RI
+> cross-check; modality-vs-pixels = info, metadata-wins; never blocks), `has_critical` (the sole red trigger,
+> so info-only files show nothing — the biggest anti-numbing lever, Part 4a severity reusing critical/info),
+> a **cry-wolf**-clean contract (a clean file → zero, enforced by tests, Part 4b), and the **anti-numbing
+> store** over `user_settings` (Part 4c): mark-expected demotes to info (not delete), keyed to the acquisition
+> FINGERPRINT not the file, reversible, per-pattern only (no ignore-all), with a developer precision signal
+> (`rules_dismissed_across_many_fingerprints`). `test_metadata_contradictions.py` (8 `core` tests).
+> **Remaining:** the Qt surface — the metadata-button warning indicator (a distinct badge, NOT overloading
+> the step-status red, per the colour caution), the concrete hover tooltip, and the dialog listing
+> contradictions first; plus extracting immersion/medium/RI in `metadata_extract` so the immersion rule fires
+> on real files (the engine already handles them when present).
 
 
 **Date:** 2026-07-21 · **Target tree:** 1.6.269 · Verified against the 1.6.269 tree. Three joined

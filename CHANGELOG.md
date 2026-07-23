@@ -1,3 +1,26 @@
+## [1.6.293] - 2026-07-23
+### Added — **Metadata-contradiction engine: detected, severity-graded, cry-wolf-clean, anti-numbing per pattern (tag_confidence Parts 3–4 core).**
+A file can carry internally inconsistent metadata (a Zeiss ZEN export saying the objective is oil while
+ObjectiveSettings say the medium is air — RI 1.518 giving it away) or metadata that disagrees with the
+pixels. Showing every such disagreement on every file trains the user to ignore them. New Qt-free
+`utils/metadata_contradictions.py` keeps the signal meaningful:
+- `detect_contradictions(metadata, *, pixel_modality)` finds them, most-severe first, **never blocking, with
+  metadata always winning**: an oil-vs-air immersion/medium inconsistency is **critical** (it changes the
+  effective NA and microns-per-pixel) and named concretely with the RI cross-check; a declared-vs-pixel
+  modality mismatch is **info** (metadata wins, recorded). `has_critical` is the sole trigger for a red
+  indicator — info-only files show nothing.
+- **Cry-wolf discipline enforced by tests:** a clean, consistent file raises ZERO; wording differences
+  ('widefield fluorescence' vs 'fluorescence') are the same category, not a contradiction.
+- **Anti-numbing store** (reusing `user_settings`): a pattern marked "expected for this instrument" is
+  **demoted to info, not deleted** — keyed to the acquisition FINGERPRINT (never the file, or the user
+  re-dismisses forever), **reversibly**, **per-pattern only (no 'ignore all')**, and with a developer-facing
+  precision signal (`rules_dismissed_across_many_fingerprints`) so a rule dismissed across many setups is
+  fixed rather than absorbed.
+- Tests (`core`, `test_metadata_contradictions.py`, 8 tests): detection + concrete message + RI cross-check,
+  info-vs-critical, cry-wolf, fingerprint-not-file keying, per-pattern suppression, reversibility, the
+  developer precision signal. The red button indicator + tooltip + dialog listing (the Qt surface over this
+  engine) remain the follow-on; immersion/medium/RI field extraction feeds it as those land.
+
 ## [1.6.292] - 2026-07-23
 ### Changed — **Confidence scores the EVIDENCE, not the source label (tag_confidence Part 1): a binary pixel call is decisive or `None`, and metadata is graded within its source.**
 Confidence numbers were a coin flip. `classify_channel_from_pixels` reported a heuristic sum (0.5–0.7) for a
