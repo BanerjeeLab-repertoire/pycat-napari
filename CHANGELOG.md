@@ -1,3 +1,25 @@
+## [1.6.298] - 2026-07-23
+### Added — **Dock-space follow-ons: a real `collapse` mode and a Qt-smoke test of the actual tabbed mount.**
+Two of the three follow-ons noted on the `dock_space_management` spec:
+- **`collapse` mode** is now a real third option beside `tabify` (default) and `stack` (opt-out). For users
+  who prefer the stacked mental model, collapse mounts the results dock stacked and then grows it via
+  `QMainWindow.resizeDocks` — a **native Qt primitive**, not hand-rolled reparenting — so the tall method
+  panel shrinks to give room while staying open and reversible by dragging the splitter, with its parameter
+  state untouched. Headless-safe: no `_qt_window` → a clean no-op that leaves today's stacking.
+- **Qt-smoke tests** (`integration`) exercise the reflow against a **live `QMainWindow` with real
+  `QDockWidget`s**: tabify genuinely tabs the results dock with the method dock (asserted via Qt's own
+  `tabifiedDockWidgets`) and the method widget is never reparented (`.widget() is method`, text intact);
+  collapse invokes the real `resizeDocks` on the results dock without tabbing. These verify the actual Qt
+  primitives the design relies on, beyond the fake-window unit tests.
+- Tests (`test_dock_space.py`): +2 `core` (collapse mounts-stacked-then-grows via a recording fake-Qt window;
+  collapse no-ops without a Qt window) and +2 `integration` (the live-window tabify and collapse smokes).
+  Full core green (1770).
+
+The third follow-on — exposing the preference in a settings UI — remains **deferred**: the codebase has no
+preferences/settings panel, and the only menu surface is the contract-locked `menu_manager` god-file already
+flagged for decomposition, so a proper home is a small future preferences panel rather than more accretion on
+that file. The preference is fully functional today via `dock_space.set_reflow_mode`.
+
 ## [1.6.297] - 2026-07-23
 ### Fixed — **Results docks now get room: they tabify with the tall method panel instead of being starved below it (dock_space_management).**
 A brushable results dock was appended *below* the method widget in the same right-hand dock area, and Qt split

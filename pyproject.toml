@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.297"
+version = "1.6.298"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -123,7 +123,8 @@ gpu = [
 # of the stack.
 #
 # **bioio-bioformats MUST be pinned <2.0.** 2.0.0 depends on bffile, which requires numpy>=2.1 --
-# and PyCAT pins numpy<2.1 (cellpose + numba), so `pip install ...[bioformats]` would be
+# and PyCAT pins numpy<2.1 (**cellpose 3 only** -- numba is NOT a constraint: numba 0.66 runs
+# fine on numpy 2.3; see docs/source/known_issues.md), so `pip install ...[bioformats]` would be
 # unresolvable. 1.3.x is the numpy-safe line. The `numpy<2.1` pin is repeated here as a belt so the
 # extra can never trample the base env. (1.3.x bundles Java BioFormats 6.7.0, which cannot read
 # these CZIs; PyCAT overrides the scyjava endpoint to formats-gpl:8.1.1 + the OME Maven repo at JVM
@@ -197,7 +198,11 @@ arm-mac = [
     # `pip install pycat-napari[arm-mac]` fail with ResolutionImpossible on every
     # supported Python. Use a bounded range that has cp312 arm64 wheels while
     # staying within the torch range that still supports numpy<2.0 (matching the
-    # numpy>=1.22,<2.0 pin above).
+    # numpy>=1.22 base pin above).
+    #
+    # NOTE (2026-07-23): earlier wording here cited a base ``numpy>=1.22,<2.0`` pin. That pin no
+    # longer exists -- the base is ``numpy>=1.22``, unbounded. Re-derive this ceiling from current
+    # compatibility testing before trusting it. See docs/source/known_issues.md.
     "torch>=2.2.0,<2.3.0; platform_system=='Darwin' and platform_machine=='arm64'"
 ]
 

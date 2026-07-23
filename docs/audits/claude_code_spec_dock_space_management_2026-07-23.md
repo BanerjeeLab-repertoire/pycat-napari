@@ -11,8 +11,13 @@
 > `'stack'` = today) is a MODE string so `'collapse'` can be added later; mount is idempotent + headless-safe +
 > falls back to a plain mount if `tabify` is unavailable. Routed through all four results mounts (VPT, batch,
 > cellular-object, IVF-droplet). `tests/test_dock_space.py` (`core`, 9 tests). Full core green (1759).
-> **Follow-ons (not blocking):** a Qt-smoke test of the real tabbed mount under a live viewer; exposing the
-> preference in a settings UI; adding a `'collapse'` mode if a user wants the stacked mental model back.
+> **Follow-ons:** ✅ Qt-smoke test of the real tabbed mount (1.6.298 — a live `QMainWindow` verifies tabify
+> genuinely tabs + method state survives, and collapse invokes real `resizeDocks`). ✅ `'collapse'` mode
+> (1.6.298 — a real third mode via `QMainWindow.resizeDocks`, grows the results dock so the method panel
+> shrinks while staying open/reversible/state-preserving). ⏸ **Deferred:** exposing the preference in a
+> settings UI — the codebase has no preferences panel, and the only menu surface is the contract-locked
+> `menu_manager` god-file already flagged for decomposition; the right home is a future small preferences
+> panel, not more accretion there. The preference works today via `dock_space.set_reflow_mode`.
 >
 > **Note:** the spec's line references (`ui_modules.py:762…`, `vpt/results_dock.py:182`) are from the 1.6.281
 > tree; the results mounts now live under `toolbox/` — the shared-helper fix is location-independent.

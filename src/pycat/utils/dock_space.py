@@ -13,10 +13,11 @@ main risk the spec flags). It is reversible (drag the tab out), obvious (tabs ar
 method that mounts through this helper inherits it). A user can opt out to today's stacking via the
 ``ui.results_dock_reflow`` = ``'stack'`` preference.
 
-Chosen tabify over collapse: Qt has no native "collapse a dock to its title bar" primitive (a hand-rolled one
-would fight napari 0.7.x, exactly what the spec cautions against), whereas ``tabify`` is a supported napari
-call that satisfies every constraint — room, reversibility, visible affordance, and guaranteed state
-preservation — with no widget surgery. The preference is a MODE string so ``'collapse'`` can be added later.
+Default is tabify: it satisfies every constraint — room, reversibility, visible affordance, and guaranteed
+state preservation — with no widget surgery. For users who prefer the stacked mental model, ``'collapse'``
+grows the results dock via ``QMainWindow.resizeDocks`` (a native primitive, not hand-rolled reparenting) so
+the tall method panel shrinks to give room while staying open and reversible by dragging the splitter.
+``'stack'`` opts out to today's even height-split.
 
 Qt-free: the napari ``window`` is duck-typed (only ``add_dock_widget`` is called), so the whole helper is
 core-tested with a fake window and no Qt import; it no-ops cleanly when there is no window (headless)."""
@@ -26,8 +27,10 @@ from __future__ import annotations
 PREF_KEY = 'ui.results_dock_reflow'
 #: Default favours VISIBILITY — the reported problem is that results are invisible — but it is opt-out.
 DEFAULT_MODE = 'tabify'
-#: 'tabify' → results dock tabs with the method panel (full height); 'stack' → today's height-split behaviour.
-VALID_MODES = ('tabify', 'stack')
+#: 'tabify' → results dock tabs with the method panel (full height); 'collapse' → keep the stacked mental
+#: model but grow the results dock so the tall method panel shrinks to give it room; 'stack' → today's
+#: even height-split behaviour (opt-out).
+VALID_MODES = ('tabify', 'collapse', 'stack')
 
 
 def reflow_mode(settings) -> str:
@@ -51,19 +54,37 @@ def set_reflow_mode(settings, mode):
 
 
 def plan_results_mount(*, mode, has_results_widget, has_method_panel=True, already_reflowed=False) -> str:
-    """Pure decision for how to mount a results dock: ``'tabify'`` or ``'stack'``. Backward-compatible (mode
-    ``'stack'`` → ``'stack'``, exactly today's behaviour); safe (no widget to mount, or nothing to tab onto →
-    ``'stack'``); idempotent (an already-reflowed area → ``'stack'`` so a second results dock does not
-    re-reflow an area that is already tabbed)."""
+    """Pure decision for how to mount a results dock: ``'tabify'``, ``'collapse'``, or ``'stack'``.
+    Backward-compatible (mode ``'stack'`` → ``'stack'``, exactly today's behaviour); safe (no widget to mount,
+    or no method panel to reflow against → ``'stack'``); idempotent (an already-reflowed area → ``'stack'`` so
+    a second results dock does not re-reflow an area that is already tabbed or collapsed)."""
     if not has_results_widget:
         return 'stack'
     if mode == 'stack':
         return 'stack'
     if not has_method_panel:
-        return 'stack'          # nothing to tab onto — a plain mount is the correct outcome
+        return 'stack'          # nothing to tab onto / collapse beside — a plain mount is the correct outcome
     if already_reflowed:
         return 'stack'
-    return mode                 # 'tabify'
+    return mode                 # 'tabify' or 'collapse'
+
+
+def _apply_collapse(window, dock):
+    """Grow the results ``dock`` so the taller method panel collapses to give it room, using
+    ``QMainWindow.resizeDocks`` — a **native Qt primitive**, not hand-rolled widget reparenting, so the method
+    widget's state is untouched and the change is reversible by dragging the splitter. Guarded and
+    headless-safe: no ``_qt_window`` (or any Qt hiccup) → a clean no-op that just leaves today's stacking.
+    Never raises."""
+    qt = getattr(window, '_qt_window', None)
+    if qt is None or dock is None or not hasattr(qt, 'resizeDocks'):
+        return
+    try:
+        from qtpy.QtCore import Qt as _Qt
+        # A very large target height maxes the results dock; Qt shrinks the siblings (the tall method panel)
+        # to their minimum. This gives the results the freed vertical space without closing the method panel.
+        qt.resizeDocks([dock], [1_000_000], _Qt.Vertical)
+    except Exception:      # broad-ok: ui_cleanup — collapse is cosmetic; a failure just leaves the stacking
+        pass
 
 
 def add_results_dock(window, widget, *, name, settings=None, area='right', already_reflowed=False):
@@ -91,4 +112,7 @@ def add_results_dock(window, widget, *, name, settings=None, area='right', alrea
             return window.add_dock_widget(widget, name=name, area=area, tabify=True)
         except Exception:      # broad-ok: ui_cleanup — reflow is cosmetic; fall back so results never vanish
             pass
-    return window.add_dock_widget(widget, name=name, area=area)
+    dock = window.add_dock_widget(widget, name=name, area=area)     # 'collapse' and 'stack' both mount stacked
+    if action == 'collapse':
+        _apply_collapse(window, dock)                               # then grow the results dock to shrink method
+    return dock
