@@ -168,6 +168,41 @@ def test_collapse_mode_is_a_clean_noop_without_a_qt_window(tmp_path):
     assert dock == ('dock', 'VPT Results', False) and win.calls[0]['tabify'] is False
 
 
+@pytest.mark.core
+def test_collapse_leaves_the_dock_mounted_if_resize_raises(tmp_path):
+    # never-lose-the-dock: a resizeDocks that raises (older napari / Qt hiccup) must leave the dock stacked
+    class _BoomQt:
+        def resizeDocks(self, *a, **k):
+            raise RuntimeError("Qt hiccup")
+
+    store = _store(tmp_path)
+    set_reflow_mode(store, 'collapse')
+    win = _FakeWindow(with_qt=False)
+    win._qt_window = _BoomQt()
+    dock = add_results_dock(win, 'W', name='VPT Results', settings=store)
+    assert dock == ('dock', 'VPT Results', False) and win.calls[0]['tabify'] is False
+
+
+# ── Guard A: the declared mode vocabulary agrees across setter, planner, and the preference registry ──
+
+@pytest.mark.core
+def test_guard_A_every_declared_mode_is_settable_reachable_and_matches_the_registry(tmp_path):
+    # every declared mode can be SET without raising and reads back (no declared-but-unsettable mode)
+    for i, mode in enumerate(VALID_MODES):
+        store = UserSettings(path=tmp_path / f"s{i}.json")
+        set_reflow_mode(store, mode)
+        assert reflow_mode(store) == mode
+    # every declared mode is REACHABLE from plan_results_mount (no declared-but-dead option — the exact gap
+    # that let `collapse` be tested while absent from the planner)
+    for mode in VALID_MODES:
+        assert plan_results_mount(mode=mode, has_results_widget=True) == mode
+    # the preference registry's options for the reflow key EQUAL VALID_MODES exactly (both directions)
+    from pycat.utils.preferences import list_preferences
+    from pycat.utils import dock_space
+    by_key = {v.key: v for v in list_preferences(None)}
+    assert {o.value for o in by_key[dock_space.PREF_KEY].options} == set(VALID_MODES)
+
+
 # ── Qt-smoke: the reflow drives the REAL Qt dock primitives our design relies on ────────────────────
 # (integration — a live QMainWindow with real QDockWidgets; the `core` lane stays headless.)
 

@@ -1625,3 +1625,32 @@ specs. Coverage:
 
 These three are the remaining engineering-audit work beyond the three specs written. VPT and timeseries
 domain splits are the large ones and should be their own coverage-gated specs when picked up.
+
+---
+
+## 8. Descoping discipline — when a spec defers an alternative, say "do not test X" (2026-07-23)
+
+Three consecutive CI failures were **test defects, not product bugs**: a test's own numeric assumption was
+wrong (`test_unmixing::negative_fraction`); Qt-requiring tests marked `core` in a lane without pytest-qt
+(4× `qtbot` collection errors); and a test asserting a dock-reflow mode (`collapse`) the module had
+deliberately *deferred* and never declared in `VALID_MODES`.
+
+The `collapse` case originated in a spec that named **tabify** as the decision and **collapse** as a possible
+follow-on — the implementation honoured that (tabify only; `VALID_MODES = ('tabify', 'stack')`), but the
+tests for collapse were written anyway, so they failed against a mode the module correctly did not have.
+
+**Discipline:** when a spec descopes an alternative, state it explicitly in the spec's *test* section — e.g.
+"do not write tests for `collapse`; it is a deferred follow-on." A decision named only in prose ("we chose
+tabify") is not enough; the test section is what the test author reads.
+
+**Guards that catch what slips through** (added 1.6.304, `collapse_mode_and_test_guards` spec):
+- **Guard A** (`test_dock_space::test_guard_A_*`): every entry in a `VALID_*` vocabulary must be settable,
+  reachable from its planner, and match the preference-registry options exactly — no declared-but-dead or
+  implemented-but-undeclared option.
+- **Guard B** (`test_ci_dependencies::test_no_test_exercises_an_option_the_module_does_not_declare`): a test
+  passing a string literal to a declared-vocabulary option setter (e.g. `set_reflow_mode`) must use a value
+  in the module's `VALID_*` set, unless the call is inside `with pytest.raises(...)` (a legitimate rejection
+  test). Narrow and mechanical — scoped to setters with a `VALID_*` constant, so it does not become a broad
+  "tests must match specs" check that would false-positive and get disabled.
+
+Neither guard replaces the descoping discipline; they catch the cases where the discipline was not followed.

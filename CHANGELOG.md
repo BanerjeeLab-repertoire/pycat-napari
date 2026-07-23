@@ -1,3 +1,23 @@
+## [1.6.304] - 2026-07-23
+### Added — **Two guards against spec-drift test failures (collapse_mode_and_test_guards).**
+The `collapse` reflow mode (Part 1 of the spec) was already implemented in 1.6.298 and hardened in 1.6.303;
+this ship completes the spec with the two guards for the *class* of failure it belongs to — a test asserting
+behaviour the module never declared — plus the descoping discipline that prevents it upstream.
+- **Guard A** (`test_dock_space::test_guard_A_*`): the declared mode vocabulary must agree across the three
+  places it lives — every entry in `VALID_MODES` is settable via `set_reflow_mode` without raising, is
+  reachable from `plan_results_mount` (no declared-but-dead option), and equals the preference registry's
+  options for `ui.results_dock_reflow` exactly. Catches a mode declared-but-unimplemented or the reverse.
+- **Guard B** (`test_ci_dependencies::test_no_test_exercises_an_option_the_module_does_not_declare`): an
+  AST scan asserting that any string literal a test passes to a declared-vocabulary option setter
+  (`set_reflow_mode`) is in the module's `VALID_*` set — unless the call is inside `with pytest.raises(...)`
+  (a legitimate rejection test). This is exactly the defect that let `collapse` be tested before it existed.
+  Deliberately narrow and mechanical (scoped to setters with a `VALID_*` constant) so it can't become a
+  broad "tests must match specs" check that false-positives and gets disabled.
+- Also added `test_collapse_leaves_the_dock_mounted_if_resize_raises` (never-lose-the-dock when `resizeDocks`
+  throws) and a DEV_NOTES section on the descoping discipline: when a spec defers an alternative, say so in
+  the spec's *test* section ("do not write tests for X"), not only in prose. No product-code change; full
+  core green.
+
 ## [1.6.303] - 2026-07-23
 ### Fixed — **Dock collapse no longer silently no-ops in the minimal (no-qtpy) core lane.**
 The `collapse` reflow mode's `_apply_collapse` did `from qtpy.QtCore import Qt` before calling `resizeDocks`.

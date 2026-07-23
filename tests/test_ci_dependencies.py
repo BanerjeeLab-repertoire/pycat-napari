@@ -410,3 +410,82 @@ def test_no_core_test_file_imports_the_gui_stack_at_module_scope():
           "napari/Qt on purpose), erroring the file's core tests for the wrong reason. Move the GUI "
           "import inside the integration test that needs it."
     )
+
+
+# ── A test may not exercise an option the module does not declare ────────────────────────────────────
+#
+# A recurring CI failure class is a TEST DEFECT, not a product bug: a test asserts behaviour for an option
+# the module never declared. The dock_space `collapse` failure was exactly this — a mode asserted in tests
+# while absent from `VALID_MODES`, so the setter raised and the planner had no branch. This guards the class:
+# for option setters that validate against a declared `VALID_*` vocabulary, every string literal a test
+# passes them must be in that vocabulary — UNLESS the call sits inside a `with pytest.raises(...)` block,
+# where asserting that an invalid value is REJECTED is legitimate. Narrow and mechanical by design.
+
+
+def _declared_option_setters():
+    """Map an option-setter NAME to a callable returning its module's declared valid-value set. Scoped to
+    setters backed by a ``VALID_*`` vocabulary (a broad 'tests must match specs' check would false-positive
+    and get disabled). Extend this as more such setters appear."""
+    def _reflow_modes():
+        from pycat.utils.dock_space import VALID_MODES
+        return set(VALID_MODES)
+    return {'set_reflow_mode': _reflow_modes}
+
+
+def _call_simple_name(call):
+    f = call.func
+    if isinstance(f, ast.Attribute):
+        return f.attr
+    if isinstance(f, ast.Name):
+        return f.id
+    return None
+
+
+def _calls_inside_pytest_raises(tree):
+    """Every ``Call`` node that lives inside a ``with pytest.raises(...):`` block — those deliberately test
+    that an INVALID value is rejected, so they are exempt from the vocabulary check."""
+    guarded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.With):
+            for item in node.items:
+                ctx = item.context_expr
+                if isinstance(ctx, ast.Call) and _call_simple_name(ctx) == "raises":
+                    for sub in ast.walk(node):
+                        if isinstance(sub, ast.Call):
+                            guarded.add(sub)
+    return guarded
+
+
+@pytest.mark.core
+def test_no_test_exercises_an_option_the_module_does_not_declare():
+    """Guard B (collapse_mode_and_test_guards): a test passing a string literal to a declared-vocabulary
+    option setter must use a value the module actually declares — otherwise it is testing a deferred/rejected
+    alternative (the `collapse`-not-in-`VALID_MODES` failure). Calls inside `with pytest.raises(...)` are
+    exempt (rejection tests)."""
+    setters = _declared_option_setters()
+    offenders = []
+    for path in sorted(_TESTS_DIR.rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        guarded = _calls_inside_pytest_raises(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or node in guarded:
+                continue
+            name = _call_simple_name(node)
+            if name not in setters:
+                continue
+            valid = setters[name]()
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value not in valid:
+                    offenders.append(f"{path.name}: {name}(..., {arg.value!r}) — not in {sorted(valid)}")
+
+    assert not offenders, (
+        "These tests pass an option-setter a value its module does not declare (outside a `pytest.raises` "
+        "rejection test) — i.e. they exercise a deferred/rejected alternative, the class of defect that let "
+        "`collapse` be tested before it was implemented:\n  " + "\n  ".join(offenders)
+        + "\n\nEither the module should DECLARE and implement the option (add it to its VALID_* set), or the "
+          "test should not assert working behaviour for it. If you are testing that the value is REJECTED, "
+          "wrap the call in `with pytest.raises(...)`."
+    )
