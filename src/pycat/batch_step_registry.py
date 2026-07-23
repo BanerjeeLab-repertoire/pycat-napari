@@ -373,9 +373,22 @@ _STEP_OPERATIONS: dict[str, tuple[str, ...]] = {
     'auto_crop_roi':            ('multi_otsu',),
     'cellpose_segmentation':    ('cellpose', 'stardist'),
     'condensate_segmentation':  ('mask_stretch', 'subcellular_segment'),
-    'ivf_segmentation':         ('mask_stretch', 'subcellular_segment'),
+    # 'ivf_segmentation' is INTENTIONALLY not declared here (removed, not just
+    # left unmapped): replay_ivf_segmentation dispatches on a recorded
+    # 'method' across 5 genuinely different code paths (otsu/multiotsu are
+    # bare skimage calls with no operation tag at all; sauvola calls
+    # local_thresholding_func; rf is untagged/unreplayable; only the rare
+    # 'spot' fallback invokes mask_stretch+subcellular_segment). A single
+    # step-name-keyed entry can't express "which ops, conditioned on which
+    # recorded param" -- declaring ('mask_stretch', 'subcellular_segment')
+    # unconditionally was actively misleading for the 4 other methods (it's
+    # what the "Recorded Steps" viewer showed for e.g. a multiotsu-recorded
+    # step, even though multiotsu never touches either op). A guessed/stale
+    # mapping is worse than none -- see this module's own stated principle.
     'bf_condensate_segmentation': ('bf_segment',),
-    'ivbf_segmentation':        ('bf_segment',),
+    'ivbf_segmentation':        ('bf_segment',),   # unambiguous: bf_segment tags
+                                                     # segment_bf_condensates itself,
+                                                     # regardless of its internal method
     'ivf_size_distribution':    ('invitro.size_distribution',),   # a MEASURE op
 }
 

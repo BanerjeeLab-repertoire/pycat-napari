@@ -93,14 +93,32 @@ def _first_step(config: Dict, *names: str) -> Optional[Dict]:
     return None
 
 
+def _all_open_image_steps(config: Dict) -> List[Dict]:
+    """All recorded 'open_image' steps, in order.
+
+    A session that opens several single-channel files as SEPARATE actions
+    (e.g. Open 2D Image(s) for a Ch1 file, then again for a Ch2 file --
+    rather than multi-selecting both in one dialog) records one open_image
+    step per file, each with its own single-entry source_files/file_path and
+    an empty channel_assignment. This is a distinct recording shape from the
+    single-step multi-select case below and must be detected separately.
+    """
+    return [s for s in config.get("steps", []) if s.get("step") == "open_image"]
+
+
 def _config_uses_split_source_files(config: Dict) -> bool:
-    """True when the recorded open step came from multiple source files."""
+    """True when the recorded open step(s) came from multiple source files --
+    either one 'Open' action with several files selected at once
+    (source_files on a single step), or multiple separate open_image actions
+    (one step per file)."""
     open_step = _first_step(config, "open_image", "open_stack")
     if not open_step:
         return False
     params = open_step.get("params", {}) or {}
     src = params.get("source_files") or []
-    return len(src) > 1
+    if len(src) > 1:
+        return True
+    return len(_all_open_image_steps(config)) > 1
 
 
 def _primary_source_suffix(config: Dict) -> Optional[str]:
@@ -111,14 +129,23 @@ def _primary_source_suffix(config: Dict) -> Optional[str]:
     double-counts the dataset. We process only files that look like the first
     recorded source and let replay_open_image locate its companions.
     """
+    from pathlib import Path as _Path
     open_step = _first_step(config, "open_image", "open_stack")
     if not open_step:
         return None
     params = open_step.get("params", {}) or {}
     src = params.get("source_files") or []
     if len(src) < 2:
-        return None
-    from pathlib import Path as _Path
+        # Not a single-step multi-select -- check for multiple SEPARATE
+        # open_image steps instead (one file per step; see
+        # _all_open_image_steps).
+        open_steps = _all_open_image_steps(config)
+        if len(open_steps) < 2:
+            return None
+        src = [s.get("params", {}).get("file_path") for s in open_steps]
+        src = [p for p in src if p]
+        if len(src) < 2:
+            return None
     stems = [_Path(x).stem for x in src]
     primary = stems[0]
     # Longest common prefix among the recorded split files.
@@ -389,6 +416,17 @@ class BatchWorker(QThread):
         # Propagate the batch-level auto-ball_radius decision so the open_image
         # replay can estimate it per image when appropriate.
         state['_auto_ball_radius'] = getattr(self, '_auto_ball_radius', False)
+        # For split-file recordings (multiple separate 'open_image' steps --
+        # e.g. two single-channel files opened as separate layers), tell
+        # replay_open_image which recorded file_path was the PRIMARY (first)
+        # one, so any later open_image step in this same file's replay can
+        # resolve its OWN companion file for the current batch sample instead
+        # of reloading the primary file again (see replay_open_image).
+        _open_steps = _all_open_image_steps(self.config)
+        if len(_open_steps) > 1:
+            _primary_file = (_open_steps[0].get("params", {}) or {}).get('file_path')
+            if _primary_file:
+                state['_primary_open_image_stem'] = Path(_primary_file).stem
         for step_entry in self.config.get("steps", []):
             step_name = step_entry.get("step", "")
             params = step_entry.get("params", {})

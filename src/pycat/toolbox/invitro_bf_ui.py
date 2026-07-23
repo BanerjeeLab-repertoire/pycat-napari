@@ -197,7 +197,11 @@ def _ivbf_preprocessing(ui, layout):
             ui._dr()['ivbf_bg_subtracted']= res['bg_subtracted']
             ui._dr()['ivbf_source']       = img
             ui._record('ivbf_preprocess', {'image_layer': img_dd.currentText(),
-                                            'bg_kernel': bg_sp.value()})
+                                            'bg_kernel': bg_sp.value(),
+                                            'halo_weight': halo_sp.value(),
+                                            'use_flat_field_reference': ref_cb.isChecked(),
+                                            'flat_field_reference_layer': (
+                                                ref_dd.currentText() if ref_cb.isChecked() else None)})
             napari_show_info("In vitro BF preprocessing done.")
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -285,7 +289,8 @@ def _ivbf_segmentation(ui, layout):
             ui._record('ivbf_segmentation', {'enhanced_layer': enh_dd.currentText(),
                                               'method': _method,
                                               'texture_window': _tw, 'split': _split,
-                                              'min_d': _mind, 'max_d': _maxd})
+                                              'min_d': _mind, 'max_d': _maxd,
+                                              'min_circularity': _circ})
             napari_show_info(f"In vitro BF: {n} droplets segmented ({_method}).")
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -596,6 +601,11 @@ def _ivbf_dynamics(ui, layout):
                 tables.append(("Fusion relaxation", res['fusions']))
             ui._record('ivbf_dynamics', {
                 'stack_layer': stack_dd.currentText(), 'frame_interval_s': dt,
+                'max_displacement_um': disp_sp.value(),
+                'run_coarsening': cb_coarse.isChecked(),
+                'run_sedimentation': cb_sed.isChecked(),
+                'run_msd': cb_msd.isChecked(),
+                'run_fusion_fit': cb_fuse.isChecked(),
             })
             _show("IVBF Dynamics", tables)
         def _err(msg):
@@ -650,7 +660,9 @@ def _ivbf_focus_qc(ui, layout):
             run.setEnabled(True)
             df = res['per_frame_df']; summ = res['summary']
             ui._dr()['ivbf_frame_qc'] = df
-            ui._record('ivbf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df)})
+            ui._record('ivbf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df),
+                                          'frame_interval_s': dt_sp.value(),
+                                          'defocus_threshold': thr_sp.value()})
             summ_df = pd.DataFrame([{k:v for k,v in summ.items() if k!='recommendation'}])
             _show("IVBF Focus QC", [("Summary", summ_df), ("Per-frame", df)])
             n = summ['n_defocused_frames']

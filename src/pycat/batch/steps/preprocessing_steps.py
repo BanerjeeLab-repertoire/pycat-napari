@@ -43,6 +43,22 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
     on_fluor = 'fluorescence' in active_name  # default (incl. "segmentation") -> seg
 
     def _proc(arr):
+        # run_pre_process_image (the interactive path) caps ball_radius/window_size
+        # to 5% of the image's own smaller dimension (min 4px) to avoid a
+        # MemoryError from an oversized rolling-ball structuring element -- but
+        # that cap is a LOCAL variable there, never written back to
+        # data_repository, so the recorded ball_radius/window_size above are the
+        # PRE-cap values. Replaying with the uncapped values silently applies a
+        # larger ball_radius/window_size than the GUI actually used whenever the
+        # cap would have triggered (small images, or after upscaling pushes
+        # ball_radius close to/above the threshold) -- a different LoG sigma,
+        # WBNS scale and CLAHE tile size, and the exact MemoryError risk the cap
+        # exists to prevent. The cap must be recomputed per-image (not reused
+        # from the recording) since a batch image's shape can differ from what
+        # was used interactively.
+        _max_radius = max(4, int(min(np.asarray(arr).shape[-2:]) * 0.05))
+        _br = min(ball_radius, _max_radius)
+        _ws = min(window_size, _max_radius * 2)
         # ── BATCH MUST PASS RAW COUNTS. It was pre-normalising, and that is the bug. ──
         #
         # **Gable's report: batch segments the same image differently from the recording.**
@@ -72,7 +88,7 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
         # the rolling ball's radius has an intensity component, so pedestal subtraction changes
         # the segmentation too.
         return np.asarray(pre_process_image(
-            _raw_counts(arr), ball_radius, window_size,
+            _raw_counts(arr), _br, _ws,
             suppress_foreground=suppress_foreground,
             suppression_params=suppression_params)).astype(np.float32)
 
@@ -128,6 +144,12 @@ def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Pa
         )
         data_instance.data_repository['ball_radius'] = (
             _get_data(data_instance, 'ball_radius', 50) * upscale_factor
+        )
+        # run_upscaling_func also scales object_size (image_processing/upscaling.py) --
+        # replay previously only synced cell_diameter/ball_radius/microns_per_pixel_sq,
+        # leaving object_size stale at its pre-upscale value for every batch run.
+        data_instance.data_repository['object_size'] = (
+            _get_data(data_instance, 'object_size', 50) * upscale_factor
         )
         data_instance.data_repository['microns_per_pixel_sq'] = (
             _get_data(data_instance, 'microns_per_pixel_sq', 1.0) / (upscale_factor ** 2)

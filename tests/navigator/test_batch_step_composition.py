@@ -29,9 +29,17 @@ from pycat.batch_step_registry import _STEP_MAP, _STEP_OPERATIONS, step_operatio
 from pycat.navigator.op_catalog import _measure_ops, load_operation_catalog
 
 # Coverage floor — how many steps declare their operations today. RATCHET: raise it as more steps are
-# mapped; it must never decrease (a dropped mapping is a regression). Same discipline as the operation
-# graph's input floor and the complexity budget's ceiling.
-_MIN_STEPS_DECLARED = 10
+# mapped; it must never decrease from neglect (a dropped mapping is a regression). Same discipline as
+# the operation graph's input floor and the complexity budget's ceiling.
+#
+# Lowered 10 -> 9 deliberately (not a neglect-regression): 'ivf_segmentation' was removed from
+# _STEP_OPERATIONS because its declared ops ('mask_stretch', 'subcellular_segment') were DISPROVEN, not
+# merely unmaintained -- replay_ivf_segmentation was fixed to dispatch across 5 methods recorded via a
+# 'method' param (otsu/multiotsu/sauvola/rf/spot), and that pair of ops is only actually invoked by the
+# rare 'spot' fallback. The other four are either untagged skimage calls or a different function
+# entirely, so no single unconditional tuple can honestly describe this step. Per this module's own
+# principle ("a guessed mapping is worse than none"), removing a proven-wrong entry is not a regression.
+_MIN_STEPS_DECLARED = 9
 
 
 def _operation_vocabulary():

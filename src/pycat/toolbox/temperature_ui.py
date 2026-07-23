@@ -866,7 +866,21 @@ class TemperatureDependentUI:
             pass
         napari_show_info(f"Batch complete: {n_ok}/{len(df)} TIFFs processed successfully.")
         self._record('temperature_batch', {
-            'tiff_root': tiff_root, 'temp_root': temp_root, 'n_files': len(df), 'n_ok': n_ok,
+            'tiff_root': tiff_root, 'temp_root': temp_root,
+            'subtract_first_frame': self._subtract_first.isChecked(),
+            'correct_focal_drift': self._correct_focus.isChecked(),
+            'temp_column': self._temp_col.text().strip() or 'AI0 (°C)',
+            'csv_header': self._csv_header.value(),
+            'export_mp4': self._batch_export_mp4.isChecked(),
+            'export_corrected': self._batch_export_corrected.isChecked(),
+            'fps': self._fps.value(),
+            'pixel_um': self._pixel_size(),
+            'use_scalebar': self._use_scalebar.isChecked(),
+            'build_phase_diagram': (getattr(self, '_batch_phase_diagram', None) is not None
+                                     and self._batch_phase_diagram.isChecked()),
+            'phase_side': (self._phase_side.currentIndex()
+                            if getattr(self, '_phase_side', None) is not None else None),
+            'n_files': len(df), 'n_ok': n_ok,
         })
 
         # Phase diagram from the batch (parse filenames for the swept variable).

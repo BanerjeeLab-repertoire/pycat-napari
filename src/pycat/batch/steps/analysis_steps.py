@@ -122,6 +122,18 @@ def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir
         state['no_cells'] = True
         return
 
+    # An omit-mask layer is created and hand-painted interactively (the user
+    # marks structures like nucleoli to exclude) -- there is no file or
+    # recorded geometry to reconstruct it from headlessly, so it can never be
+    # applied in batch mode. Warn loudly rather than silently including cells
+    # the interactive run would have excluded.
+    omit_layer = params.get('omit_layer')
+    if omit_layer and str(omit_layer).strip().lower() not in ('', 'none'):
+        print(f"[PyCAT Batch]   Cell analysis: recorded omit mask "
+              f"'{omit_layer}' was hand-painted interactively and cannot be "
+              f"reconstructed in batch mode -- proceeding WITHOUT it. Cells "
+              f"the interactive session excluded may be included here.")
+
     labeled_cell_masks, cell_df = cell_analysis_func(
         image, cell_masks, omission_mask=None, data_instance=data_instance
     )
@@ -138,30 +150,56 @@ def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir
 
 
 def replay_sacf_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
-    from pycat.toolbox.spatial_acf_tools import sacf_per_cell_per_slice
+    """Replay Spatial ACF analysis, dispatching on the recorded mode exactly
+    like run_sacf_analysis (spatial_acf_tools.py) does.
+
+    Previously this imported `sacf_per_cell_per_slice`, a function that does
+    not exist anywhere in the codebase -- every batch run of this step raised
+    an ImportError, regardless of what was recorded. It also never read
+    `params['mode']` at all, so even a fixed import would have silently run
+    LIR-style logic for 'drawn_rectangle'/'whole_image' recordings.
+    """
+    from pycat.toolbox.spatial_acf_tools import (
+        sacf_lir_mode, sacf_whole_image_mode, MODE_LIR, MODE_RECT, MODE_WHOLE)
     import numpy as np
 
-    image = state['image']
-    labeled_cells = state.get('labeled_cells')
     data_instance = state['data_instance']
+    mode = params.get('mode', MODE_LIR)
 
-    if labeled_cells is None:
-        print("[PyCAT Batch] SACF: no labeled cell mask in state — skipping.")
+    image = _resolve_image_layer(state, params.get('image_layer'), fallback=state.get('image'))
+    if image is None:
+        print("[PyCAT Batch]   SACF skipped: recorded image_layer not found in state.")
         return
-
     stack = image[np.newaxis, ...] if image.ndim == 2 else image
     microns_per_pixel = np.sqrt(
         data_instance.data_repository.get('microns_per_pixel_sq', 1.0)
     )
 
-    results_df = sacf_per_cell_per_slice(
-        stack=stack,
-        labeled_cell_mask=labeled_cells,
-        microns_per_pixel=microns_per_pixel,
-    )
+    if mode == MODE_LIR:
+        labeled_cells = state.get('labeled_cells')
+        if labeled_cells is None:
+            print("[PyCAT Batch]   SACF (LIR mode) skipped: no labeled cell mask in state.")
+            return
+        results_df = sacf_lir_mode(stack, labeled_cells, microns_per_pixel)
+    elif mode == MODE_WHOLE:
+        results_df = sacf_whole_image_mode(stack, microns_per_pixel)
+    elif mode == MODE_RECT:
+        # A drawn-rectangle Shapes layer is created interactively (the user
+        # draws rectangles on the canvas) -- there is no file or recorded
+        # geometry to reconstruct it from headlessly. Recorded for
+        # provenance only; say so explicitly rather than silently skipping
+        # or guessing a substitute ROI.
+        print("[PyCAT Batch]   SACF (drawn-rectangle mode) skipped in headless "
+              "mode: the ROI rectangles were drawn interactively and cannot "
+              "be reconstructed from the recorded config.")
+        return
+    else:
+        print(f"[PyCAT Batch]   SACF: unknown recorded mode {mode!r} — skipping.")
+        return
+
     results_df.to_csv(output_dir / f"{image_path.stem}_sacf_results.csv", index=False)
     data_instance.data_repository['sacf_results_df'] = results_df
-    print(f"[PyCAT Batch]   SACF done: {len(results_df)} rows.")
+    print(f"[PyCAT Batch]   SACF ({mode}) done: {len(results_df)} rows.")
 
 
 def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -172,6 +210,7 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     from pycat.toolbox.segmentation_tools import (
         segment_subcellular_objects, cell_mask_stretching
     )
+    from pycat.toolbox.segmentation.intensity import compute_image_intensity_stats
     import pandas as pd
 
     if state.get('no_cells'):
@@ -209,6 +248,24 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
     total_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
     total_refined_puncta_mask = np.zeros_like(labeled_cells, dtype=bool)
 
+    # ── Absolute-intensity punctate gate ────────────────────────────────
+    # run_segment_subcellular_objects (the interactive path) computes this
+    # ONCE globally, before any per-cell/per-crop renormalisation, and passes
+    # it into every per-cell call -- it's what lets segment_subcellular_objects
+    # tell "this cell is genuinely empty" apart from "this cell's noise got
+    # stretched to look like signal" by CLAHE. Replay previously never
+    # computed or passed it, so image_stats defaulted to None and the
+    # phantom-cell gate was silently disabled for every batch run --
+    # systematically more permissive on empty/noisy cells than the
+    # interactive session, independent of any single recorded parameter.
+    # compute_image_intensity_stats returns position-independent scalars
+    # (bg_median/bg_sigma/smooth_sigma), so the same globally-computed dict
+    # is valid for both the bbox-crop and full-image branches below.
+    min_spot_radius = params.get('min_spot_radius', 2)
+    image_stats = compute_image_intensity_stats(
+        original_image, labeled_cells,
+        smooth_sigma=max(0.5, min_spot_radius / 2.0))
+
     # Per-cell bounding boxes from auto_crop_roi step (if it ran).
     # Processing each cell in its own tight crop avoids operating on the
     # full 2048×2048 image for every cell — substantial speedup for images
@@ -232,7 +289,8 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 global_snr_threshold=params.get('global_snr_threshold', 1.0),
                 intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
                 max_area_fraction=params.get('max_area_fraction', 0.25),
-                min_spot_radius=params.get('min_spot_radius', 2),
+                min_spot_radius=min_spot_radius,
+                image_stats=image_stats,
             )
             # Stitch results back into full-image mask
             total_puncta_mask[y0:y1, x0:x1]         |= unrefined_crop
@@ -247,7 +305,8 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 global_snr_threshold=params.get('global_snr_threshold', 1.0),
                 intensity_hwhm_scale=params.get('intensity_hwhm_scale', 1.17),
                 max_area_fraction=params.get('max_area_fraction', 0.25),
-                min_spot_radius=params.get('min_spot_radius', 2),
+                min_spot_radius=min_spot_radius,
+                image_stats=image_stats,
             )
             total_puncta_mask |= unrefined
             total_refined_puncta_mask |= refined

@@ -330,9 +330,15 @@ def _ivf_preprocessing(ui, layout):
             ui.viewer.add_image(proc, name=f"IVF Preprocessed [{img_dd.currentText()}]",
                                  colormap='viridis')
             ui._dr()['ivf_preprocessed'] = proc
-            ui._record('ivf_preprocess', {'image_layer': img_dd.currentText(),
-                                          'method': _mnames[idx],
-                                          'sigma': sigma, 'ball_radius': ball})
+            # Only record the parameter that's actually meaningful for the
+            # chosen method -- Gaussian/LoG use sigma only, rolling-ball uses
+            # ball_radius only (see _task above). Recording both unconditionally
+            # falsely implies e.g. ball_radius was applied when method='gaussian'.
+            ui._record('ivf_preprocess', {
+                'image_layer': img_dd.currentText(),
+                'method': _mnames[idx],
+                'sigma': (sigma if idx in (0, 1) else None),
+                'ball_radius': (ball if idx == 2 else None)})
             napari_show_info(f"In vitro preprocessing done ({_mnames[idx]}).")
         def _err(msg):
             prog.setVisible(False); run.setEnabled(True)
@@ -762,7 +768,9 @@ def _ivf_field_summary(ui, layout):
         ui._dr()['ivf_field_summary']   = summ
         ui._dr()['ivf_partition_coeff'] = part
         ui._record('ivf_field_summary', {
-            'image_layer': img_dd.currentText(), 'mask_layer': mask_dd.currentText()})
+            'image_layer': img_dd.currentText(), 'mask_layer': mask_dd.currentText(),
+            'use_dark_reference': _use_dark,
+            'dark_reference_layer': (dark_dd.currentText() if _use_dark else None)})
 
         summ_df = pd.DataFrame([summ])
         # The 2D-projection caveat now rides IN the table (condensate_mode + volume-fraction refusal note),
@@ -982,8 +990,14 @@ def _ivf_dynamics(ui, layout):
         _show("IVF Dynamics", tables)
         ui._record('ivf_dynamics', {
             'mask_stack': stack_dd.currentText(),
+            'fluorescence_stack': img_dd.currentText(),
             'frame_interval_s': dt_sp.value(),
-            'max_displacement_um': disp_sp.value()})
+            'max_displacement_um': disp_sp.value(),
+            'run_msd': cb_msd.isChecked(),
+            'run_coarsening': cb_coarse.isChecked(),
+            'run_sedimentation': cb_sed.isChecked(),
+            'run_fusion_fit': cb_fuse.isChecked(),
+            'run_kaplan_meier': cb_km.isChecked()})
 
     def _on_run():
         from pycat.toolbox.dynamic_spatial_tools import (
@@ -1215,7 +1229,8 @@ def _ivf_frame_qc(ui, layout):
             ui._record('ivf_frame_qc', {
                 'stack_layer': stack_dd.currentText(),
                 'frame_interval_s': dt_sp.value(),
-                'blur_threshold': thr_sp.value()})
+                'blur_threshold': thr_sp.value(),
+                'apply_bleach_correction': do_apply})
             if 'corrected' in res:
                 ui.viewer.add_image(res['corrected'],
                                      name=f"Bleach-Corrected [{layer.name}]",
