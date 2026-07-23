@@ -1032,7 +1032,8 @@ def mount_cellular_workspace(viewer, central_manager):
                           label_col='global_punctum_label', source_path=src, reveal='overlay')
 
     try:
-        dock = viewer.window.add_dock_widget(ws, name='Cellular Object Results', area='right')
+        from pycat.utils.dock_space import add_results_dock
+        dock = add_results_dock(viewer.window, ws, name='Cellular Object Results')
         central_manager._cellular_results_dock = (dock, ws)      # keep alive; detach on close
     except Exception as exc:                             # broad-ok: no viewer window headless — the workspace is still returned
         debug_log('feature_analysis: could not dock the cellular workspace', exc)

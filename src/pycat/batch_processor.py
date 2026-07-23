@@ -691,7 +691,8 @@ class BatchDialog(QDialog):
                 return
             window = getattr(viewer, 'window', None)
             if window is not None:
-                window.add_dock_widget(workspace, name='Batch Results (brushable)', area='right')
+                from pycat.utils.dock_space import add_results_dock
+                add_results_dock(window, workspace, name='Batch Results (brushable)')
                 cm._batch_results_workspace = workspace     # keep alive
                 self._log.append("Brushable batch results opened — plots + tables + offline object crops.")
         except Exception as _bwe:   # broad-ok: a brushing failure must never taint a completed batch

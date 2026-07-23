@@ -179,8 +179,9 @@ class _VptResultsDockMixin:
                 self.viewer.window.remove_dock_widget(self._vpt_results_dock)
         except Exception:                            # broad-ok: stale dock ref → just add a fresh one
             pass
-        self._vpt_results_dock = self.viewer.window.add_dock_widget(
-            splitter, name="VPT Results", area='right')
+        from pycat.utils.dock_space import add_results_dock
+        self._vpt_results_dock = add_results_dock(
+            self.viewer.window, splitter, name="VPT Results")
 
         self._vpt_results = {
             'ptc': ptc, 'msd_df': msd_df, 'fit': fit, 'mod': mod, 'tracks': tracks,

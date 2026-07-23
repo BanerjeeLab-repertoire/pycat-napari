@@ -1,3 +1,26 @@
+## [1.6.297] - 2026-07-23
+### Fixed — **Results docks now get room: they tabify with the tall method panel instead of being starved below it (dock_space_management).**
+A brushable results dock was appended *below* the method widget in the same right-hand dock area, and Qt split
+the height between them — so on a method whose parameter panel is very tall (VPT), the results (the plots and
+linked table that are the whole payoff of brushing) got almost no space and were effectively invisible.
+- New `utils/dock_space.py` (Qt-free — the napari window is duck-typed) reflows the dock **area** rather than
+  touching the method widget. `add_results_dock(window, widget, name=...)` mounts a results dock with napari's
+  `tabify=True` by default, so it becomes a **tab** alongside the method panel: full panel height, parameters
+  one tab-click away, reversible (drag the tab out), obvious (tabs are visible).
+- **State is guaranteed intact**: tabify never reparents, rebuilds, or clears the method widget, so its
+  entered parameter values and field-status markers survive untouched — the main risk the spec flags is
+  sidestepped entirely (chosen over a hand-rolled collapse, which has no native Qt primitive and would fight
+  napari 0.7.x).
+- **Opt-out and general**: the `ui.results_dock_reflow` preference (`'tabify'` default, `'stack'` = today's
+  behaviour) is remembered per user; the mount is idempotent (a second results dock does not re-reflow) and
+  headless-safe (no window → clean no-op); a napari without the `tabify` kwarg falls back to a plain stacked
+  mount so results never vanish. Implemented once in the shared helper and routed through all four results
+  mounts (VPT, batch, cellular-object, IVF-droplet) so any future method inherits it.
+- Tests (`core`, `test_dock_space.py`, 9 tests): default-favours-visibility, persistence + unknown-value
+  fallback, unknown-mode rejected, the pure plan (backward-compatible/safe/idempotent), headless no-op, tabify
+  kwarg passed, stack reproduces today, already-reflowed no re-tabify, the never-lose-the-dock fallback. Full
+  core green (1759).
+
 ## [1.6.296] - 2026-07-23
 ### Added — **Reader-independent metadata merge: metadata from wherever it parses best, with per-field provenance and reported conflicts (deep_metadata_and_naming Part 2).**
 The best reader for pixels is not always the best for metadata, but today they are the same choice — a format

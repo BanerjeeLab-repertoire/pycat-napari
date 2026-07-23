@@ -704,7 +704,8 @@ def _mount_droplet_workspace(ui, part_df, summ_df, mask_layer, source_path):
     ws.add_image_tier(ui.viewer, mask_layer, part_df, 'ivf.image',
                       label_col='droplet_label', source_path=source_path)
     try:
-        dock = ui.viewer.window.add_dock_widget(ws, name='IVF Droplet Results', area='right')
+        from pycat.utils.dock_space import add_results_dock
+        dock = add_results_dock(ui.viewer.window, ws, name='IVF Droplet Results')
         ui._ivf_results_dock = (dock, ws)              # keep alive; detach the views if it closes
     except Exception as exc:                           # broad-ok: no viewer window headless — the workspace is still returned
         debug_log('invitro_fluor: could not dock the droplet workspace', exc)
