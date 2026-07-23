@@ -343,13 +343,43 @@ def fz_segmentation_and_binarization(image, mask, ball_radius, rim_close_radius=
     # (i.e., plausibly a bridged large-condensate rim, not ordinary puncta)
     # get the closed/filled version; everything else reverts to the
     # pre-closing mask.
+    #
+    # Size alone is NOT sufficient: a dense cluster of several genuinely
+    # separate small puncta (common in a punctate nucleus) can also
+    # close+fill into a single result >= rim_close_min_result_area, and
+    # binary_fill_holes doesn't just add a thin bridge between them -- it
+    # can solidly fill the entire span, erasing the internal valleys
+    # between the original detections that downstream watershed needs to
+    # split them back apart. Empirically validated (synthetic dense-cluster
+    # vs. fragmented-rim cases, at realistic gap sizes for this closing
+    # radius): per-fragment solidity does NOT reliably separate these (a
+    # moderately thick rim arc can be just as individually solid as a real
+    # punctum). What does separate them cleanly: (a) how many separate
+    # pre-closing pieces are being joined -- a broken rim fragments into a
+    # handful of adjacent arcs, while a dense field of real puncta commonly
+    # numbers in the dozens -- and (b) how much of the bridged result is
+    # real pre-closing signal vs. newly-manufactured fill. Both required;
+    # otherwise revert that region to its pre-closing (unbridged) pixels.
+    pre_close_labeled = sk.measure.label(segmented_mask)
     lbl_closed = sk.measure.label(filled_closed)
-    if lbl_closed.max() > 0:
-        areas = ndi.sum(np.ones_like(lbl_closed), lbl_closed, range(1, lbl_closed.max() + 1))
-        large_labels = np.where(areas >= rim_close_min_result_area)[0] + 1
-        accept = np.isin(lbl_closed, large_labels)
-    else:
-        accept = np.zeros_like(filled_closed, dtype=bool)
+    accept = np.zeros_like(filled_closed, dtype=bool)
+    for closed_label in range(1, lbl_closed.max() + 1):
+        region_mask = lbl_closed == closed_label
+        region_area = int(region_mask.sum())
+        if region_area < rim_close_min_result_area:
+            continue
+        contributing_labels = np.unique(pre_close_labeled[region_mask])
+        contributing_labels = contributing_labels[contributing_labels != 0]
+        if contributing_labels.size == 0:
+            continue
+        pre_close_area = int(np.isin(pre_close_labeled, contributing_labels).sum())
+        if contributing_labels.size == 1:
+            # Filling a single pre-existing component's own hollow interior
+            # merges nothing -- always safe.
+            accept |= region_mask
+            continue
+        if contributing_labels.size <= 8 and region_area <= 2.0 * pre_close_area:
+            accept |= region_mask
     segmented_mask = np.where(accept, filled_closed, segmented_mask)
 
     # Determine the maximum area for objects based on the input cell mask.

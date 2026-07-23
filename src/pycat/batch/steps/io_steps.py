@@ -30,8 +30,47 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
     This generalizes to any number of channels — 2, 3, 4, or more — since
     the lookup is driven entirely by the recorded layer names rather than
     a fixed seg/fluor pair.
+
+    Split-file recordings (multiple SEPARATE 'open_image' steps -- e.g. two
+    single-channel files opened as separate layers, rather than multi-
+    selected in one dialog, so channel_assignment is empty on every step):
+    the first call for a given batch sample loads the PRIMARY file
+    (image_path, as normal, below). ``batch_processor._process_file`` stamps
+    ``state['_primary_open_image_stem']`` before replay starts whenever more
+    than one open_image step was recorded. Every open_image call AFTER the
+    first one in that same replay must NOT reload image_path again (it
+    would just reload the primary file a second time — the original bug
+    here) — it must locate THIS step's own recorded file's companion for
+    the CURRENT batch sample and stash it under its recorded layer name in
+    state['channels_by_name'], leaving state['image']/['preprocessed']
+    (the primary) untouched.
     """
     from pycat.data.data_modules import BaseDataClass
+
+    primary_stem = state.get('_primary_open_image_stem')
+    if primary_stem is not None:
+        calls_so_far = state.get('_open_image_calls', 0)
+        state['_open_image_calls'] = calls_so_far + 1
+        if calls_so_far >= 1:
+            recorded_stem = Path(params.get('file_path', '') or '').stem
+            layer_name = params.get('_active_layer_at_record') or recorded_stem or 'companion'
+            if not recorded_stem or recorded_stem == primary_stem:
+                # Nothing to resolve: no recorded path, or same file as the
+                # primary (e.g. a duplicate open_image step).
+                return
+            try:
+                companion_path = _derive_split_companion_path(
+                    image_path, primary_stem, recorded_stem)
+                companion_image, _ = _load_image(companion_path, channel=0)
+            except Exception as _e:
+                print(f"[PyCAT Batch]   Companion file for layer "
+                      f"'{layer_name}' could not be loaded ({_e}) — this "
+                      f"layer will be unavailable to later steps.")
+                return
+            state.setdefault('channels_by_name', {})[layer_name] = companion_image
+            print(f"[PyCAT Batch]   Loaded companion file {companion_path.name} "
+                  f"as layer '{layer_name}'  shape={companion_image.shape}")
+            return
 
     channel_assignment = params.get('channel_assignment')
 

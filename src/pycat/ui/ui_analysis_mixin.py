@@ -173,7 +173,14 @@ class _AnalysisWidgetsMixin:
                 run_autocorrelation_analysis, self.viewer, ACF_image_dropdown,
                 ACF_roi_dropdown, lower_limit_input, upper_limit_input,
                 self.central_manager.active_data_class)
-            self._record('sacf_analysis', {
+            # Distinct key from the newer per-cell 'sacf_analysis' step
+            # (spatial_acf_tools.py's _add_run_sacf_analysis) -- this is a
+            # different, older algorithm (run_autocorrelation_analysis) with
+            # an incompatible params schema (roi_layer/lower_limit/upper_limit
+            # vs mode/labels_layer/shapes_layer). Recording both under the
+            # same key meant whichever ran second silently overwrote the
+            # other's schema for any replay/inspection code reading it.
+            self._record('acf_analysis', {
                 'image_layer': ACF_image_dropdown.currentText(),
                 'roi_layer': ACF_roi_dropdown.currentText(),
                 'lower_limit': lower_limit_input.text(),

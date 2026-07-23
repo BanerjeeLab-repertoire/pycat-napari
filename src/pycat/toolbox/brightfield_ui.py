@@ -302,6 +302,9 @@ def _add_bf_preprocessing(ui, layout):
                 'image_layer': img_dd.currentText(),
                 'bg_kernel':   bg_spin.value(),
                 'halo_weight': halo_spin.value(),
+                'use_flat_field_reference': ref_cb.isChecked(),
+                'flat_field_reference_layer': (
+                    ref_dd.currentText() if ref_cb.isChecked() else None),
             })
             napari_show_info("BF preprocessing done — 'BF Enhanced' layer ready for segmentation.")
 
@@ -837,6 +840,9 @@ def _add_bf_dynamics(ui, layout):
 
             ui._record('bf_dynamics', {
                 'stack_layer': stack_dd.currentText(), 'frame_interval_s': dt,
+                'max_displacement_um': disp_spin.value(),
+                'run_msd': do_msd, 'run_coarsening': do_coarse,
+                'run_kaplan_meier': do_km, 'run_merge_fission': do_mf,
                 'n_tracks': len(res['tracks']),
             })
             from pycat.ui.ui_utils import show_dataframes_dialog
@@ -902,6 +908,7 @@ def _add_bf_texture(ui, layout):
         ui._dr()['bf_texture_df'] = df
         ui._record('bf_texture', {
             'od_layer': od_dd.currentText(), 'mask_layer': mask_dd.currentText(),
+            'cell_layer': cell_dd.currentText(),
             'n_regions': len(df),
         })
         from pycat.ui.ui_utils import show_dataframes_dialog
@@ -974,7 +981,9 @@ def _add_bf_frame_qc(ui, layout):
             df   = result['per_frame_df']
             summ = result['summary']
             ui._dr()['bf_frame_quality'] = df
-            ui._record('bf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df)})
+            ui._record('bf_frame_qc', {'stack_layer': stack_dd.currentText(), 'n_frames': len(df),
+                                        'frame_interval_s': dt_spin.value(),
+                                        'defocus_threshold': thr_spin.value()})
             n_def = summ['n_defocused_frames']
             from pycat.ui.ui_utils import show_dataframes_dialog
             summ_df = pd.DataFrame([{k: v for k, v in summ.items()

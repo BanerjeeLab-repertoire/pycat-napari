@@ -48,10 +48,18 @@ class _FilteringWidgetsMixin:
                 run_enhanced_rb_gaussian_bg_removal, None,
                 self.central_manager.active_data_class, self.viewer)
             dr = self.central_manager.active_data_class.data_repository
-            self._record('background_removal', {
+            bg_rec = {
                 'active_layer': active_name,
                 'ball_radius':  int(dr.get('ball_radius', 50)),
-            })
+            }
+            # run_enhanced_rb_gaussian_bg_removal's "already enhanced" branch
+            # reads this same override from data_repository; without recording
+            # it, replay_background_removal falls back to {} (library defaults)
+            # instead of the user's tuned foreground-suppression slider values.
+            sp = dr.get('foreground_suppression_params', None)
+            if sp:
+                bg_rec['foreground_suppression_params'] = dict(sp)
+            self._record('background_removal', bg_rec)
         remove_background_button.clicked.connect(_on_enhanced_bg_removal)
         remove_background_layout.addWidget(remove_background_button) # Add the button to the layout
         remove_background_widget = QWidget()
