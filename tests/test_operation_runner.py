@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.utils.operation_runner import OperationRunner, CancellationToken
 

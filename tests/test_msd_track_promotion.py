@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 from matplotlib.collections import LineCollection
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _N = 6
 

@@ -11,7 +11,7 @@ import pytest
 from pycat.utils.object_graph import (
     BiologicalObject, ObjectGraph, objects_from_table, build_object_graph)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _cells():

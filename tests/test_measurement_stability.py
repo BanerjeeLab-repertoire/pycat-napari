@@ -13,7 +13,7 @@ import pytest
 from pycat.toolbox.measurement_stability import (
     StabilityResult, measurement_stability, stability_factor)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _threshold(image, threshold=0.5):

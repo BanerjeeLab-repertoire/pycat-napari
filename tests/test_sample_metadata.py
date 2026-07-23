@@ -22,7 +22,7 @@ import pytest
 # Local application imports
 from pycat.utils import sample_metadata as sm
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # ── filename parsing ───────────────────────────────────────────────────────────

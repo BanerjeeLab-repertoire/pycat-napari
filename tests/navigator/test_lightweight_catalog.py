@@ -18,7 +18,7 @@ from pycat.navigator.operation_spec import (
     operation_availability, runnability)
 from pycat.utils.errors import OptionalDependencyError
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 def test_discovery_does_not_use_the_import_path(monkeypatch):
     """The default (lightweight) path reads the JSON — it must NOT go through the import-and-introspect

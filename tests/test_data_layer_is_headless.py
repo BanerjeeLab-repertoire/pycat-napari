@@ -24,7 +24,7 @@ import pathlib
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _FORBIDDEN_ROOTS = {"napari", "PyQt5", "PyQt6", "qtpy"}
 

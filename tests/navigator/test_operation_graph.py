@@ -23,7 +23,7 @@ guess is worse than declaring none, so only the unambiguous image-consuming tran
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.navigator.operation_spec import iter_operation_specs
 from pycat.utils.tag_registry import ROLES, TARGETS

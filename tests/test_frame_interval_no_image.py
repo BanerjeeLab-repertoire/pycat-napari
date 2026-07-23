@@ -9,7 +9,7 @@ movie (where a wrong interval IS a factor-of-two error) gets ignored too.
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.utils.frame_interval import has_time_axis
 

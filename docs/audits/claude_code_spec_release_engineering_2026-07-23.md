@@ -1,6 +1,13 @@
 # Claude Code spec — Release-engineering hardening
 
-> **◐ STATUS — Parts A + B + D DONE (A/D 1.6.305, B 1.6.306); Part C remains.**
+> **● STATUS — ALL PARTS DONE (A/D 1.6.305, B 1.6.306, C 1.6.307).**
+> **Part C — DONE.** `core` split into a true minimal tier (numpy+pytest only — 480 tests, ~118 files,
+> determined EMPIRICALLY by running the suite in a numpy-only venv) and `base` (needs the scientific stack —
+> 128 files re-marked). conftest ignores non-`core` files by marker (AST, no import) when the base stack is
+> absent, so the minimal lane collects cleanly. CI: the headless lane runs `-m "core or base"` (1816, zero
+> loss); a new `minimal` job runs `-m core` in numpy+pytest only; the wheel lane runs `-m "core or base"`; the
+> two Qt/GUI guards now cover core-or-base. `gui`/`optional`/`slow`/`gpu` markers declared for future use.
+> Verified: minimal `-m core` green (480), `-m "core or base"` = 1816, guards + budgets green.
 > **Part A — DONE.** Ran the real correctness selection: **65 findings** (NOT near-zero as the spec expected)
 > — 62 F811 redundant re-imports + 3 B023 closures (the B023 in the 1.6.295 `parse_ome_channels_and_instrument`).
 > Drove all to zero (redundant imports removed; one cross-module re-import verified same-object before removal;

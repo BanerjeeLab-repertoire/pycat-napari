@@ -56,7 +56,7 @@ def _absorbing_disc(transmittance, size=128, radius=20, noise=0.0, seed=0):
     return np.clip(image, 1, 65535).astype(np.float32), (d < radius)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("transmittance", [0.9, 0.5, 0.1])
 def test_optical_density_is_exact_beer_lambert(transmittance):
     """``OD = -log10(I/I0)``, to **0.0–0.2 %** across the whole transmittance range."""
@@ -75,7 +75,7 @@ def test_optical_density_is_exact_beer_lambert(transmittance):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("transmittance,expected_ratio", [(0.5, 2.0), (0.25, 4.0), (0.1, 10.0)])
 def test_the_od_partition_coefficient_is_not_a_hundred_million(transmittance, expected_ratio):
     """**96,910,007 for a condensate whose true OD is 0.097.**
@@ -106,7 +106,7 @@ def test_the_od_partition_coefficient_is_not_a_hundred_million(transmittance, ex
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_brightfield_segmentation_finds_DARK_objects_and_not_bright_ones():
     """**Correctly polarity-specific.** It will not silently process a fluorescence image.
 
@@ -142,7 +142,7 @@ def test_brightfield_segmentation_finds_DARK_objects_and_not_bright_ones():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("period,in_band", [(8, "8-40"), (20, "8-40"), (60, "2-8")])
 def test_the_fft_bandpass_keeps_exactly_the_frequencies_in_its_band(period, in_band):
     """Audited and **correct** — 9/9 gratings kept or cut exactly as their frequency dictates."""
@@ -165,7 +165,7 @@ def test_the_fft_bandpass_keeps_exactly_the_frequencies_in_its_band(period, in_b
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_interface_width_tracks_the_true_boundary_blur():
     """Audited and **correct** — the measured width is proportional to the true σ.
 

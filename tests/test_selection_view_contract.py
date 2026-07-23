@@ -13,7 +13,7 @@ from pycat.utils.selection_service import (
     ProgrammaticGuard, SelectionService, SelectionState, SelectionView, register_view)
 from tests.selection_view_contract import assert_selection_view_contract
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service():

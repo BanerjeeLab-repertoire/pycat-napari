@@ -16,7 +16,7 @@ from pycat.utils.comparative_figures import condition_comparison
 from pycat.utils.selection_service import SelectionService
 from pycat.utils.entity_ref import ENTITY_ID_COLUMN
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_melt_carries_the_entity_id_through():

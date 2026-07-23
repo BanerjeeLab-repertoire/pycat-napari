@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.utils.general_utils import remove_small_objects_compat
 

@@ -12,7 +12,7 @@ from pycat.toolbox.biological_qc_tools import (
     flag_edge_touching, flag_size_outliers, flag_intensity_outliers,
     flag_containment_violations, biological_qc, _mad_outlier_mask)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _labels():

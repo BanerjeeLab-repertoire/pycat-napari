@@ -130,7 +130,7 @@ def _module_level_gui_imports(path: pathlib.Path):
     return bad
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("mod", SCIENTIFIC_MODULES)
 def test_no_module_level_gui_import(mod):
     """A scientific module must not import napari or Qt at module scope."""
@@ -169,7 +169,7 @@ def test_no_module_level_gui_import(mod):
 # dependency list is missing something a science module genuinely needs, THIS test says so
 # — pointing at the real problem instead of failing somewhere downstream.
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("mod", SCIENTIFIC_MODULES)
 def test_module_actually_imports(mod):
     """Each guarded module must import in the headless CI environment."""

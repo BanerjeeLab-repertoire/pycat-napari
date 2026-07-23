@@ -14,7 +14,7 @@ from pycat.utils.figure_spec import (
     FigureData, FigureSpec, apply_size_preset, export, ontology_caveats, ontology_y_label,
     render, spec_from_dict, spec_to_dict)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _data():

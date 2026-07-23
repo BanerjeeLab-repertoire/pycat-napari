@@ -56,7 +56,7 @@ def _channel_pair(size=128, psf=3.0, correlation=0.0, seed=0):
             (second - second.min()).astype(np.float32))
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("true_r", [0.0, 0.6, 1.0])
 def test_pearson_recovers_a_known_correlation(true_r):
     """Audited and **exact** — within 1.3 % at every level, and precisely 1.0 on identical images."""
@@ -72,7 +72,7 @@ def test_pearson_recovers_a_known_correlation(true_r):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_costes_does_not_call_INDEPENDENT_blurred_channels_colocalized():
     """**83 % false positives on independent channels**, because the scramble was pixel-wise.
 
@@ -102,7 +102,7 @@ def test_costes_does_not_call_INDEPENDENT_blurred_channels_colocalized():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("true_r", [0.3, 0.6])
 def test_costes_still_DETECTS_real_colocalization(true_r):
     """**A null with no power is a null that never says anything.** 10/10 at both levels."""
@@ -125,7 +125,7 @@ def test_costes_still_DETECTS_real_colocalization(true_r):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_null_PRESERVES_the_images_own_spatial_structure():
     """**The property that makes it Costes and not a pixel shuffle.**
 

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _make_session(parent, stem, n_layers=1, n_tables=1):

@@ -72,7 +72,7 @@ def _synthetic_field(size=128, seed=0, contrast=300):
     return np.clip(field, 0, 65535).astype(np.uint16)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_rolling_ball_is_NOT_scale_invariant():
     """**The fact the whole bug rests on.** If this were false, the normalisation would be harmless.
 
@@ -102,7 +102,7 @@ def test_the_rolling_ball_is_NOT_scale_invariant():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_batch_preprocessing_passes_RAW_COUNTS_not_a_normalised_image():
     """``pre_process_image`` divides by its own max. **It expects raw counts.**
 
@@ -143,7 +143,7 @@ def test_batch_preprocessing_passes_RAW_COUNTS_not_a_normalised_image():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_already_enhanced_HEURISTIC_sees_the_same_scale_in_both_paths():
     """**The branch itself diverged**, which is worse than a shifted number.
 
@@ -204,7 +204,7 @@ def test_the_already_enhanced_HEURISTIC_sees_the_same_scale_in_both_paths():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_CELLPOSE_is_genuinely_unaffected():
     """**Not every normalisation is a bug, and saying so is part of the audit.**
 

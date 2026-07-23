@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from tests.route_equivalence import (
     Workflow, run_all_routes, assert_routes_agree,

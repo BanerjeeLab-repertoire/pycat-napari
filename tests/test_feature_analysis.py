@@ -30,7 +30,7 @@ import pandas as pd
 from pycat.toolbox.feature_analysis_tools import calculate_glcm_features
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_glcm_features_basic():
     """
     Test basic GLCM feature calculation.
@@ -68,7 +68,7 @@ def test_glcm_features_basic():
     assert 0 <= features_df['energy'].iloc[0] <= 1  # Energy is always between 0 and 1
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_glcm_features_with_mask():
     """
     Test GLCM feature calculation with ROI mask.
@@ -100,7 +100,7 @@ def test_glcm_features_with_mask():
     assert not features_with_mask.equals(features_no_mask)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_glcm_features_invalid_input():
     """
     Test GLCM feature calculation with invalid inputs.

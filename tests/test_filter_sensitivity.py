@@ -22,7 +22,7 @@ from tests.filter_sensitivity import (VALIDATED_CASES, FilterSensitivityError,
                                       assert_offset_invariant, assert_scale_invariant, sweep)
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # ── Case 1: molecular counting / r2_min — SELECTION BIAS ──────────────────────────────────

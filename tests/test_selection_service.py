@@ -20,7 +20,7 @@ testing a deadlock.
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service(defer=None):

@@ -12,7 +12,7 @@ hard contract. They were read off the pre-refactor implementation.
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _REL = 1e-6
 

@@ -17,7 +17,7 @@ from pycat.toolbox.condensate_modes import (
     volume_fraction)
 from pycat.utils.errors import ScientificAssumptionError
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # ── Mode resolution: declared or derived, never guessed for an ambiguous 3D array ───────────────

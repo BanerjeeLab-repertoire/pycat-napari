@@ -59,7 +59,7 @@ def _calls(scene, repeats=40):
             for seed in range(repeats)]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_BOTH_processes_at_once_are_seen_as_BOTH():
     """**The branch was unreachable.** A sample with both was called "sedimentation" 98 % of the
     time, and told the user there was **no coarsening artefact**.
@@ -75,7 +75,7 @@ def test_BOTH_processes_at_once_are_seen_as_BOTH():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("scene,expected", [
     (dict(phi_rate=2e-4, radius_rate=0.0, count_rate=+0.3), 'sedimentation'),
     (dict(phi_rate=0.0, radius_rate=3e-3, count_rate=-0.3), 'coarsening'),
@@ -90,7 +90,7 @@ def test_each_process_alone_is_still_identified(scene, expected):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_STABLE_sample_is_not_called_anything():
     """**A false 'coarsening' is a physical claim about a sample that is not changing.**
 

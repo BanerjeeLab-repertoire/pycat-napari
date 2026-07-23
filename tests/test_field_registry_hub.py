@@ -14,7 +14,7 @@ import pytest
 from pycat.utils.field_registry_hub import (
     FieldRegistryHub, active_field_registries, register_field_registry)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _FakeRegistry:

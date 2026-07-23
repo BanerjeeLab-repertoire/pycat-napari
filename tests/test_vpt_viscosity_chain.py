@@ -38,7 +38,7 @@ def _simulate_brownian_tracks(n_tracks, n_frames, D_um2_per_s, dt_s, seed=0):
     return pd.DataFrame(rows)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_msd_recovers_known_diffusion_coefficient():
     D_true = 0.05          # µm²/s
     dt = 0.1               # s/frame
@@ -55,7 +55,7 @@ def test_msd_recovers_known_diffusion_coefficient():
     assert 0.85 < alpha < 1.15, alpha
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_viscosity_stokes_einstein_known_value():
     # η = kT / (6πRD). Check the arithmetic against a hand computation.
     kB = 1.380649e-23
@@ -70,7 +70,7 @@ def test_viscosity_stokes_einstein_known_value():
     assert abs(eta - expected) / expected < 1e-6, (eta, expected)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_viscosity_full_chain_from_brownian_tracks():
     # End-to-end: known D → simulated tracks → MSD → fit → viscosity, and
     # compare to the Stokes-Einstein viscosity computed from the TRUE D.
@@ -91,14 +91,14 @@ def test_viscosity_full_chain_from_brownian_tracks():
     assert abs(eta_fit - eta_true) / eta_true < 0.35, (eta_fit, eta_true)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_viscosity_nonpositive_inputs_return_nan():
     assert np.isnan(viscosity_from_diffusion(0.0, bead_radius_um=0.2))
     assert np.isnan(viscosity_from_diffusion(0.1, bead_radius_um=0.0))
     assert np.isnan(viscosity_from_diffusion(-1.0, bead_radius_um=0.2))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_viscosity_carries_the_interval_the_msd_fit_supports():
     """The CI on D must reach the viscosity — it is the number that goes into the paper.
 

@@ -29,7 +29,7 @@ import numpy as np
 from pycat.toolbox.image_processing_tools import apply_rescale_intensity
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_rescale_intensity_basic():
     """
     Test basic intensity rescaling functionality.
@@ -61,7 +61,7 @@ def test_rescale_intensity_basic():
     assert np.allclose(result, expected_values)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_rescale_intensity_custom_range():
     """
     Test rescaling to custom output range.
@@ -88,7 +88,7 @@ def test_rescale_intensity_custom_range():
     assert np.isclose(result.max(), 100)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_rescale_intensity_preserve_zeros():
     """
     Test that zero values remain zero after rescaling.

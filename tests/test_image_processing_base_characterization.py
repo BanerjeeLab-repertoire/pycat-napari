@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _img():

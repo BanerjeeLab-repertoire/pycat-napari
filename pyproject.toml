@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pycat-napari"
-version = "1.6.306"
+version = "1.6.307"
 description = "Python Condensate Analysis Toolbox - A napari-based tool for biomolecular condensate analysis"
 readme = "README.md"
 # 3.13 is BLOCKED UPSTREAM, not by PyCAT's own code (which compiles and passes core on 3.13).
@@ -310,11 +310,26 @@ qt_api = "pyqt5"
 # to a GUI import made that impossible, which is backwards: the numerical code is the
 # part that most needs automated regression testing.
 #
-#   pytest -m core          -> no napari, no Qt, no GPU. Run on every commit.
-#   pytest -m integration   -> viewer behaviour, file loading, Qt widgets.
+# Tiered so compatibility testing is diagnostic — the FIRST lane to run under a new interpreter is `core`,
+# which needs almost nothing, so it isolates "does the interpreter work" from "is the scientific stack
+# installable" (exactly what the Python 3.13 investigation lacked). Deps grow monotonically down the list.
+#
+#   pytest -m core            -> stdlib + numpy ONLY. No scientific stack, no napari, no Qt, no GPU.
+#   pytest -m "core or base"  -> the full headless suite (adds scipy/scikit-image/pandas/matplotlib/... ).
+#   pytest -m integration     -> viewer behaviour, file loading, Qt widgets.
+#
+# The core/base line is EMPIRICAL, not guessed: a test is `core` only if it passes in a numpy+pytest-only
+# venv (verified 2026-07-23 — 646 tests across ~118 files); anything that needs the scientific stack (at
+# import or at runtime) is `base`. Mis-marking toward `base` is harmless (the `core or base` lane covers it);
+# a `core` test that needs more fails the minimal lane, which is how a bad mark is caught.
 markers = [
-    "core: pure scientific kernels - no napari, no Qt, no GPU. Must pass headlessly.",
-    "integration: requires napari/Qt/file-IO/GPU.",
+    "core: minimal — stdlib + numpy ONLY. No scientific stack, no napari, no Qt, no GPU. The first lane under a new interpreter.",
+    "base: headless but needs the declared base scientific stack (scipy/scikit-image/pandas/matplotlib/opencv/simpleitk/seaborn/networkx/scikit-learn). No napari, no Qt, no GPU.",
+    "integration: requires napari/Qt/file-IO — a real viewer, widgets, or readers.",
+    "gui: requires napari/Qt (a QApplication or live widgets).",
+    "optional: requires an optional extra (plotly, stardist, bioformats, pyqtgraph, ...).",
+    "slow: long-running; run deliberately, not on every push.",
+    "gpu: requires a CUDA GPU (cupy / torch-cuda).",
     "benchmark: standing per-release validation suite; run deliberately, not on every commit (see benchmarks/).",
 ]
 

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.utils.comparative_figures import (
     aggregate_to_unit, condition_comparison, dose_response, measurement_matrix)

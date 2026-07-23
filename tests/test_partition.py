@@ -15,7 +15,7 @@ from tests.fixtures_synthetic import partition_scene
 from pycat.toolbox.partition_enrichment_tools import client_enrichment
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_partition_known_ratio_no_background():
     """K_true = dense/dilute with background=0 must be recovered exactly."""
     k_true = 5.0
@@ -24,7 +24,7 @@ def test_partition_known_ratio_no_background():
     assert res['enrichment'] == pytest.approx(k_true, rel=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_partition_unity_when_uniform():
     """A uniform image (dense == dilute intensity) must give K == 1.0."""
     img, dense, cell = partition_scene(k_true=1.0, dense_val=100.0, dilute_val=100.0)
@@ -32,7 +32,7 @@ def test_partition_unity_when_uniform():
     assert res['enrichment'] == pytest.approx(1.0, rel=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_partition_background_subtraction_effect():
     """Invariant / sanity: subtracting a positive camera offset increases the
     apparent K (moves the ratio away from 1), per K=(dense-bg)/(dilute-bg)."""
@@ -44,7 +44,7 @@ def test_partition_background_subtraction_effect():
     assert k_with_bg == pytest.approx((300 - 50) / (100 - 50), rel=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_partition_non_negative():
     """Invariant: enrichment of a real positive-intensity scene is non-negative."""
     img, dense, cell = partition_scene(k_true=2.0)
@@ -52,7 +52,7 @@ def test_partition_non_negative():
     assert res['enrichment'] >= 0.0
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_over_inclusive_droplet_mask_is_detected():
     """A mask that spills past the droplet edge collapses Kp — silently.
 

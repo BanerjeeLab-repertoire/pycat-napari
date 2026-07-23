@@ -17,7 +17,7 @@ from pycat.navigator.contracts import AnalysisIntent, GateStatus
 from pycat.navigator.op_catalog import build_operation_registry
 from pycat.navigator.planner import Planner
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _ctx(**facts):

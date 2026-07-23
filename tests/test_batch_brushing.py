@@ -49,7 +49,7 @@ def _make_batch(tmp_path):
     return out, source_paths
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_assemble_tags_each_row_with_its_source_image(tmp_path):
     out, srcs = _make_batch(tmp_path)
     tables = assemble_batch_object_tables(out, srcs)
@@ -59,7 +59,7 @@ def test_assemble_tags_each_row_with_its_source_image(tmp_path):
     assert cell[ENTITY_ID_COLUMN].nunique() == 2
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_batch_row_resolves_to_its_image_offline(tmp_path):
     out, srcs = _make_batch(tmp_path)
     cell = assemble_batch_object_tables(out, srcs)['cell']

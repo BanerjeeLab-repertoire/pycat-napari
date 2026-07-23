@@ -24,7 +24,7 @@ import pytest
 # Local application imports
 from pycat.utils.object_ref import cell_label_column
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_both_spellings_resolve():

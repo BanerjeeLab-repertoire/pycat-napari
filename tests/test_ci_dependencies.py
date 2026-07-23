@@ -325,6 +325,16 @@ def _is_core_selected(func, module_marks):
     return "core" in decorator_marks or "core" in module_marks
 
 
+def _is_headless_selected(func, module_marks):
+    """Would EITHER headless lane (`core` = numpy-only, `base` = the scientific stack) select this test? Both
+    run WITHOUT napari/Qt/pytest-qt, so a test carrying `core` OR `base` may not need a Qt fixture and its file
+    may not import the GUI stack at module scope."""
+    decorator_marks = set()
+    for d in func.decorator_list:
+        decorator_marks |= _mark_names(d)
+    return bool({"core", "base"} & (decorator_marks | set(module_marks)))
+
+
 def _local_fixtures(tree):
     """Names of fixtures DEFINED in this file (a `@pytest.fixture`-decorated function). A file that
     supplies its own Qt fixture — e.g. a `qapp` guarded by `importorskip('PyQt5')`, which SKIPS rather
@@ -358,7 +368,7 @@ def test_no_core_marked_test_requests_a_qt_fixture():
         supplied_locally = _local_fixtures(tree)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-                if not _is_core_selected(node, module_marks):
+                if not _is_headless_selected(node, module_marks):
                     continue
                 params = {a.arg for a in node.args.args} | {a.arg for a in node.args.kwonlyargs}
                 for qt in sorted((params & _QT_FIXTURES) - supplied_locally):
@@ -389,7 +399,7 @@ def test_no_core_test_file_imports_the_gui_stack_at_module_scope():
         module_marks = _module_level_marks(tree)
         has_core = any(
             isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
-            and _is_core_selected(n, module_marks)
+            and _is_headless_selected(n, module_marks)
             for n in ast.walk(tree))
         if not has_core:
             continue

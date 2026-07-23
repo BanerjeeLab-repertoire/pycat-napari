@@ -16,7 +16,7 @@ from pycat.utils.figure_spec import (
     FigureData, FigureSpec, render, refine, render_multipanel, resolve_y_scale, group_error,
     spec_to_dict, spec_from_dict)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _data(values_by_group):

@@ -143,11 +143,14 @@ jobs:
         run: |
           pytest tests/test_headless_science.py -v
 
-      - name: Core scientific tests
+      - name: Core + base scientific tests
         # The numerical kernels — FRAP fitting, VPT/viscosity, colocalization
         # coefficients, partition, image transforms — must all be verifiable here.
-        # (See the wheel job below: this lane runs against src/ via the editable install;
-        # the wheel lane runs the SAME suite against the built artifact, and they must agree.)
+        # This lane installs the full base scientific stack, so it runs `-m "core or base"`: the whole
+        # HEADLESS suite (`core` = numpy-only + `base` = needs scipy/pandas/skimage/...). The separate
+        # `minimal` job below runs just `-m core` with numpy+pytest only — the new-interpreter diagnostic.
+        # (See also the wheel job: this lane runs against src/ via the editable install; the wheel lane runs
+        # the SAME `core or base` suite against the built artifact, and they must agree.)
         #
         # NO `|| pytest tests/` FALLBACK. The first version had one, as a hedge in case
         # the `core` marker was not wired up. It was: `pytest -m core` collected almost
@@ -176,7 +179,38 @@ jobs:
         # once is what told us the real cause (all 13 failing, including numpy-only
         # modules, meant `pycat` itself was not importable — not a missing dependency).
         run: |
-          pytest -m core -v
+          pytest -m "core or base" -v
+
+  minimal:
+    name: minimal core (numpy + pytest ONLY — the new-interpreter diagnostic)
+    runs-on: ubuntu-latest
+    # The FIRST lane to run under a new interpreter: pytest + numpy + pycat and NOTHING else — no scientific
+    # stack, no napari, no Qt, no GPU. It runs `-m core`; conftest ignores every non-`core` file BY MARKER
+    # (an AST scan, without importing it), so a `base` file's module-scope pandas/scipy import cannot break
+    # collection here. This isolates "does the interpreter + pycat's pure/numpy code work" from "is the full
+    # scientific stack installable" — exactly what the Python 3.13 investigation needed and did not have
+    # (see docs/source/known_issues.md). The `core` set is EMPIRICAL: a test is `core` only if it passes in
+    # this env (verified locally, 2026-07-23). If a `core` test needs more, THIS lane goes red — which is how
+    # a bad mark is caught; mis-marking toward `base` is harmless (the `core or base` lane covers it).
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install numpy + pytest ONLY
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pytest
+          # PyCAT itself, no dependencies — the whole point is that `core` needs nothing but numpy.
+          pip install --no-deps -e .
+
+      - name: Minimal core suite
+        # `-o addopts=` clears the pyproject `--cov=pycat` default (pytest-cov is not installed in this
+        # deliberately-bare lane); `-v` is re-added explicitly.
+        run: |
+          pytest -m core -o addopts= -v
 
   wheel:
     name: core against the built WHEEL (packaging guard)
@@ -220,4 +254,4 @@ jobs:
         env:
           PYCAT_ALLOW_INSTALLED: "1"
         run: |
-          pytest -m core -o pythonpath= -v
+          pytest -m "core or base" -o pythonpath= -v

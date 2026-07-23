@@ -24,7 +24,7 @@ from pycat.toolbox.pixel_wise_corr_analysis_tools import pearsons_correlation
 # KNOWN-ANSWER tests — real assertions, ground truth is exact.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pearson_identical_channels_is_one():
     """Two identical channels must give Pearson == 1.0."""
     ch1, ch2, roi = two_channels('identical')
@@ -32,7 +32,7 @@ def test_pearson_identical_channels_is_one():
     assert pcc == pytest.approx(1.0, abs=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pearson_anticorrelated_is_minus_one():
     """A channel vs its linear inverse must give Pearson == -1.0."""
     ch1, ch2, roi = two_channels('anticorr')
@@ -40,7 +40,7 @@ def test_pearson_anticorrelated_is_minus_one():
     assert pcc == pytest.approx(-1.0, abs=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pearson_independent_is_near_zero():
     """Two independent noise channels should give Pearson ~ 0."""
     ch1, ch2, roi = two_channels('independent', shape=(256, 256))
@@ -48,7 +48,7 @@ def test_pearson_independent_is_near_zero():
     assert abs(pcc) < 0.1  # loose: finite-sample noise
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pearson_is_symmetric():
     """Pearson(a,b) must equal Pearson(b,a) — an invariant, no ground truth
     value needed."""
@@ -84,7 +84,7 @@ EMPIRICAL_PARTIAL_OVERLAP_PEARSON = 0.8321
 
 @pytest.mark.skipif(EMPIRICAL_PARTIAL_OVERLAP_PEARSON is None,
                     reason="Fill EMPIRICAL_PARTIAL_OVERLAP_PEARSON with a validated reference value")
-@pytest.mark.core
+@pytest.mark.base
 def test_pearson_partial_overlap_matches_reference():
     """Characterization test: partial-overlap scene should match the validated
     reference Pearson. Fill EMPIRICAL_PARTIAL_OVERLAP_PEARSON to enable."""
@@ -97,7 +97,7 @@ def test_pearson_partial_overlap_matches_reference():
     assert pcc == pytest.approx(EMPIRICAL_PARTIAL_OVERLAP_PEARSON, abs=1e-2)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_whole_frame_pearson_measures_the_cell_shape_not_colocalisation():
     """Pearson over the whole frame is saturated by the shared cell shape.
 
@@ -153,7 +153,7 @@ def test_whole_frame_pearson_measures_the_cell_shape_not_colocalisation():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_manders_warns_when_the_threshold_is_below_the_background():
     """A threshold below the background gives M = 1.0 on pure noise.
 

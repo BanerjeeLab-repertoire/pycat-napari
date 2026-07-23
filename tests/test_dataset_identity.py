@@ -13,7 +13,7 @@ import pytest
 from pycat.utils.dataset_identity import (DatasetRegistry, compute_fingerprint, fingerprints_match,
                                           bounded_partial_hash, DatasetFingerprint)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _write(path, data):

@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # A population with ONE injected size outlier (object 10). n>=3 so robust MAD can act; the rest are a

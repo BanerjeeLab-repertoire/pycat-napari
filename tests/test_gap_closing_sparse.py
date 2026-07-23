@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.toolbox.dynamic_spatial_tools import _close_gaps_bayesian
 

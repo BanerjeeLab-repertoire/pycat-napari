@@ -45,7 +45,7 @@ import pytest
 # Local application imports
 from pycat.toolbox import segmentation_tools as seg
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _P = dict(kurtosis_threshold=-3.0, local_snr_threshold=1.0, global_snr_threshold=1.0,
           intensity_hwhm_scale=1.17, max_area_fraction=0.25)

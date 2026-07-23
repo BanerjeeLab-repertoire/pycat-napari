@@ -1,3 +1,25 @@
+## [1.6.307] - 2026-07-23
+### Changed — **Finer test-marker tiers: `core` is now a true minimal lane; `base` for the scientific stack (release_engineering Part C).**
+`core` used to mean "any headless test" and pulled the full scientific stack, so there was no way to check
+basic health under a new interpreter without installing scipy/pandas/skimage/etc. — exactly what the Python
+3.13 investigation lacked. `core` is now split into a genuinely minimal tier and a `base` tier, verified
+empirically (not guessed from names):
+- **`core`** — passes with **numpy + pytest only**, nothing else. The first lane to run under a new
+  interpreter. Determined by actually running the suite in a numpy-only venv: 480 tests across ~118 files.
+- **`base`** — headless but needs the declared scientific stack (scipy/scikit-image/pandas/matplotlib/opencv/
+  simpleitk/seaborn/networkx/scikit-learn). 128 files re-marked `core` → `base` (every file with a test that
+  needs more than numpy). Also declared: `gui`, `optional`, `slow`, `gpu` (vocabulary for future use).
+- **conftest** ignores non-`core` files BY MARKER (an AST scan, no import) when the base stack is absent, so a
+  `base` file's module-scope `pandas`/`scipy` import cannot break collection in the minimal lane.
+- **CI**: the existing headless lane now runs `-m "core or base"` (the whole headless suite — **1816 passed,
+  identical to before, zero coverage loss**); a new **`minimal` job** installs only numpy + pytest and runs
+  `-m core` (the new-interpreter diagnostic); the wheel lane runs `-m "core or base"` too. The two Qt/GUI CI
+  guards (`test_ci_dependencies`) now cover `core` **or** `base` — both lanes are Qt-free.
+- **Safety by construction**: mis-marking toward `base` is harmless (the `core or base` lane covers it); a
+  `core` test that needs more fails the minimal lane, which is how a bad mark is caught. Verified locally:
+  minimal `-m core` green (480), `-m "core or base"` = 1816, guards + budgets green. No scientific behaviour
+  changes. Part C completes release_engineering.
+
 ## [1.6.306] - 2026-07-23
 ### Added — **A wheel-install CI lane backs the `pythonpath` convenience (release_engineering Part B, complete).**
 1.6.305 added `pythonpath = ["src"]` so a bare `pytest` runs from a clone, but the spec is explicit that this

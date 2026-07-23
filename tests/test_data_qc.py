@@ -87,7 +87,7 @@ def _stack(n=10, seed=0):
 
 # ── The bug: the container's max is not the sensor's ceiling ─────────────────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("ceiling,expected_pct", [(4095, 1.2), (1000, 9.1)])
 def test_saturation_is_detected_below_the_dtype_maximum(ceiling, expected_pct):
     """A 12-bit camera in a uint16 array clips at 4095 — not at 65535.
@@ -130,7 +130,7 @@ def test_saturation_is_detected_below_the_dtype_maximum(ceiling, expected_pct):
     assert result["status"] == "bad"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_saturation_does_not_cry_wolf_on_an_unclipped_image():
     """An image with a brightest pixel is not a clipped image."""
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
@@ -152,7 +152,7 @@ def test_saturation_does_not_cry_wolf_on_an_unclipped_image():
 
 # ── The discrimination tests: each metric must ignore the OTHER defects ──────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_focus_finds_a_defocused_frame_and_ignores_a_noisy_one():
     """A focus score that rises with noise is measuring noise (the 1.5.405 bug).
 
@@ -188,7 +188,7 @@ def test_focus_finds_a_defocused_frame_and_ignores_a_noisy_one():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_snr_and_vignetting_are_invariant_to_the_camera_pedestal():
     """A pedestal adds a constant. It is not noise, and it is not uneven illumination."""
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
@@ -211,7 +211,7 @@ def test_snr_and_vignetting_are_invariant_to_the_camera_pedestal():
     # that passes on a broken metric is worse than no test.**
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_snr_falls_with_noise_and_vignetting_fires_on_a_gradient():
     """Each metric must actually respond to its OWN defect."""
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
@@ -230,7 +230,7 @@ def test_snr_falls_with_noise_and_vignetting_fires_on_a_gradient():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_drift_and_vibration_ignore_bleaching():
     """A bleaching sample gets DIMMER. It does not MOVE.
 
@@ -265,7 +265,7 @@ def test_drift_and_vibration_ignore_bleaching():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_vibration_fires_on_a_PERIODIC_source_and_not_on_random_jitter():
     """``qc_vibration`` claims to find *"a vibration source (pump, fan, footsteps)"*.
 
@@ -309,7 +309,7 @@ def test_vibration_fires_on_a_PERIODIC_source_and_not_on_random_jitter():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_drift_fires_on_drift():
     """The positive control for qc_drift."""
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
@@ -320,7 +320,7 @@ def test_drift_fires_on_drift():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_nyquist_uses_the_abbe_limit():
     """d = λ/(2·NA), and Nyquist wants at least two samples across it.
 
@@ -368,7 +368,7 @@ def _zstack(asymmetry=0.0, size=160, n_planes=21, seed=0):
     return np.stack(planes).astype(np.uint16)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("label", ["2d_fluor", "brightfield", "zstack", "timeseries"])
 def test_clean_data_of_every_type_raises_no_alarms(label):
     """**Any warn or bad on clean data is a false alarm, by definition.**
@@ -417,7 +417,7 @@ def test_clean_data_of_every_type_raises_no_alarms(label):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_inapplicable_checks_say_so_rather_than_passing():
     """A check that cannot apply must not report 'good'. That is a quiet lie.
 
@@ -442,7 +442,7 @@ def test_inapplicable_checks_say_so_rather_than_passing():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_spherical_aberration_was_inverted():
     """It fired on CLEAN stacks and passed the aberration it exists to detect.
 
@@ -486,7 +486,7 @@ def test_spherical_aberration_was_inverted():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_verdict_says_how_many_checks_actually_ran():
     """*"All assessed metrics look good"* is technically true and practically a trap.
 
@@ -522,7 +522,7 @@ def test_the_verdict_says_how_many_checks_actually_ran():
             )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_single_image_focus_is_judged_from_edge_sharpness():
     """**A single image CAN be judged for focus** — via the sharpness of its objects' edges.
 
@@ -585,7 +585,7 @@ def test_single_image_focus_is_judged_from_edge_sharpness():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_focus_is_comparable_across_a_dataset_without_any_optics():
     """*"Which of my 40 fields is the soft one?"* — the way focus is most often used.
 
@@ -617,7 +617,7 @@ def test_focus_is_comparable_across_a_dataset_without_any_optics():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_focus_refuses_when_the_field_has_no_sharp_objects():
     """A blurry cell cannot hide a sharp punctum — **but if nothing is small, there is no
     evidence.**
@@ -648,7 +648,7 @@ def test_focus_refuses_when_the_field_has_no_sharp_objects():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_absolute_focus_verdict_admits_its_systematic_floor():
     """It is a **screen for gross defocus**, not a measurement — and it says so.
 
@@ -690,7 +690,7 @@ def test_the_absolute_focus_verdict_admits_its_systematic_floor():
 
 # ── The five checks that had no test at all ──────────────────────────────────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_ghosting_detects_a_reflection_and_recovers_its_offset():
     """A reflection ghost is a faint SHIFTED COPY — from a filter, or a coverslip.
 
@@ -725,7 +725,7 @@ def test_ghosting_detects_a_reflection_and_recovers_its_offset():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("tau,expected_remaining", [(50.0, 53.8), (15.0, 12.7)])
 def test_photobleaching_reports_the_true_fraction_remaining(tau, expected_remaining):
     """The reported %-remaining must match the truth — it decides whether a correction is
@@ -750,7 +750,7 @@ def test_photobleaching_reports_the_true_fraction_remaining(tau, expected_remain
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_time_sampling_is_nyquist_in_time():
     """At least two samples per process timescale, or the dynamics are aliased."""
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
@@ -764,7 +764,7 @@ def test_time_sampling_is_nyquist_in_time():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_chromatic_measures_the_shift_when_it_is_given_the_channels():
     """**A working check that never receives its data never runs.**
 
@@ -799,7 +799,7 @@ def test_chromatic_measures_the_shift_when_it_is_given_the_channels():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_diffraction_limit_is_a_sigma_not_a_resolution():
     """Abbe ``d = lambda/(2·NA)`` is a RESOLUTION (~a FWHM), not a standard deviation.
 
@@ -822,7 +822,7 @@ def test_diffraction_limit_is_a_sigma_not_a_resolution():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_vignetting_detects_a_real_falloff():
     """``grey_opening`` returned an identically ZERO illumination field. The check was blind.
 
@@ -873,7 +873,7 @@ def test_vignetting_detects_a_real_falloff():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_vignetting_reads_high_on_a_pedestal_and_says_so():
     """The pedestal is ADDITIVE and the illumination is MULTIPLICATIVE. It cannot be corrected.
 
@@ -909,7 +909,7 @@ def test_vignetting_reads_high_on_a_pedestal_and_says_so():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_report_does_not_misdescribe_its_own_method():
     """**A report that misdescribes its own method is worse than one that is silent.**
 
@@ -939,7 +939,7 @@ def test_the_report_does_not_misdescribe_its_own_method():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_vignetting_panel_does_not_contradict_its_own_verdict():
     """A flat field must LOOK flat.
 
@@ -1005,7 +1005,7 @@ def test_run_full_qc_adds_NO_note_when_it_read_everything():
 # so a phase-split of qc_focus (stack / diffraction-limit verdict / na / info) can be proven to move no
 # number. Pure numpy/scipy (edge width + band-pass energy), so the golden values are platform-portable.
 
-@pytest.mark.core
+@pytest.mark.base
 def test_qc_focus_is_byte_identical():
     qc = pytest.importorskip("pycat.toolbox.data_qc_tools")
     optics = dict(pixel_um=0.065, na=1.4, wavelength_nm=520)

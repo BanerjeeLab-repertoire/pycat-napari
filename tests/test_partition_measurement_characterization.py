@@ -11,7 +11,7 @@ and the measurement identity must be untouched.
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _H = _W = 120
 

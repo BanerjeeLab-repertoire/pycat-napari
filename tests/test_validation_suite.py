@@ -13,7 +13,7 @@ from benchmarks.run_suite import (
     Regression, append_record, compare_to_baseline, format_report, has_regression,
     read_records, run_case, run_suite)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_the_suite_runs_end_to_end_and_writes_a_well_formed_record(tmp_path):

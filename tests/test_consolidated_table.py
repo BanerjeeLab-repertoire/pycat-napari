@@ -23,7 +23,7 @@ from pycat.utils.consolidated_table import (melt_object_measurements, build_imag
                                             consolidated_columns, ConsolidatedLongWriter)
 from pycat.utils.sample_metadata import SampleMetadata
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _wide(n=2):

@@ -44,7 +44,7 @@ def _artist_for(df, level):
     return _Artist(np.column_stack([sub['x'].values, sub['y'].values]))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_verified_hue_split_maps_each_artist_to_its_subset():
     df = _table()
     artists = [_artist_for(df, c) for c in ['A', 'B', 'C']]
@@ -60,7 +60,7 @@ def test_a_verified_hue_split_maps_each_artist_to_its_subset():
     assert covered == list(range(len(df)))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_picked_point_resolves_to_the_correct_entity_within_its_subset():
     df = _table()
     refs = list(df['label'])                       # stand-in ObjectRefs: one per row, in DataFrame order
@@ -74,7 +74,7 @@ def test_a_picked_point_resolves_to_the_correct_entity_within_its_subset():
     assert refs[pos_b[1]] == 105
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_point_count_mismatch_REFUSES_the_whole_plot():
     """The safety property: an artist whose point count matches no free subset refuses everything."""
     df = _table()
@@ -83,7 +83,7 @@ def test_a_point_count_mismatch_REFUSES_the_whole_plot():
     assert not ok and mappings is None and 'refused' in msg
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_coordinate_mismatch_REFUSES_the_whole_plot():
     """Right count, wrong coordinates (seaborn reordered within a group) must also refuse — not guess."""
     df = _table()
@@ -93,14 +93,14 @@ def test_a_coordinate_mismatch_REFUSES_the_whole_plot():
     assert not ok and 'refused' in msg
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_split_without_a_hue_column_is_refused():
     df = _table()
     ok, mappings, msg = _seaborn_subset_mappings([_artist_for(df, 'A')], df, 'x', 'y', None)
     assert not ok and mappings is None
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_attach_brushing_wires_one_pickable_per_artist_for_a_split(monkeypatch):
     import pycat.utils.brushing as B
     calls = []
@@ -116,7 +116,7 @@ def test_attach_brushing_wires_one_pickable_per_artist_for_a_split(monkeypatch):
     assert calls == [(art_a, [101, 103, 106]), (art_b, [102, 105])]   # each artist gets its own subset's refs
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_attach_brushing_wires_a_single_artist_directly(monkeypatch):
     import pycat.utils.brushing as B
     calls = []
@@ -127,7 +127,7 @@ def test_attach_brushing_wires_a_single_artist_directly(monkeypatch):
     assert calls == [('ARTIST', [11, 22, 33])]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_real_seaborn_hue_plot_is_brushable_not_refused():
     """The end-to-end guarantee on the installed seaborn: a hue scatter is brushable, never refused."""
     pytest.importorskip('seaborn')

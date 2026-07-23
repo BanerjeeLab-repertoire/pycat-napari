@@ -14,7 +14,7 @@ import pytest
 
 from pycat.toolbox.partition_enrichment_tools import assess_background_region, client_enrichment
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _scene(pedestal, k=5.0, size=128, dilute_signal=100.0):

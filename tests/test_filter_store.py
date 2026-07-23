@@ -13,7 +13,7 @@ import pytest
 from pycat.utils.filter_store import (Filter, FilterStore, resolve_render_tier,
                                       filtered_result_note, filter_table)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service():

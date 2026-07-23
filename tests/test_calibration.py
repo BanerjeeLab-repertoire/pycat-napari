@@ -28,7 +28,7 @@ import pytest
 from pycat.utils import calibration as cal
 from pycat.utils.measurement import ParameterSource
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _fp(**over):

@@ -28,7 +28,7 @@ import pytest
 # points there so monkeypatch targets bind the module the internal bare-name calls resolve against.
 from pycat.toolbox.vpt import detection as vpt
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _PARAMS = dict(min_sigma=1.0, max_sigma=5.0, num_sigma=5, threshold=0.02)
 

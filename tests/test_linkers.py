@@ -98,7 +98,7 @@ def _linkers():
             ("bayesian", dst.link_trajectories_bayesian)]
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("name,linker", _linkers())
 def test_linker_is_perfect_on_clean_well_separated_objects(name, linker):
     """The baseline. If this fails, nothing downstream can be trusted."""
@@ -117,7 +117,7 @@ def test_linker_is_perfect_on_clean_well_separated_objects(name, linker):
     assert n_tracks == 20, f"{name}: {n_tracks} tracks from 20 objects"
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("name,linker", _linkers())
 def test_gap_closing_repairs_detection_dropout(name, linker):
     """**Dropout shatters a linker, and the gap setting is what repairs it.**
@@ -159,7 +159,7 @@ def test_gap_closing_repairs_detection_dropout(name, linker):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_bayesian_linker_wins_where_assignment_is_ambiguous():
     """The two linkers are **identical** until objects get confusable — and then Bayes wins.
 
@@ -235,7 +235,7 @@ _GOLDEN_LINK_COSTS = [4.5, 4.5, 4.5, 4.5, 0.139223, 0.218376, 0.023469, 0.171413
                       0.004566, 0.029801, 0.026932, 0.009697]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_bayesian_linker_assignment_is_byte_identical():
     """The exact assignment on a fixed multi-branch scenario — a golden master. If a refactor of
     `link_trajectories_bayesian` changes any track_id or link_cost, this fails: the Hungarian solve is

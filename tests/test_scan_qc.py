@@ -15,7 +15,7 @@ from pycat.toolbox.scan_qc_tools import (
     qc_scan_shear, qc_bidirectional_phase, qc_disk_pattern, qc_pinhole_crosstalk,
     run_scan_qc, scan_shear_flags)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # ── synthetic constructions (the artifacts, built as the physics defines them) ──────────────────

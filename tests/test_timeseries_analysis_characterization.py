@@ -14,7 +14,7 @@ the same net the existing segmentation characterization tests rely on.
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _synthetic_scene():

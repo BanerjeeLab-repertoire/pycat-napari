@@ -12,7 +12,7 @@ import pytest
 from pycat.navigator.operation_spec import iter_operation_specs, resolve_operation
 from pycat.utils.tag_registry import REQUIREMENT_NAMES
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 # The measurement operations this increment added, each with the module.function it MUST bind to. If a
 # binding is renamed/moved, `resolve_operation` fails loudly here — the intended guard.

@@ -12,7 +12,7 @@ deprecated `figure_publication.FigureSpec` shim has since been removed and its p
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _fd():

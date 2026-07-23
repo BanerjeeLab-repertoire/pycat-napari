@@ -13,7 +13,7 @@ import pytest
 
 from pycat.toolbox.ratiometric_tools import ratio_image, object_ratios, RatioResult
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_a_known_ratio_is_recovered_after_background_subtraction():

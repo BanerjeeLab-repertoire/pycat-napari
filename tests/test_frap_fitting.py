@@ -21,7 +21,7 @@ from pycat.toolbox.frap_tools import frap_recovery_model, fit_frap_recovery
 # KNOWN-ANSWER — the model equation is exact.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.core
+@pytest.mark.base
 def test_recovery_model_endpoints():
     """I(0) = a, and I(t→∞) → b. Exact from the model definition."""
     a, b, tau = 0.2, 0.9, 5.0
@@ -30,14 +30,14 @@ def test_recovery_model_endpoints():
     assert frap_recovery_model(1e6, a, b, tau) == pytest.approx(b, abs=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_recovery_model_halftime_point():
     """At t = τ½, x = 1, so I = (a + b) / 2 exactly."""
     a, b, tau = 0.2, 0.9, 5.0
     assert frap_recovery_model(tau, a, b, tau) == pytest.approx((a + b) / 2, abs=1e-9)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_fit_recovers_known_params_noise_free():
     """A noise-free synthetic curve must fit back to its known mobile fraction
     and half-time."""
@@ -50,7 +50,7 @@ def test_fit_recovers_known_params_noise_free():
     assert res['r_squared'] == pytest.approx(1.0, abs=1e-3)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_fit_mobile_fraction_in_unit_range():
     """Invariant: reported mobile fraction stays in a sane range for a normal
     recovery, regardless of exact value."""
@@ -85,7 +85,7 @@ NOISY_FIT_MOBILE_TOL = 0.03
 
 @pytest.mark.skipif(NOISY_FIT_NOISE_SIGMA is None or NOISY_FIT_MOBILE_TOL is None,
                     reason="Fill NOISY_FIT_NOISE_SIGMA / NOISY_FIT_MOBILE_TOL from validated data")
-@pytest.mark.core
+@pytest.mark.base
 def test_fit_recovers_params_under_noise():
     """Characterization: fit should recover mobile fraction within tolerance at
     a representative noise level. Fill the two constants above to enable."""
@@ -96,7 +96,7 @@ def test_fit_recovers_params_under_noise():
     assert res['mobile_fraction'] == pytest.approx(mobile, abs=NOISY_FIT_MOBILE_TOL)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_frap_reports_when_the_data_cannot_determine_the_half_time():
     """R² cannot tell you that the data does not CONSTRAIN the parameter.
 
@@ -160,7 +160,7 @@ def test_frap_reports_when_the_data_cannot_determine_the_half_time():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_acquisition_bleaching_corrupts_frap_and_the_reference_fixes_it():
     """Acquisition bleaching makes the plateau sag — and neither R² nor the CI catches it.
 

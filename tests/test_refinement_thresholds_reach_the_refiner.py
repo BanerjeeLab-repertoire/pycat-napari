@@ -20,7 +20,7 @@ what arrives. Asserting on the output at defaults would pass against the bug.
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _NON_DEFAULT = dict(
     kurtosis_threshold=-1.5,        # default -3.0

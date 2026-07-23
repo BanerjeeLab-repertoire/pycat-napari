@@ -76,7 +76,7 @@ def _batch_of_files(n_files=3, size=128):
     return pd.DataFrame(rows)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_batch_plot_point_becomes_an_IMAGE_with_no_session():
     """**This is the requirement.** *"Select points in the resulting plot and see the bounded
     images"* — over a dataset that is **not loaded**.
@@ -106,7 +106,7 @@ def test_a_batch_plot_point_becomes_an_IMAGE_with_no_session():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_ref_WITHOUT_a_bbox_says_WHY_it_cannot_be_resolved():
     """*"Nothing happened"* is the worst possible answer to a click.
 
@@ -125,7 +125,7 @@ def test_a_ref_WITHOUT_a_bbox_says_WHY_it_cannot_be_resolved():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_NEW_plot_becomes_brushable_in_ONE_line():
     """**The extensibility requirement.**
 
@@ -186,7 +186,7 @@ def test_a_NEW_plot_becomes_brushable_in_ONE_line():
     assert len(figure._pycat_object_refs) == 40
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_hub_does_not_loop_when_a_view_echoes_a_selection():
     """**Without the re-entrancy guard, a click oscillates.**
 
@@ -217,7 +217,7 @@ def test_the_hub_does_not_loop_when_a_view_echoes_a_selection():
     assert calls['table'] == 1, "the other view must be updated exactly once"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_regionprops_bbox_is_kept_not_discarded():
     """**25 files call regionprops. One keeps the bbox.**
 
@@ -240,7 +240,7 @@ def test_regionprops_bbox_is_kept_not_discarded():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_grouped_scatter_needs_PER_GROUP_refs_or_it_resolves_to_the_WRONG_OBJECT():
     """**The silent mis-indexing trap**, and it would never be noticed.
 
@@ -301,7 +301,7 @@ def test_a_grouped_scatter_needs_PER_GROUP_refs_or_it_resolves_to_the_WRONG_OBJE
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_bbox_survives_regionprops_table_into_an_ObjectRef():
     """**The main cell and puncta tables go through ``regionprops_table``, not a loop.**
 
@@ -332,7 +332,7 @@ def test_the_bbox_survives_regionprops_table_into_an_ObjectRef():
 
 # ── The bbox sweep must STAY complete ─────────────────────────────────────────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_ref_points_at_the_OBJECT_and_not_at_its_PARENT():
     """**A ref that points at the wrong object is worse than one that points at nothing.**
 
@@ -366,7 +366,7 @@ def test_a_ref_points_at_the_OBJECT_and_not_at_its_PARENT():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_every_per_object_results_LOOP_keeps_the_bbox():
     """**A file-level check is not a loop-level check** — and that is how one survived.
 
@@ -445,7 +445,7 @@ def test_every_per_object_results_LOOP_keeps_the_bbox():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_bbox_import_is_PRESENT_wherever_it_is_USED():
     """**A file edited in a sandbox and left out of a release is a file that does not exist.**
 
@@ -588,7 +588,7 @@ class _StubViewer:
         return self._add(data, **kwargs)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_click_CROPS_without_materialising_the_acquisition():
     """**One click asked for the whole acquisition to take an 8-pixel crop.**
 
@@ -624,7 +624,7 @@ def test_a_click_CROPS_without_materialising_the_acquisition():
     assert np.array_equal(crop, stack._a[10][12:36, 22:46])
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_object_resolves_to_ITS_OWN_layer_not_merely_the_FIRST_one():
     """**With two segmentations open, a punctum from analysis B highlighted an object in mask A.**
 
@@ -657,7 +657,7 @@ def test_an_object_resolves_to_ITS_OWN_layer_not_merely_the_FIRST_one():
     assert 'Selection' in viewer.layers, "no selection overlay was drawn"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_LEGACY_ref_still_resolves_but_says_it_GUESSED():
     """Additive: a ref with no `source_layer_id` (every ref today, until increment 2 fills it)
     keeps the old first-match behaviour — but a silently-wrong highlight becomes a visibly
@@ -677,7 +677,7 @@ def test_a_LEGACY_ref_still_resolves_but_says_it_GUESSED():
         "the fallback was silent — the whole point is that a guess announces itself")
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_ref_whose_layer_is_CLOSED_resolves_to_NOTHING_rather_than_the_wrong_thing():
     """The ref knows its layer, and that layer is not open. The honest answer is "not here" —
     quietly using a different mask is the original bug wearing a new hat."""
@@ -693,7 +693,7 @@ def test_a_ref_whose_layer_is_CLOSED_resolves_to_NOTHING_rather_than_the_wrong_t
     assert 'not open' in note
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_source_layer_id_is_OPTIONAL_so_every_existing_ref_still_works():
     """`ObjectRef` is frozen and constructed all over the codebase. The field is additive and
     defaulted; increment 2 fills it."""
@@ -709,7 +709,7 @@ def test_source_layer_id_is_OPTIONAL_so_every_existing_ref_still_works():
 # ═══════════════════════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_wiring_a_BIG_plot_does_not_build_a_ref_for_every_point():
     """**The refs cost 380x the plot they decorate.**
 
@@ -752,7 +752,7 @@ def test_wiring_a_BIG_plot_does_not_build_a_ref_for_every_point():
         ref_mod.ObjectRef.from_row = original
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_lazy_refs_behave_like_the_LIST_they_replaced():
     """Every caller indexes, lens or iterates them — the laziness must be invisible."""
     from pycat.utils.object_ref import ObjectRef, refs_from_dataframe
@@ -767,7 +767,7 @@ def test_lazy_refs_behave_like_the_LIST_they_replaced():
     assert all(isinstance(r, ObjectRef) for r in refs)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_lazy_ref_cache_stays_BOUNDED():
     """The whole point is not holding 100k objects; a cache that grows without bound would put them
     straight back."""
@@ -782,7 +782,7 @@ def test_the_lazy_ref_cache_stays_BOUNDED():
         f"the cache grew to {len(refs._cache)} — it is re-creating the problem it exists to avoid")
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_ROW_that_cannot_build_a_ref_keeps_the_refs_INDEX_ALIGNED():
     """`make_pickable` maps a click to `refs[index]`. A row that fails must still occupy its slot,
     or every point after it points at the wrong object."""
@@ -794,7 +794,7 @@ def test_a_ROW_that_cannot_build_a_ref_keeps_the_refs_INDEX_ALIGNED():
     assert refs[2].object_id == 3          # still in slot 2, not shifted up
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_clicking_ONE_point_highlights_ONE_point():
     """**It used to highlight several, and none of them reliably the right one.**
 
@@ -827,7 +827,7 @@ def test_clicking_ONE_point_highlights_ONE_point():
         plt.close(fig)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_BASE_scatter_is_never_touched_by_a_selection():
     """O(1) and, more importantly, unable to mis-mark: if the base artist is not modified, it
     cannot end up tiling a short size array across the collection again."""
@@ -856,7 +856,7 @@ def test_the_BASE_scatter_is_never_touched_by_a_selection():
         plt.close(fig)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_selection_overlay_is_NOT_pickable():
     """It sits on top of the base artist. If it could be picked it would hand back its own index —
     0 — i.e. the wrong object, every time."""

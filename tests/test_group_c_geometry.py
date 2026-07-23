@@ -68,7 +68,7 @@ def _two_discs(overlap_px, size=96, radius=12):
     return left | right
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("overlap", [0, 4, 8])
 def test_touching_objects_are_actually_split(overlap):
     """**A boolean mask cannot express a split**, and the function returned one.
@@ -92,7 +92,7 @@ def test_touching_objects_are_actually_split(overlap):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("overlap", [14, 20])
 def test_genuinely_merged_objects_are_not_split(overlap):
     """It must not cry wolf: two discs that have truly merged are **one** object."""
@@ -108,7 +108,7 @@ def test_genuinely_merged_objects_are_not_split(overlap):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("radius", [1.5, 2.0, 5.0])
 def test_partial_volume_recovers_the_area_of_a_sub_resolution_object(radius):
     """The plain mask is **43 % too small** on a 1.5 px object. PV gets it to 3.6 %."""
@@ -130,7 +130,7 @@ def test_partial_volume_recovers_the_area_of_a_sub_resolution_object(radius):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("radius,expected_bias", [(2.0, -0.55), (5.0, -0.22), (10.0, -0.11)])
 def test_the_predicted_intensity_bias_matches_the_real_one(radius, expected_bias):
     """**It predicts a bias it cannot remove.** That is exactly the right thing to do.
@@ -166,7 +166,7 @@ def test_the_predicted_intensity_bias_matches_the_real_one(radius, expected_bias
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("pedestal", [0.0, 500.0])
 def test_gaussian_localization_is_exact_and_pedestal_invariant(pedestal):
     """Audited and **correct** — and it is the one estimator that fits its own offset.
@@ -195,7 +195,7 @@ def test_gaussian_localization_is_exact_and_pedestal_invariant(pedestal):
     assert measured_sigma == pytest.approx(true_sigma, rel=0.05)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("n_spots,separation", [(4, 20.0), (16, 12.0), (9, 6.0)])
 def test_clean_detection_finds_the_right_number_of_spots(n_spots, separation):
     """Audited and **correct** — exact at every separation, down to 3x the PSF sigma."""
@@ -242,7 +242,7 @@ def _ellipsoid_stack(radius_z_um, radius_xy_um, mpp=0.1, dz=0.5, shape=(31, 64, 
     return labels, intensity
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_3d_volume_uses_the_z_step_not_the_xy_pixel():
     """Audited and **correct** — and the failure it avoids is a **5x** error.
 
@@ -262,7 +262,7 @@ def test_3d_volume_uses_the_z_step_not_the_xy_pixel():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("radius_z,radius_xy,true_major", [
     (1.0, 1.0, 2.0),          # sphere — the case that HID the bug
     (2.0, 0.5, 4.0),          # elongated in Z — a 4x underestimate
@@ -328,7 +328,7 @@ def _beads_on_a_string(n_beads=6, size=128, radius=7):
     return mask
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_two_touching_droplets_are_split():
     """A **deep neck** means the interface has NOT relaxed. They are two droplets."""
     lm = pytest.importorskip("pycat.toolbox.label_and_mask_tools")
@@ -343,7 +343,7 @@ def test_two_touching_droplets_are_split():
     assert int(result['labels'].max()) == 2
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("overlap", [0.35, 0.50])
 def test_arrested_fusion_is_NOT_split_because_the_arrest_is_the_finding(overlap):
     """**A shallow neck means surface tension has already done its work.**
@@ -377,7 +377,7 @@ def test_arrested_fusion_is_NOT_split_because_the_arrest_is_the_finding(overlap)
     assert int(result['labels'].max()) == 1
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_chain_is_not_cut_in_two():
     """**Beads on a string is not a droplet pair.** Cutting it in two would be arbitrary.
 
@@ -396,7 +396,7 @@ def test_a_chain_is_not_cut_in_two():
     assert record['n_peaks'] >= 4
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_single_droplet_is_left_alone():
     """The splitter must not cry wolf."""
     lm = pytest.importorskip("pycat.toolbox.label_and_mask_tools")
@@ -409,7 +409,7 @@ def test_a_single_droplet_is_left_alone():
     assert int(result['labels'].max()) == 1
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_neck_ratio_moves_monotonically_with_the_degree_of_fusion():
     """**The neck ratio IS the physics**, and it behaves like it.
 
@@ -441,7 +441,7 @@ def test_the_neck_ratio_moves_monotonically_with_the_degree_of_fusion():
 
 # ── The physics of the neck: surface tension, elasticity, and what a frame can carry ──────
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("d_over_R", [1.8, 1.5, 1.2])
 def test_the_neck_geometry_obeys_the_sphere_relation(d_over_R):
     """**sin(α) = r_n / R.** The dihedral angle falls straight out of the mask.
@@ -475,7 +475,7 @@ def test_the_neck_geometry_obeys_the_sphere_relation(d_over_R):
     assert record['dihedral_deg'] == pytest.approx(true_dihedral, abs=5.0)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_elastocapillary_length_is_recovered_from_a_POPULATION():
     """**γ/G from one image. No time series, no calibration.**
 
@@ -526,7 +526,7 @@ def test_the_elastocapillary_length_is_recovered_from_a_POPULATION():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_all_round_or_all_irregular_population_is_BOUNDED_not_fitted():
     """**If nothing crosses the threshold, L_ec is bounded — and that is still information.**
 
@@ -552,7 +552,7 @@ def test_an_all_round_or_all_irregular_population_is_BOUNDED_not_fitted():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_droplet_smaller_than_L_ec_cannot_be_arrested():
     """**The size gate is PHYSICS, not noise** — and it must be reported as such.
 
@@ -583,7 +583,7 @@ def test_a_droplet_smaller_than_L_ec_cannot_be_arrested():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_neck_laplace_pressure_reproduces_PAWAR_2011():
     """**Validated against published experimental data.**
 
@@ -640,7 +640,7 @@ def test_the_neck_laplace_pressure_reproduces_PAWAR_2011():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_elastocapillary_window_covers_the_condensate_regime():
     """**Is the method even in the accessible regime?** Checked against literature values.
 

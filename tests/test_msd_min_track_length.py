@@ -36,7 +36,7 @@ import pytest
 # Local application imports
 from pycat.toolbox import condensate_physics_tools as cpt
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 @pytest.fixture

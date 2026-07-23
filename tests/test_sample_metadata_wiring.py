@@ -17,7 +17,7 @@ import pathlib
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 # ── Part B: the per-image write helper + config-driven resolver ─────────────────────────────

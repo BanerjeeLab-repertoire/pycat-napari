@@ -62,15 +62,39 @@ def _close_matplotlib_figures():
 # transitively needs the stack, even though it never names it.
 _GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui")
 
+# The base SCIENTIFIC stack — the deps a `base`-tier test needs. The MINIMAL `core` lane installs none of
+# these (only numpy + pytest), so when any is absent we are in the minimal lane and only `core`-marked files
+# can even be imported; everything else is ignored WITHOUT importing it (a `base` file that imports pandas or
+# scipy at module scope would otherwise error at collection, before `-m core` ever deselects it).
+_BASE_STACK = ("scipy", "pandas", "matplotlib", "skimage", "sklearn", "cv2", "SimpleITK", "seaborn", "networkx")
+
 
 def _absent_packages():
     return {m for m in _OPTIONAL_STACK if importlib.util.find_spec(m) is None}
 
 
+def _base_stack_absent():
+    """True in the MINIMAL `core` lane — at least one base scientific package is not installed."""
+    return any(importlib.util.find_spec(m) is None for m in _BASE_STACK)
+
+
+def _file_has_core_marker(tree):
+    """Whether the test file carries a ``core`` marker anywhere — a ``pytest.mark.core`` attribute in a
+    ``@pytest.mark.core`` decorator or a ``pytestmark = pytest.mark.core`` assignment. AST-only, so it never
+    imports the module (the whole point — a `base` file must be judged without importing its heavy deps)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "core":
+            val = node.value
+            if isinstance(val, ast.Attribute) and val.attr == "mark":
+                return True
+    return False
+
+
 def pytest_ignore_collect(collection_path, config):
-    """Skip test modules that cannot import because the GUI/IO stack is absent."""
+    """Skip test modules that cannot import because the GUI/IO or base scientific stack is absent."""
     absent = _absent_packages()
-    if not absent:
+    minimal = _base_stack_absent()
+    if not absent and not minimal:
         return False                       # full environment: collect everything
 
     if collection_path.suffix != ".py" or not collection_path.name.startswith("test_"):
@@ -81,6 +105,11 @@ def pytest_ignore_collect(collection_path, config):
     except (OSError, SyntaxError):
         return False
 
+    # Minimal `core` lane: no base scientific stack, so a file with no `core`-marked test cannot run — and
+    # importing it would error on its module-scope pandas/scipy/etc. Ignore it by MARKER, without importing.
+    if minimal and not _file_has_core_marker(tree):
+        return True
+
     for node in tree.body:                 # module scope only — that is what breaks collection
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
@@ -89,7 +118,7 @@ def pytest_ignore_collect(collection_path, config):
         else:
             continue
         for name in names:
-            if name.split(".")[0] in absent:
+            if name.split(".")[0] in (absent or ()):
                 return True
             if any(name.startswith(p) for p in _GUI_BOUND_PYCAT):
                 return True

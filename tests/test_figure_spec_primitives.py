@@ -15,7 +15,7 @@ The canonical spec's JSON round-trip and the reproducible export **bundle** are 
 # Third party imports
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 @pytest.fixture(autouse=True)

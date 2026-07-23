@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 @pytest.fixture(scope='module')

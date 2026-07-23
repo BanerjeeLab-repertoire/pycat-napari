@@ -15,7 +15,7 @@ import pytest
 from pycat.toolbox.feature_redundancy import (analyze_redundancy, minimal_feature_set,
                                               RedundancyReport)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _rng(seed=0):

@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from skimage.draw import disk
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _scene():

@@ -37,7 +37,7 @@ def _block(nz=4, ny=6, nx=6):
     return labelled, intensity, nz * ny * nx
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_voxel_is_ANISOTROPIC_and_the_volume_says_so():
     """A 0.3 µm Z step must give a volume 3.3x smaller than an assumed 1.0 µm one."""
     labelled, intensity, n_voxels = _block()
@@ -60,7 +60,7 @@ def test_the_voxel_is_ANISOTROPIC_and_the_volume_says_so():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_UNKNOWN_z_step_gives_NaN_not_a_plausible_LIE():
     """**NaN propagates. A 3.3x overestimate does not.**
 
@@ -78,7 +78,7 @@ def test_an_UNKNOWN_z_step_gives_NaN_not_a_plausible_LIE():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_z_step_is_READ_from_the_file_not_guessed():
     """``metadata_extract`` already stores it. The accessor must actually consult it."""
     repository = {'file_metadata': {'common': {'z_step_um': 0.3}}}
@@ -90,7 +90,7 @@ def test_the_z_step_is_READ_from_the_file_not_guessed():
     assert z_step_um(repository) == pytest.approx(0.25)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_MISSING_z_step_is_NaN_and_an_IMPLAUSIBLE_one_is_too():
     """Silence is not 1.0, and a corrupt tag is not a measurement."""
     assert np.isnan(z_step_um({}))

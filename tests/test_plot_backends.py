@@ -44,7 +44,7 @@ def _table():
         label=[101, 102, 103, 104, 105, 106]))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_reordered_artist_is_REFUSED_not_silently_mapped():
     """**This is the safety property that makes multi-backend brushing possible at all.**
 
@@ -73,7 +73,7 @@ def test_a_reordered_artist_is_REFUSED_not_silently_mapped():
     assert not ok and 'do not correspond' in message
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("backend", ['matplotlib', 'seaborn'])
 def test_the_matplotlib_and_seaborn_scatters_map_1_to_1_to_the_rows(backend):
     """**Seaborn IS matplotlib.** Same canvas, same pick event — so the brushing is the same.
@@ -101,7 +101,7 @@ def test_the_matplotlib_and_seaborn_scatters_map_1_to_1_to_the_rows(backend):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_seaborn_hue_keeps_ONE_artist_in_row_order():
     """**Verified, not assumed.**
 
@@ -136,7 +136,7 @@ def test_seaborn_hue_keeps_ONE_artist_in_row_order():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_plotly_hover_carries_the_object_identity():
     """**Plotly's click lives in JavaScript.** So the identity goes in the hover instead.
 
@@ -187,7 +187,7 @@ def test_the_plotly_hover_carries_the_object_identity():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_unavailable_backend_says_WHY():
     """**An option that silently fails is worse than one that is not there.**"""
     backends = pytest.importorskip("pycat.utils.plot_backends")
@@ -209,7 +209,7 @@ def test_an_unavailable_backend_says_WHY():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_backend_auto_resolves_to_matplotlib_for_a_small_frame():
     """backend='auto' picks the interactive backend by size (backend_parity Part 2): a small frame stays on
     matplotlib (well below the PyQtGraph threshold), returning a matplotlib figure with brushing enabled."""
@@ -221,7 +221,7 @@ def test_backend_auto_resolves_to_matplotlib_for_a_small_frame():
     assert isinstance(fig, matplotlib.figure.Figure) and ok
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_backend_auto_would_pick_pyqtgraph_above_the_threshold_when_available():
     """The auto decision itself: above the threshold and where PyQtGraph is available, 'auto' resolves to
     pyqtgraph (the actual render is the interactive path). Decision pinned via the pure chooser."""

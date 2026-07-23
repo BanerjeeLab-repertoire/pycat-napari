@@ -28,7 +28,7 @@ import types
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _Layer:

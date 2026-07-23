@@ -29,7 +29,7 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.navigator import op_catalog
 from pycat.navigator.op_catalog import (

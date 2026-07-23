@@ -14,7 +14,7 @@ import hashlib
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _synth(n_frames=4, shape=(96, 96), n_beads=12, seed=0):

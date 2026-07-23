@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _PX = 0.065          # µm per lateral pixel
 _Z_STEP = 0.30       # µm per slice — a typical confocal pairing

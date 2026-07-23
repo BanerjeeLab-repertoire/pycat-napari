@@ -12,7 +12,7 @@ import pytest
 from pycat.utils.result_models import AnalysisResult, BatchStepResult, STATUSES
 from pycat.utils.errors import PyCATError, ScientificAssumptionError
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_analysis_result_is_frozen_and_normalizes_sequences():

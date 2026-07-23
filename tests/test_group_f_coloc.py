@@ -57,7 +57,7 @@ def _random_spots(n_spots, radius, seed):
     return mask
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("overlap_cols,true_jaccard", [(0, 0.0), (10, 1 / 7), (20, 1 / 3)])
 def test_the_overlap_metrics_are_analytically_exact(overlap_cols, true_jaccard):
     """Jaccard, Dice and Manders reproduce the closed-form answer to four decimals."""
@@ -76,7 +76,7 @@ def test_the_overlap_metrics_are_analytically_exact(overlap_cols, true_jaccard):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("n_spots,radius,min_chance_m1", [(40, 8, 0.05), (80, 10, 0.25)])
 def test_independent_channels_overlap_by_chance_and_it_scales_with_density(
         n_spots, radius, min_chance_m1):
@@ -100,7 +100,7 @@ def test_independent_channels_overlap_by_chance_and_it_scales_with_density(
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_coloc_null_does_not_call_independent_channels_colocalized():
     """**False positives: 0/15 sparse, 1/15 medium.** The test is calibrated where it can be."""
     coloc = pytest.importorskip("pycat.toolbox.obj_based_coloc_analysis_tools")
@@ -118,7 +118,7 @@ def test_the_coloc_null_does_not_call_independent_channels_colocalized():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_coloc_null_detects_real_colocalization():
     """A 3 px shift of the same objects: **M1 = 0.78 against a null of 0.29, p = 0.010.**"""
     coloc = pytest.importorskip("pycat.toolbox.obj_based_coloc_analysis_tools")
@@ -136,7 +136,7 @@ def test_the_coloc_null_detects_real_colocalization():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_null_flags_itself_as_strained_at_high_density():
     """**The null is conservative at high density, and that is not fixable — so it says so.**
 

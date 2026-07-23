@@ -74,7 +74,7 @@ def _warned_while_syncing(data_repository):
     return bool(_WARNED)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_STILL_IMAGE_is_not_warned_about_a_frame_interval():
     """**The bug Meet hit.** A 2-D image has no time axis to be wrong about."""
     repository = {}
@@ -88,7 +88,7 @@ def test_a_STILL_IMAGE_is_not_warned_about_a_frame_interval():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_MOVIE_with_no_frame_interval_is_STILL_warned_about():
     """**The warning must not be softened — only aimed.**
 
@@ -105,7 +105,7 @@ def test_a_MOVIE_with_no_frame_interval_is_STILL_warned_about():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_UNKNOWN_time_axis_FAILS_TOWARD_THE_LOUD_SIDE():
     """An older session, or a loader not yet taught to record ``n_t``, must **warn** — *once an
     image is actually loaded.*
@@ -135,7 +135,7 @@ def test_an_UNKNOWN_time_axis_FAILS_TOWARD_THE_LOUD_SIDE():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_STALE_frame_count_from_the_PREVIOUS_file_is_overwritten():
     """**Recorded outside the metadata `try` — because a stale time axis is confidently wrong.**
 
@@ -150,7 +150,7 @@ def test_a_STALE_frame_count_from_the_PREVIOUS_file_is_overwritten():
     assert not has_time_axis(repository)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize('given,expected', [
     (1, 1), (0, 1), (None, 1), (214, 214), (-5, 1), ('abc', 1),
 ])

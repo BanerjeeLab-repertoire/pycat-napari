@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.toolbox.analysis_plots import representative_track_sample
 

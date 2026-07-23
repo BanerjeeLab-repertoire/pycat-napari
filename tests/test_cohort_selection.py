@@ -14,7 +14,7 @@ import pytest
 
 from pycat.utils.selection_service import SelectionService, Cohort
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service():

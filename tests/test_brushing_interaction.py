@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _Layers(list):

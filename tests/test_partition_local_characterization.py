@@ -13,7 +13,7 @@ preserve.
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _H = _W = 200
 _CENTRES = [(60, 60), (60, 140), (140, 60), (140, 140)]

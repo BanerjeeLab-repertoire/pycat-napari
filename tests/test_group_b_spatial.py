@@ -71,7 +71,7 @@ def _clustered_points(n=120, n_groups=6, spread=8.0, seed=0):
     return np.clip(np.asarray(points), 11, _SIZE - 11)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_random_pattern_produces_clusters_by_chance():
     """The premise. **If this fails, the significance test is unnecessary.**"""
     org = pytest.importorskip("pycat.toolbox.organizational_metrics_tools")
@@ -86,7 +86,7 @@ def test_a_random_pattern_produces_clusters_by_chance():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_cluster_count_points_the_WRONG_WAY():
     """**Clustering makes FEWER, BIGGER clusters.** The count is anti-correlated with the truth.
 
@@ -108,7 +108,7 @@ def test_the_cluster_count_points_the_WRONG_WAY():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_clustering_null_has_the_right_false_positive_rate():
     """**4 % false positives on CSR**, against a nominal 5 %.
 
@@ -130,7 +130,7 @@ def test_the_clustering_null_has_the_right_false_positive_rate():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_clustering_null_detects_real_clustering():
     """**100 % power.** A null with no power is a null that never says anything."""
     org = pytest.importorskip("pycat.toolbox.organizational_metrics_tools")
@@ -149,7 +149,7 @@ def test_the_clustering_null_detects_real_clustering():
 
 # ── spatial_randomness_tools: the hypothesis did NOT hold, and that is the finding ─────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_morans_I_is_textbook_correct():
     """0.0001 on white noise, 0.97 on smoothed, **exactly −1.0 on a checkerboard.**"""
     from scipy import ndimage as ndi
@@ -171,7 +171,7 @@ def test_morans_I_is_textbook_correct():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_structure_beyond_optics_separates_biology_from_the_PSF():
     """**The hypothesis did NOT hold here — and this module is a model for the others.**
 
@@ -221,7 +221,7 @@ def test_structure_beyond_optics_separates_biology_from_the_PSF():
 
 # ── Morphological complexity: fractal D has EXACT analytic ground truth ───────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_fractal_dimension_is_exact_on_a_sierpinski_triangle():
     """**1.5850 against an analytic log(3)/log(2) = 1.5850.**
 
@@ -243,7 +243,7 @@ def test_fractal_dimension_is_exact_on_a_sierpinski_triangle():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_fractal_dimension_of_a_DISC_depends_on_its_SIZE():
     """**A 57 % difference in D, from geometry alone — and it would test as significant.**
 
@@ -291,7 +291,7 @@ def test_the_fractal_dimension_of_a_DISC_depends_on_its_SIZE():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_fractal_table_carries_the_object_size():
     """**Without the size beside it, a size-driven D difference is invisible.**"""
     mc = pytest.importorskip("pycat.toolbox.morphological_complexity_tools")
@@ -319,7 +319,7 @@ def test_the_fractal_table_carries_the_object_size():
 # ── Topology: one good statistic beside a broken one ──────────────────────────────────────
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("n_peaks,noise", [(0, 5.0), (0, 20.0), (0, 60.0),
                                            (3, 20.0), (6, 20.0), (9, 20.0), (6, 60.0)])
 def test_topo_n_basins_counts_the_REAL_peaks_and_none_on_a_flat_field(n_peaks, noise):
@@ -378,7 +378,7 @@ def test_topo_n_basins_counts_the_REAL_peaks_and_none_on_a_flat_field(n_peaks, n
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_noise_must_come_from_the_RAW_IMAGE_not_the_envelope():
     """**The envelope is smoothed, and smoothing destroys the noise.** That is the whole finding.
 
@@ -428,7 +428,7 @@ _TOPO_PEAKS_PERSIST = [508.761369363, 455.434935566, 454.311664912, 452.33921653
                        3.461551484, 3.411321482]
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_topology_metrics_is_byte_identical():
     topo = pytest.importorskip("pycat.toolbox.topology_tools")
     mask = np.ones((64, 64), bool)

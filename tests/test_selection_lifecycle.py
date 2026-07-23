@@ -16,7 +16,7 @@ import pytest
 
 from pycat.utils.selection_service import SelectionService
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _svc():

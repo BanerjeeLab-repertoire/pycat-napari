@@ -33,7 +33,7 @@ class _FakeDI:
         self.data_repository[key] = value
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_puncta_analysis_paints_a_globally_unique_perpunctum_layer():
     labeled_cells = np.zeros((40, 40), dtype=np.int32)
     labeled_cells[2:18, 2:18] = 1
@@ -110,7 +110,7 @@ def test_session_load_remounts_the_cellular_panel(qtbot):
     assert 'cell.table' in cm.selection._subscribers
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_session_without_a_cell_table_does_not_remount():
     # Genuinely headless: the guard returns False before mount_cellular_workspace is imported or any Qt
     # widget is created (session_loader._remount_brushable_panel), so this needs no qtbot.

@@ -31,7 +31,7 @@ import pytest
 from scipy import ndimage as ndi
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_puncta_filter_keeps_real_rejects_spurious():
     seg = pytest.importorskip(
         "pycat.toolbox.segmentation_tools",
@@ -84,7 +84,7 @@ def test_puncta_filter_keeps_real_rejects_spurious():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_puncta_filter_reports_what_it_rejected():
     """A filter that removes objects and says nothing is indistinguishable from a
     segmentation that never found them.

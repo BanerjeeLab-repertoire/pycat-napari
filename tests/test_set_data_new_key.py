@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _data_class():

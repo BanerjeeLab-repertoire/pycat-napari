@@ -53,7 +53,7 @@ import pytest
 _TOOLBOX = pathlib.Path(__file__).resolve().parents[1] / "src" / "pycat" / "toolbox"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_every_toolbox_module_IMPORTS():
     """**The floor.** A module that does not import is a feature that does not exist.
 
@@ -86,7 +86,7 @@ def test_every_toolbox_module_IMPORTS():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_cellpose_model_builder_actually_RUNS_on_both_versions():
     """**The bug that got through, and the test that would have stopped it.**
 

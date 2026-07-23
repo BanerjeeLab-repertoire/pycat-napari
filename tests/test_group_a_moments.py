@@ -70,7 +70,7 @@ def _spida_pixels(pedestal=0.0, n_true=8.0, epsilon=25.0, n=20000, seed=0):
     return rng.poisson(rng.poisson(n_true, n) * epsilon).astype(float) + pedestal
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_spida_recovers_n_and_epsilon_on_a_clean_histogram():
     """The baseline. The estimator itself is sound."""
     spida = pytest.importorskip("pycat.toolbox.spida_tools")
@@ -82,7 +82,7 @@ def test_spida_recovers_n_and_epsilon_on_a_clean_histogram():
     assert fit["epsilon"] == pytest.approx(25.0, rel=0.15)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("pedestal,min_error", [(200, 2.0), (800, 10.0)])
 def test_the_pedestal_destroys_spida_and_is_now_caught(pedestal, min_error):
     """**A 24-fold overestimate of the molecule count** on a realistic camera offset.
@@ -112,7 +112,7 @@ def test_the_pedestal_destroys_spida_and_is_now_caught(pedestal, min_error):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_spida_pedestal_check_does_not_cry_wolf():
     """0 false alarms in 20 clean seeds. A check that fires on good data gets switched off."""
     spida = pytest.importorskip("pycat.toolbox.spida_tools")
@@ -161,7 +161,7 @@ def _median_count(**kwargs):
     return float(np.median(values)) if values else float("nan")
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_molecule_counting_is_exact_on_a_clean_trace():
     """The estimator is SOUND. Everything below is contamination, not a broken method."""
     assert _median_count() == pytest.approx(10.0, rel=0.10), (
@@ -169,7 +169,7 @@ def test_molecule_counting_is_exact_on_a_clean_trace():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_count_molecules_single_is_byte_identical():
     """Byte-identical characterization pinning the EXACT output on two deterministic traces, so a
     phase-split of `count_molecules_single` can be proven to move no number. The CLEAN trace has no
@@ -194,7 +194,7 @@ def test_count_molecules_single_is_byte_identical():
     assert noisy['accepted'] is True and noisy['n_points'] == 162
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_pedestal_is_removed_before_the_variance_pairs_are_built():
     """The pedestal corrupted **ν**, not just the numerator.
 
@@ -238,7 +238,7 @@ def _blurred_noise(blur_sigma, size=256, pedestal=0.0, seed=0):
     return (field + 100 + pedestal).astype(np.float32)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("blur", [2.0, 4.0, 6.0, 8.0])
 def test_the_acf_gaussian_needs_a_baseline_or_sigma_blows_up(blur):
     """**A 43 % overestimate of the correlation length** — and the fix is one parameter.
@@ -273,7 +273,7 @@ def test_the_acf_gaussian_needs_a_baseline_or_sigma_blows_up(blur):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_acf_is_pedestal_invariant():
     """**Group A's pedestal hypothesis does NOT apply here** — and that is worth recording.
 
@@ -294,7 +294,7 @@ def test_the_acf_is_pedestal_invariant():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("blur", [2.0, 3.0, 4.0, 6.0])
 def test_ccf_sigma_was_the_std_of_the_VALUES_not_the_peak_width(blur):
     """**A 13-fold underestimate**, and it would have been the same number for any structure.
@@ -325,7 +325,7 @@ def test_ccf_sigma_was_the_std_of_the_VALUES_not_the_peak_width(blur):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("shift", [(0, 3), (5, 0), (4, 4)])
 def test_the_ccf_peak_recovers_a_known_inter_channel_shift(shift):
     """Audited and correct: the peak position is exact. This is chromatic-shift detection."""
@@ -346,7 +346,7 @@ def test_the_ccf_peak_recovers_a_known_inter_channel_shift(shift):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("read_sd,pedestal,tolerance", [
     (15.0, 500.0, 0.20),
     (40.0, 800.0, 0.25),

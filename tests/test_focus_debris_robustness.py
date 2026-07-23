@@ -27,7 +27,7 @@ import pytest
 from scipy import ndimage
 
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _N, _H, _W = 20, 128, 128
 _SAMPLE_FOCUS = 14

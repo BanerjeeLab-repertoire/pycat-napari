@@ -21,7 +21,7 @@ from pycat.utils import tag_registry
 from pycat.utils.operation_runner import OperationRunner
 from pycat.utils.tag_registry import active_operation, operation_context
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _PydanticLikeViewer:

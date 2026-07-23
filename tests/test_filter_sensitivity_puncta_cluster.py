@@ -28,7 +28,7 @@ from scipy import stats
 from tests.filter_sensitivity import (assert_no_selection_bias, assert_offset_invariant,
                                       assert_scale_invariant, sweep)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 _SNR_SIGMA = 5.0

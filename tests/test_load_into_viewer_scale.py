@@ -14,7 +14,7 @@ import types
 import numpy as np
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _FakeViewer:

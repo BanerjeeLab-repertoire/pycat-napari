@@ -51,7 +51,7 @@ def _scene(pedestal, seed=0):
     return mask, img + rng.normal(0, 5.0, (h, w))
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("pedestal", [0, 100, 500, 2000])
 def test_transfection_call_is_pedestal_invariant(pedestal):
     """The same cells must get the same verdict on any camera."""

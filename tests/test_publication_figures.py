@@ -17,7 +17,7 @@ import pytest
 from pycat.utils.comparative_figures import condition_comparison_figure
 from pycat.utils.figure_spec import FigureSpec, refine, export
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _long_df():

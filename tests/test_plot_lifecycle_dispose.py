@@ -20,7 +20,7 @@ import pytest
 
 from pycat.utils.brushing import make_pickable, dispose_pickable, _teardown_pickable
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _Ref:

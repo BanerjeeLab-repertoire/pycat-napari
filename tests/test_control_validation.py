@@ -16,7 +16,7 @@ import pytest
 from pycat.toolbox.control_validation import (
     ControlResult, control_report_figure, recommend_parameters, validate_against_controls)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _threshold(image, threshold=0.5):

@@ -16,7 +16,7 @@ from pycat.utils.entity_ref import (
     ENTITY_ID_COLUMN, LAYER_ID_COLUMN, EntitySpec, entity_spec_for, finalize_entity_table,
     register_entity_spec, stamp_entity_ids)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _cell_table():

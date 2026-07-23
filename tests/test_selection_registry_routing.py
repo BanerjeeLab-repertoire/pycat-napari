@@ -13,7 +13,7 @@ import pytest
 from pycat.utils.entity_registry import EntityLocation, EntityRecord, default_registry
 from pycat.utils.object_ref import ObjectRef, location_from_registry, resolve_offline
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 @pytest.fixture

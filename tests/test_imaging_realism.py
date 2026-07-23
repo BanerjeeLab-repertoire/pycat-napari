@@ -62,7 +62,7 @@ def _droplets(edge_px=0.5, size=200):
     return img, labels
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("pedestal", [0.0, 100.0, 500.0, 2000.0])
 def test_partition_survives_the_camera_pedestal_given_a_dark_reference(pedestal):
     """With a dark reference, Kp must be pedestal-INDEPENDENT — on a realistic acquisition.
@@ -90,7 +90,7 @@ def test_partition_survives_the_camera_pedestal_given_a_dark_reference(pedestal)
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_saturated_partition_is_refused_not_reported():
     """A clipped measurement is MEANINGLESS, not conservative.
 
@@ -133,7 +133,7 @@ def test_saturated_partition_is_refused_not_reported():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("psf_sigma", [0.0, 1.0, 2.5])
 def test_partition_with_a_realistic_psf_recovers_or_warns(psf_sigma):
     """The PSF halo is not the dilute phase — and the annulus gap exists to step past it.
@@ -163,7 +163,7 @@ def test_partition_with_a_realistic_psf_recovers_or_warns(psf_sigma):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_transfection_filter_survives_a_realistic_acquisition():
     """The cell-selection gate must not depend on the camera.
 

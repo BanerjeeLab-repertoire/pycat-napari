@@ -16,7 +16,7 @@ from pycat.utils.comparative_figures import condition_comparison_figure
 from pycat.utils.figure_spec import FigureSpec, SIZE_PRESETS
 from pycat.utils.figure_refine import FigureRefineController
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _fig():

@@ -100,7 +100,7 @@ def _broad(handler):
     return isinstance(exception_type, ast.Name) and exception_type.id in ('Exception', 'BaseException')
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_no_SCIENTIFIC_GATE_is_silently_swallowed():
     """**A gate that fails to install must say so. Every time, to every user.**"""
     offenders = []
@@ -142,7 +142,7 @@ def test_no_SCIENTIFIC_GATE_is_silently_swallowed():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_LOUD_reporter_is_actually_loud_without_a_debug_flag():
     """*A reporter that only speaks under `PYCAT_DEBUG=1` is the bug, not the fix.*
 
@@ -175,7 +175,7 @@ def test_the_LOUD_reporter_is_actually_loud_without_a_debug_flag():
     assert 'a test gate' in printed, "the context was not surfaced — which gate failed?"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_debug_log_stays_QUIET_so_the_distinction_is_real():
     """The other half: a cosmetic failure must **not** shout.
 

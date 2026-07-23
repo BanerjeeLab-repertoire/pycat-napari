@@ -58,7 +58,7 @@ def _load_tagged_modules():
         "\n  " + "\n  ".join(f"{module}: {exc!r}" for module, exc in skipped))
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_vocabulary_is_populated():
     """If the registry is empty, nothing below means anything."""
     registry = _registry()
@@ -72,7 +72,7 @@ def test_the_vocabulary_is_populated():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_duplicate_tag_is_an_ERROR_not_a_silent_collision():
     """**A tag must mean ONE thing.**
 
@@ -89,7 +89,7 @@ def test_a_duplicate_tag_is_an_ERROR_not_a_silent_collision():
             return image
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_tags_are_HUMAN_READABLE():
     """``clahe``, ``log``, ``dog``, ``otsu``, ``watershed`` — **names, not descriptions.**
 
@@ -108,7 +108,7 @@ def test_the_tags_are_HUMAN_READABLE():
         assert entry['summary'], f"'{op}' has no summary — the tag inspector has nothing to show"
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_every_operation_declares_what_it_PRODUCES():
     """A tag that does not say what kind of layer it makes cannot answer *"where is the mask?"*."""
     registry = _registry()
@@ -120,7 +120,7 @@ def test_every_operation_declares_what_it_PRODUCES():
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_an_UNREGISTERED_tag_is_REFUSED_not_written():
     """**A tag outside the vocabulary is a degenerate tag.** It cannot be queried, and nothing
     else will ever match it. Writing it would let it rot in the data.
@@ -137,7 +137,7 @@ def test_an_UNREGISTERED_tag_is_REFUSED_not_written():
         registry.tag_from_operation(_FakeLayer(), 'a_tag_nobody_registered')
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_canonical_tags_exist_and_mean_what_they_say():
     """The ones Gable named, plus the ones a user will actually reach for."""
     registry = _registry()
@@ -173,7 +173,7 @@ def test_the_canonical_tags_exist_and_mean_what_they_say():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_a_plot_can_carry_the_tags_of_the_data_behind_it():
     """**A plot is a view of tagged data, and it should say so.**
 
@@ -280,7 +280,7 @@ def _transform_like_functions():
     return found
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_every_layer_producing_transform_declares_a_tag():
     """**The sweep must stay complete.**
 
@@ -307,7 +307,7 @@ def test_every_layer_producing_transform_declares_a_tag():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_there_is_ONE_role_vocabulary_and_the_registry_does_not_invent_a_second():
     """**I made this mistake twice, in the module built to prevent it.**
 
@@ -341,7 +341,7 @@ def test_there_is_ONE_role_vocabulary_and_the_registry_does_not_invent_a_second(
         )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_op_key_is_validated_against_the_REGISTRY():
     """**A tag outside the vocabulary rots in the data**, looking like a real tag.
 
@@ -370,7 +370,7 @@ def test_the_op_key_is_validated_against_the_REGISTRY():
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_the_UI_only_operations_are_registered():
     """**CLAHE is a UI action, not a toolbox function.** A sweep of ``*_tools.py`` misses it.
 

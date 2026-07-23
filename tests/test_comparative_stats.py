@@ -26,7 +26,7 @@ from scipy import stats
 from pycat.utils.comparative_stats import (aggregate_to_replicate, compare_conditions,
                                            ComparisonResult)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _objects(condition, replicate, rep_mean, n=300, spread=5.0, seed=0):

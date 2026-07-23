@@ -14,7 +14,7 @@ import pytest
 from pycat.toolbox.smlm_tools import (LocalizationSet, load_localization_table,
                                       temporal_merge, analyze_localizations)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _write(tmp_path, df, name='locs.csv'):

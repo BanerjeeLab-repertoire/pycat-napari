@@ -20,7 +20,7 @@ from pycat.utils.selection_service import SelectionService, Cohort
 from pycat.utils.cohort_targets import (bin_cohort, aggregate_cohort, cohort_dock_label,
                                         select_aggregate_row, attach_histogram_brushing)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _service():

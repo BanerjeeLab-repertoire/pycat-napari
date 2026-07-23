@@ -16,7 +16,7 @@ import pathlib
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _write_cell_df(output_dir, stem):

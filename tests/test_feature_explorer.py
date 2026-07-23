@@ -13,7 +13,7 @@ import pytest
 
 from pycat.utils.feature_explorer import build_feature_card, FeatureCard
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def _table(n=200, seed=0):

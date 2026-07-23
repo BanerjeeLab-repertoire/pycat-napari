@@ -12,7 +12,7 @@ from pycat.utils.analysis_presets import (
     ANALYSIS_PRESETS, AnalysisPreset, PresetApplication, orphan_parameter_keys,
     preset_availability, presets_for)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 def test_presets_are_uniquely_keyed_and_every_one_declares_provenance():

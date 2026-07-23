@@ -13,7 +13,7 @@ import pytest
 from pycat.toolbox.kymograph_tools import (kymograph, colocalization_kymograph,
                                            object_property_kymograph, Kymograph)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _LazyStack:

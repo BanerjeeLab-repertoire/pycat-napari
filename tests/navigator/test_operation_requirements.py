@@ -25,7 +25,7 @@ z-stack; the temporal ops need a time axis). A guessed requirement is worse than
 
 import pytest
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 from pycat.navigator.operation_spec import (
     iter_operation_specs, runnability, unmet_requirements)

@@ -25,7 +25,7 @@ from pycat.toolbox.brightfield_tools import bf_analyse_focus_series
 from pycat.toolbox.condensate_physics_tools import analyse_frame_quality
 from pycat.utils.math_utils import robust_focus_energy
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 _H = _W = 120
 #: The condensate / biological region — the mask. Central 40×40 = 1600 px ≈ 11% of the frame.

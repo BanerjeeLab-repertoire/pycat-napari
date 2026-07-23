@@ -50,7 +50,7 @@ def _cell_and_points(n=30, clustered=False, seed=0):
     return cell, np.asarray(pts, dtype=float)
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("statistic", ["ripley_l", "pcf"])
 def test_null_actually_runs(statistic):
     """The code path must execute. This is how statistic='pcf' shipped broken."""
@@ -65,7 +65,7 @@ def test_null_actually_runs(statistic):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("statistic", ["ripley_l", "pcf"])
 def test_null_false_positive_rate(statistic):
     """The FALSE-POSITIVE RATE must be near alpha — not a single-seed assertion.
@@ -95,7 +95,7 @@ def test_null_false_positive_rate(statistic):
     )
 
 
-@pytest.mark.core
+@pytest.mark.base
 @pytest.mark.parametrize("statistic", ["ripley_l", "pcf"])
 def test_null_retains_power(statistic):
     """Genuinely clustered objects MUST be detected — a calibrated-but-blind test is

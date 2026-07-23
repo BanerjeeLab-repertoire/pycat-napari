@@ -32,19 +32,19 @@ class _FakePoint:
 
 # ── availability + seam wiring (headless) ─────────────────────────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_availability_is_a_bool():
     assert isinstance(pyqtgraph_available(), bool)
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pyqtgraph_is_a_registered_backend():
     from pycat.utils.plot_backends import BACKENDS, available_backends
     assert 'pyqtgraph' in BACKENDS
     assert 'pyqtgraph' in available_backends()          # reported either way, with a reason if absent
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_scatter_reports_clearly_when_pyqtgraph_is_absent(monkeypatch):
     """The backend seam must degrade with a message, not crash, if the extra is missing."""
     import pycat.utils.plot_backend_pyqtgraph as pg
@@ -55,7 +55,7 @@ def test_scatter_reports_clearly_when_pyqtgraph_is_absent(monkeypatch):
     assert ok is False and artist is None and 'pyqtgraph' in msg
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_pd_unique_preserves_first_seen_order():
     from pycat.utils.plot_backend_pyqtgraph import pd_unique
     assert pd_unique(['b', 'a', 'b', 'c', 'a']) == ['b', 'a', 'c']

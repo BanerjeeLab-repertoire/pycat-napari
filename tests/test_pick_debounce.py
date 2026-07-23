@@ -21,7 +21,7 @@ import pytest
 # Local application imports
 from pycat.toolbox import analysis_plots as ap
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base
 
 
 class _Line:
