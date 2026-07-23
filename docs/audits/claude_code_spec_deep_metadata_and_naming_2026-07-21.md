@@ -1,6 +1,17 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
-> **◐ STATUS — Part 3 (filename-aware naming) DONE, shipped in 1.6.280. Parts 1–2 remain.**
+> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 element-scoped OME parse DONE (1.6.294). Part 1 per-channel
+> schema + instrument block, and Part 2, remain.**
+>
+> **Part 1 (element-scoped OME parse) — DONE, shipped 1.6.294.** New `_parse_ome_xml_scoped` reads each
+> attribute from the element it belongs to (`ElementTree`, namespace-agnostic): the first `<Pixels>` element's
+> geometry/`Type`/`DimensionOrder`, the `<AcquisitionDate>` **child element**, the first `<Plane>` exposure —
+> fixing `Pixels/@Type` resolving to `PMT` from a preceding `<Detector Type="PMT">` and multi-image
+> first-match cross-contamination. The scoped value wins; the whole-string regex remains a gap-filler so
+> nothing already-correct regresses; unparseable OME → `{}` → regex fallback (never crashes). OME-XML is now
+> detected BEFORE the ImageJ `key=value` branch (line-wrapped attributes were mis-parsed as key=value).
+> `tests/test_ome_xml_scoped_parse.py` (`core`, 6 tests). **Remaining in Part 1:** the per-channel `channels`
+> schema and the instrument/objective block. **Part 2** (reader-independent `extract_metadata_merged`) remains.
 >
 > **Part 3 — DONE.** `channel_naming.identify_channel` gained a `file_stem` argument, a **Tier 1c** (match
 > the stem with the existing `_match_fluorophore_name`, below real metadata but above the pixel/position

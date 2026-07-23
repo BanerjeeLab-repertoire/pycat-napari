@@ -90,6 +90,41 @@ def _safe_str(x):
         return None
 
 
+def _parse_ome_xml_scoped(xml_string):
+    """Read OME attributes from the ELEMENT they belong to — ``Pixels/@Type`` (the pixel dtype), NOT the
+    first ``Type=`` in the document, which on a real Zeiss LSM export is ``<Detector Type="PMT">`` and was
+    silently recording a detector category as the pixel data type.
+
+    Reads the first ``Pixels`` element's geometry/dtype/calibration attributes, the ``<AcquisitionDate>``
+    child text (an element, not an attribute — the old regex never matched it), and the first ``<Plane>``'s
+    exposure. Returns ``{attr: value}`` for what it finds, or ``{}`` if the XML cannot be parsed — the caller
+    then falls back to the forgiving whole-string regex, so a malformed file never loses what the old parse
+    got. Namespace-agnostic (OME tags carry a schema namespace)."""
+    import xml.etree.ElementTree as _ET
+    try:
+        root = _ET.fromstring(xml_string)
+    except Exception:      # broad-ok: optional_probe — unparseable OME → fall back to the regex, never crash
+        return {}
+
+    def _ln(tag):
+        return tag.rsplit('}', 1)[-1] if isinstance(tag, str) else tag
+
+    out = {}
+    pixels = next((e for e in root.iter() if _ln(e.tag) == 'Pixels'), None)
+    if pixels is not None:
+        for k in ('PhysicalSizeX', 'PhysicalSizeY', 'PhysicalSizeZ', 'SizeT', 'SizeC', 'SizeZ',
+                  'Type', 'TimeIncrement', 'DimensionOrder'):
+            if k in pixels.attrib:
+                out[k] = pixels.attrib[k]
+    acq = next((e for e in root.iter() if _ln(e.tag) == 'AcquisitionDate'), None)
+    if acq is not None and (acq.text or '').strip():
+        out['AcquisitionDate'] = acq.text.strip()
+    plane = next((e for e in root.iter() if _ln(e.tag) == 'Plane'), None)
+    if plane is not None and 'ExposureTime' in plane.attrib:
+        out['ExposureTime'] = plane.attrib['ExposureTime']
+    return out
+
+
 def parse_description_blob(text):
     """Turn a metadata 'description' blob into a flat dict of fields, so a wall
     of unparsed text becomes queryable structured metadata.
@@ -123,6 +158,26 @@ def parse_description_blob(text):
         except Exception:
             pass
 
+    # OME-XML — detected BEFORE the ImageJ key=value block, because XML whose attributes wrap across lines
+    # would otherwise be mis-parsed as `key=value` (a continuation line like `PhysicalSizeX="0.1" SizeC="3"`
+    # does not start with `<`). Read each attribute from the element it belongs to (fixes Type="PMT" from
+    # <Detector> masquerading as the pixel dtype, and multi-image first-match cross-contamination). The
+    # scoped value WINS; the old whole-string regex remains only as a gap-filler for anything the parse could
+    # not reach, so no value that was already correct regresses.
+    if s[:5].lower().startswith('<?xml') or '<ome' in s.lower() or '<image' in s.lower():
+        import re as _re
+        scoped = _parse_ome_xml_scoped(s)
+        for attr in ('PhysicalSizeX', 'PhysicalSizeY', 'PhysicalSizeZ',
+                     'TimeIncrement', 'SizeT', 'SizeC', 'SizeZ', 'Type',
+                     'DimensionOrder', 'ExposureTime', 'AcquisitionDate'):
+            if attr in scoped:
+                out[attr] = scoped[attr]
+            else:
+                m = _re.search(rf'{attr}="([^"]+)"', s)
+                if m:
+                    out[attr] = m.group(1)
+        return out
+
     # ImageJ key=value block (one per line).
     if '=' in s and ('ImageJ' in s or '\n' in s):
         for line in s.splitlines():
@@ -135,16 +190,6 @@ def parse_description_blob(text):
                 out[k] = v
         if out:
             return out
-
-    # OME-XML — pull a handful of useful attributes without a full parse.
-    if s[:5].lower().startswith('<?xml') or '<ome' in s.lower() or '<image' in s.lower():
-        import re as _re
-        for attr in ('PhysicalSizeX', 'PhysicalSizeY', 'PhysicalSizeZ',
-                     'TimeIncrement', 'SizeT', 'SizeC', 'SizeZ', 'Type',
-                     'ExposureTime', 'AcquisitionDate'):
-            m = _re.search(rf'{attr}="([^"]+)"', s)
-            if m:
-                out[attr] = m.group(1)
 
     return out
 

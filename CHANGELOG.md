@@ -1,3 +1,22 @@
+## [1.6.294] - 2026-07-23
+### Fixed — **OME-XML metadata is read from the RIGHT element, and XML is no longer mis-parsed as ImageJ key=value (deep_metadata_and_naming Part 1).**
+The OME-XML branch of `parse_description_blob` regexed the WHOLE document for 10 fixed attribute names and
+took the first match. On a real Zeiss LSM export the pixel dtype `Type` resolved to `PMT` — the first `Type=`
+in the file belongs to `<Detector Type="PMT">`, which precedes `<Pixels Type="uint16">` — so the detector
+category was silently recorded as the pixel dtype. Multi-image files cross-contaminated the same way.
+- New `_parse_ome_xml_scoped(xml_string)` parses with `ElementTree` (namespace-agnostic), reading each
+  attribute from the element it belongs to: the first `<Pixels>` element's `PhysicalSizeX/Y/Z`, `SizeT/C/Z`,
+  `Type`, `DimensionOrder`, `TimeIncrement`; the `<AcquisitionDate>` **child element** (an element, never an
+  attribute — the old regex `AcquisitionDate="` could never match it); and the first `<Plane>` exposure. The
+  scoped value **wins**; the old whole-string regex remains only as a gap-filler, so nothing already-correct
+  regresses. Unparseable OME returns `{}` and falls back to the regex — never crashes.
+- OME-XML is now detected **before** the ImageJ `key=value` branch. XML whose attributes wrap across lines
+  (`PhysicalSizeX="0.1" SizeC="3"` on a continuation line that does not start with `<`) was otherwise
+  captured by the greedy line-oriented ImageJ parser, which returned garbage before the OME branch ran.
+- Tests (`core`, `test_ome_xml_scoped_parse.py`, 6 tests): `Type` is the pixel dtype not the first `Type=`;
+  pixel-size/geometry unchanged; the `<AcquisitionDate>` child is read; the scoped parser in isolation;
+  malformed XML → `{}` → regex fallback recovers the value; a non-OME blob is untouched.
+
 ## [1.6.293] - 2026-07-23
 ### Added — **Metadata-contradiction engine: detected, severity-graded, cry-wolf-clean, anti-numbing per pattern (tag_confidence Parts 3–4 core).**
 A file can carry internally inconsistent metadata (a Zeiss ZEN export saying the objective is oil while
