@@ -9,8 +9,13 @@ contradiction that a real ZEN export writes (recorded, never silently resolved).
 """
 import pytest
 
-from pycat.file_io.metadata_extract import (
-    parse_ome_channels_and_instrument, _OME_CHANNEL_KEYS, _OME_INSTRUMENT_KEYS)
+# Guarded import (kept out of module top-level) so the headless core collector does not skip this module on
+# the `pycat.file_io` prefix — metadata_extract is pure/headless-safe. See test_ome_xml_scoped_parse.
+try:
+    from pycat.file_io.metadata_extract import (
+        parse_ome_channels_and_instrument, _OME_CHANNEL_KEYS, _OME_INSTRUMENT_KEYS)
+except Exception:      # pragma: no cover - only when the io stack is truly unavailable
+    pytest.skip("pycat.file_io.metadata_extract unavailable", allow_module_level=True)
 
 pytestmark = pytest.mark.core
 

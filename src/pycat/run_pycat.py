@@ -460,19 +460,11 @@ def run_pycat_func():
     # be skipped entirely by setting PYCAT_SKIP_WARMUP=1.
     viewer = napari.Viewer(title="PyCAT")
 
-    # ── Clean up last session's local cache, visibly ────────────────────────────
-    #
-    # If a previous session copied slow-storage acquisitions into %TEMP%/pycat_local_cache,
-    # those copies are still there. NOW — before this session opens anything — is the one
-    # moment they are provably idle, so it is the safe moment to offer to clear them. The
-    # sweep lists them grouped by source folder and lets the user Keep any for a week; it
-    # never deletes silently. Best-effort: a cleanup that crashes launch is worse than the
-    # disk it reclaims.
-    try:
-        from pycat.file_io.local_cache import clear_cache_on_startup
-        clear_cache_on_startup()
-    except Exception as _cache_exc:
-        debug_log('run_pycat: local cache cleanup skipped', _cache_exc)
+    # Last session's local-cache cleanup is OFFERED at the END of launch (scheduled just before
+    # napari.run(), below), not here. The cached copies stay idle for the entire launch sequence —
+    # nothing between viewer construction and the event loop opens a cached acquisition — so the
+    # "provably idle" window spans the whole startup, and offering at the end means the housekeeping
+    # prompt does not compete with the branded window still assembling in front of the user.
 
     # ── Every layer this viewer makes is tagged, and no call site can forget ────
     #
@@ -734,6 +726,15 @@ QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; lef
         QTimer.singleShot(0, _apply_style)     # stylesheet first (triggers relayout)
         QTimer.singleShot(0, _maximize)        # first maximize once loop is live
         QTimer.singleShot(80, _brand_welcome)  # brand once the welcome widget exists
+        # Offer last session's cache cleanup AFTER the window is presented — non-blocking (a notification
+        # pointing to File ▸ Manage local cache…), scheduled last so it never competes with startup.
+        def _offer_cache(*_):
+            try:
+                from pycat.file_io.local_cache import offer_cache_cleanup
+                offer_cache_cleanup(viewer)
+            except Exception as _cache_exc:
+                debug_log('run_pycat: local cache offer skipped', _cache_exc)
+        QTimer.singleShot(600, _offer_cache)   # after branding/maximize settle
         # Settling watcher: every 100ms, re-assert maximize if it dropped, until
         # the state has been stable for the deadline. Self-stops.
         _mx_timer = QTimer()

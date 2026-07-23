@@ -8,8 +8,13 @@ FAILING source with a recorded reason instead of the old bare `except: pass` tha
 """
 import pytest
 
-from pycat.file_io.metadata_extract import (
-    merge_metadata_sources, extract_metadata_merged, _values_conflict)
+# Guarded import (kept out of module top-level) so the headless core collector does not skip this module on
+# the `pycat.file_io` prefix — metadata_extract is pure/headless-safe. See test_ome_xml_scoped_parse.
+try:
+    from pycat.file_io.metadata_extract import (
+        merge_metadata_sources, extract_metadata_merged, _values_conflict)
+except Exception:      # pragma: no cover - only when the io stack is truly unavailable
+    pytest.skip("pycat.file_io.metadata_extract unavailable", allow_module_level=True)
 
 pytestmark = pytest.mark.core
 

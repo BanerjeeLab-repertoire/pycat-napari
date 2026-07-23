@@ -235,37 +235,75 @@ def _group_by_source(items):
 
 # ── The startup sweep ──────────────────────────────────────────────────────────────────────
 
-def clear_cache_on_startup():
-    """Called once at launch, BEFORE any file is opened this session.
-
-    Lists cached copies grouped by source folder, lets the user *Keep* files or whole
-    folders (protecting them for ``KEEP_DAYS``), then deletes everything not kept and reports
-    exactly what was freed. Currently-protected items are shown but pre-checked and excluded
-    from the default clear; when their protection has expired they reappear unchecked.
-
-    Best-effort and non-fatal: a cleanup that crashes the app it is cleaning up for has done
-    more harm than the disk it was reclaiming."""
+def _pending_cache():
+    """Scan and classify the cache once. Returns ``(items, protected_now, now, total)`` or ``None`` when the
+    cache is empty (or the scan failed) — the single source both the startup offer and the on-demand manager
+    read, so an empty cache is uniformly silent."""
     try:
         items = _scan_cache()
-    except Exception as exc:
+    except Exception as exc:      # broad-ok: optional_probe — a scan failure must not gate launch
         debug_log('local_cache: scan failed', exc)
-        return
-
+        return None
     if not items:
-        return
-
+        return None
     now = time.time()
     protected_now = [it for it in items if it['source'] and _is_protected(it['source'], now)]
-    clearable = [it for it in items if it not in protected_now]
-
     total = sum(it['size_bytes'] for it in items)
+    return items, protected_now, now, total
 
-    # Try the dialog. If Qt isn't available (headless/tests), fall back to a conservative
-    # console notice and DO NOT auto-delete — silent deletion without a user ever seeing the
-    # list is exactly what this feature exists to avoid.
+
+def cached_summary():
+    """``(count, human_total)`` for the cached copies, or ``None`` if the cache is empty — the amount the
+    startup notification reports without opening anything."""
+    pending = _pending_cache()
+    if pending is None:
+        return None
+    items, _protected, _now, total = pending
+    return len(items), _human(total)
+
+
+def offer_cache_cleanup(viewer=None):
+    """The startup entry point: **non-blocking**. If a previous session left cached copies, post a napari
+    notification with the amount and point to *File ▸ Manage local cache…* — the cache is idle for the entire
+    launch (nothing between viewer construction and the event loop opens a cached acquisition), so we wait
+    until the window is fully presented and never compete with startup or gate it behind a modal.
+
+    An empty cache is silent (a first-run user sees nothing). Never raises — a cleanup offer that crashes the
+    app it is cleaning up for has done more harm than the disk it would reclaim. Deliberately does NOT open the
+    dialog: the on-demand :func:`open_cache_manager` (menu / notification) is the only path that shows it."""
+    try:
+        summary = cached_summary()
+        if summary is None:
+            return
+        count, human = summary
+        msg = (f"PyCAT has {human} of cached copies ({count} file(s)) from a previous session. "
+               f"Open File ‣ Manage local cache… to review or clear them.")
+        try:
+            from napari.utils.notifications import show_info
+            show_info(msg)
+        except Exception:      # broad-ok: optional_probe — no napari notifications → console notice instead
+            print(f"[PyCAT storage] {msg}")
+    except Exception as exc:      # broad-ok: optional_probe — the offer must never take launch down with it
+        debug_log('local_cache: cache offer skipped', exc)
+
+
+def open_cache_manager(parent=None):
+    """The on-demand entry point (File menu / the startup notification): show the grouped keep/clear dialog and
+    apply the choice. User-initiated, so the dialog is modal here — unlike the startup offer, which never
+    blocks. Safe on an empty cache (a console notice, no dialog). Reuses ``_show_dialog`` / ``_apply``
+    unchanged, so the grouping, per-file/-folder Keep, ``KEEP_DAYS`` protection, and 'never delete silently /
+    report in the terminal' guarantees are exactly as before."""
+    pending = _pending_cache()
+    if pending is None:
+        print(f"[PyCAT storage] No cached files in {cache_dir()}.")
+        return
+
+    items, protected_now, now, total = pending
+    # If Qt isn't available (headless/tests), fall back to a conservative console notice and DO NOT
+    # auto-delete — silent deletion without a user ever seeing the list is what this feature exists to avoid.
     try:
         chosen_to_clear = _show_dialog(items, protected_now, now, total)
-    except Exception as exc:
+    except Exception as exc:      # broad-ok: optional_probe — no dialog → report, never delete unseen
         debug_log('local_cache: dialog unavailable; not clearing', exc)
         print(f"[PyCAT storage] {len(items)} cached file(s) in {cache_dir()} "
               f"({_human(total)}). Open PyCAT with a display to review and clear them.")
@@ -277,6 +315,29 @@ def clear_cache_on_startup():
         return
 
     _apply(items, chosen_to_clear)
+
+
+def install_cache_menu_action(file_menu, parent=None):
+    """Add a 'Manage local cache…' action to the given File ``QMenu`` (opening :func:`open_cache_manager` on
+    demand). Installed from ``central_manager`` rather than the menu builder because ``menu_manager.py`` is
+    pinned at its line-count ceiling — the ratchet forbids growing the god-file, so the entry lives beside the
+    cache code it opens. Returns the ``QAction`` (kept alive by the menu), or ``None`` when Qt/the menu is
+    unavailable (headless)."""
+    try:
+        from PyQt5.QtWidgets import QAction
+    except Exception:      # broad-ok: optional_probe — no Qt (headless) → no menu entry, caller guards on None
+        return None
+    if file_menu is None:
+        return None
+    try:
+        action = QAction('Manage local cache…', parent)
+        action.setToolTip('Review and clear cached copies of acquisitions from previous sessions.')
+        action.triggered.connect(lambda *_: open_cache_manager(parent))
+        file_menu.addAction(action)
+        return action
+    except Exception as exc:      # broad-ok: ui_cleanup — a missing/odd menu must never break startup
+        debug_log('local_cache: could not install cache menu action', exc)
+        return None
 
 
 def _apply(all_items, chosen_to_clear):

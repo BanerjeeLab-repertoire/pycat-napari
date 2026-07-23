@@ -109,10 +109,15 @@ class CentralManager:
         self.toolbox_functions_ui = ToolboxFunctionsUI(self.viewer, self)
         self.analysis_methods_ui = AnalysisMethodsUI(self.viewer, self)
         self.menu_manager = MenuManager(self.viewer, self)
-        # Preferences panel entry point — installed here rather than in the menu god-file (pinned at its line
-        # ceiling) so the '⚙ Preferences' action lives beside the panel it opens.
+        # These entry points are installed here rather than in the menu god-file (pinned at its line ceiling)
+        # so each action lives beside the code it opens: the '⚙ Preferences' panel, and 'Manage local cache…'
+        # in the File menu (the on-demand cache manager, now that startup only offers it non-blockingly).
         from pycat.ui.preferences_dialog import install_preferences_action
         self._preferences_action = install_preferences_action(self.viewer)
+        from pycat.file_io.local_cache import install_cache_menu_action
+        self._cache_menu_action = install_cache_menu_action(
+            getattr(self.menu_manager, 'file_menu', None),
+            getattr(getattr(self.viewer, 'window', None), '_qt_window', None))
 
         # Connect viewer layer selection changes to update the UI tools appropriately
         self.viewer.layers.selection.events.changed.connect(self.toolbox_functions_ui.update_tool)

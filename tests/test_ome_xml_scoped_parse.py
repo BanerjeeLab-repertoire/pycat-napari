@@ -8,7 +8,14 @@ is `uint16`, the pixel-size/geometry attributes are unchanged (nothing already-c
 """
 import pytest
 
-from pycat.file_io.metadata_extract import parse_description_blob, _parse_ome_xml_scoped
+# Guarded so the import is NOT at module top-level: the headless core collector
+# (conftest.pytest_ignore_collect) skips any module that imports `pycat.file_io` at module scope when the
+# optional stack is thinned, and metadata_extract is pure/headless-safe — so this keeps the tests collectable
+# (and cleanly skips only where the io stack genuinely can't import).
+try:
+    from pycat.file_io.metadata_extract import parse_description_blob, _parse_ome_xml_scoped
+except Exception:      # pragma: no cover - only when the io stack is truly unavailable
+    pytest.skip("pycat.file_io.metadata_extract unavailable", allow_module_level=True)
 
 pytestmark = pytest.mark.core
 

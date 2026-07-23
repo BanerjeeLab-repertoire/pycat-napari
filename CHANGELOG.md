@@ -1,3 +1,39 @@
+## [1.6.300] - 2026-07-23
+### Fixed — **The local-cache cleanup no longer gates startup: offered non-blockingly at the end of launch, reachable on demand (cache_cleanup_startup).**
+The cache-cleanup dialog appeared as a modal **over** the napari splash while the window was still assembling —
+the first thing a user met was a file-deletion decision about an app that had not finished presenting itself.
+The safety reasoning ("the cache is provably idle before anything opens") was right, but the placement was
+wrong: the cache stays idle for the *entire* launch, so the offer belonged at the end, not the earliest instant.
+- **Deferred to the end of launch**: `run_pycat` no longer calls the cleanup immediately after viewer
+  construction; instead it schedules a non-blocking offer (via `QTimer.singleShot`) after the branding and
+  window setup, just before the event loop. The user sees a fully-formed, branded application first.
+- **Non-blocking**: new `offer_cache_cleanup(viewer)` posts a napari notification with the cached amount
+  pointing to *File ▸ Manage local cache…* — no modal on the startup path. An empty cache stays completely
+  silent (the first-run experience is unchanged).
+- **Reachable on demand**: new `open_cache_manager()` shows the SAME grouped keep/clear dialog (modal, because
+  now user-initiated) and applies the choice, wired to a **'Manage local cache…' File-menu action**. The
+  dialog, its grouping, per-file/-folder Keep, `KEEP_DAYS` protection, and 'never delete silently / report in
+  the terminal' guarantees are reused **unchanged** — this changes *when* and *how* the cleanup is presented,
+  not the dialog. (The menu action is installed from `central_manager`, not the line-capped `menu_manager`
+  god-file.)
+- Every safety guarantee holds: nothing is deleted without an explicit choice, `KEEP_DAYS` protection applies,
+  a cleanup failure is swallowed so it can never crash launch.
+- Tests: `test_cache_cleanup_startup.py` (`core` + one `integration` for the napari notification — empty-cache
+  silence, the offer never raises, the on-demand manager shows the dialog + applies the choice, cancelled
+  clears nothing, and a static check that launch defers the offer and no longer clears immediately) and
+  `test_cache_menu_action.py` (`integration`, 2 — the File-menu action opens the manager; headless-safe).
+
+### Fixed — **core-lane test collection: `pycat.file_io`-importing test modules now actually run headlessly.**
+While adding the cache tests, found that `conftest.pytest_ignore_collect` silently skips any test module that
+imports `pycat.file_io` / `pycat.ui` at **module scope** whenever an optional-stack package is absent
+(aicsimageio is, post-bioio-migration) — so such `core`-marked modules were collected only when a file was
+named explicitly, never in the full `pytest -m core` dir scan. The cache tests, and the metadata tests shipped
+in 1.6.294–296 (`test_ome_xml_scoped_parse`, `test_ome_channels_and_instrument`, `test_metadata_merge`, ~21
+pure-parsing core tests), were affected. Fixed by moving those imports off module top-level (a `lc` fixture or
+a guarded `try/except` with `pytest.skip(allow_module_level=True)`), so the modules are collected and their
+tests genuinely run in the core lane. These pure logic/parsing tests belong in `core`; only the napari/Qt
+paths are `integration`.
+
 ## [1.6.299] - 2026-07-23
 ### Added — **A preferences panel: the persisted user preferences finally have a surface (unblocks the dock_space follow-on).**
 PyCAT had accumulated persisted user preferences — `app_mode`'s beginner/advanced interface level and
