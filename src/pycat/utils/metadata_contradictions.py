@@ -169,3 +169,106 @@ def rules_dismissed_across_many_fingerprints(store, *, threshold=3):
         if n >= threshold:
             out[pattern] = n
     return out
+
+
+# ── Surfacing over loaded metadata: the report + the (Qt-free, duck-typed) indicator ──────────────
+#
+# Part 3 of tag_confidence: turn the engine above into what the UI shows. The metadata button gains a WARNING
+# GLYPH (deliberately not the field_status step-status red — a different concept) and a CONCRETE tooltip when a
+# file carries a critical contradiction; clicking still opens the existing metadata dialog. Never blocks.
+
+
+@dataclasses.dataclass(frozen=True)
+class ContradictionReport:
+    """What the UI reads for one loaded file: the ``contradictions`` (after the user's 'expected' judgements
+    are applied), whether any is ``critical`` (the sole trigger for the warning indicator), and the acquisition
+    ``fingerprint`` (so the dialog can offer 'expected for this instrument')."""
+    contradictions: tuple = ()
+    fingerprint: str = 'unknown'
+    is_critical: bool = False
+
+
+def _engine_input(file_metadata):
+    """Flatten a loaded ``{common, raw}`` metadata dict into the keys :func:`detect_contradictions` /
+    :func:`acquisition_fingerprint` read. Immersion / medium / refractive index live in the per-file
+    ``raw['instrument']`` block (added by the deep-metadata OME parse); the declared modality comes from the
+    curated common fields or the first channel. Absent fields stay absent — the engine is cry-wolf-clean."""
+    md = file_metadata or {}
+    common = md.get('common') or {}
+    raw = md.get('raw') or {}
+    inst = raw.get('instrument') or {}
+    channels = raw.get('channels') or []
+    ch0 = channels[0] if channels else {}
+    return {
+        'immersion': inst.get('immersion') or common.get('immersion'),
+        'medium': inst.get('medium') or common.get('medium'),
+        'refractive_index': inst.get('refractive_index') or common.get('refractive_index'),
+        'modality': (common.get('modality') or ch0.get('contrast_method') or ch0.get('acquisition_mode')),
+        'acquisition_mode': ch0.get('acquisition_mode') or common.get('acquisition_mode'),
+        'contrast_method': ch0.get('contrast_method'),
+        'instrument': common.get('microscope') or common.get('instrument') or inst.get('instrument'),
+        'software': common.get('software'),
+        'objective': common.get('objective'),
+    }
+
+
+def contradiction_report(file_metadata, *, pixel_modality=None, store=None) -> ContradictionReport:
+    """Detect the contradictions in a loaded ``{common, raw}`` metadata dict, applying the user's per-pattern
+    'expected' judgements when a ``store`` is given, and return the :class:`ContradictionReport` the UI reads.
+    Empty / absent metadata → an all-clear report (the cry-wolf contract, end to end)."""
+    md = _engine_input(file_metadata)
+    contradictions = detect_contradictions(md, pixel_modality=pixel_modality)
+    fingerprint = acquisition_fingerprint(md)
+    if store is not None:
+        contradictions = apply_expectations(contradictions, fingerprint, store)
+    return ContradictionReport(contradictions=tuple(contradictions), fingerprint=fingerprint,
+                               is_critical=has_critical(contradictions))
+
+
+#: The neutral metadata-button label (info glyph); the warning label swaps the glyph so the indicator reads as
+#: a DISTINCT concept from the field_status step-status red (which means 'required input missing').
+_METADATA_LABEL = "ⓘ  Metadata"     # ⓘ
+_METADATA_WARN_LABEL = "⚠  Metadata"  # ⚠
+
+
+def indicator_label(report, *, base=_METADATA_LABEL, warn=_METADATA_WARN_LABEL) -> str:
+    """The metadata action's label for ``report``: the warning glyph when a critical contradiction is present,
+    the neutral info glyph otherwise."""
+    return warn if report.is_critical else base
+
+
+def report_tooltip(report, *, clean_text="Acquisition metadata for the loaded file.") -> str:
+    """A CONCRETE multi-line tooltip naming each contradiction (critical first — the engine already sorts),
+    or ``clean_text`` when there are none. A vague warning is ignorable; a specific one is actionable."""
+    if not report.contradictions:
+        return clean_text
+    lines = ["Metadata contradictions found — click for details:"]
+    for c in report.contradictions:
+        lines.append(("⚠ " if c.severity == 'critical' else "• ") + c.message)
+    return "\n".join(lines)
+
+
+def install_metadata_indicator(meta_action, viewer, *, get_metadata, store=None,
+                               base_label=_METADATA_LABEL, clean_tooltip="Acquisition metadata for the "
+                               "loaded file."):
+    """Keep the metadata action's label + tooltip in sync with the loaded file's contradictions, refreshing
+    whenever a layer is inserted (a file sets its metadata, then adds layers). **Never blocks** — it only
+    restyles the button; clicking it still opens the metadata dialog.
+
+    Qt-free by duck-typing so it is core-tested with fakes: ``meta_action`` needs ``setText`` / ``setToolTip``,
+    ``viewer`` needs ``layers.events.inserted.connect``, and ``get_metadata()`` returns the current
+    ``{common, raw}`` (or ``None``). Returns the refresh callable (also useful to call after a manual reload)."""
+    def _refresh(*_):
+        try:
+            report = contradiction_report(get_metadata() or {}, store=store)
+            meta_action.setText(indicator_label(report, base=base_label))
+            meta_action.setToolTip(report_tooltip(report, clean_text=clean_tooltip))
+        except Exception:      # broad-ok: ui_cleanup — a bad metadata dict must never break the toolbar
+            pass
+
+    try:
+        viewer.layers.events.inserted.connect(_refresh)
+    except Exception:      # broad-ok: optional_probe — no live viewer/events (headless) → still refresh once
+        pass
+    _refresh()
+    return _refresh

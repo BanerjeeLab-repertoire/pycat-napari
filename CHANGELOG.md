@@ -1,3 +1,30 @@
+## [1.6.301] - 2026-07-23
+### Added — **Metadata contradictions are now surfaced: the metadata button warns concretely (tag_confidence Part 3).**
+The contradiction engine shipped in 1.6.293 (`utils/metadata_contradictions.py`) was wired to nothing — it
+detected inconsistencies but nobody saw them. This drives it from real loaded metadata and shows the result on
+the metadata button, following the spec's anti-numbing rules:
+- New `contradiction_report({common, raw})` adapts loaded metadata to the engine — immersion/medium/refractive
+  index come from the `raw['instrument']` block the deep-metadata OME parse now provides (1.6.295), the
+  declared modality from the curated fields / first channel — runs `detect_contradictions`, applies the user's
+  per-pattern 'expected' judgements, and returns a `ContradictionReport` (contradictions, fingerprint,
+  `is_critical`).
+- The **metadata toolbar button** gains a **warning glyph** (⚠, deliberately NOT the field_status step-status
+  red — a distinct concept, per the colour-vocabulary caution) and a **concrete tooltip** ("Objective says Oil
+  immersion; ObjectiveSettings says Air medium (RI 1.518 indicates oil)…") **only when a critical contradiction
+  is present** — the single biggest anti-numbing lever, so most files show nothing. It **never blocks**;
+  clicking still opens the metadata dialog. `install_metadata_indicator` refreshes the button whenever a layer
+  is inserted (a new file loads its metadata, then adds layers) and is duck-typed so it is fully core-tested
+  without Qt; it is wired from `batch_processor` (where the button lives), not the line-capped `menu_manager`.
+- Cry-wolf preserved end to end: a clean file surfaces nothing; a pattern marked expected is demoted below
+  critical (the warning glyph clears) while still listed.
+- Tests (`core`, `test_metadata_contradiction_surface.py`, 7): the critical report from an oil-vs-air
+  instrument block, the end-to-end cry-wolf clean case, expected-demotion, the warning-glyph-only-when-critical
+  label, the concrete tooltip, and the installer (styles the button + refreshes on layer insert + never
+  raises).
+- **Follow-on:** listing the contradictions first inside the metadata dialog and an in-dialog "expected for
+  this instrument" control — deferred because `_show_metadata_dialog` lives in the line-capped `menu_manager`
+  god-file; the button indicator + tooltip is the primary anti-numbing surface and lands here.
+
 ## [1.6.300] - 2026-07-23
 ### Fixed — **The local-cache cleanup no longer gates startup: offered non-blockingly at the end of launch, reachable on demand (cache_cleanup_startup).**
 The cache-cleanup dialog appeared as a modal **over** the napari splash while the window was still assembling —

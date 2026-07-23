@@ -1,6 +1,19 @@
 # Claude Code spec — Evidence-based confidence, metadata validity filtering, and contradiction surfacing that doesn't numb the user
 
-> **◐ STATUS — Parts 1 & 2 DONE; Part 3 (contradiction surfacing) + Part 4 (anti-numbing) remain.**
+> **◐ STATUS — Parts 1 & 2 DONE; Part 4 engine DONE (1.6.293); Part 3 surfacing — button indicator DONE
+> (1.6.301), in-dialog listing + expected-marking control remain.**
+> **Part 4 (anti-numbing engine) — DONE, shipped 1.6.293.** `utils/metadata_contradictions.py`: severity
+> (`has_critical` is the sole red trigger), cry-wolf (a clean file → zero), and the per-pattern/per-fingerprint
+> 'expected' store (`mark_expected`/`apply_expectations`, reversible, no global mute) + the developer precision
+> signal (`rules_dismissed_across_many_fingerprints`). `tests/test_metadata_contradictions.py` (8 core).
+> **Part 3 (surfacing) — button indicator DONE, shipped 1.6.301.** `contradiction_report({common, raw})` drives
+> the engine from real loaded metadata (immersion/medium/RI from the `raw['instrument']` block added in
+> 1.6.295); the metadata toolbar button gains a WARNING glyph (⚠, distinct from the field_status step-status
+> red per the colour caution) + a CONCRETE tooltip only when a critical contradiction is present, never
+> blocking (click still opens the dialog). `install_metadata_indicator` is duck-typed (7 core tests) and wired
+> from `batch_processor`, not the line-capped `menu_manager`. **Remaining:** listing the contradictions first
+> inside `_show_metadata_dialog` and an in-dialog 'expected for this instrument' control — deferred because that
+> dialog is in the ceiling-capped menu god-file (needs an extraction to make room). Full core green.
 > **Part 2** (the `is_meaningful` validity filter) shipped 1.6.290: `utils/metadata_validity.py`
 > (empty/placeholder/non-finite + field-aware pixel_size=1.0 / gain·magnification·NA=0 sentinels, never
 > blanket-rejecting the number 1), applied at the metadata write guard; `tests/test_metadata_validity.py`

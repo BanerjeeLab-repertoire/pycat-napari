@@ -1165,6 +1165,18 @@ def add_batch_toolbar_button(viewer, processor: BatchProcessor):
                 "dimensions, date) for the loaded file.")
             meta_action.triggered.connect(_mm._show_metadata_dialog)
             toolbar.addAction(meta_action)
+            # Contradiction surfacing (tag_confidence Part 3): a warning glyph + concrete tooltip when the
+            # loaded file carries a critical metadata contradiction. Never blocks; clicking still opens the
+            # dialog. Logic is the Qt-free engine in utils/metadata_contradictions.
+            try:
+                from pycat.utils.metadata_contradictions import install_metadata_indicator
+                from pycat.utils.user_settings import settings as _uset
+                install_metadata_indicator(
+                    meta_action, viewer, store=_uset(),
+                    get_metadata=lambda: _mm.central_manager.active_data_class
+                    .data_repository.get('file_metadata'))
+            except Exception:      # broad-ok: ui_cleanup — the indicator is cosmetic; the button still works
+                pass
 
         if hasattr(_mm, 'open_tag_inspector'):
             tags_action = QAction("\u25a3  Tags", main_window)       # ▣ tag
