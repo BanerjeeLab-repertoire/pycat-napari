@@ -1,3 +1,24 @@
+## [1.6.282] - 2026-07-22
+### Added — **a reusable brushable results workspace (plots left, tables right) — Phase 1 of the plots+tables+image brushing feature.**
+The foundation for Meet's request: one panel that stacks scatter plots down the left and results tables down
+the right, every plot point and table row referring to the SAME object so clicking one lights up the others.
+It owns no dispatcher — every view is a `SelectionView` on the one application `SelectionService`
+(`central_manager.selection`), keyed on the stable `_pycat_entity_id`. Because a cell and a condensate are
+different entity *types*, "two interleaved brushing tiers over one image" needs no special case: two views,
+two keys, one service.
+
+- New `ui/brushable_workspace.py`: `BrushablePlot` — a scatter promoted to the `SelectionView` contract
+  (`comparative_figures._attach_object_brushing` as a class); a click selects the nearest object's entity
+  everywhere, an inbound selection rings the point without re-emitting. Its `_object_points`/`_draw` are
+  overridable, so a custom painter (VPT's MSD/moduli panels) plugs into the same brushing machinery — the
+  seam by which `vpt/results_dock` can later be refactored onto this core.
+- `BrushableWorkspace` — a `QSplitter` with `add_plot` (left, top→bottom) and `add_table` (right; a
+  `BrushableTable`, identity columns hidden from display but kept for brushing); `detach()` unsubscribes all.
+- `tests/test_brushable_workspace.py` (`core`, 5 tests): the plot passes `assert_selection_view_contract`; a
+  plot click selects everywhere; a plot + table over one DataFrame brush together; two entity types are
+  independent tiers on one service. Full `pytest -m core` green (1712). Phases 2–4 (in-vitro, cellular
+  two-tier, batch) build on this; the image tier lands with a real labels layer in Phase 2.
+
 ## [1.6.281] - 2026-07-22
 ### Fixed — **the frame-0 landmine, in four more places: a lazy stack held in an `active`/`mask` variable no longer silently collapses to one frame (close_partial_specs Part C).**
 `np.asarray(layer.data)` on one of PyCAT's lazy wrappers returns **frame 0 only** — nothing errors, the
