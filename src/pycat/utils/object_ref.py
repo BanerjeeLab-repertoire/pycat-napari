@@ -379,6 +379,20 @@ def location_from_registry(ref: ObjectRef) -> ObjectRef:
         source_path=loc.source if loc.source is not None else ref.source_path)
 
 
+def _source_layer_of(ref: ObjectRef, viewer):
+    """The exact layer this ref was measured on, matched by ``pycat_layer_id`` — the layer whose scale and
+    translate map the ref's pixel-space bbox to world coordinates. ``None`` when the ref records no source
+    layer or that layer is not open. (Unlike :func:`layers_for_ref`, this is not restricted to labels/mask
+    roles: the measured-on layer may be the image itself, and its scale is what the world transform needs.)"""
+    lid = getattr(ref, 'source_layer_id', None)
+    if not lid:
+        return None
+    for layer in getattr(viewer, 'layers', []) or []:
+        if (getattr(layer, 'metadata', None) or {}).get('pycat_layer_id') == lid:
+            return layer
+    return None
+
+
 def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
     """**Interactive**: find the object in a live layer and reveal it.
 
@@ -418,7 +432,23 @@ def resolve_in_viewer(ref: ObjectRef, viewer, *, centre=True, pad_px=8):
     if centre and ref.bbox:
         try:
             y0, x0, y1, x1 = ref.bbox
-            viewer.camera.center = (0.0, (y0 + y1) / 2.0, (x0 + x1) / 2.0)
+            cy, cx = (y0 + y1) / 2.0, (x0 + x1) / 2.0
+            # The camera works in WORLD coordinates, so the pixel-space centre must be scaled + offset by the
+            # source layer's scale/translate — otherwise a calibrated or upscaled layer centres on the wrong
+            # spot (the same missing transform that mis-placed the overlay box). Fall back to pixel space
+            # (scale 1, offset 0) when the source layer is not resolvable.
+            sy = sx = 1.0
+            ty = tx = 0.0
+            layer = _source_layer_of(ref, viewer)
+            if layer is not None:
+                import numpy as _np
+                sc = _np.asarray(getattr(layer, 'scale', (1.0, 1.0)), dtype=float).ravel()
+                tr = _np.asarray(getattr(layer, 'translate', (0.0, 0.0)), dtype=float).ravel()
+                if sc.size >= 2:
+                    sy, sx = float(sc[-2]), float(sc[-1])
+                if tr.size >= 2:
+                    ty, tx = float(tr[-2]), float(tr[-1])
+            viewer.camera.center = (0.0, cy * sy + ty, cx * sx + tx)
         except Exception as exc:
             debug_log('resolve_in_viewer: could not centre the camera', exc)
 

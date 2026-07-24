@@ -1,3 +1,29 @@
+## [1.6.329] - 2026-07-24
+### Fixed — **Brushing highlights and zooms to the right place on calibrated & upscaled layers (selection_scale_and_guided_templates Part 1).**
+Reported: the cellular-object plot "isn't brushing properly — it doesn't highlight the cell or zoom to it".
+Cause: the selection overlay was drawn at the default scale 1.0 while its bbox is in the **source layer's
+pixel grid**, and the camera (which works in WORLD coordinates) centred on the raw pixel index. So on any
+layer with a non-unit `scale` — which every **calibrated** layer has (`layer.scale = pixel_size`), and every
+**upscaled** layer — the box and the camera both landed in the wrong place. It is one missing transform, which
+is why "doesn't highlight" and "doesn't zoom" appeared together.
+- `show_selection` now resolves the object's **source layer** by the recorded `pycat_layer_id` and draws the
+  overlay (bbox + centre) with **that layer's `scale` and `translate`** (reconciled to the viewer's ndim so a
+  2-D object in a 3-D viewer is handled). `resolve_in_viewer` centres the camera in **world coordinates**
+  (`pixel-centre × scale + translate`). Scale-1.0 behaviour is unchanged (regression-tested).
+- **Honest miss**: when the ref records a source layer that is **not open**, nothing is drawn and the miss is
+  reported — an unverified box in the wrong place is worse than no box.
+- **Resolve to the measured-on layer**, not the active one — so an upscaled workflow highlights on the
+  upscaled layer (what the user sees and what the measurement used).
+- **Hide the mismatched-resolution image** under the highlight: a visible image layer whose **pixel grid**
+  differs from the target's (e.g. a 1024² source beside a 2048² upscaled layer) is hidden for the selection
+  and **restored on clear** — comparing the grid shape, not the world extent. Only image layers, never the
+  target, never a layer the user already hid, and never everything (if hiding would leave no visible image,
+  nothing is hidden).
+- Tests: `test_selection_overlay_scale.py` (`base`, 12 — scale/upscale draw, world-coordinate camera,
+  legacy-unscaled, missing-source honest miss, multi-ref, and the hide/restore/attribution/never-hide-all
+  rules) with a duck-typed viewer (napari-free). Existing brushing/selection tests pass unmodified. Parts 2
+  (wire guided-panel execution) and 3 (saveable templates) remain.
+
 ## [1.6.328] - 2026-07-24
 ### Added — **A channel identity you name once is now recalled on STACK loads too, by acquisition layout (czi_sidecar_and_stack_identity Part 2).**
 On the 2D path a remembered channel identity is recalled for the next same-layout file; the stack loaders named
