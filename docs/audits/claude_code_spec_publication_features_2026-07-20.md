@@ -10,8 +10,12 @@
 > Publication-sane default preserved (a bare spec renders linear, unchanged). `tests/test_publication_
 > features.py` (`core`, Agg). Error/CI representation also DONE (1.6.263): `error_type`
 > (`none`/`sd`/`sem`/`ci95`) draws an error bar on each group mean and LABELS the type on the figure (pure
-> `group_error` helper; SD ddof=1 / SEM / 1.96·SEM). **Remaining Tier 1:** tick scientific-notation/exponent
-> control, significance bracket-placement UI exposure. **Tier 2:** multi-panel +
+> `group_error` helper; SD ddof=1 / SEM / 1.96·SEM). Scientific-notation control DONE (1.6.322): `sci_notation`
+> (`None` default | `'sci'` a shared ×10ⁿ exponent via mathtext | `'plain'`) honoured by `render()` and
+> `refine()`, pure `resolve_sci_notation` validate-and-warns an unknown value, skipped on a log axis (already
+> in powers), installs a fresh `ScalarFormatter` so it composes with `tick_format`, round-trips through JSON,
+> exposed as a dropdown beside the y-scale control; `tests/test_publication_features.py` +7 (Agg). **Remaining
+> Tier 1:** significance bracket-placement UI exposure (the axis controls are complete). **Tier 2:** multi-panel +
 > panel labels DONE (1.6.264): `render_multipanel(panels, *, spec, n_cols, panel_labels)` grids several
 > `FigureData` with bold A/B/C… labels (per-panel spec override; per-axis plotting factored into a shared
 > `_render_on_axis`, so single-panel `render` is unchanged). Validated fonts + transparent background DONE

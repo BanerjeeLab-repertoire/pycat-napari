@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 
 from pycat.utils.figure_spec import (
-    FigureData, FigureSpec, render, refine, render_multipanel, resolve_y_scale, group_error,
-    spec_to_dict, spec_from_dict)
+    FigureData, FigureSpec, render, refine, render_multipanel, resolve_y_scale, resolve_sci_notation,
+    group_error, spec_to_dict, spec_from_dict)
 
 pytestmark = pytest.mark.base
 
@@ -79,6 +79,60 @@ def test_refine_log_on_nonpositive_also_falls_back_with_a_warning():
         warnings.simplefilter('always')
         refine(fig, FigureSpec(y_scale='log'))
     assert fig.axes[0].get_yscale() == 'symlog' and any('non-positive' in str(x.message) for x in w)
+
+
+# ── scientific-notation / exponent control (the last Tier-1 axis slice) ──────────────────────────────
+
+def _y_offset_text(fig):
+    """The y-axis offset label (the shared ×10ⁿ) after a draw — '' when none is shown."""
+    fig.canvas.draw()
+    return fig.axes[0].yaxis.get_offset_text().get_text()
+
+
+def test_sci_notation_shows_a_shared_exponent_offset():
+    d = _data({'WT': np.array([1e5, 2e5, 3e5]), 'KO': np.array([1.5e5, 2.5e5])})
+    off = _y_offset_text(render(d, FigureSpec(sci_notation='sci')))
+    assert off and ('10' in off)                          # a ×10ⁿ offset is present (not 1e5 on every tick)
+
+
+def test_plain_notation_suppresses_the_exponent_offset():
+    d = _data({'WT': np.array([1e5, 2e5, 3e5]), 'KO': np.array([1.5e5, 2.5e5])})
+    assert _y_offset_text(render(d, FigureSpec(sci_notation='plain'))) == ''   # forced plain → no offset
+
+
+def test_default_sci_notation_is_a_noop_that_does_not_clobber_tick_format():
+    from matplotlib.ticker import FormatStrFormatter
+    fig = render(_data({'WT': np.array([1.0, 2.0, 3.0])}), FigureSpec())
+    refine(fig, FigureSpec(tick_format='%.2f'))           # sci_notation defaults None → must leave tick_format
+    assert isinstance(fig.axes[0].yaxis.get_major_formatter(), FormatStrFormatter)
+
+
+def test_sci_notation_is_skipped_on_a_log_axis_which_already_labels_in_powers():
+    d = _data({'WT': np.array([1.0, 10.0, 100.0, 1000.0])})
+    fig = render(d, FigureSpec(y_scale='log', sci_notation='sci'))
+    assert fig.axes[0].get_yscale() == 'log'              # log honoured; sci did not fight it or crash
+
+
+def test_an_unknown_sci_notation_warns_and_falls_back_not_silently():
+    d = _data({'WT': np.array([1e5, 2e5])})
+    with pytest.warns(UserWarning, match="unknown sci_notation"):
+        render(d, FigureSpec(sci_notation='fancy'))
+
+
+def test_resolve_sci_notation_is_pure():
+    assert resolve_sci_notation(None) == (None, None)
+    assert resolve_sci_notation('sci') == ('sci', None)
+    assert resolve_sci_notation('plain') == ('plain', None)
+    mode, warn = resolve_sci_notation('nope')
+    assert mode is None and warn and 'nope' in warn
+
+
+def test_sci_notation_round_trips_through_json_and_refine_applies_it():
+    spec = FigureSpec(sci_notation='sci', title='t')
+    assert spec_from_dict(spec_to_dict(spec)).sci_notation == 'sci'
+    fig = render(_data({'WT': np.array([1e5, 2e5, 3e5])}), FigureSpec())   # rendered default
+    refine(fig, FigureSpec(sci_notation='sci'))
+    assert '10' in _y_offset_text(fig)                    # refine applied the exponent, presentation-only
 
 
 def test_group_error_computes_sd_sem_and_ci_and_needs_two_points():

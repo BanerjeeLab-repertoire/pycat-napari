@@ -1,3 +1,21 @@
+## [1.6.322] - 2026-07-24
+### Added — **Scientific-notation control for figure y-ticks — a shared ×10ⁿ exponent instead of `1e5` repeated on every tick (publication_features Tier 1, the last axis slice).**
+Default matplotlib ticks look unfinished in print; a comparison figure of large or small values wants one clean
+exponent, not the number spelled out on every tick.
+
+- **`FigureSpec.sci_notation`** (`None` = matplotlib default · `'sci'` = a single shared ×10ⁿ offset via
+  mathtext · `'plain'` = force plain), honoured by both `render()` and `refine()`. Pure `resolve_sci_notation`
+  validates the request and **warns on an unknown value** rather than silently ignoring it (the same
+  validate-and-warn discipline as `y_scale`). A **log** axis already labels in powers, so the control is
+  skipped there; and a fresh `ScalarFormatter` is installed so it composes safely with `tick_format`.
+- Round-trips through JSON like the other scalar fields; a bare spec is unchanged (default is off). Exposed in
+  the comparative-figures refine bar as a dropdown beside the y-scale control.
+- `tests/test_publication_features.py` +7 (Agg): the shared exponent appears under `'sci'` and is suppressed
+  under `'plain'`; the default is a no-op that doesn't clobber `tick_format`; log axes are left alone; an
+  unknown value warns; the pure helper and JSON/refine round-trips. Full `pytest -m "core or base"` green.
+  **Tier 1 axis controls are now complete** (scales, minor ticks, error representation, scientific notation);
+  the remaining Tier-1 item is significance-bracket UI exposure.
+
 ## [1.6.321] - 2026-07-23
 ### Changed — **Every load now pulls metadata from wherever it parses best, not just from the reader showing the pixels (deep_metadata Part 2 — the merge is finally wired in).**
 The reader-independent merge (`extract_metadata_merged`) and the element-scoped OME parse shipped earlier, but

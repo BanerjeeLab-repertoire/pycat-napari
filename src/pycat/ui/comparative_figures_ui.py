@@ -142,6 +142,10 @@ def _build_refine_row(refiner, redraw, parent):
     yscale_dd.currentTextChanged.connect(lambda t: (refiner.set(y_scale=t), redraw()))
     row.addWidget(yscale_dd)
 
+    sci_dd = QComboBox(); sci_dd.addItems(['default', 'sci', 'plain'])   # y-tick number format (shared ×10ⁿ)
+    sci_dd.currentTextChanged.connect(lambda t: (refiner.set(sci_notation=t), redraw()))
+    row.addWidget(sci_dd)
+
     legend_cb = QCheckBox("legend")
     legend_cb.toggled.connect(lambda on: (refiner.set(legend=bool(on)), redraw()))
     row.addWidget(legend_cb)

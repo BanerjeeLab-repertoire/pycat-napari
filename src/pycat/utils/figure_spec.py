@@ -82,6 +82,8 @@ class FigureSpec:
     journal_column: "str | None" = None         # 'single'|'onehalf'|'double' → width preset (mm→in at edge)
     height_mm: "float | None" = None
     tick_format: "str | None" = None            # e.g. '%.2f' on the y axis
+    sci_notation: "str | None" = None           # y-tick number format: None = matplotlib default | 'sci' (a shared
+    #                                             ×10ⁿ exponent, not 1e3 on every tick) | 'plain' (publication_features Tier 1)
     significance_brackets: tuple = ()           # ({'x1','x2','y','label'}, ...) — render()/refine() draw them
     y_scale: str = 'linear'                     # 'linear' | 'log' | 'symlog' — size/intensity are often
     #                                             log-normal; a linear axis misrepresents them (publication_features Tier 1)
@@ -143,6 +145,38 @@ def resolve_y_scale(y_scale, value_arrays):
                 f"log y-scale requested, but the data has non-positive values (min {allv.min():.4g}); a log "
                 "axis cannot show values ≤ 0. Using symlog instead (it handles zero and negatives).")
     return y_scale, None
+
+
+def resolve_sci_notation(sci_notation):
+    """The y-tick number format to apply, and a warning for an unrecognised request (validate-and-warn, never
+    silently ignore — the same discipline as :func:`resolve_y_scale`). Returns ``(mode, warning)`` where
+    ``mode`` is ``None`` (matplotlib default), ``'sci'`` or ``'plain'``."""
+    if sci_notation in (None, 'default'):
+        return None, None
+    if sci_notation in ('sci', 'plain'):
+        return sci_notation, None
+    return None, (f"unknown sci_notation {sci_notation!r}; using the matplotlib default "
+                  "(expected 'sci' | 'plain').")
+
+
+def _apply_sci_notation(ax, sci_notation):
+    """Force scientific ('sci' — a single shared ×10ⁿ exponent via mathtext, not ``1e3`` repeated on every
+    tick) or 'plain' y-tick labels. A **log** axis already labels in powers, so it is left untouched. Installs
+    a fresh ``ScalarFormatter`` so it is robust to a prior ``tick_format`` (``FormatStrFormatter``). Emits the
+    validate-and-warn warning for an unknown value. Returns the mode actually applied (or ``None``)."""
+    mode, warning = resolve_sci_notation(sci_notation)
+    if warning:
+        import warnings as _warnings
+        _warnings.warn(warning)
+    if mode is None or ax.get_yscale() == 'log':
+        return None
+    import matplotlib.ticker as mticker
+    fmt = mticker.ScalarFormatter(useMathText=True)
+    fmt.set_scientific(mode == 'sci')
+    if mode == 'sci':
+        fmt.set_powerlimits((0, 0))     # always surface the ×10ⁿ offset, even at moderate magnitudes
+    ax.yaxis.set_major_formatter(fmt)
+    return mode
 
 
 #: How each error type is labelled on the figure (stating the error is a publication requirement).
@@ -255,6 +289,7 @@ def _render_on_axis(ax, fig_data, spec):
             _warnings.warn(warning)
     if getattr(spec, 'minor_ticks', False):
         ax.minorticks_on()
+    _apply_sci_notation(ax, getattr(spec, 'sci_notation', None))
     # State the error type on the figure — an unlabelled error bar is unpublishable (is it SD? SEM? CI?).
     if getattr(spec, 'error_type', 'none') in ERROR_LABELS:
         ax.text(0.98, 0.98, f"error bars: {ERROR_LABELS[spec.error_type]}", transform=ax.transAxes,
@@ -482,6 +517,7 @@ def apply_spec(fig, spec):
         if spec.tick_format:
             import matplotlib.ticker as mticker
             ax.yaxis.set_major_formatter(mticker.FormatStrFormatter(spec.tick_format))
+        _apply_sci_notation(ax, getattr(spec, 'sci_notation', None))
         if spec.recolor:
             _recolor_series(ax, theme['palette'])
         for ann in spec.significance_brackets:
