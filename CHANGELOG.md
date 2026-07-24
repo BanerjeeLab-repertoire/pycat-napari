@@ -1,3 +1,20 @@
+## [1.6.326] - 2026-07-24
+### Added — **Imaris (.ims) files now expose the same per-channel `channels` schema as OME, so channel metadata is consistent across formats (deep_metadata item 4).**
+`extract_ims_metadata` flattened per-channel data into single top-level fields, so any consumer that reads
+`raw['channels']` / `raw['instrument']` (e.g. the metadata-contradiction surface) saw nothing for an .ims file
+even though Imaris stores per-channel name / emission / excitation in its `DataSetInfo/Channel N` groups.
+
+- New `_ims_channel_records` builds a `raw['channels']` list keyed by the **same `_OME_CHANNEL_KEYS`** the OME
+  reader uses; Imaris exposes name / emission / excitation / color / gain, and the OME-only fields (fluor,
+  contrast_method, acquisition_mode, detector_id, offset, binning, amplification_gain) stay `None` — missing
+  stays missing, never defaulted. `_ims_instrument` adds the `raw['instrument']` block (NA + magnification).
+- Additive: the top-level `emission_nm` / `excitation_nm` fill from channel 0 only when the image header
+  carried none; every existing IMS field is unchanged.
+- `tests/test_ims_channels.py` (`base`, 4, synthetic Imaris HDF5): the channels list mirrors the OME schema;
+  top-level emission fills from channel 0; a file with no channel groups is safe (no `channels` key); the
+  instrument block carries NA + magnification. Full `pytest -m "core or base"` green. Remaining item-4 readers:
+  CZI / LIF / ND2 (need vendor fixtures).
+
 ## [1.6.325] - 2026-07-24
 ### Fixed — **Old saved sessions' entity ids now upgrade to the durable dataset UUID on load, so brushing and cross-session references resolve again (dataset_identity_uuid step 4).**
 Since 1.6.191 a dataset's identity is a durable UUID, not its file path. Sessions saved before that embedded

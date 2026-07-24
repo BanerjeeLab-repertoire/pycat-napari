@@ -1,8 +1,16 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
 > **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (1.6.294 + 1.6.295); Part 2 merge policy DONE (1.6.296),
-> DISPATCHER ADOPTION DONE (1.6.321); item 6 BOUNDED PER-PAGE TIFF METADATA DONE (1.6.323). Remaining: deepen
-> CZI/LIF/ND2/IMS readers to the same `channels` shape (item 4), and the Qt provenance/conflict surface.**
+> DISPATCHER ADOPTION DONE (1.6.321); item 6 BOUNDED PER-PAGE TIFF METADATA DONE (1.6.323); item 4 IMS READER
+> DONE (1.6.326). Remaining: deepen CZI/LIF/ND2 readers to the same `channels` shape (item 4, need vendor
+> fixtures), and the Qt provenance/conflict surface.**
+>
+> **Item 4 — IMS reader parity — DONE, shipped 1.6.326.** `extract_ims_metadata` now emits `raw['channels']`
+> (via `_ims_channel_records`, keyed by the same `_OME_CHANNEL_KEYS` as the OME reader — Imaris' name / emission
+> / excitation / color / gain filled, the OME-only fields `None`) and `raw['instrument']` (NA + magnification),
+> so metadata_contradictions and every other `raw['channels']`/`['instrument']` consumer sees a consistent
+> shape for .ims files. Additive: top-level emission/excitation fill from channel 0 only when the image header
+> had none. `tests/test_ims_channels.py` (`base`, 4, synthetic Imaris HDF5). CZI/LIF/ND2 remain (vendor fixtures).
 >
 > **Item 6 (lazy/bounded per-page TIFF metadata) — DONE, shipped 1.6.323.** The load path read EVERY page's
 > `MicroManagerMetadata` tag to estimate the frame cadence (a 10k-frame stack parsed 10k IFDs at open). Now

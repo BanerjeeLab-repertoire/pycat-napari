@@ -432,11 +432,54 @@ _IMS_IMAGE_ATTRS = (
 )
 
 
+def _ims_channel_records(hf):
+    """Per-channel records from Imaris ``DataSetInfo/Channel N`` groups, in the **same schema** as the OME
+    channels list (``_OME_CHANNEL_KEYS`` — deep_metadata item 4, reader parity). Imaris exposes name /
+    emission / excitation / color / gain; the OME-only fields (fluor, contrast_method, acquisition_mode,
+    detector_id, offset, binning, amplification_gain) stay ``None`` — missing stays missing. Never raises."""
+    out = []
+    try:
+        info = hf['DataSetInfo']
+    except Exception:      # broad-ok: optional_probe — no DataSetInfo → no per-channel records
+        return out
+    i = 0
+    while f'Channel {i}' in info:
+        try:
+            a = info[f'Channel {i}'].attrs
+        except Exception:  # broad-ok: optional_probe — a malformed channel group ends the scan, never crashes
+            break
+        rec = {k: None for k in _OME_CHANNEL_KEYS}
+        rec['index'] = i
+        rec['name'] = _safe_str(a.get('Name'))
+        em = a.get('LSMEmissionWavelength')
+        rec['emission_nm'] = _safe_float(em if em is not None else a.get('EmissionWavelength'))
+        ex = a.get('LSMExcitationWavelength')
+        rec['excitation_nm'] = _safe_float(ex if ex is not None else a.get('ExcitationWavelength'))
+        rec['color'] = _safe_str(a.get('Color'))
+        gn = a.get('GainValue')
+        rec['gain'] = _safe_float(gn if gn is not None else a.get('Gain'))
+        out.append(rec)
+        i += 1
+    return out
+
+
+def _ims_instrument(attrs):
+    """The instrument/objective block for an Imaris Image, in the OME instrument schema (``_OME_INSTRUMENT_KEYS``
+    — item 4 parity). Imaris carries the NA and the objective magnification; the rest stay ``None``."""
+    inst = {k: None for k in _OME_INSTRUMENT_KEYS}
+    inst['lens_na'] = _safe_float(attrs.get('NumericalAperture'))
+    inst['nominal_magnification'] = _safe_float(attrs.get('LensPower'))
+    return inst
+
+
 def extract_ims_metadata(file_path, reader=None, width_px=None):
     """Extract normalised metadata from an Imaris .ims file.
 
     If a live imaris_ims_file_reader ``reader`` is supplied its h5py handle is
-    reused; otherwise the file is opened read-only via h5py.
+    reused; otherwise the file is opened read-only via h5py. Carries a per-channel
+    ``raw['channels']`` list and a ``raw['instrument']`` block in the same schema
+    the OME reader uses (deep_metadata item 4), so every consumer of those sees a
+    consistent shape across formats.
     """
     common = _empty_common(file_path)
     common['file_type'] = 'ims'
@@ -467,6 +510,7 @@ def extract_ims_metadata(file_path, reader=None, width_px=None):
             common['emission_nm'] = _safe_float(attrs.get('EmissionWavelength'))
             common['software'] = (_safe_str(attrs.get('ManufactorString'))
                                   or _safe_str(attrs.get('ManufactorType')))
+            raw['instrument'] = _ims_instrument(attrs)
 
             # Pixel size from extents: (ExtMax0 - ExtMin0) / width.
             ext_min = _safe_float(attrs.get('ExtMin0'))
@@ -504,6 +548,16 @@ def extract_ims_metadata(file_path, reader=None, width_px=None):
                     common['bit_depth'] = int(_np.dtype(dt).itemsize * 8)
             except Exception:
                 pass
+
+        # Per-channel records (item 4): same schema as the OME channels list, so raw['channels'] is consistent
+        # across formats. Additive — top-level excitation/emission fill from channel 0 only when Image had none.
+        channels = _ims_channel_records(hf)
+        if channels:
+            raw['channels'] = channels
+            if common.get('emission_nm') is None:
+                common['emission_nm'] = channels[0].get('emission_nm')
+            if common.get('excitation_nm') is None:
+                common['excitation_nm'] = channels[0].get('excitation_nm')
 
     except Exception:
         pass
