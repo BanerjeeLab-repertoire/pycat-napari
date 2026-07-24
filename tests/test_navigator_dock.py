@@ -148,3 +148,15 @@ def test_the_navigator_shows_a_data_observations_section(qtbot):
     qtbot.addWidget(widget)
     texts = " ".join(lbl.text() for lbl in widget.findChildren(QLabel))
     assert "What we can tell" in texts and "multichannel" in texts.lower()
+
+
+@pytest.mark.integration
+def test_the_guided_run_note_carries_the_gate_respecting_order():
+    # until auto-execution is wired, the honest message is actionable: it names the gate-respecting run order
+    from pycat.ui.navigator_dock import _guided_run_note
+    from pycat.navigator.session import NavigatorSession
+    s = NavigatorSession()
+    s.intent.observables = ['count']
+    s.intent.target = 'cell'
+    note = _guided_run_note(s.compile_plan())
+    assert "method panels" in note and "in this order" in note and "→" in note

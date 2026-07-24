@@ -1,3 +1,27 @@
+## [1.6.330] - 2026-07-24
+### Added — **Gate-respecting execution model for a guided plan, and an actionable run order in the dock (selection_scale Part 2).**
+Part 2 asked to wire the navigator's Run button to execute the compiled plan "through the existing execution
+path — the same one each method panel uses". Verified against the tree, that path **does not exist uniformly**:
+PyCAT's operations have bespoke, panel-collected signatures (e.g. `segment_subcellular_objects(original_image,
+pre_processed_image, cell_mask, cell_label, ball_radius, …15 params)`) threaded from prior steps and tuned by
+the user, and `resolve_operation`'s callable is invoked nowhere — there is no generic "run this op". So full
+auto-execution is a **per-operation adapter layer** (input marshalling + a parameter story), not a mechanical
+wiring, and invoking those functions with guessed arguments would risk wrong science. This ships the safe,
+correct **foundation** that layer needs, plus the honest, improved dock:
+- New Qt-free **`navigator/execution.py`**: `execution_order(plan)` turns a compiled `Plan` into the sequence a
+  runner (or a guided hand-off to the real panels) must honour — **QC probes first**, a **blocker halts the
+  run** at that step (it and everything after are `skipped`) with the stated reason, a **soft caveat runs**
+  with its reason carried. Plus `is_runnable`, `first_blocker`, and `execution_briefing`.
+- **The dock is now actionable, not a dead control**: the "auto-run is coming" message carries the
+  **gate-respecting run order** (`probe → segment → measure …`) so the user runs the steps in their method
+  panels in exactly the right sequence — the "guided route IS the manual route" the spec wants, made explicit.
+- Tests: `tests/navigator/test_navigator_execution.py` (`base`, 6 — probes lead, a blocker halts + skips the
+  rest, a caveat runs, a clean plan runs every step, the briefing names order + blocker, frozen records) and a
+  dock test that the run-order note is produced. Full core-or-base green.
+- **Deferred (architectural finding, recorded on the spec):** the per-operation execution adapters that let
+  the Run button compute each step end to end — a larger layer, since there is no uniform op invocation. Part
+  3 (saveable templates) also remains.
+
 ## [1.6.329] - 2026-07-24
 ### Fixed — **Brushing highlights and zooms to the right place on calibrated & upscaled layers (selection_scale_and_guided_templates Part 1).**
 Reported: the cellular-object plot "isn't brushing properly — it doesn't highlight the cell or zoom to it".

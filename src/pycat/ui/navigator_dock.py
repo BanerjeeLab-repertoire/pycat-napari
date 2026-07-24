@@ -128,6 +128,22 @@ def _render_observations(widget, body_layout):
                                  "color: gray; font-size: 10px; margin-bottom: 4px;"))
 
 
+def _guided_run_note(plan):
+    """The honest guided-run message, made ACTIONABLE with the gate-respecting run ORDER. Auto-running the
+    whole plan needs a per-operation execution adapter (PyCAT ops have bespoke, panel-collected signatures —
+    there is no uniform "run this op"), so that is a separate layer; until it lands, the user runs the steps in
+    their method panels in exactly this sequence (probes first, a blocker stops)."""
+    order = ""
+    try:
+        from pycat.navigator.execution import execution_order
+        order = " → ".join(s.name for s in execution_order(plan) if s.status in ("run", "caveat"))
+    except Exception:      # broad-ok: ui_cleanup — a briefing failure must not break the plan view
+        order = ""
+    msg = ("This plan is ready. Auto-running from the guided panel is coming; for now run the steps in their "
+           "method panels")
+    return msg + (f", in this order:\n{order}." if order else ".")
+
+
 def build_navigator_widget(session, *, on_run=None, central_manager=None, parent=None):
     """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
     (headless). ``on_run(plan)`` is called when the user runs the compiled plan. When ``central_manager`` is
@@ -206,9 +222,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
         if reason is not None:
             body_layout.addWidget(_label("⛔  " + reason, "color: #c0392b; font-size: 11px;"))
         elif not callable(widget._on_run):
-            body_layout.addWidget(_label(
-                "This plan is ready. Running it from the guided panel is coming — for now, run each step from "
-                "its method panel.", "color: gray; font-size: 11px;"))
+            body_layout.addWidget(_label(_guided_run_note(widget._plan), "color: gray; font-size: 11px;"))
         over = QPushButton("↺  Start over")
         over.clicked.connect(_restart)
         body_layout.addWidget(over)

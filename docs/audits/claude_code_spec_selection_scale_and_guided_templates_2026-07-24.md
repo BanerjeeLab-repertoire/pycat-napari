@@ -1,7 +1,18 @@
 # Claude Code spec — Selection overlay ignores layer scale; guided-panel execution and saveable templates
 
-> **◐ STATUS — Part 1 (the scale bug) DONE, shipped 1.6.329. Parts 2 (guided execution) + 3 (templates)
-> remain; Part 4 is a design note (no build).**
+> **◐ STATUS — Part 1 DONE (1.6.329). Part 2 gate-respecting execution MODEL + actionable dock DONE (1.6.330);
+> full auto-execution DEFERRED (architectural finding). Part 3 (templates) remains; Part 4 is a design note.**
+> **Part 2 — MODEL DONE, auto-execution DEFERRED (1.6.330).** Verified there is **no uniform execution path**:
+> PyCAT ops have bespoke, panel-collected signatures (`segment_subcellular_objects(original_image,
+> pre_processed_image, cell_mask, …15 params)`) and `resolve_operation`'s callable is invoked nowhere, so
+> "run the compiled plan through the same path each method panel uses" would require a **per-operation adapter
+> layer** (input marshalling + parameter collection) — invoking those functions with guessed args risks wrong
+> science, so it is NOT a mechanical wiring. Shipped the safe foundation: Qt-free `navigator/execution.py`
+> (`execution_order` — probes first, a blocker halts + skips the rest, a caveat runs with its reason;
+> `is_runnable`/`first_blocker`/`execution_briefing`), `tests/navigator/test_navigator_execution.py` (`base`,
+> 6). The dock's "coming" message now carries the gate-respecting run ORDER (guided route = the real panels,
+> sequenced). **Follow-on:** the per-op execution adapters that let the Run button compute each step end to
+> end (the larger layer this model is built to drive).
 > **Part 1 — DONE.** `selection_overlay.show_selection` resolves the object's source layer by
 > `pycat_layer_id` and draws the bbox + centre with that layer's `scale`/`translate` (reconciled to the
 > viewer ndim); `object_ref.resolve_in_viewer` centres the camera in WORLD coordinates (`pixel × scale +
