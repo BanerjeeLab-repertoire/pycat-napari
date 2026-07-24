@@ -101,3 +101,34 @@ def test_a_3d_image_control_is_reduced_to_its_channel_means():
     c1 = np.stack([np.full((4, 4), 75.0), np.full((4, 4), 500.0)])       # ch0=75,  ch1=500 → col [.15, 1]
     M = estimate_mixing_matrix([c0, c1])
     assert np.allclose(M, _M_TRUE, atol=1e-9)
+
+
+# ── Round-trip property: recovery cannot encode a hand-computed wrong expectation (unmixing_test_fixtures) ──
+# Two unmixing failures were test-side: an expected value that did not follow from the fixture's linear algebra
+# (a channel that is pure crosstalk correctly unmixes to ~0, not to its measured value). This constructs the
+# true abundances A FIRST, forms measured = M·A (+ background), and asserts unmix RECOVERS A — so the expected
+# value IS the input and there is no number to get wrong. unmixing_tools.py is unchanged.
+
+@pytest.mark.parametrize("M, A, background", [
+    # a channel with ZERO true abundance (the CI failing case, correctly expressed) — pure bleed-through → ~0
+    (np.array([[1.0, 0.15], [0.08, 1.0]]),
+     np.stack([np.full((6, 6), 800.0), np.zeros((6, 6))]), 0.0),
+    # both channels present, ASYMMETRIC crosstalk (0.15 vs 0.08)
+    (np.array([[1.0, 0.15], [0.08, 1.0]]),
+     np.stack([np.full((5, 5), 300.0), np.full((5, 5), 120.0)]), 0.0),
+    # 3-channel matrix
+    (np.array([[1.0, 0.10, 0.05], [0.08, 1.0, 0.12], [0.03, 0.07, 1.0]]),
+     np.stack([np.full((4, 4), 200.0), np.full((4, 4), 90.0), np.full((4, 4), 350.0)]), 0.0),
+    # scalar background offset — unmix subtracts it before inversion
+    (np.array([[1.0, 0.15], [0.08, 1.0]]),
+     np.stack([np.full((5, 5), 300.0), np.full((5, 5), 120.0)]), 100.0),
+    # per-channel background vector
+    (np.array([[1.0, 0.15], [0.08, 1.0]]),
+     np.stack([np.full((5, 5), 300.0), np.full((5, 5), 120.0)]), np.array([50.0, 80.0])),
+])
+def test_mix_then_unmix_round_trips_across_the_parameter_sweep(M, A, background):
+    bg = np.asarray(background, dtype=float)
+    measured = np.einsum('kj,j...->k...', M, A)
+    measured = measured + (bg.reshape((-1,) + (1,) * (A.ndim - 1)) if bg.ndim else bg)
+    recovered = unmix(measured, M, background=background)
+    assert np.allclose(recovered, A, atol=1e-9)          # tolerance, never equality — −1e-15 is zero
