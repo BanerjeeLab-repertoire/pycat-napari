@@ -183,3 +183,23 @@ def test_the_save_as_template_button_persists_the_answered_plan(qtbot, tmp_path,
     save_btn.click()
     saved = templates.load_template("Mine", store=store)
     assert saved is not None and saved.observables                          # the answers were persisted
+
+
+@pytest.mark.integration
+def test_run_plan_via_central_manager_reports_and_is_safe(monkeypatch):
+    from types import SimpleNamespace
+    from pycat.ui.navigator_dock import run_plan_via_central_manager
+    from pycat.navigator.planner import Plan, PlanStep
+    from pycat.navigator.contracts import ModuleContract, AnalysisIntent
+    from pycat.navigator.capabilities import InformationRole
+    import napari.utils.notifications as notif
+
+    shown = []
+    monkeypatch.setattr(notif, "show_info", lambda m: shown.append(m))
+    # an uncovered navigator step → reported "run from your panel", nothing invoked, no crash
+    step = PlanStep(module=ModuleContract(name="subcellular_segment", info_role=InformationRole.TRANSFORM),
+                    produces=None, inputs=[], reason="")
+    plan = Plan(intent=AnalysisIntent(target="t", observables=["x"]), steps=[step])
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository={}))
+    run_plan_via_central_manager(cm, plan)
+    assert shown and "method panels" in shown[0]

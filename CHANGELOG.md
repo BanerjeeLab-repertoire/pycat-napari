@@ -1,3 +1,25 @@
+## [1.6.332] - 2026-07-24
+### Added — **Navigator execution-adapter layer, Phase 1: "Run analysis" computes a plan through the batch handlers, gate-respecting (guided == batch == manual).**
+`selection_scale` Part 2 established there is no uniform "run this op" — but the batch `_STEP_MAP` handlers ARE
+the proven "same computation" route (uniform `(state, image_path, params, output_dir)`; `test_route_equivalence`
+asserts batch == manual). This ships the executor that drives them:
+- New Qt-free **`navigator/executor.py`**: `run_plan(plan, state, …)` executes a compiled plan by driving the
+  batch handlers in the gate-respecting order (`execution.execution_order`), threading each step's output
+  through a shared `state` as a batch replay does. An `ExecAdapter` maps a plan step to a batch handler and
+  derives its params; **a step with no adapter is reported ('needs_panel'), never invoked with guessed
+  arguments** — the whole point of an adapter layer over a generic `fn(image)` (which would produce wrong
+  science silently). Gate semantics are READ from `execution_order`: a blocker halts the run (state untouched),
+  a caveat runs with its reason, probes first.
+- **One proven adapter (`background_removal`)** — the shortest chain `test_route_equivalence` covers — so the
+  acceptance gate is pinned: `tests/navigator/test_navigator_executor.py` (`base`, 5) asserts **guided == batch
+  == manual, bit for bit**, plus a blocker halts + leaves state untouched, a caveat runs, and an uncovered step
+  is reported not invoked.
+- **The Run button is wired** (`run_plan_via_central_manager`, passed as `on_run` from `central_manager`):
+  adapter-covered steps run through the batch handlers; uncovered steps are reported "run these from their
+  method panels, in order". Safe on an uncovered plan (nothing runs); best-effort.
+- **Later phases** (per the `navigator_execution_adapters` spec): a parameter-review panel, more adapters one
+  workflow at a time (each behind its own route-equivalence test), and dock progress/cancel.
+
 ## [1.6.331] - 2026-07-24
 ### Added — **Save an answered guided plan as a reusable method template (selection_scale Part 3).**
 The navigator's payoff: a plan the user likes should be reusable on other data without re-answering. A guided

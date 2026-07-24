@@ -1,5 +1,17 @@
 # Claude Code spec — Navigator execution adapters: make "Run analysis" compute the plan
 
+> **◐ STATUS — Phase 1 DONE (shipped 1.6.332). Phases 2–4 remain.**
+> **Phase 1 — DONE.** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP` handlers
+> in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler + `params_from`;
+> a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate semantics read from
+> `execution_order` (blocker halts + state untouched, caveat runs, probes first). One proven adapter
+> (`background_removal`) with the acceptance gate pinned — `tests/navigator/test_navigator_executor.py`
+> (`base`, 5): **guided == batch == manual, bit for bit**, plus blocker/caveat/no-adapter. The Run button is
+> wired via `central_manager` (`run_plan_via_central_manager` as `on_run`) — covered steps run, the rest are
+> reported "run from their panels, in order". **Remaining: Phase 2** (parameter-review panel, preset-seeded,
+> provenance-recorded), **Phase 3** (more adapters, one workflow per increment, each behind its own
+> route-equivalence test), **Phase 4** (dock progress + cancel).
+
 **Date:** 2026-07-24 · **Target tree:** 1.6.331 · Scoping spec for the layer deferred in
 `selection_scale_and_guided_templates` Part 2. **This is a design + phasing document, not a one-shot build** —
 the adapters land workflow by workflow, each proven output-identical to the manual and batch routes before the

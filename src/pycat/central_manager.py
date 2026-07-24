@@ -119,9 +119,12 @@ class CentralManager:
             getattr(self.menu_manager, 'file_menu', None),
             getattr(getattr(self.viewer, 'window', None), '_qt_window', None))
         # Navigator: guided-analysis dock (question flow -> quality-gated, editable plan). Entry point here,
-        # not the line-capped menu god-file. on_run is left None until the plan-execution bridge lands.
-        from pycat.ui.navigator_dock import install_navigator_action
-        self._navigator_action = install_navigator_action(self.viewer, central_manager=self)
+        # not the line-capped menu god-file. Run analysis is wired through the execution-adapter layer (Phase
+        # 1): adapter-covered steps run via the batch handlers, the rest are reported "run from your panel".
+        from pycat.ui.navigator_dock import install_navigator_action, run_plan_via_central_manager
+        self._navigator_action = install_navigator_action(
+            self.viewer, central_manager=self,
+            on_run=lambda plan: run_plan_via_central_manager(self, plan))
         # Populate the feature registry so any consumer (the beginner home dock, a capability query) sees
         # every surfaced-but-otherwise-hidden feature (navigator inc 4). Guarded: a registration hiccup must
         # never break startup, and the cards' openers import Qt/toolbox lazily so this stays cheap.

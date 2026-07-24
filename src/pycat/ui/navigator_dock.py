@@ -128,6 +128,34 @@ def _render_observations(widget, body_layout):
                                  "color: gray; font-size: 10px; margin-bottom: 4px;"))
 
 
+def run_plan_via_central_manager(central_manager, plan):
+    """Execute a compiled plan against the session's data through the execution-adapter layer, and report
+    per-step outcomes. Adapter-covered steps run through the batch handlers (the proven 'same computation'
+    route); a step with no adapter yet is reported as 'run from its panel' — never invoked with guessed args.
+    Safe on an uncovered plan (nothing runs); best-effort, never crashes the UI. This is the wired ``on_run``."""
+    try:
+        from pycat.navigator.executor import run_plan
+        dr = getattr(getattr(central_manager, "active_data_class", None), "data_repository", None)
+        if dr is None:
+            return
+        report = run_plan(plan, dr, ctx=dr)
+        ran = [s.name for s in report.ran]
+        panel = [s.name for s in report.needs_panel]
+        blocked = [s for s in report.steps if s.outcome == "blocked"]
+        parts = []
+        if ran:
+            parts.append("Ran: " + ", ".join(ran) + ".")
+        if blocked:
+            parts.append(f"Stopped at {blocked[0].name} — {blocked[0].detail}")
+        if panel:
+            parts.append("Run these from their method panels, in order: " + ", ".join(panel) + ".")
+        from napari.utils.notifications import show_info
+        show_info(" ".join(parts) or "Nothing to run.")
+    except Exception as exc:      # broad-ok: ui_cleanup — a run attempt must never crash the guided panel
+        from pycat.utils.general_utils import debug_log
+        debug_log("navigator: run_plan_via_central_manager failed", exc)
+
+
 def _guided_run_note(plan):
     """The honest guided-run message, made ACTIONABLE with the gate-respecting run ORDER. Auto-running the
     whole plan needs a per-operation execution adapter (PyCAT ops have bespoke, panel-collected signatures —
