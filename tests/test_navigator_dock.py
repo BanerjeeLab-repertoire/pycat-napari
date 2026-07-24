@@ -203,3 +203,35 @@ def test_run_plan_via_central_manager_reports_and_is_safe(monkeypatch):
     cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository={}))
     run_plan_via_central_manager(cm, plan)
     assert shown and "method panels" in shown[0]
+
+
+@pytest.mark.integration
+def test_the_param_review_form_renders_and_edits_flow_to_the_review(qtbot):
+    """Phase 2: the plan view surfaces the adapter-covered step's material parameter as an editable control,
+    seeded at its grounded default; editing it updates the ParamReview the Run will pass."""
+    from types import SimpleNamespace
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSpinBox
+    from pycat.ui.navigator_dock import build_navigator_widget, _add_param_review
+    from pycat.navigator.session import NavigatorSession
+    from pycat.navigator.planner import Plan, PlanStep
+    from pycat.navigator.contracts import ModuleContract, AnalysisIntent
+    from pycat.navigator.capabilities import InformationRole
+
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository={}), viewer=None,
+                         register_data_switch_callback=lambda cb: None)
+    widget = build_navigator_widget(NavigatorSession(), on_run=lambda plan, review=None: None,
+                                    central_manager=cm)
+    qtbot.addWidget(widget)
+    step = PlanStep(module=ModuleContract(name="background_removal", info_role=InformationRole.TRANSFORM),
+                    produces=None, inputs=[], reason="")
+    plan = Plan(intent=AnalysisIntent(target="t", observables=["x"]), steps=[step])
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    _add_param_review(widget, layout, plan)
+    assert widget._review is not None and not widget._review.is_empty
+    spin = host.findChild(QSpinBox)
+    assert spin is not None and spin.value() == 50            # seeded at the grounded default
+    spin.setValue(12)                                          # a user edit
+    assert widget._review.step("background_removal").values["ball_radius"] == 12
+    assert widget._review.step("background_removal").is_modified

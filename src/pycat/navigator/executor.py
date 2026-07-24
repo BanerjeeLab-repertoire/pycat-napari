@@ -58,10 +58,13 @@ def has_adapter(step_name: str) -> bool:
 @dataclasses.dataclass(frozen=True)
 class StepOutcome:
     """What happened to one step. ``outcome`` is ``'ran'`` / ``'ran_with_caveat'`` / ``'blocked'`` (the run
-    stops here) / ``'skipped'`` (after a blocker) / ``'needs_panel'`` (no adapter yet) / ``'error'``."""
+    stops here) / ``'skipped'`` (after a blocker) / ``'needs_panel'`` (no adapter yet) / ``'error'``.
+    ``provenance`` (Phase 2) records how the step was parameterised — the ``PresetApplication.record()`` shape
+    (which preset, if any, seeded it and what the user changed) — empty when the step carried no review."""
     name: str
     outcome: str
     detail: str = ""
+    provenance: dict = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -96,6 +99,7 @@ def _build_step_registry() -> dict:
 
 
 def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=None, runner=None,
+             params_by_step: Optional[dict] = None, provenance_by_step: Optional[dict] = None,
              on_step: Optional[Callable] = None) -> ExecReport:
     """Execute ``plan``'s steps in gate order by driving the batch handlers, threading ``state`` (a dict the
     handlers read/write, exactly as a batch replay). Returns an :class:`ExecReport`.
@@ -104,7 +108,11 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
     run at that step (nothing after it runs); a **caveat** runs with the caveat recorded; **probes** run first.
     A step with no :class:`ExecAdapter` is reported ``'needs_panel'`` — never invoked with guessed arguments.
     A step that raises halts the run (downstream depends on its output). ``runner`` (an ``OperationRunner``)
-    runs each handler off the Qt thread when given; otherwise handlers run synchronously (headless / tests)."""
+    runs each handler off the Qt thread when given; otherwise handlers run synchronously (headless / tests).
+
+    ``params_by_step`` (Phase 2) overrides the adapter's derived params per step with the user-reviewed values
+    (:mod:`pycat.navigator.parameters`); ``provenance_by_step`` records how each ran step was parameterised
+    (the ``PresetApplication.record()`` shape) onto its :class:`StepOutcome`."""
     intent = intent if intent is not None else getattr(plan, "intent", None)
     registry = _build_step_registry()
     report = ExecReport()
@@ -143,6 +151,10 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 continue
 
             params = adapter.params_from(intent, ctx, state)
+            if params_by_step and es.name in params_by_step:
+                # Reviewed values override the adapter's derived params, but the adapter still supplies the
+                # non-reviewed routing keys (e.g. active_layer) — merge, don't replace.
+                params = {**params, **params_by_step[es.name]}
             try:
                 if runner is not None:
                     runner.execute(fn, state, image_path, params, output_dir)
@@ -153,8 +165,9 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 halted = True
                 continue
 
+            prov = (provenance_by_step or {}).get(es.name, {})
             report.steps.append(StepOutcome(
-                es.name, "ran_with_caveat" if es.status == "caveat" else "ran", es.reason))
+                es.name, "ran_with_caveat" if es.status == "caveat" else "ran", es.reason, prov))
             if on_step:
                 on_step(report.steps[-1])
     finally:

@@ -128,17 +128,25 @@ def _render_observations(widget, body_layout):
                                  "color: gray; font-size: 10px; margin-bottom: 4px;"))
 
 
-def run_plan_via_central_manager(central_manager, plan):
+def run_plan_via_central_manager(central_manager, plan, review=None):
     """Execute a compiled plan against the session's data through the execution-adapter layer, and report
     per-step outcomes. Adapter-covered steps run through the batch handlers (the proven 'same computation'
-    route); a step with no adapter yet is reported as 'run from its panel' — never invoked with guessed args.
-    Safe on an uncovered plan (nothing runs); best-effort, never crashes the UI. This is the wired ``on_run``."""
+    route) with the user-reviewed parameters (Phase 2); a step with no adapter yet is reported as 'run from its
+    panel' — never invoked with guessed args. ``review`` is the :class:`ParamReview` the dock built from its
+    editable form; when ``None`` (a programmatic run), one is built from the plan so parameters are still
+    preset/default-seeded and provenance is still recorded. Safe on an uncovered plan (nothing runs);
+    best-effort, never crashes the UI. This is the wired ``on_run``."""
     try:
         from pycat.navigator.executor import run_plan
         dr = getattr(getattr(central_manager, "active_data_class", None), "data_repository", None)
         if dr is None:
             return
-        report = run_plan(plan, dr, ctx=dr)
+        if review is None:
+            from pycat.navigator.parameters import build_param_review
+            review = build_param_review(plan, ctx=dr)
+        report = run_plan(plan, dr, ctx=dr,
+                          params_by_step=review.params_by_step(),
+                          provenance_by_step=review.provenance_by_step())
         ran = [s.name for s in report.ran]
         panel = [s.name for s in report.needs_panel]
         blocked = [s for s in report.steps if s.outcome == "blocked"]
@@ -149,6 +157,9 @@ def run_plan_via_central_manager(central_manager, plan):
             parts.append(f"Stopped at {blocked[0].name} — {blocked[0].detail}")
         if panel:
             parts.append("Run these from their method panels, in order: " + ", ".join(panel) + ".")
+        modified = [s.name for s in report.ran if s.provenance.get("is_modified")]
+        if modified:
+            parts.append("Parameters modified for: " + ", ".join(modified) + ".")
         from napari.utils.notifications import show_info
         show_info(" ".join(parts) or "Nothing to run.")
     except Exception as exc:      # broad-ok: ui_cleanup — a run attempt must never crash the guided panel
@@ -199,6 +210,68 @@ def _add_template_save(widget, body_layout):
     body_layout.addWidget(btn)
 
 
+def _param_input(param, value, on_change):
+    """One editable control for a material parameter, seeded at ``value``; ``on_change(new_value)`` fires on
+    edit. int → spin box, float → double spin, choice → combo. Returns the widget (or ``None`` on an odd kind)."""
+    from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
+    if param.kind == "int":
+        w = QSpinBox()
+        w.setMinimum(int(param.minimum) if param.minimum is not None else 0)
+        w.setMaximum(int(param.maximum) if param.maximum is not None else 100000)
+        w.setValue(int(value))
+        w.valueChanged.connect(lambda v: on_change(v))
+        return w
+    if param.kind == "float":
+        w = QDoubleSpinBox()
+        w.setDecimals(3)
+        w.setMinimum(float(param.minimum) if param.minimum is not None else 0.0)
+        w.setMaximum(float(param.maximum) if param.maximum is not None else 1e9)
+        w.setValue(float(value))
+        w.valueChanged.connect(lambda v: on_change(v))
+        return w
+    if param.kind == "choice":
+        w = QComboBox()
+        w.addItems([str(c) for c in param.choices])
+        if str(value) in [str(c) for c in param.choices]:
+            w.setCurrentText(str(value))
+        w.currentTextChanged.connect(lambda v: on_change(v))
+        return w
+    return None
+
+
+def _add_param_review(widget, body_layout, plan):
+    """Render the editable parameter-review form (Phase 2) and stash the :class:`ParamReview` on the widget as
+    ``_review`` for the run. Surfaces the handful of material parameters per adapter-covered step, seeded from a
+    preset/session value/grounded default (never invented); an edit is tracked so the run records provenance.
+    Renders nothing when no adapter-covered step has material params — the honest 'nothing to review' case."""
+    from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout
+    from pycat.navigator.parameters import build_param_review, material_params
+    try:
+        review = build_param_review(plan, ctx=widget._session.ctx)
+    except Exception:      # broad-ok: ui_cleanup — a review failure must not break the plan view
+        review = None
+    widget._review = review
+    if review is None or review.is_empty:
+        return
+    body_layout.addWidget(_label("⚙  Review parameters", "font-weight: bold; font-size: 12px; margin-top: 6px;"))
+    body_layout.addWidget(_label("Seeded from your data and grounded defaults — edit before running.",
+                                 "color: gray; font-size: 10px;"))
+    for step in review.steps:
+        body_layout.addWidget(_label(step.step_name, "font-weight: bold; font-size: 11px; color: #2a7ab0;"))
+        for param in material_params(step.step_name):
+            frame = QFrame()
+            row = QHBoxLayout(frame)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(_label(param.label, "font-size: 11px;"))
+            inp = _param_input(param, step.values.get(param.name, param.default),
+                               lambda v, s=step, n=param.name: s.set(n, v))
+            if inp is not None:
+                if param.help:
+                    inp.setToolTip(param.help)
+                row.addWidget(inp)
+            body_layout.addWidget(frame)
+
+
 def build_navigator_widget(session, *, on_run=None, central_manager=None, parent=None):
     """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
     (headless). ``on_run(plan)`` is called when the user runs the compiled plan. When ``central_manager`` is
@@ -235,6 +308,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
     widget._rows = []
     widget._choice_buttons = []
     widget._run_button = None
+    widget._review = None               # Phase 2: the ParamReview built at plan render, passed to the run
     widget._regate_only = False         # a viewer event re-gates; answering/restart recompiles
     widget._reeval_pending = False
 
@@ -267,6 +341,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
         body_layout.addWidget(_label(_PLAN_LEGEND, "color: gray; font-size: 10px; margin-bottom: 4px;"))
         for row in widget._rows:
             body_layout.addWidget(_row_frame(row))
+        _add_param_review(widget, body_layout, plan)     # Phase 2: the editable, seeded material params
         run = QPushButton("▶  Run analysis")
         reason = widget._session.run_blocked_reason()
         run.setEnabled(reason is None and callable(widget._on_run))
@@ -289,7 +364,11 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
 
     def _run():
         if callable(widget._on_run) and widget._plan is not None:
-            widget._on_run(widget._plan)
+            review = getattr(widget, "_review", None)
+            try:
+                widget._on_run(widget._plan, review)     # Phase 2: pass the reviewed params
+            except TypeError:
+                widget._on_run(widget._plan)             # a 1-arg on_run (older callers) still works
 
     def _restart():
         widget._session = NavigatorSession()

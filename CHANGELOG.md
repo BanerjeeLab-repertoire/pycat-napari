@@ -1,3 +1,26 @@
+## [1.6.333] - 2026-07-24
+### Added — **Navigator execution-adapter layer, Phase 2: an honest parameter review — seeded, editable, provenance-recorded.**
+The navigator asks *what* to do, not *with which parameters* — but a guided run that silently picks a
+rolling-ball radius (or a segmentation method) the user never saw is worse than asking. Phase 2 adds the
+minimal parameter review, Qt-free at its core:
+- New **`navigator/parameters.py`**: each adapter-covered step declares its **material** parameters (the handful
+  the science turns on, not every argument). `build_param_review(plan, ctx)` seeds them by a declared
+  precedence — **a matching preset → a session value → the grounded function default** — never an invented one.
+  `ReviewedStep` generalises the preset `populate-but-never-lock` contract to the no-preset case too: the user
+  may edit any value, and the edit is tracked as **provenance in the exact `PresetApplication.record()` shape**
+  (`preset_key`, `modified_parameters`, `is_modified`, `parameters`), `preset_key=None` when no preset seeded it.
+- **The reviewed values drive the run.** `run_plan(…, params_by_step=, provenance_by_step=)` merges the reviewed
+  values over the adapter's derived params (routing keys like `active_layer` still come from the adapter) and
+  records the provenance onto each ran step's `StepOutcome`. `tests/navigator/test_navigator_parameters.py`
+  (`base`, 9) pins it: an edited rolling-ball radius makes the guided result equal the **manual operation at
+  that radius** — and *not* at the default — so the edit provably reaches the computation.
+- **The dock surfaces it**: the plan view renders an editable "Review parameters" form (a spin/combo per
+  material parameter, seeded, tooltip-documented) above Run; the Run passes the `ParamReview` through
+  `run_plan_via_central_manager`, which also reports which steps ran with modified parameters. A programmatic
+  run with no form still builds a default-seeded review, so provenance is recorded either way.
+- **Later phases** (per the `navigator_execution_adapters` spec): more adapters one workflow at a time (each
+  behind its route-equivalence test), then dock progress + cancel.
+
 ## [1.6.332] - 2026-07-24
 ### Added — **Navigator execution-adapter layer, Phase 1: "Run analysis" computes a plan through the batch handlers, gate-respecting (guided == batch == manual).**
 `selection_scale` Part 2 established there is no uniform "run this op" — but the batch `_STEP_MAP` handlers ARE

@@ -1,16 +1,22 @@
 # Claude Code spec — Navigator execution adapters: make "Run analysis" compute the plan
 
-> **◐ STATUS — Phase 1 DONE (shipped 1.6.332). Phases 2–4 remain.**
-> **Phase 1 — DONE.** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP` handlers
-> in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler + `params_from`;
-> a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate semantics read from
-> `execution_order` (blocker halts + state untouched, caveat runs, probes first). One proven adapter
-> (`background_removal`) with the acceptance gate pinned — `tests/navigator/test_navigator_executor.py`
-> (`base`, 5): **guided == batch == manual, bit for bit**, plus blocker/caveat/no-adapter. The Run button is
-> wired via `central_manager` (`run_plan_via_central_manager` as `on_run`) — covered steps run, the rest are
-> reported "run from their panels, in order". **Remaining: Phase 2** (parameter-review panel, preset-seeded,
-> provenance-recorded), **Phase 3** (more adapters, one workflow per increment, each behind its own
-> route-equivalence test), **Phase 4** (dock progress + cancel).
+> **◑ STATUS — Phases 1–2 DONE (shipped 1.6.332, 1.6.333). Phases 3–4 remain.**
+> **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
+> handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
+> `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate
+> semantics read from `execution_order` (blocker halts + state untouched, caveat runs, probes first). One
+> proven adapter (`background_removal`) with the acceptance gate pinned — `test_navigator_executor.py`
+> (`base`, 5): **guided == batch == manual, bit for bit**. Run button wired via `central_manager`.
+> **Phase 2 — DONE (1.6.333).** `navigator/parameters.py`: each adapter-covered step declares its **material**
+> params; `build_param_review(plan, ctx)` seeds them **preset → session value → grounded default** (never
+> invented); `ReviewedStep` tracks edits as provenance in the exact `PresetApplication.record()` shape
+> (`preset_key=None` when no preset). `run_plan(…, params_by_step=, provenance_by_step=)` merges reviewed values
+> over the adapter's params and records provenance on each `StepOutcome`. `test_navigator_parameters.py`
+> (`base`, 9): an edited rolling-ball radius makes the guided result equal the **manual op at that radius, not
+> the default** — the edit provably reaches the computation. The dock renders an editable "Review parameters"
+> form above Run (seeded, tooltip-documented) and passes the `ParamReview` through. **Remaining: Phase 3**
+> (more adapters, one workflow per increment, each behind its own route-equivalence test), **Phase 4** (dock
+> progress + cancel).
 
 **Date:** 2026-07-24 · **Target tree:** 1.6.331 · Scoping spec for the layer deferred in
 `selection_scale_and_guided_templates` Part 2. **This is a design + phasing document, not a one-shot build** —

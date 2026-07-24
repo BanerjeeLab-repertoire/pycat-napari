@@ -124,7 +124,7 @@ class CentralManager:
         from pycat.ui.navigator_dock import install_navigator_action, run_plan_via_central_manager
         self._navigator_action = install_navigator_action(
             self.viewer, central_manager=self,
-            on_run=lambda plan: run_plan_via_central_manager(self, plan))
+            on_run=lambda plan, review=None: run_plan_via_central_manager(self, plan, review))
         # Populate the feature registry so any consumer (the beginner home dock, a capability query) sees
         # every surfaced-but-otherwise-hidden feature (navigator inc 4). Guarded: a registration hiccup must
         # never break startup, and the cards' openers import Qt/toolbox lazily so this stays cheap.
