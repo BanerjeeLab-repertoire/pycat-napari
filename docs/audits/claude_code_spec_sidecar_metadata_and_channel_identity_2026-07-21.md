@@ -1,7 +1,16 @@
 # Claude Code spec — Sidecar metadata discovery, the ISS case, and a last-resort channel-identity dialog
 
 > **◐ STATUS — Part 1 (both immediate bug fixes) DONE: Step 1a shipped 1.6.285, Step 1b shipped 1.6.286.
-> Parts 2-3 CORE DONE (sidecar discovery mechanism + ISS parser, shipped 1.6.289; built and tested against a synthetic fbs matching the spec format). Load-path integration + Part 4 dialog remain (see the GUI/follow-ons TODO).**
+> Parts 2-3 CORE DONE (sidecar discovery mechanism + ISS parser, shipped 1.6.289; built and tested against a synthetic fbs matching the spec format). Part 4 dialog MECHANISM DONE (1.6.316). Load-path integration (sidecar-on-load + threading the prompt/recalled answers into naming) remains (see the GUI/follow-ons TODO).**
+> **Part 4 (last-resort channel-identity prompt) — mechanism DONE, 1.6.316.** `channel_naming.channel_needs_identity`
+> (True only for the position-guess fall-through), `channel_designations.remember_channel_identity` /
+> `recall_channel_identities` / `forget_channel_identity` (signature-keyed, extends the same store as the
+> condensate designation — they coexist either order; opt-in, layout-guarded, reversible), and
+> `ui/channel_identity_dialog.py` (`build_channel_identity_dialog` / `prompt_channel_identities` — optional
+> per-channel prompt, only the unidentified channels, never in batch/headless, `harvest()` seam).
+> `tests/test_channel_identity.py` (`core` 4 + `integration` 2). Residual: calling the prompt on load when a
+> channel needs it and applying recalled answers — the live load-path wiring, alongside the sidecar-on-load
+> integration.
 >
 > **Step 1b — DONE.** `metadata_extract._parse_voxelsize` parses `VoxelSize=X x Y x Z` (µm) out of a TIFF
 > `PageName`; `extract_tiff_metadata` fills `z_step_um` from Z (the 19 µm the structured pixel-size object

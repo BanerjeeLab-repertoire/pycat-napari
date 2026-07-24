@@ -108,11 +108,13 @@ def remember_designation(channel_infos: List[dict], condensate_channel_index: in
         return False
     store = dict(_load())
     sig = acquisition_signature(channel_infos)
-    store[sig] = {
+    entry = dict(store.get(sig) or {})       # preserve any channel-identity answers already stored (Part 4)
+    entry.update({
         'condensate_channel_index': int(condensate_channel_index),
         'n_channels': len(channel_infos),
         'buckets': [str((ci or {}).get('bucket') or 'unknown') for ci in channel_infos],
-    }
+    })
+    store[sig] = entry
     return _save(store)
 
 
@@ -142,6 +144,63 @@ def forget_designation(channel_infos: List[dict]) -> bool:
     sig = acquisition_signature(channel_infos)
     if sig in store:
         del store[sig]
+        return _save(store)
+    return False
+
+
+# ── Channel-identity answers (sidecar Part 4): a last-resort human answer for a channel whose identity no
+# metadata / filename / pixel evidence could recover, remembered for future same-layout files. Extends THIS
+# signature-keyed store (never a second one); the answer round-trips, is reversible, and — being opt-in
+# (only a real answer is stored) — never overwrites file metadata, it only fills a genuinely-empty identity.
+def remember_channel_identity(channel_infos: List[dict], channel_index: int, identity) -> bool:
+    """Persist 'in this acquisition layout, channel N is <identity>'. Opt-in (a blank answer is not stored),
+    keyed to the acquisition signature, merged into the same entry as any condensate designation."""
+    if channel_infos is None or channel_index is None:
+        return False
+    if not (0 <= channel_index < len(channel_infos)):
+        return False
+    if not identity or not str(identity).strip():
+        return False
+    store = dict(_load())
+    sig = acquisition_signature(channel_infos)
+    entry = dict(store.get(sig) or {})
+    entry['n_channels'] = len(channel_infos)
+    entry.setdefault('buckets', [str((ci or {}).get('bucket') or 'unknown') for ci in channel_infos])
+    ids = dict(entry.get('channel_identities') or {})
+    ids[str(int(channel_index))] = str(identity).strip()
+    entry['channel_identities'] = ids
+    store[sig] = entry
+    return _save(store)
+
+
+def recall_channel_identities(channel_infos: List[dict]) -> Dict[int, str]:
+    """Remembered channel-identity answers for this acquisition layout: ``{index: identity}`` (empty when none).
+    Guarded to the current channel count so a stale store never mislabels a differently-shaped file."""
+    if not channel_infos:
+        return {}
+    entry = _load().get(acquisition_signature(channel_infos)) or {}
+    out: Dict[int, str] = {}
+    for k, v in (entry.get('channel_identities') or {}).items():
+        try:
+            idx = int(k)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(channel_infos) and v:
+            out[idx] = str(v)
+    return out
+
+
+def forget_channel_identity(channel_infos: List[dict], channel_index: int) -> bool:
+    """Remove a remembered channel-identity answer for this layout (reversible)."""
+    store = dict(_load())
+    sig = acquisition_signature(channel_infos)
+    entry = dict(store.get(sig) or {})
+    ids = dict(entry.get('channel_identities') or {})
+    key = str(int(channel_index))
+    if key in ids:
+        del ids[key]
+        entry['channel_identities'] = ids
+        store[sig] = entry
         return _save(store)
     return False
 

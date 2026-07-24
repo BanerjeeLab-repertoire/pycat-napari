@@ -158,6 +158,16 @@ def _match_wavelength(emission_nm: Optional[float]) -> Optional[tuple[str, str]]
     return None
 
 
+def channel_needs_identity(channel_info) -> bool:
+    """True when a channel has NO usable identity — it fell all the way through the fluorophore / channel-name
+    / filename / emission / pixel tiers to the last-resort POSITION guess ('C0-Blue'-style). That is the only
+    case the sidecar Part 4 identity prompt is shown for: a channel identified from real evidence (any other
+    ``source``) is never asked about, so the prompt-only-when-genuinely-missing discipline holds."""
+    if not channel_info:
+        return True
+    return (channel_info or {}).get('source') == 'position'
+
+
 def identify_channel(
     channel_index: int,
     fluorophore_name: Optional[str] = None,

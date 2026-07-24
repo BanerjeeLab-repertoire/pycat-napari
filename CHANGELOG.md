@@ -1,3 +1,26 @@
+## [1.6.316] - 2026-07-23
+### Added — **A last-resort channel-identity prompt for channels the metadata can't name, remembered per acquisition layout (sidecar_metadata Part 4).**
+When a channel's identity can't be recovered from in-file metadata, the filename, or the pixel classifier, it
+falls to a meaningless position guess ("C0-Blue"). This adds the mechanism to ask the user — only then,
+optionally — and to remember the answer for future files acquired the same way.
+
+- `utils/channel_naming.py`: `channel_needs_identity(channel_info)` — True only when a channel fell all the
+  way to the position guess (`source == 'position'`); a channel identified from real evidence is never asked
+  about (prompt-only-when-genuinely-missing).
+- `utils/channel_designations.py`: `remember_channel_identity` / `recall_channel_identities` /
+  `forget_channel_identity` — persist a channel-identity answer keyed to the acquisition **signature**
+  (extending the SAME store as the condensate designation, never a second one; the two now coexist in either
+  order). Opt-in (a blank answer is not stored, so a human answer only fills a genuinely-empty identity, never
+  overwrites metadata), guarded to the current channel count, and reversible.
+- New `ui/channel_identity_dialog.py`: `build_channel_identity_dialog` / `prompt_channel_identities` — an
+  optional per-channel prompt shown ONLY for the unidentified channels, **never in batch/headless** (returns
+  `None` without Qt). A skipped field stays unset. Built with a `harvest()` seam so it is Qt-smoke tested
+  without a modal `exec`.
+- `tests/test_channel_identity.py`: `core` (4) for the decision logic + persistence (round-trip, reversible,
+  coexists with a condensate designation, layout-guarded) and `integration` (2) for the dialog. Full
+  `pytest -m "core or base"` green. **Remaining:** wiring the prompt + recalled answers into the live load
+  path (with the sidecar-metadata load integration).
+
 ## [1.6.315] - 2026-07-23
 ### Added — **The workflow preset picker: pick a declared, provenanced starting point that populates but never locks (analysis_presets Part B).**
 The preset objects — the `AnalysisPreset` registry, its import-time honesty invariants (non-empty provenance;
