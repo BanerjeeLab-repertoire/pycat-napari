@@ -1,3 +1,23 @@
+## [1.6.314] - 2026-07-23
+### Added — **The metadata dialog lists acquisition contradictions first, with a reversible "expected for this instrument" control (tag_confidence Part 3 — the spec is complete).**
+The engine that detects metadata contradictions (e.g. a Zeiss export declaring Oil immersion but Air medium
+with oil's refractive index), classifies severity, and holds the per-instrument "expected" judgements was
+already built, and the metadata toolbar button already warns when a critical one is present. This adds the
+last piece — the dialog surface — so the warning is actionable, not just a glyph.
+
+- New `ui/metadata_contradiction_panel.py`: `build_contradiction_panel(file_metadata)` lists the
+  contradictions **ahead of the raw metadata** (critical first, concretely named), and offers on each a
+  **reversible** "Expected for this instrument" control. Marking one greys it in the dialog immediately and —
+  keyed to the acquisition fingerprint, **never the file** — demotes it to info everywhere (the button stops
+  flagging it on the next refresh). There is deliberately **no "ignore all"**; suppression is per-pattern.
+  Headless-safe (returns `None` without Qt, or when there are no contradictions — a clean file shows nothing).
+- New Qt-free `contradiction_rows(file_metadata, store)` render model in `utils/metadata_contradictions.py`
+  (carries each contradiction's ORIGINAL severity + its per-instrument expected status). Wired into the
+  metadata dialog (`menu_manager._show_metadata_dialog`) in a guarded block that can never break it.
+- `tests/test_metadata_contradiction_panel.py`: `core` (2) for the render model, `integration` (2) for the
+  panel (marking persists + re-renders to "Unmark" + is reversible; a clean file yields no panel). Full
+  `pytest -m "core or base"` green. **tag_confidence_and_metadata_validity (Parts 1–4) is now complete.**
+
 ## [1.6.313] - 2026-07-23
 ### Fixed — **The minimal test lanes no longer require the optional `openpyxl`, and the dependency guard now covers lazy imports (openpyxl-lazy-import spec).**
 Two `base`-lane navigator tests failed with `ModuleNotFoundError: openpyxl` — the third failure of the class

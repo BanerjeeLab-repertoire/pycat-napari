@@ -225,6 +225,30 @@ def contradiction_report(file_metadata, *, pixel_modality=None, store=None) -> C
                                is_critical=has_critical(contradictions))
 
 
+@dataclasses.dataclass(frozen=True)
+class ContradictionRow:
+    """One row for the metadata dialog's contradiction section: the ORIGINAL severity (before any
+    'expected' demotion) plus whether the user has marked this pattern expected for this instrument — so the
+    dialog lists them critical-first, greys the expected ones, and offers a reversible per-pattern control."""
+    pattern: str
+    severity: str
+    message: str
+    expected: bool
+
+
+def contradiction_rows(file_metadata, *, pixel_modality=None, store=None):
+    """The dialog's render model: ``(rows, fingerprint)``. Every detected contradiction with its ORIGINAL
+    severity and its per-instrument 'expected' status (from ``store``) — distinct from
+    :func:`contradiction_report`, which demotes expected ones to ``info`` for the button/tooltip. Qt-free."""
+    md = _engine_input(file_metadata)
+    fingerprint = acquisition_fingerprint(md)
+    rows = tuple(
+        ContradictionRow(pattern=c.pattern, severity=c.severity, message=c.message,
+                         expected=bool(store is not None and is_expected(c.pattern, fingerprint, store)))
+        for c in detect_contradictions(md, pixel_modality=pixel_modality))
+    return rows, fingerprint
+
+
 #: The neutral metadata-button label (info glyph); the warning label swaps the glyph so the indicator reads as
 #: a DISTINCT concept from the field_status step-status red (which means 'required input missing').
 _METADATA_LABEL = "ⓘ  Metadata"     # ⓘ

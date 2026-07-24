@@ -1,7 +1,15 @@
 # Claude Code spec — Evidence-based confidence, metadata validity filtering, and contradiction surfacing that doesn't numb the user
 
-> **◐ STATUS — Parts 1 & 2 DONE; Part 4 engine DONE (1.6.293); Part 3 surfacing — button indicator DONE
-> (1.6.301), in-dialog listing + expected-marking control remain.**
+> **✅ STATUS — DONE (Parts 1–4). Part 1 (1.6.292), Part 2 (1.6.290), Part 4 engine (1.6.293), Part 3
+> surfacing — button indicator (1.6.301) + the in-dialog listing & 'expected' control (1.6.314).**
+> **Part 3 in-dialog surface (1.6.314).** New `ui/metadata_contradiction_panel.py` `build_contradiction_panel`
+> lists the contradictions AHEAD of the raw metadata (critical first, concretely named) with a per-pattern
+> REVERSIBLE 'Expected for this instrument' control (marks/unmarks via `mark_expected`, keyed to the
+> acquisition fingerprint, never the file; no 'ignore all'). Marking greys it immediately + demotes it to info
+> everywhere on the next refresh. New Qt-free `contradiction_rows` render model in
+> `utils/metadata_contradictions.py`. Wired into `menu_manager._show_metadata_dialog` in a guarded 7-line block
+> (menu_manager held at its 2344 ceiling — no extraction needed). `tests/test_metadata_contradiction_panel.py`
+> (`core` 2 + `integration` 2). The whole spec is complete.
 > **Part 4 (anti-numbing engine) — DONE, shipped 1.6.293.** `utils/metadata_contradictions.py`: severity
 > (`has_critical` is the sole red trigger), cry-wolf (a clean file → zero), and the per-pattern/per-fingerprint
 > 'expected' store (`mark_expected`/`apply_expectations`, reversible, no global mute) + the developer precision

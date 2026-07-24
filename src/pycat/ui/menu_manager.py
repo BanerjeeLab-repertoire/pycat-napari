@@ -967,6 +967,13 @@ class MenuManager:
         fname = common.get('file_name') or 'Unknown file'
         header = QLabel(f"<b>{fname}</b>")
         layout.addWidget(header)
+        try:      # tag_confidence Part 3: contradictions listed first, with the reversible 'expected' control
+            from pycat.ui.metadata_contradiction_panel import build_contradiction_panel
+            _cp = build_contradiction_panel(md)
+            if _cp is not None:
+                layout.addWidget(_cp)
+        except Exception:  # broad-ok: ui_cleanup — the contradiction panel must never break the metadata dialog
+            pass
 
         table = QTableWidget()
         table.setColumnCount(2)
