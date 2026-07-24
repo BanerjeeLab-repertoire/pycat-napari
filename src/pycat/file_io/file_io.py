@@ -385,6 +385,12 @@ class FileIOClass(_StackOpenersMixin):
             from pycat.file_io.readers.image_reader_2d import read_2d_image_channels
             _channels, _channel_info, image, _used_pil = read_2d_image_channels(file_path)
 
+            # Enrich naming from a companion sidecar (an ISS _fbs.xml names Ch1/Ch2 from their emission
+            # filters, so they never fall to 'Brightfield'), then apply any identity the user remembered for
+            # this acquisition layout. Non-gating: on any failure the channels load with what the reader found.
+            from pycat.file_io.load_channel_identity import resolve_channel_identity_on_load
+            _channel_info = resolve_channel_identity_on_load(file_path, _channel_info)
+
             if _used_pil:
                 # PIL NumPy-2.0 fallback path: reader already produced the channel
                 # tuples; emit the same user-facing warning and skip the structured
@@ -1217,14 +1223,15 @@ class FileIOClass(_StackOpenersMixin):
         
     def _channels_all_confident(self, channel_info):
         """True when every channel has a confident identity (metadata name /
-        wavelength, or a pixel-measured modality) — i.e. no channel is a bare
-        positional guess. Used to skip the naming dialog when it would only be
-        confirming names PyCAT is already sure of."""
+        wavelength, a pixel-measured modality, or an identity the user remembered
+        for this layout) — i.e. no channel is a bare positional guess. Used to skip
+        the naming dialog when it would only be confirming names PyCAT is already
+        sure of, and so a recalled answer never re-prompts a same-layout file."""
         if not channel_info:
             return False
         try:
             for ci in channel_info:
-                if not ci or ci.get('source') not in ('name', 'wavelength', 'pixels'):
+                if not ci or ci.get('source') not in ('name', 'wavelength', 'pixels', 'user'):
                     return False
             return True
         except Exception:
@@ -1271,6 +1278,14 @@ class FileIOClass(_StackOpenersMixin):
             if result == QDialog.Accepted:
                 # Get the names assigned by the user
                 channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
+                # Remember a real name the user typed for a channel that had NO recoverable identity, keyed to
+                # this acquisition layout, so a future same-layout file is named automatically (never re-asked).
+                if not is_mask:
+                    try:
+                        from pycat.file_io.load_channel_identity import remember_user_channel_names
+                        remember_user_channel_names(channel_info, channel_names)
+                    except Exception:      # broad-ok: write — remembering an identity is best-effort; a failure must not break the load
+                        pass
             elif result == QDialog.Rejected:
                 return # If the user cancels the dialog do nothing
 

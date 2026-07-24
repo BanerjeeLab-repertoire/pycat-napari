@@ -1,3 +1,24 @@
+## [1.6.320] - 2026-07-23
+### Added — **A companion sidecar now names channels on load, and a channel identity you give once is remembered for the same acquisition (sidecar_metadata Part 4/5 — the 2D load-path wiring).**
+The mechanisms shipped earlier (sidecar discovery + ISS parser 1.6.289; the identity store + prompt 1.6.316);
+this joins them into the live 2D loader so they actually fire on load.
+
+- **Sidecar enrichment on load.** New Qt-free `file_io/load_channel_identity.py`; the 2D loader calls
+  `resolve_channel_identity_on_load(file_path, channel_info)` right after reading the channels. It discovers a
+  companion file (e.g. an ISS Vista `_fbs.xml`) and feeds its per-channel emission into naming **above** the
+  pixel/position guess — so `im-*_Ch1`/`_Ch2` are named from their 647 / 525 nm filters (far-red / green) and
+  **never fall to `Brightfield`** (the reported ISS bug). Real in-file metadata is never overwritten.
+- **A remembered identity auto-applies.** The same call recalls any channel identity you saved for this
+  acquisition layout and applies it as a confident `user` label; `_channels_all_confident` now counts `user`,
+  so a second file of the **same layout is named automatically and never re-asks**.
+- **Your answer is remembered.** When you type a name for a channel that carried no recoverable identity,
+  `remember_user_channel_names` persists it (keyed to the acquisition layout; a blank or left-at-default answer
+  is not stored) — so the recall above has something to recall.
+- Non-gating throughout: any discovery/parse/recall failure just means the image loads with what the reader
+  found. `tests/test_load_channel_identity.py` (`core` enrichment ×3 + `base` persistence ×4). Full
+  `pytest -m "core or base"` green. Remaining: the **stack** load path (needs an aggregating channel-info list
+  threaded through `_finalise_stack_load`) and live in-napari validation of the 2D dialog interaction.
+
 ## [1.6.319] - 2026-07-23
 ### Added — **The navigator shows "What we can tell from your data", and every control now explains itself (navigator-UX items 3 & 3b — the spec is complete).**
 The last of the first-user feedback. The metadata layer already emits the facts; this surfaces them.

@@ -1,7 +1,30 @@
 # Claude Code spec — Sidecar metadata discovery, the ISS case, and a last-resort channel-identity dialog
 
 > **◐ STATUS — Part 1 (both immediate bug fixes) DONE: Step 1a shipped 1.6.285, Step 1b shipped 1.6.286.
-> Parts 2-3 CORE DONE (sidecar discovery mechanism + ISS parser, shipped 1.6.289; built and tested against a synthetic fbs matching the spec format). Part 4 dialog MECHANISM DONE (1.6.316). Load-path integration (sidecar-on-load + threading the prompt/recalled answers into naming) remains (see the GUI/follow-ons TODO).**
+> Parts 2-3 CORE DONE (sidecar discovery mechanism + ISS parser, shipped 1.6.289; built and tested against a synthetic fbs matching the spec format). Part 4 dialog MECHANISM DONE (1.6.316).**
+>
+> **◐ Load-path wiring — 2D path DONE, 1.6.320.** New Qt-free orchestration `file_io/load_channel_identity.py`
+> joins the two shipped mechanisms into the live 2D loader: `resolve_channel_identity_on_load(file_path,
+> channel_info)` is called after `read_2d_image_channels` (file_io.py:387) — it discovers a sidecar
+> (`sidecar_metadata_for`) and **enriches naming from its per-channel emission ABOVE the pixel/position
+> guess** (an ISS `_Ch1`/`_Ch2` pair is named far-red / green from 647/525 nm and **never falls to
+> `Brightfield`**), then **applies any remembered identity** for this acquisition layout
+> (`recall_channel_identities`) as a `source='user'` label. `_channels_all_confident` now counts `'user'`, so
+> a recalled answer skips the naming dialog (**a same-layout file is never re-asked**). When the user DOES
+> type a name for a genuinely-unidentified channel in the existing naming dialog,
+> `remember_user_channel_names` persists it (blank/default answers are not stored) — the recall side then has
+> something to recall. All orchestration is deterministic and **non-gating** (any failure → the image loads
+> with what the reader found); `tests/test_load_channel_identity.py` (`core` 3 enrichment + `base` 4
+> persistence). Rather than stack a **second** last-resort prompt on top of the existing naming dialog (which
+> already asks for an ambiguous channel — a second would violate the spec's own "the dialog is a last resort"
+> caution), the wiring reuses that dialog as the ask and adds recall/remember/sidecar-enrichment around it.
+>
+> **REMAINING after 1.6.320:** (1) the **stack load path** — `stack_openers.py`'s three back-ends build only a
+> transient per-channel `_ch_info` and discard it, so wiring recall/remember there needs an aggregating list
+> threaded through `_finalise_stack_load`; deferred as a larger, riskier refactor. (2) **Live GUI validation**
+> of the 2D wiring (the actual dialog interaction and layer renaming) is not headlessly reproducible here —
+> the orchestration is unit-tested, the 1-line live calls are failure-tolerant, but the end-to-end load has
+> not been exercised in a running napari.
 > **Part 4 (last-resort channel-identity prompt) — mechanism DONE, 1.6.316.** `channel_naming.channel_needs_identity`
 > (True only for the position-guess fall-through), `channel_designations.remember_channel_identity` /
 > `recall_channel_identities` / `forget_channel_identity` (signature-keyed, extends the same store as the
