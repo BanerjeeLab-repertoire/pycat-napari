@@ -1,7 +1,15 @@
 # Claude Code spec — Selection overlay ignores layer scale; guided-panel execution and saveable templates
 
-> **◐ STATUS — Part 1 DONE (1.6.329). Part 2 gate-respecting execution MODEL + actionable dock DONE (1.6.330);
-> full auto-execution DEFERRED (architectural finding). Part 3 (templates) remains; Part 4 is a design note.**
+> **◐ STATUS — Parts 1 (1.6.329), 3 (1.6.331) DONE. Part 2 execution MODEL DONE (1.6.330), auto-execution
+> DEFERRED (architectural finding). Part 4 is a design note (no build).**
+> **Part 3 — DONE (1.6.331).** Qt-free `navigator/templates.py`: a guided plan saves as a `GuidedTemplate`
+> (the ANSWERS — observables/target/question-trail — + step names + params) under `user_settings`
+> (`navigator.templates`); `save/list/load/delete/rename` (rename never overwrites). Verdicts are NOT stored —
+> a gate verdict is a property of the DATA, so `intent_from_template` → recompile re-evaluates every gate (a
+> template runnable on one dataset can be blocked on another). Corrupt entry → "not available", never a crash.
+> A '💾 Save as template…' button in the plan view makes it reachable. `tests/navigator/test_navigator_templates.py`
+> (`base`, 7) + a dock save-button integration test. **Follow-on:** the picker UI to START from a saved
+> template (the apply half's UI; the mechanism is done).
 > **Part 2 — MODEL DONE, auto-execution DEFERRED (1.6.330).** Verified there is **no uniform execution path**:
 > PyCAT ops have bespoke, panel-collected signatures (`segment_subcellular_objects(original_image,
 > pre_processed_image, cell_mask, …15 params)`) and `resolve_operation`'s callable is invoked nowhere, so

@@ -160,3 +160,26 @@ def test_the_guided_run_note_carries_the_gate_respecting_order():
     s.intent.target = 'cell'
     note = _guided_run_note(s.compile_plan())
     assert "method panels" in note and "in this order" in note and "→" in note
+
+
+@pytest.mark.integration
+def test_the_save_as_template_button_persists_the_answered_plan(qtbot, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QInputDialog, QPushButton
+    from pycat.ui.navigator_dock import build_navigator_widget
+    from pycat.navigator.session import NavigatorSession
+    from pycat.utils.user_settings import UserSettings
+    import pycat.navigator.templates as templates
+
+    store = UserSettings(path=tmp_path / "s.json")
+    monkeypatch.setattr(templates, "_store", lambda s=None: store)           # route the save to a temp store
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Mine", True)))
+
+    widget = build_navigator_widget(NavigatorSession())
+    qtbot.addWidget(widget)
+    guard = 0
+    while widget._state == "question":
+        widget._choice_buttons[0].click(); guard += 1; assert guard < 40
+    save_btn = next(b for b in widget.findChildren(QPushButton) if "Save as template" in b.text())
+    save_btn.click()
+    saved = templates.load_template("Mine", store=store)
+    assert saved is not None and saved.observables                          # the answers were persisted

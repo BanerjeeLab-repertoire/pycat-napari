@@ -144,6 +144,33 @@ def _guided_run_note(plan):
     return msg + (f", in this order:\n{order}." if order else ".")
 
 
+def _add_template_save(widget, body_layout):
+    """Add a 'Save as template…' button that persists the answered plan under a user-supplied name (the answers
+    + step names, NOT the gate verdicts — see navigator.templates). Reusable on other data without
+    re-answering. Best-effort: a save failure never breaks the plan view."""
+    from PyQt5.QtWidgets import QPushButton, QInputDialog
+
+    def _save():
+        try:
+            name, ok = QInputDialog.getText(widget, "Save guided template", "Template name:")
+            if not ok or not str(name).strip():
+                return
+            from pycat.navigator.templates import template_from_plan, save_template
+            plan = widget._session.compile_plan()
+            save_template(template_from_plan(str(name).strip(), widget._session.intent, plan))
+            from napari.utils.notifications import show_info
+            show_info(f"Saved guided template '{str(name).strip()}' — reuse it on other data from Home.")
+        except Exception as exc:      # broad-ok: ui_cleanup — a save failure must not break the plan view
+            from pycat.utils.general_utils import debug_log
+            debug_log("navigator: could not save the template", exc)
+
+    btn = QPushButton("\U0001f4be  Save as template…")     # 💾
+    btn.setToolTip("Save these answers as a reusable method template — apply it to other data without "
+                   "re-answering (the quality gates re-evaluate on the new data).")
+    btn.clicked.connect(_save)
+    body_layout.addWidget(btn)
+
+
 def build_navigator_widget(session, *, on_run=None, central_manager=None, parent=None):
     """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
     (headless). ``on_run(plan)`` is called when the user runs the compiled plan. When ``central_manager`` is
@@ -226,6 +253,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
         over = QPushButton("↺  Start over")
         over.clicked.connect(_restart)
         body_layout.addWidget(over)
+        _add_template_save(widget, body_layout)
 
     def _answer(spec, value):
         widget._session.answer(spec, value)

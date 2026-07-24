@@ -1,3 +1,27 @@
+## [1.6.331] - 2026-07-24
+### Added — **Save an answered guided plan as a reusable method template (selection_scale Part 3).**
+The navigator's payoff: a plan the user likes should be reusable on other data without re-answering. A guided
+template IS a preset with provenance about how it was authored — so it follows the `analysis_presets`
+discipline (it records the ANSWERS that produced it) but, being a user-level artefact that survives sessions,
+lives in the general `user_settings` service rather than the hardcoded, sensitivity-validated preset registry.
+- New Qt-free **`navigator/templates.py`**: `GuidedTemplate` (name, observables, target, the question trail,
+  step names, parameters) + `template_from_plan` / `save_template` / `list_templates` / `load_template` /
+  `delete_template` / `rename_template` (never overwrites), persisted under `user_settings` key
+  `navigator.templates`.
+- **The verdicts are deliberately NOT stored.** A quality-gate verdict is a property of the DATA, not the
+  plan — a template runnable on one dataset may be blocked on another — so applying a template
+  (`intent_from_template` → recompile against the new context) **re-evaluates every gate**. Carrying a verdict
+  over would assert quality never checked on this data. A corrupt template entry degrades to "not available"
+  (skipped), never a crash.
+- **Reachable**: a '💾 Save as template…' button in the navigator plan view persists the current answers under
+  a user-supplied name.
+- Tests: `tests/navigator/test_navigator_templates.py` (`base`, 7 — save+reload carries steps and answers,
+  applying to a different dataset re-evaluates the gates, verdicts absent, persistence across sessions,
+  delete/rename-never-overwrites, corrupt-degrades) + a dock integration test for the Save button. Full
+  core-or-base green.
+- **Follow-on:** the template-picker UI (start a new analysis FROM a saved template — the apply half's UI; the
+  mechanism is done and tested).
+
 ## [1.6.330] - 2026-07-24
 ### Added — **Gate-respecting execution model for a guided plan, and an actionable run order in the dock (selection_scale Part 2).**
 Part 2 asked to wire the navigator's Run button to execute the compiled plan "through the existing execution
