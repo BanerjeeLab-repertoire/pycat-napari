@@ -121,7 +121,7 @@ class _AnalysisWidgetsMixin:
             try:
                 from pycat.toolbox.feature_analysis_tools import mount_cellular_workspace
                 mount_cellular_workspace(self.viewer, self.central_manager)
-            except Exception as _wexc:   # broad-ok: a brushing-mount hiccup must never cost the user their analysis
+            except Exception as _wexc:   # broad-ok: ui_cleanup — a brushing-mount hiccup must never cost the user their analysis
 
                 from pycat.utils.general_utils import debug_log
                 debug_log('cellular analysis: could not mount the brushable workspace', _wexc)

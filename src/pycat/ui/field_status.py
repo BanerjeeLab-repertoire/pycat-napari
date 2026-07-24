@@ -173,7 +173,7 @@ class FieldRegistry:
         try:
             from pycat.utils.field_registry_hub import register_field_registry
             register_field_registry(self)
-        except Exception:  # broad-ok: registration is a convenience; never break a UI builder over it
+        except Exception:  # broad-ok: ui_cleanup — registration is a convenience; never break a UI builder over it
             pass
 
     def register(self, widget, role, default=None, name_hint=None, step=None,

@@ -38,7 +38,7 @@ def open_comparative_figures_dialog(central_manager, viewer):
         return
     try:
         df = pd.read_csv(path)
-    except Exception as exc:                          # broad-ok: bad/locked file → tell the user, don't crash
+    except Exception as exc:                          # broad-ok: optional_probe — bad/locked file → tell the user, don't crash
         QMessageBox.warning(parent, "Comparative figures", f"Could not read {path}:\n{exc}")
         return
     if 'measurement' not in df.columns or 'value' not in df.columns:
@@ -89,7 +89,7 @@ def open_comparative_figures_dialog(central_manager, viewer):
                 condition_cols=[cond_dd.currentText()], unit_cols=[unit_dd.currentText()],
                 kind=kind_dd.currentText(), test=test_cb.isChecked(), ax=ax,
                 selection_service=service)
-        except Exception as exc:                      # broad-ok: a bad column choice must not kill the dialog
+        except Exception as exc:                      # broad-ok: ui_cleanup — a bad column choice must not kill the dialog
             caption.setText(f"Could not render: {exc}")
             canvas.draw_idle(); return
         note = summary.attrs.get('note') or ''

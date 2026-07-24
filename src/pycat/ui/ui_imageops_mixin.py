@@ -431,7 +431,7 @@ class _ImageOpsWidgetsMixin:
                 return None
             try:
                 return np.asarray(self.viewer.layers[name].data, dtype=float)
-            except Exception:      # broad-ok: a missing/odd layer just means "not selected" here
+            except Exception:      # broad-ok: optional_probe — a missing/odd layer just means "not selected" here
                 return None
 
         def _on_run():

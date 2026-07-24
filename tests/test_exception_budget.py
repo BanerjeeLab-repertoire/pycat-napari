@@ -152,6 +152,51 @@ def test_a_categorized_broad_ok_names_a_VALID_category():
           "`# broad-ok: <reason>` for an as-yet-uncategorized handler.")
 
 
+# Per package, the count of broad-ok handlers NOT yet carrying a category (a plain `# broad-ok: <reason>`
+# rather than `# broad-ok: <category> — <reason>`). The exception_context_classification sweep drives these to
+# 0 a package at a time — categorize a handler (say WHAT it guards) and lower the number here. It only goes
+# DOWN, and a package that is not listed has an implicit budget of 0 (a NEW uncategorized handler fails).
+_UNCATEGORIZED_BUDGET = {
+    'file_io': 64,
+    'toolbox': 46,
+    'utils': 45,
+    'batch': 4,
+    'navigator': 3,
+    'batch_processor.py': 2,
+    'ui': 0,          # ui package fully categorized (exception_context_classification Part 1, first package)
+}
+
+
+def _uncategorized_counts():
+    """Per package: the number of ``# broad-ok:`` markers whose first token is NOT a known category."""
+    _, markers = _scan()
+    counts = {}
+    for f, _ln, reason in markers:
+        m = _CATEGORY_FORM.match(reason)
+        if not (m and m.group(1) in _CATEGORIES):
+            pkg = re.split(r'[\\/]', f)[0]
+            counts[pkg] = counts.get(pkg, 0) + 1
+    return counts
+
+
+def test_no_package_GROWS_its_UNCATEGORIZED_broad_ok_count():
+    """**The categorization ratchet (exception_context_classification Part 1).** Every `# broad-ok:` should
+    eventually say WHAT it guards (``ui_cleanup`` / ``optional_probe`` / ``scientific_result`` / ``write`` /
+    ``batch_step``) so a write / batch-step swallow is held to a stricter standard than a UI-cleanup one. This
+    drives the uncategorized count to 0 a package at a time and forbids adding a new *plain* broad-ok to a
+    package already at budget — the number only goes down. Categorize the handler; do NOT raise the budget."""
+    counts = _uncategorized_counts()
+    over = []
+    for pkg, n in sorted(counts.items()):
+        budget = _UNCATEGORIZED_BUDGET.get(pkg, 0)
+        if n > budget:
+            over.append(f"{pkg}: {n} uncategorized broad-ok (budget {budget}, +{n - budget})")
+    assert not over, (
+        "a package grew its UNcategorized `# broad-ok:` count:\n  " + "\n  ".join(over)
+        + "\n\nGive the handler a category — `# broad-ok: <category> — <reason>` with one of "
+        + f"{sorted(_CATEGORIES)} — saying WHAT it guards. Do NOT raise the budget; it is a ratchet.")
+
+
 def test_the_typed_error_FAMILY_exists():
     """The vocabulary a converted handler raises into. All derive from `PyCATError`, so a caller can
     catch the family or one kind."""

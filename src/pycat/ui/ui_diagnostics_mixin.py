@@ -742,7 +742,7 @@ class _DiagnosticsWidgetsMixin:
             try:
                 pos = np.asarray(self.viewer.layers[pn].data, dtype=float)
                 neg = np.asarray(self.viewer.layers[nn].data, dtype=float)
-            except Exception as e:  # broad-ok: reading a napari layer's .data can fail many ways; report and abort, don't crash the widget
+            except Exception as e:  # broad-ok: optional_probe — reading a napari layer's .data can fail many ways; report and abort, don't crash the widget
                 show_warning("Could not read the control images: %s" % e); return
             if pos.ndim != 2 or neg.ndim != 2:
                 show_warning("Control validation runs on single 2D fields (pick one plane each)."); return

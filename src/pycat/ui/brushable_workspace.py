@@ -84,7 +84,7 @@ class BrushablePlot:
         try:
             self.ax.set_xlabel(self.x_col)
             self.ax.set_ylabel(self.y_col)
-        except Exception as exc:                        # broad-ok: labelling is cosmetic, never fatal
+        except Exception as exc:                        # broad-ok: ui_cleanup — labelling is cosmetic, never fatal
             debug_log('brushable_workspace: could not label plot axes', exc)
 
     @property
@@ -94,14 +94,14 @@ class BrushablePlot:
     def _connect(self):
         try:
             register_view(self.service, self)           # subscribes apply_selection + pushes current state
-        except Exception as exc:                         # broad-ok: a plot that can't subscribe still draws
+        except Exception as exc:                         # broad-ok: optional_probe — a plot that can't subscribe still draws
             debug_log('brushable_workspace: could not register the plot view', exc)
         try:
             self._cid = self.ax.figure.canvas.mpl_connect(
                 'button_press_event',
                 lambda ev: (getattr(ev, 'inaxes', None) is self.ax and getattr(ev, 'x', None) is not None
                             and self.emit_nearest(ev.x, ev.y)))
-        except Exception as exc:                         # broad-ok: no live canvas headless — clicks come via emit_nearest
+        except Exception as exc:                         # broad-ok: optional_probe — no live canvas headless — clicks come via emit_nearest
             debug_log('brushable_workspace: no canvas to connect the plot click', exc)
 
     # ── outbound: a click selects the nearest object ──────────────────────────────────────────
@@ -142,22 +142,22 @@ class BrushablePlot:
             xs, ys = zip(*sel)
             try:
                 (self._ring,) = self.ax.plot(xs, ys, **_RING_KW)
-            except Exception as exc:                     # broad-ok: the ring is cosmetic; never fail a selection over it
+            except Exception as exc:                     # broad-ok: ui_cleanup — the ring is cosmetic; never fail a selection over it
                 debug_log('brushable_workspace: could not draw the selection ring', exc)
         try:
             self.ax.figure.canvas.draw_idle()
-        except Exception:                                # broad-ok: no live canvas headless — nothing to redraw
+        except Exception:                                # broad-ok: optional_probe — no live canvas headless — nothing to redraw
             pass
 
     def close(self):
         try:
             self.service.unsubscribe(self.view_id)
-        except Exception as exc:                         # broad-ok: teardown is best-effort; never raise on close
+        except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: plot unsubscribe failed', exc)
         if self._cid is not None:
             try:
                 self.ax.figure.canvas.mpl_disconnect(self._cid)
-            except Exception:                            # broad-ok: a stale/twice-disconnected cid is harmless
+            except Exception:                            # broad-ok: ui_cleanup — a stale/twice-disconnected cid is harmless
                 pass
             self._cid = None
 
@@ -208,21 +208,21 @@ class BrushableImageTier:
                 # image); a single-image tier passes one source_path for all.
                 _src = row.get('_pycat_source_path') or source_path
                 self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=_src)
-            except Exception as exc:                     # broad-ok: a row without a resolvable bbox just can't reveal
+            except Exception as exc:                     # broad-ok: ui_cleanup — a row without a resolvable bbox just can't reveal
                 debug_log('brushable_workspace: could not build an ObjectRef for a row', exc)
         self._connect()
 
     def _connect(self):
         try:
             register_view(self.service, self)
-        except Exception as exc:                         # broad-ok: an image tier that can't subscribe still shows the layer
+        except Exception as exc:                         # broad-ok: optional_probe — an image tier that can't subscribe still shows the layer
             debug_log('brushable_workspace: could not register the image tier', exc)
         if not self._install_callback:
             return                                       # the workspace dispatches clicks at the viewer level
         try:
             self._cb = self._on_click
             self.labels_layer.mouse_drag_callbacks.append(self._cb)
-        except Exception as exc:                         # broad-ok: no live layer callbacks headless — reveal still works
+        except Exception as exc:                         # broad-ok: optional_probe — no live layer callbacks headless — reveal still works
             debug_log('brushable_workspace: could not wire the image click', exc)
 
     def pick_at(self, position) -> bool:
@@ -233,7 +233,7 @@ class BrushableImageTier:
             return False
         try:
             value = self.labels_layer.get_value(position, world=True)
-        except Exception as exc:                         # broad-ok: a click outside the data / mid-transition
+        except Exception as exc:                         # broad-ok: ui_cleanup — a click outside the data / mid-transition
             debug_log('brushable_workspace: could not read the clicked label', exc)
             return False
         eid = self._label_to_eid.get(int(value)) if value else None
@@ -261,18 +261,18 @@ class BrushableImageTier:
                 show_selection(self.viewer, refs)       # bbox rectangle — robust when label != object_id
             else:
                 resolve_in_viewer(refs[0], self.viewer, centre=False)
-        except Exception as exc:                         # broad-ok: the reveal is best-effort; never fail a selection over it
+        except Exception as exc:                         # broad-ok: ui_cleanup — the reveal is best-effort; never fail a selection over it
             debug_log('brushable_workspace: could not reveal the selection in the image', exc)
 
     def close(self):
         try:
             self.service.unsubscribe(self.view_id)
-        except Exception as exc:                         # broad-ok: teardown is best-effort; never raise on close
+        except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: image tier unsubscribe failed', exc)
         if self._cb is not None:
             try:
                 self.labels_layer.mouse_drag_callbacks.remove(self._cb)
-            except Exception:                            # broad-ok: a callback already removed / layer gone
+            except Exception:                            # broad-ok: ui_cleanup — a callback already removed / layer gone
                 pass
             self._cb = None
 
@@ -321,11 +321,11 @@ class BatchCropView:
                 continue
             try:
                 self._eid_to_ref[str(eid)] = ObjectRef.from_row(row, source_path=row.get('_pycat_source_path'))
-            except Exception as exc:                     # broad-ok: a row without a resolvable bbox just can't crop
+            except Exception as exc:                     # broad-ok: ui_cleanup — a row without a resolvable bbox just can't crop
                 debug_log('brushable_workspace: batch ref build failed', exc)
         try:
             register_view(self.service, self)
-        except Exception as exc:                         # broad-ok: a crop view that can't subscribe still shows
+        except Exception as exc:                         # broad-ok: optional_probe — a crop view that can't subscribe still shows
             debug_log('brushable_workspace: could not register the batch crop view', exc)
 
     def apply_selection(self, state):
@@ -337,7 +337,7 @@ class BatchCropView:
             return
         try:
             crop, message = crop_for_ref(refs[0], viewer=None)
-        except Exception as exc:                         # broad-ok: an unreadable source file just shows nothing
+        except Exception as exc:                         # broad-ok: optional_probe — an unreadable source file just shows nothing
             debug_log('brushable_workspace: offline crop failed', exc)
             return
         self.last_crop = crop
@@ -350,7 +350,7 @@ class BatchCropView:
     def close(self):
         try:
             self.service.unsubscribe(self.view_id)
-        except Exception as exc:                         # broad-ok: teardown is best-effort; never raise on close
+        except Exception as exc:                         # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             debug_log('brushable_workspace: batch crop unsubscribe failed', exc)
 
 
@@ -446,13 +446,13 @@ class BrushableWorkspace(QWidget):
                 try:
                     if tier.pick_at(event.position):
                         return
-                except Exception as exc:                # broad-ok: a tier that can't read a click is skipped
+                except Exception as exc:                # broad-ok: optional_probe — a tier that can't read a click is skipped
                     debug_log('brushable_workspace: a tier failed to pick', exc)
 
         try:
             viewer.mouse_drag_callbacks.append(_pick)
             self._viewer_cb = _pick
-        except Exception as exc:                        # broad-ok: no viewer callbacks headless — tiers still reveal
+        except Exception as exc:                        # broad-ok: optional_probe — no viewer callbacks headless — tiers still reveal
             debug_log('brushable_workspace: could not install the viewer pick handler', exc)
 
     def add_offline_crop_view(self, df, view_id, *, title=None):
@@ -470,13 +470,13 @@ class BrushableWorkspace(QWidget):
         if self._viewer is not None and self._viewer_cb is not None:
             try:
                 self._viewer.mouse_drag_callbacks.remove(self._viewer_cb)
-            except Exception:                            # broad-ok: a callback already removed / viewer gone
+            except Exception:                            # broad-ok: ui_cleanup — a callback already removed / viewer gone
                 pass
             self._viewer_cb = None
         for view in self._views:
             try:
                 view.close()
-            except Exception as exc:                     # broad-ok: teardown is best-effort; never raise on close
+            except Exception as exc:                     # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
                 debug_log('brushable_workspace: a view failed to close', exc)
         self._views = []
         self._image_tiers = []

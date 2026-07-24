@@ -30,7 +30,7 @@ def session_facts(central_manager=None, viewer=None) -> set:
     dr = None
     try:
         dr = central_manager.active_data_class.data_repository
-    except Exception:                                # broad-ok: no active data class → no repo facts
+    except Exception:                                # broad-ok: optional_probe — no active data class → no repo facts
         dr = None
 
     if dr is not None:
@@ -38,13 +38,13 @@ def session_facts(central_manager=None, viewer=None) -> set:
             from pycat.utils.frame_interval import has_time_axis
             if has_time_axis(dr):
                 facts.add('time_axis')
-        except Exception:                            # broad-ok: predicate unavailable → fact absent
+        except Exception:                            # broad-ok: optional_probe — predicate unavailable → fact absent
             pass
         try:
             from pycat.utils.pixel_size import has_real_pixel_size
             if has_real_pixel_size(dr):
                 facts.add('pixel_size')
-        except Exception:                            # broad-ok: predicate unavailable → fact absent
+        except Exception:                            # broad-ok: optional_probe — predicate unavailable → fact absent
             pass
         try:
             common = (dr.get('file_metadata', {}) or {}).get('common', {}) or {}
@@ -52,7 +52,7 @@ def session_facts(central_manager=None, viewer=None) -> set:
                 facts.add('two_channels')
             if int(common.get('n_z') or 0) > 1:
                 facts.add('z_stack')                 # metadata fallback for the z-axis
-        except Exception:                            # broad-ok: metadata shape varies → skip
+        except Exception:                            # broad-ok: optional_probe — metadata shape varies → skip
             pass
 
     # z-stack, primary signal: a loaded image layer tagged with a Z axis.
@@ -67,14 +67,14 @@ def session_facts(central_manager=None, viewer=None) -> set:
                 if 'Z' in axes or str(get_tag(layer, 'stack_axis', '') or '') == 'Z':
                     facts.add('z_stack')
                     break
-        except Exception:                            # broad-ok: tags/napari absent → rely on metadata fallback
+        except Exception:                            # broad-ok: optional_probe — tags/napari absent → rely on metadata fallback
             pass
 
     try:
         from pycat.toolbox.gpu_utils import gpu_available
         if gpu_available():
             facts.add('gpu')
-    except Exception:                                # broad-ok: no GPU backend → fact absent
+    except Exception:                                # broad-ok: optional_probe — no GPU backend → fact absent
         pass
 
     return facts
@@ -98,10 +98,10 @@ def gate_run_button(button, requirements, central_manager=None, viewer=None, *, 
         try:
             facts = session_facts(central_manager, viewer)
             can, reason = operation_availability(spec, facts)
-        except Exception:                            # broad-ok: fail-open — never lock the user out on our error
+        except Exception:                            # broad-ok: ui_cleanup — fail-open — never lock the user out on our error
             try:
                 button.setEnabled(True)
-            except Exception:                        # broad-ok: button already gone
+            except Exception:                        # broad-ok: ui_cleanup — button already gone
                 pass
             return
         try:
@@ -111,7 +111,7 @@ def gate_run_button(button, requirements, central_manager=None, viewer=None, *, 
             else:
                 tip = f"Unavailable — {reason}."
                 button.setToolTip(f"{tip}\n{base_tooltip}" if base_tooltip else tip)
-        except Exception:                            # broad-ok: button torn down between events
+        except Exception:                            # broad-ok: ui_cleanup — button torn down between events
             pass
 
     refresh()
@@ -119,6 +119,6 @@ def gate_run_button(button, requirements, central_manager=None, viewer=None, *, 
         for _sig in ('inserted', 'removed'):
             try:
                 getattr(viewer.layers.events, _sig).connect(refresh)
-            except Exception:                        # broad-ok: older napari event API → skip live refresh
+            except Exception:                        # broad-ok: optional_probe — older napari event API → skip live refresh
                 pass
     return refresh

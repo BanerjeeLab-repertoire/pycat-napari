@@ -25,7 +25,7 @@ def _family_of(key):
         from pycat.utils.measurement_ontology import describe
         d = describe(key)
         return getattr(d, 'family', None) if d is not None else None
-    except Exception:      # broad-ok: family grouping is best-effort — an unknown column just goes flat
+    except Exception:      # broad-ok: ui_cleanup — family grouping is best-effort — an unknown column just goes flat
         return None
 
 
@@ -63,7 +63,7 @@ def build_feature_explorer_dock(table, *, context=None, selection_service=None,
                                      QTextBrowser, QLabel)
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-    except Exception as exc:      # broad-ok: no Qt/matplotlib (headless) — the aggregator works without this shell
+    except Exception as exc:      # broad-ok: optional_probe — no Qt/matplotlib (headless) — the aggregator works without this shell
         debug_log('Feature Explorer: Qt/matplotlib unavailable', exc)
         return None
 
@@ -123,7 +123,7 @@ def build_feature_explorer_dock(table, *, context=None, selection_service=None,
                         selection_service=selection_service,
                         view_id=_VIEW_ID, measurement=key, units=card.units, bars=bars)
                     _brush['dispose'] = handles.get('dispose')
-                except Exception as exc:      # broad-ok: histogram brushing is optional — never break the dock
+                except Exception as exc:      # broad-ok: optional_probe — histogram brushing is optional — never break the dock
                     debug_log('Feature Explorer: could not wire histogram brushing', exc)
         canvas.draw_idle()
 

@@ -1,7 +1,18 @@
 # Claude Code spec — Exception handler classification by context category
 
-> **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). The full categorization sweep (Part 1, all
-> ~166 handlers) remains.**
+> **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). Part 1 categorization sweep UNDERWAY —
+> a ratchet + the `ui` package done (2026-07-24, git-only). Remaining: file_io / toolbox / utils / batch /
+> navigator.**
+>
+> **Part 1 — categorization ratchet + `ui` package DONE (test/comment-only, git-only, no bump).** Added
+> `test_exception_budget.py::test_no_package_GROWS_its_UNCATEGORIZED_broad_ok_count` — a per-package ratchet on
+> the count of plain (uncategorized) `# broad-ok:` markers, pinned at the current counts and only ever going
+> DOWN, so a new plain broad-ok in a package at budget fails and the sweep proceeds a package at a time. The
+> `ui` package (41 handlers) was then categorized to **0**: cosmetic / teardown / dialog-robustness /
+> gating-fail-open → `ui_cleanup`; external-capability probes (headless canvas, can't-subscribe, no-GPU, older
+> napari API, unreadable file, predicate/metadata unavailable, layer-data read) → `optional_probe`. Comment +
+> test only (no runtime change). Uncategorized total 205 → 164; budgets: file_io 64, toolbox 46, utils 45,
+> batch 4, navigator 3, batch_processor.py 2, **ui 0**.
 >
 > **The batch_step rule is now STRUCTURALLY GUARDED (via close_partial_specs Part B; test-only guard).**
 > `tests/test_no_silent_batch_step_swallowing.py` (`core`) flags a broad handler directly inside a multi-file
