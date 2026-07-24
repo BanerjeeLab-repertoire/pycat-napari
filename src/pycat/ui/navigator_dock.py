@@ -21,6 +21,17 @@ _STATE_STYLE = {
     "probe":      ("⏳ ", "#2a7ab0"),  # ⏳ blue — QC probe
 }
 
+# What each state MEANS — the reported confusion was unexplained blue/green sections. One vocabulary, said out
+# loud: a legend at the top of the plan and a tooltip per step (navigator-UX items 3b/4).
+_STATE_MEANING = {
+    "ok":         "Ready to run.",
+    "downgraded": "Runs, but the result carries a caveat (see the note).",
+    "blocked":    "Can't run yet — a precondition is unmet (see the reason).",
+    "probe":      "A quality-control step that runs first to measure a signal a later step needs.",
+}
+_PLAN_LEGEND = ("Step colour — green: ready · ⏳ blue: a QC probe runs first · ⚠ amber: runs with a caveat · "
+                "⛔ red: blocked (the reason is shown).")
+
 
 def _label(text, style=""):
     from PyQt5.QtWidgets import QLabel
@@ -36,6 +47,7 @@ def _row_frame(row):
     from PyQt5.QtWidgets import QFrame, QVBoxLayout
     frame = QFrame()
     frame.setFrameShape(QFrame.StyledPanel)
+    frame.setToolTip(_STATE_MEANING.get(row.state, ""))     # every step explains its own colour/state
     fl = QVBoxLayout(frame)
     glyph, colour = _STATE_STYLE.get(row.state, ("", "#444"))
     fl.addWidget(_label(f"{glyph}{row.name}", f"font-weight: bold; color: {colour};"))
@@ -160,9 +172,10 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
             plan = widget._session.compile_plan()
         widget._regate_only = False
         widget._plan = plan
-        widget._rows = plan_rows(plan)
+        widget._rows = plan_rows(plan, widget._session.ctx)
         body_layout.addWidget(_label(
             "Proposed analysis — review, then run. Each step shows any quality caveats.", "font-size: 12px;"))
+        body_layout.addWidget(_label(_PLAN_LEGEND, "color: gray; font-size: 10px; margin-bottom: 4px;"))
         for row in widget._rows:
             body_layout.addWidget(_row_frame(row))
         run = QPushButton("▶  Run analysis")

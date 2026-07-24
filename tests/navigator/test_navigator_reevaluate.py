@@ -85,3 +85,17 @@ def test_run_blocked_reason_is_present_while_blocked_and_clears_when_resolved():
                               "file_metadata": {"common": {"n_channels": 1, "n_timepoints": 200}}}), s.ctx)
     s.regate()
     assert s.run_blocked_reason() is None                           # calibrated + loaded → runnable, no reason
+
+
+def test_plan_rows_prepends_a_load_data_step_0_satisfied_once_loaded():
+    """Item 2: the plan begins with a visible 'Load data' prerequisite — blocked until an image is open, then
+    satisfied — while `plan_rows(plan)` without a context (existing callers) is unchanged (no step 0)."""
+    from pycat.navigator.session import plan_rows
+    ctx = AnalysisContext()
+    plan = _plan_for("viscosity", "bead", ctx)
+    without = plan_rows(plan)                              # no ctx → existing behaviour, no step 0
+    unloaded = plan_rows(plan, ctx)
+    assert unloaded[0].name == "Load data" and unloaded[0].state == "blocked"
+    assert len(unloaded) == len(without) + 1
+    ctx.set("channels", 2, source=Source.METADATA)        # an image is open
+    assert plan_rows(plan, ctx)[0].state == "ok"          # step 0 flips to satisfied

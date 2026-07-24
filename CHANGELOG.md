@@ -1,3 +1,25 @@
+## [1.6.318] - 2026-07-23
+### Changed — **Navigator comprehension: a load-data step 0, an explained step-colour legend, a self-explaining mode toggle, and Explore-capabilities in its own tab (navigator-UX items 2, 4, 5, 6).**
+The remaining presentation/comprehension items from the first-user feedback (item 1, the re-evaluation bug,
+shipped in 1.6.317).
+
+- **Item 2 — load-data step 0.** `plan_rows(plan, ctx)` now prepends a visible **"Load data"** prerequisite,
+  blocked until an image is open and satisfied once it is. It is a shown prerequisite, NOT a gate on the
+  questionnaire (you can review the whole plan before loading; only *running* needs data). `plan_rows(plan)`
+  without a context is unchanged, so existing callers are unaffected.
+- **Item 4 — the colours are explained.** The reported "I don't understand the blue and green sections":
+  a one-line legend at the top of the plan (green = ready · ⏳ blue = a QC probe runs first · ⚠ amber = runs
+  with a caveat · ⛔ red = blocked) plus a per-step tooltip stating what its state means — reusing the existing
+  status vocabulary, not a new colour scheme.
+- **Item 5 — the mode toggle explains itself.** It now labels the OUTCOME ("Switch to Full" / "Switch to
+  Guided") with a tooltip and a subtitle stating what each mode gives you. Behaviour of `app_mode` is
+  unchanged — labelling only.
+- **Item 6 — Explore capabilities is its own tab.** The Home dock splits the guided questionnaire and the
+  capability explorer into two tabs, so the card list can grow without squeezing the questionnaire.
+- Tests: a `base` step-0 test + an `integration` tabs smoke; the existing home/navigator smoke tests updated.
+  `build_home_widget` refactored (render extracted to module scope) to stay under the complexity ceiling.
+  Full `pytest -m "core or base"` green. **Item 3** (metadata pre-answers) is the last remaining piece.
+
 ## [1.6.317] - 2026-07-23
 ### Fixed — **The guided navigator now tracks the loaded data: loading an image re-enables the run action, and a disabled run always says why (navigator-UX first-user feedback, item 1).**
 Reported from the first real guided session: *"run analysis did not light up"* — and after loading data and

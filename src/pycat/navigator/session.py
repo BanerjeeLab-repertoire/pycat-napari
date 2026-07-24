@@ -173,15 +173,31 @@ class PlanRow:
 _PROBE_REASON = "Quality probe — measures a signal a later step needs before its result can be trusted."
 
 
-def plan_rows(plan) -> list:
-    """Render ``plan`` as an ordered list of :class:`PlanRow` — QC probes first, then each step with its
-    quality-gate verdicts folded in from ``plan.gate_report``. This is what makes increment 2's gate report
-    visible: a plan shown without the reasons reduces the Navigator to a step generator."""
+def data_is_loaded(ctx) -> bool:
+    """Whether an image is open, from the context facts a load populates (see ``context_from_session``)."""
+    return bool(ctx) and (ctx.known("channels") or ctx.known("axes") or ctx.known("time_points"))
+
+
+def plan_rows(plan, ctx=None) -> list:
+    """Render ``plan`` as an ordered list of :class:`PlanRow` — a **load-data step 0** (when ``ctx`` is given),
+    then QC probes, then each step with its quality-gate verdicts folded in from ``plan.gate_report``. This is
+    what makes increment 2's gate report visible: a plan shown without the reasons reduces the Navigator to a
+    step generator. Step 0 is a visible PREREQUISITE (satisfied once an image is open), not a gate on the
+    questionnaire — the user can review the whole plan before loading; only *running* needs data."""
     by_module = defaultdict(list)
     for module_name, assumption, status in plan.gate_report:
         by_module[module_name].append((assumption, status))
 
     rows = []
+    if ctx is not None:
+        loaded = data_is_loaded(ctx)
+        rows.append(PlanRow(
+            name="Load data", kind="prerequisite",
+            state="ok" if loaded else "blocked", runnable=loaded,
+            reason=("An image is open." if loaded
+                    else "Open an image to run this analysis — you can review the whole plan first."),
+            gates=()))
+
     for probe in plan.probes:
         rows.append(PlanRow(name=probe.name, kind="probe", state="probe", runnable=True,
                             reason=_PROBE_REASON, gates=()))

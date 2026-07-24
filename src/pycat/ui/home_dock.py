@@ -22,18 +22,106 @@ def _open_card(card):
         debug_log(f"home: could not open feature {card.key}", exc)
 
 
+def _label(text, style=""):
+    from PyQt5.QtWidgets import QLabel
+    lbl = QLabel(text)
+    lbl.setWordWrap(True)
+    if style:
+        lbl.setStyleSheet(style)
+    return lbl
+
+
+def _card_frame(widget, card):
+    from PyQt5.QtWidgets import QVBoxLayout, QPushButton, QFrame
+    frame = QFrame()
+    frame.setFrameShape(QFrame.StyledPanel)
+    fl = QVBoxLayout(frame)
+    btn = QPushButton(card.title)
+    btn.setToolTip(card.summary)
+    btn.clicked.connect(lambda _=False, c=card: _open_card(c))
+    fl.addWidget(btn)
+    fl.addWidget(_label(card.summary, "color: gray; font-size: 11px;"))
+    widget._cards.append((card, btn))
+    return frame
+
+
+def _render_home(widget, body_layout, store, reg, central_manager):
+    """Render the Home surface: a header + a Guided/Full toggle that labels the OUTCOME (item 5), then two
+    tabs — the guided navigator and the capability explorer, which serve different intents and get their own
+    space (item 6). Re-run whenever the app mode changes."""
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget
+    from PyQt5.QtCore import Qt
+    from pycat.utils.app_mode import current_mode, toggle_mode, AppMode
+    while body_layout.count():
+        item = body_layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.deleteLater()
+    widget._cards = []
+    mode = current_mode(store)
+    widget._shown_mode = mode
+
+    header = QHBoxLayout()
+    header.addWidget(_label("\U0001f3e0  PyCAT — Home", "font-weight: bold; font-size: 15px;"), 1)   # 🏠
+    mb = QPushButton("Switch to Full" if mode is AppMode.BEGINNER else "Switch to Guided")
+    mb.setToolTip("Guided: answer a few questions and PyCAT proposes a workflow.\n"
+                  "Full: every analysis method, menu-first, no guidance.\nNothing is hidden either way.")
+    mb.clicked.connect(lambda _=False: toggle_mode(store))     # the subscription re-renders
+    widget._mode_button = mb
+    header.addWidget(mb)
+    header_widget = QWidget()
+    header_widget.setLayout(header)
+    body_layout.addWidget(header_widget)
+    body_layout.addWidget(_label(
+        "Guided mode — answer questions, get a proposed workflow. Full mode has every method, no guidance."
+        if mode is AppMode.BEGINNER else
+        "Full mode — every analysis method, menu-first. Switch to Guided for a proposed workflow.",
+        "color: gray; font-size: 11px;"))
+
+    tabs = QTabWidget()
+    guided = QWidget()
+    gl = QVBoxLayout(guided)
+    gl.setAlignment(Qt.AlignTop)
+    from pycat.ui.navigator_dock import build_navigator_widget
+    from pycat.navigator.session import NavigatorSession
+    nav = build_navigator_widget(
+        NavigatorSession(), on_run=getattr(central_manager, "run_navigator_plan", None),
+        central_manager=central_manager)
+    if nav is not None:
+        widget._navigator = nav
+        gl.addWidget(nav)
+    else:
+        gl.addWidget(_label("Guided analysis is unavailable here.", "color: gray;"))
+    tabs.addTab(guided, "\U0001f9ed  Guided")           # 🧭
+
+    explore = QWidget()
+    el = QVBoxLayout(explore)
+    el.setAlignment(Qt.AlignTop)
+    el.addWidget(_label("Everything PyCAT can do — click a card to open it.", "color: gray; font-size: 11px;"))
+    grouped = reg.by_category(mode)
+    if not grouped:
+        el.addWidget(_label("No capabilities registered yet.", "color: gray;"))
+    for category, cards in grouped.items():
+        el.addWidget(_label(category, "font-weight: bold; color: #2a7ab0; margin-top: 6px;"))
+        for card in cards:
+            el.addWidget(_card_frame(widget, card))
+    tabs.addTab(explore, "\U0001f9f0  Explore capabilities")   # 🧰
+
+    widget._tabs = tabs                                  # smoke-test seam
+    body_layout.addWidget(tabs)
+
+
 def build_home_widget(central_manager, *, reg=None, store=None, parent=None):
     """Build (do not mount) the Home widget, or ``None`` if Qt is unavailable (headless). ``reg`` defaults to
     the process-wide feature registry and ``store`` to the real user-settings; both are injectable for tests.
     Exposes ``_render`` / ``_cards`` / ``_mode_button`` / ``_navigator`` for a Qt-smoke test to drive it."""
     try:
-        from PyQt5.QtWidgets import (
-            QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QFrame)
+        from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea
         from PyQt5.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
     from pycat.utils.feature_registry import registry as _registry
-    from pycat.utils.app_mode import current_mode, toggle_mode, on_mode_change, AppMode
+    from pycat.utils.app_mode import on_mode_change
 
     reg = reg if reg is not None else _registry()
 
@@ -54,68 +142,8 @@ def build_home_widget(central_manager, *, reg=None, store=None, parent=None):
     scroll.setWidget(body)
     root.addWidget(scroll)
 
-    def _clear():
-        while body_layout.count():
-            item = body_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-
-    def _label(text, style=""):
-        lbl = QLabel(text)
-        lbl.setWordWrap(True)
-        if style:
-            lbl.setStyleSheet(style)
-        return lbl
-
-    def _card_frame(card):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        fl = QVBoxLayout(frame)
-        btn = QPushButton(card.title)
-        btn.setToolTip(card.summary)
-        btn.clicked.connect(lambda _=False, c=card: _open_card(c))
-        fl.addWidget(btn)
-        fl.addWidget(_label(card.summary, "color: gray; font-size: 11px;"))
-        widget._cards.append((card, btn))
-        return frame
-
     def _render():
-        _clear()
-        widget._cards = []
-        mode = current_mode(store)
-        widget._shown_mode = mode
-
-        header = QHBoxLayout()
-        header.addWidget(_label("\U0001f3e0  PyCAT — Home", "font-weight: bold; font-size: 15px;"), 1)  # 🏠
-        mb = QPushButton("Guided" if mode is AppMode.BEGINNER else "Full")
-        mb.setToolTip("Switch between the guided (beginner) surface and the full workbench. Nothing is hidden.")
-        mb.clicked.connect(lambda _=False: toggle_mode(store))     # the subscription below re-renders
-        widget._mode_button = mb
-        header.addWidget(mb)
-        header_widget = QWidget()
-        header_widget.setLayout(header)
-        body_layout.addWidget(header_widget)
-
-        # Guided analysis — the increment-3 navigator, embedded.
-        from pycat.ui.navigator_dock import build_navigator_widget
-        from pycat.navigator.session import NavigatorSession
-        nav = build_navigator_widget(
-            NavigatorSession(), on_run=getattr(central_manager, "run_navigator_plan", None),
-            central_manager=central_manager)
-        if nav is not None:
-            widget._navigator = nav
-            body_layout.addWidget(nav)
-
-        # Capability cards — grouped by category, filtered to the current mode.
-        body_layout.addWidget(_label("Explore capabilities", "font-weight: bold; margin-top: 8px;"))
-        grouped = reg.by_category(mode)
-        if not grouped:
-            body_layout.addWidget(_label("No capabilities registered yet.", "color: gray;"))
-        for category, cards in grouped.items():
-            body_layout.addWidget(_label(category, "font-weight: bold; color: #2a7ab0; margin-top: 6px;"))
-            for card in cards:
-                body_layout.addWidget(_card_frame(card))
+        _render_home(widget, body_layout, store, reg, central_manager)
 
     def _on_mode_changed(_mode):
         try:

@@ -1,7 +1,14 @@
 # Claude Code spec — Navigator UX: first-user feedback
 
-> **◐ STATUS — Item 1 (the bug: re-evaluate on state change + say why) DONE, shipped 1.6.317. Items 2–6
-> (load-data step 0, metadata pre-answers, colour legend, toggle text, Explore tab) remain.**
+> **◐ STATUS — Items 1, 2, 4, 5, 6 DONE (item 1 @1.6.317; items 2/4/5/6 @1.6.318). Only item 3 (metadata
+> pre-answers) remains.**
+> **Items 2/4/5/6 (1.6.318).** Item 2: `plan_rows(plan, ctx)` prepends a visible 'Load data' step 0 (blocked
+> until an image is open, satisfied once it is; the questionnaire is never gated — `plan_rows(plan)` without a
+> ctx is unchanged). Item 4: a step-colour legend + per-step tooltips (`_STATE_MEANING`), reusing the existing
+> status vocabulary. Item 5: the mode toggle labels the OUTCOME with a tooltip + subtitle (behaviour
+> unchanged). Item 6: the Home dock splits Guided | Explore capabilities into tabs (`build_home_widget`
+> refactored to a module-level `_render_home` to stay under the complexity ceiling). `base` step-0 test +
+> `integration` tabs smoke.
 > **Item 1 (1.6.317).** `planner.regate(plan, ctx)` re-evaluates a COMPILED plan's gaps/gates against a fresh
 > context WITHOUT recompiling (recompiling could re-select modules and change the plan under the user).
 > `NavigatorSession` retains its plan and gained `regate()` + `run_blocked_reason()` (never a dead control:

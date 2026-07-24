@@ -63,3 +63,18 @@ def test_clicking_a_card_invokes_its_real_entry(qtbot, tmp_path):
     assert opened == [True]                                                 # the home invoked the real entry
 
     widget.detach()
+
+
+@pytest.mark.integration
+def test_the_home_splits_guided_and_explore_into_tabs(qtbot, tmp_path):
+    from pycat.ui.home_dock import build_home_widget
+    from pycat.utils.feature_registry import FeatureRegistry
+    from pycat.utils.feature_cards import register_default_feature_cards
+
+    reg = FeatureRegistry()
+    register_default_feature_cards(types.SimpleNamespace(), reg=reg)
+    widget = build_home_widget(types.SimpleNamespace(), reg=reg, store=_store(tmp_path))
+    qtbot.addWidget(widget)
+    assert widget._tabs is not None
+    labels = [widget._tabs.tabText(i) for i in range(widget._tabs.count())]
+    assert any("Guided" in t for t in labels) and any("Explore" in t for t in labels)
