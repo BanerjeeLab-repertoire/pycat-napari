@@ -30,7 +30,7 @@ def test_channel_needs_identity_only_for_the_position_guess():
 
 # ── the persistence (extends the signature-keyed store) ────────────────────────────────────────────────
 
-@pytest.mark.core
+@pytest.mark.base
 def test_identity_answers_round_trip_and_are_reversible(isolated_store):
     cd = isolated_store
     infos = [{"bucket": "blue"}, {"bucket": "green"}]
@@ -42,7 +42,7 @@ def test_identity_answers_round_trip_and_are_reversible(isolated_store):
     assert cd.recall_channel_identities(infos) == {}
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_identity_and_a_condensate_designation_coexist_either_order(isolated_store):
     cd = isolated_store
     infos = [{"bucket": "blue"}, {"bucket": "green"}]
@@ -52,7 +52,7 @@ def test_identity_and_a_condensate_designation_coexist_either_order(isolated_sto
     assert cd.recall_channel_identities(infos) == {0: "DAPI"}
 
 
-@pytest.mark.core
+@pytest.mark.base
 def test_recall_is_guarded_to_the_acquisition_layout(isolated_store):
     cd = isolated_store
     cd.remember_channel_identity([{"bucket": "blue"}, {"bucket": "green"}, {"bucket": "red"}], 2, "X")

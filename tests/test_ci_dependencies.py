@@ -40,6 +40,7 @@ import re
 import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
+_SRC = _ROOT / "src" / "pycat"
 _TOOLBOX = _ROOT / "src" / "pycat" / "toolbox"
 _WORKFLOW = _ROOT / ".github" / "workflows" / "core.yml"
 _HEADLESS_TEST = _ROOT / "tests" / "test_headless_science.py"
@@ -584,4 +585,215 @@ def test_no_undeclared_unguarded_lazy_import():
           "(so an absent package degrades to a fallback) — `openpyxl` was neither, and CI went red on it. "
           "Declare it, wrap the import in try/except with a fallback, or — if it is a genuinely optional "
           "backend — add it to _LAZY_OK with a one-line justification."
+    )
+
+
+# ── Lane/selection agreement: a `core` test must need only what the minimal `core` lane installs ──────────
+#
+# The FOURTH instance of the recurring class (scikit-image): a `core` test transitively needed skimage (via
+# general_utils, at MODULE scope) and errored in the minimal 'numpy + pytest ONLY' lane. No single static rule
+# expresses the whole class cleanly, so three complementary guards cover it (said out loud, per the spec):
+#   1. qtbot — a Qt FIXTURE:            test_no_core_marked_test_requests_a_qt_fixture
+#   3. openpyxl — a FUNCTION-scope lazy import: test_no_undeclared_unguarded_lazy_import
+#   4. skimage — a collection-time transitive import: this guard. It walks what each `core` test imports at
+#      MODULE scope and through its requested FIXTURES (both run before the body, so `importorskip` can't guard
+#      them — skimage reached channel_identity via a fixture), following pycat.* into src. A body import behind
+#      an `importorskip("<absent>")` is excused: the test skips before that import runs.
+
+def _minimal_core_lane_packages():
+    """Packages the minimal `core` lane installs, READ FROM the workflow so it can't drift — the job whose
+    suite command is the bare ``pytest -m core -o addopts=``. Returns its scientific packages (pytest/pip are
+    test infra), normally just ``{'numpy'}``; ``None`` if that lane isn't found."""
+    if not _WORKFLOW.exists():
+        return None
+    lines = _WORKFLOW.read_text(encoding="utf-8", errors="ignore").splitlines()
+    jobs, cur = [], []
+    for line in lines:
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):     # a job id at 2-space indent under `jobs:`
+            if cur:
+                jobs.append("\n".join(cur))
+            cur = [line]
+        else:
+            cur.append(line)
+    if cur:
+        jobs.append("\n".join(cur))
+    for job in jobs:
+        if "pytest -m core -o addopts=" not in job:       # the minimal lane's distinctive command
+            continue
+        pkgs = set()
+        for line in job.splitlines():
+            cmd = line.split("#", 1)[0]
+            if "pip install" not in cmd:
+                continue
+            for tok in cmd.split():
+                if tok in ("python", "-m", "pip", "install", "--upgrade", "--no-deps", "-e", "."):
+                    continue
+                if tok.startswith("-"):
+                    continue
+                pkgs.add(_ALIAS.get(tok, tok.lower().replace("-", "_")))
+        return pkgs - {"pytest", "pip"}
+    return None
+
+
+def _pycat_import_targets(node):
+    """The pycat.* dotted module name(s) a single import node targets (resolving ``from pkg import submodule``)."""
+    out = set()
+    if isinstance(node, ast.Import):
+        for a in node.names:
+            if a.name.split(".")[0] == "pycat":
+                out.add(a.name)
+    elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0 and node.module.split(".")[0] == "pycat":
+        pkg = node.module[len("pycat."):]
+        for a in node.names:
+            sub = _SRC / pkg.replace(".", "/") / (a.name + ".py")
+            out.add(f"{node.module}.{a.name}" if sub.exists() else node.module)
+    return out
+
+
+def _fixture_defs(tree):
+    """``{name: FunctionDef}`` for the ``@pytest.fixture`` functions in a test file."""
+    defs = {}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for d in n.decorator_list:
+                t = d.func if isinstance(d, ast.Call) else d
+                if (isinstance(t, ast.Attribute) and t.attr == "fixture") or (isinstance(t, ast.Name) and t.id == "fixture"):
+                    defs[n.name] = n
+    return defs
+
+
+def _module_third_party(dotted, seen):
+    """Third-party packages a src module needs at MODULE SCOPE, following pycat.* imports transitively."""
+    import sys
+    if dotted in seen:
+        return set()
+    seen.add(dotted)
+    rel = dotted[len("pycat."):] if dotted.startswith("pycat.") else dotted
+    path = _SRC / (rel.replace(".", "/") + ".py")
+    if not path.exists():
+        path = _SRC / rel.replace(".", "/") / "__init__.py"
+    if not path.exists():
+        return set()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return set()
+    found = set()
+    for node in tree.body:                       # MODULE SCOPE only
+        names = []
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names = [node.module]
+        for name in names:
+            top = name.split(".")[0]
+            if top == "pycat":
+                found |= _module_third_party(name, seen)
+            elif top in sys.stdlib_module_names:
+                continue
+            else:
+                found.add(_ALIAS.get(top, top.lower().replace("-", "_")))
+    return found
+
+
+# The minimal `core` lane's conftest (tests/conftest.py) SKIPS a file — without importing it — when it has no
+# `core` test, or when a module-scope import names an absent optional-stack package or a GUI/IO-bound pycat
+# package. Those files never run there, so flagging them would be a false positive. Mirrored here (kept in sync
+# with the conftest's own lists) so this guard flags only what would ACTUALLY reach the minimal lane.
+_OPTIONAL_STACK_ABSENT = {"napari", "PyQt5", "qtpy", "aicsimageio", "cellpose", "torch"}
+_GUI_BOUND_PYCAT = ("pycat.data", "pycat.file_io", "pycat.run_pycat", "pycat.ui")
+
+
+def _importorskip_guard_line(node, allowed):
+    """The earliest line in a test body where ``pytest.importorskip("X")`` names a package the lane does NOT
+    install — or None. A body import *after* that line never executes in the minimal lane (the test skips
+    first), so it cannot make the test error there. Fixture/module-scope imports run before the body and are
+    unaffected."""
+    lines = []
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Call):
+            continue
+        f = sub.func
+        is_ios = (isinstance(f, ast.Attribute) and f.attr == "importorskip") or (isinstance(f, ast.Name) and f.id == "importorskip")
+        if is_ios and sub.args and isinstance(sub.args[0], ast.Constant) and isinstance(sub.args[0].value, str):
+            pkg = _ALIAS.get(sub.args[0].value, sub.args[0].value.lower().replace("-", "_"))
+            if pkg not in allowed:
+                lines.append(sub.lineno)
+    return min(lines) if lines else None
+
+
+def _conftest_skips_in_minimal_lane(tree):
+    """Mirror ``conftest.pytest_ignore_collect`` for the minimal lane: a file is skipped (never imported) if it
+    has no `core`-selected test, or a MODULE-SCOPE import names an absent optional-stack package or a GUI/IO
+    pycat package."""
+    module_marks = _module_level_marks(tree)
+    if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+               and _is_core_selected(n, module_marks) for n in ast.walk(tree)):
+        return True
+    for node in tree.body:
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+        for name in names:
+            if name.split(".")[0] in _OPTIONAL_STACK_ABSENT:
+                return True
+            if any(name.startswith(p) for p in _GUI_BOUND_PYCAT):
+                return True
+    return False
+
+
+@pytest.mark.core
+def test_a_core_test_needs_only_the_minimal_lane_install():
+    """Every `core`-selected test's collection-time imports — its file's module scope, the fixtures it requests,
+    and its body imports that are NOT behind an `importorskip("<absent>")` — must resolve (following pycat.*
+    into src) to packages the minimal `core` lane installs, else the test belongs in `base`. This catches the
+    scikit-image failure at its source: it entered channel_identity through a FIXTURE, which runs before the
+    body and so cannot be `importorskip`-guarded."""
+    installed = _minimal_core_lane_packages()
+    if installed is None:
+        pytest.skip("could not locate the minimal core lane in the workflow")
+    allowed = installed | {"pytest"}
+    offenders = {}
+    for path in sorted((_ROOT / "tests").rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        if _conftest_skips_in_minimal_lane(tree):     # never reaches the minimal lane → not a failure there
+            continue
+        module_marks = _module_level_marks(tree)
+        fixtures = _fixture_defs(tree)
+        module_targets = set()
+        for node in tree.body:
+            module_targets |= _pycat_import_targets(node)
+        for node in ast.walk(tree):
+            if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")):
+                continue
+            if not _is_core_selected(node, module_marks):
+                continue
+            # Module-scope and fixture imports run at collection / before the body — always required.
+            targets = set(module_targets)
+            for arg in (a.arg for a in node.args.args):
+                if arg in fixtures:
+                    for sub in ast.walk(fixtures[arg]):
+                        targets |= _pycat_import_targets(sub)
+            # Body imports guarded by an earlier `importorskip("<absent>")` never run in the minimal lane.
+            guard = _importorskip_guard_line(node, allowed)
+            for sub in ast.walk(node):
+                if guard is not None and getattr(sub, "lineno", 0) > guard:
+                    continue
+                targets |= _pycat_import_targets(sub)
+            needed = set()
+            for t in targets:
+                needed |= _module_third_party(t, set())
+            extra = needed - allowed
+            if extra:
+                offenders.setdefault(f"{path.name}::{node.name}", set()).update(extra)
+
+    assert not offenders, (
+        f"These `core` tests transitively need packages the minimal `core` lane does not install "
+        f"(it installs {sorted(installed)}):\n  "
+        + "\n  ".join(f"{k}  → {sorted(v)}" for k, v in sorted(offenders.items()))
+        + "\n\nA `core` test runs in the numpy-only lane, so everything it imports (transitively, at module "
+          "scope) must be numpy-only — else it belongs in `base`. Re-mark the test `base`, or make the "
+          "imported module numpy-only."
     )
