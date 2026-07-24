@@ -1,8 +1,15 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
 > **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (1.6.294 + 1.6.295); Part 2 merge policy DONE (1.6.296),
-> DISPATCHER ADOPTION DONE (1.6.321). Remaining: deepen CZI/LIF/ND2/IMS readers to the same `channels` shape
-> (item 4), the Qt provenance/conflict surface, and lazy/bounded per-page TIFF metadata.**
+> DISPATCHER ADOPTION DONE (1.6.321); item 6 BOUNDED PER-PAGE TIFF METADATA DONE (1.6.323). Remaining: deepen
+> CZI/LIF/ND2/IMS readers to the same `channels` shape (item 4), and the Qt provenance/conflict surface.**
+>
+> **Item 6 (lazy/bounded per-page TIFF metadata) — DONE, shipped 1.6.323.** The load path read EVERY page's
+> `MicroManagerMetadata` tag to estimate the frame cadence (a 10k-frame stack parsed 10k IFDs at open). Now
+> `_extract_mm_frame_times_from_tiff` is bounded by `_LOAD_PAGE_SAMPLE_CAP` (64) at both load call sites and
+> reports `pages_sampled`/`pages_total` (surfaced in `raw`); a constant-cadence acquisition gives the same
+> median interval from the prefix, so no correct value changes, while `max_pages=None` still reads every plane
+> on demand. `tests/test_per_page_metadata_bounded.py` (`core`, real MM-tagged multipage TIFFs).
 >
 > **Part 2 dispatcher adoption — DONE, shipped 1.6.321.** `extract_metadata` (the entry every load path calls:
 > file_io.py:462, stack_openers.py:106/433/602) now delegates to `extract_metadata_merged`, so the built merge

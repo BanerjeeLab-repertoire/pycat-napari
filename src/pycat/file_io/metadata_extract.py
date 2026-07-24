@@ -635,13 +635,17 @@ def extract_tiff_metadata(file_path):
             # Measured per-frame acquisition timing from MicroManager page tags,
             # if present (authoritative cadence; see _extract_mm_frame_times_from_tiff).
             try:
-                _mm = _extract_mm_frame_times_from_tiff(file_path)
+                # Bounded at load — sampling a prefix, never scanning every page of a large stack (item 6).
+                _mm = _extract_mm_frame_times_from_tiff(file_path, max_pages=_LOAD_PAGE_SAMPLE_CAP)
                 if _mm:
                     if _mm.get('frame_interval_s'):
                         common['frame_interval_s'] = float(_mm['frame_interval_s'])
                         common['frame_interval_source'] = _mm.get('source')
                         common['frame_interval_iqr_s'] = _mm.get('frame_interval_iqr_s')
                         common['frame_deltas_s'] = _mm.get('frame_deltas_s')
+                    if _mm.get('pages_sampled') is not None:
+                        raw['frame_times_pages_sampled'] = str(_mm['pages_sampled'])
+                        raw['frame_times_pages_total'] = str(_mm.get('pages_total'))
                     for _k in ('exposure_s', 'camera_name',
                                'acquisition_start_time', 'n_frames'):
                         if _mm.get(_k) is not None and common.get(_k) is None:
@@ -658,6 +662,13 @@ def extract_tiff_metadata(file_path):
 # AICSImage (CZI, OME-TIFF, and TIFFs AICSImage can parse)
 # ---------------------------------------------------------------------------
 
+# The load path samples at most this many page-tag records to estimate the cadence — reading EVERY page of a
+# large stack at load is the thing deep_metadata item 6 forbids (a 10k-frame stack would parse 10k IFDs just to
+# open). A bounded prefix gives the same median cadence for a constant-cadence acquisition; a caller that truly
+# needs every plane's record passes ``max_pages=None`` (the on-demand/full read).
+_LOAD_PAGE_SAMPLE_CAP = 64
+
+
 def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
     """Read per-frame acquisition timing directly from a (MicroManager) TIFF.
 
@@ -667,9 +678,15 @@ def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
     nominal ``Interval_ms`` in the summary (often 0 / unset) or a free-text OME
     ``<Description>`` like "500ms interval" (which the hardware may ignore).
 
+    ``max_pages`` bounds how many page-tag records are read: the load path passes
+    ``_LOAD_PAGE_SAMPLE_CAP`` so opening a huge stack never parses every IFD, while
+    ``None`` reads all pages on demand. The returned dict reports ``pages_sampled``
+    (records read) and ``pages_total`` so the bound is inspectable.
+
     Returns a dict with keys (any of which may be absent):
       frame_interval_s, frame_interval_iqr_s, frame_deltas_s (list),
-      exposure_s, camera_name, acquisition_start_time, n_frames, source
+      exposure_s, camera_name, acquisition_start_time, n_frames,
+      pages_sampled, pages_total, source
     or ``None`` if no per-frame timing is found.
     """
     try:
@@ -683,10 +700,12 @@ def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
     camera_name = None
     start_time = None
     n_pages = 0
+    pages_read = 0
     try:
         with tifffile.TiffFile(file_path) as t:
             n_pages = len(t.pages)
             limit = n_pages if max_pages is None else min(n_pages, max_pages)
+            pages_read = limit                            # the bound actually applied (≤ max_pages)
             for i in range(limit):
                 pg = t.pages[i]
                 tag = pg.tags.get('MicroManagerMetadata')
@@ -719,7 +738,8 @@ def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
     if len(elapsed_ms) < 2:
         # Still return exposure/camera if we found them on a single page.
         if exposure_ms is not None or camera_name is not None:
-            out = {'source': 'micromanager_page_tags', 'n_frames': n_pages or None}
+            out = {'source': 'micromanager_page_tags', 'n_frames': n_pages or None,
+                   'pages_sampled': pages_read, 'pages_total': n_pages}
             if exposure_ms is not None:
                 out['exposure_s'] = exposure_ms / 1e3
             if camera_name is not None:
@@ -744,6 +764,8 @@ def _extract_mm_frame_times_from_tiff(file_path, max_pages=None):
         'frame_interval_iqr_s': iqr_s,
         'frame_deltas_s': [float(x) for x in deltas_s],
         'n_frames': n_pages or (len(elapsed_ms)),
+        'pages_sampled': pages_read,
+        'pages_total': n_pages,
         'source': 'micromanager_elapsedtime',
     }
     if exposure_ms is not None:
@@ -976,7 +998,8 @@ def extract_reader_metadata(file_path, image=None):
         _derived_s = _derived_src = _derived_iqr = None
         _nominal_s = _nominal_src = None
         try:
-            _mm = _extract_mm_frame_times_from_tiff(file_path)
+            # Bounded at load (item 6) — a prefix sample, not every page of a large stack.
+            _mm = _extract_mm_frame_times_from_tiff(file_path, max_pages=_LOAD_PAGE_SAMPLE_CAP)
             if _mm and _mm.get('frame_interval_s'):
                 _derived_s = float(_mm['frame_interval_s'])
                 _derived_src = _mm.get('source')

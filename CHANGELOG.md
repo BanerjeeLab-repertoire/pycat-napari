@@ -1,3 +1,20 @@
+## [1.6.323] - 2026-07-24
+### Changed — **Opening a large time-lapse no longer reads every page's tags — the cadence is sampled from a bounded prefix (deep_metadata item 6).**
+A time-lapse TIFF carries its true frame cadence in a per-page `MicroManagerMetadata` tag. The load path used
+to walk **every** page to read them — a 10,000-frame stack parsed 10,000 IFDs just to open. It now samples a
+bounded prefix.
+
+- `_extract_mm_frame_times_from_tiff` reads at most `_LOAD_PAGE_SAMPLE_CAP` (64) page records at load (both
+  load call sites now pass the cap), and reports `pages_sampled` / `pages_total` so the bound is inspectable
+  (surfaced in the TIFF metadata `raw`). A constant-cadence acquisition yields the same median interval from
+  the prefix as from the whole stack, so no correct value changes; a caller that genuinely needs every plane's
+  record still passes `max_pages=None` for the full on-demand read.
+- `tests/test_per_page_metadata_bounded.py` (`core`, real MicroManager-tagged multipage TIFFs): the load path
+  samples the cap, not all N pages; the bounded sample still recovers the 500 ms cadence; the full read is
+  available on demand; a small stack reads only what exists. Full `pytest -m "core or base"` green. Remaining
+  deep_metadata items: deepening CZI/LIF/ND2/IMS readers to the `channels` shape (item 4) and the Qt
+  provenance/conflict surface.
+
 ## [1.6.322] - 2026-07-24
 ### Added — **Scientific-notation control for figure y-ticks — a shared ×10ⁿ exponent instead of `1e5` repeated on every tick (publication_features Tier 1, the last axis slice).**
 Default matplotlib ticks look unfinished in print; a comparison figure of large or small values wants one clean
