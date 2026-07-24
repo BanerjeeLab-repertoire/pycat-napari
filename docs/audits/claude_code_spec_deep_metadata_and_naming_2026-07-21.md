@@ -1,8 +1,19 @@
 # Claude Code spec — Deep metadata extraction (reader-independent) + filename-aware channel naming
 
-> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (1.6.294 + 1.6.295); Part 2 merge policy DONE (1.6.296).
-> Remaining: deepen CZI/LIF/ND2/IMS readers to the same `channels` shape (item 4), the Qt provenance/conflict
-> surface, full dispatcher adoption of the merge, and lazy/bounded per-page TIFF metadata.**
+> **◐ STATUS — Part 3 DONE (1.6.280); Part 1 DONE (1.6.294 + 1.6.295); Part 2 merge policy DONE (1.6.296),
+> DISPATCHER ADOPTION DONE (1.6.321). Remaining: deepen CZI/LIF/ND2/IMS readers to the same `channels` shape
+> (item 4), the Qt provenance/conflict surface, and lazy/bounded per-page TIFF metadata.**
+>
+> **Part 2 dispatcher adoption — DONE, shipped 1.6.321.** `extract_metadata` (the entry every load path calls:
+> file_io.py:462, stack_openers.py:106/433/602) now delegates to `extract_metadata_merged`, so the built merge
+> is finally live — per-field provenance, two-source conflict findings, and a **recorded** source failure in
+> place of the old bare `except: pass` (removed). The hard caution is met: `_default_metadata_sources` keeps
+> the open pixel reader's own metadata HIGHEST precedence when a handle is passed, so no currently-correct
+> value (esp. `pixel_size_um`) moves — a lower-precedence source only fills empties; all 134 metadata/
+> pixel-size tests pass unmodified. The merged `raw` preserves each source's top-level keys (`channels`,
+> `instrument`, flat scan tags) so `metadata_contradictions` / `_fill_scan_acquisition_fields` keep reading
+> them. `tests/test_metadata_merge.py` +3 (`core`). **Remaining:** item 4 (deepen CZI/LIF/ND2/IMS readers),
+> item 6 (lazy/bounded per-page TIFF metadata), and the Qt provenance/conflict surface.
 >
 > **Part 2 (reader-independent merge) — merge policy DONE, shipped 1.6.296.** New `merge_metadata_sources`
 > (pure, Qt-free) merges an ordered `(name, common)` list by field-level precedence (first *meaningful* value

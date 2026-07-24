@@ -1,3 +1,25 @@
+## [1.6.321] - 2026-07-23
+### Changed — **Every load now pulls metadata from wherever it parses best, not just from the reader showing the pixels (deep_metadata Part 2 — the merge is finally wired in).**
+The reader-independent merge (`extract_metadata_merged`) and the element-scoped OME parse shipped earlier, but
+nothing on the live path *used* the merge — it was built and dormant. The dispatcher `extract_metadata` (the
+entry point every load path calls) now routes through it.
+
+- **Dispatcher adoption.** `extract_metadata` delegates to `extract_metadata_merged`, so every load gets
+  field-level provenance (which source each field came from), two-source conflict findings, and — replacing a
+  bare `except: pass` the spec explicitly called out — a **recorded** reason when a metadata source fails.
+- **No currently-correct value moves (the hard caution).** `_default_metadata_sources` keeps the open pixel
+  reader's own metadata at **highest precedence** whenever a handle is passed, so `pixel_size_um` and every
+  other correct value are unchanged; a lower-precedence source (e.g. tifffile's baseline tags behind the
+  structured reader) only **fills** fields the primary left empty. All 134 metadata/pixel-size gate tests pass
+  unmodified.
+- **Consumers keep working.** The merged `raw` preserves each source's top-level keys (`channels`,
+  `instrument`, flat scan tags) rather than burying them under `raw_by_source`, so
+  `metadata_contradictions` and `_fill_scan_acquisition_fields` read them where they always have.
+- `tests/test_metadata_merge.py` +3 (`core`): the dispatcher routes through the merge and records failures;
+  precedence keeps the open reader primary; merged raw preserves top-level source keys. Full
+  `pytest -m "core or base"` green. Remaining deep_metadata items: deepening CZI/LIF/ND2/IMS readers to the
+  `channels` shape (item 4), the Qt provenance/conflict surface, and lazy/bounded per-page TIFF metadata.
+
 ## [1.6.320] - 2026-07-23
 ### Added — **A companion sidecar now names channels on load, and a channel identity you give once is remembered for the same acquisition (sidecar_metadata Part 4/5 — the 2D load-path wiring).**
 The mechanisms shipped earlier (sidecar discovery + ISS parser 1.6.289; the identity store + prompt 1.6.316);

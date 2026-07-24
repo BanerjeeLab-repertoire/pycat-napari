@@ -12,7 +12,8 @@ import pytest
 # the `pycat.file_io` prefix — metadata_extract is pure/headless-safe. See test_ome_xml_scoped_parse.
 try:
     from pycat.file_io.metadata_extract import (
-        merge_metadata_sources, extract_metadata_merged, _values_conflict)
+        merge_metadata_sources, extract_metadata_merged, extract_metadata,
+        _default_metadata_sources, _values_conflict)
 except Exception:      # pragma: no cover - only when the io stack is truly unavailable
     pytest.skip("pycat.file_io.metadata_extract unavailable", allow_module_level=True)
 
@@ -100,3 +101,40 @@ def test_the_merge_trail_and_per_source_raw_are_preserved():
     assert res['raw']['raw_by_source']['tiff']['ImageDescription'] == 'ImageJ'
     assert res['raw']['raw_by_source']['ome']['ome_metadata'] == '<OME/>'
     assert 'source_failures' not in res['raw']                         # no failures → key absent, not empty
+
+
+# ── the dispatcher now routes through the merge (the Part 2 wiring the built machinery was missing) ──────
+
+def test_merged_raw_preserves_top_level_source_keys_for_consumers():
+    # metadata_contradictions reads raw['channels'] / raw['instrument'] at top level, and
+    # _fill_scan_acquisition_fields scans flat raw tags — the merge must carry them, not bury them.
+    def structured():
+        return {'common': {}, 'raw': {'channels': [{'index': 0}], 'instrument': {'lens_na': 1.4}}}
+
+    def tags():
+        return {'common': {}, 'raw': {'ImageDescription': 'ImageJ'}}
+
+    res = extract_metadata_merged('x.tif', sources=[('structured', structured), ('tags', tags)])
+    assert res['raw']['channels'] == [{'index': 0}]                    # top-level, where the consumer reads it
+    assert res['raw']['instrument'] == {'lens_na': 1.4}
+    assert res['raw']['ImageDescription'] == 'ImageJ'
+    assert res['raw']['raw_by_source']['structured']['channels']       # still available per-source too
+
+
+def test_source_precedence_preserves_the_open_readers_metadata_as_primary():
+    # The pixel-size caution: with an open handle the reader's own metadata must stay HIGHEST precedence, so
+    # no currently-correct value can move; tifffile is only a gap-filler behind it.
+    with_handle = [n for n, _ in _default_metadata_sources('x.tif', image=object())]
+    assert with_handle[0] == 'ome_structured' and 'tifffile' in with_handle
+    no_handle = [n for n, _ in _default_metadata_sources('x.tif')]
+    assert no_handle[0] == 'tifffile'                                  # no handle → tifffile primary (as before)
+    assert [n for n, _ in _default_metadata_sources('x.czi')] == ['ome_structured']
+    assert [n for n, _ in _default_metadata_sources('x.ims')] == ['ims_hdf5']
+
+
+def test_the_dispatcher_routes_through_the_merge_and_records_failures_not_swallows():
+    # extract_metadata (every load path's entry) now goes through the merge: its result carries the merge
+    # trail, and a source that fails on a missing file is RECORDED, not swallowed by a bare except.
+    res = extract_metadata('this_file_does_not_exist.tif')
+    assert 'metadata_sources' in res['raw']                            # proof it went through the merge
+    assert 'raw_by_source' in res['raw']

@@ -1082,6 +1082,15 @@ _DELIBERATE = {
     # (that would be a hard circular import, since `file_io` now imports `lazy_sources`).
     'file_io.py::resolve_ome_file_set',
     'file_io.py::build_ome_page_map',
+
+    # 1.6.321 — deep_metadata Part 2 dispatcher adoption: `extract_metadata`'s per-format routing (the .ims /
+    # image-handle / .tif-with-pixel-size-fallback / else branches, and its bare `except: pass`) was replaced
+    # by a single delegation to `extract_metadata_merged`. Nothing was dropped — the routing MOVED into
+    # `_default_metadata_sources` (which reproduces the same precedence, keeping the open reader's metadata
+    # highest so no correct value moves) and the merge itself; the bare except became a RECORDED source
+    # failure. Pinned by test_metadata_merge (the dispatcher routes through the merge; precedence preserved;
+    # all 134 metadata/pixel-size tests pass unmodified).
+    'metadata_extract.py::extract_metadata',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

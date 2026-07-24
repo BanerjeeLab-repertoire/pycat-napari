@@ -1140,12 +1140,19 @@ def _default_metadata_sources(file_path, *, image=None, reader=None, width_px=No
     ext = os.path.splitext(file_path)[1].lower() if file_path else ''
     if ext == '.ims':
         return [('ims_hdf5', lambda: extract_ims_metadata(file_path, reader=reader, width_px=width_px))]
+    structured = ('ome_structured', lambda: extract_reader_metadata(file_path, image=image))
+    tiff = ('tifffile', lambda: extract_tiff_metadata(file_path))
+    if image is not None:
+        # An already-open pixel reader was handed in: its own structured metadata stays HIGHEST precedence, so
+        # no value that is already correct on the live load path can move. For a TIFF we also ask tifffile —
+        # it reads baseline tags the structured reader skips, but as the lower-precedence source it only FILLS
+        # fields the reader left None, it never overrides them.
+        return [structured, tiff] if ext in ('.tif', '.tiff') else [structured]
     if ext in ('.tif', '.tiff'):
-        # tifffile reads baseline tags the structured reader skips; the structured/OME reader parses fields
-        # tifffile cannot. Ask BOTH — metadata is a one-time pull, so a second parse is cheap next to a load.
-        return [('tifffile', lambda: extract_tiff_metadata(file_path)),
-                ('ome_structured', lambda: extract_reader_metadata(file_path, image=image))]
-    return [('ome_structured', lambda: extract_reader_metadata(file_path, image=image))]
+        # No open handle: tifffile is primary (it reads the baseline tags), the structured/OME reader fills
+        # what tifffile cannot — the same precedence the dispatcher used for its pixel-size fallback.
+        return [tiff, structured]
+    return [structured]
 
 
 def extract_metadata_merged(file_path, *, image=None, reader=None, width_px=None, sources=None):
@@ -1173,9 +1180,16 @@ def extract_metadata_merged(file_path, *, image=None, reader=None, width_px=None
 
     merged = merge_metadata_sources(commons)
 
-    raw = {'raw_by_source': raw_by_source,
-           'metadata_sources': merged['sources'],
-           'metadata_conflicts': merged['conflicts']}
+    # Preserve each source's top-level raw keys (highest-precedence source last, so it wins) BEFORE attaching
+    # the merge trail — consumers read raw['channels'] / raw['instrument'] (metadata_contradictions) and
+    # _fill_scan_acquisition_fields scans flat raw tags, so a merged result must carry them, not bury them
+    # under raw_by_source. The trail keys are attached last and never collide with real metadata fields.
+    raw = {}
+    for name, _fn in reversed(srcs):
+        raw.update(raw_by_source.get(name, {}))
+    raw['raw_by_source'] = raw_by_source
+    raw['metadata_sources'] = merged['sources']
+    raw['metadata_conflicts'] = merged['conflicts']
     if failures:
         raw['source_failures'] = failures
     return _fill_scan_acquisition_fields({'common': merged['common'], 'raw': raw})
@@ -1188,30 +1202,15 @@ def extract_metadata_merged(file_path, *, image=None, reader=None, width_px=None
 def extract_metadata(file_path, reader=None, image=None, width_px=None):
     """Return normalised {'common', 'raw'} metadata for any supported file.
 
-    Routes by extension. ``reader`` (IMS) and ``image`` (AICSImage) let callers
+    Routes through the reader-independent merge (Part 2): each metadata source for this file/handle is asked,
+    the results are merged by field-level precedence with recorded per-field provenance and reported conflicts,
+    and a failing source is skipped with a recorded reason instead of a swallowed ``except``. The source
+    ordering (``_default_metadata_sources``) keeps the pixel reader's own metadata highest precedence whenever a
+    handle is passed, so **no value that is already correct on the live load path moves**; a lower-precedence
+    source only fills fields the primary left empty. ``reader`` (IMS) and ``image`` (AICSImage) let callers
     reuse an already-open handle instead of re-opening the file.
     """
-    ext = os.path.splitext(file_path)[1].lower() if file_path else ''
-    if ext == '.ims':
-        return _fill_scan_acquisition_fields(
-            extract_ims_metadata(file_path, reader=reader, width_px=width_px))
-    if image is not None:
-        return _fill_scan_acquisition_fields(extract_reader_metadata(file_path, image=image))
-    if ext in ('.tif', '.tiff'):
-        # Prefer tifffile for plain TIFFs (reads baseline tags the structured reader skips).
-        result = extract_tiff_metadata(file_path)
-        # If pixel size still missing, try the structured reader as a secondary source.
-        if result['common'].get('pixel_size_um') is None:
-            try:
-                from_reader = extract_reader_metadata(file_path)
-                if from_reader['common'].get('pixel_size_um') is not None:
-                    result['common']['pixel_size_um'] = from_reader['common']['pixel_size_um']
-                    result['common']['pixel_size_source'] = from_reader['common']['pixel_size_source']
-            except Exception:
-                pass
-        return _fill_scan_acquisition_fields(result)
-    # Fallback: try the structured reader for anything else (czi, lif, nd2, ...).
-    return _fill_scan_acquisition_fields(extract_reader_metadata(file_path, image=image))
+    return extract_metadata_merged(file_path, image=image, reader=reader, width_px=width_px)
 
 
 # ---------------------------------------------------------------------------
