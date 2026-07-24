@@ -99,3 +99,18 @@ def test_plan_rows_prepends_a_load_data_step_0_satisfied_once_loaded():
     assert len(unloaded) == len(without) + 1
     ctx.set("channels", 2, source=Source.METADATA)        # an image is open
     assert plan_rows(plan, ctx)[0].state == "ok"          # step 0 flips to satisfied
+
+
+def test_data_observations_are_evidence_backed_and_never_guessed():
+    """Item 3: 'What we can tell from your data' — observations only where the metadata supports them, with
+    the evidence; a bare plane count never becomes a time-series/Z claim."""
+    from pycat.navigator.session import data_observations
+    obs = data_observations(_cm({"file_metadata": {"common": {
+        "n_channels": 3, "n_timepoints": 200, "frame_interval_s": 0.5}}}))
+    joined = " | ".join(o["text"].lower() for o in obs)
+    assert "3 channel" in joined and "time series" in joined and "multichannel" in joined
+    assert any("200 timepoints" in o["evidence"] for o in obs)          # the evidence is shown
+    # n_timepoints but NO interval → no time-series claim (no guessing)
+    assert not any("time series" in o["text"].lower()
+                   for o in data_observations(_cm({"file_metadata": {"common": {"n_timepoints": 5}}})))
+    assert data_observations(_cm({})) == []                             # nothing loaded → nothing to say

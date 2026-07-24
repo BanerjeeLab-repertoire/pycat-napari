@@ -145,6 +145,39 @@ def context_from_session(central_manager, ctx: Optional[AnalysisContext] = None)
     return ctx
 
 
+def data_observations(central_manager):
+    """"**What we can tell from your data**" — human-readable observations derived from the loaded image's
+    metadata, each with its EVIDENCE, for the navigator to show as suggestions rather than silent decisions
+    (navigator-UX item 3). Nothing is invented: an observation appears only when the metadata actually supports
+    it, and dimensionality is never guessed from a bare plane count (a time-series / Z-stack line needs the
+    corroborating interval / step). Returns a list of ``{text, evidence}`` dicts (empty when nothing is
+    known)."""
+    dr = getattr(getattr(central_manager, "active_data_class", None), "data_repository", None)
+    get = dr.get if hasattr(dr, "get") else (lambda k, d=None: d)
+    common = ((get("file_metadata") or {}) or {}).get("common") or {}
+    nc, nt, nz = _num(common.get("n_channels")), _num(common.get("n_timepoints")), _num(common.get("n_z"))
+    interval, zstep = _num(common.get("frame_interval_s")), _num(common.get("z_step_um"))
+
+    obs = []
+    shape = []
+    if nc:
+        shape.append(f"{int(nc)} channel{'s' if nc > 1 else ''}")
+    if nz:
+        shape.append(f"{int(nz)} Z slice{'s' if nz > 1 else ''}")
+    if nt:
+        shape.append(f"{int(nt)} timepoint{'s' if nt > 1 else ''}")
+    if shape:
+        obs.append({"text": " · ".join(shape), "evidence": "the file's recorded dimensions"})
+    if nt and nt > 1 and interval:
+        obs.append({"text": "This looks like a time series",
+                    "evidence": f"{int(nt)} timepoints, {interval:g} s frame interval"})
+    if nz and nz > 1 and zstep:
+        obs.append({"text": "This looks like a Z-stack", "evidence": f"{int(nz)} slices, {zstep:g} µm step"})
+    if nc and nc > 1:
+        obs.append({"text": "This is multichannel", "evidence": f"{int(nc)} channels"})
+    return obs
+
+
 # ── the render model: a plan as ordered rows, quality-gate verdicts inline ───────────────────────────
 
 @dataclasses.dataclass(frozen=True)

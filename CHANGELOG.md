@@ -1,3 +1,21 @@
+## [1.6.319] - 2026-07-23
+### Added — **The navigator shows "What we can tell from your data", and every control now explains itself (navigator-UX items 3 & 3b — the spec is complete).**
+The last of the first-user feedback. The metadata layer already emits the facts; this surfaces them.
+
+- **Item 3 — metadata pre-answers, made visible.** New Qt-free `session.data_observations(central_manager)`
+  returns human-readable observations from the loaded image's metadata, each with its **evidence** — *"3
+  channels · 200 timepoints"*, *"This looks like a time series — 200 timepoints, 0.5 s frame interval"*,
+  *"This is multichannel — 3 channels"*. Nothing is invented: an observation appears only where the metadata
+  supports it, and a time-series / Z-stack line needs the corroborating interval / step (a bare plane count is
+  never enough). The navigator renders these as a **"What we can tell from your data"** section, clearly
+  marked as read from the file, with the user's answers taking precedence (they already do — a user answer
+  outranks metadata in `context_from_session`).
+- **Item 3b — the explanatory layer, guarded.** The panel had shipped without one; now the mode toggle, every
+  capability card, and every plan step carry a tooltip / stated meaning, and a test asserts it (the
+  missing-layer guard) so it can't vanish wholesale again.
+- Tests: a `base` observations test (evidence-backed, no-guessing) + `integration` (the section renders; the
+  explanatory-layer guard). Full `pytest -m "core or base"` green. **Navigator-UX items 1–6 are all shipped.**
+
 ## [1.6.318] - 2026-07-23
 ### Changed — **Navigator comprehension: a load-data step 0, an explained step-colour legend, a self-explaining mode toggle, and Explore-capabilities in its own tab (navigator-UX items 2, 4, 5, 6).**
 The remaining presentation/comprehension items from the first-user feedback (item 1, the re-evaluation bug,

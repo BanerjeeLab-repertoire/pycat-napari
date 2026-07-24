@@ -110,6 +110,24 @@ def _wire_reevaluation(widget, central_manager, render):
         pass
 
 
+def _render_observations(widget, body_layout):
+    """The 'What we can tell from your data' section (navigator-UX item 3): metadata-derived observations with
+    their evidence, shown as SUGGESTIONS — the user's answers take precedence. Renders nothing when no data is
+    loaded or nothing is knowable (no guessing)."""
+    cm = getattr(widget, "_cm", None)
+    if cm is None:
+        return
+    from pycat.navigator.session import data_observations
+    obs = data_observations(cm)
+    if not obs:
+        return
+    body_layout.addWidget(_label("\U0001f50d  What we can tell from your data", "font-weight: bold; font-size: 12px;"))
+    for o in obs:
+        body_layout.addWidget(_label(f"• {o['text']}  —  {o['evidence']}", "color: #2a7ab0; font-size: 11px;"))
+    body_layout.addWidget(_label("Read from the file — your answers below take precedence.",
+                                 "color: gray; font-size: 10px; margin-bottom: 4px;"))
+
+
 def build_navigator_widget(session, *, on_run=None, central_manager=None, parent=None):
     """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
     (headless). ``on_run(plan)`` is called when the user runs the compiled plan. When ``central_manager`` is
@@ -209,6 +227,7 @@ def build_navigator_widget(session, *, on_run=None, central_manager=None, parent
 
     def render():
         _clear()
+        _render_observations(widget, body_layout)      # 'What we can tell from your data' — item 3
         q = widget._session.next_question()
         if q is not None:
             _render_question(widget, body_layout, q, _answer)

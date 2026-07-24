@@ -78,3 +78,25 @@ def test_the_home_splits_guided_and_explore_into_tabs(qtbot, tmp_path):
     assert widget._tabs is not None
     labels = [widget._tabs.tabText(i) for i in range(widget._tabs.count())]
     assert any("Guided" in t for t in labels) and any("Explore" in t for t in labels)
+
+
+@pytest.mark.integration
+def test_every_interactive_element_carries_explanatory_text(qtbot, tmp_path):
+    """Item 3b: the panel shipped without an explanatory layer at all. This is the missing-layer guard — the
+    mode toggle and every capability card button must carry a tooltip, and every plan step-colour must have a
+    stated meaning (items 4/5), so the layer can't go missing wholesale again."""
+    from pycat.ui.home_dock import build_home_widget
+    from pycat.ui.navigator_dock import _STATE_STYLE, _STATE_MEANING
+    from pycat.utils.feature_registry import FeatureRegistry
+    from pycat.utils.feature_cards import register_default_feature_cards
+
+    reg = FeatureRegistry()
+    register_default_feature_cards(types.SimpleNamespace(), reg=reg)
+    widget = build_home_widget(types.SimpleNamespace(), reg=reg, store=_store(tmp_path))
+    qtbot.addWidget(widget)
+
+    assert widget._mode_button.toolTip(), "the Guided/Full toggle must explain itself"
+    assert widget._cards, "the explore tab must have capability cards"
+    for card, btn in widget._cards:
+        assert btn.toolTip(), f"card {card.key!r} has no explanatory tooltip"
+    assert set(_STATE_STYLE) <= set(_STATE_MEANING), "every plan step colour must have a stated meaning"

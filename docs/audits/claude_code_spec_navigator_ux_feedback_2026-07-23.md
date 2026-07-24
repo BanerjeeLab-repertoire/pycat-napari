@@ -1,7 +1,15 @@
 # Claude Code spec — Navigator UX: first-user feedback
 
-> **◐ STATUS — Items 1, 2, 4, 5, 6 DONE (item 1 @1.6.317; items 2/4/5/6 @1.6.318). Only item 3 (metadata
-> pre-answers) remains.**
+> **✅ STATUS — DONE (items 1–6). Item 1 @1.6.317; items 2/4/5/6 @1.6.318; items 3 + 3b @1.6.319.**
+> **Item 3 + 3b (1.6.319).** Qt-free `session.data_observations(cm)` → evidence-backed observations from the
+> loaded metadata (only where supported; a time-series/Z line needs the interval/step — no guessing from a
+> plane count); the navigator renders a 'What we can tell from your data' section, marked read-from-file with
+> the user's answers taking precedence (they already outrank metadata in `context_from_session`). Item 3b: the
+> mode toggle, capability cards, and plan steps all carry explanatory text, guarded by
+> `test_every_interactive_element_carries_explanatory_text`. `base` observations test + `integration` (section
+> renders; the missing-layer guard). **Deliberately deferred:** a per-answer interactive OVERRIDE toggle inside
+> the observations section (the answers are already overridable via the questions; a per-line toggle is a
+> refinement, not the visibility the report asked for).
 > **Items 2/4/5/6 (1.6.318).** Item 2: `plan_rows(plan, ctx)` prepends a visible 'Load data' step 0 (blocked
 > until an image is open, satisfied once it is; the questionnaire is never gated — `plan_rows(plan)` without a
 > ctx is unchanged). Item 4: a step-colour legend + per-step tooltips (`_STATE_MEANING`), reusing the existing

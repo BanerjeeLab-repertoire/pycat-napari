@@ -132,3 +132,19 @@ def test_the_plan_re_gates_on_a_viewer_event_and_the_run_reason_updates(qtbot):
     widget._reevaluate_now()
     assert widget._state == "plan"                          # still on the plan (re-gated, not restarted)
     assert widget._session.run_blocked_reason() != "Load an image first."   # the reason tracked the load
+
+
+@pytest.mark.integration
+def test_the_navigator_shows_a_data_observations_section(qtbot):
+    from types import SimpleNamespace
+    from PyQt5.QtWidgets import QLabel
+    from pycat.ui.navigator_dock import build_navigator_widget
+    from pycat.navigator.session import NavigatorSession
+
+    repo = {"file_metadata": {"common": {"n_channels": 3, "n_timepoints": 200, "frame_interval_s": 0.5}}}
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository=repo), viewer=None,
+                         register_data_switch_callback=lambda cb: None)
+    widget = build_navigator_widget(NavigatorSession(), central_manager=cm)
+    qtbot.addWidget(widget)
+    texts = " ".join(lbl.text() for lbl in widget.findChildren(QLabel))
+    assert "What we can tell" in texts and "multichannel" in texts.lower()
