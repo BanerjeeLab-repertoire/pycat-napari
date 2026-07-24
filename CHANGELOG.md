@@ -1,3 +1,22 @@
+## [1.6.324] - 2026-07-24
+### Added — **A companion sidecar now names stack channels on load too, so an ISS stack is never labelled "Brightfield" (sidecar Part 5, stack path).**
+1.6.320 wired sidecar channel-naming into the 2D loader; this extends the enrichment to the stack load path.
+
+- New Qt-free `enrich_channel_from_sidecar(ch_info, sidecar, channel_index)` — the per-channel counterpart of
+  `enrich_with_sidecar`, for the stack back-ends that name each layer inside a loop rather than from an
+  aggregated list. `enrich_with_sidecar` now delegates to it (shared logic, unchanged behaviour).
+- Wired into the **IMS** and **generic (TIFF/CZI-via-structured-reader)** stack openers: the sidecar is
+  discovered once per load (non-gating — `None` when absent) and each weak channel is named from its emission
+  filter above the pixel/position guess, so an ISS `_Ch1`/`_Ch2` stack is named far-red / green and **never
+  falls to `Brightfield`**. Real in-file metadata is never overwritten.
+- `tests/test_load_channel_identity.py` +3 (`core`): a single channel is named from the sidecar entry at its
+  own index; a metadata channel is left alone; the helper is non-gating. Full `pytest -m "core or base"` green.
+- **Deferred, honestly:** the CZI-streaming back-end was left unwired (it sits exactly at the function-length
+  ratchet, and CZI files carry their own structured metadata so the sidecar case does not arise there); and
+  identity **recall/remember** on the stack path still needs the aggregated-channel-info restructure through
+  `_finalise_stack_load` (the stack openers name each layer in isolation). Live in-napari validation of the
+  stack dialog also remains outside the headless suite.
+
 ## [1.6.323] - 2026-07-24
 ### Changed — **Opening a large time-lapse no longer reads every page's tags — the cadence is sampled from a bounded prefix (deep_metadata item 6).**
 A time-lapse TIFF carries its true frame cadence in a per-page `MicroManagerMetadata` tag. The load path used

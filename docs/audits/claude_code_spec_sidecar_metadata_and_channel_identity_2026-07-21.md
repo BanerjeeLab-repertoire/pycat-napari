@@ -19,12 +19,20 @@
 > already asks for an ambiguous channel — a second would violate the spec's own "the dialog is a last resort"
 > caution), the wiring reuses that dialog as the ask and adds recall/remember/sidecar-enrichment around it.
 >
-> **REMAINING after 1.6.320:** (1) the **stack load path** — `stack_openers.py`'s three back-ends build only a
-> transient per-channel `_ch_info` and discard it, so wiring recall/remember there needs an aggregating list
-> threaded through `_finalise_stack_load`; deferred as a larger, riskier refactor. (2) **Live GUI validation**
-> of the 2D wiring (the actual dialog interaction and layer renaming) is not headlessly reproducible here —
-> the orchestration is unit-tested, the 1-line live calls are failure-tolerant, but the end-to-end load has
-> not been exercised in a running napari.
+> **◐ Stack-path sidecar enrichment — DONE (IMS + generic), 1.6.324.** `enrich_channel_from_sidecar(ch_info,
+> sidecar, channel_index)` (Qt-free; `enrich_with_sidecar` now delegates to it) is wired into the IMS and
+> generic (TIFF/CZI-via-structured-reader) stack openers: the sidecar is discovered once per load (non-gating)
+> and each weak channel is named from its emission above the pixel/position guess, so an ISS stack is never
+> `Brightfield`. `tests/test_load_channel_identity.py` +3 (`core`). The CZI-streaming back-end is left unwired
+> (it sits exactly at the function-length ratchet, and CZI carries its own structured metadata so the sidecar
+> case does not arise there).
+>
+> **REMAINING after 1.6.324:** (1) identity **recall/remember** on the stack path — the stack openers name each
+> layer in isolation, so this still needs an aggregating channel-info list threaded through
+> `_finalise_stack_load` (the enrichment above does not need it; recall/remember does). (2) **Live GUI
+> validation** of the 2D/stack wiring (dialog interaction, layer renaming) is not headlessly reproducible here —
+> the orchestration is unit-tested and the live calls are failure-tolerant, but the end-to-end load has not been
+> exercised in a running napari.
 > **Part 4 (last-resort channel-identity prompt) — mechanism DONE, 1.6.316.** `channel_naming.channel_needs_identity`
 > (True only for the position-guess fall-through), `channel_designations.remember_channel_identity` /
 > `recall_channel_identities` / `forget_channel_identity` (signature-keyed, extends the same store as the

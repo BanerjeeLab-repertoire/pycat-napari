@@ -7,11 +7,17 @@ persistence store reaches the scientific stack through `channel_designations`, s
 """
 import pytest
 
-from pycat.file_io.load_channel_identity import (
-    enrich_with_sidecar,
-    apply_recalled_identities,
-    remember_user_channel_names,
-)
+# Guarded import (kept out of module top-level) so the headless collector does not skip this module on the
+# `pycat.file_io` prefix — load_channel_identity is Qt-free/headless-safe. See test_metadata_merge.
+try:
+    from pycat.file_io.load_channel_identity import (
+        enrich_with_sidecar,
+        enrich_channel_from_sidecar,
+        apply_recalled_identities,
+        remember_user_channel_names,
+    )
+except Exception:      # pragma: no cover - only when the io stack is truly unavailable
+    pytest.skip("pycat.file_io.load_channel_identity unavailable", allow_module_level=True)
 
 
 # ── Sidecar enrichment (numpy-only) ────────────────────────────────────────────────────────────────────
@@ -44,6 +50,30 @@ def test_enrichment_is_non_gating_without_a_sidecar_or_channels():
     assert enrich_with_sidecar(info, None) is info                    # no sidecar → unchanged, no crash
     assert enrich_with_sidecar(info, {"channels": []}) is info        # empty → unchanged
     assert enrich_with_sidecar(info, {"channels": [{"index": 0}]}) == info  # no emission → unchanged
+
+
+# ── Per-channel enrichment (the stack back-ends name each layer in a loop, not from a list) ─────────────
+
+@pytest.mark.core
+def test_a_single_channel_is_named_from_the_sidecar_at_its_own_index():
+    # A stack back-end enriches channel 1 (a position guess) from the sidecar entry whose index is 1.
+    sidecar = {"channels": [{"index": 0, "emission_nm": 525}, {"index": 1, "emission_nm": 647}]}
+    weak = {"source": "position", "bucket": "green", "label": "Green", "layer_name": "C1-Green"}
+    out = enrich_channel_from_sidecar(weak, sidecar, 1)
+    assert out["source"] == "wavelength" and out["bucket"] == "far_red"    # named from ch1's 647 nm, not ch0's
+
+
+@pytest.mark.core
+def test_a_single_channel_with_real_metadata_is_left_alone():
+    named = {"source": "name", "bucket": "blue", "label": "DAPI", "layer_name": "C0-DAPI"}
+    assert enrich_channel_from_sidecar(named, {"channels": [{"index": 0, "emission_nm": 647}]}, 0) is named
+
+
+@pytest.mark.core
+def test_single_channel_enrichment_is_non_gating():
+    weak = {"source": "position", "bucket": "blue", "label": "DAPI"}
+    assert enrich_channel_from_sidecar(weak, None, 0) is weak                 # no sidecar → unchanged
+    assert enrich_channel_from_sidecar(weak, {"channels": [{"index": 2, "emission_nm": 647}]}, 0) is weak  # no entry for idx 0
 
 
 # ── Remembered identities (reach the scientific stack via channel_designations) ─────────────────────────

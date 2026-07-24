@@ -34,35 +34,37 @@ def _with_identity(info, index, name, source):
     return out
 
 
+def enrich_channel_from_sidecar(ch_info, sidecar, channel_index):
+    """Improve ONE weak channel's name from a discovered sidecar's emission for ``channel_index`` — the
+    per-channel counterpart of :func:`enrich_with_sidecar`, for the stack back-ends that name each layer inside
+    a loop rather than from an aggregated list. A channel already named from real in-file metadata
+    (``name``/``wavelength``) is left untouched; a sidecar that identifies nothing changes nothing. Non-gating:
+    returns ``ch_info`` unchanged on any problem."""
+    if not ch_info or not sidecar:
+        return ch_info
+    try:
+        sc = next((c for c in (sidecar.get("channels") or [])
+                   if isinstance(c, dict) and c.get("index") == channel_index), None)
+        emission = (sc or {}).get("emission_nm")
+        if sc is None or emission is None or (ch_info.get("source") not in _WEAK_SOURCES):
+            return ch_info
+        from pycat.utils.channel_naming import identify_channel
+
+        improved = identify_channel(channel_index=channel_index, emission_wavelength=emission)
+        return improved if improved.get("source") != "position" else ch_info
+    except Exception:      # broad-ok: optional_probe — sidecar enrichment is best-effort; the image still loads
+        return ch_info
+
+
 def enrich_with_sidecar(channel_info, sidecar):
     """Improve WEAK channel names using a discovered sidecar's per-channel emission, re-running the same naming
     tiers so the result carries ``source='wavelength'``. A channel already named from real in-file metadata
     (``name``/``wavelength``) is left untouched; a sidecar that identifies nothing changes nothing. Returns a
     new list (or the input unchanged on any problem — never gates the load)."""
-    if not channel_info or not sidecar:
+    if not channel_info or not sidecar or not sidecar.get("channels"):
         return channel_info
     try:
-        sc_by_index = {
-            c.get("index"): c
-            for c in (sidecar.get("channels") or [])
-            if isinstance(c, dict) and c.get("index") is not None
-        }
-        if not sc_by_index:
-            return channel_info
-        from pycat.utils.channel_naming import identify_channel
-
-        out = []
-        for i, info in enumerate(channel_info):
-            info = info or {}
-            sc = sc_by_index.get(i)
-            emission = (sc or {}).get("emission_nm")
-            if sc is not None and emission is not None and (info.get("source") in _WEAK_SOURCES):
-                improved = identify_channel(channel_index=i, emission_wavelength=emission)
-                if improved.get("source") != "position":   # only adopt when the sidecar actually identified it
-                    out.append(improved)
-                    continue
-            out.append(info)
-        return out
+        return [enrich_channel_from_sidecar(info or {}, sidecar, i) for i, info in enumerate(channel_info)]
     except Exception:      # broad-ok: optional_probe — sidecar enrichment is best-effort; the image still loads
         return channel_info
 

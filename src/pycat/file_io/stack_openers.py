@@ -20,6 +20,8 @@ from pycat.file_io.readers.mask_reader import read_2d_mask_channels
 from pycat.file_io.readers.ims_reader import (
     _ImsReaderTYX, _ImsReaderZYX, _ImsReaderTZYX,
     _suppress_ims_chunk_prints, _ims_pixel_size_um)
+from pycat.file_io.load_channel_identity import enrich_channel_from_sidecar
+from pycat.file_io.sidecar_discovery import sidecar_metadata_for
 from pycat.utils.channel_naming import (
     extract_channel_info,
     extract_channel_info_from_ims,
@@ -172,11 +174,13 @@ class _StackOpenersMixin:
             # identity, so the primary reader (already retained above) is not held twice.
             _img_source.retain(pos_reader)
 
+            _sidecar = sidecar_metadata_for(pos_path)       # once per position; non-gating (None when absent)
             for channel_idx in channels_to_load:
                 with _suppress_ims_chunk_prints():
                     _ch_info = extract_channel_info_from_ims(
                         pos_reader, channel_idx,
                         file_stem=_stem_of(pos_path))
+                _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
                 debug_log(f"file_io: IMS channel {channel_idx} -> "
@@ -474,6 +478,9 @@ class _StackOpenersMixin:
                 channels_to_load = list(range(n_c))
 
             _stem = _stem_of(file_path)
+            # A companion sidecar (an ISS _fbs.xml) names a channel from its emission filter — discovered once,
+            # non-gating (None when absent), applied per channel below so an ISS stack is never 'Brightfield'.
+            _sidecar = sidecar_metadata_for(file_path)
             for channel_idx in channels_to_load:
                 if reader_has_structure:
                     _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem)
@@ -481,6 +488,7 @@ class _StackOpenersMixin:
                     _ch_info = {'layer_name': f'C{channel_idx}',
                                  'bucket': 'unknown', 'label': f'C{channel_idx}',
                                  'source': 'position'}
+                _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
 
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
