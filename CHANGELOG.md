@@ -1,3 +1,22 @@
+## [1.6.315] - 2026-07-23
+### Added — **The workflow preset picker: pick a declared, provenanced starting point that populates but never locks (analysis_presets Part B).**
+The preset objects — the `AnalysisPreset` registry, its import-time honesty invariants (non-empty provenance;
+`validated=True` must link a real validation case), availability gating, and the populate-not-lock
+`PresetApplication` — were built and tested with no UI. This adds the picker surface.
+
+- New `ui/preset_picker.py`: `build_preset_picker(workflow_id, *, available=None, on_apply=...)` lists the
+  presets that apply to a workflow — each with its description, its **provenance** (where the numbers came
+  from, mandatory), a validated / starting-point badge, and any caveats — and **greys** a preset the session
+  cannot run yet with the reason (from `preset_availability`, which reuses the one requirements vocabulary,
+  never a second gate). Choosing one produces a `PresetApplication` and hands it to `on_apply`, which seeds
+  the workflow's parameter widgets; the user may then edit any value and the application tracks the deviation.
+  The picker never locks a value and never invokes a workflow. Headless-safe (`None` without Qt or presets).
+- `tests/test_preset_picker.py` (`integration`, 3 Qt-smoke): a runnable preset applies and seeds a
+  populate-not-lock application; an unrunnable one is greyed with its reason; a workflow with no presets
+  yields no picker. Full `pytest -m "core or base"` green. **Remaining:** embedding the picker in the grounded
+  workflows and the live `PresetApplication.record()` into `batch_processor.record` — thin per-workflow wiring
+  over this reusable control (its record shape is already pinned by test).
+
 ## [1.6.314] - 2026-07-23
 ### Added — **The metadata dialog lists acquisition contradictions first, with a reversible "expected for this instrument" control (tag_confidence Part 3 — the spec is complete).**
 The engine that detects metadata contradictions (e.g. a Zeiss export declaring Oil immersion but Air medium

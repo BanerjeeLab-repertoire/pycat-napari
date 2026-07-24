@@ -1,6 +1,15 @@
 # Claude Code spec — Analysis presets: unify the scattered preset idea
 
-> **◐ STATUS — headless CORE DONE, shipped in 1.6.162 (verified 2026-07-22). Part A + the Qt-free half of
+> **◐ STATUS — Part A + the Qt-free half of B/C DONE (1.6.162); the preset-picker WIDGET DONE (1.6.315).
+> Residual: embedding the picker in the grounded workflows + the live `PresetApplication.record()` wiring
+> (thin per-workflow steps over the reusable control, both needing a live GUI to place/verify).**
+> **Preset picker (1.6.315).** `ui/preset_picker.py` `build_preset_picker(workflow_id, *, available, on_apply)`
+> — lists a workflow's presets with description / provenance / validated-or-starting-point badge / caveats,
+> greys an unrunnable one with its reason (`preset_availability`, the one requirements vocabulary), and on
+> choose produces a populate-not-lock `PresetApplication` handed to `on_apply` (which seeds the workflow's
+> widgets). Headless-safe. `tests/test_preset_picker.py` (`integration`, 3 Qt-smoke). The per-workflow
+> embedding + `batch_processor.record` call are the last wiring — `record()`'s shape is already test-pinned.
+> **[Original status below.]** — headless CORE DONE, shipped in 1.6.162 (verified 2026-07-22). Part A + the Qt-free half of
 > Parts B/C are complete and guarded; the UI picker + its live batch-record wiring are the only residual,
 > and both are Qt-bound.**
 >
