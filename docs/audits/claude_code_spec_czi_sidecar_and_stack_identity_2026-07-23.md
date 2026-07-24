@@ -1,7 +1,21 @@
 # Claude Code spec — Close the two deferred items from the sidecar/channel-identity work
 
-> **◐ STATUS — Part 1 (CZI split + sidecar wire) DONE @1.6.327; Part 3 (collection guard) DONE (git-only).
-> Part 2 (stack recall/remember) remains.**
+> **✅ STATUS — Part 1 (CZI split + sidecar wire) @1.6.327; Part 2 (stack RECALL) @1.6.328; Part 3 (collection
+> guard) git-only. All three addressed; two honest residuals noted below.**
+>
+> **Part 2 — stack RECALL DONE, shipped 1.6.328.** All three stack back-ends (IMS / generic / CZI-streaming) now
+> build the whole channel list and resolve it once through `resolve_channel_identity_on_load` (sidecar + recall
+> by acquisition signature) **before naming** — recall keys on the full list's signature, so it cannot be
+> applied per channel. Precedence preserved and asserted: metadata > sidecar > remembered > guess; recall
+> applies to a new file of the same layout (signature, not path), a different layout does not recall, and a
+> remembered answer never overrides a metadata/sidecar name. A normal stack resolves to the identical list, so
+> naming is unchanged (characterization suites pass). `tests/test_load_channel_identity.py` +3 (`base`).
+> **Two residuals, stated:** (1) **REMEMBER** during a stack load needs a stack channel-identity *prompt*, which
+> the stack loaders don't have — a fresh answer is captured on the 2D dialog and recalled on stacks; there is no
+> new remember trigger on the stack path. (2) Resolution is **per-loader immediately before naming** (via the
+> one shared resolver), NOT at `_finalise_stack_load` as the spec suggested — because recall must precede naming
+> and the funnel runs after it; this is one resolver called at one pre-naming point per loader, not a parallel
+> collection point. Live layer-naming on a real stack is outside the headless gate.
 >
 > **Part 3 — collection-completeness guard DONE (test-only, git-only).** `test_ci_dependencies.py::
 > test_no_NEW_test_file_is_silently_skippable_at_import` — a file carrying a `core`/`base` test with a bare

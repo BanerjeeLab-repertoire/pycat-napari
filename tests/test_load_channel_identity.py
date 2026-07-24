@@ -15,6 +15,7 @@ try:
         enrich_channel_from_sidecar,
         apply_recalled_identities,
         remember_user_channel_names,
+        resolve_channel_identity_on_load,
     )
 except Exception:      # pragma: no cover - only when the io stack is truly unavailable
     pytest.skip("pycat.file_io.load_channel_identity unavailable", allow_module_level=True)
@@ -122,3 +123,37 @@ def test_recall_only_applies_to_weak_channels_never_overwriting_metadata(isolate
     named = [{"source": "name", "bucket": "green", "label": "EGFP"}]   # same signature, but real metadata now
     out = apply_recalled_identities(named)
     assert out[0]["label"] == "EGFP" and out[0]["source"] == "name"    # metadata is not overwritten
+
+
+# ── Stack recall by acquisition signature (czi_sidecar_and_stack_identity Part 2) ────────────────────────
+# The stack loaders resolve the aggregated channel list through resolve_channel_identity_on_load before naming,
+# so a remembered answer applies to a NEW file of the same layout. Precedence: metadata > sidecar > remembered.
+
+@pytest.mark.base
+def test_resolve_recalls_a_remembered_identity_by_signature_not_path(isolated_store):
+    layout = [{"source": "position", "bucket": "far_red", "label": "FarRed"},
+              {"source": "wavelength", "bucket": "green", "label": "Green"}]
+    isolated_store.remember_channel_identity(layout, 0, "FUS-mCherry")
+    # A DIFFERENT file (the path is irrelevant / does not exist) with the SAME channel layout recalls it.
+    same_layout = [{"source": "position", "bucket": "far_red", "label": "FarRed"},
+                   {"source": "wavelength", "bucket": "green", "label": "Green"}]
+    out = resolve_channel_identity_on_load("no_such_stack_file_XYZ.tif", same_layout)
+    assert out[0]["source"] == "user" and out[0]["label"] == "FUS-mCherry"
+
+
+@pytest.mark.base
+def test_a_different_channel_layout_does_not_recall(isolated_store):
+    isolated_store.remember_channel_identity(
+        [{"bucket": "far_red", "label": "FarRed"}, {"bucket": "green", "label": "Green"}], 0, "FUS-mCherry")
+    other = [{"source": "position", "bucket": "blue", "label": "DAPI"}]        # a different layout
+    out = resolve_channel_identity_on_load("x.tif", other)
+    assert out[0].get("source") == "position" and out[0]["label"] == "DAPI"    # no stale recall
+
+
+@pytest.mark.base
+def test_resolve_does_not_override_metadata_with_a_remembered_answer(isolated_store):
+    weak = [{"source": "position", "bucket": "green", "label": "Green"}]
+    isolated_store.remember_channel_identity(weak, 0, "GFP")
+    named = [{"source": "name", "bucket": "green", "label": "EGFP"}]           # same signature, real metadata now
+    out = resolve_channel_identity_on_load("x.tif", named)
+    assert out[0]["label"] == "EGFP" and out[0]["source"] == "name"           # metadata outranks the memory

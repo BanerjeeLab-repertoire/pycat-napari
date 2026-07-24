@@ -1,3 +1,26 @@
+## [1.6.328] - 2026-07-24
+### Added — **A channel identity you name once is now recalled on STACK loads too, by acquisition layout (czi_sidecar_and_stack_identity Part 2).**
+On the 2D path a remembered channel identity is recalled for the next same-layout file; the stack loaders named
+each layer in isolation, so that memory never reached them. Now all three stack back-ends resolve the channel
+set before naming.
+
+- The IMS, generic (TIFF/CZI-structured), and CZI-streaming openers now **build the whole channel list, then
+  resolve it once** through `resolve_channel_identity_on_load` (sidecar enrichment + recall by acquisition
+  signature) **before** naming any layer — recall keys on the full list's signature, so it cannot be applied
+  per channel. This replaces the per-channel sidecar enrichment with the shared resolver.
+- **Precedence preserved and asserted:** real metadata > sidecar > remembered user answer > pixel/position
+  guess (`apply_recalled_identities` only touches weak channels). A remembered answer applies to a **new file
+  of the same layout** (signature, not path); a **different layout does not recall**; and it never overrides a
+  metadata- or sidecar-named channel.
+- A normal stack (no sidecar, no remembered answer) resolves to the identical list, so naming is unchanged —
+  the stack characterization suites pass. `tests/test_load_channel_identity.py` +3 (`base`): recall-by-signature,
+  different-layout-no-recall, metadata-not-overridden. Full `pytest -m "core or base"` green.
+- **Scope, honestly:** this delivers RECALL on the stack path (the cross-path benefit — remember on a 2D load,
+  recall on a same-layout stack). The stack loaders have no channel-identity *prompt*, so a fresh answer is
+  still captured on the 2D dialog, not during a stack load. Resolution is per-loader immediately before naming
+  (the one shared resolver) rather than at `_finalise_stack_load`, because recall must precede naming and the
+  funnel runs after it. Live layer-naming on a real stack isn't reproducible in the headless gate.
+
 ## [1.6.327] - 2026-07-24
 ### Added — **CZI streaming loads now read a companion sidecar too — the last stack back-end gets channel naming, without moving the complexity ratchet (czi_sidecar_and_stack_identity Part 1).**
 1.6.324 wired sidecar channel-naming into the IMS and generic stack openers but left CZI-streaming out, because

@@ -20,8 +20,7 @@ from pycat.file_io.readers.mask_reader import read_2d_mask_channels
 from pycat.file_io.readers.ims_reader import (
     _ImsReaderTYX, _ImsReaderZYX, _ImsReaderTZYX,
     _suppress_ims_chunk_prints, _ims_pixel_size_um)
-from pycat.file_io.load_channel_identity import enrich_channel_from_sidecar
-from pycat.file_io.sidecar_discovery import sidecar_metadata_for
+from pycat.file_io.load_channel_identity import resolve_channel_identity_on_load
 from pycat.utils.channel_naming import (
     extract_channel_info,
     extract_channel_info_from_ims,
@@ -174,13 +173,14 @@ class _StackOpenersMixin:
             # identity, so the primary reader (already retained above) is not held twice.
             _img_source.retain(pos_reader)
 
-            _sidecar = sidecar_metadata_for(pos_path)       # once per position; non-gating (None when absent)
-            for channel_idx in channels_to_load:
-                with _suppress_ims_chunk_prints():
-                    _ch_info = extract_channel_info_from_ims(
-                        pos_reader, channel_idx,
-                        file_stem=_stem_of(pos_path))
-                _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
+            # Resolve every channel's identity as a set (sidecar + remembered answer by acquisition signature)
+            # before naming — recall keys on the whole channel list, so it cannot be applied per channel.
+            with _suppress_ims_chunk_prints():
+                _ch_infos = [extract_channel_info_from_ims(pos_reader, _c, file_stem=_stem_of(pos_path))
+                             for _c in channels_to_load]
+            _ch_infos = resolve_channel_identity_on_load(pos_path, _ch_infos)
+            for _pos, channel_idx in enumerate(channels_to_load):
+                _ch_info = _ch_infos[_pos]
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
                 debug_log(f"file_io: IMS channel {channel_idx} -> "
@@ -478,17 +478,16 @@ class _StackOpenersMixin:
                 channels_to_load = list(range(n_c))
 
             _stem = _stem_of(file_path)
-            # A companion sidecar (an ISS _fbs.xml) names a channel from its emission filter — discovered once,
-            # non-gating (None when absent), applied per channel below so an ISS stack is never 'Brightfield'.
-            _sidecar = sidecar_metadata_for(file_path)
-            for channel_idx in channels_to_load:
-                if reader_has_structure:
-                    _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem)
-                else:
-                    _ch_info = {'layer_name': f'C{channel_idx}',
-                                 'bucket': 'unknown', 'label': f'C{channel_idx}',
-                                 'source': 'position'}
-                _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
+            # Build every channel's identity FIRST, then resolve the whole set: sidecar enrichment (an ISS
+            # _fbs.xml names a channel from its emission, so a stack is never 'Brightfield') AND a remembered
+            # answer for THIS acquisition layout — recall keys on the full channel list's signature, so it
+            # cannot be applied per channel. Precedence: real metadata > sidecar > remembered answer > guess.
+            _ch_infos = [extract_channel_info(image, _c, file_stem=_stem) if reader_has_structure
+                         else {'layer_name': f'C{_c}', 'bucket': 'unknown', 'label': f'C{_c}', 'source': 'position'}
+                         for _c in channels_to_load]
+            _ch_infos = resolve_channel_identity_on_load(file_path, _ch_infos)
+            for _pos, channel_idx in enumerate(channels_to_load):
+                _ch_info = _ch_infos[_pos]
 
                 _ch_label    = _ch_info['layer_name']
                 _ch_colormap = suggest_colormap(_ch_info['bucket'])
@@ -654,15 +653,18 @@ class _StackOpenersMixin:
         _img_source = ImageSource(file_path=file_path)
         _img_source.retain(reader)
 
-        _sidecar = sidecar_metadata_for(file_path)          # once per load; non-gating (None when absent)
-        for channel_idx in range(n_c):
+        # Build each channel's identity, then resolve the whole set (sidecar + remembered answer by acquisition
+        # signature) before naming — same precedence as the generic/2D paths (metadata > sidecar > remembered).
+        def _czi_ch_info(_c):
             try:
-                _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem_of(file_path)) if image is not None else None
+                return extract_channel_info(image, _c, file_stem=_stem_of(file_path)) if image is not None else None
             except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
-                _ch_info = None
-            if not _ch_info:
-                _ch_info = {'layer_name': f'C{channel_idx}', 'bucket': 'unknown', 'source': 'position'}
-            _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
+                return None
+        _ch_infos = [_czi_ch_info(_c) or {'layer_name': f'C{_c}', 'bucket': 'unknown', 'source': 'position'}
+                     for _c in range(n_c)]
+        _ch_infos = resolve_channel_identity_on_load(file_path, _ch_infos)
+        for channel_idx in range(n_c):
+            _ch_info = _ch_infos[channel_idx]
             _ch_label = _ch_info.get('layer_name', f'C{channel_idx}')
             _ch_colormap = suggest_colormap(_ch_info.get('bucket', 'unknown'))
 
