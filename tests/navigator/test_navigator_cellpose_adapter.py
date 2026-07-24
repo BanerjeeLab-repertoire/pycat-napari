@@ -57,8 +57,10 @@ def test_a_real_cell_plan_has_a_segmentation_step_that_now_resolves_to_a_batch_h
     planner = Planner(build_registry_from_workbook())
     plan = planner.compile(AnalysisIntent(target="cell", observables=["morphology"]), AnalysisContext())
     names = [es.name for es in execution_order(plan)]
-    resolved = [n for n in names if resolve_batch_step(n, plan.intent) == "cellpose_segmentation"]
-    assert resolved, f"no real cell-plan step resolves to cellpose_segmentation — steps were {names}"
+    resolved = {n: resolve_batch_step(n, plan.intent) for n in names}
+    # the real cell chain now fires end to end: segment the cells, then measure them
+    assert "cellpose_segmentation" in resolved.values(), f"no cellpose step in a real cell plan — {names}"
+    assert "cell_analysis" in resolved.values(), f"no cell-analysis step in a real cell plan — {names}"
 
 
 def test_condensate_and_timeseries_segmentation_are_reported_not_guessed():
@@ -89,7 +91,7 @@ def test_every_adapter_targets_a_real_registered_batch_step():
             bs = resolve_batch_step(name, AnalysisIntent(target=target, observables=["x"]))
             if bs is not None:
                 targets.add(bs)
-    assert targets == {"background_removal", "cellpose_segmentation"}
+    assert targets == {"background_removal", "cellpose_segmentation", "cell_analysis"}
     missing = [bs for bs in targets if bs not in registry]
     assert not missing, f"adapters target batch steps that are not registered: {missing}"
 

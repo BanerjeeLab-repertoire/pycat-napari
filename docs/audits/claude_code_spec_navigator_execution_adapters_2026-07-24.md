@@ -9,8 +9,13 @@
 > (unproven batch route) and time-series keyframe cellpose are reported, never guessed. `params_from` gained the
 > reviewed values so it applies each where the handler reads it (`data_instance` for `cell_diameter`).
 > `test_navigator_cellpose_adapter.py` (`base`, 5): real-plan resolution guard + guided == manual at the reviewed
-> diameter, bit for bit + registry guard. **Phase 3 continues** (more workflows, each behind its route-equivalence
-> test); **Phase 4** (dock progress + cancel) remains.
+> diameter, bit for bit + registry guard.
+> **Phase 3 (cont.) — cell analysis (1.6.335).** `feature_analysis_tools` (cell) → the `cell_analysis` batch step,
+> proven without torch on a synthetic labelled mask (`test_navigator_cell_analysis_adapter.py`, `base`, 4: guided ==
+> manual bit for bit). It reads the `cellpose_mask` segmentation writes, so a real cell plan now fires
+> `segmentation_tools → feature_analysis_tools` end to end; no upstream mask → reported error, never a silent empty.
+> Condensate feature analysis stays reported (unproven route). **Phase 3 continues; Phase 4** (dock progress +
+> cancel) remains.
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

@@ -1,3 +1,22 @@
+## [1.6.335] - 2026-07-24
+### Added — **Navigator execution-adapter layer, Phase 3 (cont.): cell analysis — the step that measures what segmentation produced, chained.**
+The real cell chain a guided run computes is *segment, then measure*. 1.6.334 shipped the segmentation adapter;
+this adds the measurement step, so the two now run end to end.
+- **New route-proven workflow: `feature_analysis_tools` (cell target) → the `cell_analysis` batch step.** Both the
+  batch route and a direct call reduce to the same `cell_analysis_func`, so it is proven **without torch** on a
+  synthetic labelled mask (cell analysis measures any integer label image). `tests/navigator/test_navigator_cell_analysis_adapter.py`
+  (`base`, 4): guided == manual, **bit for bit**, over the per-cell feature table.
+- **The chain contract.** `cell_analysis` reads the `cellpose_mask` the segmentation adapter writes into the shared
+  run state — so in a real cell plan the guided run now fires `segmentation_tools → feature_analysis_tools` end to
+  end (asserted: a real cell/morphology plan resolves BOTH steps). With no upstream mask the step is reported as an
+  error (segmentation must run first), never a silent empty result.
+- **Coarse-module honesty holds.** `feature_analysis_tools` resolves to `None` for a condensate target — its
+  `condensate_analysis` route depends on the unproven condensate-segmentation route — so it is reported, never
+  guessed. Cell analysis surfaces no new run-time knob (it uses the session measurements already reviewed on
+  segmentation), so the parameter review stays clean.
+- **Later** (per the `navigator_execution_adapters` spec): more workflows one at a time, then dock progress +
+  cancel (Phase 4).
+
 ## [1.6.334] - 2026-07-24
 ### Fixed + Added — **Navigator execution-adapter layer, Phase 3: adapters fire on REAL plan steps; cell segmentation is the next route-proven workflow.**
 **The finding this closes:** Phase 1 proved the executor mechanism against a *synthetic* step name

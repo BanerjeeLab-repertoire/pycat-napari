@@ -69,6 +69,21 @@ def _cellpose_params(intent, ctx, state, reviewed):
     return {"method": "cellpose", "cellpose_refine": False}
 
 
+def _cell_analysis_params(intent, ctx, state, reviewed):
+    """Cell analysis takes no run-time knob of its own — it measures the mask segmentation produced, using the
+    session measurements already on the ``data_instance`` (cell_diameter, object_size, ball_radius, pixel size).
+    So the params dict is empty (image_layer/omit_layer default to the fallback + no omit mask headlessly)."""
+    return {}
+
+
+def _feature_analysis_step_if_cell(intent):
+    """``feature_analysis_tools`` is coarse — for a cell target it is ``cell_analysis`` (measures the cell mask,
+    the natural next step after segmentation). For a condensate target it would be ``condensate_analysis``, which
+    depends on a ``puncta_mask`` from the unproven condensate-segmentation batch route — so it resolves to
+    ``None`` (reported, never guessed) until that route is proven."""
+    return "cell_analysis" if getattr(intent, "target", None) == "cell" else None
+
+
 def _cellpose_step_if_cell(intent):
     """``segmentation_tools`` is coarse — for a cell target it is single-frame Cellpose (the ``cellpose_segmentation``
     batch step `test_route_equivalence` proves), but condensate segmentation is an unproven batch route (a
@@ -88,6 +103,8 @@ _ADAPTERS: dict = {
     "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
                                           _background_removal_params),
     "segmentation_tools": ExecAdapter("segmentation_tools", _cellpose_step_if_cell, _cellpose_params),
+    "feature_analysis_tools": ExecAdapter("feature_analysis_tools", _feature_analysis_step_if_cell,
+                                          _cell_analysis_params),
 }
 
 
