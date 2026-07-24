@@ -1,7 +1,16 @@
 # Claude Code spec — Close the two deferred items from the sidecar/channel-identity work
 
-> **◐ STATUS — Part 1 (CZI split + sidecar wire) DONE, shipped 1.6.327. Parts 2 (stack recall/remember) and 3
-> (collection-completeness guard) remain.**
+> **◐ STATUS — Part 1 (CZI split + sidecar wire) DONE @1.6.327; Part 3 (collection guard) DONE (git-only).
+> Part 2 (stack recall/remember) remains.**
+>
+> **Part 3 — collection-completeness guard DONE (test-only, git-only).** `test_ci_dependencies.py::
+> test_no_NEW_test_file_is_silently_skippable_at_import` — a file carrying a `core`/`base` test with a bare
+> MODULE-scope import of a GUI-bound pycat / optional-stack package is silently ignored by
+> `conftest.pytest_ignore_collect` when that stack is absent (no error), so its headless tests never run in that
+> lane. **The scan surfaced 26 such files** (not one incident — a class): they run in CI's full lane but hide in
+> any partial/local lane. The guard grandfathers those 26 in `_SILENTLY_SKIPPABLE_AT_IMPORT` and **fails on any
+> NEW one**, naming it, and requires a fixed file to be removed from the set (the debt list stays accurate). The
+> 26 are follow-on debt to convert to the guarded-import pattern incrementally.
 >
 > **Part 1 — DONE, 1.6.327.** The libCZI-metadata preamble was extracted verbatim into `_czi_open_metadata`
 > (returns `(image, microns_per_pixel)`), dropping `_open_czi_streaming` from 120→106 lines (ratchet metric) —

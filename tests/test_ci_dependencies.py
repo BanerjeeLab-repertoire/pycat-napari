@@ -797,3 +797,84 @@ def test_a_core_test_needs_only_the_minimal_lane_install():
           "scope) must be numpy-only — else it belongs in `base`. Re-mark the test `base`, or make the "
           "imported module numpy-only."
     )
+
+
+# ── Collection completeness: no NEW test file may be SILENTLY skipped at import (czi_sidecar_and_stack_identity
+# Part 3) ─────────────────────────────────────────────────────────────────────────────────────────────────────
+#
+# conftest.pytest_ignore_collect SILENTLY ignores a test file (no error, no skip line) when a MODULE-SCOPE
+# import names a GUI-bound pycat package or an optional-stack package that is absent in the current lane. A
+# file carrying a headless (`core`/`base`) test but with such a bare import therefore has its headless tests
+# QUIETLY not run in that lane — exactly how test_load_channel_identity hid 10 tests for four versions (1.6.320
+# → 1.6.324). The fix is the guarded import (wrap it in `try: … except Exception: pytest.skip(…,
+# allow_module_level=True)`), which keeps the import off the module top level so the conftest does not skip the
+# file. These are grandfathered debt; the set only SHRINKS as files switch to the guarded pattern — a file NOT
+# in the set that acquires the shape fails, and a file in the set that is FIXED must be removed from it.
+_SILENTLY_SKIPPABLE_AT_IMPORT = frozenset({
+    "test_axis_is_per_layer.py", "test_brushable_workspace.py", "test_coordinate_readout.py",
+    "test_czi_bioformats_reader.py", "test_czi_seam.py", "test_file_io_naming.py",
+    "test_ims_reader_extraction.py", "test_invitro_brushable.py", "test_loaders_agree_on_scale.py",
+    "test_operation_gating.py", "test_pagename_voxelsize.py", "test_reader_cache_closes.py",
+    "test_scene_stack.py", "test_scenes.py", "test_session_load_lazy_image.py",
+    "test_session_load_threading.py", "test_session_manifest.py", "test_session_persist_workflow.py",
+    "test_sidecar_discovery.py", "test_sidecar_metadata_step1.py", "test_stack_layer_builders_extraction.py",
+    "test_stack_metadata_extraction.py", "test_storage_probe_deadline.py", "test_tiff_page_map.py",
+    "test_tiff_reader_selection.py", "test_writers_session_outputs.py",
+})
+
+
+def _has_headless_test(tree):
+    """True if a test file carries a `core` or `base` marker (a `@pytest.mark.core/base` decorator attribute or
+    a `pytestmark = pytest.mark.core/base` assignment) — i.e. a test that is meant to run headless."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and n.attr in ("core", "base"):
+            v = n.value
+            if isinstance(v, ast.Attribute) and v.attr == "mark":
+                return True
+    return False
+
+
+def _files_silently_skippable_at_import():
+    """``{name: [offending module-scope imports]}`` for test files that carry a headless test AND have a bare
+    module-scope import of a GUI-bound pycat / optional-stack package (which the conftest silently ignores when
+    that stack is absent). A guarded import (inside a ``try`` block) is not a top-level node and so is exempt."""
+    out = {}
+    for path in sorted((_ROOT / "tests").rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        if not _has_headless_test(tree):
+            continue
+        bad = set()
+        for node in tree.body:      # MODULE scope only — that is exactly what the conftest scans
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module] if isinstance(node, ast.ImportFrom) and node.module else [])
+            for name in names:
+                if name.split(".")[0] in _OPTIONAL_STACK_ABSENT or any(name.startswith(p) for p in _GUI_BOUND_PYCAT):
+                    bad.add(name)
+        if bad:
+            out[path.name] = sorted(bad)
+    return out
+
+
+@pytest.mark.core
+def test_no_NEW_test_file_is_silently_skippable_at_import():
+    """A test file with a headless (`core`/`base`) test must not import a GUI-bound / optional-stack package at
+    MODULE scope — conftest silently IGNORES such a file when that stack is absent, so its headless tests never
+    run and nothing goes red (test_load_channel_identity hid 10 tests for four versions this way). Guard the
+    import so it is not a top-level node. The grandfathered set only shrinks; a new offender fails here."""
+    offenders = _files_silently_skippable_at_import()
+    new = {k: v for k, v in offenders.items() if k not in _SILENTLY_SKIPPABLE_AT_IMPORT}
+    fixed = sorted(_SILENTLY_SKIPPABLE_AT_IMPORT - set(offenders))
+    assert not new, (
+        "these test files carry a `core`/`base` test but import a GUI-bound / optional-stack package at MODULE "
+        "scope, so conftest SILENTLY skips them (their headless tests never run) whenever that stack is absent:"
+        "\n  " + "\n  ".join(f"{k} → {v}" for k, v in sorted(new.items()))
+        + "\n\nGuard the import so it is NOT a top-level node:\n"
+          "  try:\n      from pycat.file_io... import ...\n"
+          "  except Exception:\n      pytest.skip('... unavailable', allow_module_level=True)\n"
+          "See tests/test_metadata_merge.py for the pattern.")
+    assert not fixed, (
+        "these files no longer have the silent-skip shape — remove them from `_SILENTLY_SKIPPABLE_AT_IMPORT` "
+        "so the debt list stays accurate:\n  " + "\n  ".join(fixed))
