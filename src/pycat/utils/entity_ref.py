@@ -228,6 +228,53 @@ def entity_id_column(dataset_id, operation_id, entity_type, frame, label, parent
                      entity_id=make_entity_id(frame, label, parent)).as_column_value()
 
 
+def migrate_entity_id_dataset(df, old_dataset_id, new_dataset_id, *, column=ENTITY_ID_COLUMN) -> int:
+    """Upgrade a pre-1.6.191 dataframe's ``_pycat_entity_id`` from a **path-based** ``dataset_id`` prefix to the
+    durable **UUID** (dataset_identity_uuid migration, step 4).
+
+    The id string is ``f"{dataset_id}/{operation_id}/{entity_type}/{entity_id}"`` and is **opaque — never
+    parsed back** (a path ``dataset_id`` contains separators, so the composite cannot be split). Migration is a
+    literal PREFIX swap: a row whose id begins ``f"{old_dataset_id}/"`` gets that prefix replaced with
+    ``f"{new_dataset_id}/"``, leaving the rest (operation/type/frame/label) byte-identical. It is
+    spelling-tolerant (``/`` vs ``\\`` inside the path) because the old prefix was ``str(source_path)`` on
+    whatever platform stamped it. Rows not under the old prefix — and a df without the column — are left
+    untouched; the swap is idempotent. Mutates the column in place and returns the number of rows migrated.
+
+    This matters because both brushing and the entity registry match the WHOLE id string exactly: an
+    un-migrated ``path/…`` id would never match a freshly-derived ``uuid/…`` id for the same object, so
+    resolution would silently fail. After migration a restored id equals what a fresh stamp now produces.
+    """
+    try:
+        if df is None or not old_dataset_id or not new_dataset_id:
+            return 0
+        if column not in getattr(df, 'columns', ()):
+            return 0
+        old = str(old_dataset_id)
+        new = str(new_dataset_id)
+        if old == new:
+            return 0
+        # The separator AFTER dataset_id in the composite is always '/'; only the path's INTERNAL spelling
+        # varies by platform, so match both slash conventions.
+        prefixes = {f"{p}/" for p in (old, old.replace("\\", "/"), old.replace("/", "\\"))}
+        new_prefix = f"{new}/"
+        n = 0
+
+        def _swap(value):
+            nonlocal n
+            s = str(value)
+            for pre in prefixes:
+                if s.startswith(pre):
+                    n += 1
+                    return new_prefix + s[len(pre):]
+            return value
+
+        df[column] = df[column].map(_swap)
+        return n
+    except Exception as exc:      # broad-ok: a migration is best-effort; a failure must never break a session load
+        debug_log("entity_ref: entity-id migration failed", exc)
+        return 0
+
+
 # The parent column, by every name the codebase actually writes it under. `'cell label'` — with a
 # SPACE — is what `puncta_analysis_func` emits; everything else uses the underscore. See the note in
 # `ObjectRef.from_row`.

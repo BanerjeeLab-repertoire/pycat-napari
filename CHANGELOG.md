@@ -1,3 +1,24 @@
+## [1.6.325] - 2026-07-24
+### Fixed — **Old saved sessions' entity ids now upgrade to the durable dataset UUID on load, so brushing and cross-session references resolve again (dataset_identity_uuid step 4).**
+Since 1.6.191 a dataset's identity is a durable UUID, not its file path. Sessions saved before that embedded
+the file PATH as the `dataset_id` prefix of every `_pycat_entity_id`. Because brushing and the entity registry
+match the whole id string exactly, an un-migrated `path/…` id never matches a freshly-derived `uuid/…` id for
+the same object — resolution silently failed. This upgrades them on open.
+
+- New Qt-free `entity_ref.migrate_entity_id_dataset(df, old_dataset_id, new_dataset_id)` — a literal prefix
+  swap (`f"{old}/"` → `f"{uuid}/"`) that leaves operation/type/frame/label byte-identical. The composite id is
+  opaque and a path contains separators, so it is never parsed; the swap tolerates `/` vs `\` path spellings
+  and is idempotent. After migration a restored id equals what a fresh stamp now produces for the same object.
+- Wired into the session loader (`_apply_session_payload`): each restored dataframe is migrated using the
+  manifest's `source_image.path` resolved to its UUID via the dataset registry, before it enters the
+  repository. Non-gating — a no-manifest/loose load (no source path) or an unreadable file simply skips it, and
+  a failure never blocks the load.
+- `tests/test_entity_id_migration.py` (`base`, 7): prefix swap with the suffix intact; parity with a fresh
+  stamp (the resolution guarantee); spelling tolerance; other datasets left alone; idempotent/no-op; safe on a
+  df without the column; and end-to-end against the real registry UUID. Full `pytest -m "core or base"` green.
+- Scope, honestly: current saves strip `_pycat_*` columns, so only pre-strip (pre-1.6.191) session CSVs carry a
+  path-based id to migrate — the exact population this targets.
+
 ## [1.6.324] - 2026-07-24
 ### Added — **A companion sidecar now names stack channels on load too, so an ISS stack is never labelled "Brightfield" (sidecar Part 5, stack path).**
 1.6.320 wired sidecar channel-naming into the 2D loader; this extends the enrichment to the stack load path.

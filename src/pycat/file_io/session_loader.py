@@ -316,6 +316,22 @@ def _load_source_image_into_viewer(src_path, viewer, data_instance, file_io=None
         return False
 
 
+def _migrate_loaded_entity_ids(df, source_path):
+    """Upgrade a restored dataframe's pre-1.6.191 path-based ``_pycat_entity_id`` to the durable UUID for this
+    session's source image (dataset_identity_uuid migration, step 4). Non-gating: needs the manifest source
+    path (a no-manifest / loose load has none), needs the file readable to mint a UUID, and never raises."""
+    try:
+        from pycat.utils.entity_ref import ENTITY_ID_COLUMN, migrate_entity_id_dataset
+        if df is None or not source_path or ENTITY_ID_COLUMN not in getattr(df, 'columns', ()):
+            return
+        from pycat.utils.dataset_identity import uuid_for_path
+        uuid = uuid_for_path(source_path)
+        if uuid:
+            migrate_entity_id_dataset(df, source_path, uuid)
+    except Exception:      # broad-ok: migration is best-effort; a failure must never block the session load
+        pass
+
+
 def _read_session_payload(folder, *, stems=None, stem_filter=None, progress=None) -> dict:
     """Read + decode a session's files into a payload — **no viewer, no repository writes.**
 
@@ -514,8 +530,12 @@ def _apply_session_payload(payload, viewer, data_instance, central_manager=None)
     except Exception:
         pass
 
-    # 3) Dataframes -> repository.
+    # 3) Dataframes -> repository. Upgrade any pre-1.6.191 path-based entity ids to the durable UUID first, so
+    #    a restored id matches what a fresh stamp now produces (brushing / the registry match the whole id
+    #    string exactly). Non-gating — only manifest-based loads know the source path; a failure never blocks.
+    _migrate_path = payload.get('source_path')
     for df_key, df in payload.get('dataframes', {}).items():
+        _migrate_loaded_entity_ids(df, _migrate_path)
         loaded_dfs[df_key] = df
         if data_instance is not None:
             data_instance.data_repository[df_key] = df

@@ -1,10 +1,17 @@
-> **✅ STATUS — mechanism (1.6.190) + `dataset_id_for` integration (1.6.191) DONE.** `dataset_id_for` now
-> resolves a READABLE file to its durable UUID via `dataset_identity.uuid_for_path` / `default_registry`
-> (persisted to `~/.pycat/dataset_registry.json`); an absent/unreadable path falls back to the path string
-> (backward-compatible). `tests/test_dataset_identity.py` covers the routing + the fallback. **Remaining
-> (smaller follow-on):** the one-time migration of OLD path-based session ids to UUIDs on load (rewrites
-> ids in saved dataframes) — the fresh-load path is durable now; only pre-1.6.191 saved sessions carry
-> path-based ids.
+> **✅ STATUS — COMPLETE. mechanism (1.6.190) + `dataset_id_for` integration (1.6.191) + session-id migration
+> (1.6.325).** `dataset_id_for` resolves a READABLE file to its durable UUID via `dataset_identity.uuid_for_path`
+> / `default_registry` (persisted to `~/.pycat/dataset_registry.json`); an absent/unreadable path falls back to
+> the path string (backward-compatible). `tests/test_dataset_identity.py` covers the routing + the fallback.
+>
+> **Step 4 (migrate old path-based session ids) — DONE, shipped 1.6.325.** `entity_ref.migrate_entity_id_dataset`
+> (Qt-free) swaps a pre-1.6.191 dataframe's path-based `dataset_id` prefix for the durable UUID — a literal
+> `f"{old}/"` → `f"{uuid}/"` prefix replacement (the composite id is opaque and a path contains separators, so
+> it is never parsed), spelling-tolerant and idempotent, leaving operation/type/frame/label byte-identical.
+> Wired into `session_loader._apply_session_payload`: each restored dataframe is migrated using the manifest's
+> `source_image.path` resolved through the registry, non-gating (a no-manifest/loose load or unreadable file
+> skips it; a failure never blocks the load). This restores exact-string resolution for brushing and the entity
+> registry (both match the whole id). `tests/test_entity_id_migration.py` (`base`, 7). Scope is honestly narrow —
+> current saves strip `_pycat_*` columns, so only pre-strip session CSVs carry a path-based id to migrate.
 >
 > (superseded) The mechanism-only status: **🟡 the `dataset_id_for` re-routing REMAINS.**
 > `utils/dataset_identity.py` — `DatasetIdentity` / `DatasetFingerprint`, `bounded_partial_hash` (head +
