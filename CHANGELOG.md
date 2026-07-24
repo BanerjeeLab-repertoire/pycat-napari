@@ -1,3 +1,19 @@
+## [1.6.327] - 2026-07-24
+### Added — **CZI streaming loads now read a companion sidecar too — the last stack back-end gets channel naming, without moving the complexity ratchet (czi_sidecar_and_stack_identity Part 1).**
+1.6.324 wired sidecar channel-naming into the IMS and generic stack openers but left CZI-streaming out, because
+`_open_czi_streaming` sat exactly at the 120-line function ratchet and one more line would cross it. That reason
+was contingent, not principled — so this splits the function and wires the sidecar.
+
+- Extracted the libCZI-metadata preamble **verbatim** into `_czi_open_metadata` (returns
+  `(image, microns_per_pixel)`), dropping `_open_czi_streaming` from 120 to 106 lines (ratchet metric) — the
+  unreviewable-function count **falls by one**, the ceiling is untouched (never raised to fit a feature).
+- Then wired the sidecar on the CZI path exactly as the generic path does: `sidecar_metadata_for` discovered
+  once per load (non-gating, `None` when absent), each weak channel named from its emission via
+  `enrich_channel_from_sidecar` above the pixel/position guess — real metadata never overwritten.
+- The extraction is code-motion only (identical layers/shapes/scale/metadata by construction) and the sidecar
+  wire reuses the unit-tested helper; CZI/stack regression suites green. Full `pytest -m "core or base"` green.
+  (An end-to-end CZI load still isn't headlessly reproducible here — no CZI fixture / BioFormats in the gate.)
+
 ## [1.6.326] - 2026-07-24
 ### Added — **Imaris (.ims) files now expose the same per-channel `channels` schema as OME, so channel metadata is consistent across formats (deep_metadata item 4).**
 `extract_ims_metadata` flattened per-channel data into single top-level fields, so any consumer that reads

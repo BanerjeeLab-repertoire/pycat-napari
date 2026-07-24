@@ -566,6 +566,31 @@ class _StackOpenersMixin:
                                   n_z if reader_has_structure else 1,
                                   file_path, source='generic')
 
+    def _czi_open_metadata(self, file_path, image):
+        """libCZI metadata for a streaming CZI (pixels come from BioFormats; only libCZI's PIXEL reads fail).
+        Reuses the routing probe's ``image`` when given so the big open is not paid twice; updates the active
+        data class and stashes ``file_metadata``. Returns ``(image, microns_per_pixel)``. Extracted verbatim
+        from :meth:`_open_czi_streaming` so that method stays under the complexity ratchet."""
+        microns_per_pixel = 1.0
+        try:
+            if image is None:
+                image = open_image(file_path)
+            try:
+                px = image.physical_pixel_sizes
+                microns_per_pixel = float(px.Y) if px.Y else 1.0
+            except Exception as _pe:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
+                debug_log("file_io: CZI physical pixel size unavailable", _pe)
+            self.central_manager.active_data_class.update_metadata(image)
+            try:
+                from pycat.file_io.metadata_extract import extract_metadata
+                _md = extract_metadata(file_path, image=image)
+                self.central_manager.active_data_class.data_repository['file_metadata'] = _md
+            except Exception as _mde:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
+                debug_log("file_io: CZI metadata extraction failed", _mde)
+        except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
+            debug_log("file_io: CZI metadata via libCZI failed (using BioFormats dims only)", _e)
+        return image, microns_per_pixel
+
     def _open_czi_streaming(self, file_path: str, image=None):
         """Load a Zeiss streaming CZI (which libCZI cannot decode) via BioFormats.
 
@@ -593,26 +618,10 @@ class _StackOpenersMixin:
                 "Alternatively, export it to OME-TIFF from ZEN.")
             return
 
-        # Metadata via libCZI — it opens the file fine; only the pixel reads fail. Reuse the probe's
-        # image when given (the big open is not paid twice); open here only as a fallback.
-        microns_per_pixel = 1.0
-        try:
-            if image is None:
-                image = open_image(file_path)
-            try:
-                px = image.physical_pixel_sizes
-                microns_per_pixel = float(px.Y) if px.Y else 1.0
-            except Exception as _pe:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
-                debug_log("file_io: CZI physical pixel size unavailable", _pe)
-            self.central_manager.active_data_class.update_metadata(image)
-            try:
-                from pycat.file_io.metadata_extract import extract_metadata
-                _md = extract_metadata(file_path, image=image)
-                self.central_manager.active_data_class.data_repository['file_metadata'] = _md
-            except Exception as _mde:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
-                debug_log("file_io: CZI metadata extraction failed", _mde)
-        except Exception as _e:  # broad-ok: format/metadata read logged via debug_log; open continues with a fallback
-            debug_log("file_io: CZI metadata via libCZI failed (using BioFormats dims only)", _e)
+        # Metadata via libCZI — it opens the file fine; only the pixel reads fail. Reuse the probe's image
+        # when given (the big open is not paid twice). Extracted so this method stays under the complexity
+        # ratchet, which is what left the CZI path without a sidecar until now (czi_sidecar_and_stack_identity).
+        image, microns_per_pixel = self._czi_open_metadata(file_path, image)
 
         # Open the BioFormats reader OFF the main thread (setId parses every frame offset) so the
         # event loop keeps painting instead of a dead spinner. Surface the frame count (known from
@@ -645,13 +654,15 @@ class _StackOpenersMixin:
         _img_source = ImageSource(file_path=file_path)
         _img_source.retain(reader)
 
+        _sidecar = sidecar_metadata_for(file_path)          # once per load; non-gating (None when absent)
         for channel_idx in range(n_c):
             try:
                 _ch_info = extract_channel_info(image, channel_idx, file_stem=_stem_of(file_path)) if image is not None else None
             except Exception:  # broad-ok: best-effort probe → fallback value; a read failure must not crash the open
                 _ch_info = None
             if not _ch_info:
-                _ch_info = {'layer_name': f'C{channel_idx}', 'bucket': 'unknown'}
+                _ch_info = {'layer_name': f'C{channel_idx}', 'bucket': 'unknown', 'source': 'position'}
+            _ch_info = enrich_channel_from_sidecar(_ch_info, _sidecar, channel_idx)
             _ch_label = _ch_info.get('layer_name', f'C{channel_idx}')
             _ch_colormap = suggest_colormap(_ch_info.get('bucket', 'unknown'))
 
