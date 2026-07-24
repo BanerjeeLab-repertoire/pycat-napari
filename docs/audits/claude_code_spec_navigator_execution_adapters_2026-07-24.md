@@ -1,6 +1,16 @@
 # Claude Code spec — Navigator execution adapters: make "Run analysis" compute the plan
 
-> **◑ STATUS — Phases 1–2 DONE (shipped 1.6.332, 1.6.333). Phases 3–4 remain.**
+> **◕ STATUS — Phases 1–3 IN PROGRESS/DONE (shipped 1.6.332–1.6.334). Phase 3 continues per workflow; Phase 4 remains.**
+> **Phase 3 — started (1.6.334).** The finding: Phase 1 proved the mechanism against a *synthetic* step name, but
+> real plans emit toolbox-**module** names — so no adapter fired in production. Fixed by re-keying adapters on the
+> real module names (`image_processing_tools` → `background_removal`, Phase 1's proof now live) and adding the next
+> route-proven workflow: `segmentation_tools` (cell target) → `cellpose_segmentation`. A coarse module resolves its
+> batch step from the intent (`resolve_batch_step` — the shared "will this run" authority); condensate segmentation
+> (unproven batch route) and time-series keyframe cellpose are reported, never guessed. `params_from` gained the
+> reviewed values so it applies each where the handler reads it (`data_instance` for `cell_diameter`).
+> `test_navigator_cellpose_adapter.py` (`base`, 5): real-plan resolution guard + guided == manual at the reviewed
+> diameter, bit for bit + registry guard. **Phase 3 continues** (more workflows, each behind its route-equivalence
+> test); **Phase 4** (dock progress + cancel) remains.
 > **Phase 1 — DONE (1.6.332).** `navigator/executor.py`: `run_plan(plan, state, …)` drives the batch `_STEP_MAP`
 > handlers in `execution_order` order, threading `state`; `ExecAdapter` maps a plan step → batch handler +
 > `params_from`; a step with no adapter is reported ('needs_panel'), never invoked with guessed args; gate

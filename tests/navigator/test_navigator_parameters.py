@@ -49,17 +49,17 @@ def _plan(*steps):
 # ── the declared precedence: preset → session value → grounded default ─────────────────────────────────
 
 def test_background_removal_material_param_is_ball_radius_default_50():
-    params = material_params("background_removal")
+    params = material_params("image_processing_tools")
     assert [p.name for p in params] == ["ball_radius"]
-    review = build_param_review(_plan(_step("background_removal")))
-    step = review.step("background_removal")
+    review = build_param_review(_plan(_step("image_processing_tools")))
+    step = review.step("image_processing_tools")
     assert step.values["ball_radius"] == 50          # grounded default, no session value, no preset
     assert not step.is_modified
 
 
 def test_a_session_value_seeds_over_the_default():
-    review = build_param_review(_plan(_step("background_removal")), ctx={"ball_radius": 30})
-    assert review.step("background_removal").values["ball_radius"] == 30
+    review = build_param_review(_plan(_step("image_processing_tools")), ctx={"ball_radius": 30})
+    assert review.step("image_processing_tools").values["ball_radius"] == 30
 
 
 def test_a_step_with_no_adapter_or_no_material_params_carries_no_review():
@@ -75,12 +75,12 @@ def test_an_edited_radius_drives_the_run_and_matches_manual_at_that_radius():
     raw = _raw()
     edited = 15                                       # NOT the default 50
 
-    review = build_param_review(_plan(_step("background_removal")))
-    review.step("background_removal").set("ball_radius", edited)
-    assert review.step("background_removal").is_modified
+    review = build_param_review(_plan(_step("image_processing_tools")))
+    review.step("image_processing_tools").set("ball_radius", edited)
+    assert review.step("image_processing_tools").is_modified
 
     state = {"image": raw, "preprocessed": raw, "data_instance": _DataInstance({"ball_radius": 50})}
-    report = run_plan(_plan(_step("background_removal")), state,
+    report = run_plan(_plan(_step("image_processing_tools")), state,
                       params_by_step=review.params_by_step(),
                       provenance_by_step=review.provenance_by_step())
     guided = np.asarray(state["preprocessed"]).astype(np.float32)
@@ -125,10 +125,10 @@ def test_preset_seeds_values_and_an_edit_is_recorded_as_modified():
 
 def test_provenance_flows_onto_the_run_report():
     raw = _raw()
-    review = build_param_review(_plan(_step("background_removal")))
-    review.step("background_removal").set("ball_radius", 20)
+    review = build_param_review(_plan(_step("image_processing_tools")))
+    review.step("image_processing_tools").set("ball_radius", 20)
     state = {"image": raw, "preprocessed": raw, "data_instance": _DataInstance({})}
-    report = run_plan(_plan(_step("background_removal")), state,
+    report = run_plan(_plan(_step("image_processing_tools")), state,
                       params_by_step=review.params_by_step(),
                       provenance_by_step=review.provenance_by_step())
     prov = report.steps[0].provenance

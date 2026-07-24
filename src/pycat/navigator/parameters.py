@@ -24,7 +24,7 @@ import dataclasses
 from typing import Optional
 
 from .execution import execution_order
-from .executor import has_adapter
+from .executor import resolve_batch_step
 
 
 @dataclasses.dataclass(frozen=True)
@@ -42,14 +42,20 @@ class StepParam:
     maximum: object = None
 
 
-#: The material parameters per plan step — the ONLY place a step declares which of its arguments are surfaced
-#: for review. Grows one adapter at a time (each behind its route-equivalence test), mirroring ``executor._ADAPTERS``.
+#: The material parameters per plan step, keyed by the REAL navigator module name. The ONLY place a step
+#: declares which of its arguments are surfaced for review. Grows one adapter at a time (each behind its
+#: route-equivalence test), mirroring ``executor._ADAPTERS``.
+_CELL_DIAMETER = StepParam(
+    "cell_diameter", "Cell diameter (px)", "int", 100, minimum=1,
+    help="The approximate cell diameter in pixels that Cellpose sizes its search to. Measure it on your data — "
+         "a wrong diameter is the most common cause of missed or merged cells. Default 100 px.")
 _MATERIAL: dict = {
-    "background_removal": (
+    "image_processing_tools": (
         StepParam("ball_radius", "Rolling-ball radius (px)", "int", 50, minimum=1,
                   help="The rolling-ball structuring radius for background estimation. Larger keeps more "
                        "low-frequency structure; too small eats real signal. Default 50 px."),
     ),
+    "segmentation_tools": (_CELL_DIAMETER,),
 }
 
 
@@ -176,6 +182,7 @@ def build_param_review(plan, ctx=None) -> ParamReview:
     the declared precedence. Blocked/skipped steps carry no review (they will not run). Never invents a
     parameter — a step with no declared material params contributes nothing to review."""
     reviewed = []
+    intent = getattr(plan, "intent", None)
     try:
         order = execution_order(plan)
     except Exception:      # broad-ok: optional_probe — an un-orderable plan yields an empty review, not a crash
@@ -183,7 +190,9 @@ def build_param_review(plan, ctx=None) -> ParamReview:
     for es in order:
         if es.status not in ("run", "caveat"):
             continue
-        if not has_adapter(es.name):
+        # Only steps that will ACTUALLY run get a review — a coarse module whose variant is not auto-runnable
+        # (its batch step resolves to None) must not surface a parameter for a step that won't execute.
+        if resolve_batch_step(es.name, intent) is None:
             continue
         params = material_params(es.name)
         if not params:

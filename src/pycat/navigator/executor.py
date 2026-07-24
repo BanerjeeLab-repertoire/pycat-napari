@@ -28,31 +28,82 @@ from .execution import execution_order
 
 @dataclasses.dataclass(frozen=True)
 class ExecAdapter:
-    """Bridges ONE plan step to the batch handler that computes it. ``params_from(intent, ctx, state)`` derives
-    the handler's ``params`` from the answers (Phase 1: grounded defaults; a preset seed lands in Phase 2)."""
+    """Bridges ONE plan step to the batch handler that computes it. ``plan_step`` is the **real navigator module
+    name** (as `execution_order` reports it — e.g. ``segmentation_tools``, ``image_processing_tools``), not a
+    synthetic label. ``batch_step`` is either the ``_STEP_MAP`` key that computes it, or a callable
+    ``(intent) -> Optional[str]`` for a coarse module whose batch step depends on the target (e.g.
+    ``segmentation_tools`` → ``cellpose_segmentation`` for a cell, ``None`` for a condensate whose batch route is
+    an unproven gap). ``params_from(intent, ctx, state, reviewed)`` derives the handler's ``params`` from the
+    answers and the user-reviewed values, applying each where the handler actually reads it."""
     plan_step: str
-    batch_step: str
+    batch_step: object
     params_from: Callable
 
 
-def _background_removal_params(intent, ctx, state):
-    radius = None
-    try:
-        radius = ctx.get("ball_radius") if ctx is not None else None
-    except Exception:      # broad-ok: optional_probe — a context miss falls back to the grounded default
-        radius = None
+def _background_removal_params(intent, ctx, state, reviewed):
+    radius = reviewed.get("ball_radius") if reviewed else None
+    if radius is None and ctx is not None:
+        try:
+            radius = ctx.get("ball_radius")
+        except Exception:      # broad-ok: optional_probe — a context miss falls back to the grounded default
+            radius = None
     return {"ball_radius": int(radius) if radius else 50, "active_layer": "segmentation image"}
 
 
-#: The declared adapters. The ONLY place a plan step is tied to a computation — a step absent here is reported
-#: as "run from its panel", never guessed at. Grows one workflow per phase (each behind a route-equivalence test).
+def _cellpose_params(intent, ctx, state, reviewed):
+    """Cellpose reads ``cell_diameter`` from the ``data_instance`` (NOT the params dict), so a reviewed/derived
+    diameter is applied THERE — the params dict only carries the method + refine flag the handler reads."""
+    diam = reviewed.get("cell_diameter") if reviewed else None
+    if diam is None and ctx is not None:
+        try:
+            diam = ctx.get("cell_diameter")
+        except Exception:      # broad-ok: optional_probe — no session diameter → the handler's grounded default (100)
+            diam = None
+    if diam is not None and isinstance(state, dict):
+        di = state.get("data_instance")
+        if di is not None and hasattr(di, "set_data"):
+            try:
+                di.set_data("cell_diameter", int(diam))
+            except Exception:      # broad-ok: optional_probe — a bad diameter falls back to the handler default
+                pass
+    return {"method": "cellpose", "cellpose_refine": False}
+
+
+def _cellpose_step_if_cell(intent):
+    """``segmentation_tools`` is coarse — for a cell target it is single-frame Cellpose (the ``cellpose_segmentation``
+    batch step `test_route_equivalence` proves), but condensate segmentation is an unproven batch route (a
+    documented route-equivalence gap), so it resolves to ``None`` (reported, never guessed). Time-series cell
+    segmentation (``ts_cellpose_tools``) is deliberately NOT mapped: its real operation is keyframe propagation
+    across a stack (``replay_ts_cellpose_keyframe``), which is not route-proven — a single-frame stand-in would
+    be wrong science, so it stays 'run from its panel'."""
+    return "cellpose_segmentation" if getattr(intent, "target", None) == "cell" else None
+
+
+#: The declared adapters, keyed by the REAL navigator module name `execution_order` reports. The ONLY place a
+#: plan step is tied to a computation — a step absent here (or one whose batch step resolves to ``None``) is
+#: reported "run from its panel", never guessed at. Grows one workflow per phase, each behind a
+#: route-equivalence test: ``background_removal`` (rolling-ball) and ``cellpose_segmentation`` are the batch
+#: steps `test_route_equivalence` proves compute identically to the manual route.
 _ADAPTERS: dict = {
-    "background_removal": ExecAdapter("background_removal", "background_removal", _background_removal_params),
+    "image_processing_tools": ExecAdapter("image_processing_tools", "background_removal",
+                                          _background_removal_params),
+    "segmentation_tools": ExecAdapter("segmentation_tools", _cellpose_step_if_cell, _cellpose_params),
 }
 
 
 def has_adapter(step_name: str) -> bool:
     return step_name in _ADAPTERS
+
+
+def resolve_batch_step(step_name: str, intent=None) -> Optional[str]:
+    """The batch step ``step_name`` will actually run for ``intent``, or ``None`` if it has no adapter or its
+    variant is not auto-runnable yet (a coarse module whose target has no proven batch route). The single
+    authority for 'will this step run', shared by the executor and the parameter review."""
+    adapter = _ADAPTERS.get(step_name)
+    if adapter is None:
+        return None
+    bs = adapter.batch_step
+    return bs(intent) if callable(bs) else bs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,25 +187,29 @@ def run_plan(plan, state, *, intent=None, ctx=None, image_path=None, output_dir=
                 continue
 
             adapter = _ADAPTERS.get(es.name)
-            if adapter is None:
-                report.steps.append(StepOutcome(
-                    es.name, "needs_panel", "no execution adapter yet — run this step from its method panel"))
+            batch_step = adapter.batch_step(intent) if (adapter and callable(adapter.batch_step)) \
+                else (adapter.batch_step if adapter else None)
+            if batch_step is None:
+                # No adapter, or a coarse module whose variant has no proven batch route yet — report it,
+                # never invoke with guessed arguments.
+                detail = ("no execution adapter yet — run this step from its method panel" if adapter is None
+                          else "this variant isn't auto-runnable yet — run this step from its method panel")
+                report.steps.append(StepOutcome(es.name, "needs_panel", detail))
                 if on_step:
                     on_step(report.steps[-1])
                 continue
 
-            fn = registry.get(adapter.batch_step)
+            fn = registry.get(batch_step)
             if fn is None:
                 report.steps.append(StepOutcome(es.name, "error",
-                                                f"batch step {adapter.batch_step!r} is not registered"))
+                                                f"batch step {batch_step!r} is not registered"))
                 halted = True
                 continue
 
-            params = adapter.params_from(intent, ctx, state)
-            if params_by_step and es.name in params_by_step:
-                # Reviewed values override the adapter's derived params, but the adapter still supplies the
-                # non-reviewed routing keys (e.g. active_layer) — merge, don't replace.
-                params = {**params, **params_by_step[es.name]}
+            # Reviewed values reach the adapter, which applies each where the handler actually reads it (the
+            # params dict, or the data_instance for cellpose's cell_diameter) — the executor never guesses.
+            reviewed = (params_by_step or {}).get(es.name, {})
+            params = adapter.params_from(intent, ctx, state, reviewed)
             try:
                 if runner is not None:
                     runner.execute(fn, state, image_path, params, output_dir)

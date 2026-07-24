@@ -1,3 +1,31 @@
+## [1.6.334] - 2026-07-24
+### Fixed + Added — **Navigator execution-adapter layer, Phase 3: adapters fire on REAL plan steps; cell segmentation is the next route-proven workflow.**
+**The finding this closes:** Phase 1 proved the executor mechanism against a *synthetic* step name
+(`background_removal`), but real compiled plans emit toolbox-**module** step names (`segmentation_tools`,
+`image_processing_tools`, …) — so that adapter never fired in production: every real plan step reported
+"run from your panel". Phase 3 re-keys the adapters on the real module names and adds the next proven workflow.
+- **Adapters now key on the real navigator module names** `execution_order` reports. `image_processing_tools`
+  (the module whose product is a background-corrected field) maps to the proven `background_removal` batch step
+  — Phase 1's bit-for-bit proof is now *live* on real plans.
+- **New route-proven workflow: single-frame cell segmentation.** `segmentation_tools` for a **cell** target maps
+  to `cellpose_segmentation` — the batch step `test_route_equivalence` proves computes identically to the manual
+  route. A **coarse** module resolves its batch step from the intent: condensate segmentation resolves to `None`
+  (its batch route is an unproven documented gap) and is reported, never guessed; time-series cell segmentation
+  (`ts_cellpose_tools`, keyframe propagation) is deliberately unmapped — a single-frame stand-in would be wrong
+  science. `resolve_batch_step(step, intent)` is the single "will this step run" authority, shared by the
+  executor and the parameter review.
+- **Reviewed parameters reach the handler where it actually reads them.** Cellpose reads `cell_diameter` from the
+  `data_instance`, not the params dict — so `params_from(intent, ctx, state, reviewed)` now receives the reviewed
+  values and applies each where the handler reads it (the params dict for `ball_radius`, the `data_instance` for
+  `cell_diameter`); the executor never guesses.
+- **Proof** (`tests/navigator/test_navigator_cellpose_adapter.py`, `base`, 5): a real cell plan's segmentation
+  step resolves to a batch handler (the regression guard for the synthetic-name gap); driving
+  `cellpose_segmentation` through the adapter with a reviewed diameter equals a direct Cellpose call at that
+  diameter, **bit for bit**; condensate/time-series segmentation run nothing and are reported; and every batch
+  step an adapter targets is a real registered handler.
+- **Later** (per the `navigator_execution_adapters` spec): more adapters one workflow at a time, then dock
+  progress + cancel (Phase 4).
+
 ## [1.6.333] - 2026-07-24
 ### Added — **Navigator execution-adapter layer, Phase 2: an honest parameter review — seeded, editable, provenance-recorded.**
 The navigator asks *what* to do, not *with which parameters* — but a guided run that silently picks a

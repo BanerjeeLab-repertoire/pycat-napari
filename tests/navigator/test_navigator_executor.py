@@ -75,7 +75,7 @@ def test_guided_equals_batch_equals_manual_for_background_removal():
     # guided: run_plan drives the SAME batch handler, its params derived by the adapter
     gstate = {"image": raw, "preprocessed": raw,
               "data_instance": _DataInstance({"ball_radius": _BALL_RADIUS})}
-    report = run_plan(_plan(_step("background_removal")), gstate, ctx={"ball_radius": _BALL_RADIUS})
+    report = run_plan(_plan(_step("image_processing_tools")), gstate, ctx={"ball_radius": _BALL_RADIUS})
     guided = np.asarray(gstate["preprocessed"]).astype(np.float32)
 
     assert [s.outcome for s in report.steps] == ["ran"]
@@ -98,9 +98,9 @@ def test_a_blocker_halts_the_run_and_leaves_the_state_untouched():
                    check=lambda ctx: GateStatus.VIOLATED, severity="blocker")
     raw, state = _bg_state()
     before = np.asarray(state["preprocessed"]).copy()
-    # background_removal HAS an adapter, but a blocker on it must stop the run before it is invoked
-    report = run_plan(_plan(_step("background_removal"), _step("subcellular_segment"),
-                            gate_report=[("background_removal", a, GateStatus.VIOLATED)]),
+    # image_processing_tools HAS an adapter, but a blocker on it must stop the run before it is invoked
+    report = run_plan(_plan(_step("image_processing_tools"), _step("subcellular_segment"),
+                            gate_report=[("image_processing_tools", a, GateStatus.VIOLATED)]),
                       state, ctx={"ball_radius": _BALL_RADIUS})
     assert report.steps[0].outcome == "blocked" and "pixel size" in report.steps[0].detail
     assert all(s.outcome in ("blocked", "skipped") for s in report.steps)   # nothing ran
@@ -112,8 +112,8 @@ def test_a_caveat_step_runs_and_carries_its_reason():
     a = Assumption(id="q:rel", description="reliability was not assessed",
                    check=lambda ctx: GateStatus.VIOLATED, severity="warning")   # soft → runs
     raw, state = _bg_state()
-    report = run_plan(_plan(_step("background_removal"),
-                            gate_report=[("background_removal", a, GateStatus.VIOLATED)]),
+    report = run_plan(_plan(_step("image_processing_tools"),
+                            gate_report=[("image_processing_tools", a, GateStatus.VIOLATED)]),
                       state, ctx={"ball_radius": _BALL_RADIUS})
     assert report.steps[0].outcome == "ran_with_caveat" and report.steps[0].detail
     assert report.ran
@@ -121,7 +121,7 @@ def test_a_caveat_step_runs_and_carries_its_reason():
 
 def test_probes_and_normal_steps_run_before_a_no_adapter_step_is_reported():
     raw, state = _bg_state()
-    report = run_plan(_plan(_step("background_removal"), _step("feature_measure")),
+    report = run_plan(_plan(_step("image_processing_tools"), _step("feature_measure")),
                       state, ctx={"ball_radius": _BALL_RADIUS})
     outcomes = [(s.name, s.outcome) for s in report.steps]
-    assert outcomes == [("background_removal", "ran"), ("feature_measure", "needs_panel")]
+    assert outcomes == [("image_processing_tools", "ran"), ("feature_measure", "needs_panel")]

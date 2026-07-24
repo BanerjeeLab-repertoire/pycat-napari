@@ -222,7 +222,7 @@ def test_the_param_review_form_renders_and_edits_flow_to_the_review(qtbot):
     widget = build_navigator_widget(NavigatorSession(), on_run=lambda plan, review=None: None,
                                     central_manager=cm)
     qtbot.addWidget(widget)
-    step = PlanStep(module=ModuleContract(name="background_removal", info_role=InformationRole.TRANSFORM),
+    step = PlanStep(module=ModuleContract(name="image_processing_tools", info_role=InformationRole.TRANSFORM),
                     produces=None, inputs=[], reason="")
     plan = Plan(intent=AnalysisIntent(target="t", observables=["x"]), steps=[step])
 
@@ -233,5 +233,5 @@ def test_the_param_review_form_renders_and_edits_flow_to_the_review(qtbot):
     spin = host.findChild(QSpinBox)
     assert spin is not None and spin.value() == 50            # seeded at the grounded default
     spin.setValue(12)                                          # a user edit
-    assert widget._review.step("background_removal").values["ball_radius"] == 12
-    assert widget._review.step("background_removal").is_modified
+    assert widget._review.step("image_processing_tools").values["ball_radius"] == 12
+    assert widget._review.step("image_processing_tools").is_modified
