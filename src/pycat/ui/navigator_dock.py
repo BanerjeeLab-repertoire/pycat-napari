@@ -22,17 +22,95 @@ _STATE_STYLE = {
 }
 
 
-def build_navigator_widget(session, *, on_run=None, parent=None):
-    """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
-    (headless). ``on_run(plan)`` is called when the user runs the compiled plan. The widget re-renders itself
-    as questions are answered and exposes ``_render()`` / ``_state`` / ``_choice_buttons`` for a Qt-smoke
-    test to drive it."""
+def _label(text, style=""):
+    from PyQt5.QtWidgets import QLabel
+    lbl = QLabel(text)
+    lbl.setWordWrap(True)
+    if style:
+        lbl.setStyleSheet(style)
+    return lbl
+
+
+def _row_frame(row):
+    """One plan-step row: its name coloured by gate state, its reason, and the inline quality-gate notes."""
+    from PyQt5.QtWidgets import QFrame, QVBoxLayout
+    frame = QFrame()
+    frame.setFrameShape(QFrame.StyledPanel)
+    fl = QVBoxLayout(frame)
+    glyph, colour = _STATE_STYLE.get(row.state, ("", "#444"))
+    fl.addWidget(_label(f"{glyph}{row.name}", f"font-weight: bold; color: {colour};"))
+    if row.reason:
+        fl.addWidget(_label(row.reason, "color: gray; font-size: 11px;"))
+    for note in row.gates:                           # the inline quality-gate verdicts (the point of inc 2)
+        g, c = _STATE_STYLE.get(note.kind, ("", "#444"))
+        fl.addWidget(_label(f"{g}{note.reason}", f"color: {c}; font-size: 11px;"))
+    return frame
+
+
+def _render_question(widget, body_layout, spec, on_answer):
+    """Render a question (prompt + rationale + one button per choice) into ``body_layout``; a click answers."""
+    from PyQt5.QtWidgets import QPushButton
+    widget._state = "question"
+    widget._choice_buttons = []
+    body_layout.addWidget(_label(spec.prompt, "font-size: 13px; margin-top: 6px;"))
+    if spec.rationale:
+        body_layout.addWidget(_label(spec.rationale, "color: gray; font-size: 11px;"))
+    for choice in spec.choices:
+        text = choice.label + (f"   ({choice.hint})" if choice.hint else "")
+        btn = QPushButton(text)
+        btn.clicked.connect(lambda _=False, s=spec, v=choice.value: on_answer(s, v))
+        body_layout.addWidget(btn)
+        widget._choice_buttons.append(btn)
+
+
+def _wire_reevaluation(widget, central_manager, render):
+    """Wire the plan to viewer state: a layer inserted/removed or a calibration change RE-GATES (not
+    recompiles) the compiled plan so a blocked step flips to satisfied and the run action re-enables — the fix
+    for a panel that never tracked the data. Debounced: bursts of layer events coalesce into one cheap re-gate."""
+    from PyQt5.QtCore import QTimer
+
+    def _reevaluate_now():
+        widget._reeval_pending = False
+        if widget._state != "plan" or widget._session._plan is None:
+            return
+        widget._regate_only = True
+        render()
+
+    def _reevaluate(*_):
+        if widget._reeval_pending:
+            return
+        widget._reeval_pending = True
+        QTimer.singleShot(120, _reevaluate_now)
+
+    widget._reevaluate_now = _reevaluate_now
+    if central_manager is None:
+        return
     try:
-        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea, QFrame)
+        _ev = getattr(getattr(getattr(central_manager, "viewer", None), "layers", None), "events", None)
+        if _ev is not None:
+            _ev.inserted.connect(_reevaluate)
+            _ev.removed.connect(_reevaluate)
+    except Exception:      # broad-ok: optional_probe — no live viewer events → still correct on mount
+        pass
+    try:
+        central_manager.register_data_switch_callback(_reevaluate)   # pixel-size / data changes
+    except Exception:      # broad-ok: optional_probe — the callback registry is optional
+        pass
+
+
+def build_navigator_widget(session, *, on_run=None, central_manager=None, parent=None):
+    """Build (do not mount) the Navigator widget over ``session``, or return ``None`` if Qt is unavailable
+    (headless). ``on_run(plan)`` is called when the user runs the compiled plan. When ``central_manager`` is
+    given, the plan **tracks viewer state**: loading an image, adding/removing a layer, or a calibration change
+    RE-GATES the compiled plan (cheap; never recompiles) so a blocked step flips to satisfied and the run
+    action re-enables — the fix for a panel that was inert. Exposes ``_render()`` / ``_state`` /
+    ``_choice_buttons`` / ``_reevaluate_now`` for a Qt-smoke test to drive it."""
+    try:
+        from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea)
         from PyQt5.QtCore import Qt
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no widget, callers guard on None
         return None
-    from pycat.navigator.session import plan_rows, NavigatorSession
+    from pycat.navigator.session import plan_rows, NavigatorSession, context_from_session
 
     widget = QWidget(parent)
     root = QVBoxLayout(widget)
@@ -50,11 +128,14 @@ def build_navigator_widget(session, *, on_run=None, parent=None):
 
     widget._session = session
     widget._on_run = on_run
+    widget._cm = central_manager
     widget._state = "question"          # "question" | "plan" — inspected by the smoke test
     widget._plan = None
     widget._rows = []
     widget._choice_buttons = []
     widget._run_button = None
+    widget._regate_only = False         # a viewer event re-gates; answering/restart recompiles
+    widget._reeval_pending = False
 
     def _clear():
         while body_layout.count():
@@ -63,41 +144,21 @@ def build_navigator_widget(session, *, on_run=None, parent=None):
             if w is not None:
                 w.deleteLater()
 
-    def _label(text, style):
-        lbl = QLabel(text)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet(style)
-        return lbl
-
-    def _render_question(spec):
-        widget._state = "question"
-        widget._choice_buttons = []
-        body_layout.addWidget(_label(spec.prompt, "font-size: 13px; margin-top: 6px;"))
-        if spec.rationale:
-            body_layout.addWidget(_label(spec.rationale, "color: gray; font-size: 11px;"))
-        for choice in spec.choices:
-            text = choice.label + (f"   ({choice.hint})" if choice.hint else "")
-            btn = QPushButton(text)
-            btn.clicked.connect(lambda _=False, s=spec, v=choice.value: _answer(s, v))
-            body_layout.addWidget(btn)
-            widget._choice_buttons.append(btn)
-
-    def _row_frame(row):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.StyledPanel)
-        fl = QVBoxLayout(frame)
-        glyph, colour = _STATE_STYLE.get(row.state, ("", "#444"))
-        fl.addWidget(_label(f"{glyph}{row.name}", f"font-weight: bold; color: {colour};"))
-        if row.reason:
-            fl.addWidget(_label(row.reason, "color: gray; font-size: 11px;"))
-        for note in row.gates:                       # the inline quality-gate verdicts (the point of inc 2)
-            g, c = _STATE_STYLE.get(note.kind, ("", "#444"))
-            fl.addWidget(_label(f"{g}{note.reason}", f"color: {c}; font-size: 11px;"))
-        return frame
-
     def _render_plan():
         widget._state = "plan"
-        plan = widget._session.compile_plan()
+        # Refresh the context from the loaded image before (re)evaluating, so a panel opened AFTER data is
+        # already loaded starts correct (run-once-on-mount), and re-gate rather than recompile on a viewer
+        # event (recompiling could re-select modules and change the plan under the user).
+        if widget._cm is not None:
+            try:
+                context_from_session(widget._cm, widget._session.ctx)
+            except Exception:      # broad-ok: optional_probe — a bad repository must not break the panel
+                pass
+        if widget._regate_only and widget._session._plan is not None:
+            plan = widget._session.regate()
+        else:
+            plan = widget._session.compile_plan()
+        widget._regate_only = False
         widget._plan = plan
         widget._rows = plan_rows(plan)
         body_layout.addWidget(_label(
@@ -105,10 +166,18 @@ def build_navigator_widget(session, *, on_run=None, parent=None):
         for row in widget._rows:
             body_layout.addWidget(_row_frame(row))
         run = QPushButton("▶  Run analysis")
-        run.setEnabled(any(r.runnable for r in widget._rows) and callable(widget._on_run))
+        reason = widget._session.run_blocked_reason()
+        run.setEnabled(reason is None and callable(widget._on_run))
         run.clicked.connect(_run)
         body_layout.addWidget(run)
         widget._run_button = run
+        # Say WHY, always — a disabled run action is never a dead control.
+        if reason is not None:
+            body_layout.addWidget(_label("⛔  " + reason, "color: #c0392b; font-size: 11px;"))
+        elif not callable(widget._on_run):
+            body_layout.addWidget(_label(
+                "This plan is ready. Running it from the guided panel is coming — for now, run each step from "
+                "its method panel.", "color: gray; font-size: 11px;"))
         over = QPushButton("↺  Start over")
         over.clicked.connect(_restart)
         body_layout.addWidget(over)
@@ -129,19 +198,21 @@ def build_navigator_widget(session, *, on_run=None, parent=None):
         _clear()
         q = widget._session.next_question()
         if q is not None:
-            _render_question(q)
+            _render_question(widget, body_layout, q, _answer)
         else:
             _render_plan()
 
+    _wire_reevaluation(widget, central_manager, render)
     widget._render = render
     render()
     return widget
 
 
-def install_navigator_action(viewer, *, on_run=None):
+def install_navigator_action(viewer, *, on_run=None, central_manager=None):
     """Add a '\U0001f9ed Navigator' menu-bar action that opens the guided-analysis dock, mounted with the
-    tabify behaviour (1.6.297) so it is visible rather than squeezed. Installed from ``central_manager`` (not
-    the line-capped menu god-file). Returns the ``QAction`` or ``None`` (headless)."""
+    tabify behaviour (1.6.297) so it is visible rather than squeezed. ``central_manager`` lets the opened plan
+    track viewer state (re-gate on load). Installed from ``central_manager`` (not the line-capped menu
+    god-file). Returns the ``QAction`` or ``None`` (headless)."""
     try:
         from PyQt5.QtWidgets import QAction
     except Exception:      # broad-ok: optional_probe — no Qt (headless) → no action
@@ -155,7 +226,7 @@ def install_navigator_action(viewer, *, on_run=None):
     def _open(*_):
         from pycat.navigator.session import NavigatorSession
         from pycat.utils.dock_space import add_results_dock
-        widget = build_navigator_widget(NavigatorSession(), on_run=on_run)
+        widget = build_navigator_widget(NavigatorSession(), on_run=on_run, central_manager=central_manager)
         if widget is None:
             return
         held["widget"] = widget

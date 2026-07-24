@@ -37,6 +37,7 @@ class NavigatorSession:
         self.intent = AnalysisIntent()
         self.ctx = ctx if ctx is not None else AnalysisContext()
         self.pins: dict = {}
+        self._plan = None       # the last compiled plan — re-gated (not recompiled) on a viewer state change
 
     # ── the question loop ──────────────────────────────────────────────────────
     def next_question(self):
@@ -53,8 +54,34 @@ class NavigatorSession:
 
     # ── plan + editing (a pin is an edit; recompile re-validates) ───────────────
     def compile_plan(self):
-        """Backward-chain the current intent/context into a runnable, quality-gated :class:`Plan`."""
-        return self.planner.compile(self.intent, self.ctx, pins=dict(self.pins))
+        """Backward-chain the current intent/context into a runnable, quality-gated :class:`Plan`. The plan is
+        retained so a viewer state change can RE-GATE it (see :meth:`regate`) without recompiling."""
+        self._plan = self.planner.compile(self.intent, self.ctx, pins=dict(self.pins))
+        return self._plan
+
+    def regate(self):
+        """Re-evaluate the retained plan's gates/gaps against the CURRENT ``self.ctx`` (which a viewer event
+        has just refreshed), without recompiling the structure — the cheap path that makes the plan track
+        loaded data. Returns the re-gated plan, or ``None`` if nothing has been compiled yet."""
+        from .planner import regate
+        return regate(self._plan, self.ctx) if self._plan is not None else None
+
+    def run_blocked_reason(self):
+        """A short, user-language reason the plan cannot run yet, or ``None`` when it is runnable — so the run
+        action is never a dead control. Derived from the retained plan's gaps against ``self.ctx``: no data →
+        'Load an image first'; a calibration gap → set the scale; else the first concrete blocker."""
+        plan = self._plan
+        if plan is None:
+            return "Answer the questions to build a plan."
+        if not self.ctx.known("channels") and not self.ctx.known("axes") and not self.ctx.known("time_points"):
+            return "Load an image first."
+        for gap in plan.gaps:
+            if gap.key in ("calibrated",) or "pixel" in gap.key or "calib" in gap.key:
+                return "Set the pixel size (scale) — this measurement needs a calibrated image."
+        blockers = plan.blockers()
+        if blockers:
+            return blockers[0]
+        return None if plan.is_executable else "This plan cannot run yet."
 
     def pin(self, representation_kind: str, module_name: str) -> None:
         """Change which module provides ``representation_kind`` (the editable-plan mechanism). The caller
@@ -63,6 +90,59 @@ class NavigatorSession:
 
     def unpin(self, representation_kind: str) -> None:
         self.pins.pop(representation_kind, None)
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
+
+
+def context_from_session(central_manager, ctx: Optional[AnalysisContext] = None) -> AnalysisContext:
+    """Refresh an :class:`AnalysisContext` from the loaded image's metadata so the navigator's plan re-gates
+    against live state (the fix for a plan that never tracked the data). **Metadata suggests, the user
+    decides:** a fact already answered by the USER is never overwritten (only source=METADATA facts are
+    (re)set). And it **never guesses dimensionality from array shape alone** — ``axes`` is set only from an
+    explicit ``dimension_order``; a bare plane count leaves the Z/T question genuinely open (to ask), because a
+    3-plane stack could be Z, T, or channels. Returns ``ctx``."""
+    from .context import Source        # AnalysisContext is imported at module scope (used in the annotation)
+    ctx = ctx if ctx is not None else AnalysisContext()
+    dr = getattr(getattr(central_manager, "active_data_class", None), "data_repository", None)
+    get = dr.get if hasattr(dr, "get") else (lambda k, d=None: d)
+    common = ((get("file_metadata") or {}) or {}).get("common") or {}
+
+    def _set(key, value):
+        f = ctx.fact(key)
+        if f is not None and f.source is Source.USER:
+            return                          # a user answer outranks metadata — never overwrite
+        ctx.set(key, value, source=Source.METADATA)
+
+    if _num(common.get("n_channels")) is not None:
+        _set("channels", int(common["n_channels"]))
+    if _num(common.get("n_timepoints")) is not None:
+        _set("time_points", int(common["n_timepoints"]))
+
+    order = common.get("dimension_order")
+    if isinstance(order, str) and order:        # an EXPLICIT layout — never inferred from a plane count
+        up = order.upper()
+        axes = []
+        if (_num(common.get("n_timepoints")) or 1) > 1 and "T" in up:
+            axes.append("time")
+        if (_num(common.get("n_z")) or 1) > 1 and "Z" in up:
+            axes.append("z")
+        _set("axes", axes)
+
+    px = _num(get("microns_per_pixel"))
+    if px is None:
+        sq = _num(get("microns_per_pixel_sq"))
+        px = sq ** 0.5 if sq else None
+    if px is None:
+        px = _num(common.get("pixel_size_um"))
+    if px is not None and abs(px - 1.0) > 1e-9:  # a real, non-sentinel calibration
+        _set("pixel_size", px)                   # the pixel-size validity gate (an assumption) reads this
+        _set("voxel_size", px)                   # the 'calibrated' context requirement reads this
+
+    if common.get("modality"):
+        _set("modality", str(common["modality"]))
+    return ctx
 
 
 # ── the render model: a plan as ordered rows, quality-gate verdicts inline ───────────────────────────

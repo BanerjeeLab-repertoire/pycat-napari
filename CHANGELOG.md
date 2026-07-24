@@ -1,3 +1,29 @@
+## [1.6.317] - 2026-07-23
+### Fixed — **The guided navigator now tracks the loaded data: loading an image re-enables the run action, and a disabled run always says why (navigator-UX first-user feedback, item 1).**
+Reported from the first real guided session: *"run analysis did not light up"* — and after loading data and
+after a restart, **nothing in the panel changed at all.** The plan was evaluated ONCE at compile and nothing
+recomputed when the viewer changed, so the run action could never become enabled by doing the very thing it
+was waiting for. Guided mode was inert as shipped.
+
+- `navigator/planner.py`: new `regate(plan, ctx)` re-evaluates a compiled plan's context gaps and validity
+  gates against a fresh context **without recompiling** the structure — the cheap path that lets a viewer
+  event flip a blocked step to satisfied. (Recompiling could re-select modules on a cost tie-break and change
+  the plan under the user — hence re-gate, don't recompile.)
+- `navigator/session.py`: the session retains its plan and gained `regate()`, `run_blocked_reason()` (a
+  user-language reason so the disabled run is never a dead control — *"Load an image first"*, *"Set the pixel
+  size…"* — or `None` when runnable), and `context_from_session(central_manager)` which refreshes the context
+  from the loaded image's metadata. **Metadata suggests, the user decides** (a user answer is never
+  overwritten), and dimensionality is **never guessed from a bare plane count** (axes only from an explicit
+  `dimension_order`; the 1.0 µm/px sentinel is not treated as a calibration).
+- `ui/navigator_dock.py`: the widget takes `central_manager`, subscribes to layer insert/remove and
+  calibration changes, **debounces**, re-gates + re-renders (and once on mount, so a panel opened with data
+  already loaded is correct), and shows the blocking reason inline. Wired from `central_manager` and the home
+  dock. `build_navigator_widget` was refactored (render/re-gate helpers to module scope) to stay under the
+  complexity ceiling.
+- `tests/navigator/test_navigator_reevaluate.py` (`base`, 6) + a re-gate Qt-smoke in `test_navigator_dock.py`.
+  Full `pytest -m "core or base"` green. Items 2–6 (load-data step 0, metadata pre-answers, colour legend,
+  toggle text, Explore tab) follow.
+
 ## [1.6.316] - 2026-07-23
 ### Added — **A last-resort channel-identity prompt for channels the metadata can't name, remembered per acquisition layout (sidecar_metadata Part 4).**
 When a channel's identity can't be recovered from in-file metadata, the filename, or the pixel classifier, it

@@ -121,7 +121,7 @@ class CentralManager:
         # Navigator: guided-analysis dock (question flow -> quality-gated, editable plan). Entry point here,
         # not the line-capped menu god-file. on_run is left None until the plan-execution bridge lands.
         from pycat.ui.navigator_dock import install_navigator_action
-        self._navigator_action = install_navigator_action(self.viewer)
+        self._navigator_action = install_navigator_action(self.viewer, central_manager=self)
         # Populate the feature registry so any consumer (the beginner home dock, a capability query) sees
         # every surfaced-but-otherwise-hidden feature (navigator inc 4). Guarded: a registration hiccup must
         # never break startup, and the cards' openers import Qt/toolbox lazily so this stays cheap.

@@ -106,6 +106,26 @@ class Plan:
         return [g for g in self.gaps if g.status is GateStatus.UNKNOWN]
 
 
+def regate(plan: "Plan", ctx: AnalysisContext) -> "Plan":
+    """Re-evaluate a COMPILED plan's context gaps and validity gates against a fresh ``ctx``, WITHOUT
+    recompiling the plan structure — the steps and which module provides what are fixed, only the verdicts
+    recompute. This is what lets loading data or setting a calibration flip a step from unknown/blocked to
+    satisfied and re-enable the run action, cheaply, on a viewer event (the navigator-UX bug: the plan was
+    evaluated once at compile and never tracked state). Recompiling instead could re-select modules (cost
+    tie-breaks read ``ctx``) and silently change the plan under the user — hence re-gate, don't recompile.
+    Mutates and returns ``plan``."""
+    plan.gaps = []
+    for step in plan.steps:
+        for ckey in step.module.requires_context:
+            status = ctx.context_requirement(ckey)
+            if status is True:
+                continue
+            plan.gaps.append(ContextGap(
+                ckey, step.module.name, GateStatus.VIOLATED if status is False else GateStatus.UNKNOWN))
+    plan.gate_report = [(name, a, a.evaluate(ctx)) for (name, a, _old) in plan.gate_report]
+    return plan
+
+
 # --------------------------------------------------------------------------- #
 # The planner                                                                 #
 # --------------------------------------------------------------------------- #

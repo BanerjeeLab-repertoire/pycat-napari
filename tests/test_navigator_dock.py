@@ -99,3 +99,36 @@ def test_the_installer_is_headless_safe_without_a_qt_window():
         window = None
 
     assert install_navigator_action(_Viewer()) is None
+
+
+@pytest.mark.integration
+def test_the_plan_re_gates_on_a_viewer_event_and_the_run_reason_updates(qtbot):
+    """The reported bug: the plan never tracked viewer state, so loading data changed nothing. Driving to a
+    plan, then simulating a load and firing the re-evaluation, must re-gate the SAME plan and update the
+    run-blocked reason — no restart, no recompile."""
+    from types import SimpleNamespace
+    from pycat.ui.navigator_dock import build_navigator_widget
+    from pycat.navigator.session import NavigatorSession
+
+    repo = {}
+    cm = SimpleNamespace(active_data_class=SimpleNamespace(data_repository=repo), viewer=None,
+                         register_data_switch_callback=lambda cb: None)
+    widget = build_navigator_widget(NavigatorSession(), on_run=lambda plan: None, central_manager=cm)
+    assert widget is not None
+    qtbot.addWidget(widget)
+
+    guard = 0
+    while widget._state == "question":                     # answer through to a compiled plan
+        assert widget._choice_buttons
+        widget._choice_buttons[0].click()
+        guard += 1
+        assert guard < 40
+    assert widget._state == "plan" and widget._plan is not None
+    assert widget._session.run_blocked_reason() == "Load an image first."   # nothing loaded
+
+    # simulate an image loaded + calibrated, then fire the re-evaluation (bypassing the debounce timer)
+    repo["file_metadata"] = {"common": {"n_channels": 1, "n_timepoints": 200}}
+    repo["microns_per_pixel"] = 0.1
+    widget._reevaluate_now()
+    assert widget._state == "plan"                          # still on the plan (re-gated, not restarted)
+    assert widget._session.run_blocked_reason() != "Load an image first."   # the reason tracked the load

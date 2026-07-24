@@ -101,7 +101,8 @@ def build_home_widget(central_manager, *, reg=None, store=None, parent=None):
         from pycat.ui.navigator_dock import build_navigator_widget
         from pycat.navigator.session import NavigatorSession
         nav = build_navigator_widget(
-            NavigatorSession(), on_run=getattr(central_manager, "run_navigator_plan", None))
+            NavigatorSession(), on_run=getattr(central_manager, "run_navigator_plan", None),
+            central_manager=central_manager)
         if nav is not None:
             widget._navigator = nav
             body_layout.addWidget(nav)
