@@ -229,8 +229,16 @@ def test_time_series_analyses_do_not_collapse_a_lazy_stack_to_frame_zero():
             # `active.data` (brightfield best-slice, CLEAN, the flatfield corrector) and `lmask.data`, none
             # of which the old `'layer' in name` heuristic caught. Match the image-layer variable names that
             # actually hold layers, so the guard covers the bug class regardless of what the var is called.
+            # The alias list was BROADENED to common stack/image names (page_to_selection Part 2, verified
+            # 2026-07-24): the whole-tree per-site sweep confirmed the tail is clean — every current
+            # `np.asarray(<x>.data)` is either an allowlisted 2D module or a NON-image `.data` (frap_io's 1D
+            # Lumicks force-distance h5 channels: `chan`/`dist_obj`/`force_obj`, correctly excluded) — so
+            # widening the names here is pure pre-emption (nothing new is flagged) that stops the next reactive
+            # extension. `_snr_of_array` (pipeline_snr) and the topology envelope were spot-checked as genuinely
+            # 2D-by-construction, validating their allowlist entries.
             _var = str(getattr(argument.value, 'id', '')).lower()
-            if any(_t in _var for _t in ('layer', 'active', 'image', 'mask')):
+            if any(_t in _var for _t in ('layer', 'active', 'image', 'img', 'mask',
+                                         'stack', 'stk', 'movie', 'frames', 'plane', 'volume')):
                 offenders.append(f"{relative}:{node.lineno}")
 
     assert not offenders, (

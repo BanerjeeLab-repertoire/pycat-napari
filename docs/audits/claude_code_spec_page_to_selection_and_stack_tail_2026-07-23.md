@@ -1,7 +1,22 @@
 # Claude Code spec — Page to the selected track, and close the stack-access tail
 
-> **◐ STATUS — Part 1 (page-to-selection) ALREADY DONE (built after the spec's 1.6.324 target). Part 2
-> (stack-access tail) remains — a curated per-site sweep, not a blind ratchet.**
+> **● STATUS — DONE. Part 1 (page-to-selection) shipped earlier; Part 2 (stack-access tail) SWEPT
+> 2026-07-24: the tail is CLEAN — zero conversions needed — and the guard was hardened.**
+>
+> **Part 2 — DONE (whole-tree per-site sweep, 2026-07-24).** Enumerated all 30 `np.asarray(<x>.data)` sites.
+> Finding: **none is an un-handled lazy-stack consumer.** (a) The only NON-allowlisted code sites are
+> `file_io/frap_io.py` (5) — verified 1D Lumicks C-Trap force-distance / force-time **h5 channels**
+> (`f[grp][ch].data`, with `.sample_rate`), NOT napari image layers, so `asarray` is correct and there is no
+> frame-0 risk. (b) The remaining sites are in `_LAZY_STACK_ALLOWED` (2D by construction) — spot-checked
+> `pipeline_snr_tools._snr_of_array` (documented "for a 2-D array"; its stats require 2D — converting would
+> BREAK it, so `asarray` is right) and the `topology_tools` envelope (inherently 2D), validating those
+> entries. (c) The rest are prose in docstrings/comments. The genuine lazy consumers were already routed
+> through `materialize_stack` in the earlier redundancy axes (1.6.212, 1.6.258), which is why the tail is
+> clean — exactly the "most `.data` sites are 2D-only where `asarray` is correct" outcome the spec hedged for.
+> **Hardening:** broadened the guard's layer-variable heuristic (`test_silent_fallbacks`) with common
+> stack/image aliases (`img`/`stack`/`stk`/`movie`/`frames`/`plane`/`volume`) — pure pre-emption (nothing new
+> flagged) that stops the next *reactive* extension (it had to be widened before when the bug bit on
+> `active.data`/`lmask.data`). No source change, no output change; all existing lazy-stack tests pass.
 >
 > **Part 1 — DONE (verified at 1.6.328).** `_vpt_page_to_selected_track` (`toolbox/vpt/results_dock.py:289`)
 > does exactly what the spec asks: recomputes the bucket from the ordered `all_tids` and the CURRENT
