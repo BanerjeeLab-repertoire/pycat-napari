@@ -17,7 +17,7 @@ try:
 except Exception:      # pragma: no cover - only when the io stack is truly unavailable
     pytest.skip("pycat.file_io.metadata_extract unavailable", allow_module_level=True)
 
-pytestmark = pytest.mark.core
+pytestmark = pytest.mark.base   # writes real TIFFs via tifffile (a scikit-image transitive dep) → base, not core
 
 
 def _write_mm_timelapse(path, n_pages, interval_ms=500.0):

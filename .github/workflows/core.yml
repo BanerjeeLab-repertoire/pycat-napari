@@ -79,6 +79,12 @@ jobs:
           # (following pycat.toolbox imports transitively) and fails if any is missing here.
           # Hand-maintaining it is exactly how sklearn got left out.
           pip install scikit-learn
+          # openpyxl: the Navigator loads its scientific question-tree + module-contract WORKBOOKS
+          # (`navigator/data/*.xlsx`) at RUNTIME via `navigator/loader.py` — a LAZY import, so the
+          # module-scope-derived list above cannot see it, and the DERIVED-list guard cannot require it.
+          # A base test that constructs a real guided plan (test_navigator_cellpose_adapter) hits it at
+          # runtime → this lane must install it explicitly. Pure-Python, lightweight.
+          pip install openpyxl
           # pytest + pytest-cov + ruff only — NOT pytest-qt. This lane runs `-m core`, which is
           # declared headless (no napari/Qt/GPU). Qt-requiring tests are marked `integration` and run
           # elsewhere (locally via `pip install -e ".[test]"`, which DOES include pytest-qt; a dedicated
@@ -237,6 +243,7 @@ jobs:
           pip install numpy scipy scikit-image pandas matplotlib
           pip install opencv-python-headless pywavelets simpleitk
           pip install seaborn networkx scikit-learn
+          pip install openpyxl   # Navigator loads its .xlsx workbooks lazily at runtime (see the core lane's note)
           pip install pytest pytest-cov build
 
       - name: Build the wheel and install it (not editable, not src)
