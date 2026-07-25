@@ -1205,6 +1205,10 @@ _DELIBERATE = {
     'obj_based_coloc_analysis_tools.py::select_all',
     'obj_based_coloc_analysis_tools.py::deselect_all',
     'obj_based_coloc_analysis_tools.py::get_selected_methods',
+
+    # data_qc_decomposition step 1 (2026-07-24): the 309-line `plot_qc_report` (presentation only) + its private
+    # status-colour/label dicts moved VERBATIM to `toolbox/data_qc/report.py`; `data_qc_tools` re-exports it.
+    'data_qc_tools.py::plot_qc_report',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

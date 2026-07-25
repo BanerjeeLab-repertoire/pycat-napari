@@ -1,3 +1,16 @@
+## [1.6.347] - 2026-07-24
+### Changed — **The QC report split out of `data_qc_tools.py` into a `data_qc/` package (data_qc_decomposition, step 1 — report).**
+Starting the by-family decomposition of the 1,949-line acquisition-QC module with the biggest, zero-science-risk
+piece: the 309-line `plot_qc_report` (the multi-panel QC summary render — per-check status rows, focus/exposure
+panels, the sampling gauge) and its private status-colour/label dicts moved **VERBATIM** to
+`toolbox/data_qc/report.py`.
+
+- Presentation only — no science. `data_qc_tools.py` re-exports `plot_qc_report`, so every caller is unchanged;
+  it drops 1,949 → 1,633 lines. Pinned by the QC test net (`test_data_qc`, `test_qc_gallery`,
+  `test_qc_ui_contract`, `test_biological_qc_surfaced` — all pass through the re-export). Recorded in
+  `_DELIBERATE`. Full `pytest -m "core or base"` green. Remaining steps: the check families (exposure, focus,
+  noise, illumination, aberration, stability, sampling) and the runner.
+
 ## [1.6.346] - 2026-07-24
 ### Changed — **Object-based colocalization moved into the `coloc/` package; the colocalization decomposition is complete (coloc_decomposition, step 6 — object_based).**
 The sibling `obj_based_coloc_analysis_tools.py` (per-object Manders/Jaccard/Dice/centroid-distance
