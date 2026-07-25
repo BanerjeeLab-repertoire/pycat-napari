@@ -1209,6 +1209,15 @@ _DELIBERATE = {
     # data_qc_decomposition step 1 (2026-07-24): the 309-line `plot_qc_report` (presentation only) + its private
     # status-colour/label dicts moved VERBATIM to `toolbox/data_qc/report.py`; `data_qc_tools` re-exports it.
     'data_qc_tools.py::plot_qc_report',
+
+    # data_qc_decomposition step 2a (2026-07-25): the shared low-level QC primitives (`_to_float`,
+    # `_robust_noise_std`, `_dtype_max`, `_mean_frame`, `_not_applicable`) moved VERBATIM to `data_qc/_base.py`
+    # so the per-family modules can import them; `data_qc_tools` re-exports them.
+    'data_qc_tools.py::_to_float',
+    'data_qc_tools.py::_robust_noise_std',
+    'data_qc_tools.py::_dtype_max',
+    'data_qc_tools.py::_mean_frame',
+    'data_qc_tools.py::_not_applicable',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

@@ -1,3 +1,16 @@
+## [1.6.348] - 2026-07-25
+### Changed — **Shared QC primitives extracted to `data_qc/_base.py` — the foundation for the check-family split (data_qc_decomposition, step 2a).**
+The acquisition-QC check families share low-level helpers, so — before the families can move — those primitives
+get a shared home (the same pattern the image-processing decomposition used).
+
+- `_to_float` / `_dtype_max` (dtype-aware normalisation), `_robust_noise_std` (MAD noise estimate),
+  `_mean_frame` (stack → representative frame), and `_not_applicable` (the standard skipped-check result) moved
+  **VERBATIM** to `toolbox/data_qc/_base.py`. Self-contained (only numpy + debug_log; inter-calls stay within
+  the group).
+- `data_qc_tools.py` imports them from `_base` (so its checks resolve) and re-exports them (callers unchanged);
+  it drops 1,633 → 1,532 lines. No number changed — pinned by the QC net. Recorded in `_DELIBERATE`. Full
+  `pytest -m "core or base"` green. Next: the check families (exposure, focus, noise, …) import from `_base`.
+
 ## [1.6.347] - 2026-07-24
 ### Changed — **The QC report split out of `data_qc_tools.py` into a `data_qc/` package (data_qc_decomposition, step 1 — report).**
 Starting the by-family decomposition of the 1,949-line acquisition-QC module with the biggest, zero-science-risk

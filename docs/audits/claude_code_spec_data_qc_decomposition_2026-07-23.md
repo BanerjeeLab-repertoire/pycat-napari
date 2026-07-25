@@ -1,8 +1,13 @@
 # Claude Code spec — Decompose `data_qc_tools.py` by check family
 
-> **◐ STATUS — step 1 (report) DONE, shipped 1.6.347 (consistency verified: module was still 1,949 lines / 25
-> defs before this). Remaining: the check families (exposure, focus, noise, illumination, aberration,
-> stability, sampling) + the runner.**
+> **◐ STATUS — step 1 (report @1.6.347) + step 2a (shared `_base` primitives @1.6.348) DONE; module 1,949 →
+> 1,532 lines. Remaining: the check families (exposure, focus, noise, illumination, aberration, stability,
+> sampling) — each imports from `_base` — + the runner.**
+>
+> **Step 2a — _base.py — DONE, 1.6.348.** The check families share low-level helpers (`_to_float` ×10,
+> `_not_applicable` ×10, `_mean_frame` ×6, `_dtype_max`, `_robust_noise_std`), so those primitives moved VERBATIM
+> to `data_qc/_base.py` first (the image_processing `_base` pattern). `data_qc_tools` imports + re-exports them.
+> This unblocks the per-family moves (each family module will `from data_qc._base import …`).
 >
 > **Step 1 — report.py — DONE, 1.6.347.** The 309-line `plot_qc_report` (presentation only) + its private
 > `_STATUS_COLOR`/`_STATUS_LABEL` dicts (used only by it) moved VERBATIM to `data_qc/report.py`;
