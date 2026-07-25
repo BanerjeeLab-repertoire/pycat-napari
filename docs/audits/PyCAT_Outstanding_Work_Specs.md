@@ -278,6 +278,13 @@ while threshold > min_nonzero_intensity and np.abs(r) > 0.1 and iterations < 50:
 
 ### B1. Kaplan–Meier: finish left-censoring + censored-aware mean
 
+> **✅ DONE — 1.6.354 (2026-07-25).** Left-censoring (frame-0 tracks folded into censored), RMST mean
+> (`mean_lifetime_is_rmst` flag + `n_left/right_censored` counts). **Also found & fixed a residual risk-set
+> bug the spec assumed closed:** the decrement only removed censored tracks at exact event times, so
+> between-event censoring was never removed (n_at_risk read 3 vs correct 2); replaced with the canonical
+> `n_at_risk = sum(durations >= t)`. Golden-master `tests/test_kaplan_meier.py`. Verified still-live against
+> the 1.6.353 tree before fixing.
+
 **File:** `toolbox/condensate_physics/survival.py` (moved verbatim from condensate_physics_tools at
 1.6.219). The **main** bug (risk set) is fixed:
 `n_at_risk -= (n_events + n_censored)` runs. Two documented behaviours remain unimplemented.

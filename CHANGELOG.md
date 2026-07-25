@@ -1,3 +1,23 @@
+## [1.6.354] - 2026-07-25
+### Fixed — **Kaplan–Meier survival mishandled censoring three ways (Outstanding-Work spec B1).**
+`kaplan_meier_lifetimes` (`toolbox/condensate_physics/survival.py`) claimed to handle left-censoring but only
+computed right-censoring, reported the mean as the naive `durations.mean()`, and left a residual risk-set bug.
+
+- **Risk set (residual bug found while implementing B1).** `n_at_risk` is now `sum(durations >= t)` — the
+  canonical form. The old decrement only subtracted censored tracks whose duration *exactly* equalled an event
+  time, so a censored track that dropped out **between** event times was never removed, overcounting the risk
+  set and biasing survival **high** (verified: `n_at_risk` read 3 where the correct value is 2).
+- **Left-censoring now real.** Frame-0-born tracks (unknown true birth) are treated as **censored** — they enter
+  the risk set but are never counted as an observed death (their duration is only a *minimum* lifetime). The
+  docstring now states exactly this instead of claiming a full left-censored estimator that was not computed.
+- **Censored-aware mean via RMST.** `mean_lifetime_frames` is now the restricted mean survival time (area under
+  the KM curve) instead of `durations.mean()`, which counted right-censored (incomplete) durations as complete
+  deaths and biased the mean **low**. `attrs['mean_lifetime_is_rmst'] = True` flags it; `n_left_censored` /
+  `n_right_censored` are surfaced so the user sees how much of the population was censored. Median unchanged.
+- **Golden-master test** (`tests/test_kaplan_meier.py`): risk set equals `sum(durations >= t)` including
+  between-event censoring; RMST > naive mean under heavy right-censoring; frame-0 tracks create no survival
+  step-down (not events); empty input → empty frame.
+
 ## [1.6.353] - 2026-07-25
 ### Fixed — **Costes M1/M2 and the threshold search were both wrong — thresholded colocalization was meaningless (Outstanding-Work specs A3 + A4, shipped together).**
 The Manders thresholded coefficients and the Costes threshold that feeds them are only meaningful together, so both are fixed in one version.
