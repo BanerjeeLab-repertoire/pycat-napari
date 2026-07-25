@@ -1,3 +1,22 @@
+## [1.6.361] - 2026-07-25
+### Changed — **Sub-split `vpt/detection.py` (part 2: GPU kernels) — vpt_detection_subsplit, complete.**
+The pure GPU code moves to its own module; detection.py is left holding the core detection path + the
+equivalence gate.
+
+- **`vpt/gpu.py` (new)** — `blob_log_gpu` (the cupy Laplacian-of-Gaussian blob detector, GPU counterpart of
+  skimage's `blob_log`) and `_gpu_build_id` (cupy build fingerprint) moved VERBATIM. cupy is imported lazily
+  inside the functions, so the module imports on a CPU-only box. Neither calls a detection function, so there
+  is no import cycle.
+- **The equivalence GATE stays in `detection.py`** — `gpu_matches_cpu`, `_run_gpu_equivalence_check`, and the
+  session memo `_GPU_EQUIV_CACHE` are coupled to `detect_beads_frame` and are monkeypatched **on the detection
+  module** by `test_vpt_equivalence_guard_memo`. Moving them would have forced test changes, and "the
+  equivalence guards pass unmodified" is law — so only the pure kernels moved. `detection.py` back-imports the
+  two kernels (its core path calls `blob_log_gpu`) and re-exports them.
+- detection.py **1,773 → 1,261 lines** across the two parts. The GPU/CPU/serial equivalence guards, the
+  detect-beads characterization (coords, sigma, count **and order**), and the **~8.325 viscosity chain
+  baseline** all pass **unmodified**.
+- **Revert condition (standing VPT rule):** if the viscosity baseline shifts from ~8.325, revert.
+
 ## [1.6.360] - 2026-07-25
 ### Changed — **Sub-split `vpt/detection.py` (part 1: linking + artifacts) — vpt_detection_subsplit.**
 The VPT decomposition left `detection.py` at 1,773 lines / 34 functions, larger than several files that were

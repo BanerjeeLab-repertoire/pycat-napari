@@ -1259,6 +1259,13 @@ _DELIBERATE = {
     'detection.py::local_intensity',               # nested in estimate_linking_distance_um
     'detection.py::build_hot_pixel_mask',           # -> vpt/artifacts.py
     'detection.py::dedup_detections_ring_merge',
+
+    # vpt_detection_subsplit step 3 (2026-07-25): the PURE GPU kernels moved VERBATIM to vpt/gpu.py;
+    # detection.py re-exports them and calls them on the core detection path. The equivalence GATE
+    # (gpu_matches_cpu / _run_gpu_equivalence_check / _GPU_EQUIV_CACHE) stays in detection (monkeypatched
+    # there by the equivalence guard tests).
+    'detection.py::blob_log_gpu',                   # -> vpt/gpu.py
+    'detection.py::_gpu_build_id',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

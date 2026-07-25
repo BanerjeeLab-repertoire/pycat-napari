@@ -1,11 +1,13 @@
 # Claude Code spec — Sub-split `vpt/detection.py` (the VPT decomposition left one giant)
 
-> **◐ IN PROGRESS — steps 1+2 DONE, 1.6.360 (2026-07-25).** `vpt/linking.py` (estimate_linking_distance_um,
-> assess_linking_conditions — the two misfiled linking fns) + `vpt/artifacts.py` (build_hot_pixel_mask,
-> dedup_detections_ring_merge) created; detection.py 1,773 → 1,340 lines, re-exports all four. Equivalence
-> guards + detect-beads order + ~8.325 viscosity chain all green. **Remaining: step 3 — blob_log_gpu + GPU
-> dispatch → vpt/gpu.py (run the equivalence guards specifically); then the shim/ratchet.** Verified premise
-> (1,773 lines, both linking fns present, no vpt/linking.py) against the 1.6.359 tree.
+> **✅ DONE — 1.6.360 (linking + artifacts) + 1.6.361 (GPU kernels). detection.py 1,773 → 1,261 lines.**
+> `vpt/linking.py` (estimate_linking_distance_um, assess_linking_conditions), `vpt/artifacts.py`
+> (build_hot_pixel_mask, dedup_detections_ring_merge), `vpt/gpu.py` (blob_log_gpu, _gpu_build_id) created;
+> detection.py re-exports all. **Deviation from the target (documented):** the GPU/CPU equivalence GATE
+> (`gpu_matches_cpu` / `_run_gpu_equivalence_check` / `_GPU_EQUIV_CACHE`) stayed in detection.py rather than
+> moving to gpu.py — it is coupled to `detect_beads_frame` and monkeypatched on the detection module by the
+> equivalence guard tests, and "equivalence guards pass unmodified" is law; only the pure cupy kernels moved.
+> All equivalence guards + detect-beads order + the ~8.325 viscosity chain pass **unmodified**.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. The VPT
 decomposition succeeded — `vpt_tools.py` is a 95-line shim — but it produced **one oversized module**:
