@@ -349,6 +349,10 @@ durations as if the condensate died at the last observed frame → biases the me
 
 ### B2. Molecular-counting UI reinstates the selection-effect gate
 
+> **✅ DONE — 1.6.355 (2026-07-25).** Panel R² default 0.999 → 0.0 (step 0.05) + selection-effect tooltip;
+> `_on_run` warns when a raised gate drops >10% of traces. Test `tests/test_molecular_counting_ui_default.py`
+> (integration). Verified still-live (setValue(0.999)) against the 1.6.354 tree before fixing.
+
 **File:** `toolbox/molecular_counting_tools.py`. The library default is correct
 (`count_molecules_pooled(..., r2_min=0.0)`, :313, with a `.. danger::` block documenting that 0.999
 inflated the mean 44→77). But the widget builder overrides it back to 0.999:

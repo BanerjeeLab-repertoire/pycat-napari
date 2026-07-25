@@ -489,10 +489,12 @@ def _build_molecular_counting_panel(ui_instance):
     form.addRow("Discard first N frames:", fast_spin)
 
     r2_spin = QDoubleSpinBox(); r2_spin.setRange(0.0, 1.0); r2_spin.setDecimals(4)
-    r2_spin.setValue(0.999); r2_spin.setSingleStep(0.001)
+    r2_spin.setValue(0.0); r2_spin.setSingleStep(0.05)
     r2_spin.setToolTip(
-        "Minimum bleaching-fit R² for a trace to contribute. Counting is only "
-        "trustworthy on clean bleaching curves; the original used 0.999.")
+        "Minimum bleaching-fit R² for a trace to contribute. DEFAULT 0.0 (keep all traces).\n"
+        "A high R² gate selects for BRIGHT traces (better SNR fit better), which biases the "
+        "pooled population toward high copy number -- it inflated a true mean of 44 to 77 in the "
+        "module's own test. Raise this only if you understand you are filtering on brightness.")
     form.addRow("Min bleaching R²:", r2_spin)
 
     prog = QProgressBar(); prog.setVisible(False)
@@ -553,6 +555,15 @@ def _add_molecular_counting(ui_instance, layout=None, separate_widget=False):
             _warn(f"Molecular counting failed: {e}")
             import traceback; traceback.print_exc(); return
         prog.setVisible(False)
+
+        # Anti-black-box: a raised R² gate is never silent. If it dropped a nontrivial fraction of
+        # traces, say so -- excluded traces skew low-copy-number (the selection effect the tooltip warns of).
+        r2_min = r2_spin.value()
+        n_total_traces = len(traces)
+        n_used = result.get('n_used', n_total_traces)
+        if r2_min > 0 and n_total_traces > 0 and (n_total_traces - n_used) / n_total_traces > 0.1:
+            _warn(f"{n_total_traces - n_used} of {n_total_traces} traces excluded by the R²>{r2_min:g} "
+                  "gate; excluded traces skew low-copy-number, biasing the pooled mean high.")
 
         df = result['per_trace'].copy()
         if len(lbls) == len(df):

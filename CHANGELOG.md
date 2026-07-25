@@ -1,3 +1,18 @@
+## [1.6.355] - 2026-07-25
+### Fixed — **The molecular-counting GUI reinstated the R² selection-effect bug the library had already fixed (Outstanding-Work spec B2).**
+`count_molecules_pooled` defaults to `r2_min=0.0` (keep all traces) with a documented danger note that a 0.999
+gate inflated a true mean of 44 to 77 by selecting for bright traces (better SNR → better fit). But the widget
+builder overrode the spinbox back to **0.999**, so through the GUI the selection effect was live.
+
+- `_build_molecular_counting_panel` (`toolbox/molecular_counting_tools.py`) now defaults the R² spinbox to
+  **0.0** (step 0.05), with a tooltip that states the selection effect explicitly. The spinbox stays present and
+  adjustable — an expert may still gate a specific dataset; the fix is the default and the disclosure.
+- `_on_run` now surfaces a one-line warning when a raised gate drops more than 10% of traces ("N of M traces
+  excluded by the R²>… gate; excluded traces skew low-copy-number, biasing the pooled mean high"), so a raised
+  gate is never silent.
+- **Test** (`tests/test_molecular_counting_ui_default.py`): the panel's R² spinbox starts at 0.0 and its tooltip
+  states the bias. Integration-marked (needs Qt).
+
 ## [1.6.354] - 2026-07-25
 ### Fixed — **Kaplan–Meier survival mishandled censoring three ways (Outstanding-Work spec B1).**
 `kaplan_meier_lifetimes` (`toolbox/condensate_physics/survival.py`) claimed to handle left-censoring but only
