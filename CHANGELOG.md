@@ -1,3 +1,15 @@
+## [1.6.372] - 2026-07-25
+### Changed — **Extracted the metadata dialog from MenuManager (ui_decomposition Part 2, feature 3).**
+The 157-line `_show_metadata_dialog` (the "Show Metadata" dialog — per-file acquisition metadata, the
+contradiction panel, CSV export, with its `_fmt` / `_fmt_interval` / `_populate` / `_export` helpers) moves
+**verbatim** to `ui/metadata_dialogs.py`; `MenuManager._show_metadata_dialog` becomes a thin wrapper.
+
+- The extracted function keeps the same `self` parameter so its body is byte-for-byte the original method's; the
+  module carries the Qt/napari imports the dialog needs. The menu action and its label are unchanged — the
+  **menu-contract snapshot passes unmodified**. `menu_manager.py` drops 2,099 → 1,946 lines.
+- Full `pytest -m "core or base"` green (1991 passed). Remaining features: metadata comparison, grid view,
+  native-menu manipulation, session-loading orchestration.
+
 ## [1.6.371] - 2026-07-25
 ### Changed — **Extracted the tag inspector from MenuManager (ui_decomposition Part 2, feature 2).**
 The 121-line `open_tag_inspector` (the per-layer tag inspector/editor dialog, with its `_current_layer` /
