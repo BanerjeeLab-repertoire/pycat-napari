@@ -145,6 +145,27 @@ def costes_linear_model(x, a, b):
     return a * x + b
 
 
+def _costes_tls_line(R, G):
+    """Orthogonal (total-least-squares) line green = a*red + b via PCA on the mean-centred cloud.
+
+    Returns (a, b) where a is the slope of the first principal component and b passes through the
+    centroid, or (nan, nan) if the slope is undefined (a vertical principal axis). TLS is the Costes
+    requirement: ordinary least squares (green-on-red) is biased low under symmetric errors-in-variables
+    noise, which biases both thresholds.
+    """
+    R = np.asarray(R, dtype=float)
+    G = np.asarray(G, dtype=float)
+    Rm, Gm = R.mean(), G.mean()
+    cov = np.cov(np.vstack([R - Rm, G - Gm]))
+    evals, evecs = np.linalg.eigh(cov)
+    vx, vy = evecs[:, int(np.argmax(evals))]          # principal axis
+    if abs(vx) <= 1e-12:                               # vertical line -> undefined slope
+        return np.nan, np.nan
+    a = vy / vx                                        # slope
+    b = Gm - a * Rm                                    # intercept through the centroid
+    return a, b
+
+
 def costes_thresholding(red_channel, green_channel, roi_mask):
     """
     Applies Costes' thresholding method to determine intensity thresholds above which there is significant
@@ -168,10 +189,19 @@ def costes_thresholding(red_channel, green_channel, roi_mask):
 
     Notes
     -----
-    The method iteratively finds the optimal thresholds by fitting a linear model to the intensities of the two channels and then
-    calculating Pearson correlation coefficients. The process aims to maximize the correlation by excluding pixels below the
-    thresholds that contribute insignificantly to the overall correlation, ensuring only significant colocalized signals are considered.
-    This method assumes a primarily positive correlation between the channels and will not be effective for negatively correlated images.
+    The method fits the Costes intensity line by **orthogonal (total least squares) regression** -- the
+    first principal component of the mean-centred (red, green) point cloud -- then descends the threshold
+    across the full intensity range until the Pearson correlation of the *below-threshold* population
+    reaches zero (the Costes stopping criterion). This assumes a primarily positive correlation between
+    the channels and will not be effective for negatively correlated images.
+
+    Notes on the previous implementation (fixed here)
+    -------------------------------------------------
+    The old code had three compounding defects: (a) it used ``curve_fit`` (ordinary least squares of
+    green-on-red), not the orthogonal line Costes requires, which biases the slope and both thresholds;
+    (b) it stepped the threshold by a fixed ``-0.01`` capped at 50 iterations, so on any uint16 image the
+    threshold descended at most 0.5 intensity units from the maximum and effectively never moved off it;
+    (c) it stopped on ``|r| > 0.1`` rather than the Costes criterion ``r_below <= 0``.
     """
     # Apply ROI mask if provided, else flatten the entire channel arrays.
     if roi_mask is not None:
@@ -181,35 +211,33 @@ def costes_thresholding(red_channel, green_channel, roi_mask):
         red_flat = red_channel.flatten()
         green_flat = green_channel.flatten()
 
-    # Fit the linear model to the intensity values of the red and green channels.
-    params, _ = scipy.optimize.curve_fit(costes_linear_model, red_flat, green_flat)
-    a, b = params  # Extract linear model parameters.
+    R = np.asarray(red_flat, dtype=float)
+    G = np.asarray(green_flat, dtype=float)
+    # Guard degenerate inputs the old code silently mishandled (empty / all-zero / near-empty ROI):
+    # return (nan, nan) so the caller emits nan M1/M2 rather than a fabricated ~max threshold.
+    if R.size < 8 or not np.any(R > 0) or not np.any(G > 0):
+        return np.nan, np.nan
 
-    # Calculate Pearson correlation coefficient for initial assessment.
-    r, _ = scipy.stats.pearsonr(red_flat, green_flat)
+    # (a) Orthogonal / total-least-squares intensity line.
+    a, b = _costes_tls_line(R, G)
+    if not np.isfinite(a) or a <= 0:                   # undefined / non-positive slope -> not analysable
+        return np.nan, np.nan
 
-    # Initialize the threshold starting from the maximum intensity observed.
-    max_intensity = max(np.max(red_flat), np.max(green_flat))
-    threshold = max_intensity
+    # (b) Descend across the full intensity range (not fixed 0.01 steps).
+    t_hi = float(min(R.max(), (G.max() - b) / a))
+    t_lo = float(max(R[R > 0].min(), 0.0))
+    if not np.isfinite(t_hi) or t_hi <= t_lo:
+        return np.nan, np.nan
 
-    # Define the stopping condition for the iterative thresholding.
-    min_nonzero_intensity = max(np.min(red_flat[np.nonzero(red_flat)]), np.min(green_flat[np.nonzero(green_flat)])) + 0.01
+    T = t_hi
+    for T in np.linspace(t_hi, t_lo, 256):
+        below = (R <= T) | (G <= a * T + b)            # sub-threshold population
+        if below.sum() < 8:
+            continue
+        r_below, _ = scipy.stats.pearsonr(R[below], G[below])
+        if r_below <= 0:                               # (c) correct Costes stop
+            break
 
-    iterations = 0
-    # Iteratively adjust the threshold to find the optimal values.
-    while threshold > min_nonzero_intensity and np.abs(r) > 0.1 and iterations < 50:
-        # Apply current thresholds to identify pixels to be excluded.
-        mask = (red_flat > threshold) & (green_flat > a * threshold + b)
-        if np.any(mask):
-            # Recalculate Pearson correlation coefficient for pixels below the current threshold.
-            r, _ = scipy.stats.pearsonr(red_flat[~mask], green_flat[~mask])
-
-        # Decrement the threshold slightly for the next iteration.
-        threshold -= 0.01
-        iterations += 1
-
-    # Calculate the final thresholds for both channels.
-    threshold_red = threshold
-    threshold_green = a * threshold + b
-
+    threshold_red = float(T)
+    threshold_green = float(a * T + b)
     return threshold_red, threshold_green

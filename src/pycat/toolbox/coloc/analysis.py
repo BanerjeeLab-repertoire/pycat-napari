@@ -589,8 +589,23 @@ def pixel_wise_correlation_analysis(image1, image2, roi_mask, method_selections,
     if costes_m1_m2_selected:
         # Perform Costes Thresholding
         thresh1, thresh2 = method_functions['Costes Automatic Thresholded M1 & M2'](image1, image2, roi_mask)
-        costes_m1 = np.round(np.sum(image1[image1 > thresh1])/np.sum(image1), 4)
-        costes_m2 = np.round(np.sum(image2[image2 > thresh2])/np.sum(image2), 4)
+        # Manders thresholded coefficients CROSS-REFERENCE the channels: M1 is the fraction of channel-1
+        # intensity in pixels where channel 2 is above ITS threshold (and vice versa), restricted to the
+        # ROI. The old code summed image1 where image1 > thresh1 (self-referential) -- identically ~1 for
+        # any threshold at the noise floor, so it was not a colocalization coefficient at all.
+        if roi_mask is not None:
+            roi = roi_mask > 0
+        else:
+            roi = np.ones(image1.shape, dtype=bool)
+        if np.isnan(thresh1) or np.isnan(thresh2):
+            costes_m1 = costes_m2 = np.nan
+        else:
+            above2 = roi & (image2 > thresh2)          # channel-2 positive pixels
+            above1 = roi & (image1 > thresh1)          # channel-1 positive pixels
+            denom1 = np.sum(image1[roi])
+            denom2 = np.sum(image2[roi])
+            costes_m1 = np.round(np.sum(image1[above2]) / denom1, 4) if denom1 > 0 else np.nan
+            costes_m2 = np.round(np.sum(image2[above1]) / denom2, 4) if denom2 > 0 else np.nan
         # Append results to the table
         row_m1 = {'Method': 'Costes Automatic Thresholded M1', 'Coefficient': costes_m1, 'P-Value': np.nan}
         row_m2 = {'Method': 'Costes Automatic Thresholded M2', 'Coefficient': costes_m2, 'P-Value': np.nan}

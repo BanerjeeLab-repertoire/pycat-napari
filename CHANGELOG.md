@@ -1,3 +1,25 @@
+## [1.6.353] - 2026-07-25
+### Fixed — **Costes M1/M2 and the threshold search were both wrong — thresholded colocalization was meaningless (Outstanding-Work specs A3 + A4, shipped together).**
+The Manders thresholded coefficients and the Costes threshold that feeds them are only meaningful together, so both are fixed in one version.
+
+- **A3 — M1/M2 now cross-reference the channels** (`toolbox/coloc/analysis.py`). M1 is the fraction of
+  channel-1 intensity in pixels where **channel 2** is above its threshold (and the mirror for M2),
+  ROI-masked, with a `nan` guard when a denominator is zero or the threshold is undefined. The old code
+  summed `image1` where `image1 > thresh1` — self-referential, hence ~1 for any threshold at the noise
+  floor, so two completely disjoint channels reported M1 ≈ M2 ≈ 1 (false colocalization).
+- **A4 — `costes_thresholding` rewritten** (`toolbox/coloc/thresholding.py`). Three compounding defects
+  fixed: (a) the intensity line is now **orthogonal / total-least-squares** (PCA principal component,
+  extracted as `_costes_tls_line`) instead of OLS `curve_fit`, which was biased low under symmetric
+  errors-in-variables noise; (b) the threshold descends across the **full intensity range** (256 levels)
+  instead of fixed `-0.01` steps capped at 50 iterations, which on a uint16 image never left the maximum;
+  (c) it stops on the correct Costes criterion (`r_below ≤ 0`) instead of `|r| > 0.1`. Degenerate inputs
+  (empty / all-zero / non-positively-correlated) return `(nan, nan)` rather than a fabricated ~max
+  threshold. `costes_linear_model` is kept for external callers.
+- **Golden-master tests.** `tests/test_costes_threshold.py`: uint16 threshold lands near the noise/signal
+  boundary (not ~max); TLS slope recovered within 10% under errors-in-variables noise (OLS under-estimates);
+  degenerate inputs → nan. `tests/test_costes_manders.py` (drives the real dispatch): fully colocalized →
+  M1,M2 ≈ 1; disjoint → not the old false ~1; partial overlap → a graded value strictly in (0, 1).
+
 ## [1.6.352] - 2026-07-25
 ### Fixed — **Nematic order parameter measured x-axis alignment, not the director — a perfectly aligned bundle read as isotropic (Outstanding-Work spec A2).**
 `orientation_order_parameter` (`toolbox/morphological_complexity_tools.py`) returned `S = |⟨cos2θ⟩|`, which is

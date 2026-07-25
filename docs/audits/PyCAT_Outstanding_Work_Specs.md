@@ -144,6 +144,11 @@ correct value is literally the magnitude of `mean_resultant`, already on line 36
 
 ### A3. Costes thresholded M1/M2 — never reference the opposite channel
 
+> **✅ DONE — 1.6.353 (2026-07-25), shipped with A4.** M1/M2 now cross-reference the channels (ROI-masked,
+> nan-guarded) in `coloc/analysis.py`. Note: code moved to the `coloc` package during the coloc
+> decomposition; the fix was applied at the new location. Golden-master `tests/test_costes_manders.py`
+> (drives the real dispatch): colocalized → ~1, disjoint → not ~1, partial → graded (0,1).
+
 **File:** `toolbox/pixel_wise_corr_analysis_tools.py:1495–1496` (inside the coloc dispatch).
 
 **Current (buggy):**
@@ -194,6 +199,12 @@ restricted to the ROI.
 ---
 
 ### A4. `costes_thresholding` — OLS instead of orthogonal regression, capped 0.5-unit descent, wrong stop
+
+> **✅ DONE — 1.6.353 (2026-07-25), shipped with A3.** TLS line via PCA (`_costes_tls_line`), full-range
+> 256-level descent, `r_below ≤ 0` stop, `(nan,nan)` on degenerate inputs. Code lives in
+> `coloc/thresholding.py` (moved during the coloc decomposition). Golden-master
+> `tests/test_costes_threshold.py`: threshold not pinned at max on uint16, TLS slope within 10% under
+> errors-in-variables noise (OLS under-estimates), degenerate → nan.
 
 **File:** `toolbox/pixel_wise_corr_analysis_tools.py:1020` (search loop :1064–1086).
 
