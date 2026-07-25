@@ -1118,6 +1118,18 @@ _DELIBERATE = {
     # in file_io as orchestration) call `self._..._single(...)` unchanged; the load fire-order is untouched.
     'file_io.py::_add_image_or_mask_single',
     'file_io.py::_open_image_auto_single',
+
+    # coloc_decomposition (2026-07-24) step 1: the raw pairwise-correlation metrics (Pearson, the Manders
+    # overlap + M1/M2, and the rank correlations) moved VERBATIM to `toolbox/coloc/metrics.py`;
+    # `pixel_wise_corr_analysis_tools` re-exports them (the old import still resolves). No number changed —
+    # pinned identical by the colocalization test net (test_coloc_metrics, test_pixel_coloc, test_group_f_coloc).
+    'pixel_wise_corr_analysis_tools.py::pearsons_correlation',
+    'pixel_wise_corr_analysis_tools.py::manders_overlap',
+    'pixel_wise_corr_analysis_tools.py::manders_k1_calculation',
+    'pixel_wise_corr_analysis_tools.py::manders_k2_calculation',
+    'pixel_wise_corr_analysis_tools.py::spearman_r_calculation',
+    'pixel_wise_corr_analysis_tools.py::kendall_tau_calculation',
+    'pixel_wise_corr_analysis_tools.py::weighted_tau_calculation',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

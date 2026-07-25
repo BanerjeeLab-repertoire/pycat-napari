@@ -1,3 +1,18 @@
+## [1.6.341] - 2026-07-24
+### Changed — **Colocalization raw metrics split into a `coloc/` package (coloc_decomposition, step 1 — metrics).**
+The 2,029-line `pixel_wise_corr_analysis_tools.py` mixes the raw measures, thresholding, spatial nulls, the
+temporal trace, and the orchestration. This starts a domain split with the cleanest layer.
+
+- New `toolbox/coloc/` package; `coloc/metrics.py` holds the **raw pairwise correlation/overlap measures** —
+  Pearson (`pearsons_correlation`), the Manders overlap + M1/M2 coefficients, and the rank correlations
+  (Spearman, Kendall, weighted-tau). Each takes two images + an ROI mask and returns a scalar; none depends on
+  another coloc function, so the move is clean.
+- Moved **VERBATIM** — no number changed; pinned identical by the colocalization test net (`test_coloc_metrics`,
+  `test_pixel_coloc`, `test_group_f_coloc`), which passes unmodified through the re-export.
+  `pixel_wise_corr_analysis_tools.py` re-exports the seven names, so every caller is unchanged; it drops
+  2,029 → 1,738 lines. Recorded in `_DELIBERATE`. Full `pytest -m "core or base"` green. Remaining coloc steps:
+  thresholding, nulls, temporal, analysis, object_based.
+
 ## [1.6.340] - 2026-07-24
 ### Changed — **The per-file load helpers moved to their own module; the file_io.py decomposition's four concerns are now extracted (file_io_decomposition, step: loading).**
 `_add_image_or_mask_single` (image-or-mask? load it) and `_open_image_auto_single` (2D-or-stack? route it) —
