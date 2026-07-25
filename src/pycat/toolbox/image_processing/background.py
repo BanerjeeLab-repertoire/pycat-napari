@@ -282,12 +282,12 @@ def run_rb_gaussian_background_removal(eq_int_input, data_instance, viewer):
     bg_removed_image = rb_gaussian_background_removal(image, ball_radius, equalize_intensity=equalize_intensity_input)
 
     # Add the processed image as a new layer in the viewer
-    _add_image(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}', operation='background_subtract')
+    _bg_layer = _add_image(bg_removed_image, viewer, name=f'RB-Gaussian Background Removed {active_layer.name}', operation='background_subtract')
+    # Record lineage through the REGISTERED op (op/role + derived_from edge), not the previous raw string.
     try:
-        from pycat.utils import layer_tags as _LT
-        if len(viewer.layers):
-            _LT.mark_derived(viewer.layers[-1], active_layer, via='background_subtract')
-    except Exception:
+        from pycat.utils.tag_registry import tag_from_operation
+        tag_from_operation(_bg_layer, rb_gaussian_background_removal, source_layer=active_layer)
+    except Exception:  # broad-ok: optional_probe — lineage metadata is auxiliary; never block the result
         pass
 
 

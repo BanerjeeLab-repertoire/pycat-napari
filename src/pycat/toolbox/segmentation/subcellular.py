@@ -349,8 +349,13 @@ def run_segment_subcellular_objects(pre_processed_image_layer, original_image_la
             "No mask layers were added to avoid cluttering the viewer with empty results."
         )
         return
-    viewer.add_labels(labeled_total_puncta, name=f"Total Puncta Mask")
-    viewer.add_labels(labeled_total_refined, name=f"Total Refined Puncta Mask")
+    _puncta_layer = viewer.add_labels(labeled_total_puncta, name=f"Total Puncta Mask")
+    _refined_layer = viewer.add_labels(labeled_total_refined, name=f"Total Refined Puncta Mask")
+    # Record lineage: both masks were produced by segment_subcellular_objects FROM the pre-processed
+    # image, so downstream steps and the resolver can trace them back to their source image.
+    from pycat.utils.tag_registry import tag_from_operation
+    tag_from_operation(_puncta_layer, segment_subcellular_objects, source_layer=pre_processed_image_layer)
+    tag_from_operation(_refined_layer, segment_subcellular_objects, source_layer=pre_processed_image_layer)
     napari_show_info(
         f"Condensate segmentation complete: {n_condensates} objects found.")
 

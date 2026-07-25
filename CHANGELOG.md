@@ -1,3 +1,26 @@
+## [1.6.357] - 2026-07-25
+### Added — **Lineage recording at the first batch of pipeline add-sites (Outstanding-Work spec C1, increment 1).**
+`tag_from_operation` — which stamps a layer with the operation that produced it AND records a `derived_from`
+edge to its source — had **zero real call sites**, so the resolver's head-of-lineage and "labels derived from
+this image" queries always fell back to weak guesses. This wires it at the highest-value add-sites (the outputs
+later steps consume):
+
+- **Cellpose → cell labels** (`segmentation/cellpose.py`): the output labels now record `op='cellpose'` and a
+  `derived_from` edge to the input image layer.
+- **Subcellular segmentation → puncta / refined masks** (`segmentation/subcellular.py`): both masks record
+  `op='subcellular_segment'` derived from the pre-processed image.
+- **Background removal → preprocessed image** (`image_processing/background.py`): replaces a raw-string
+  `mark_derived('background_subtract')` with `tag_from_operation` through the **registered** op (`rolling_ball`).
+- **Preprocess → preprocessed image** (`image_processing/preprocessing.py`): records `op='preprocess'` derived
+  from the active image.
+- **Enabling fix:** `add_image_with_default_colormap` (`ui/ui_utils.py`) now **returns** the created layer — it
+  previously discarded it (returned `None`), which is why `_add_image`'s captured layer was always `None` and
+  the image add-sites could not be tagged. Backward-compatible (callers that ignored the return still work).
+- **Test** (`tests/test_lineage_recording.py`, integration): the real `run_pre_process_image` path stamps
+  `op='preprocess'` (source='pipeline') + a `derived_from` edge to the input; the shared add-labels mechanism
+  records op + edge on a labels layer. Remaining add-sites (VPT bead detection, brightfield/in-vitro condensate
+  masks — which need dropdown-layer re-resolution or branch-dependent op selection) are a later C1 increment.
+
 ## [1.6.356] - 2026-07-25
 ### Fixed — **Contact angle was capped at 90° — every hydrophobic droplet was reported as its acute supplement (Outstanding-Work spec B3).**
 `estimate_contact_angle` (`toolbox/invitro/analysis.py`) computed `θ = arcsin(a/R)`, which can never exceed 90°,

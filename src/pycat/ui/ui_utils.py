@@ -376,8 +376,10 @@ def add_image_with_default_colormap(data, viewer, colormap='viridis', **kwargs):
     The default colormap 'viridis' is chosen due to its effectiveness in making distinct features stand out visually.
     Other colormaps provided by Napari can also be specified for different visual effects.
     """
-    # Add the image to the Napari viewer with the specified (or default viridis) colormap and any additional kwargs
-    viewer.add_image(data, colormap=colormap, **kwargs)
+    # Add the image to the Napari viewer with the specified (or default viridis) colormap and any additional
+    # kwargs, and RETURN the created layer so callers can tag it (lineage) instead of reaching for
+    # viewer.layers[-1]. Previously this returned None, so _add_image's captured layer was always None.
+    return viewer.add_image(data, colormap=colormap, **kwargs)
 
 
 def refresh_viewer_with_new_data(viewer, active_layer, new_data=None):

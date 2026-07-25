@@ -225,8 +225,15 @@ def run_pre_process_image(data_instance, viewer):
         suppression_params=suppression_params)
 
     # Add the pre-processed image to the viewer with a default colormap
-    _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}",
-               operation='preprocess')
+    _pre_layer = _add_image(pre_processed_image, viewer, name=f"Pre-Processed {active_layer.name}",
+                            operation='preprocess')
+    # Record lineage: the pre-processed image is derived FROM active_layer via pre_process_image, so a
+    # later segmentation step querying head-of-lineage finds the right source image.
+    try:
+        from pycat.utils.tag_registry import tag_from_operation
+        tag_from_operation(_pre_layer, pre_process_image, source_layer=active_layer)
+    except Exception:  # broad-ok: optional_probe — lineage metadata is auxiliary; never block the result
+        pass
 
 
 # ---------------------------------------------------------------------------

@@ -306,7 +306,11 @@ def run_cellpose_segmentation(image_layer, data_instance, viewer):
                                        postprocess=refine)
     
     # Add the segmentation results as a new label layer to the viewer.
-    viewer.add_labels(cell_masks, name=f"Cellpose Segmentation on {image_layer.name}")
+    _cell_layer = viewer.add_labels(cell_masks, name=f"Cellpose Segmentation on {image_layer.name}")
+    # Record lineage: these cell labels were produced by cellpose_segmentation FROM image_layer, so the
+    # resolver can answer "which image is behind these labels" and head-of-lineage queries resolve.
+    from pycat.utils.tag_registry import tag_from_operation
+    tag_from_operation(_cell_layer, cellpose_segmentation, source_layer=image_layer)
 
 
 def train_and_apply_rf_classifier(image, training_labels, object_diameter):

@@ -448,6 +448,15 @@ sites**. So derived/superseded edges are essentially never written, and `tag_res
 
 ### C1. Stamp lineage at the UI add-sites for the highest-value operations (additive, low-risk)
 
+> **◐ IN PROGRESS — increment 1 DONE, 1.6.357 (2026-07-25).** Wired `tag_from_operation` at: cellpose→cell
+> labels, subcellular→puncta/refined masks, background removal→preprocessed (replacing a raw-string
+> `mark_derived`), preprocess→preprocessed. **Enabling fix:** `add_image_with_default_colormap` now RETURNS the
+> created layer (was discarding it → `_add_image` captured None). Test `tests/test_lineage_recording.py`
+> (integration). **Remaining (increment 2):** VPT bead detection (`vpt_ui.py:600/604`, branch-dependent),
+> brightfield/in-vitro condensate masks (`brightfield_ui.py:455`, `invitro_*` — need dropdown-layer
+> re-resolution since the input var holds `.data`, not the layer), z-stack 3D bg/segmentation. Verified
+> tag_from_operation had 0 real call sites against the 1.6.356 tree before wiring.
+
 The layer hook (`layer_tag_hook.install`) already auto-tags `role`/`provenance` on every `add_*`. What
 it *cannot* know is the **source layer** — only the UI call site knows "these labels came from *that*
 image". `tag_from_operation` exists precisely to record that edge.
