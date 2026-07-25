@@ -1,3 +1,20 @@
+## [1.6.362] - 2026-07-25
+### Changed — **Decomposed the 638-line `_add_advanced_analysis` UI builder (ui_builder_split, 1 of 5).**
+The five longest functions in PyCAT are all UI builders. This splits the largest into small helpers, none over
+the 120-line ratchet — pure Qt construction, no science, no numerics changed.
+
+- **Per-tab builders:** `_build_morphological_tab`, `_build_dynamic_tab`, `_build_organizational_tab`.
+- **Widget factories** build each tab's widgets **verbatim** and return a `SimpleNamespace` of handles:
+  `_dynamic_linking_widgets`, `_dynamic_run_widgets`, `_organizational_widgets`.
+- **Run handlers** `_run_dynamic_analysis` / `_run_organizational_analysis` take the namespace, unpack it to
+  locals in one statement, then run the original handler bodies **verbatim** (dedented). `_add_advanced_analysis`
+  is now a 116-line orchestrator that wires the three tabs.
+- Construction order, parenting and signal connections are preserved; every resulting function is ≤120 lines.
+  Pinned by `test_ui_builder_split` (the `_morph_worker` / `_org_worker` attribute contract, unmodified) and a
+  new headless construction smoke (`test_advanced_analysis_builder.py`). **`_MAX_LONG_FUNCTIONS` lowered
+  120 → 119.** Remaining builders: `_add_condensate_physics`, `_add_run_ts_cellpose`, and the two
+  `timeseries/ui.py` builders.
+
 ## [1.6.361] - 2026-07-25
 ### Changed — **Sub-split `vpt/detection.py` (part 2: GPU kernels) — vpt_detection_subsplit, complete.**
 The pure GPU code moves to its own module; detection.py is left holding the core detection path + the

@@ -8,6 +8,8 @@ Sits in the pipeline after condensate analysis (static) or after time-series
 condensate analysis (dynamic).
 """
 from __future__ import annotations
+
+from types import SimpleNamespace
 import numpy as np
 
 
@@ -92,74 +94,8 @@ def _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_d
     worker.start()
 
 
-def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
-    """
-    Tabbed widget with three sections:
-      Tab 1 — Morphological Complexity
-      Tab 2 — Dynamic Spatial Phenotyping (time-series only)
-      Tab 3 — Organizational Metrics
-    """
-    outer = QVBoxLayout()
-    ui_instance.add_text_label(outer, 'Advanced Condensate Analysis', bold=True)
-
-    # ── The pixel-size gate: this panel reports AREAS and DISTANCES in microns ──
-    #
-    # ``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and
-    # **1 um/px is a plausible value, not an obviously-wrong one.** So an area silently comes out
-    # in PIXELS-squared, labelled as microns-squared, and nothing says so.
-    #
-    # ``utils/pixel_size.py`` puts it exactly: *"A NaN area is visibly wrong; a 1435x
-    # overestimate is not."* Eight UIs already carry this gate; this one did not.
-    try:
-        from pycat.ui.field_status import add_pixel_size_gate
-        add_pixel_size_gate(
-            outer,
-            lambda: ui_instance.central_manager.active_data_class.data_repository,
-            central_manager=ui_instance.central_manager)
-    except Exception as _exc:
-        report_guarantee_failure('advanced_analysis_ui: add_pixel_size_gate', _exc)
-
-    # Fully-optional block: hidden by default behind an off-by-default checkbox.
-    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
-    show_cb = _QCheckBox("Show advanced analysis (optional)")
-    show_cb.setChecked(False)
-    show_cb.setToolTip(
-        "Morphological complexity, dynamic spatial phenotyping, and organizational "
-        "metrics. Optional — enable only if you need these analyses.")
-    outer.addWidget(show_cb)
-
-    # Detect whether any loaded layer is a (T,H,W) time stack. The dynamic spatial
-    # phenotyping tab only applies to time-series data, so it is hidden when the
-    # input has no time channel.
-    def _has_time_stack():
-        try:
-            for lyr in ui_instance.viewer.layers:
-                data = getattr(lyr, 'data', None)
-                if data is not None and getattr(data, 'ndim', 0) >= 3:
-                    return True
-        except Exception:
-            pass
-        return False
-
-    tabs = QTabWidget()
-    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-    def _fit_tab_height(idx=None):
-        # Cap the tab widget height to the current tab's content + tab bar.
-        # QTabWidget normally reserves space for the tallest tab in ALL tabs;
-        # this overrides that by calling setMaximumHeight() whenever the tab
-        # changes, collapsing the empty space that would otherwise appear when
-        # a shorter tab (Morphological, Organizational) is active.
-        w = tabs.currentWidget()
-        if w is None:
-            return
-        bar_h     = tabs.tabBar().sizeHint().height()
-        content_h = w.sizeHint().height()
-        tabs.setMaximumHeight(bar_h + content_h + 12)  # 12px margin
-
-    tabs.currentChanged.connect(_fit_tab_height)
-
-    # ── Tab 1: Morphological Complexity ─────────────────────────────────
+def _build_morphological_tab(ui_instance, tabs):
+    """Tab 1 — Morphological Complexity (split out of _add_advanced_analysis)."""
     morph_widget = QWidget()
     morph_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     mf = QFormLayout(morph_widget)
@@ -273,13 +209,9 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     run_m.clicked.connect(_on_morph)
     tabs.addTab(morph_widget, "Morphological")
 
-    # ── Tab 2: Dynamic Spatial Phenotyping ──────────────────────────────
-    dyn_widget = QWidget()
-    dyn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-    df = QFormLayout(dyn_widget)
-    df.setContentsMargins(4, 4, 4, 4)
-    df.setSpacing(5)
 
+def _dynamic_linking_widgets(ui_instance, df):
+    """Build the Dynamic-tab linking/parameter widgets; return their handles."""
     stack_dd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     df.addRow("TS condensate mask stack (T,H,W):", stack_dd)
 
@@ -379,23 +311,12 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     df.addRow(tm_merge_cb)
     df.addRow(tm_split_cb)
     df.addRow(tm_kalman_cb)
+    return SimpleNamespace(
+        stack_dd=stack_dd, linker_dd=linker_dd, max_disp=max_disp, max_gap=max_gap, sigma_spin=sigma_spin, area_w_spin=area_w_spin, vel_check=vel_check, frame_dt=frame_dt, prox_um=prox_um, nb_rad=nb_rad, tm_gap_dist=tm_gap_dist, tm_merge_cb=tm_merge_cb, tm_split_cb=tm_split_cb, tm_kalman_cb=tm_kalman_cb, tm_note=tm_note)
 
-    # Show/hide linker-specific params
-    def _on_linker_changed():
-        idx = linker_dd.currentIndex()
-        is_bayes = idx == 0
-        is_trackmate = idx == 2
-        sigma_spin.setEnabled(is_bayes)
-        area_w_spin.setEnabled(is_bayes)
-        vel_check.setEnabled(is_bayes)
-        tm_gap_dist.setEnabled(is_trackmate)
-        tm_merge_cb.setEnabled(is_trackmate)
-        tm_split_cb.setEnabled(is_trackmate)
-        tm_kalman_cb.setEnabled(is_trackmate)
-        tm_note.setVisible(is_trackmate)
-    linker_dd.currentIndexChanged.connect(_on_linker_changed)
-    _on_linker_changed()
 
+def _dynamic_run_widgets(df):
+    """Build the Dynamic-tab analysis checkboxes + run controls; return their handles."""
     cb_track = QCheckBox("Trajectory tracking + metrics")
     cb_track.setToolTip("Link objects into trajectories and compute per-track speed, displacement, and confinement."); cb_track.setChecked(True)
     cb_track.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -420,129 +341,157 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     run_d.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     stop_d = QPushButton("■  Stop"); stop_d.setVisible(False)
     df.addRow(prog_d); df.addRow(run_d); df.addRow(stop_d)
+    return SimpleNamespace(
+        cb_track=cb_track, cb_mf=cb_mf, cb_life=cb_life, cb_nb=cb_nb, cb_grow=cb_grow, prog_d=prog_d, run_d=run_d, stop_d=stop_d)
 
-    def _on_dynamic():
-        from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories,
-            trajectory_metrics, detect_merge_fission,
-            cluster_lifetime_analysis, neighbourhood_persistence,
-            growth_shrinkage_kinetics,
-        )
-        try:
-            stack = ui_instance.viewer.layers[stack_dd.currentText()].data
-        except KeyError as e:
-            napari_show_warning(f"Layer not found: {e}"); return
 
-        if stack.ndim != 3:
-            napari_show_warning("Dynamic analysis needs a 3D (T,H,W) mask stack."); return
+def _run_dynamic_analysis(ui_instance, w):
+    """Run the dynamic spatial-phenotyping analysis for the Dynamic tab."""
+    (stack_dd, prog_d, run_d, cb_track, cb_mf, cb_life, cb_nb, cb_grow, linker_dd, max_disp, max_gap, sigma_spin, area_w_spin, vel_check, tm_gap_dist, tm_merge_cb, tm_split_cb, tm_kalman_cb, prox_um, nb_rad, frame_dt, stop_d) = (
+        w.stack_dd, w.prog_d, w.run_d, w.cb_track, w.cb_mf, w.cb_life, w.cb_nb, w.cb_grow, w.linker_dd, w.max_disp, w.max_gap, w.sigma_spin, w.area_w_spin, w.vel_check, w.tm_gap_dist, w.tm_merge_cb, w.tm_split_cb, w.tm_kalman_cb, w.prox_um, w.nb_rad, w.frame_dt, w.stop_d)
+    from pycat.toolbox.dynamic_spatial_tools import (
+        extract_frame_properties, link_trajectories,
+        trajectory_metrics, detect_merge_fission,
+        cluster_lifetime_analysis, neighbourhood_persistence,
+        growth_shrinkage_kinetics,
+    )
+    try:
+        stack = ui_instance.viewer.layers[stack_dd.currentText()].data
+    except KeyError as e:
+        napari_show_warning(f"Layer not found: {e}"); return
 
-        dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
-        # NOTE: this used to call `progress_emit(0, 5)` here. `progress_emit` is a
-        # PARAMETER of the nested `_task` below, not a variable of this scope, so the
-        # name did not exist yet and this line raised NameError — killing the handler
-        # before the worker was even created. The Dynamic Spatial Analysis button
-        # could never have run. There is nothing to emit TO at this point anyway (no
-        # worker exists), so the progress bar is simply set directly.
-        prog_d.setMaximum(5); prog_d.setValue(0); prog_d.setVisible(True)
-        run_d.setEnabled(False)
+    if stack.ndim != 3:
+        napari_show_warning("Dynamic analysis needs a 3D (T,H,W) mask stack."); return
 
-        def _task(progress_emit=None, should_cancel=None):
-            def _cancelled():
-                return bool(should_cancel and should_cancel())
-            res = {}
-            props = extract_frame_properties(np.asarray(stack), mpx)
-            tracks = None
-            progress_emit and progress_emit(1, 5)
-            if _cancelled():
-                return res
+    dr  = ui_instance.central_manager.active_data_class.data_repository
+    mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
+    # NOTE: this used to call `progress_emit(0, 5)` here. `progress_emit` is a
+    # PARAMETER of the nested `_task` below, not a variable of this scope, so the
+    # name did not exist yet and this line raised NameError — killing the handler
+    # before the worker was even created. The Dynamic Spatial Analysis button
+    # could never have run. There is nothing to emit TO at this point anyway (no
+    # worker exists), so the progress bar is simply set directly.
+    prog_d.setMaximum(5); prog_d.setValue(0); prog_d.setVisible(True)
+    run_d.setEnabled(False)
 
-            if cb_track.isChecked() or cb_life.isChecked() or cb_nb.isChecked() or cb_grow.isChecked():
-                linker_idx = linker_dd.currentIndex()
-                if linker_idx == 0:
-                    from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
-                    tracks = link_trajectories_bayesian(
-                        props,
-                        max_displacement_um=max_disp.value(),
-                        max_gap_frames=max_gap.value(),
-                        sigma_um=sigma_spin.value(),
-                        area_weight=area_w_spin.value(),
-                        use_velocity=vel_check.isChecked(),
-                    )
-                elif linker_idx == 2:
-                    from pycat.toolbox.trackmate_bridge import (
-                        trackmate_bridge_available, run_trackmate_lap_tracking)
-                    if not trackmate_bridge_available():
-                        raise ImportError(
-                            "TrackMate bridge requires pyimagej. Install with:\n"
-                            "  pip install pycat-napari[trackmate]\n"
-                            "  (or directly: pip install pyimagej)\n"
-                            "and ensure a Java runtime (JDK 11+) is on PATH "
-                            "(pip does not install Java \u2014 use conda "
-                            "install openjdk=11 or your OS package manager), "
-                            "then retry.")
-                    tm_result = run_trackmate_lap_tracking(
-                        props,
-                        max_linking_distance_um=max_disp.value(),
-                        max_gap_closing_distance_um=tm_gap_dist.value(),
-                        max_frame_gap=max_gap.value(),
-                        allow_merging=tm_merge_cb.isChecked(),
-                        allow_splitting=tm_split_cb.isChecked(),
-                        use_kalman=tm_kalman_cb.isChecked(),
-                    )
-                    # Drop any spots TrackMate left unlinked (track_id == -1)
-                    # so downstream trajectory functions never see an
-                    # ambiguous "-1" pseudo-track.
-                    tracks = tm_result[tm_result['track_id'] != -1].reset_index(drop=True)
-                else:
-                    tracks = link_trajectories(props, max_disp.value(), max_gap.value())
-                if cb_track.isChecked():
-                    res['trajectories']    = tracks
-                    res['trajectory_metrics'] = trajectory_metrics(tracks)
-                progress_emit and progress_emit(2, 5)
-
-            if cb_mf.isChecked():
-                res['merge_fission'] = detect_merge_fission(
-                    np.asarray(stack), mpx, prox_um.value())
-                progress_emit and progress_emit(3, 5)
-
-            if cb_life.isChecked() and tracks is not None:
-                res['lifetime_distribution'] = cluster_lifetime_analysis(tracks)
-                progress_emit and progress_emit(3, 5)
-
-            if cb_nb.isChecked() and tracks is not None:
-                res['neighbourhood_persistence'] = neighbourhood_persistence(
-                    props, tracks, nb_rad.value())
-                progress_emit and progress_emit(4, 5)
-
-            if cb_grow.isChecked() and tracks is not None:
-                try:
-                    from pycat.file_io.stack_access import warn_if_assumed_axis
-                    warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Growth/shrinkage kinetics (treats frames as time)')
-                except Exception as _exc:
-                    report_guarantee_failure('advanced_analysis_ui: warn_if_assumed_axis', _exc)
-                res['growth_kinetics'] = growth_shrinkage_kinetics(
-                    tracks, frame_dt.value())
-                progress_emit and progress_emit(5, 5)
-
+    def _task(progress_emit=None, should_cancel=None):
+        def _cancelled():
+            return bool(should_cancel and should_cancel())
+        res = {}
+        props = extract_frame_properties(np.asarray(stack), mpx)
+        tracks = None
+        progress_emit and progress_emit(1, 5)
+        if _cancelled():
             return res
 
-        _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_dd,
-                              sigma_spin, area_w_spin, max_disp, max_gap, tm_gap_dist,
-                              tm_merge_cb, tm_split_cb, tm_kalman_cb, _task, dr)
+        if cb_track.isChecked() or cb_life.isChecked() or cb_nb.isChecked() or cb_grow.isChecked():
+            linker_idx = linker_dd.currentIndex()
+            if linker_idx == 0:
+                from pycat.toolbox.dynamic_spatial_tools import link_trajectories_bayesian
+                tracks = link_trajectories_bayesian(
+                    props,
+                    max_displacement_um=max_disp.value(),
+                    max_gap_frames=max_gap.value(),
+                    sigma_um=sigma_spin.value(),
+                    area_weight=area_w_spin.value(),
+                    use_velocity=vel_check.isChecked(),
+                )
+            elif linker_idx == 2:
+                from pycat.toolbox.trackmate_bridge import (
+                    trackmate_bridge_available, run_trackmate_lap_tracking)
+                if not trackmate_bridge_available():
+                    raise ImportError(
+                        "TrackMate bridge requires pyimagej. Install with:\n"
+                        "  pip install pycat-napari[trackmate]\n"
+                        "  (or directly: pip install pyimagej)\n"
+                        "and ensure a Java runtime (JDK 11+) is on PATH "
+                        "(pip does not install Java \u2014 use conda "
+                        "install openjdk=11 or your OS package manager), "
+                        "then retry.")
+                tm_result = run_trackmate_lap_tracking(
+                    props,
+                    max_linking_distance_um=max_disp.value(),
+                    max_gap_closing_distance_um=tm_gap_dist.value(),
+                    max_frame_gap=max_gap.value(),
+                    allow_merging=tm_merge_cb.isChecked(),
+                    allow_splitting=tm_split_cb.isChecked(),
+                    use_kalman=tm_kalman_cb.isChecked(),
+                )
+                # Drop any spots TrackMate left unlinked (track_id == -1)
+                # so downstream trajectory functions never see an
+                # ambiguous "-1" pseudo-track.
+                tracks = tm_result[tm_result['track_id'] != -1].reset_index(drop=True)
+            else:
+                tracks = link_trajectories(props, max_disp.value(), max_gap.value())
+            if cb_track.isChecked():
+                res['trajectories']    = tracks
+                res['trajectory_metrics'] = trajectory_metrics(tracks)
+            progress_emit and progress_emit(2, 5)
 
-    run_d.clicked.connect(_on_dynamic)
-    # Dynamic Spatial Phenotyping applies only to (T,H,W) time-series data.
-    # The tab is added/removed dynamically by _sync_dynamic_tab() based on
-    # whether a time stack is loaded (handled below), so it is NOT added here.
+        if cb_mf.isChecked():
+            res['merge_fission'] = detect_merge_fission(
+                np.asarray(stack), mpx, prox_um.value())
+            progress_emit and progress_emit(3, 5)
 
-    # ── Tab 3: Organizational Metrics ───────────────────────────────────
-    org_widget = QWidget()
-    org_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-    of = QFormLayout(org_widget)
-    of.setContentsMargins(4, 4, 4, 4)
-    of.setSpacing(5)
+        if cb_life.isChecked() and tracks is not None:
+            res['lifetime_distribution'] = cluster_lifetime_analysis(tracks)
+            progress_emit and progress_emit(3, 5)
 
+        if cb_nb.isChecked() and tracks is not None:
+            res['neighbourhood_persistence'] = neighbourhood_persistence(
+                props, tracks, nb_rad.value())
+            progress_emit and progress_emit(4, 5)
+
+        if cb_grow.isChecked() and tracks is not None:
+            try:
+                from pycat.file_io.stack_access import warn_if_assumed_axis
+                warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Growth/shrinkage kinetics (treats frames as time)')
+            except Exception as _exc:
+                report_guarantee_failure('advanced_analysis_ui: warn_if_assumed_axis', _exc)
+            res['growth_kinetics'] = growth_shrinkage_kinetics(
+                tracks, frame_dt.value())
+            progress_emit and progress_emit(5, 5)
+
+        return res
+
+    _start_dynamic_worker(ui_instance, prog_d, run_d, stop_d, stack_dd, linker_dd,
+                          sigma_spin, area_w_spin, max_disp, max_gap, tm_gap_dist,
+                          tm_merge_cb, tm_split_cb, tm_kalman_cb, _task, dr)
+
+
+def _build_dynamic_tab(ui_instance, tabs):
+    """Tab 2 — Dynamic Spatial Phenotyping. Returns the (dynamically added) tab widget."""
+    dyn_widget = QWidget()
+    dyn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    df = QFormLayout(dyn_widget)
+    df.setContentsMargins(4, 4, 4, 4)
+    df.setSpacing(5)
+    w = _dynamic_linking_widgets(ui_instance, df)
+    (linker_dd, sigma_spin, area_w_spin, vel_check, tm_gap_dist, tm_merge_cb, tm_split_cb, tm_kalman_cb, tm_note) = (
+        w.linker_dd, w.sigma_spin, w.area_w_spin, w.vel_check, w.tm_gap_dist, w.tm_merge_cb, w.tm_split_cb, w.tm_kalman_cb, w.tm_note)
+    def _on_linker_changed():
+        idx = linker_dd.currentIndex()
+        is_bayes = idx == 0
+        is_trackmate = idx == 2
+        sigma_spin.setEnabled(is_bayes)
+        area_w_spin.setEnabled(is_bayes)
+        vel_check.setEnabled(is_bayes)
+        tm_gap_dist.setEnabled(is_trackmate)
+        tm_merge_cb.setEnabled(is_trackmate)
+        tm_split_cb.setEnabled(is_trackmate)
+        tm_kalman_cb.setEnabled(is_trackmate)
+        tm_note.setVisible(is_trackmate)
+    linker_dd.currentIndexChanged.connect(_on_linker_changed)
+    _on_linker_changed()
+    w_run = _dynamic_run_widgets(df)
+    for _k, _v in vars(w_run).items():
+        setattr(w, _k, _v)
+    w.run_d.clicked.connect(lambda: _run_dynamic_analysis(ui_instance, w))
+    return dyn_widget
+
+
+def _organizational_widgets(ui_instance, of):
+    """Build the Organizational-metrics widgets; return their handles."""
     punc_dd_o = ui_instance.create_layer_dropdown(napari.layers.Labels)
     cell_dd_o = ui_instance.create_layer_dropdown(napari.layers.Labels)
     of.addRow("Condensate mask:", punc_dd_o)
@@ -580,109 +529,194 @@ def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
     run_o.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     stop_o = QPushButton("■  Stop"); stop_o.setVisible(False)
     of.addRow(prog_o); of.addRow(run_o); of.addRow(stop_o)
+    return SimpleNamespace(
+        punc_dd_o=punc_dd_o, cell_dd_o=cell_dd_o, eps_spin=eps_spin, knn_spin=knn_spin, ebin_spin=ebin_spin, cb_ent=cb_ent, cb_clsz=cb_clsz, cb_spc=cb_spc, cb_occ=cb_occ, cb_bnd=cb_bnd, prog_o=prog_o, run_o=run_o, stop_o=stop_o)
 
-    def _on_org():
-        from pycat.toolbox.organizational_metrics_tools import (
-            spatial_entropy, cluster_size_distribution,
-            inter_condensate_spacing, per_cell_occupancy,
-            distance_to_boundary,
-        )
-        from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids
-        try:
-            pmask = ui_instance.viewer.layers[punc_dd_o.currentText()].data
-            cmask = ui_instance.viewer.layers[cell_dd_o.currentText()].data
-        except KeyError as e:
-            napari_show_warning(f"Layer not found: {e}"); return
 
-        dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
-        coords_df = get_puncta_centroids(pmask, cmask, mpx)
-        cells = [c for c in coords_df['cell_label'].unique() if c != 0]
-        n = len(cells)
-        prog_o.setMaximum(max(n, 1)); prog_o.setValue(0); prog_o.setVisible(True)
-        run_o.setEnabled(False)
+def _run_organizational_analysis(ui_instance, w):
+    """Run the organizational-metrics analysis for the Organizational tab."""
+    (punc_dd_o, cell_dd_o, prog_o, run_o, stop_o, cb_ent, cb_clsz, cb_spc, cb_occ, cb_bnd, ebin_spin, eps_spin, knn_spin) = (
+        w.punc_dd_o, w.cell_dd_o, w.prog_o, w.run_o, w.stop_o, w.cb_ent, w.cb_clsz, w.cb_spc, w.cb_occ, w.cb_bnd, w.ebin_spin, w.eps_spin, w.knn_spin)
+    from pycat.toolbox.organizational_metrics_tools import (
+        spatial_entropy, cluster_size_distribution,
+        inter_condensate_spacing, per_cell_occupancy,
+        distance_to_boundary,
+    )
+    from pycat.toolbox.spatial_metrology_tools import get_puncta_centroids
+    try:
+        pmask = ui_instance.viewer.layers[punc_dd_o.currentText()].data
+        cmask = ui_instance.viewer.layers[cell_dd_o.currentText()].data
+    except KeyError as e:
+        napari_show_warning(f"Layer not found: {e}"); return
 
-        def _task(progress_emit=None, should_cancel=None):
-            def _cancelled():
-                return bool(should_cancel and should_cancel())
-            res = {'occupancy': per_cell_occupancy(pmask, cmask, mpx) if cb_occ.isChecked() else None}
-            ent_rows, clsz_rows, spc_rows, bnd_rows = [], [], [], []
+    dr  = ui_instance.central_manager.active_data_class.data_repository
+    mpx = pixel_size_um_or_default(dr, context='advanced_analysis_ui')
+    coords_df = get_puncta_centroids(pmask, cmask, mpx)
+    cells = [c for c in coords_df['cell_label'].unique() if c != 0]
+    n = len(cells)
+    prog_o.setMaximum(max(n, 1)); prog_o.setValue(0); prog_o.setVisible(True)
+    run_o.setEnabled(False)
 
-            for i, cl in enumerate(cells):
-                if _cancelled():
-                    break
-                sub = coords_df[coords_df['cell_label'] == cl]
-                coords = sub[['y_um', 'x_um']].values
-                cm = (cmask == cl).astype(bool)
+    def _task(progress_emit=None, should_cancel=None):
+        def _cancelled():
+            return bool(should_cancel and should_cancel())
+        res = {'occupancy': per_cell_occupancy(pmask, cmask, mpx) if cb_occ.isChecked() else None}
+        ent_rows, clsz_rows, spc_rows, bnd_rows = [], [], [], []
 
-                if cb_ent.isChecked():
-                    e = spatial_entropy(coords, cm, ebin_spin.value(), mpx)
-                    ent_rows.append({'cell_label': cl, **e})
+        for i, cl in enumerate(cells):
+            if _cancelled():
+                break
+            sub = coords_df[coords_df['cell_label'] == cl]
+            coords = sub[['y_um', 'x_um']].values
+            cm = (cmask == cl).astype(bool)
 
-                if cb_clsz.isChecked():
-                    cs = cluster_size_distribution(coords, eps_spin.value())
-                    clsz_rows.append({'cell_label': cl,
-                                      'n_clusters':        cs.attrs.get('n_clusters', 0),
-                                      'n_noise':           cs.attrs.get('n_noise', 0),
-                                      'mean_cluster_size': cs.attrs.get('mean_cluster_size', np.nan),
-                                      'fraction_clustered':cs.attrs.get('fraction_clustered', np.nan)})
+            if cb_ent.isChecked():
+                e = spatial_entropy(coords, cm, ebin_spin.value(), mpx)
+                ent_rows.append({'cell_label': cl, **e})
 
-                if cb_spc.isChecked():
-                    sp = inter_condensate_spacing(coords, knn_spin.value())
-                    spc_rows.append({'cell_label': cl,
-                                     'mean_spacing_um':  sp.attrs.get('mean_spacing_um', np.nan),
-                                     'median_spacing_um':sp.attrs.get('median_spacing_um', np.nan),
-                                     'spacing_cv':       sp.attrs.get('coefficient_of_variation', np.nan)})
+            if cb_clsz.isChecked():
+                cs = cluster_size_distribution(coords, eps_spin.value())
+                clsz_rows.append({'cell_label': cl,
+                                  'n_clusters':        cs.attrs.get('n_clusters', 0),
+                                  'n_noise':           cs.attrs.get('n_noise', 0),
+                                  'mean_cluster_size': cs.attrs.get('mean_cluster_size', np.nan),
+                                  'fraction_clustered':cs.attrs.get('fraction_clustered', np.nan)})
 
-                if cb_bnd.isChecked():
-                    bd = distance_to_boundary(coords, cm, mpx)
-                    bnd_rows.append({'cell_label': cl,
-                                     'mean_dist_to_boundary_um':   bd['mean_dist_um'],
-                                     'median_dist_to_boundary_um': bd['median_dist_um'],
-                                     'max_inscribed_radius_um':    bd['max_inscribed_radius_um']})
+            if cb_spc.isChecked():
+                sp = inter_condensate_spacing(coords, knn_spin.value())
+                spc_rows.append({'cell_label': cl,
+                                 'mean_spacing_um':  sp.attrs.get('mean_spacing_um', np.nan),
+                                 'median_spacing_um':sp.attrs.get('median_spacing_um', np.nan),
+                                 'spacing_cv':       sp.attrs.get('coefficient_of_variation', np.nan)})
 
-                progress_emit and progress_emit(i + 1, n)
+            if cb_bnd.isChecked():
+                bd = distance_to_boundary(coords, cm, mpx)
+                bnd_rows.append({'cell_label': cl,
+                                 'mean_dist_to_boundary_um':   bd['mean_dist_um'],
+                                 'median_dist_to_boundary_um': bd['median_dist_um'],
+                                 'max_inscribed_radius_um':    bd['max_inscribed_radius_um']})
 
-            out = {}
-            if ent_rows:  out['spatial_entropy']  = pd.DataFrame(ent_rows)
-            if clsz_rows: out['cluster_sizes']     = pd.DataFrame(clsz_rows)
-            if spc_rows:  out['spacing']           = pd.DataFrame(spc_rows)
-            if res['occupancy'] is not None: out['occupancy'] = res['occupancy']
-            if bnd_rows:  out['boundary_distances'] = pd.DataFrame(bnd_rows)
-            return out
+            progress_emit and progress_emit(i + 1, n)
 
-        worker = _AdvancedAnalysisWorker(_task, {})
-        ui_instance._org_worker = worker
-        worker.progress.connect(lambda v, m: prog_o.setValue(v))
-        stop_o.setVisible(True)
-        try: stop_o.clicked.disconnect()
-        except Exception: pass
-        stop_o.clicked.connect(lambda: (worker.requestInterruption(), stop_o.setEnabled(False)))
-        stop_o.setEnabled(True)
+        out = {}
+        if ent_rows:  out['spatial_entropy']  = pd.DataFrame(ent_rows)
+        if clsz_rows: out['cluster_sizes']     = pd.DataFrame(clsz_rows)
+        if spc_rows:  out['spacing']           = pd.DataFrame(spc_rows)
+        if res['occupancy'] is not None: out['occupancy'] = res['occupancy']
+        if bnd_rows:  out['boundary_distances'] = pd.DataFrame(bnd_rows)
+        return out
 
-        def _done(res):
-            prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
-            for k, v in res.items():
-                dr[f'org_{k}'] = v
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            tables = [(k.replace('_',' ').title(), v.round(4))
-                      for k, v in res.items()]
-            show_dataframes_dialog("Organizational Metrics", tables)
-            ui_instance._record('organizational_metrics',
-                                {'puncta': punc_dd_o.currentText()})
-            napari_show_info("Organizational metrics complete.")
+    worker = _AdvancedAnalysisWorker(_task, {})
+    ui_instance._org_worker = worker
+    worker.progress.connect(lambda v, m: prog_o.setValue(v))
+    stop_o.setVisible(True)
+    try: stop_o.clicked.disconnect()
+    except Exception: pass
+    stop_o.clicked.connect(lambda: (worker.requestInterruption(), stop_o.setEnabled(False)))
+    stop_o.setEnabled(True)
 
-        def _err(msg):
-            prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
-            napari_show_warning("Organizational metrics error — see terminal.")
-            print(f"[PyCAT Org] ERROR:\n{msg}")
+    def _done(res):
+        prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
+        for k, v in res.items():
+            dr[f'org_{k}'] = v
+        from pycat.ui.ui_utils import show_dataframes_dialog
+        tables = [(k.replace('_',' ').title(), v.round(4))
+                  for k, v in res.items()]
+        show_dataframes_dialog("Organizational Metrics", tables)
+        ui_instance._record('organizational_metrics',
+                            {'puncta': punc_dd_o.currentText()})
+        napari_show_info("Organizational metrics complete.")
 
-        worker.finished.connect(_done); worker.error.connect(_err)
-        worker.start()
+    def _err(msg):
+        prog_o.setVisible(False); run_o.setEnabled(True); stop_o.setVisible(False)
+        napari_show_warning("Organizational metrics error — see terminal.")
+        print(f"[PyCAT Org] ERROR:\n{msg}")
 
-    run_o.clicked.connect(_on_org)
+    worker.finished.connect(_done); worker.error.connect(_err)
+    worker.start()
+
+
+def _build_organizational_tab(ui_instance, tabs):
+    """Tab 3 — Organizational Metrics."""
+    org_widget = QWidget()
+    org_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    of = QFormLayout(org_widget)
+    of.setContentsMargins(4, 4, 4, 4)
+    of.setSpacing(5)
+    w = _organizational_widgets(ui_instance, of)
+    w.run_o.clicked.connect(lambda: _run_organizational_analysis(ui_instance, w))
     tabs.addTab(org_widget, "Organizational")
 
+
+def _add_advanced_analysis(ui_instance, layout=None, separate_widget=False):
+    """
+    Tabbed widget with three sections:
+      Tab 1 — Morphological Complexity
+      Tab 2 — Dynamic Spatial Phenotyping (time-series only)
+      Tab 3 — Organizational Metrics
+    """
+    outer = QVBoxLayout()
+    ui_instance.add_text_label(outer, 'Advanced Condensate Analysis', bold=True)
+
+    # ── The pixel-size gate: this panel reports AREAS and DISTANCES in microns ──
+    #
+    # ``microns_per_pixel_sq`` defaults to **1** when the metadata does not carry it — and
+    # **1 um/px is a plausible value, not an obviously-wrong one.** So an area silently comes out
+    # in PIXELS-squared, labelled as microns-squared, and nothing says so.
+    #
+    # ``utils/pixel_size.py`` puts it exactly: *"A NaN area is visibly wrong; a 1435x
+    # overestimate is not."* Eight UIs already carry this gate; this one did not.
+    try:
+        from pycat.ui.field_status import add_pixel_size_gate
+        add_pixel_size_gate(
+            outer,
+            lambda: ui_instance.central_manager.active_data_class.data_repository,
+            central_manager=ui_instance.central_manager)
+    except Exception as _exc:
+        report_guarantee_failure('advanced_analysis_ui: add_pixel_size_gate', _exc)
+
+    # Fully-optional block: hidden by default behind an off-by-default checkbox.
+    from PyQt5.QtWidgets import QCheckBox as _QCheckBox
+    show_cb = _QCheckBox("Show advanced analysis (optional)")
+    show_cb.setChecked(False)
+    show_cb.setToolTip(
+        "Morphological complexity, dynamic spatial phenotyping, and organizational "
+        "metrics. Optional — enable only if you need these analyses.")
+    outer.addWidget(show_cb)
+
+    # Detect whether any loaded layer is a (T,H,W) time stack. The dynamic spatial
+    # phenotyping tab only applies to time-series data, so it is hidden when the
+    # input has no time channel.
+    def _has_time_stack():
+        try:
+            for lyr in ui_instance.viewer.layers:
+                data = getattr(lyr, 'data', None)
+                if data is not None and getattr(data, 'ndim', 0) >= 3:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    tabs = QTabWidget()
+    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+    def _fit_tab_height(idx=None):
+        # Cap the tab widget height to the current tab's content + tab bar.
+        # QTabWidget normally reserves space for the tallest tab in ALL tabs;
+        # this overrides that by calling setMaximumHeight() whenever the tab
+        # changes, collapsing the empty space that would otherwise appear when
+        # a shorter tab (Morphological, Organizational) is active.
+        w = tabs.currentWidget()
+        if w is None:
+            return
+        bar_h     = tabs.tabBar().sizeHint().height()
+        content_h = w.sizeHint().height()
+        tabs.setMaximumHeight(bar_h + content_h + 12)  # 12px margin
+
+    tabs.currentChanged.connect(_fit_tab_height)
+    _build_morphological_tab(ui_instance, tabs)
+    dyn_widget = _build_dynamic_tab(ui_instance, tabs)
+    _build_organizational_tab(ui_instance, tabs)
     outer.addWidget(tabs)
     # Hidden until the user ticks "Show advanced analysis".
     tabs.setVisible(False)

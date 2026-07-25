@@ -190,7 +190,14 @@ _LONG_FUNCTION_LIMIT = 120
 # `test_field_summary_is_byte_identical` (the exact populated dict — sizes, phase intensities, intensity
 # ratio, contrast, area fraction + deprecated aliases — AND the empty branch, which omits intensity_ratio /
 # dense_dilute_contrast); the existing halo/contrast property tests pass unmodified. Count 121 → 120.
-_MAX_LONG_FUNCTIONS = 120
+# 119. (2026-07-25, ui_builder_split) `_add_advanced_analysis` (advanced_analysis_ui, 638 lines) — the first
+# of the five giant UI builders — fully decomposed into per-tab builders (`_build_morphological_tab`,
+# `_build_dynamic_tab`, `_build_organizational_tab`), widget factories returning a SimpleNamespace of handles
+# (`_dynamic_linking_widgets`, `_dynamic_run_widgets`, `_organizational_widgets`) and the two big run handlers
+# (`_run_dynamic_analysis`, `_run_organizational_analysis`), which unpack the namespace and run VERBATIM.
+# Every resulting function ≤120 lines. Pinned by test_ui_builder_split (the `_morph_worker`/`_org_worker`
+# attribute contract) + a headless construction smoke; no widget logic changed. Count 120 → 119.
+_MAX_LONG_FUNCTIONS = 119
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

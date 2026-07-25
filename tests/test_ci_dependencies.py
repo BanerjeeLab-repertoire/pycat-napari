@@ -58,7 +58,7 @@ _STDLIB = {
     "tempfile", "shutil", "subprocess", "importlib", "contextlib", "traceback", "logging",
     "random", "hashlib", "csv", "io", "glob", "uuid", "textwrap", "__future__", "concurrent",
     "threading", "queue", "pickle", "inspect", "operator", "string", "struct", "base64",
-    "zipfile", "platform", "builtins",
+    "zipfile", "platform", "builtins", "types",
 }
 
 # import name -> pip name

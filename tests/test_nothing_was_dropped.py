@@ -1266,6 +1266,16 @@ _DELIBERATE = {
     # there by the equivalence guard tests).
     'detection.py::blob_log_gpu',                   # -> vpt/gpu.py
     'detection.py::_gpu_build_id',
+
+    # ui_builder_split builder 1 (2026-07-25): _add_advanced_analysis (638 lines) decomposed into per-tab
+    # builders + widget factories + run handlers (all <=120). The two big handlers were renamed as they moved
+    # to module level; the builder body shrank; `_task` is a common per-tab nested name whose high-water is
+    # from the (now relocated) dynamic handler. All widget logic preserved VERBATIM (test_ui_builder_split +
+    # the construction smoke pin it).
+    'advanced_analysis_ui.py::_on_dynamic',         # -> _run_dynamic_analysis (renamed on move to module level)
+    'advanced_analysis_ui.py::_on_org',             # -> _run_organizational_analysis
+    'advanced_analysis_ui.py::_add_advanced_analysis',  # 674 -> 116: decomposed into tab builders/helpers
+    'advanced_analysis_ui.py::_task',               # common per-tab nested name; bodies moved into the helpers
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
