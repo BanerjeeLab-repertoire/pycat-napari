@@ -1,11 +1,12 @@
 # Claude Code spec — Split the `_add_*` UI builders (the five longest functions in the project)
 
-> **◐ IN PROGRESS — builders 1+2 of 5 DONE (1.6.362, 1.6.363).** `_add_advanced_analysis` (638) and
-> `_add_condensate_physics` (595) fully decomposed into per-tab builders + widget factories (returning a
-> SimpleNamespace of handles) + run handlers (unpack the namespace, run VERBATIM). Every function ≤120;
-> `_MAX_LONG_FUNCTIONS` 120 → 118. Verified by the pre-existing `test_ui_builder_split` attribute contract +
-> headless construction smokes. **Remaining: `_add_run_ts_cellpose` (549), `_add_lazy_preprocess_stack` (520),
-> `_add_run_timeseries_condensate_analysis` (492) — one per release.**
+> **◐ IN PROGRESS — 3 of 5 DONE (1.6.362, 1.6.363, 1.6.364).** `_add_advanced_analysis` (638),
+> `_add_condensate_physics` (595) and `_add_run_timeseries_condensate_analysis` (492) fully decomposed into
+> widget factories (returning a SimpleNamespace of handles) + handlers (unpack the namespace, run VERBATIM).
+> Every function ≤120; `_MAX_LONG_FUNCTIONS` 120 → 117. Verified by `test_ui_builder_split` + construction
+> smokes. **Remaining — the two hardest (monster handlers): `_add_run_ts_cellpose` (549, 311-line `_on_run`)
+> and `_add_lazy_preprocess_stack` (520, 358-line `_on_build`); each needs a deeper 3-level split of its
+> handler into dispatcher + path/step functions.**
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. **The five longest
 functions in PyCAT are all UI builders**, and none has ever been touched — verified `grep -c "def _build_"`

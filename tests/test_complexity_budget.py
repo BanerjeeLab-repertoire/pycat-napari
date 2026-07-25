@@ -203,7 +203,13 @@ _LONG_FUNCTION_LIMIT = 120
 # run handlers (`_run_msd_analysis`/`_run_qc_analysis`) which unpack + run VERBATIM. Every function ≤120.
 # Pinned by test_ui_builder_split (the `_msd_worker`/`_hist_worker`/`_qc_worker` contract) + a construction
 # smoke; no widget logic changed. Count 119 → 118.
-_MAX_LONG_FUNCTIONS = 118
+# 117. (2026-07-25, ui_builder_split 5/5) `_add_run_timeseries_condensate_analysis` (timeseries/ui.py, 492
+# lines) — decomposed into widget factories (`_ts_cond_input_widgets`/`_ts_cond_refine_widgets` returning a
+# SimpleNamespace), the run handler `_ts_cond_run`, the finished handler `_ts_cond_on_finished`, the Ripley/PCF
+# appender `_ts_cond_append_ripley` and the batch-record `_ts_cond_record` — each unpacks the namespace and runs
+# VERBATIM. Every function ≤120. Pinned by test_ui_builder_split + a construction smoke; no analysis changed.
+# GUI imports stay function-local (the module is headless-importable). Count 118 → 117.
+_MAX_LONG_FUNCTIONS = 117
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
@@ -290,7 +296,7 @@ _FILE_LINE_CEILINGS = {
     "toolbox/timeseries_condensate_tools.py": 180,
     "toolbox/timeseries/analysis.py": 685,
     "toolbox/timeseries/execution.py": 581,
-    "toolbox/timeseries/ui.py": 1232,
+    "toolbox/timeseries/ui.py": 1262,   # +30: ui_builder_split 5/5 decomposed _add_run_timeseries_condensate_analysis (adds helper defs/docstrings/unpacks; the giant function is gone)
     # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
     # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
     # PURE re-export shim (no defs). Ceiling locked at the shim size.

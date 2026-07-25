@@ -37,7 +37,7 @@ def _stub_ui():
         viewer = _Viewer()
         central_manager = _CM()
 
-        def add_text_label(self, layout, text, bold=False):
+        def add_text_label(self, layout, text, bold=False, **kwargs):
             pass
 
         def create_layer_dropdown(self, layer_type):
@@ -65,4 +65,12 @@ def test_condensate_physics_widget_constructs(qtbot):
     import pycat.toolbox.condensate_physics_ui as m
     ui = _stub_ui()
     m._add_condensate_physics(ui)
+    assert getattr(ui, "_built", None) is not None
+
+
+@pytest.mark.integration
+def test_timeseries_condensate_widget_constructs(qtbot):
+    import pycat.toolbox.timeseries.ui as m
+    ui = _stub_ui()
+    m._add_run_timeseries_condensate_analysis(ui)
     assert getattr(ui, "_built", None) is not None

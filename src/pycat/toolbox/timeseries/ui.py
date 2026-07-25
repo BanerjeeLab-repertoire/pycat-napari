@@ -9,6 +9,8 @@ science from their sibling modules; the tools module re-exports the builders the
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from typing import Optional
 import numpy as np
 import pandas as pd
@@ -694,26 +696,10 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
     )
 
 
-def _add_run_timeseries_condensate_analysis(
-    ui_instance, layout=None, separate_widget=False
-):
-    """
-    Build the Time-Series Condensate Analysis widget and add it to the
-    Condensate Analysis pipeline dock.
-
-    Call from CondensateAnalysisUI.setup_ui() as:
-        self.central_manager.toolbox_functions_ui
-            ._add_run_timeseries_condensate_analysis(
-                layout=self.condensate_layout)
-    """
-    # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+def _ts_cond_input_widgets(ui_instance, ts_layout):
+    """Build the input + option widgets for the time-series condensate panel."""
+    from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QSizePolicy, QSpinBox
     import napari
-    from pycat.ui.ui_utils import show_dataframes_dialog
-    ts_layout = QVBoxLayout()
-    ui_instance.add_text_label(ts_layout, 'Time-Series Condensate Analysis', bold=True)
-
-    # ── Inputs ───────────────────────────────────────────────────────────
     ui_instance.add_text_label(ts_layout, 'Raw image stack (T, H, W):', font_size=9)
     stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     ts_layout.addWidget(stack_dropdown)
@@ -782,8 +768,13 @@ def _add_run_timeseries_condensate_analysis(
         lambda s: ripley_checkbox.setEnabled(bool(s)))
 
     ts_layout.addWidget(opts_group)
+    return SimpleNamespace(
+        stack_dropdown=stack_dropdown, proc_dropdown=proc_dropdown, mask_dropdown=mask_dropdown, ref_spin=ref_spin, drift_checkbox=drift_checkbox, spatial_checkbox=spatial_checkbox, ripley_checkbox=ripley_checkbox)
 
-    # ── Refinement parameters ────────────────────────────────────────────
+
+def _ts_cond_refine_widgets(ts_layout):
+    """Build the refinement-parameter + run-control widgets (and the shared state refs)."""
+    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy
     ref_group = QGroupBox("Refinement Parameters")
     ref_layout = QFormLayout(ref_group)
     ref_layout.setContentsMargins(9, 20, 9, 6)
@@ -897,272 +888,286 @@ def _add_run_timeseries_condensate_analysis(
     # 'Ripley's L / PCF' silently produced NO Ripley or PCF results at all: no crash,
     # no warning, just missing output.
     _mask_name_ref = [None]    # mutable: set in _on_run, read in _on_finished
+    return SimpleNamespace(
+        min_spot_spin=min_spot_spin, kurtosis_spin=kurtosis_spin, lsnr_spin=lsnr_spin, gsnr_spin=gsnr_spin, hwhm_spin=hwhm_spin, maxarea_spin=maxarea_spin, per_frame_norm_cb=per_frame_norm_cb, progress_bar=progress_bar, run_btn=run_btn, cancel_btn=cancel_btn, _worker_ref=_worker_ref, _run_ripley_ref=_run_ripley_ref, _mask_name_ref=_mask_name_ref)
 
-    def _on_run():
-        # Validate inputs
-        stack_name = stack_dropdown.currentText()
-        proc_name  = proc_dropdown.currentText()
-        mask_name  = mask_dropdown.currentText()
-        _mask_name_ref[0] = mask_name   # hand it to _on_finished (see above)
 
+def _ts_cond_record(ui_instance, ns, stack_name, proc_name, mask_name):
+    """Record the time-series run for batch replay."""
+    (ref_spin, drift_checkbox, kurtosis_spin, lsnr_spin, gsnr_spin, hwhm_spin, per_frame_norm_cb, maxarea_spin, min_spot_spin, spatial_checkbox) = (
+        ns.ref_spin, ns.drift_checkbox, ns.kurtosis_spin, ns.lsnr_spin, ns.gsnr_spin, ns.hwhm_spin, ns.per_frame_norm_cb, ns.maxarea_spin, ns.min_spot_spin, ns.spatial_checkbox)
+    ui_instance._record('timeseries_condensate_analysis', {
+        'stack_layer': stack_name,
+        'proc_layer': proc_name,
+        'mask_layer': mask_name,
+        'reference_frame': int(ref_spin.value()),
+        'use_drift_correction': drift_checkbox.isChecked(),
+        'kurtosis_threshold': kurtosis_spin.value(),
+        'local_snr_threshold': lsnr_spin.value(),
+        'global_snr_threshold': gsnr_spin.value(),
+        'intensity_hwhm_scale': hwhm_spin.value(),
+        'per_frame_normalize': per_frame_norm_cb.isChecked(),
+        'max_area_fraction': maxarea_spin.value(),
+        'min_spot_radius': min_spot_spin.value(),
+        'compute_spatial': spatial_checkbox.isChecked(),
+    })
+
+
+def _ts_cond_append_ripley(ui_instance, ns, results_df, condensate_stack, data_instance, tables):
+    """Post-run Ripley's L / PCF per cell across all frames, appended to `tables`."""
+    (_run_ripley_ref, _mask_name_ref) = (
+        ns._run_ripley_ref, ns._mask_name_ref)
+    """Post-run Ripley's L / PCF per cell across all frames, appended to the
+    results-dialog `tables` list in place. Closure over ui_instance,
+    _run_ripley_ref and _mask_name_ref; moved verbatim out of _on_finished to
+    keep that function under the complexity gate."""
+    _run_ripley = _run_ripley_ref[0]
+    if _run_ripley:
         try:
-            stack_layer = ui_instance.viewer.layers[stack_name]
-            proc_layer  = ui_instance.viewer.layers[proc_name]
-            mask_layer  = ui_instance.viewer.layers[mask_name]
-        except KeyError as e:
-            napari_show_warning(f"Time-Series: layer not found — {e}")
-            return
+            from pycat.toolbox.spatial_metrology_tools import (
+                ripleys_l, pair_correlation_function, get_puncta_centroids,
+                spatial_null_envelope)
+            import skimage as _sk
+            mpx = float(data_instance.data_repository.get(
+                'microns_per_pixel_sq', 1.0) ** 0.5)
+            _mask_name = _mask_name_ref[0]
+            if not _mask_name:
+                raise RuntimeError(
+                    'Ripley/PCF: the cell-mask layer name was not carried '
+                    'over from the run.')
+            cell_mask_layer = ui_instance.viewer.layers[_mask_name]
+            cmask = cell_mask_layer.data
 
-        stack_data = stack_layer.data
-        if stack_data.ndim == 2:
-            napari_show_warning("Time-Series: selected image is 2D — need a (T,H,W) stack.")
-            return
-        if stack_data.ndim == 3:
-            pass  # (T, H, W) — correct
-        else:
-            napari_show_warning(f"Time-Series: unexpected image shape {stack_data.shape}.")
-            return
+            ripley_rows, pcf_rows = [], []
+            n_frames_rip = condensate_stack.shape[0]
+            for t in range(n_frames_rip):
+                frame_mask = condensate_stack[t]
+                coords_df  = get_puncta_centroids(frame_mask, cmask, mpx)
+                for cl in coords_df['cell_label'].unique():
+                    if cl == 0: continue
+                    sub    = coords_df[coords_df['cell_label'] == cl]
+                    coords = sub[['y_um','x_um']].values
+                    cm     = (cmask == cl).astype(bool)
+                    area   = float(cm.sum()) * (mpx**2)
+                    if len(coords) >= 3:
+                        rl = ripleys_l(coords, area)
+                        rl['frame'] = t; rl['cell_label'] = cl
 
-        proc_data   = proc_layer.data
-        mask_data   = mask_layer.data
+                        # ── Against a COMPARTMENT-CONSTRAINED null, not CSR ──────
+                        #
+                        # L(r) = 0 is the complete-spatial-randomness expectation, and
+                        # CSR assumes an object could land ANYWHERE in `area`. It
+                        # cannot: these condensates are confined to THIS cell, which is
+                        # irregular and usually non-convex — and the confinement itself
+                        # produces an apparent signal. Measured (1.5.397) on objects
+                        # placed uniformly at random inside a real non-convex cell,
+                        # where the truth is no structure at all:
+                        #
+                        #     r=8  -> L = -0.82   "~random"
+                        #     r=29 -> L = -4.95   "strong regularity"
+                        #
+                        # and at a realistic pixel size the same random objects gave
+                        # L = +6.18, i.e. "strong clustering". **The artefact points in
+                        # either direction depending on the scale.**
+                        #
+                        # spatial_null_envelope randomises the points WITHIN THIS CELL,
+                        # so whatever the confinement does to L(r) is in the null too
+                        # and cancels. Validated: 0/20 false positives on random-in-cell
+                        # data (which the CSR line called "regular"), 20/20 detection of
+                        # genuine clustering.
+                        try:
+                            coords_px = sub[['y_px', 'x_px']].values
+                            _env_df, _env = spatial_null_envelope(
+                                coords_px, cm, microns_per_pixel=mpx,
+                                n_simulations=99)
+                            rl['null_p_value'] = _env.get('p_value', np.nan)
+                            rl['null_significant'] = bool(
+                                _env.get('significant', False))
+                        except Exception as _e:
+                            debug_log("TS Ripley: null envelope failed", _e)
+                            rl['null_p_value'] = np.nan
+                            rl['null_significant'] = False
+                        ripley_rows.append(rl)
+                        pc = pair_correlation_function(coords, area)
+                        pc['frame'] = t; pc['cell_label'] = cl
+                        pcf_rows.append(pc)
 
-        # The cell mask may be either a 2D (H,W) mask or a (T,H,W) mask stack.
-        # A (T,H,W) mask (e.g. from keyframe Cellpose) is preferred — it applies
-        # each frame's own mask, correctly following cells that move over time.
-        # A 2D mask is accepted but assumes the sample is stationary in time.
-        if mask_data.ndim == 2:
+            if ripley_rows:
+                import pandas as _pd
+                rdf = _pd.concat(ripley_rows, ignore_index=True)
+                pdf = _pd.concat(pcf_rows, ignore_index=True)
+                data_instance.data_repository['timeseries_ripleys_l'] = rdf
+                data_instance.data_repository['timeseries_pcf']        = pdf
+                tables += [
+                    ("Ripley's L(r) — all frames", rdf.round(4)),
+                    ("Pair Correlation g(r) — all frames", pdf.round(4)),
+                ]
+        except Exception as _re:
+            print(f"[PyCAT TS] Ripley/PCF computation failed: {_re}")
+
+
+def _ts_cond_on_finished(ui_instance, ns, results_df, condensate_stack, stack_name):
+    """Present the time-series analysis results when the worker finishes."""
+    from pycat.ui.ui_utils import show_dataframes_dialog
+    (progress_bar, run_btn, cancel_btn) = (
+        ns.progress_bar, ns.run_btn, ns.cancel_btn)
+    progress_bar.setVisible(False)
+    run_btn.setEnabled(True)
+    cancel_btn.setVisible(False)
+
+    if results_df.empty:
+        napari_show_info("Time-Series analysis cancelled.")
+        return
+
+    # Store results
+    data_instance = ui_instance.central_manager.active_data_class
+    data_instance.data_repository['timeseries_condensate_df'] = results_df
+
+    # Add condensate stack to viewer
+    if condensate_stack.size > 0:
+        ui_instance.viewer.add_labels(
+            condensate_stack.astype(int),
+            name=f"TimeSeries Condensate Masks"
+        )
+
+    # Build summary: condensate fraction vs frame per cell
+    agg_dict = dict(
+        n_cells=('cell_label', 'count'),
+        mean_condensate_fraction=('condensate_fraction', 'mean'),
+        std_condensate_fraction=('condensate_fraction', 'std'),
+        mean_total_area_um2=('total_condensate_area_um2', 'mean'),
+        total_n_condensates=('n_condensates', 'sum'),
+    )
+    # Add spatial summaries to frame-level aggregation if present
+    spatial_cols_present = [c for c in
+        ['nnd_mean_um','nnd_cv','kde_mean_density',
+         'hull_occupancy','hull_compactness','spacing_cv']
+        if c in results_df.columns]
+    for sc in spatial_cols_present:
+        agg_dict[f'mean_{sc}'] = (sc, 'mean')
+
+    summary = results_df.groupby('frame').agg(
+        **agg_dict).round(6).reset_index()
+
+    tables = [
+        ("Per-Cell Per-Frame Results", results_df.round(4)),
+        ("Summary (per frame)", summary),
+    ]
+
+    # Optional post-run Ripley's L and PCF (per cell across all frames)
+    _ts_cond_append_ripley(ui_instance, ns, results_df, condensate_stack, data_instance, tables)
+
+    show_dataframes_dialog("Time-Series Condensate Analysis", tables)
+
+    napari_show_info(
+        f"Time-Series analysis complete: {results_df['frame'].nunique()} frames, "
+        f"{results_df['cell_label'].nunique()} cells."
+        + (f" Spatial metrics: {', '.join(spatial_cols_present)}."
+           if spatial_cols_present else "")
+        + " Use Advanced Analysis → Dynamic tab to track condensates "
+          "with Bayesian or greedy linking."
+    )
+
+    _plot_condensate_fraction(results_df)
+
+
+def _ts_cond_run(ui_instance, ns):
+    """Validate inputs, launch the time-series analysis worker, and wire its callbacks."""
+    (stack_dropdown, proc_dropdown, mask_dropdown, ref_spin, drift_checkbox, kurtosis_spin, lsnr_spin, gsnr_spin, hwhm_spin, maxarea_spin, min_spot_spin, spatial_checkbox, per_frame_norm_cb, ripley_checkbox, progress_bar, run_btn, cancel_btn, _mask_name_ref, _run_ripley_ref, _worker_ref) = (
+        ns.stack_dropdown, ns.proc_dropdown, ns.mask_dropdown, ns.ref_spin, ns.drift_checkbox, ns.kurtosis_spin, ns.lsnr_spin, ns.gsnr_spin, ns.hwhm_spin, ns.maxarea_spin, ns.min_spot_spin, ns.spatial_checkbox, ns.per_frame_norm_cb, ns.ripley_checkbox, ns.progress_bar, ns.run_btn, ns.cancel_btn, ns._mask_name_ref, ns._run_ripley_ref, ns._worker_ref)
+    # Validate inputs
+    stack_name = stack_dropdown.currentText()
+    proc_name  = proc_dropdown.currentText()
+    mask_name  = mask_dropdown.currentText()
+    _mask_name_ref[0] = mask_name   # hand it to _on_finished (see above)
+
+    try:
+        stack_layer = ui_instance.viewer.layers[stack_name]
+        proc_layer  = ui_instance.viewer.layers[proc_name]
+        mask_layer  = ui_instance.viewer.layers[mask_name]
+    except KeyError as e:
+        napari_show_warning(f"Time-Series: layer not found — {e}")
+        return
+
+    stack_data = stack_layer.data
+    if stack_data.ndim == 2:
+        napari_show_warning("Time-Series: selected image is 2D — need a (T,H,W) stack.")
+        return
+    if stack_data.ndim == 3:
+        pass  # (T, H, W) — correct
+    else:
+        napari_show_warning(f"Time-Series: unexpected image shape {stack_data.shape}.")
+        return
+
+    proc_data   = proc_layer.data
+    mask_data   = mask_layer.data
+
+    # The cell mask may be either a 2D (H,W) mask or a (T,H,W) mask stack.
+    # A (T,H,W) mask (e.g. from keyframe Cellpose) is preferred — it applies
+    # each frame's own mask, correctly following cells that move over time.
+    # A 2D mask is accepted but assumes the sample is stationary in time.
+    if mask_data.ndim == 2:
+        napari_show_warning(
+            "Time-Series: 2D cell mask — assuming your sample is stationary "
+            "in time (the same mask is applied to every frame). For moving "
+            "cells, run keyframe cell segmentation to get a (T,H,W) mask.")
+    elif mask_data.ndim == 3:
+        if mask_data.shape[0] != stack_data.shape[0]:
             napari_show_warning(
-                "Time-Series: 2D cell mask — assuming your sample is stationary "
-                "in time (the same mask is applied to every frame). For moving "
-                "cells, run keyframe cell segmentation to get a (T,H,W) mask.")
-        elif mask_data.ndim == 3:
-            if mask_data.shape[0] != stack_data.shape[0]:
-                napari_show_warning(
-                    f"Time-Series: mask stack has {mask_data.shape[0]} frames but "
-                    f"the image has {stack_data.shape[0]}; the reference frame's "
-                    "mask will be used for all frames.")
-            # else: matching (T,H,W) — used per-frame downstream.
-        else:
-            napari_show_warning(
-                f"Time-Series: cell mask must be 2D (H,W) or a (T,H,W) stack; "
-                f"got shape {mask_data.shape}.")
-            return
+                f"Time-Series: mask stack has {mask_data.shape[0]} frames but "
+                f"the image has {stack_data.shape[0]}; the reference frame's "
+                "mask will be used for all frames.")
+        # else: matching (T,H,W) — used per-frame downstream.
+    else:
+        napari_show_warning(
+            f"Time-Series: cell mask must be 2D (H,W) or a (T,H,W) stack; "
+            f"got shape {mask_data.shape}.")
+        return
 
-        data_instance = ui_instance.central_manager.active_data_class
-        ball_radius   = float(data_instance.data_repository.get('ball_radius', 50))
-        mpx_sq        = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
+    data_instance = ui_instance.central_manager.active_data_class
+    ball_radius   = float(data_instance.data_repository.get('ball_radius', 50))
+    mpx_sq        = float(data_instance.data_repository.get('microns_per_pixel_sq', 1.0))
 
-        # IMPORTANT: do NOT call .astype()/np.asarray() on stack_data or
-        # proc_data here. If these are lazy zarr-backed _ZarrStack layers
-        # (the normal case after lazy stack preprocessing), eagerly
-        # converting dtype triggers __array__ and materialises the entire
-        # (T, H, W) stack into RAM immediately, defeating both the lazy
-        # loading AND the parallel analysis path's ability to detect and
-        # reuse the existing on-disk zarr store (it would have to write
-        # a redundant copy back to disk before parallel dispatch).
-        # Per-frame dtype conversion happens lazily inside the analysis
-        # function instead (both the parallel worker and serial fallback
-        # already read each frame and cast it to float32 individually).
-        kwargs = dict(
-            stack=stack_data,
-            preprocessed_stack=proc_data,
-            labeled_cell_mask=mask_data,
-            ball_radius=ball_radius,
-            microns_per_pixel_sq=mpx_sq,
-            reference_frame=int(ref_spin.value()),
-            use_drift_correction=drift_checkbox.isChecked(),
-            kurtosis_threshold=kurtosis_spin.value(),
-            local_snr_threshold=lsnr_spin.value(),
-            global_snr_threshold=gsnr_spin.value(),
-            intensity_hwhm_scale=hwhm_spin.value(),
-            max_area_fraction=maxarea_spin.value(),
-            min_spot_radius=min_spot_spin.value(),
-            compute_spatial=spatial_checkbox.isChecked(),
-            per_frame_normalize=per_frame_norm_cb.isChecked(),
-        )
-        _run_ripley = ripley_checkbox.isChecked() and spatial_checkbox.isChecked()
-        _run_ripley_ref[0] = _run_ripley
+    # IMPORTANT: do NOT call .astype()/np.asarray() on stack_data or
+    # proc_data here. If these are lazy zarr-backed _ZarrStack layers
+    # (the normal case after lazy stack preprocessing), eagerly
+    # converting dtype triggers __array__ and materialises the entire
+    # (T, H, W) stack into RAM immediately, defeating both the lazy
+    # loading AND the parallel analysis path's ability to detect and
+    # reuse the existing on-disk zarr store (it would have to write
+    # a redundant copy back to disk before parallel dispatch).
+    # Per-frame dtype conversion happens lazily inside the analysis
+    # function instead (both the parallel worker and serial fallback
+    # already read each frame and cast it to float32 individually).
+    kwargs = dict(
+        stack=stack_data,
+        preprocessed_stack=proc_data,
+        labeled_cell_mask=mask_data,
+        ball_radius=ball_radius,
+        microns_per_pixel_sq=mpx_sq,
+        reference_frame=int(ref_spin.value()),
+        use_drift_correction=drift_checkbox.isChecked(),
+        kurtosis_threshold=kurtosis_spin.value(),
+        local_snr_threshold=lsnr_spin.value(),
+        global_snr_threshold=gsnr_spin.value(),
+        intensity_hwhm_scale=hwhm_spin.value(),
+        max_area_fraction=maxarea_spin.value(),
+        min_spot_radius=min_spot_spin.value(),
+        compute_spatial=spatial_checkbox.isChecked(),
+        per_frame_normalize=per_frame_norm_cb.isChecked(),
+    )
+    _run_ripley = ripley_checkbox.isChecked() and spatial_checkbox.isChecked()
+    _run_ripley_ref[0] = _run_ripley
 
-        n_frames = stack_data.shape[0]
-        progress_bar.setMaximum(n_frames)
-        progress_bar.setValue(0)
-        progress_bar.setVisible(True)
-        run_btn.setEnabled(False)
-        cancel_btn.setVisible(True)
+    n_frames = stack_data.shape[0]
+    progress_bar.setMaximum(n_frames)
+    progress_bar.setValue(0)
+    progress_bar.setVisible(True)
+    run_btn.setEnabled(False)
+    cancel_btn.setVisible(True)
 
-        worker = _make_timeseriesworker()(kwargs)
-        _worker_ref[0] = worker
-
-        worker.progress.connect(lambda f, t: progress_bar.setValue(f))
-        worker.finished.connect(lambda df, cs: _on_finished(df, cs, stack_name))
-        worker.error.connect(_on_error)
-        worker.start()
-
-        # Record for batch
-        ui_instance._record('timeseries_condensate_analysis', {
-            'stack_layer': stack_name,
-            'proc_layer': proc_name,
-            'mask_layer': mask_name,
-            'reference_frame': int(ref_spin.value()),
-            'use_drift_correction': drift_checkbox.isChecked(),
-            'kurtosis_threshold': kurtosis_spin.value(),
-            'local_snr_threshold': lsnr_spin.value(),
-            'global_snr_threshold': gsnr_spin.value(),
-            'intensity_hwhm_scale': hwhm_spin.value(),
-            'per_frame_normalize': per_frame_norm_cb.isChecked(),
-            'max_area_fraction': maxarea_spin.value(),
-            'min_spot_radius': min_spot_spin.value(),
-            'compute_spatial': spatial_checkbox.isChecked(),
-        })
-
-    def _append_ripley_pcf_tables(results_df, condensate_stack, data_instance, tables):
-        """Post-run Ripley's L / PCF per cell across all frames, appended to the
-        results-dialog `tables` list in place. Closure over ui_instance,
-        _run_ripley_ref and _mask_name_ref; moved verbatim out of _on_finished to
-        keep that function under the complexity gate."""
-        _run_ripley = _run_ripley_ref[0]
-        if _run_ripley:
-            try:
-                from pycat.toolbox.spatial_metrology_tools import (
-                    ripleys_l, pair_correlation_function, get_puncta_centroids,
-                    spatial_null_envelope)
-                import skimage as _sk
-                mpx = float(data_instance.data_repository.get(
-                    'microns_per_pixel_sq', 1.0) ** 0.5)
-                _mask_name = _mask_name_ref[0]
-                if not _mask_name:
-                    raise RuntimeError(
-                        'Ripley/PCF: the cell-mask layer name was not carried '
-                        'over from the run.')
-                cell_mask_layer = ui_instance.viewer.layers[_mask_name]
-                cmask = cell_mask_layer.data
-
-                ripley_rows, pcf_rows = [], []
-                n_frames_rip = condensate_stack.shape[0]
-                for t in range(n_frames_rip):
-                    frame_mask = condensate_stack[t]
-                    coords_df  = get_puncta_centroids(frame_mask, cmask, mpx)
-                    for cl in coords_df['cell_label'].unique():
-                        if cl == 0: continue
-                        sub    = coords_df[coords_df['cell_label'] == cl]
-                        coords = sub[['y_um','x_um']].values
-                        cm     = (cmask == cl).astype(bool)
-                        area   = float(cm.sum()) * (mpx**2)
-                        if len(coords) >= 3:
-                            rl = ripleys_l(coords, area)
-                            rl['frame'] = t; rl['cell_label'] = cl
-
-                            # ── Against a COMPARTMENT-CONSTRAINED null, not CSR ──────
-                            #
-                            # L(r) = 0 is the complete-spatial-randomness expectation, and
-                            # CSR assumes an object could land ANYWHERE in `area`. It
-                            # cannot: these condensates are confined to THIS cell, which is
-                            # irregular and usually non-convex — and the confinement itself
-                            # produces an apparent signal. Measured (1.5.397) on objects
-                            # placed uniformly at random inside a real non-convex cell,
-                            # where the truth is no structure at all:
-                            #
-                            #     r=8  -> L = -0.82   "~random"
-                            #     r=29 -> L = -4.95   "strong regularity"
-                            #
-                            # and at a realistic pixel size the same random objects gave
-                            # L = +6.18, i.e. "strong clustering". **The artefact points in
-                            # either direction depending on the scale.**
-                            #
-                            # spatial_null_envelope randomises the points WITHIN THIS CELL,
-                            # so whatever the confinement does to L(r) is in the null too
-                            # and cancels. Validated: 0/20 false positives on random-in-cell
-                            # data (which the CSR line called "regular"), 20/20 detection of
-                            # genuine clustering.
-                            try:
-                                coords_px = sub[['y_px', 'x_px']].values
-                                _env_df, _env = spatial_null_envelope(
-                                    coords_px, cm, microns_per_pixel=mpx,
-                                    n_simulations=99)
-                                rl['null_p_value'] = _env.get('p_value', np.nan)
-                                rl['null_significant'] = bool(
-                                    _env.get('significant', False))
-                            except Exception as _e:
-                                debug_log("TS Ripley: null envelope failed", _e)
-                                rl['null_p_value'] = np.nan
-                                rl['null_significant'] = False
-                            ripley_rows.append(rl)
-                            pc = pair_correlation_function(coords, area)
-                            pc['frame'] = t; pc['cell_label'] = cl
-                            pcf_rows.append(pc)
-
-                if ripley_rows:
-                    import pandas as _pd
-                    rdf = _pd.concat(ripley_rows, ignore_index=True)
-                    pdf = _pd.concat(pcf_rows, ignore_index=True)
-                    data_instance.data_repository['timeseries_ripleys_l'] = rdf
-                    data_instance.data_repository['timeseries_pcf']        = pdf
-                    tables += [
-                        ("Ripley's L(r) — all frames", rdf.round(4)),
-                        ("Pair Correlation g(r) — all frames", pdf.round(4)),
-                    ]
-            except Exception as _re:
-                print(f"[PyCAT TS] Ripley/PCF computation failed: {_re}")
-
-    def _on_finished(results_df, condensate_stack, stack_name):
-        progress_bar.setVisible(False)
-        run_btn.setEnabled(True)
-        cancel_btn.setVisible(False)
-
-        if results_df.empty:
-            napari_show_info("Time-Series analysis cancelled.")
-            return
-
-        # Store results
-        data_instance = ui_instance.central_manager.active_data_class
-        data_instance.data_repository['timeseries_condensate_df'] = results_df
-
-        # Add condensate stack to viewer
-        if condensate_stack.size > 0:
-            ui_instance.viewer.add_labels(
-                condensate_stack.astype(int),
-                name=f"TimeSeries Condensate Masks"
-            )
-
-        # Build summary: condensate fraction vs frame per cell
-        agg_dict = dict(
-            n_cells=('cell_label', 'count'),
-            mean_condensate_fraction=('condensate_fraction', 'mean'),
-            std_condensate_fraction=('condensate_fraction', 'std'),
-            mean_total_area_um2=('total_condensate_area_um2', 'mean'),
-            total_n_condensates=('n_condensates', 'sum'),
-        )
-        # Add spatial summaries to frame-level aggregation if present
-        spatial_cols_present = [c for c in
-            ['nnd_mean_um','nnd_cv','kde_mean_density',
-             'hull_occupancy','hull_compactness','spacing_cv']
-            if c in results_df.columns]
-        for sc in spatial_cols_present:
-            agg_dict[f'mean_{sc}'] = (sc, 'mean')
-
-        summary = results_df.groupby('frame').agg(
-            **agg_dict).round(6).reset_index()
-
-        tables = [
-            ("Per-Cell Per-Frame Results", results_df.round(4)),
-            ("Summary (per frame)", summary),
-        ]
-
-        # Optional post-run Ripley's L and PCF (per cell across all frames)
-        _append_ripley_pcf_tables(results_df, condensate_stack, data_instance, tables)
-
-        show_dataframes_dialog("Time-Series Condensate Analysis", tables)
-
-        napari_show_info(
-            f"Time-Series analysis complete: {results_df['frame'].nunique()} frames, "
-            f"{results_df['cell_label'].nunique()} cells."
-            + (f" Spatial metrics: {', '.join(spatial_cols_present)}."
-               if spatial_cols_present else "")
-            + " Use Advanced Analysis → Dynamic tab to track condensates "
-              "with Bayesian or greedy linking."
-        )
-
-        _plot_condensate_fraction(results_df)
+    worker = _make_timeseriesworker()(kwargs)
+    _worker_ref[0] = worker
 
     def _on_error(msg):
         progress_bar.setVisible(False)
@@ -1170,17 +1175,43 @@ def _add_run_timeseries_condensate_analysis(
         cancel_btn.setVisible(False)
         napari_show_warning(f"Time-Series analysis error — see terminal for details.")
         print(f"[PyCAT TimeSeries] ERROR:\n{msg}")
+    worker.progress.connect(lambda f, t: progress_bar.setValue(f))
+    worker.finished.connect(lambda df, cs: _ts_cond_on_finished(ui_instance, ns, df, cs, stack_name))
+    worker.error.connect(_on_error)
+    worker.start()
+    _ts_cond_record(ui_instance, ns, stack_name, proc_name, mask_name)
+
+
+def _add_run_timeseries_condensate_analysis(
+    ui_instance, layout=None, separate_widget=False
+):
+    """
+    Build the Time-Series Condensate Analysis widget and add it to the
+    Condensate Analysis pipeline dock.
+
+    Call from CondensateAnalysisUI.setup_ui() as:
+        self.central_manager.toolbox_functions_ui
+            ._add_run_timeseries_condensate_analysis(
+                layout=self.condensate_layout)
+    """
+    # GUI imported here, not at module scope — the analysis in this module needs none.
+    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    import napari
+    from pycat.ui.ui_utils import show_dataframes_dialog
+    ts_layout = QVBoxLayout()
+    ui_instance.add_text_label(ts_layout, 'Time-Series Condensate Analysis', bold=True)
+    na = _ts_cond_input_widgets(ui_instance, ts_layout)
+    nb = _ts_cond_refine_widgets(ts_layout)
+    ns = SimpleNamespace(**vars(na), **vars(nb))
 
     def _on_cancel():
-        w = _worker_ref[0]
+        w = ns._worker_ref[0]
         if w and w.isRunning():
             w.cancel()
-            cancel_btn.setVisible(False)
+            ns.cancel_btn.setVisible(False)
             napari_show_info("Cancellation requested — finishing current frame …")
-
-    run_btn.clicked.connect(_on_run)
-    cancel_btn.clicked.connect(_on_cancel)
-
+    ns.run_btn.clicked.connect(lambda: _ts_cond_run(ui_instance, ns))
+    ns.cancel_btn.clicked.connect(_on_cancel)
     ts_widget = QWidget()
     ts_widget.setLayout(ts_layout)
     ui_instance._add_widget_to_layout_or_dock(

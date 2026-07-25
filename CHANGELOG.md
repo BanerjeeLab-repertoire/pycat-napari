@@ -1,3 +1,19 @@
+## [1.6.364] - 2026-07-25
+### Changed — **Decomposed the 492-line `_add_run_timeseries_condensate_analysis` UI builder (ui_builder_split, 5 of 5 by size but 3rd shipped).**
+The time-series condensate-analysis panel split the same way — pure Qt construction, no analysis changed.
+
+- **Widget factories** `_ts_cond_input_widgets` / `_ts_cond_refine_widgets` build the input/option and
+  refinement/run-control widgets **verbatim** and return a `SimpleNamespace` of handles (including the shared
+  `_worker_ref` / `_run_ripley_ref` / `_mask_name_ref` state refs).
+- **Handlers** `_ts_cond_run` (validate + launch worker), `_ts_cond_on_finished` (present results),
+  `_ts_cond_append_ripley` (post-run Ripley's L / PCF), and `_ts_cond_record` (batch record) move to module
+  level; each unpacks the namespace and runs the original body **verbatim**. GUI imports stay function-local so
+  the module remains headless-importable.
+- `_add_run_timeseries_condensate_analysis` is now a 35-line orchestrator; every resulting function is ≤120
+  lines. Pinned by `test_ui_builder_split` + a headless construction smoke. **`_MAX_LONG_FUNCTIONS` lowered
+  118 → 117.** Remaining (the two hardest, with 311/358-line handlers): `_add_run_ts_cellpose` and
+  `_add_lazy_preprocess_stack`.
+
 ## [1.6.363] - 2026-07-25
 ### Changed — **Decomposed the 595-line `_add_condensate_physics` UI builder (ui_builder_split, 2 of 5).**
 The condensate-biophysics panel (MSD, intensity/Csat, kinetics, QC, survival) split the same way as builder 1 —
