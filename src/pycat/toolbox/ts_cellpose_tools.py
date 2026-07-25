@@ -38,6 +38,7 @@ Date
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 
 import numpy as np
 # ── napari and Qt are imported LAZILY, via a proxy ────────────────────────────
@@ -496,34 +497,10 @@ def apply_transfection_filter_to_stack(mask_stack, kept_labels):
     return out
 
 
-def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
-    """
-    Time-series cell segmentation with keyframe interpolation.
-
-    Supports Cellpose, StarDist, Random Forest, and Multi-Otsu thresholding.
-    Automatically applies the XY ROI and frame range set in Step 2 (Apply ROI).
-
-    For multi-channel data, the user can select a dedicated segmentation
-    channel (e.g. DAPI for nuclei) instead of the fluorescence channel
-    used for condensate detection — only that channel is passed to the
-    segmentation algorithm. When no dedicated channel is available, 
-    Multi-Otsu thresholding provides a DNA-stain-free fallback.
-    """
-    # Qt is imported here, not at module scope — the analysis functions in this
-    # module use none of it, and a module-scope import blocked their headless import.
-    from PyQt5.QtWidgets import (
-        QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
-        QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
-        QRadioButton,
-    )
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
-    grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
-    form  = QFormLayout(grp)
-    form.setContentsMargins(9, 20, 9, 6)
-    form.setLabelAlignment(Qt.AlignLeft)
-
-    # ── Channel / stack selection ─────────────────────────────────────────
+def _ts_cp_input_method_widgets(ui_instance, form):
+    """Build the seg-channel + method-selection widgets; return their handles."""
+    from PyQt5.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QRadioButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    import napari
     seg_lbl = QLabel(
         "<span style='color:#aaa;font-size:9pt;'>"
         "Select the image channel for segmentation. Use a DAPI/nuclear "
@@ -632,7 +609,14 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
         "nuclear stain (DAPI, Hoechst) — the cytoplasm model tends to merge\n"
         "nuclei into one blob. Applies to Cellpose only.")
     method_layout.addWidget(nuclei_check)
+    return SimpleNamespace(
+        stack_dropdown=stack_dropdown, interval_spin=interval_spin, rb_cellpose=rb_cellpose, rb_stardist=rb_stardist, rb_rf=rb_rf, rb_otsu=rb_otsu, rf_ann_dd=rf_ann_dd, otsu_spin=otsu_spin, nuclei_check=nuclei_check)
 
+
+def _ts_cp_option_widgets(ui_instance, form):
+    """Build the upscale / max-projection / transfection / progress widgets."""
+    from PyQt5.QtWidgets import QCheckBox, QDoubleSpinBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
+    import napari
     # ── Upscaling ─────────────────────────────────────────────────────────
     upscale_check = QCheckBox("Upscale keyframes  (recommended for ≤512px)")
     upscale_check.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -721,324 +705,380 @@ def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
     run_btn = QPushButton("▶  Run Cell Segmentation")
     run_btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     run_btn.setToolTip("Run keyframe cell segmentation using the selected method.")
+    return SimpleNamespace(
+        upscale_check=upscale_check, upscale_spin=upscale_spin, max_proj_check=max_proj_check, transfect_check=transfect_check, transfect_fluor_dd=transfect_fluor_dd, transfect_snr_spin=transfect_snr_spin, progress_bar=progress_bar, progress_label=progress_label, run_btn=run_btn)
 
-    def _on_run():
-        layer_name = stack_dropdown.currentText()
+
+def _ts_cp_seg_otsu(ui_instance, w, stack_np, layer_name, dr, interval):
+    """Multi-Otsu keyframe cell segmentation (inline, no worker)."""
+    (otsu_spin) = (
+        w.otsu_spin)
+    from skimage.filters import threshold_multiotsu
+    import skimage as _sk
+    n_classes = otsu_spin.value()
+    n_seg_frames = stack_np.shape[0]
+    mask_arr = np.zeros_like(stack_np, dtype=np.uint16)
+    for i in range(n_seg_frames):
+        frame = stack_np[i]
         try:
-            layer = ui_instance.viewer.layers[layer_name]
+            thresholds = threshold_multiotsu(frame, classes=n_classes)
+            # Use the LOWEST threshold to capture the full cell body
+            # (cytoplasm + nucleus). thresholds[-1] was wrong — that
+            # selects only the brightest class (condensates/puncta),
+            # giving a cell mask that matches condensate spots rather
+            # than cell boundaries.
+            from pycat.toolbox.batch_roi_tools import multi_otsu_cell_mask
+            _cell_diam = dr.get('cell_diameter', 100)
+            mask_arr[i] = multi_otsu_cell_mask(
+                frame, n_classes=n_classes,
+                cell_diameter=int(_cell_diam)).astype(np.uint16)
+        except Exception:
+            pass
+    ts_mask_name = f"TS Cell Masks [{layer_name}]"
+    ui_instance.viewer.add_labels(mask_arr.copy(), name=ts_mask_name)
+    best = max(range(n_seg_frames),
+               key=lambda i: int(mask_arr[i].max()))
+    ui_instance.viewer.add_labels(
+        mask_arr[best].copy(), name="Labeled Cell Mask")
+    data_inst = ui_instance.central_manager.active_data_class
+    data_inst.data_repository['ts_cell_mask_stack'] = mask_arr
+    ui_instance._record('ts_cellpose_keyframe', {
+        'stack_layer': layer_name, 'method': 'multi_otsu',
+        'n_classes': n_classes, 'keyframe_interval': interval,
+    })
+    napari_show_info(f"Multi-Otsu cell segmentation complete ({n_seg_frames} frames).")
+    return
+
+
+def _ts_cp_seg_rf(ui_instance, w, stack_np, layer_name, dr, interval):
+    """Random-Forest keyframe cell segmentation (inline)."""
+    (rf_ann_dd, progress_bar, progress_label, run_btn) = (
+        w.rf_ann_dd, w.progress_bar, w.progress_label, w.run_btn)
+    ann_name = rf_ann_dd.currentText()
+    try:
+        ann_layer = ui_instance.viewer.layers[ann_name]
+    except KeyError:
+        napari_show_warning(f"Annotation layer '{ann_name}' not found.")
+        return
+    from pycat.toolbox.segmentation_tools import train_rf_segmenter, apply_rf_segmenter
+    import skimage as _sk
+    kf_indices_preview = list(range(0, stack_np.shape[0], interval))
+    if (stack_np.shape[0] - 1) not in kf_indices_preview:
+        kf_indices_preview.append(stack_np.shape[0] - 1)
+    n_kf = len(kf_indices_preview)
+    progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
+    progress_bar.setVisible(True)
+    progress_label.setText(f"Training RF on annotation layer…")
+    progress_label.setVisible(True)
+    run_btn.setEnabled(False)
+    try:
+        ref_frame = stack_np[0]
+        ann_data  = np.asarray(ann_layer.data)
+        if ann_data.ndim == 3:
+            ann_data = ann_data[0]
+        clf = train_rf_segmenter(ref_frame, ann_data)
+    except Exception as e:
+        napari_show_warning(f"RF training failed: {e}")
+        progress_bar.setVisible(False); progress_label.setVisible(False)
+        run_btn.setEnabled(True)
+        return
+    mask_arr = np.zeros_like(stack_np, dtype=np.uint16)
+    kf_indices = list(range(0, stack_np.shape[0], interval))
+    if (stack_np.shape[0] - 1) not in kf_indices:
+        kf_indices.append(stack_np.shape[0] - 1)
+    for i, t in enumerate(kf_indices):
+        try:
+            pred = apply_rf_segmenter(clf, stack_np[t])
+            mask_arr[t] = _sk.measure.label(pred > 0).astype(np.uint16)
+        except Exception:
+            pass
+        progress_bar.setValue(i + 1)
+    # Propagate to non-keyframes
+    kf_masks = {t: mask_arr[t] for t in kf_indices}
+    lazy = _KeyframeMaskStack(kf_masks, kf_indices, stack_np.shape[0])
+    full = np.asarray(lazy).copy()
+    ts_mask_name = f"TS Cell Masks [{layer_name}]"
+    ui_instance.viewer.add_labels(full, name=ts_mask_name)
+    best = max(kf_indices, key=lambda t: int(mask_arr[t].max()))
+    ui_instance.viewer.add_labels(mask_arr[best].copy(), name="Labeled Cell Mask")
+    data_inst = ui_instance.central_manager.active_data_class
+    data_inst.data_repository['ts_cell_mask_stack'] = lazy
+    ui_instance._record('ts_cellpose_keyframe', {
+        'stack_layer': layer_name, 'method': 'random_forest',
+        'annotation_layer': ann_name, 'keyframe_interval': interval,
+    })
+    napari_show_info("Random Forest cell segmentation complete.")
+    progress_bar.setVisible(False); progress_label.setVisible(False)
+    run_btn.setEnabled(True)
+    return
+
+
+def _ts_cp_transfection_filter(ui_instance, w, layer_name, mask_stack, best_kf, data_inst):
+    """Optional transfection filter — drop untransfected cells into a separate mask."""
+    (transfect_check, transfect_fluor_dd, transfect_snr_spin) = (
+        w.transfect_check, w.transfect_fluor_dd, w.transfect_snr_spin)
+    # ── Optional transfection filter ──────────────────────────────
+    # Score each cell by fluorescence SNR on the reference frame and
+    # drop untransfected cells into a SEPARATE "Transfected Cells" mask
+    # (the full mask above is preserved). Builds a kept-vs-dropped stats
+    # table + efficiency estimate. Off by default (Csat experiments want
+    # the low/untransfected cells).
+    if transfect_check.isChecked():
+        try:
+            _fl_name = transfect_fluor_dd.currentText()
+            _fl_layer = ui_instance.viewer.layers[_fl_name]
+            _fl_data = np.asarray(_fl_layer.data)
+            # Reference frame of the fluorescence channel, matched to the
+            # best keyframe used for the representative 2D mask.
+            if _fl_data.ndim == 3:
+                _ref_idx = min(best_kf, _fl_data.shape[0] - 1)
+                _fl_frame = np.asarray(_fl_data[_ref_idx]).astype(np.float32)
+            else:
+                _fl_frame = _fl_data.astype(np.float32)
+            _ref_mask = np.asarray(mask_stack[best_kf])
+            if _fl_frame.shape != _ref_mask.shape:
+                napari_show_warning(
+                    "Transfection filter skipped: fluorescence frame "
+                    f"{_fl_frame.shape} doesn't match mask "
+                    f"{_ref_mask.shape}.")
+            else:
+                kept, dropped, stats_df, eff = filter_cells_by_transfection(
+                    _ref_mask, _fl_frame,
+                    snr_threshold=float(transfect_snr_spin.value()))
+                filtered_stack = apply_transfection_filter_to_stack(
+                    mask_stack, kept)
+                tf_name = f"Transfected Cells [{layer_name}]"
+                ui_instance.viewer.add_labels(
+                    np.asarray(filtered_stack).copy(), name=tf_name)
+                data_inst.data_repository['transfected_cell_mask_stack'] = filtered_stack
+                data_inst.data_repository['transfection_stats'] = stats_df
+                data_inst.data_repository['transfection_efficiency'] = eff
+                napari_show_info(
+                    f"Transfection filter: {len(kept)} transfected / "
+                    f"{len(kept) + len(dropped)} cells "
+                    f"({eff:.0%} efficiency, SNR ≥ "
+                    f"{transfect_snr_spin.value():.1f}). "
+                    f"Kept cells → '{tf_name}'. "
+                    f"Per-cell stats in data repository "
+                    f"('transfection_stats').")
+                ui_instance._record('ts_transfection_filter', {
+                    'fluor_layer': _fl_name,
+                    'snr_threshold': float(transfect_snr_spin.value()),
+                    'reference_frame': int(best_kf),
+                    'n_kept': len(kept), 'n_dropped': len(dropped),
+                    'efficiency': float(eff),
+                })
         except KeyError:
-            napari_show_warning(f"Layer '{layer_name}' not found.")
-            return
+            napari_show_warning(
+                "Transfection filter skipped: select a valid "
+                "fluorescence channel.")
+        except Exception as _tf_e:
+            napari_show_warning(
+                f"Transfection filter failed: {_tf_e}")
 
-        data = layer.data
-        if data.ndim == 2:
-            data = data[np.newaxis]
-        if data.ndim != 3:
-            napari_show_warning("Time-Series cell segmentation requires a 3D (T,H,W) layer.")
-            return
 
-        n_t = data.shape[0]
-        interval     = interval_spin.value()
-        dr           = ui_instance.central_manager.active_data_class.data_repository
-        cell_diameter = float(dr.get('cell_diameter', 100))
+def _ts_cp_on_finished(ui_instance, w, layer_name, n_t, interval, cell_diameter, mask_stack, kf_indices):
+    """Present the keyframe-Cellpose worker results and run the transfection filter."""
+    (progress_bar, progress_label, run_btn, max_proj_check, rb_stardist, upscale_check, upscale_spin) = (
+        w.progress_bar, w.progress_label, w.run_btn, w.max_proj_check, w.rb_stardist, w.upscale_check, w.upscale_spin)
+    progress_bar.setVisible(False)
+    progress_label.setVisible(False)
+    run_btn.setEnabled(True)
 
-        # ── Apply frame range from Apply ROI (Step 2) ─────────────────
-        t_start = int(dr.get('timeseries_frame_start', 0))
-        t_end   = int(dr.get('timeseries_frame_end', n_t - 1))
-        t_start = max(0, min(t_start, n_t - 1))
-        t_end   = max(t_start, min(t_end, n_t - 1))
-        stack_np = np.asarray(data[t_start:t_end + 1]).astype(np.float32)
-        if t_start > 0 or t_end < n_t - 1:
-            napari_show_info(
-                f"Cell seg: using frame range {t_start}–{t_end} "
-                f"({t_end - t_start + 1} of {n_t} frames).")
+    if max_proj_check.isChecked():
+        # Union of all keyframe masks — conservative cell ROI.
+        # np.broadcast_to WITHOUT .copy() creates a read-only
+        # stride-tricked view: the same 2D union array is presented
+        # as (T,H,W) without allocating n_t separate copies in
+        # memory. Safe here since this data is only read/displayed,
+        # never mutated after creation.
+        union = np.zeros(mask_stack.shape[1:], dtype=np.uint16)
+        for t in kf_indices:
+            union = np.where(mask_stack[t] > 0, mask_stack[t], union)
+        mask_stack = np.broadcast_to(union, mask_stack.shape)
 
-        # ── Apply XY ROI from Apply ROI (Step 2) ─────────────────────
-        if dr.get('timeseries_roi_active', False):
-            y0 = int(dr.get('timeseries_roi_y0', 0))
-            y1 = int(dr.get('timeseries_roi_y1', stack_np.shape[1]))
-            x0 = int(dr.get('timeseries_roi_x0', 0))
-            x1 = int(dr.get('timeseries_roi_x1', stack_np.shape[2]))
-            y0, y1 = max(0, y0), min(stack_np.shape[1], y1)
-            x0, x1 = max(0, x0), min(stack_np.shape[2], x1)
-            stack_np = stack_np[:, y0:y1, x0:x1]
-            napari_show_info(
-                f"Cell seg: XY crop y[{y0}:{y1}] x[{x0}:{x1}] applied.")
+    # Add (T, H, W) label stack to viewer as a genuinely writable
+    # array — napari Labels layers support paint/edit tools, so a
+    # read-only lazy view or broadcast_to view (used above purely
+    # to save memory during storage/return) must be materialised
+    # into a real, independent array here rather than handed to
+    # add_labels() directly. This is a one-time cost paid only if
+    # the user displays the layer, not held throughout the session.
+    display_stack = np.asarray(mask_stack).copy()
 
-        dr['timeseries_frame_start'] = t_start
-        dr['timeseries_frame_end']   = t_end
+    ts_mask_name = f"TS Cell Masks [{layer_name}]"
+    ui_instance.viewer.add_labels(
+        display_stack, name=ts_mask_name
+    )
 
-        # ── Multi-Otsu: no worker needed, runs per-frame inline ───────
-        if rb_otsu.isChecked():
-            from skimage.filters import threshold_multiotsu
-            import skimage as _sk
-            n_classes = otsu_spin.value()
-            n_seg_frames = stack_np.shape[0]
-            mask_arr = np.zeros_like(stack_np, dtype=np.uint16)
-            for i in range(n_seg_frames):
-                frame = stack_np[i]
-                try:
-                    thresholds = threshold_multiotsu(frame, classes=n_classes)
-                    # Use the LOWEST threshold to capture the full cell body
-                    # (cytoplasm + nucleus). thresholds[-1] was wrong — that
-                    # selects only the brightest class (condensates/puncta),
-                    # giving a cell mask that matches condensate spots rather
-                    # than cell boundaries.
-                    from pycat.toolbox.batch_roi_tools import multi_otsu_cell_mask
-                    _cell_diam = dr.get('cell_diameter', 100)
-                    mask_arr[i] = multi_otsu_cell_mask(
-                        frame, n_classes=n_classes,
-                        cell_diameter=int(_cell_diam)).astype(np.uint16)
-                except Exception:
-                    pass
-            ts_mask_name = f"TS Cell Masks [{layer_name}]"
-            ui_instance.viewer.add_labels(mask_arr.copy(), name=ts_mask_name)
-            best = max(range(n_seg_frames),
-                       key=lambda i: int(mask_arr[i].max()))
-            ui_instance.viewer.add_labels(
-                mask_arr[best].copy(), name="Labeled Cell Mask")
-            data_inst = ui_instance.central_manager.active_data_class
-            data_inst.data_repository['ts_cell_mask_stack'] = mask_arr
-            ui_instance._record('ts_cellpose_keyframe', {
-                'stack_layer': layer_name, 'method': 'multi_otsu',
-                'n_classes': n_classes, 'keyframe_interval': interval,
-            })
-            napari_show_info(f"Multi-Otsu cell segmentation complete ({n_seg_frames} frames).")
-            return
+    # Labeled Cell Mask: use the keyframe with the most detected
+    # cells rather than always frame 0. When max_projection=False,
+    # frame 0 may have an empty individual mask while other keyframes
+    # succeeded — picking the best-populated keyframe is always safe.
+    best_kf = max(kf_indices,
+                  key=lambda k: int(np.asarray(mask_stack[k]).max()))
+    ui_instance.viewer.add_labels(
+        np.asarray(mask_stack[best_kf]).copy(), name="Labeled Cell Mask"
+    )
 
-        # ── Random Forest: one trained model applied per keyframe ─────
-        if rb_rf.isChecked():
-            ann_name = rf_ann_dd.currentText()
-            try:
-                ann_layer = ui_instance.viewer.layers[ann_name]
-            except KeyError:
-                napari_show_warning(f"Annotation layer '{ann_name}' not found.")
-                return
-            from pycat.toolbox.segmentation_tools import train_rf_segmenter, apply_rf_segmenter
-            import skimage as _sk
-            kf_indices_preview = list(range(0, stack_np.shape[0], interval))
-            if (stack_np.shape[0] - 1) not in kf_indices_preview:
-                kf_indices_preview.append(stack_np.shape[0] - 1)
-            n_kf = len(kf_indices_preview)
-            progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
-            progress_bar.setVisible(True)
-            progress_label.setText(f"Training RF on annotation layer…")
-            progress_label.setVisible(True)
-            run_btn.setEnabled(False)
-            try:
-                ref_frame = stack_np[0]
-                ann_data  = np.asarray(ann_layer.data)
-                if ann_data.ndim == 3:
-                    ann_data = ann_data[0]
-                clf = train_rf_segmenter(ref_frame, ann_data)
-            except Exception as e:
-                napari_show_warning(f"RF training failed: {e}")
-                progress_bar.setVisible(False); progress_label.setVisible(False)
-                run_btn.setEnabled(True)
-                return
-            mask_arr = np.zeros_like(stack_np, dtype=np.uint16)
-            kf_indices = list(range(0, stack_np.shape[0], interval))
-            if (stack_np.shape[0] - 1) not in kf_indices:
-                kf_indices.append(stack_np.shape[0] - 1)
-            for i, t in enumerate(kf_indices):
-                try:
-                    pred = apply_rf_segmenter(clf, stack_np[t])
-                    mask_arr[t] = _sk.measure.label(pred > 0).astype(np.uint16)
-                except Exception:
-                    pass
-                progress_bar.setValue(i + 1)
-            # Propagate to non-keyframes
-            kf_masks = {t: mask_arr[t] for t in kf_indices}
-            lazy = _KeyframeMaskStack(kf_masks, kf_indices, stack_np.shape[0])
-            full = np.asarray(lazy).copy()
-            ts_mask_name = f"TS Cell Masks [{layer_name}]"
-            ui_instance.viewer.add_labels(full, name=ts_mask_name)
-            best = max(kf_indices, key=lambda t: int(mask_arr[t].max()))
-            ui_instance.viewer.add_labels(mask_arr[best].copy(), name="Labeled Cell Mask")
-            data_inst = ui_instance.central_manager.active_data_class
-            data_inst.data_repository['ts_cell_mask_stack'] = lazy
-            ui_instance._record('ts_cellpose_keyframe', {
-                'stack_layer': layer_name, 'method': 'random_forest',
-                'annotation_layer': ann_name, 'keyframe_interval': interval,
-            })
-            napari_show_info("Random Forest cell segmentation complete.")
-            progress_bar.setVisible(False); progress_label.setVisible(False)
-            run_btn.setEnabled(True)
-            return
+    # Store the LAZY (or broadcast-view) version in the data
+    # repository, not display_stack — this data is only ever read,
+    # never mutated, downstream (confirmed: batch_step_registry.py
+    # stores it into per-file state without further writes), so
+    # keeping it lazy here avoids holding a full duplicated-frame
+    # array in memory for the rest of the session.
+    data_inst = ui_instance.central_manager.active_data_class
+    data_inst.data_repository['ts_cell_mask_stack'] = mask_stack
+    data_inst.data_repository['ts_cellpose_keyframes'] = kf_indices
 
-        # ── Cellpose or StarDist: use background worker ───────────────
-        kf_indices_preview = list(range(0, stack_np.shape[0], interval))
-        if (stack_np.shape[0] - 1) not in kf_indices_preview:
-            kf_indices_preview.append(stack_np.shape[0] - 1)
-        n_kf = len(kf_indices_preview)
-        progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
-        progress_bar.setVisible(True)
-        method_name = "StarDist" if rb_stardist.isChecked() else "Cellpose"
-        progress_label.setText(f"Running {method_name} on 0 / {n_kf} keyframes…")
-        progress_label.setVisible(True)
-        run_btn.setEnabled(False)
+    n_cells = int(np.asarray(mask_stack[best_kf]).max())
+    napari_show_info(
+        f"Keyframe Cellpose complete: {len(kf_indices)} keyframes, "
+        f"{n_t} total frames, {n_cells} cells (best keyframe: {best_kf}). "
+        f"Mask stack → '{ts_mask_name}'"
+    )
 
-        upscale = upscale_spin.value() if upscale_check.isChecked() else 1
-        _cp_model = 'nuclei' if (rb_cellpose.isChecked() and nuclei_check.isChecked()) else None
-        worker = _make_keyframe_cellpose_worker()(
-            stack_np, cell_diameter, interval,
-            upscale_factor=upscale,
-            use_stardist=rb_stardist.isChecked(),
-            model_name=_cp_model,
-        )
-        ui_instance._ts_cellpose_worker = worker
+    _ts_cp_transfection_filter(ui_instance, w, layer_name, mask_stack, best_kf, data_inst)
 
-        def _on_progress(done, total):
-            progress_bar.setValue(done)
-            progress_label.setText(f"Cellpose: {done} / {total} keyframes done…")
+    # Record for batch
+    ui_instance._record('ts_cellpose_keyframe', {
+        'stack_layer':       layer_name,
+        'method':            'stardist' if rb_stardist.isChecked() else 'cellpose',
+        'keyframe_interval': interval,
+        'cell_diameter':     cell_diameter,
+        'max_projection':    max_proj_check.isChecked(),
+        'upscale_factor':    upscale_spin.value() if upscale_check.isChecked() else 1,
+    })
 
-        def _present_transfection_filter(mask_stack, best_kf, data_inst):
-            # ── Optional transfection filter ──────────────────────────────
-            # Score each cell by fluorescence SNR on the reference frame and
-            # drop untransfected cells into a SEPARATE "Transfected Cells" mask
-            # (the full mask above is preserved). Builds a kept-vs-dropped stats
-            # table + efficiency estimate. Off by default (Csat experiments want
-            # the low/untransfected cells).
-            if transfect_check.isChecked():
-                try:
-                    _fl_name = transfect_fluor_dd.currentText()
-                    _fl_layer = ui_instance.viewer.layers[_fl_name]
-                    _fl_data = np.asarray(_fl_layer.data)
-                    # Reference frame of the fluorescence channel, matched to the
-                    # best keyframe used for the representative 2D mask.
-                    if _fl_data.ndim == 3:
-                        _ref_idx = min(best_kf, _fl_data.shape[0] - 1)
-                        _fl_frame = np.asarray(_fl_data[_ref_idx]).astype(np.float32)
-                    else:
-                        _fl_frame = _fl_data.astype(np.float32)
-                    _ref_mask = np.asarray(mask_stack[best_kf])
-                    if _fl_frame.shape != _ref_mask.shape:
-                        napari_show_warning(
-                            "Transfection filter skipped: fluorescence frame "
-                            f"{_fl_frame.shape} doesn't match mask "
-                            f"{_ref_mask.shape}.")
-                    else:
-                        kept, dropped, stats_df, eff = filter_cells_by_transfection(
-                            _ref_mask, _fl_frame,
-                            snr_threshold=float(transfect_snr_spin.value()))
-                        filtered_stack = apply_transfection_filter_to_stack(
-                            mask_stack, kept)
-                        tf_name = f"Transfected Cells [{layer_name}]"
-                        ui_instance.viewer.add_labels(
-                            np.asarray(filtered_stack).copy(), name=tf_name)
-                        data_inst.data_repository['transfected_cell_mask_stack'] = filtered_stack
-                        data_inst.data_repository['transfection_stats'] = stats_df
-                        data_inst.data_repository['transfection_efficiency'] = eff
-                        napari_show_info(
-                            f"Transfection filter: {len(kept)} transfected / "
-                            f"{len(kept) + len(dropped)} cells "
-                            f"({eff:.0%} efficiency, SNR ≥ "
-                            f"{transfect_snr_spin.value():.1f}). "
-                            f"Kept cells → '{tf_name}'. "
-                            f"Per-cell stats in data repository "
-                            f"('transfection_stats').")
-                        ui_instance._record('ts_transfection_filter', {
-                            'fluor_layer': _fl_name,
-                            'snr_threshold': float(transfect_snr_spin.value()),
-                            'reference_frame': int(best_kf),
-                            'n_kept': len(kept), 'n_dropped': len(dropped),
-                            'efficiency': float(eff),
-                        })
-                except KeyError:
-                    napari_show_warning(
-                        "Transfection filter skipped: select a valid "
-                        "fluorescence channel.")
-                except Exception as _tf_e:
-                    napari_show_warning(
-                        f"Transfection filter failed: {_tf_e}")
 
-        def _on_finished(mask_stack, kf_indices):
-            progress_bar.setVisible(False)
-            progress_label.setVisible(False)
-            run_btn.setEnabled(True)
+def _ts_cp_seg_cellpose(ui_instance, w, stack_np, layer_name, n_t, interval, cell_diameter):
+    """Cellpose / StarDist keyframe cell segmentation via a background worker."""
+    (upscale_check, upscale_spin, rb_stardist, rb_cellpose, nuclei_check, progress_bar, progress_label, run_btn) = (
+        w.upscale_check, w.upscale_spin, w.rb_stardist, w.rb_cellpose, w.nuclei_check, w.progress_bar, w.progress_label, w.run_btn)
+    kf_indices_preview = list(range(0, stack_np.shape[0], interval))
+    if (stack_np.shape[0] - 1) not in kf_indices_preview:
+        kf_indices_preview.append(stack_np.shape[0] - 1)
+    n_kf = len(kf_indices_preview)
+    progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
+    progress_bar.setVisible(True)
+    method_name = "StarDist" if rb_stardist.isChecked() else "Cellpose"
+    progress_label.setText(f"Running {method_name} on 0 / {n_kf} keyframes…")
+    progress_label.setVisible(True)
+    run_btn.setEnabled(False)
 
-            if max_proj_check.isChecked():
-                # Union of all keyframe masks — conservative cell ROI.
-                # np.broadcast_to WITHOUT .copy() creates a read-only
-                # stride-tricked view: the same 2D union array is presented
-                # as (T,H,W) without allocating n_t separate copies in
-                # memory. Safe here since this data is only read/displayed,
-                # never mutated after creation.
-                union = np.zeros(mask_stack.shape[1:], dtype=np.uint16)
-                for t in kf_indices:
-                    union = np.where(mask_stack[t] > 0, mask_stack[t], union)
-                mask_stack = np.broadcast_to(union, mask_stack.shape)
+    upscale = upscale_spin.value() if upscale_check.isChecked() else 1
+    _cp_model = 'nuclei' if (rb_cellpose.isChecked() and nuclei_check.isChecked()) else None
+    worker = _make_keyframe_cellpose_worker()(
+        stack_np, cell_diameter, interval,
+        upscale_factor=upscale,
+        use_stardist=rb_stardist.isChecked(),
+        model_name=_cp_model,
+    )
+    ui_instance._ts_cellpose_worker = worker
+    def _on_progress(done, total):
+        progress_bar.setValue(done)
+        progress_label.setText(f"Cellpose: {done} / {total} keyframes done…")
+    def _on_error(msg):
+        progress_bar.setVisible(False)
+        progress_label.setVisible(False)
+        run_btn.setEnabled(True)
+        napari_show_warning("Keyframe Cellpose error — see terminal.")
+        print(f"[PyCAT TS Cellpose] ERROR:\n{msg}")
+    worker.progress.connect(_on_progress)
+    worker.finished.connect(lambda ms, kf: _ts_cp_on_finished(ui_instance, w, layer_name, n_t, interval, cell_diameter, ms, kf))
+    worker.error.connect(_on_error)
+    worker.start()
 
-            # Add (T, H, W) label stack to viewer as a genuinely writable
-            # array — napari Labels layers support paint/edit tools, so a
-            # read-only lazy view or broadcast_to view (used above purely
-            # to save memory during storage/return) must be materialised
-            # into a real, independent array here rather than handed to
-            # add_labels() directly. This is a one-time cost paid only if
-            # the user displays the layer, not held throughout the session.
-            display_stack = np.asarray(mask_stack).copy()
 
-            ts_mask_name = f"TS Cell Masks [{layer_name}]"
-            ui_instance.viewer.add_labels(
-                display_stack, name=ts_mask_name
-            )
+def _ts_cp_run(ui_instance, w):
+    """Validate inputs, apply ROI/frame-range, and dispatch to the chosen segmentation method."""
+    (stack_dropdown, interval_spin, rb_otsu, rb_rf) = (
+        w.stack_dropdown, w.interval_spin, w.rb_otsu, w.rb_rf)
+    layer_name = stack_dropdown.currentText()
+    try:
+        layer = ui_instance.viewer.layers[layer_name]
+    except KeyError:
+        napari_show_warning(f"Layer '{layer_name}' not found.")
+        return
 
-            # Labeled Cell Mask: use the keyframe with the most detected
-            # cells rather than always frame 0. When max_projection=False,
-            # frame 0 may have an empty individual mask while other keyframes
-            # succeeded — picking the best-populated keyframe is always safe.
-            best_kf = max(kf_indices,
-                          key=lambda k: int(np.asarray(mask_stack[k]).max()))
-            ui_instance.viewer.add_labels(
-                np.asarray(mask_stack[best_kf]).copy(), name="Labeled Cell Mask"
-            )
+    data = layer.data
+    if data.ndim == 2:
+        data = data[np.newaxis]
+    if data.ndim != 3:
+        napari_show_warning("Time-Series cell segmentation requires a 3D (T,H,W) layer.")
+        return
 
-            # Store the LAZY (or broadcast-view) version in the data
-            # repository, not display_stack — this data is only ever read,
-            # never mutated, downstream (confirmed: batch_step_registry.py
-            # stores it into per-file state without further writes), so
-            # keeping it lazy here avoids holding a full duplicated-frame
-            # array in memory for the rest of the session.
-            data_inst = ui_instance.central_manager.active_data_class
-            data_inst.data_repository['ts_cell_mask_stack'] = mask_stack
-            data_inst.data_repository['ts_cellpose_keyframes'] = kf_indices
+    n_t = data.shape[0]
+    interval     = interval_spin.value()
+    dr           = ui_instance.central_manager.active_data_class.data_repository
+    cell_diameter = float(dr.get('cell_diameter', 100))
 
-            n_cells = int(np.asarray(mask_stack[best_kf]).max())
-            napari_show_info(
-                f"Keyframe Cellpose complete: {len(kf_indices)} keyframes, "
-                f"{n_t} total frames, {n_cells} cells (best keyframe: {best_kf}). "
-                f"Mask stack → '{ts_mask_name}'"
-            )
+    # ── Apply frame range from Apply ROI (Step 2) ─────────────────
+    t_start = int(dr.get('timeseries_frame_start', 0))
+    t_end   = int(dr.get('timeseries_frame_end', n_t - 1))
+    t_start = max(0, min(t_start, n_t - 1))
+    t_end   = max(t_start, min(t_end, n_t - 1))
+    stack_np = np.asarray(data[t_start:t_end + 1]).astype(np.float32)
+    if t_start > 0 or t_end < n_t - 1:
+        napari_show_info(
+            f"Cell seg: using frame range {t_start}–{t_end} "
+            f"({t_end - t_start + 1} of {n_t} frames).")
 
-            _present_transfection_filter(mask_stack, best_kf, data_inst)
+    # ── Apply XY ROI from Apply ROI (Step 2) ─────────────────────
+    if dr.get('timeseries_roi_active', False):
+        y0 = int(dr.get('timeseries_roi_y0', 0))
+        y1 = int(dr.get('timeseries_roi_y1', stack_np.shape[1]))
+        x0 = int(dr.get('timeseries_roi_x0', 0))
+        x1 = int(dr.get('timeseries_roi_x1', stack_np.shape[2]))
+        y0, y1 = max(0, y0), min(stack_np.shape[1], y1)
+        x0, x1 = max(0, x0), min(stack_np.shape[2], x1)
+        stack_np = stack_np[:, y0:y1, x0:x1]
+        napari_show_info(
+            f"Cell seg: XY crop y[{y0}:{y1}] x[{x0}:{x1}] applied.")
 
-            # Record for batch
-            ui_instance._record('ts_cellpose_keyframe', {
-                'stack_layer':       layer_name,
-                'method':            'stardist' if rb_stardist.isChecked() else 'cellpose',
-                'keyframe_interval': interval,
-                'cell_diameter':     cell_diameter,
-                'max_projection':    max_proj_check.isChecked(),
-                'upscale_factor':    upscale_spin.value() if upscale_check.isChecked() else 1,
-            })
+    dr['timeseries_frame_start'] = t_start
+    dr['timeseries_frame_end']   = t_end
 
-        def _on_error(msg):
-            progress_bar.setVisible(False)
-            progress_label.setVisible(False)
-            run_btn.setEnabled(True)
-            napari_show_warning("Keyframe Cellpose error — see terminal.")
-            print(f"[PyCAT TS Cellpose] ERROR:\n{msg}")
+    if rb_otsu.isChecked():
+        _ts_cp_seg_otsu(ui_instance, w, stack_np, layer_name, dr, interval); return
+    if rb_rf.isChecked():
+        _ts_cp_seg_rf(ui_instance, w, stack_np, layer_name, dr, interval); return
+    _ts_cp_seg_cellpose(ui_instance, w, stack_np, layer_name, n_t, interval, cell_diameter)
 
-        worker.progress.connect(_on_progress)
-        worker.finished.connect(_on_finished)
-        worker.error.connect(_on_error)
-        worker.start()
 
-    run_btn.clicked.connect(_on_run)
-    form.addRow("", progress_bar)
-    form.addRow("", progress_label)
-    form.addRow("", run_btn)
+def _add_run_ts_cellpose(ui_instance, layout=None, separate_widget=False):
+    """
+    Time-series cell segmentation with keyframe interpolation.
 
+    Supports Cellpose, StarDist, Random Forest, and Multi-Otsu thresholding.
+    Automatically applies the XY ROI and frame range set in Step 2 (Apply ROI).
+
+    For multi-channel data, the user can select a dedicated segmentation
+    channel (e.g. DAPI for nuclei) instead of the fluorescence channel
+    used for condensate detection — only that channel is passed to the
+    segmentation algorithm. When no dedicated channel is available, 
+    Multi-Otsu thresholding provides a DNA-stain-free fallback.
+    """
+    # Qt is imported here, not at module scope — the analysis functions in this
+    # module use none of it, and a module-scope import blocked their headless import.
+    from PyQt5.QtWidgets import (
+        QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QGroupBox,
+        QFormLayout, QSpinBox, QDoubleSpinBox, QProgressBar, QLabel, QCheckBox,
+        QRadioButton,
+    )
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QButtonGroup, QStackedWidget, QSizePolicy, QSizePolicy as _QSP
+    grp   = QGroupBox("Step 5 — Cell / Nuclei Segmentation")
+    form  = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
+    form.setLabelAlignment(Qt.AlignLeft)
+    na = _ts_cp_input_method_widgets(ui_instance, form)
+    nb = _ts_cp_option_widgets(ui_instance, form)
+    w = SimpleNamespace(**vars(na), **vars(nb))
+    w.run_btn.clicked.connect(lambda: _ts_cp_run(ui_instance, w))
+    form.addRow("", w.progress_bar)
+    form.addRow("", w.progress_label)
+    form.addRow("", w.run_btn)
     widget = QWidget()
     layout_ = QVBoxLayout(widget)
     layout_.addWidget(grp)

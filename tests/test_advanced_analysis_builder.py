@@ -40,7 +40,7 @@ def _stub_ui():
         def add_text_label(self, layout, text, bold=False, **kwargs):
             pass
 
-        def create_layer_dropdown(self, layer_type):
+        def create_layer_dropdown(self, layer_type, *args, **kwargs):
             return QComboBox()
 
         def _add_widget_to_layout_or_dock(self, widget, layout, separate_widget, name):
@@ -73,4 +73,12 @@ def test_timeseries_condensate_widget_constructs(qtbot):
     import pycat.toolbox.timeseries.ui as m
     ui = _stub_ui()
     m._add_run_timeseries_condensate_analysis(ui)
+    assert getattr(ui, "_built", None) is not None
+
+
+@pytest.mark.integration
+def test_ts_cellpose_widget_constructs(qtbot):
+    import pycat.toolbox.ts_cellpose_tools as m
+    ui = _stub_ui()
+    m._add_run_ts_cellpose(ui)
     assert getattr(ui, "_built", None) is not None

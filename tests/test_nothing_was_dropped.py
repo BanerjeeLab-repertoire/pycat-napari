@@ -1286,6 +1286,13 @@ _DELIBERATE = {
     'condensate_physics_ui.py::_on_msd',            # -> _run_msd_analysis
     'condensate_physics_ui.py::_on_qc',             # -> _run_qc_analysis
     'condensate_physics_ui.py::_done',              # common per-tab nested name (relocated with its handler)
+
+    # ui_builder_split builder 4 (2026-07-25): _add_run_ts_cellpose (549 lines) decomposed; its 311-line
+    # _on_run split into a dispatcher (_ts_cp_run) + per-method segmentation functions (otsu/rf/cellpose) +
+    # extracted callbacks (_ts_cp_on_finished, _ts_cp_transfection_filter), all <=120. Widget logic preserved
+    # VERBATIM (test_ui_builder_split's _ts_cellpose_worker contract + a construction smoke pin it).
+    'ts_cellpose_tools.py::_add_run_ts_cellpose',   # decomposed into widget factories + dispatcher + helpers
+    'ts_cellpose_tools.py::_on_run',                # -> _ts_cp_run + the segmentation-path functions
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

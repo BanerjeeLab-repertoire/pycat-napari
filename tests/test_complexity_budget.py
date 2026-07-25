@@ -209,7 +209,13 @@ _LONG_FUNCTION_LIMIT = 120
 # appender `_ts_cond_append_ripley` and the batch-record `_ts_cond_record` — each unpacks the namespace and runs
 # VERBATIM. Every function ≤120. Pinned by test_ui_builder_split + a construction smoke; no analysis changed.
 # GUI imports stay function-local (the module is headless-importable). Count 118 → 117.
-_MAX_LONG_FUNCTIONS = 117
+# 115. (2026-07-25, ui_builder_split 4/5) `_add_run_ts_cellpose` (ts_cellpose_tools, 549 lines) — its 311-line
+# `_on_run` was the deepest handler: split into a dispatcher (`_ts_cp_run`) + per-method segmentation functions
+# (`_ts_cp_seg_otsu`/`_ts_cp_seg_rf`/`_ts_cp_seg_cellpose`) + extracted callbacks (`_ts_cp_on_finished`,
+# `_ts_cp_transfection_filter`) + two widget factories. Decomposing it removed BOTH the outer builder AND the
+# 311-line `_on_run` from the long-function set. Every function ≤120; pinned by test_ui_builder_split
+# (`_ts_cellpose_worker`) + a construction smoke. Count 117 → 115.
+_MAX_LONG_FUNCTIONS = 115
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

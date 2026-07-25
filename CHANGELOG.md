@@ -1,3 +1,18 @@
+## [1.6.365] - 2026-07-25
+### Changed — **Decomposed the 549-line `_add_run_ts_cellpose` UI builder — its 311-line `_on_run` was the deepest handler (ui_builder_split, 4 of 5).**
+Time-series keyframe cell segmentation (Cellpose / StarDist / Random-Forest / Multi-Otsu). Pure Qt + dispatch, no science changed.
+
+- **Widget factories** `_ts_cp_input_method_widgets` / `_ts_cp_option_widgets` build the seg-channel/method and
+  upscale/max-proj/transfection/progress widgets **verbatim** and return a `SimpleNamespace`.
+- **`_on_run` (311 lines) split three ways:** a dispatcher `_ts_cp_run` (validate + apply ROI/frame-range +
+  choose method) delegating to per-method segmentation functions `_ts_cp_seg_otsu` / `_ts_cp_seg_rf` /
+  `_ts_cp_seg_cellpose`, plus the worker callbacks `_ts_cp_on_finished` and `_ts_cp_transfection_filter`
+  extracted to module level. Each unpacks the namespace and runs the original body **verbatim**.
+- `_add_run_ts_cellpose` is now a 39-line orchestrator; every resulting function is ≤120 lines. Pinned by
+  `test_ui_builder_split` (the `_ts_cellpose_worker` contract, unmodified) + a headless construction smoke.
+  Decomposing it removed **both** the outer builder and the 311-line `_on_run` from the long-function set;
+  **`_MAX_LONG_FUNCTIONS` lowered 117 → 115.** Remaining: `_add_lazy_preprocess_stack` (520, 358-line handler).
+
 ## [1.6.364] - 2026-07-25
 ### Changed — **Decomposed the 492-line `_add_run_timeseries_condensate_analysis` UI builder (ui_builder_split, 5 of 5 by size but 3rd shipped).**
 The time-series condensate-analysis panel split the same way — pure Qt construction, no analysis changed.

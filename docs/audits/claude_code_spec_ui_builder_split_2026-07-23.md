@@ -4,9 +4,13 @@
 > `_add_condensate_physics` (595) and `_add_run_timeseries_condensate_analysis` (492) fully decomposed into
 > widget factories (returning a SimpleNamespace of handles) + handlers (unpack the namespace, run VERBATIM).
 > Every function ≤120; `_MAX_LONG_FUNCTIONS` 120 → 117. Verified by `test_ui_builder_split` + construction
-> smokes. **Remaining — the two hardest (monster handlers): `_add_run_ts_cellpose` (549, 311-line `_on_run`)
-> and `_add_lazy_preprocess_stack` (520, 358-line `_on_build`); each needs a deeper 3-level split of its
-> handler into dispatcher + path/step functions.**
+> smokes.
+>
+> **4 of 5 DONE — `_add_run_ts_cellpose` (549) shipped 1.6.365.** Its 311-line `_on_run` split into a
+> dispatcher (`_ts_cp_run`) + per-method segmentation functions (otsu/rf/cellpose) + extracted callbacks
+> (`_ts_cp_on_finished`, `_ts_cp_transfection_filter`) + two widget factories. Removed BOTH the builder and the
+> 311-line `_on_run` from the long-function set; `_MAX_LONG_FUNCTIONS` 117 → 115. **Remaining (the last, and the
+> hardest): `_add_lazy_preprocess_stack` (520, 358-line `_on_build`).**
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. **The five longest
 functions in PyCAT are all UI builders**, and none has ever been touched — verified `grep -c "def _build_"`
