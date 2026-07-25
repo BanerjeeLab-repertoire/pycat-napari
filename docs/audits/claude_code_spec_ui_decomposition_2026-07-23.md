@@ -8,8 +8,14 @@
 > `guard_wheel` unchanged). Contract tests updated (`test_ui_structure`, `test_tag_resolver`). **NOTE the
 > current tree has ~12 classes, not the 6 the "Verified structure" below lists** — the extra `AnalysisMethodsUI`
 > subclasses (ObjectColocAnalysisUI, PixelColocAnalysisUI, ColocalizationAnalysisUI, GeneralAnalysisUI,
-> FibrilAnalysisUI) go in `analysis_methods_ui.py` per the "and siblings" grouping. **Remaining: ToolboxFunctionsUI,
-> the AnalysisMethodsUI family, TimeSeriesCondensateUI → their modules; then Part 2 (menu_manager.py).**
+> FibrilAnalysisUI) go in `analysis_methods_ui.py` per the "and siblings" grouping.
+>
+> **◐ Increment 2 DONE, 1.6.368.** The whole `AnalysisMethodsUI` hierarchy (AnalysisMethodsUI + all 9
+> subclasses + CollapsibleSection) moved VERBATIM to `analysis_methods_ui.py`. **Deviation from the spec:**
+> kept TOGETHER (not a separate `timeseries_condensate_ui.py`) because TimeSeriesCondensateUI inherits
+> AnalysisMethodsUI AND AnalysisMethodsUI references TimeSeriesCondensateUI (the analysis switcher) — a mutual
+> dep; one module is cycle-free. `ui_modules.py` 2,410 → **816 lines** (from 3,266). **Remaining: ToolboxFunctionsUI
+> → toolbox_functions_ui.py (Part 1 final), then Part 2 (menu_manager.py).**
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. All six big science
 files are now thin shims. These two are what remain of the decomposition programme — and `ui_modules.py`

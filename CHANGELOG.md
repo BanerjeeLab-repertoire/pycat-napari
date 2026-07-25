@@ -1,3 +1,20 @@
+## [1.6.368] - 2026-07-25
+### Changed — **Extracted the `AnalysisMethodsUI` hierarchy to its own module (ui_decomposition, increment 2).**
+The condensate / colocalization / general / time-series / fibril analysis panels — `AnalysisMethodsUI` and all
+nine of its subclasses (plus the `CollapsibleSection` helper) — move **verbatim** from `ui_modules.py` to a new
+`ui/analysis_methods_ui.py`.
+
+- **The whole hierarchy moves together** (not split into a separate `timeseries_condensate_ui.py` as the spec
+  sketched): `TimeSeriesCondensateUI` inherits `AnalysisMethodsUI` **and** `AnalysisMethodsUI` references
+  `TimeSeriesCondensateUI` (the analysis-switcher) — a mutual dependency. Keeping them in one module makes that
+  cycle-free; the module imports `BaseUIClass` from the `base_ui.py` leaf, so there's no cycle back to
+  `ui_modules`.
+- `ui_modules.py` drops **2,410 → 816 lines** (it was 3,266 before increment 1). It re-exports every moved class,
+  so `from pycat.ui.ui_modules import AnalysisMethodsUI` (etc.) keeps working. No behaviour changed.
+- Contract tests updated (`test_ui_structure` now pins each moved class in its new home + re-export via a shared
+  helper; 38 methods recorded in `_DELIBERATE`). Full `pytest -m "core or base"` green (1991 passed). Remaining:
+  `ToolboxFunctionsUI` → its own module, then `menu_manager.py` (Part 2).
+
 ## [1.6.367] - 2026-07-25
 ### Changed — **Extracted `BaseUIClass` to its own leaf module (ui_decomposition, increment 1).**
 `ui/ui_modules.py` was the largest file in the project (3,266 lines). This moves its foundation — the
