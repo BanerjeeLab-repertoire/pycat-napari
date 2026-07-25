@@ -1138,6 +1138,18 @@ _DELIBERATE = {
     'pixel_wise_corr_analysis_tools.py::_base',  # nested in manders_threshold_sensitivity; moved with it
     'pixel_wise_corr_analysis_tools.py::costes_linear_model',
     'pixel_wise_corr_analysis_tools.py::costes_thresholding',
+
+    # coloc_decomposition step 3 (2026-07-24): the spatial-null + randomisation machinery (`spatial_null_test`
+    # with its nested `_coef`, `spatial_correlation_length`, `_block_shuffle`, `perform_costes_test`, and the
+    # `scramble_*` randomisers) moved VERBATIM to `toolbox/coloc/nulls.py`; re-exported. No number changed.
+    'pixel_wise_corr_analysis_tools.py::spatial_correlation_length',
+    'pixel_wise_corr_analysis_tools.py::_block_shuffle',
+    'pixel_wise_corr_analysis_tools.py::spatial_null_test',
+    'pixel_wise_corr_analysis_tools.py::_coef',  # nested in spatial_null_test; moved with it
+    'pixel_wise_corr_analysis_tools.py::scramble_blocks',
+    'pixel_wise_corr_analysis_tools.py::scramble_pixels',
+    'pixel_wise_corr_analysis_tools.py::scramble_pixels_within_mask',
+    'pixel_wise_corr_analysis_tools.py::perform_costes_test',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

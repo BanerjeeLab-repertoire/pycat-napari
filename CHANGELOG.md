@@ -1,3 +1,18 @@
+## [1.6.343] - 2026-07-24
+### Changed — **Colocalization spatial-null machinery split into `coloc/nulls.py` (coloc_decomposition, step 3).**
+The significance layer — `spatial_null_test` (does the coefficient beat a **structure-preserving** null, so two
+blurred-but-independent channels don't read as colocalized?), its `_block_shuffle` / `spatial_correlation_length`
+randomisation, the `scramble_*` randomisers, and `perform_costes_test` — moved **VERBATIM** to
+`toolbox/coloc/nulls.py`.
+
+- Self-contained: every inter-call stays within the group (`spatial_null_test`'s nested `_coef` computes the
+  correlation inline via scipy, so nulls doesn't even depend on the metrics module). No number changed —
+  pinned identical by the spatial-null test net (the gate that stops the false-positive), which passes through
+  the re-export.
+- `pixel_wise_corr_analysis_tools.py` re-exports the seven names and drops 1,545 → 1,192 lines (from 2,029
+  across the three steps). Recorded in `_DELIBERATE`. Full `pytest -m "core or base"` green. Remaining coloc
+  steps: temporal, analysis, object_based.
+
 ## [1.6.342] - 2026-07-24
 ### Changed — **Colocalization thresholding split into `coloc/thresholding.py` (coloc_decomposition, step 2).**
 - `costes_thresholding` (+ its `costes_linear_model` regression) — the Costes intensity-threshold

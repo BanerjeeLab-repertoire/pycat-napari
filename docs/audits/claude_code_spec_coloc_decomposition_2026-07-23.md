@@ -1,7 +1,12 @@
 # Claude Code spec — Decompose the colocalization science files
 
-> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) DONE; module 2,029 → 1,545 lines.
-> Remaining: nulls, temporal, analysis, object_based.**
+> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) + 3 (nulls @1.6.343) DONE; module
+> 2,029 → 1,192 lines. Remaining: temporal, analysis, object_based.**
+>
+> **Step 3 — nulls.py — DONE, 1.6.343.** `spatial_null_test` (+ nested `_coef`), `spatial_correlation_length`,
+> `_block_shuffle`, `perform_costes_test`, and the `scramble_*` randomisers moved VERBATIM to `coloc/nulls.py`.
+> Self-contained — every inter-call stays within the group; `_coef` computes correlations inline via scipy, so
+> nulls doesn't depend on metrics. Pinned by the spatial-null net; module → 1,192 lines.
 >
 > **Step 2 — thresholding.py — DONE, 1.6.342.** `costes_thresholding` (+ `costes_linear_model`) and
 > `manders_threshold_sensitivity` (nested `_base` moved with it) moved VERBATIM to `coloc/thresholding.py`,
