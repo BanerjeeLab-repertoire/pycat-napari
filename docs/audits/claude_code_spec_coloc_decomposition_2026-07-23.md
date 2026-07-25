@@ -1,7 +1,16 @@
 # Claude Code spec — Decompose the colocalization science files
 
-> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) + 3 (nulls @1.6.343) + 4 (temporal
-> @1.6.344) DONE; module 2,029 → 907 lines. Remaining: analysis (orchestration), object_based.**
+> **◐ STATUS — `pixel_wise_corr_analysis_tools.py` FULLY DECOMPOSED into `coloc/` (steps 1–5 @1.6.341–345):
+> metrics, thresholding, nulls, temporal, analysis. 2,029 → a 33-line re-export shim. Remaining: the sibling
+> `obj_based_coloc_analysis_tools.py` (object_based, step 6).**
+>
+> **Step 5 — analysis.py — DONE, 1.6.345.** The orchestration (`pixel_wise_correlation_analysis`,
+> `process_pwcca_methods`, `run_pwcca`), the visualizers (`li_ica_histogram`/`li_ica_plot`/
+> `cytofluorogram_plot`/`cross_correlation_matrix`), and the `pwcaDialog` Qt dialog (+ `LAST_COLOC_DIAGNOSTICS`)
+> moved VERBATIM to `coloc/analysis.py`, which imports what it runs from the sibling coloc modules (no shim
+> cycle). `analysis.py` keeps the `_NoQt` headless fallback (`test_headless_science` passes). Every public name
+> re-exports through the shim, so all callers (coloc UI, two_channel_coloc_tools, ui_analysis_mixin, ui_modules)
+> are unchanged. Recorded in `_DELIBERATE`.
 >
 > **Step 4 — temporal.py — DONE, 1.6.344.** `coloc_time_trace` + its plots (`plot_per_cell_coloc_time_trace`,
 > `plot_coloc_time_trace`, nested `_on_pick`) moved VERBATIM to `coloc/temporal.py`, which imports the

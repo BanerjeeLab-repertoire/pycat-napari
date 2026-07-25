@@ -1,3 +1,20 @@
+## [1.6.345] - 2026-07-24
+### Changed — **Colocalization orchestration split out; `pixel_wise_corr_analysis_tools.py` is now a 33-line re-export shim (coloc_decomposition, step 5 — analysis).**
+The final split for this file. The orchestration (`pixel_wise_correlation_analysis`, `process_pwcca_methods`,
+`run_pwcca`), the visualizers (`li_ica_histogram`, `li_ica_plot`, `cytofluorogram_plot`,
+`cross_correlation_matrix`), and the `pwcaDialog` Qt dialog (with its `LAST_COLOC_DIAGNOSTICS` state) moved
+**VERBATIM** to `toolbox/coloc/analysis.py`, which imports the coefficients / thresholding / null tests it runs
+from the sibling `coloc` modules (a clean layered dependency, no shim cycle).
+
+- `pixel_wise_corr_analysis_tools.py` is now a **pure re-export shim (2,029 → 33 lines)**: every public name
+  (from `pearsons_correlation` to `run_pwcca` to `pwcaDialog`) resolves through it, so every caller — the coloc
+  UI, `two_channel_coloc_tools`, `ui_analysis_mixin`, `ui_modules` — is unchanged.
+- `analysis.py` keeps the `_NoQt` headless fallback, so it still imports with no GUI (`test_headless_science`
+  passes). No number changed — pinned by the full coloc test net through the re-exports. Recorded in
+  `_DELIBERATE`. Full `pytest -m "core or base"` green. The colocalization file is fully decomposed into
+  `coloc/` (metrics, thresholding, nulls, temporal, analysis); the sibling `obj_based_coloc_analysis_tools.py`
+  is the remaining coloc target.
+
 ## [1.6.344] - 2026-07-24
 ### Changed — **Colocalization-over-time split into `coloc/temporal.py` (coloc_decomposition, step 4).**
 - `coloc_time_trace` (per-frame coefficient trace over a two-channel stack → tidy DataFrame) and its two

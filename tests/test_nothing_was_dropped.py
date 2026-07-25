@@ -1159,6 +1159,26 @@ _DELIBERATE = {
     'pixel_wise_corr_analysis_tools.py::plot_per_cell_coloc_time_trace',
     'pixel_wise_corr_analysis_tools.py::plot_coloc_time_trace',
     'pixel_wise_corr_analysis_tools.py::_on_pick',  # nested in the temporal plots; moved with them
+
+    # coloc_decomposition step 5 (2026-07-24): the orchestration (`pixel_wise_correlation_analysis`,
+    # `process_pwcca_methods`, `run_pwcca`), the visualizers (`li_ica_histogram`, `li_ica_plot`,
+    # `cytofluorogram_plot`, `cross_correlation_matrix`), and the `pwcaDialog` class (with its methods
+    # `_create_action_buttons` / `_create_section_layout` / `_create_selection_buttons` / `select_all` /
+    # `deselect_all` / `get_selected_methods`) moved VERBATIM to `coloc/analysis.py`. `pixel_wise_corr_analysis_
+    # tools` is now a pure re-export shim — every public name resolves through it.
+    'pixel_wise_corr_analysis_tools.py::pixel_wise_correlation_analysis',
+    'pixel_wise_corr_analysis_tools.py::process_pwcca_methods',
+    'pixel_wise_corr_analysis_tools.py::run_pwcca',
+    'pixel_wise_corr_analysis_tools.py::li_ica_histogram',
+    'pixel_wise_corr_analysis_tools.py::li_ica_plot',
+    'pixel_wise_corr_analysis_tools.py::cytofluorogram_plot',
+    'pixel_wise_corr_analysis_tools.py::cross_correlation_matrix',
+    'pixel_wise_corr_analysis_tools.py::_create_action_buttons',
+    'pixel_wise_corr_analysis_tools.py::_create_section_layout',
+    'pixel_wise_corr_analysis_tools.py::_create_selection_buttons',
+    'pixel_wise_corr_analysis_tools.py::select_all',
+    'pixel_wise_corr_analysis_tools.py::deselect_all',
+    'pixel_wise_corr_analysis_tools.py::get_selected_methods',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
