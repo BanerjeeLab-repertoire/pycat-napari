@@ -1,3 +1,19 @@
+## [1.6.363] - 2026-07-25
+### Changed — **Decomposed the 595-line `_add_condensate_physics` UI builder (ui_builder_split, 2 of 5).**
+The condensate-biophysics panel (MSD, intensity/Csat, kinetics, QC, survival) split the same way as builder 1 —
+pure Qt construction, no science changed.
+
+- **Per-tab builders:** `_build_msd_tab`, `_build_intensity_tab`, `_build_kinetics_tab`, `_build_qc_tab`,
+  `_build_survival_tab` (each returns its tab widget; the main function wires the static tab and hands the four
+  time tabs to `_sync_time_tabs`).
+- **Widget factories** for the two big tabs (`_msd_widgets`, `_qc_widgets`) build widgets **verbatim** and
+  return a `SimpleNamespace`; **run handlers** `_run_msd_analysis` / `_run_qc_analysis` unpack it and run the
+  original handler bodies **verbatim** (dedented). The three smaller tabs keep their handlers nested.
+- `_add_condensate_physics` is now a 92-line orchestrator; every resulting function is ≤120 lines. Pinned by
+  `test_ui_builder_split` (the `_msd_worker` / `_hist_worker` / `_qc_worker` attribute contract, unmodified) +
+  a headless construction smoke. **`_MAX_LONG_FUNCTIONS` lowered 119 → 118.** Remaining: `_add_run_ts_cellpose`
+  and the two `timeseries/ui.py` builders.
+
 ## [1.6.362] - 2026-07-25
 ### Changed — **Decomposed the 638-line `_add_advanced_analysis` UI builder (ui_builder_split, 1 of 5).**
 The five longest functions in PyCAT are all UI builders. This splits the largest into small helpers, none over

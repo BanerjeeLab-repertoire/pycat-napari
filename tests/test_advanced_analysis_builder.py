@@ -1,20 +1,19 @@
-"""**The Advanced Analysis widget constructs after the builder split (ui_builder_split).**
+"""**The decomposed UI builders construct at runtime (ui_builder_split).**
 
-`_add_advanced_analysis` was a 638-line builder, decomposed into per-tab builders + widget factories
-(returning a SimpleNamespace of handles) + run handlers that unpack the namespace. The static contract
-(`test_ui_builder_split`) pins that no `ui_instance` attribute vanished, but only a real construction
-exercises the runtime seam — the `SimpleNamespace` merge and the per-tab wiring. This builds the whole
-widget headlessly against a stub UI and asserts it comes up without raising. Integration-marked (needs Qt).
+The largest builders (`_add_advanced_analysis`, `_add_condensate_physics`, …) were split into per-tab
+builders + widget factories (returning a SimpleNamespace of handles) + run handlers that unpack the
+namespace. The static contract (`test_ui_builder_split`) pins that no `ui_instance` attribute vanished,
+but only a real construction exercises the runtime seam — the `SimpleNamespace` build/unpack and the
+per-tab wiring. These build each widget headlessly against a stub UI and assert it comes up without
+raising. Integration-marked (needs Qt).
 """
 import types
 
 import pytest
 
 
-@pytest.mark.integration
-def test_advanced_analysis_widget_constructs(qtbot):
+def _stub_ui():
     from PyQt5.QtWidgets import QComboBox
-    import pycat.toolbox.advanced_analysis_ui as m
 
     class _Events:
         def connect(self, *a, **k):
@@ -50,6 +49,20 @@ def test_advanced_analysis_widget_constructs(qtbot):
         def _record(self, *a, **k):
             pass
 
-    ui = _UI()
+    return _UI()
+
+
+@pytest.mark.integration
+def test_advanced_analysis_widget_constructs(qtbot):
+    import pycat.toolbox.advanced_analysis_ui as m
+    ui = _stub_ui()
     m._add_advanced_analysis(ui)
+    assert getattr(ui, "_built", None) is not None
+
+
+@pytest.mark.integration
+def test_condensate_physics_widget_constructs(qtbot):
+    import pycat.toolbox.condensate_physics_ui as m
+    ui = _stub_ui()
+    m._add_condensate_physics(ui)
     assert getattr(ui, "_built", None) is not None

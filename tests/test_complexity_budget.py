@@ -197,7 +197,13 @@ _LONG_FUNCTION_LIMIT = 120
 # (`_run_dynamic_analysis`, `_run_organizational_analysis`), which unpack the namespace and run VERBATIM.
 # Every resulting function ≤120 lines. Pinned by test_ui_builder_split (the `_morph_worker`/`_org_worker`
 # attribute contract) + a headless construction smoke; no widget logic changed. Count 120 → 119.
-_MAX_LONG_FUNCTIONS = 119
+# 118. (2026-07-25, ui_builder_split 2/5) `_add_condensate_physics` (condensate_physics_ui, 595 lines) —
+# decomposed the same way: per-tab builders (`_build_msd_tab`/`_build_intensity_tab`/`_build_kinetics_tab`/
+# `_build_qc_tab`/`_build_survival_tab`), MSD+QC widget factories returning a SimpleNamespace, and the two big
+# run handlers (`_run_msd_analysis`/`_run_qc_analysis`) which unpack + run VERBATIM. Every function ≤120.
+# Pinned by test_ui_builder_split (the `_msd_worker`/`_hist_worker`/`_qc_worker` contract) + a construction
+# smoke; no widget logic changed. Count 119 → 118.
+_MAX_LONG_FUNCTIONS = 118
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.

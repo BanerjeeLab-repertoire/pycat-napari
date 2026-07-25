@@ -8,6 +8,8 @@ Tabbed widget for:
   Tab 4 — Quality Control (bleaching correction, focus detection)
 """
 from __future__ import annotations
+
+from types import SimpleNamespace
 import numpy as np
 
 
@@ -46,74 +48,8 @@ def _fit_tab_height(tabs):
     tabs.currentChanged.connect(lambda _: _do())
     _QT.singleShot(0, _do)
 
-def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
-    outer = QVBoxLayout()
-    # ── The pixel-size gate: eta/gamma and the condensate AREA both scale with it ──
-    #
-    # This panel emits ``eta_over_gamma_s_per_um`` — the **inverse capillary velocity**, which
-    # is the leg of the chain that gives you gamma — and ``mean_condensate_area_um2``.
-    # **Both scale with the pixel size**, and it defaults to 1 um/px when the metadata does
-    # not carry it.
-    #
-    # **1 um/px is a plausible value, not an obviously-wrong one**, so the number comes out
-    # in pixels labelled as microns and nothing says so.
-    try:
-        from pycat.ui.field_status import add_pixel_size_gate
-        add_pixel_size_gate(
-            outer,
-            lambda: ui_instance.central_manager.active_data_class.data_repository,
-            central_manager=ui_instance.central_manager)
-    except Exception as _exc:
-        # NOT cosmetic: this installs the calibration gate. Without it an uncalibrated image keeps 1.0 um/px and every
-                    # length, area and diffusion coefficient is silently in PIXELS while the column
-                    # header says microns.
-        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
-        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
-        from pycat.utils.general_utils import report_guarantee_failure
-        report_guarantee_failure('condensate_physics_ui: add_pixel_size_gate', _exc)
-
-    outer.setSpacing(6)
-    outer.setContentsMargins(2, 2, 2, 2)
-    # Top-level section header sized to match the enumerated step titles (14px).
-    # Not a numbered checklist step, so no "Step N —" prefix — just the name.
-    from PyQt5.QtWidgets import QLabel as _QLabel
-    _cp_hdr = _QLabel("<span style='font-weight:700;'>Condensate Biophysics</span>")
-    from PyQt5.QtCore import Qt as _Qt
-    _cp_hdr.setTextFormat(_Qt.RichText)
-    _cp_hdr.setStyleSheet("font-size: 14px; margin-top: 4px;")
-    _cp_hdr.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
-    outer.addWidget(_cp_hdr)
-    # Optional block: reveal checkbox (off by default) shows/hides the analyses.
-    from PyQt5.QtWidgets import QCheckBox as _CPCheckBox
-    _cp_reveal = _CPCheckBox("Show condensate biophysics (optional)")
-    _cp_reveal.setChecked(False)
-    _cp_reveal.setToolTip("Optional MSD/diffusion, intensity decomposition, "
-                          "kinetics, and QC analyses. Enable to configure and run.")
-    outer.addWidget(_cp_reveal)
-    tabs = QTabWidget()
-    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-    # Most biophysics tabs (MSD, Kinetics, QC/Bleach, Survival) need a (T,H,W)
-    # time stack; only Intensity/Csat is static. Time tabs are added/removed
-    # dynamically based on whether a time stack is loaded.
-    def _has_time_stack():
-        try:
-            for lyr in ui_instance.viewer.layers:
-                data = getattr(lyr, 'data', None)
-                if data is not None and getattr(data, 'ndim', 0) >= 3:
-                    return True
-        except Exception:
-            pass
-        return False
-    _fit_tab_height(tabs)
-
-    # ── Tab 1: MSD / Diffusion ───────────────────────────────────────────
-    msd_w = QWidget()
-    msd_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-    mf = QFormLayout(msd_w)
-    mf.setContentsMargins(4, 4, 4, 4)
-    mf.setSpacing(5)
-
+def _msd_widgets(ui_instance, mf):
+    """Build the MSD/diffusion tab widgets; return their handles."""
     stack_dd_msd = ui_instance.create_layer_dropdown(napari.layers.Labels)
     mf.addRow("Condensate mask stack (T,H,W):", stack_dd_msd)
 
@@ -154,90 +90,106 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     mf.addRow(prog_msd)
     from pycat.ui.field_status import button_with_circle as _bwc
     mf.addRow(_bwc(run_msd, optional=True))
+    return SimpleNamespace(
+        stack_dd_msd=stack_dd_msd, dt_spin=dt_spin, lag_spin=lag_spin, min_len=min_len, per_track_cb=per_track_cb, prog_msd=prog_msd, run_msd=run_msd)
 
-    def _on_msd():
-        from pycat.toolbox.condensate_physics_tools import (
-            compute_msd, fit_anomalous_diffusion, msd_per_track)
-        from pycat.toolbox.dynamic_spatial_tools import (
-            extract_frame_properties, link_trajectories_bayesian)
+
+def _run_msd_analysis(ui_instance, w):
+    """Run the MSD / anomalous-diffusion analysis for the MSD tab."""
+    (stack_dd_msd, dt_spin, lag_spin, min_len, per_track_cb, prog_msd, run_msd) = (
+        w.stack_dd_msd, w.dt_spin, w.lag_spin, w.min_len, w.per_track_cb, w.prog_msd, w.run_msd)
+    from pycat.toolbox.condensate_physics_tools import (
+        compute_msd, fit_anomalous_diffusion, msd_per_track)
+    from pycat.toolbox.dynamic_spatial_tools import (
+        extract_frame_properties, link_trajectories_bayesian)
+    try:
+        stack = ui_instance.viewer.layers[stack_dd_msd.currentText()].data
+    except KeyError as e:
+        napari_show_warning(f"Layer not found: {e}"); return
+    if stack.ndim != 3:
+        napari_show_warning("MSD needs a 3D (T,H,W) label stack."); return
+    dr  = ui_instance.central_manager.active_data_class.data_repository
+    mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
+    prog_msd.setVisible(True); prog_msd.setRange(0,0); run_msd.setEnabled(False)
+
+    def _task():
+        props  = extract_frame_properties(np.asarray(stack), mpx)
+        tracks = link_trajectories_bayesian(props,
+                     max_displacement_um=float(dr.get('object_size', 3))*mpx*2)
+        max_l  = lag_spin.value() or None
         try:
-            stack = ui_instance.viewer.layers[stack_dd_msd.currentText()].data
-        except KeyError as e:
-            napari_show_warning(f"Layer not found: {e}"); return
-        if stack.ndim != 3:
-            napari_show_warning("MSD needs a 3D (T,H,W) label stack."); return
-        dr  = ui_instance.central_manager.active_data_class.data_repository
-        mpx = pixel_size_um_or_default(dr, context='condensate_physics_ui')
-        prog_msd.setVisible(True); prog_msd.setRange(0,0); run_msd.setEnabled(False)
+            from pycat.file_io.stack_access import warn_if_assumed_axis
+            warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Condensate MSD / viscosity (treats frames as time)')
+        except Exception as _exc:
+            # NOT cosmetic: this installs the T-vs-Z check. If this stack is really a Z-series, 'time' is depth and the dynamics
+                # being reported are not dynamics at all.
+            # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+            # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+            from pycat.utils.general_utils import report_guarantee_failure
+            report_guarantee_failure('condensate_physics_ui: warn_if_assumed_axis', _exc)
+        msd_df = compute_msd(tracks, max_lag=max_l,
+                              frame_interval_s=dt_spin.value(),
+                              min_track_length=min_len.value())
+        fit    = fit_anomalous_diffusion(msd_df)
+        res    = {'msd': msd_df, 'fit': fit}
+        from pycat.toolbox.condensate_physics_tools import per_track_msd_curves
+        res['track_curves'] = per_track_msd_curves(
+            tracks, frame_interval_s=dt_spin.value(),
+            min_track_length=min_len.value())
+        if per_track_cb.isChecked():
+            res['per_track'] = msd_per_track(tracks, dt_spin.value(), min_len.value())
+        return res
 
-        def _task():
-            props  = extract_frame_properties(np.asarray(stack), mpx)
-            tracks = link_trajectories_bayesian(props,
-                         max_displacement_um=float(dr.get('object_size', 3))*mpx*2)
-            max_l  = lag_spin.value() or None
-            try:
-                from pycat.file_io.stack_access import warn_if_assumed_axis
-                warn_if_assumed_axis(ui_instance.central_manager.active_data_class.data_repository, 'Condensate MSD / viscosity (treats frames as time)')
-            except Exception as _exc:
-                # NOT cosmetic: this installs the T-vs-Z check. If this stack is really a Z-series, 'time' is depth and the dynamics
-                    # being reported are not dynamics at all.
-                # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
-                # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
-                from pycat.utils.general_utils import report_guarantee_failure
-                report_guarantee_failure('condensate_physics_ui: warn_if_assumed_axis', _exc)
-            msd_df = compute_msd(tracks, max_lag=max_l,
-                                  frame_interval_s=dt_spin.value(),
-                                  min_track_length=min_len.value())
-            fit    = fit_anomalous_diffusion(msd_df)
-            res    = {'msd': msd_df, 'fit': fit}
-            from pycat.toolbox.condensate_physics_tools import per_track_msd_curves
-            res['track_curves'] = per_track_msd_curves(
-                tracks, frame_interval_s=dt_spin.value(),
-                min_track_length=min_len.value())
-            if per_track_cb.isChecked():
-                res['per_track'] = msd_per_track(tracks, dt_spin.value(), min_len.value())
-            return res
+    worker = _PhysicsWorker(_task, {})
+    ui_instance._msd_worker = worker
 
-        worker = _PhysicsWorker(_task, {})
-        ui_instance._msd_worker = worker
+    def _done(res):
+        prog_msd.setVisible(False); run_msd.setEnabled(True)
+        dr['msd_results'] = res['msd']
+        fit = res['fit']
+        from pycat.ui.ui_utils import show_dataframes_dialog
+        tables = [("MSD vs lag", res['msd'].round(4))]
+        fit_df = pd.DataFrame([{k: v for k, v in fit.items()
+                                if not hasattr(v, '__len__')}])
+        tables.append(("Anomalous diffusion fit", fit_df.round(4)))
+        if 'per_track' in res:
+            tables.append(("Per-track D and α", res['per_track'].round(4)))
+            dr['msd_per_track'] = res['per_track']
+        # Graph: MSD spaghetti (per-track faint + ensemble mean + fit).
+        try:
+            from pycat.toolbox.analysis_plots import plot_msd_trajectories
+            plot_msd_trajectories(res.get('track_curves'), res['msd'], fit,
+                                  title="Condensate MSD", interactive=True)
+        except Exception as e:
+            print(f"[PyCAT] MSD plot failed: {e}")
+        show_dataframes_dialog("MSD Analysis", tables)
+        napari_show_info(
+            f"MSD: D={fit.get('D_um2_per_s', np.nan):.4f} µm²/s, "
+            f"α={fit.get('alpha', np.nan):.3f} ({fit.get('motion_type','?')})"
+        )
+        ui_instance._record('msd_analysis', {'stack': stack_dd_msd.currentText(),
+                                               'dt': dt_spin.value()})
+    def _err(msg):
+        prog_msd.setVisible(False); run_msd.setEnabled(True)
+        napari_show_warning("MSD error — see terminal.")
+        print(f"[PyCAT MSD] {msg}")
+    worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
-        def _done(res):
-            prog_msd.setVisible(False); run_msd.setEnabled(True)
-            dr['msd_results'] = res['msd']
-            fit = res['fit']
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            tables = [("MSD vs lag", res['msd'].round(4))]
-            fit_df = pd.DataFrame([{k: v for k, v in fit.items()
-                                    if not hasattr(v, '__len__')}])
-            tables.append(("Anomalous diffusion fit", fit_df.round(4)))
-            if 'per_track' in res:
-                tables.append(("Per-track D and α", res['per_track'].round(4)))
-                dr['msd_per_track'] = res['per_track']
-            # Graph: MSD spaghetti (per-track faint + ensemble mean + fit).
-            try:
-                from pycat.toolbox.analysis_plots import plot_msd_trajectories
-                plot_msd_trajectories(res.get('track_curves'), res['msd'], fit,
-                                      title="Condensate MSD", interactive=True)
-            except Exception as e:
-                print(f"[PyCAT] MSD plot failed: {e}")
-            show_dataframes_dialog("MSD Analysis", tables)
-            napari_show_info(
-                f"MSD: D={fit.get('D_um2_per_s', np.nan):.4f} µm²/s, "
-                f"α={fit.get('alpha', np.nan):.3f} ({fit.get('motion_type','?')})"
-            )
-            ui_instance._record('msd_analysis', {'stack': stack_dd_msd.currentText(),
-                                                   'dt': dt_spin.value()})
-        def _err(msg):
-            prog_msd.setVisible(False); run_msd.setEnabled(True)
-            napari_show_warning("MSD error — see terminal.")
-            print(f"[PyCAT MSD] {msg}")
-        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
-    run_msd.clicked.connect(_on_msd)
-    # MSD, Kinetics, QC/Bleach, Survival are time-dependent — added by
-    # _sync_time_tabs() below only when a (T,H,W) stack is present.
+def _build_msd_tab(ui_instance):
+    """Tab 1 — MSD / Diffusion (a time tab; returned for _sync_time_tabs)."""
+    msd_w = QWidget()
+    msd_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    mf = QFormLayout(msd_w)
+    mf.setContentsMargins(4, 4, 4, 4)
+    mf.setSpacing(5)
+    w = _msd_widgets(ui_instance, mf)
+    w.run_msd.clicked.connect(lambda: _run_msd_analysis(ui_instance, w))
+    return msd_w
 
-    # ── Tab 2: Intensity decomposition ───────────────────────────────────
+
+def _build_intensity_tab(ui_instance):
+    """Tab 2 — Intensity decomposition / Csat (the static tab)."""
     hist_w = QWidget(); hf = QFormLayout(hist_w)
 
     img_dd   = ui_instance.create_layer_dropdown(napari.layers.Image)
@@ -289,9 +241,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
     run_hist.clicked.connect(_on_hist)
-    tabs.addTab(hist_w, "Intensity / Csat")
+    return hist_w
 
-    # ── Tab 3: Kinetics ──────────────────────────────────────────────────
+
+def _build_kinetics_tab(ui_instance):
+    """Tab 3 — Kinetics (coarsening + fusion). A time tab."""
     kin_w = QWidget(); kf = QFormLayout(kin_w)
     _wl = QLabel("Coarsening kinetics — uses timeseries_condensate_df from TS Analysis."); _wl.setWordWrap(True)
     kf.addRow(_wl)
@@ -403,19 +357,11 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
 
     run_coarse.clicked.connect(_on_coarsen)
     run_fusion.clicked.connect(_on_fusion)
-    # (time-dependent — added by _sync_time_tabs when a time stack is present)
+    return kin_w
 
-    # ── Tab 4: Quality Control ───────────────────────────────────────────
-    # Uses analyse_frame_quality() which computes 4 metrics per frame:
-    #   mean_intensity  → bleaching signal (exponential decay)
-    #   laplacian_variance → sharpness (focal drift → decreases)
-    #   image_entropy      → information content (focal drift → decreases)
-    #   gradient_energy    → edge strength (focal drift → decreases)
-    # Entropy is particularly useful because it is robust to shot noise
-    # in dim frames that can artificially inflate Laplacian variance.
 
-    qc_w = QWidget(); qf = QFormLayout(qc_w)
-
+def _qc_widgets(ui_instance, qf):
+    """Build the QC / bleach tab widgets; return their handles."""
     stack_dd_qc = ui_instance.create_layer_dropdown(napari.layers.Image)
     qf.addRow("Image stack (T,H,W):", stack_dd_qc)
 
@@ -483,103 +429,116 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
     qf.addRow(prog_qc); qf.addRow(status_qc)
     from pycat.ui.field_status import button_with_circle as _bwc
     qf.addRow(_bwc(run_qc, optional=True))
+    return SimpleNamespace(
+        stack_dd_qc=stack_dd_qc, dt_qc=dt_qc, thr_qc=thr_qc, bleach_r2_spin=bleach_r2_spin, drift_slope_spin=drift_slope_spin, apply_cb=apply_cb, prog_qc=prog_qc, status_qc=status_qc, run_qc=run_qc)
 
-    def _on_qc():
-        from pycat.toolbox.condensate_physics_tools import (
-            analyse_frame_quality, apply_bleach_correction)
-        try:
-            from pycat.utils.qt_worker import materialize_off_thread
-            layer = ui_instance.viewer.layers[stack_dd_qc.currentText()]
-            stack = materialize_off_thread(layer.data, viewer=ui_instance.viewer,
-                                           dtype=np.float32)
-        except KeyError as e:
-            napari_show_warning(f"Layer not found: {e}"); return
-        if stack.ndim != 3:
-            napari_show_warning("QC needs a 3D (T,H,W) image stack."); return
 
-        prog_qc.setMaximum(stack.shape[0])
-        prog_qc.setValue(0); prog_qc.setVisible(True)
-        status_qc.setText("Analysing frames…"); run_qc.setEnabled(False)
+def _run_qc_analysis(ui_instance, w):
+    """Run the frame-quality / bleaching analysis for the QC tab."""
+    (stack_dd_qc, dt_qc, thr_qc, bleach_r2_spin, drift_slope_spin, apply_cb, prog_qc, status_qc, run_qc) = (
+        w.stack_dd_qc, w.dt_qc, w.thr_qc, w.bleach_r2_spin, w.drift_slope_spin, w.apply_cb, w.prog_qc, w.status_qc, w.run_qc)
+    from pycat.toolbox.condensate_physics_tools import (
+        analyse_frame_quality, apply_bleach_correction)
+    try:
+        from pycat.utils.qt_worker import materialize_off_thread
+        layer = ui_instance.viewer.layers[stack_dd_qc.currentText()]
+        stack = materialize_off_thread(layer.data, viewer=ui_instance.viewer,
+                                       dtype=np.float32)
+    except KeyError as e:
+        napari_show_warning(f"Layer not found: {e}"); return
+    if stack.ndim != 3:
+        napari_show_warning("QC needs a 3D (T,H,W) image stack."); return
 
-        def _task():
-            result = analyse_frame_quality(
-                stack,
-                frame_interval_s=dt_qc.value(),
-                threshold_fraction=thr_qc.value(),
-                bleach_r2_min=bleach_r2_spin.value(),
-                drift_slope_threshold=drift_slope_spin.value(),
+    prog_qc.setMaximum(stack.shape[0])
+    prog_qc.setValue(0); prog_qc.setVisible(True)
+    status_qc.setText("Analysing frames…"); run_qc.setEnabled(False)
+
+    def _task():
+        result = analyse_frame_quality(
+            stack,
+            frame_interval_s=dt_qc.value(),
+            threshold_fraction=thr_qc.value(),
+            bleach_r2_min=bleach_r2_spin.value(),
+            drift_slope_threshold=drift_slope_spin.value(),
+        )
+        if apply_cb.isChecked():
+            result['corrected_stack'] = apply_bleach_correction(
+                stack, result['bleach_correction_factors'])
+        return result
+
+    worker = _PhysicsWorker(_task, {})
+    ui_instance._qc_worker = worker
+
+    def _done(result):
+        prog_qc.setVisible(False); run_qc.setEnabled(True)
+        dr  = ui_instance.central_manager.active_data_class.data_repository
+        df  = result['per_frame_df']
+        summ = result['summary']
+        dr['frame_quality_df']   = df
+        dr['frame_quality_summary'] = summ
+
+        # Summary row as DataFrame for display
+        summ_df = pd.DataFrame([{
+            k: v for k, v in summ.items() if k != 'recommendation'
+        }]).round(4)
+
+        from pycat.ui.ui_utils import show_dataframes_dialog
+        tables = [
+            ("QC Summary", summ_df),
+            ("Per-frame metrics", df.round(4)),
+        ]
+        show_dataframes_dialog("Frame Quality Analysis", tables)
+
+        # Add corrected stack if computed
+        if 'corrected_stack' in result:
+            ui_instance.viewer.add_image(
+                result['corrected_stack'],
+                name=f"Bleach-Corrected {layer.name}",
+                colormap='viridis')
+
+        # Status message with cause and recommendation
+        cause = summ['dominant_cause']
+        cause_colors = {
+            'clean':          '#5cb85c',   # green
+            'bleaching_only': '#f0a500',   # amber
+            'drift_only':     '#d9534f',   # red
+            'both':           '#d9534f',
+            'undetermined':   '#aaa',
+        }
+        _qc_color = cause_colors.get(cause, '#aaa')
+        status_qc.setText(
+            f"<span style='color:{_qc_color}'>"
+            f"Diagnosis: {cause.replace('_',' ').upper()}</span>"
+        )
+
+        # Napari notification
+        n_blur = summ['n_blurry_frames']
+        if cause == 'clean':
+            napari_show_info("Frame QC: clean — no bleaching or focal drift detected.")
+        else:
+            napari_show_warning(
+                f"Frame QC: {cause.replace('_',' ')}. "
+                f"{n_blur} blurry frame(s). {summ['recommendation']}"
             )
-            if apply_cb.isChecked():
-                result['corrected_stack'] = apply_bleach_correction(
-                    stack, result['bleach_correction_factors'])
-            return result
 
-        worker = _PhysicsWorker(_task, {})
-        ui_instance._qc_worker = worker
+    def _err(msg):
+        prog_qc.setVisible(False); run_qc.setEnabled(True)
+        napari_show_warning("QC error — see terminal.")
+        print(f"[PyCAT QC] {msg}")
 
-        def _done(result):
-            prog_qc.setVisible(False); run_qc.setEnabled(True)
-            dr  = ui_instance.central_manager.active_data_class.data_repository
-            df  = result['per_frame_df']
-            summ = result['summary']
-            dr['frame_quality_df']   = df
-            dr['frame_quality_summary'] = summ
+    worker.finished.connect(_done); worker.error.connect(_err); worker.start()
 
-            # Summary row as DataFrame for display
-            summ_df = pd.DataFrame([{
-                k: v for k, v in summ.items() if k != 'recommendation'
-            }]).round(4)
 
-            from pycat.ui.ui_utils import show_dataframes_dialog
-            tables = [
-                ("QC Summary", summ_df),
-                ("Per-frame metrics", df.round(4)),
-            ]
-            show_dataframes_dialog("Frame Quality Analysis", tables)
+def _build_qc_tab(ui_instance):
+    """Tab 4 — Quality Control. A time tab."""
+    qc_w = QWidget(); qf = QFormLayout(qc_w)
+    w = _qc_widgets(ui_instance, qf)
+    w.run_qc.clicked.connect(lambda: _run_qc_analysis(ui_instance, w))
+    return qc_w
 
-            # Add corrected stack if computed
-            if 'corrected_stack' in result:
-                ui_instance.viewer.add_image(
-                    result['corrected_stack'],
-                    name=f"Bleach-Corrected {layer.name}",
-                    colormap='viridis')
 
-            # Status message with cause and recommendation
-            cause = summ['dominant_cause']
-            cause_colors = {
-                'clean':          '#5cb85c',   # green
-                'bleaching_only': '#f0a500',   # amber
-                'drift_only':     '#d9534f',   # red
-                'both':           '#d9534f',
-                'undetermined':   '#aaa',
-            }
-            _qc_color = cause_colors.get(cause, '#aaa')
-            status_qc.setText(
-                f"<span style='color:{_qc_color}'>"
-                f"Diagnosis: {cause.replace('_',' ').upper()}</span>"
-            )
-
-            # Napari notification
-            n_blur = summ['n_blurry_frames']
-            if cause == 'clean':
-                napari_show_info("Frame QC: clean — no bleaching or focal drift detected.")
-            else:
-                napari_show_warning(
-                    f"Frame QC: {cause.replace('_',' ')}. "
-                    f"{n_blur} blurry frame(s). {summ['recommendation']}"
-                )
-
-        def _err(msg):
-            prog_qc.setVisible(False); run_qc.setEnabled(True)
-            napari_show_warning("QC error — see terminal.")
-            print(f"[PyCAT QC] {msg}")
-
-        worker.finished.connect(_done); worker.error.connect(_err); worker.start()
-
-    run_qc.clicked.connect(_on_qc)
-    # (time-dependent — added by _sync_time_tabs when a time stack is present)
-
-    # ── Survival analysis ─────────────────────────────────────────────────
+def _build_survival_tab(ui_instance):
+    """Survival analysis tab. A time tab."""
     surv_w = QWidget(); sf = QFormLayout(surv_w)
     _wl = QLabel("Kaplan-Meier lifetime survival — uses dynamic tracking results."); _wl.setWordWrap(True)
     sf.addRow(_wl)
@@ -612,8 +571,75 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
             f"mean = {km.attrs.get('mean_lifetime_frames',np.nan):.1f} frames")
 
     run_surv.clicked.connect(_on_surv)
-    # (time-dependent — added by _sync_time_tabs when a time stack is present)
+    return surv_w
 
+
+def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
+    outer = QVBoxLayout()
+    # ── The pixel-size gate: eta/gamma and the condensate AREA both scale with it ──
+    #
+    # This panel emits ``eta_over_gamma_s_per_um`` — the **inverse capillary velocity**, which
+    # is the leg of the chain that gives you gamma — and ``mean_condensate_area_um2``.
+    # **Both scale with the pixel size**, and it defaults to 1 um/px when the metadata does
+    # not carry it.
+    #
+    # **1 um/px is a plausible value, not an obviously-wrong one**, so the number comes out
+    # in pixels labelled as microns and nothing says so.
+    try:
+        from pycat.ui.field_status import add_pixel_size_gate
+        add_pixel_size_gate(
+            outer,
+            lambda: ui_instance.central_manager.active_data_class.data_repository,
+            central_manager=ui_instance.central_manager)
+    except Exception as _exc:
+        # NOT cosmetic: this installs the calibration gate. Without it an uncalibrated image keeps 1.0 um/px and every
+                    # length, area and diffusion coefficient is silently in PIXELS while the column
+                    # header says microns.
+        # `debug_log` prints ONLY under PYCAT_DEBUG=1 -- so in normal use this failed
+        # in COMPLETE SILENCE. See utils.general_utils.report_guarantee_failure.
+        from pycat.utils.general_utils import report_guarantee_failure
+        report_guarantee_failure('condensate_physics_ui: add_pixel_size_gate', _exc)
+
+    outer.setSpacing(6)
+    outer.setContentsMargins(2, 2, 2, 2)
+    # Top-level section header sized to match the enumerated step titles (14px).
+    # Not a numbered checklist step, so no "Step N —" prefix — just the name.
+    from PyQt5.QtWidgets import QLabel as _QLabel
+    _cp_hdr = _QLabel("<span style='font-weight:700;'>Condensate Biophysics</span>")
+    from PyQt5.QtCore import Qt as _Qt
+    _cp_hdr.setTextFormat(_Qt.RichText)
+    _cp_hdr.setStyleSheet("font-size: 14px; margin-top: 4px;")
+    _cp_hdr.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+    outer.addWidget(_cp_hdr)
+    # Optional block: reveal checkbox (off by default) shows/hides the analyses.
+    from PyQt5.QtWidgets import QCheckBox as _CPCheckBox
+    _cp_reveal = _CPCheckBox("Show condensate biophysics (optional)")
+    _cp_reveal.setChecked(False)
+    _cp_reveal.setToolTip("Optional MSD/diffusion, intensity decomposition, "
+                          "kinetics, and QC analyses. Enable to configure and run.")
+    outer.addWidget(_cp_reveal)
+    tabs = QTabWidget()
+    tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+    # Most biophysics tabs (MSD, Kinetics, QC/Bleach, Survival) need a (T,H,W)
+    # time stack; only Intensity/Csat is static. Time tabs are added/removed
+    # dynamically based on whether a time stack is loaded.
+    def _has_time_stack():
+        try:
+            for lyr in ui_instance.viewer.layers:
+                data = getattr(lyr, 'data', None)
+                if data is not None and getattr(data, 'ndim', 0) >= 3:
+                    return True
+        except Exception:
+            pass
+        return False
+    _fit_tab_height(tabs)
+    msd_w = _build_msd_tab(ui_instance)
+    hist_w = _build_intensity_tab(ui_instance)
+    tabs.addTab(hist_w, "Intensity / Csat")
+    kin_w = _build_kinetics_tab(ui_instance)
+    qc_w = _build_qc_tab(ui_instance)
+    surv_w = _build_survival_tab(ui_instance)
     def _sync_time_tabs():
         # Add/remove the time-dependent tabs to match time-stack presence.
         has_t = _has_time_stack()
@@ -631,7 +657,6 @@ def _add_condensate_physics(ui_instance, layout=None, separate_widget=False):
         ui_instance.viewer.layers.events.removed.connect(lambda *_: _sync_time_tabs())
     except Exception:
         pass
-
     outer.addWidget(tabs)
     tabs.setVisible(False)
     _cp_reveal.toggled.connect(tabs.setVisible)

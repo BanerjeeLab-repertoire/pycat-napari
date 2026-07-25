@@ -1276,6 +1276,16 @@ _DELIBERATE = {
     'advanced_analysis_ui.py::_on_org',             # -> _run_organizational_analysis
     'advanced_analysis_ui.py::_add_advanced_analysis',  # 674 -> 116: decomposed into tab builders/helpers
     'advanced_analysis_ui.py::_task',               # common per-tab nested name; bodies moved into the helpers
+
+    # ui_builder_split builder 2 (2026-07-25): _add_condensate_physics (595 lines) decomposed into per-tab
+    # builders + MSD/QC widget factories + run handlers (all <=120). MSD/QC handlers renamed on move to module
+    # level; the builder body shrank; `_done` is a common per-tab nested name whose high-water params/length
+    # come from the (now relocated) QC handler. Widget logic preserved VERBATIM (test_ui_builder_split +
+    # construction smoke pin it).
+    'condensate_physics_ui.py::_add_condensate_physics',  # decomposed into tab builders/helpers
+    'condensate_physics_ui.py::_on_msd',            # -> _run_msd_analysis
+    'condensate_physics_ui.py::_on_qc',             # -> _run_qc_analysis
+    'condensate_physics_ui.py::_done',              # common per-tab nested name (relocated with its handler)
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
