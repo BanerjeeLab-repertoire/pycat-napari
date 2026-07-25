@@ -1,3 +1,16 @@
+## [1.6.342] - 2026-07-24
+### Changed — **Colocalization thresholding split into `coloc/thresholding.py` (coloc_decomposition, step 2).**
+- `costes_thresholding` (+ its `costes_linear_model` regression) — the Costes intensity-threshold
+  determination — and `manders_threshold_sensitivity` (the M1/M2-across-thresholds stability sweep) moved
+  **VERBATIM** to `toolbox/coloc/thresholding.py`. Self-contained (the nested `_base` moves with the sensitivity
+  sweep; `costes_thresholding` calls only its own `costes_linear_model`).
+- Classification note: `perform_costes_test` was **left** — it calls the randomisation machinery
+  (`_block_shuffle`, `spatial_correlation_length`), so it belongs with the nulls step, not thresholding.
+- Moved with no number changed; pinned by the coloc test net (passes through the re-export).
+  `pixel_wise_corr_analysis_tools.py` re-exports the three names and drops 1,738 → 1,545 lines. Recorded in
+  `_DELIBERATE`. Full `pytest -m "core or base"` green. Remaining coloc steps: nulls, temporal, analysis,
+  object_based.
+
 ## [1.6.341] - 2026-07-24
 ### Changed — **Colocalization raw metrics split into a `coloc/` package (coloc_decomposition, step 1 — metrics).**
 The 2,029-line `pixel_wise_corr_analysis_tools.py` mixes the raw measures, thresholding, spatial nulls, the

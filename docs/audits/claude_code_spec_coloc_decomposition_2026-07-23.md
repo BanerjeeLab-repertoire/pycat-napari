@@ -1,7 +1,12 @@
 # Claude Code spec — Decompose the colocalization science files
 
-> **◐ STATUS — step 1 (metrics) DONE, shipped 1.6.341 (consistency verified: the module was still 2,029 lines,
-> 37 functions before this). Remaining: thresholding, nulls, temporal, analysis, object_based.**
+> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) DONE; module 2,029 → 1,545 lines.
+> Remaining: nulls, temporal, analysis, object_based.**
+>
+> **Step 2 — thresholding.py — DONE, 1.6.342.** `costes_thresholding` (+ `costes_linear_model`) and
+> `manders_threshold_sensitivity` (nested `_base` moved with it) moved VERBATIM to `coloc/thresholding.py`,
+> self-contained. `perform_costes_test` was left for the nulls step (it calls `_block_shuffle` +
+> `spatial_correlation_length` — the randomisation machinery). Pinned by the coloc net; module → 1,545 lines.
 >
 > **Step 1 — metrics.py — DONE, 1.6.341.** New `toolbox/coloc/` package; `coloc/metrics.py` holds the raw
 > pairwise measures moved VERBATIM — `pearsons_correlation`, `manders_overlap`, `manders_k1/k2_calculation`,

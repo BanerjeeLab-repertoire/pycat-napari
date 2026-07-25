@@ -1130,6 +1130,14 @@ _DELIBERATE = {
     'pixel_wise_corr_analysis_tools.py::spearman_r_calculation',
     'pixel_wise_corr_analysis_tools.py::kendall_tau_calculation',
     'pixel_wise_corr_analysis_tools.py::weighted_tau_calculation',
+
+    # coloc_decomposition step 2 (2026-07-24): the Costes threshold determination (`costes_thresholding` +
+    # `costes_linear_model`) and the Manders sensitivity sweep (`manders_threshold_sensitivity`) moved VERBATIM
+    # to `toolbox/coloc/thresholding.py`; `pixel_wise_corr_analysis_tools` re-exports them. No number changed.
+    'pixel_wise_corr_analysis_tools.py::manders_threshold_sensitivity',
+    'pixel_wise_corr_analysis_tools.py::_base',  # nested in manders_threshold_sensitivity; moved with it
+    'pixel_wise_corr_analysis_tools.py::costes_linear_model',
+    'pixel_wise_corr_analysis_tools.py::costes_thresholding',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
