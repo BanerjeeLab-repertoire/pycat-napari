@@ -505,6 +505,13 @@ spec it as a follow-up, not first.
 
 ## PART D — Light up the resolver on the dropdowns (Stage 2 activation)
 
+> **◐ IN PROGRESS — increment 1 DONE, 1.6.359 (2026-07-25).** Wired the object-based coloc mask dropdowns
+> (`ui_analysis_mixin.py`) → `colocalization.channel_a`/`channel_b` (deliberately ambiguous → select nothing,
+> name candidates). Regression guard `tests/test_resolver_wired.py` (0→N bound; + every wired binding is a
+> real key). **Remaining:** cell-analysis input/labels, puncta mask, VPT bead-stack, common.* image dropdowns
+> — each binding key chosen per dropdown semantics (a wrong key risks silent mis-selection), wired deliberately.
+> Verified 0 bound (bar the pre-existing invitro_fluor site) against the 1.6.358 tree.
+
 **Problem.** The resolver + `layer_bindings.json` (16 entries) + `autopopulate` are complete but
 **dormant**: `create_layer_dropdown(..., binding='')` defaults to empty, and **0 of the ~180 call
 sites pass `binding=`**. The mechanism is fully built (`ui_modules.py:262`, the `binding` docstring

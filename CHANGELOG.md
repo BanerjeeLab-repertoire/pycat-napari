@@ -1,3 +1,22 @@
+## [1.6.359] - 2026-07-25
+### Added — **Resolver activation on the object-coloc dropdowns (Outstanding-Work spec D, increment 1).**
+The tag resolver + `layer_bindings.json` + tag-based autopopulate were fully built but **dormant**: of ~170
+`create_layer_dropdown` call sites, essentially none passed a `binding=`, so the mechanism had no consumers.
+
+- The object-based colocalization mask dropdowns (`ui/ui_analysis_mixin.py`) now pass
+  `binding='colocalization.channel_a'` / `channel_b`. These keys are **deliberately ambiguous** (no `prefer`):
+  with two object masks present the resolver selects **nothing** and names both candidates, rather than
+  guessing a channel pairing — because a colocalization run on the wrong pairing yields a plausible-but-wrong
+  number the user would never question. Binding is purely additive (it drives auto-selection, not the listing;
+  the dropdown still lists every Labels layer and stays user-editable).
+- **Test** (`tests/test_resolver_wired.py`): the "0 → N bound" regression guard — the object-coloc dropdowns
+  carry their channel bindings, and a package-wide sweep asserts **every** wired `binding=` names a real key in
+  `layer_bindings.json` (so a future typo'd binding is caught wherever it is added). Binding *semantics* remain
+  covered by `test_tag_resolver`.
+- **Remaining (increment 2+):** the cell-analysis input/labels, puncta mask, VPT bead-stack, and common.*
+  image dropdowns — each needs its binding key chosen to match the dropdown's semantic role (a wrong key risks
+  the silent mis-selection the resolver exists to prevent), so they are wired deliberately, not in bulk.
+
 ## [1.6.358] - 2026-07-25
 ### Added / Fixed — **Tag vocabulary + frame-interval contradiction (Outstanding-Work specs F1 + F2).**
 Two small metadata-subsystem items, grouped.

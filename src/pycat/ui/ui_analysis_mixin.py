@@ -336,10 +336,13 @@ class _AnalysisWidgetsMixin:
         OBCA_layout = QVBoxLayout() # Create a vertical layout widget
         self.add_text_label(OBCA_layout, 'Object-Based Colocalization Analysis', bold=True) # Add widget title label
         self.add_text_label(OBCA_layout, 'Select Image 1') # Add a dropdown text label
-        OBCA_mask1_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
+        # Tag-based autopopulate: the two channel masks are DELIBERATELY ambiguous bindings -- with two
+        # object masks present the resolver selects nothing and names both, rather than guessing a pairing
+        # (a coloc run on the wrong pairing produces a plausible-but-wrong number). See layer_bindings.json.
+        OBCA_mask1_dropdown = self.create_layer_dropdown(napari.layers.Labels, binding='colocalization.channel_a')
         OBCA_layout.addWidget(OBCA_mask1_dropdown) # Add the dropdown to the layout
         self.add_text_label(OBCA_layout, 'Select Image 2') # Add a dropdown text label
-        OBCA_mask2_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
+        OBCA_mask2_dropdown = self.create_layer_dropdown(napari.layers.Labels, binding='colocalization.channel_b')
         OBCA_layout.addWidget(OBCA_mask2_dropdown) # Add the dropdown to the layout
         self.add_text_label(OBCA_layout, 'Select ROI Mask') # Add a dropdown text label
         OBCA_roi_dropdown = self.create_layer_dropdown(napari.layers.Labels) # Create a dropdown widget
