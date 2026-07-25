@@ -1,3 +1,20 @@
+## [1.6.360] - 2026-07-25
+### Changed — **Sub-split `vpt/detection.py` (part 1: linking + artifacts) — vpt_detection_subsplit.**
+The VPT decomposition left `detection.py` at 1,773 lines / 34 functions, larger than several files that were
+themselves decomposition targets. This is the low-risk first pass (the two clearest wins, per the spec).
+
+- **`vpt/linking.py` (new)** — `estimate_linking_distance_um` and `assess_linking_conditions` were misfiled in
+  detection.py: both are **linking** concerns, not detection. Moved VERBATIM to their proper home — a
+  correctness-of-organisation fix as well as a size reduction. `estimate_linking_distance_um` lazily imports
+  `detect_beads_frame` from detection (verified import-order-independent — no cycle).
+- **`vpt/artifacts.py` (new)** — `build_hot_pixel_mask` and `dedup_detections_ring_merge` (rejection/merge
+  around the core detection path) moved VERBATIM.
+- `detection.py` re-exports all four and back-imports the two artifact functions (its core path calls them);
+  it drops **1,773 → 1,340 lines**. No detection numerics touched. The GPU/CPU/serial equivalence guards, the
+  detect-beads characterization (coordinates, sigma, count **and order**), and the **~8.325 viscosity chain
+  baseline** all pass unmodified. Next: `blob_log_gpu` + the GPU dispatch → `vpt/gpu.py`.
+- **Revert condition (standing VPT rule):** if the viscosity baseline shifts from ~8.325, revert.
+
 ## [1.6.359] - 2026-07-25
 ### Added — **Resolver activation on the object-coloc dropdowns (Outstanding-Work spec D, increment 1).**
 The tag resolver + `layer_bindings.json` + tag-based autopopulate were fully built but **dormant**: of ~170

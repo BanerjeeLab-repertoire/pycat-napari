@@ -1249,6 +1249,16 @@ _DELIBERATE = {
     'data_qc_tools.py::_conc',                    # nested in qc_vibration
     'data_qc_tools.py::qc_biological_objects',  # -> biological.py
     'data_qc_tools.py::run_full_qc',            # -> runner.py
+
+    # vpt_detection_subsplit (2026-07-25): the two misfiled LINKING functions moved to vpt/linking.py and
+    # the two artifact-rejection functions to vpt/artifacts.py (VERBATIM); detection.py re-exports them.
+    'detection.py::estimate_linking_distance_um',   # -> vpt/linking.py
+    'detection.py::assess_linking_conditions',
+    'detection.py::_fit_sigma',                     # nested in estimate_linking_distance_um
+    'detection.py::g',                              # nested (gaussian model) in estimate_linking_distance_um
+    'detection.py::local_intensity',               # nested in estimate_linking_distance_um
+    'detection.py::build_hot_pixel_mask',           # -> vpt/artifacts.py
+    'detection.py::dedup_detections_ring_merge',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
