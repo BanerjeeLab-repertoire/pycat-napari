@@ -1,3 +1,15 @@
+## [1.6.371] - 2026-07-25
+### Changed — **Extracted the tag inspector from MenuManager (ui_decomposition Part 2, feature 2).**
+The 121-line `open_tag_inspector` (the per-layer tag inspector/editor dialog, with its `_current_layer` /
+`_refresh_table` / `_apply_override` / `_nm` helpers) moves **verbatim** to `ui/tag_inspector.py` as
+`open_tag_inspector(self)`; `MenuManager.open_tag_inspector` becomes a thin wrapper that calls into it.
+
+- The menu action and its label are unchanged — the **menu-contract snapshot passes unmodified**. Behaviour is
+  identical (the extracted function keeps the same `self` parameter, so its body is byte-for-byte the original
+  method body). `menu_manager.py` drops 2,216 → 2,099 lines.
+- Full `pytest -m "core or base"` green (1991 passed). Remaining features: grid view, metadata dialogs,
+  native-menu manipulation, session-loading orchestration.
+
 ## [1.6.370] - 2026-07-25
 ### Changed — **Extracted the command palette from MenuManager (ui_decomposition Part 2, feature 1).**
 `menu_manager.py`'s `MenuManager` class is 2,165 lines and mixes menu wiring with feature logic. This starts
