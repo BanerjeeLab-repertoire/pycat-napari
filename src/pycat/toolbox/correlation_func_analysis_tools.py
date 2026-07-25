@@ -1092,21 +1092,20 @@ def calculate_autocorrelation(image):
     or redundancy at the corresponding shift values.
     """
 
-    # Calculate the Fourier transform of the image and extract the real part
-    fourier_transform = np.real(np.fft.fft2(image))
-    # Compute the power spectrum as the square of the magnitude of the Fourier transform
-    power_spectrum = fourier_transform**2
-    # Normalize the power spectrum to its maximum value
-    normalized_power_spectrum = power_spectrum / np.max(power_spectrum)
-    # Perform an inverse Fourier transform to get the autocorrelation function
-    autocorrelation_function = np.fft.ifft2(normalized_power_spectrum)
-    # Normalize the autocorrelation function to range from 0 to 1
-    acf_min, acf_max = np.min(autocorrelation_function), np.max(autocorrelation_function)
-    normalized_autocorrelation_function = (autocorrelation_function - acf_min) / (acf_max - acf_min)
-    # Shift the zero-frequency component to the center of the spectrum
-    shifted_autocorrelation = np.real(np.fft.fftshift(normalized_autocorrelation_function))
-
-    return shifted_autocorrelation
+    # Subtract the mean (DC) so a flat background does not dominate the transform, then form the true
+    # power spectrum |F|^2 = F * conj(F) (Wiener-Khinchin). The previous implementation used
+    # np.real(fft2(image))**2, which discards the imaginary part -- that is NOT the power spectrum and
+    # is phase-blind, so it distorted every ACF-derived object size. See test_autocorrelation_fix.py.
+    img = np.asarray(image, dtype=float)
+    img = img - img.mean()                                  # subtract DC / mean
+    F = np.fft.fft2(img)
+    acf = np.real(np.fft.ifft2(F * np.conj(F)))             # true autocorrelation via |F|^2
+    acf = np.fft.fftshift(acf)                              # zero-lag to centre
+    # Normalise to [0, 1] for the downstream Gaussian fit + display, preserving peak-at-centre.
+    acf_min, acf_max = float(acf.min()), float(acf.max())
+    if acf_max - acf_min <= 0:
+        return np.zeros_like(acf)
+    return (acf - acf_min) / (acf_max - acf_min)
 
 
 def plot_2d_autocorrelation(autocorrelation, x_lims, y_lims, title="2D Autocorrelation Function"):

@@ -1,3 +1,21 @@
+## [1.6.351] - 2026-07-25
+### Fixed — **Autocorrelation used the wrong transform — every ACF-derived object size was distorted (Outstanding-Work spec A1).**
+`calculate_autocorrelation` (`toolbox/correlation_func_analysis_tools.py`) claimed the Wiener–Khinchin identity
+(ACF = inverse-FFT of the power spectrum `|F|²`) but computed `np.real(fft2(image))**2` — the square of the
+**real part**, which discards the imaginary component and never subtracts the DC term. That is not the power
+spectrum: it is phase-blind and background-dominated, so the recovered autocorrelation width — and thus **every
+ACF-derived diameter in the spatial-ACF module** (`autocorrelation_analysis` → `run_autocorrelation_analysis`,
+and `spatial_acf_tools.sacf_single_roi`) — was wrong.
+
+- Body replaced with the true form: subtract the mean, then `acf = Re(ifft(F * conj(F)))` fftshifted to centre,
+  normalised to `[0, 1]` (signature and return shape unchanged, so both callers still slice/unpack identically).
+- The correct form already existed in-repo (`spatial_randomness_tools.autocorrelation_length`); the two ACF
+  paths now agree (closes a consistency defect).
+- **Golden-master test** (`tests/test_autocorrelation_fix.py`): (1) the ACF of a Gaussian blob of width σ is a
+  Gaussian of width `σ√2` — recovered within 5% by a fit; (2) the ACF is translation-invariant (a centred blob
+  and a shifted blob give the identical ACF — the old `Re(F)²` code was phase-sensitive and failed this); (3)
+  the 1/e width agrees with the independent `autocorrelation_length`. The old code fails all three.
+
 ## [1.6.350] - 2026-07-25
 ### Changed — **`data_qc_tools.py` is now a thin shim — the decomposition is complete (data_qc_decomposition, DONE).**
 The coupled optical/stability checks, the biological check, and the orchestrator move out; the 1,949-line module
