@@ -1218,6 +1218,20 @@ _DELIBERATE = {
     'data_qc_tools.py::_dtype_max',
     'data_qc_tools.py::_mean_frame',
     'data_qc_tools.py::_not_applicable',
+
+    # data_qc_decomposition step 2b (2026-07-25): the four self-contained metric families moved VERBATIM to
+    # `data_qc/<family>.py` (each importing its `_base` helpers); `data_qc_tools` re-exports them for run_full_qc
+    # and the dashboard/gallery/quality-gate/reliability-index callers.
+    'data_qc_tools.py::qc_saturation',        # -> exposure.py
+    'data_qc_tools.py::edge_width_px',        # -> focus.py
+    'data_qc_tools.py::diffraction_limit_px',
+    'data_qc_tools.py::qc_focus',
+    'data_qc_tools.py::_qc_focus_stack',
+    'data_qc_tools.py::_sharp',                # nested in _qc_focus_stack; moved with it
+    'data_qc_tools.py::_qc_focus_absolute',
+    'data_qc_tools.py::qc_snr',               # -> noise.py
+    'data_qc_tools.py::qc_nyquist',           # -> sampling.py
+    'data_qc_tools.py::qc_time_sampling',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

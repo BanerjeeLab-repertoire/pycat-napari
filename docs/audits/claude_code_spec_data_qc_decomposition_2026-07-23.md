@@ -1,8 +1,12 @@
 # Claude Code spec — Decompose `data_qc_tools.py` by check family
 
-> **◐ STATUS — step 1 (report @1.6.347) + step 2a (shared `_base` primitives @1.6.348) DONE; module 1,949 →
-> 1,532 lines. Remaining: the check families (exposure, focus, noise, illumination, aberration, stability,
-> sampling) — each imports from `_base` — + the runner.**
+> **◐ STATUS — report @1.6.347, shared `_base` @1.6.348, and the four self-contained families
+> (exposure/focus/noise/sampling) @1.6.349 DONE; module 1,949 → 1,125 lines. Remaining: illumination,
+> aberration, stability (the coupled optical/stability checks) + the runner.**
+>
+> **Step 2b — exposure/focus/noise/sampling — DONE, 1.6.349.** The four metric families are self-contained
+> (no cross-family calls; each uses only its `_base` helpers), so they moved VERBATIM to `data_qc/<family>.py`
+> in one commit. `data_qc_tools` re-exports them. Cry-wolf + did-it-run flags pinned by the QC net.
 >
 > **Step 2a — _base.py — DONE, 1.6.348.** The check families share low-level helpers (`_to_float` ×10,
 > `_not_applicable` ×10, `_mean_frame` ×6, `_dtype_max`, `_robust_noise_std`), so those primitives moved VERBATIM

@@ -1,3 +1,19 @@
+## [1.6.349] - 2026-07-25
+### Changed — **Four self-contained QC check families split out (data_qc_decomposition, step 2b).**
+The metric checks are genuinely independent, so each family moves to its own module — the low-risk part of the split.
+
+- **`data_qc/exposure.py`** — `qc_saturation` (saturation / clipping / dynamic-range).
+- **`data_qc/focus.py`** — `edge_width_px`, `diffraction_limit_px`, `qc_focus`, `_qc_focus_stack` (+ its nested
+  `_sharp`), `_qc_focus_absolute`.
+- **`data_qc/noise.py`** — `qc_snr` (SNR vs a MAD noise floor).
+- **`data_qc/sampling.py`** — `qc_nyquist`, `qc_time_sampling`.
+- Every function moved **VERBATIM** — no re-tuned thresholds, no "improved" metrics (this file's history
+  includes an inverted spherical-aberration check; a small change flips a verdict silently). Each family imports
+  only the `_base` helpers it needs. `data_qc_tools.py` re-exports all of them, so `run_full_qc` and the
+  dashboard / gallery / quality-gate / reliability-index callers are unchanged; it drops 1,532 → 1,125 lines.
+- Cry-wolf holds (clean data raises zero flags); each check's verdict **and** did-it-run flag are pinned by the
+  QC net. Full `pytest -m "core or base"` green. Remaining: illumination, aberration, stability + the runner.
+
 ## [1.6.348] - 2026-07-25
 ### Changed — **Shared QC primitives extracted to `data_qc/_base.py` — the foundation for the check-family split (data_qc_decomposition, step 2a).**
 The acquisition-QC check families share low-level helpers, so — before the families can move — those primitives
