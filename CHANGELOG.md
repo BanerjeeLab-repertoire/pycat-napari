@@ -1,3 +1,17 @@
+## [1.6.370] - 2026-07-25
+### Changed — **Extracted the command palette from MenuManager (ui_decomposition Part 2, feature 1).**
+`menu_manager.py`'s `MenuManager` class is 2,165 lines and mixes menu wiring with feature logic. This starts
+Part 2 by moving the command-palette feature to its own module.
+
+- The 132-line `open_command_palette` (the fuzzy action-search dialog, with its `_score` / `_refresh` /
+  `_activate` / `_key` helpers) moves **verbatim** to `ui/command_palette.py` as `open_command_palette(mm)`;
+  `MenuManager.open_command_palette` becomes a thin wrapper that calls into it. The menu action and its label are
+  unchanged — the **menu-contract snapshot (`test_menu_contract`) passes unmodified**.
+- `menu_manager.py` drops 2,344 → 2,216 lines. Behaviour is identical (the body references only `self`, bound
+  via a one-line shim, and locally-imported Qt widgets). Full `pytest -m "core or base"` green (1991 passed).
+  Remaining features to extract: tag inspector, grid view, metadata dialogs, native-menu manipulation,
+  session-loading orchestration.
+
 ## [1.6.369] - 2026-07-25
 ### Changed — **`ui_modules.py` is now a thin re-export shim — ui_decomposition Part 1 COMPLETE.**
 The last class in the file, the 686-line `ToolboxFunctionsUI` (the main toolbox panel), moves **verbatim** to
