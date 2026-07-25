@@ -10,9 +10,17 @@
 > import). Qt imports stay function-local. Load path verified (CZI/IMS streaming tests pass); file_io.py →
 > 1,548 lines. **PyQt5 check (per the step's note): NOT yet droppable — file_io.py still imports PyQt5 at
 > module scope for the dialog-building methods, so the "no GUI import" win needs the `dialogs.py` extraction.**
-> **Remaining:** `dialogs.py` (assign_channels_in_dialog — the extraction that could enable the PyQt5 drop),
-> `session_actions.py` (save_and_clear_all), `loading.py` (per-file helpers), each preserving the load contract
-> exactly (assert post-load repository state identical).
+> **Step (dialogs.py) — DONE, 1.6.338.** `assign_channels_in_dialog` (120 lines) + `_channels_all_confident`
+> moved VERBATIM to a `_DialogsMixin` in `file_io/dialogs.py` (co-located with `ChannelAssignmentDialog`);
+> `FileIOClass` inherits it. `derive_layer_name` stays in file_io (lazy-imported in the moved method). Load
+> path verified (naming/scene/session/CZI tests pass); file_io.py → 1,412 lines. **PyQt5 check: still NOT
+> droppable — file_io.py uses Qt pervasively (`QFileDialog` ×14, `QMessageBox` ×10, other dialogs); it is a
+> Qt-bound load controller, so the "no GUI import" win needs ALL the Qt dialogs/pickers extracted, not just
+> these two.** Recorded, not claimed.
+>
+> **Remaining:** `session_actions.py` (save_and_clear_all), `loading.py` (per-file helpers), each preserving
+> the load contract exactly. The PyQt5 drop is a larger, separate effort (the file's file-pickers and
+> message-boxes are the bulk of its Qt use).
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. **1,662 lines, 44
 functions**, and — notably — **82 test files** reference it. That is the strongest characterization net

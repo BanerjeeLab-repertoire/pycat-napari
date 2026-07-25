@@ -1100,6 +1100,11 @@ _DELIBERATE = {
     'label_and_mask_tools.py::neck_geometry',
     'label_and_mask_tools.py::fit_elastocapillary_length',
     'label_and_mask_tools.py::_sigmoid',
+
+    # file_io_decomposition (2026-07-24): the channel-naming dialog flow moved out of file_io.py into a
+    # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.
+    # `FileIOClass` inherits the mixin, so `self.assign_channels_in_dialog(...)` is unchanged. Verbatim move.
+    'file_io.py::assign_channels_in_dialog',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

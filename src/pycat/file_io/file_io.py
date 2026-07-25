@@ -52,6 +52,7 @@ from pycat.utils.channel_naming import (
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButton, QPushButton, QFileDialog, QLineEdit, QMessageBox
 from PyQt5.QtGui import QFont
 from pycat.file_io.dialogs import ChannelAssignmentDialog, LayerDataframeSelectionDialog  # moved from here, 1.6.146
+from pycat.file_io.dialogs import _DialogsMixin  # assign_channels_in_dialog moved out (file_io_decomposition)
 from pycat.file_io.stack_openers import _StackOpenersMixin  # format openers moved out, 1.6.146
 from pycat.file_io.progress import _ProgressMixin  # busy/progress plumbing moved out (file_io_decomposition)
 from pycat.file_io.lazy_sources import _ZarrTYX  # moved out 1.6.146; re-exported  # noqa: F401
@@ -249,7 +250,7 @@ from pycat.file_io.napari_adapter import EAGER_DIAMETER_LAYERS  # noqa: F401
 
 
 
-class FileIOClass(_ProgressMixin, _StackOpenersMixin):
+class FileIOClass(_DialogsMixin, _ProgressMixin, _StackOpenersMixin):
     """
     A class for handling file input/output operations related to image analysis, including
     opening images and masks, assigning channels to opened images, and saving analysis results.
@@ -1107,143 +1108,6 @@ class FileIOClass(_ProgressMixin, _StackOpenersMixin):
                 getattr(self, 'base_file_name', None), file_path, is_mask=True)
             self.load_into_viewer(mask_image, name=_mask_name, is_mask=True)
 
-        
-    def _channels_all_confident(self, channel_info):
-        """True when every channel has a confident identity (metadata name /
-        wavelength, a pixel-measured modality, or an identity the user remembered
-        for this layout) — i.e. no channel is a bare positional guess. Used to skip
-        the naming dialog when it would only be confirming names PyCAT is already
-        sure of, and so a recalled answer never re-prompts a same-layout file."""
-        if not channel_info:
-            return False
-        try:
-            for ci in channel_info:
-                if not ci or ci.get('source') not in ('name', 'wavelength', 'pixels', 'user'):
-                    return False
-            return True
-        except Exception:
-            return False
-
-    def assign_channels_in_dialog(self, all_channels, is_mask=False, channel_info=None):
-        """
-        Assign names to each channel of an opened image or mask.
-
-        When every channel already has a CONFIDENT identity (a fluorophore/emission
-        label from metadata, or a modality measured from the pixels), the naming
-        dialog is SKIPPED and those names are applied directly — the dialog would
-        only be asking the user to confirm names PyCAT is already sure of. The
-        dialog still appears when at least one channel is ambiguous (a bare
-        positional guess), so the user can disambiguate.
-
-        Parameters
-        ----------
-        all_channels : list
-            Tuples of (channel data, file path, channel number).
-        is_mask : bool, optional
-            Whether the channels belong to a mask (default False).
-        channel_info : list, optional
-            Per-channel identity dicts from identify_channel (carries 'source').
-        """
-        # Confidence gate: skip the dialog when nothing is ambiguous (images only;
-        # masks keep the dialog since they have no measurable modality identity).
-        _auto = (not is_mask) and self._channels_all_confident(channel_info)
-
-        if _auto:
-            # Derive each channel's name from its confident identity — no dialog.
-            channel_names = []
-            for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
-                info = channel_info[channel_num] if channel_info and channel_num < len(channel_info) else None
-                channel_names.append(
-                    derive_layer_name(
-                        getattr(self, 'base_file_name', None), file_path,
-                        channel_infos=[info] if info else None, is_mask=is_mask))
-            _designated_condensate = None
-        else:
-            dialog = ChannelAssignmentDialog(all_channels, is_mask=is_mask, channel_info=channel_info)
-            result = dialog.exec_()
-
-            if result == QDialog.Accepted:
-                # Get the names assigned by the user
-                channel_names = [input_field.text() for input_field in dialog.channel_name_inputs]
-                # Remember a real name the user typed for a channel that had NO recoverable identity, keyed to
-                # this acquisition layout, so a future same-layout file is named automatically (never re-asked).
-                if not is_mask:
-                    try:
-                        from pycat.file_io.load_channel_identity import remember_user_channel_names
-                        remember_user_channel_names(channel_info, channel_names)
-                    except Exception:      # broad-ok: write — remembering an identity is best-effort; a failure must not break the load
-                        pass
-            elif result == QDialog.Rejected:
-                return # If the user cancels the dialog do nothing
-
-            # Read the opt-in condensate-channel designation (if the dialog offered it) and
-            # PERSIST it for this acquisition layout, so future same-layout files recall it.
-            _designated_condensate = None
-            try:
-                dd = getattr(dialog, '_condensate_dd', None)
-                if dd is not None:
-                    chosen = dd.currentData()
-                    if isinstance(chosen, int) and chosen >= 0:
-                        _designated_condensate = chosen
-                        from pycat.utils.channel_designations import remember_designation
-                        remember_designation(channel_info, chosen)
-            except Exception:
-                pass
-
-        # Record the final channel_num -> layer_name assignment so batch
-        # replay can recreate the exact same image-type-to-channel mapping.
-        # Stored on self so open_image()'s bp.record call can include it.
-        self._last_channel_assignment = []
-
-        # Load each channel into the viewer with the assigned name
-        # Recall any persisted "which channel is the condensate" designation for THIS
-        # acquisition layout (opt-in memory; None when nothing is remembered — we never guess).
-        # A designation the user made in THIS dialog wins over the recalled one.
-        try:
-            from pycat.utils.channel_designations import recall_designation
-            _condensate_idx = recall_designation(channel_info) if (channel_info and not is_mask) else None
-        except Exception:
-            _condensate_idx = None
-        if _designated_condensate is not None:
-            _condensate_idx = _designated_condensate
-
-        for i, (channel_data, file_path, channel_num) in enumerate(all_channels):
-            name = channel_names[i]
-            if not name:  # Use default naming if input is empty
-                if not is_mask:
-                    if channel_num == 0:
-                        name = "Fluorescence Image"
-                    elif channel_num == 1:
-                        name = "Segmentation Image"
-                    else:
-                        name = f"{os.path.basename(file_path)}_ch_{channel_num}"
-                else:
-                    name = f"Mask Layer {channel_num}"
-
-            # Capture detected identity (if any) alongside the final name
-            info = channel_info[channel_num] if channel_info and channel_num < len(channel_info) else None
-            self._last_channel_assignment.append({
-                'channel_num': channel_num,
-                'layer_name': name,
-                'source_path': file_path,
-                'source_stem': os.path.splitext(os.path.basename(file_path))[0],
-                'source_suffix': os.path.splitext(file_path)[1].lower(),
-                'detected_label': info.get('label') if info else None,
-                'detected_source': info.get('source') if info else None,
-            })
-
-            self.load_into_viewer(channel_data, name=name, is_mask=is_mask)
-
-            # Tag the channel's IDENTITY on the layer so downstream selection can query tags
-            # instead of relying on load order (which is what made DAPI and the condensate
-            # channel indistinguishable when both were named "Fluorescence Image"). This is the
-            # keystone of the tag migration for the fluorescence pipeline.
-            if not is_mask:
-                try:
-                    self._tag_channel_identity(info, channel_num,
-                                               is_condensate=(_condensate_idx == channel_num))
-                except Exception:
-                    pass
 
     def _tag_channel_identity(self, info, channel_num, is_condensate=False):
         """Attach channel-identity tags to the just-loaded layer (the last-added image layer).

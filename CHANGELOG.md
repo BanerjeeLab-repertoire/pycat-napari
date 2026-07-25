@@ -1,3 +1,18 @@
+## [1.6.338] - 2026-07-24
+### Changed — **The channel-naming dialog flow moved out of the file loader (file_io_decomposition, step: dialogs).**
+`assign_channels_in_dialog` (120 lines — the confidence gate, the naming dialog, and the recall/remember of
+channel identities) and its `_channels_all_confident` helper moved out of `file_io.py`.
+
+- Moved **VERBATIM** to a `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog`
+  it drives; `FileIOClass` inherits it, so `self.assign_channels_in_dialog(...)` is unchanged. `derive_layer_name`
+  deliberately stays in file_io (two tests AST-parse it there) and is lazy-imported in the moved method to avoid
+  a cycle — the pattern the sibling dialog code already uses.
+- Load path unchanged: the naming/scene/session/CZI load tests pass. `file_io.py` drops 1,548 → 1,412 lines.
+- **PyQt5-import status (the step's question): still NOT droppable.** Even with `assign_channels_in_dialog` and
+  `_run_with_busy_progress` gone, file_io.py uses Qt pervasively — `QFileDialog` ×14 (the file pickers),
+  `QMessageBox` ×10 (load prompts), and other dialogs. It is a Qt-bound load controller; the "no GUI import"
+  win would require extracting all of those, not just these two. Recorded honestly, not claimed.
+
 ## [1.6.337] - 2026-07-24
 ### Changed — **The file loader's busy/progress plumbing moved to its own module (file_io_decomposition, step: progress).**
 `_run_with_busy_progress` (the modal off-thread busy dialog the one-time CZI/IMS frame-index parse runs behind)
