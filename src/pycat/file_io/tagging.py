@@ -143,6 +143,8 @@ def _tag_layout(_LT, layer, n_t, n_z, n_p, axis_answer):
     """
     if n_p and n_p > 1:
         dim = 'multi-position'
+    elif (n_t and n_t > 1) and (n_z and n_z > 1):
+        dim = '3d+t'                     # volumetric time-lapse (TZYX) — a true 3D+time stack
     elif n_t and n_t > 1:
         dim = '2d+t'
     elif n_z and n_z > 1:

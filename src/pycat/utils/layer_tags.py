@@ -122,14 +122,14 @@ CORE_VALUES = {
     'quality_status': {'pass', 'warn', 'fail'},
     # 'op' has its values validated against the OPERATION REGISTRY, not a set here -- see
     # tag_registry.get_operation(). A tag that is not a registered operation is REFUSED.
-    'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position'},
+    'dimensionality': {'2d', '2d+t', 'z-stack', 'multi-position', '3d+t'},
     # 'axis_order' — the layout of the array actually handed to napari. Channels are split into
     # separate layers on load and positions into separate scenes, so C and P never appear here.
     'axis_order': {'YX', 'TYX', 'ZYX', 'TZYX'},
     # 'stack_axis' — the answer to "is this multipage TIFF T or Z?". '?' is the honest value for
     # "the user was asked and the answer did not survive", which beats guessing one.
     'stack_axis': {'T', 'Z', '?'},
-    'modality': {'fluorescence', 'brightfield'},
+    'modality': {'fluorescence', 'brightfield', 'phase', 'DIC', 'trace'},
     'spectral_bucket': {'blue', 'green', 'red', 'far_red', 'transmitted', 'unknown'},
     'scale': {'calibrated', 'uncalibrated'},
     'provenance': {'raw', 'derived', 'segmentation', 'pycat-generated',

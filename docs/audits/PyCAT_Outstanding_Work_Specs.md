@@ -641,6 +641,10 @@ assert `run_plan` on the generated plan produces the same ordered step set as th
 
 ### F1. Tag vocabulary: add `3d+t` dimensionality and `phase`/`DIC` modalities
 
+> **✅ DONE — 1.6.358 (2026-07-25).** Added `3d+t` + `phase`/`DIC`/`trace` to CORE_VALUES; fixed the
+> `_tag_layout` classifier (checked `n_t>1` before `n_z>1`, so TZYX → `2d+t`, dropping z) to emit `3d+t`.
+> Test `tests/test_dimensionality_3dt.py`. Verified still-live against the 1.6.357 tree.
+
 **File:** `utils/layer_tags.py` (`CORE_VALUES`, :125 and :132).
 
 **Current:**
@@ -667,6 +671,11 @@ assert `run_plan` on the generated plan produces the same ordered step set as th
 new values validate and that a TZYX fixture tags as `3d+t`.
 
 ### F2. Surface `frame_interval_inconsistent` in the metadata panel
+
+> **✅ DONE — 1.6.358 (2026-07-25).** `detect_contradictions` emits a critical `frame_interval_inconsistent`
+> row; `_engine_input` threads the reconciled frame-interval fields from `common` so the panel raises it.
+> Cry-wolf preserved. Test `tests/test_frame_interval_contradiction.py`. Verified still-live (flag set at
+> metadata_extract.py:1088 but unread by the contradiction engine) against the 1.6.357 tree.
 
 **Background.** The loader patch already sets `common['frame_interval_inconsistent']` (and
 `frame_interval_nominal_s`) via `reconcile_frame_interval` (`file_io/metadata_extract.py:834`), but
@@ -710,6 +719,10 @@ timestamps. There is already a **contradiction framework** built for exactly thi
   True. A consistent file → assert no such row (cry-wolf contract).
 
 ### F3. Loader nice-to-haves (low priority, fold into the next relevant code change)
+
+> **DEFERRED (as of 1.6.358).** Both items (promote gain/binning/temperature from `raw['acquisition']` into
+> `common`; parse per-frame times for the non-MicroManager TIFF path) are a lower-value display convenience
+> needing deeper per-reader loader work; not shipped with F1/F2. Fold into a future loader change.
 
 From `PyCAT_Loader_Assessment.md`, still open and explicitly low-priority:
 - **Promote `gain` / `binning` / `temperature`** from `raw['acquisition']` into `common` (they're

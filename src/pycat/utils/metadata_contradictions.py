@@ -97,6 +97,20 @@ def detect_contradictions(metadata, *, pixel_modality=None):
                      f"Metadata wins (the declared modality is kept); the disagreement is recorded."),
             fields=('modality',)))
 
+    # ── frame interval: nominal cadence disagreeing with the per-frame timestamps (timestamp wins) ──
+    # Critical: unlike a cosmetic modality mismatch, a wrong frame interval silently corrupts every
+    # time-derived quantity (D, viscosity, MSD, the moduli frequency axis). The loader already sets this
+    # flag via reconcile_frame_interval; this surfaces it.
+    if md.get('frame_interval_inconsistent'):
+        nominal = md.get('frame_interval_nominal_s')
+        actual = md.get('frame_interval_s')
+        out.append(Contradiction(
+            pattern='frame_interval_inconsistent', severity='critical',
+            message=(f"Declared frame interval {nominal} s disagrees with the interval derived from "
+                     f"per-frame timestamps ({actual} s). The timestamp-derived value is used. A wrong "
+                     f"interval corrupts every time-derived quantity (D, viscosity, MSD, moduli axis)."),
+            fields=('frame_interval_s', 'frame_interval_nominal_s')))
+
     out.sort(key=lambda c: 0 if c.severity == 'critical' else 1)
     return out
 
@@ -209,6 +223,11 @@ def _engine_input(file_metadata):
         'instrument': common.get('microscope') or common.get('instrument') or inst.get('instrument'),
         'software': common.get('software'),
         'objective': common.get('objective'),
+        # reconciled frame-interval fields (set by reconcile_frame_interval), so the frame-interval
+        # contradiction is surfaced through the panel, not just via a direct detect_contradictions call.
+        'frame_interval_inconsistent': common.get('frame_interval_inconsistent'),
+        'frame_interval_nominal_s': common.get('frame_interval_nominal_s'),
+        'frame_interval_s': common.get('frame_interval_s'),
     }
 
 

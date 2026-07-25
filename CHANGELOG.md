@@ -1,3 +1,22 @@
+## [1.6.358] - 2026-07-25
+### Added / Fixed — **Tag vocabulary + frame-interval contradiction (Outstanding-Work specs F1 + F2).**
+Two small metadata-subsystem items, grouped.
+
+- **F1 — dimensionality/modality vocabulary + the TZYX classifier.** Added `3d+t` to `dimensionality` and
+  `phase` / `DIC` / `trace` to `modality` (`utils/layer_tags.py`). Fixed the classifier (`file_io/tagging.py`):
+  it checked `n_t>1` before `n_z>1`, so a volumetric time-lapse (both a time and a z axis) was tagged `2d+t`,
+  silently dropping the z dimension — even though `axis_order` already recorded `TZYX`. A TZYX stack now tags
+  `3d+t`. Test `tests/test_dimensionality_3dt.py`.
+- **F2 — frame-interval contradiction surfaced.** The loader's `reconcile_frame_interval` already set
+  `common['frame_interval_inconsistent']` (nominal cadence vs the interval derived from per-frame timestamps),
+  but **nothing read it** — so the user never learned the cadence disagreed, even though a wrong interval
+  silently corrupts every time-derived quantity (D, viscosity, MSD, moduli axis). `detect_contradictions`
+  (`utils/metadata_contradictions.py`) now emits a **critical** `frame_interval_inconsistent` row, and
+  `_engine_input` threads the reconciled fields from `common` so the metadata panel raises the red indicator.
+  Cry-wolf preserved (a consistent file raises nothing). Test `tests/test_frame_interval_contradiction.py`.
+- **F3 (loader gain/binning/temperature promotion + non-MicroManager per-frame times) deferred** — a
+  lower-value display convenience needing deeper per-reader loader work; documented as a follow-up.
+
 ## [1.6.357] - 2026-07-25
 ### Added — **Lineage recording at the first batch of pipeline add-sites (Outstanding-Work spec C1, increment 1).**
 `tag_from_operation` — which stamps a layer with the operation that produced it AND records a `derived_from`
