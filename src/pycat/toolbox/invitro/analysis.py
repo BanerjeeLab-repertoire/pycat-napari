@@ -220,12 +220,16 @@ def estimate_contact_angle(
 
     Method:
       1. Extract the droplet boundary from the labeled mask
-      2. Find the base chord (widest horizontal extent — where droplet
-         contacts the glass, typically at the bottom of the image)
-      3. Fit a circle to the upper arc of the boundary
-      4. Compute the contact angle from the circle radius and base half-width:
-         θ = arcsin(a/R) where a = base half-width, R = fitted circle radius
-         θ < 90° = partial wetting (hydrophilic),  θ > 90° = hydrophobic
+      2. Find the contact line = the bottom-most boundary row (where the droplet meets the glass).
+         NOTE: this is deliberately NOT the widest row — for a hydrophobic droplet (θ>90°) the widest
+         row is the equator, which sits above the contact line.
+      3. Fit a circle to the arc above the contact line
+      4. Compute the contact angle from the circle geometry:
+         θ = arccos((cy − base_row) / R), where cy is the fitted centre row, base_row the contact
+         line, and R the fitted radius. This spans the full 0–180° range, so a hydrophobic droplet
+         (θ>90°, fitted centre above the contact line) is reported correctly. The earlier arcsin(a/R)
+         could never exceed 90° and silently reported such a droplet as its acute supplement.
+         θ < 90° = partial wetting (hydrophilic),  θ > 90° = hydrophobic (non-wetting)
 
     Parameters
     ----------
@@ -259,12 +263,15 @@ def estimate_contact_angle(
     if len(y_b) < 10:
         return dict(fit_success=False)
 
-    # Base: row with maximum width (widest horizontal span = contact line)
+    # Base (contact line) = the bottom-most boundary row: the substrate the droplet rests on. NB the
+    # WIDEST row is the equator, which for a hydrophobic droplet (theta>90) sits ABOVE the contact line;
+    # using the widest row would latch onto the equator and cap every reported angle at 90. The droplet
+    # arc used for the circle fit is everything above this row.
     rows_present = np.unique(y_b)
-    widths = {r: x_b[y_b == r].max() - x_b[y_b == r].min() for r in rows_present}
-    base_row   = max(widths, key=widths.get)
-    base_width = widths[base_row]
-    base_x_mid = float(x_b[y_b == base_row].mean())
+    base_row   = int(rows_present.max())
+    at_base    = x_b[y_b == base_row]
+    base_width = float(at_base.max() - at_base.min()) if at_base.size > 1 else 0.0
+    base_x_mid = float(at_base.mean())
 
     # Use upper arc (above base) for circle fit
     upper = y_b < base_row
@@ -279,7 +286,7 @@ def estimate_contact_angle(
 
     cx0 = float(x_u.mean())
     cy0 = float(y_u.mean())
-    r0  = float(base_width / 2)
+    r0  = float((x_u.max() - x_u.min()) / 2)   # half the arc span -- robust for theta>90 too
 
     try:
         res = least_squares(_circle_residuals, [cx0, cy0, r0],
@@ -288,10 +295,13 @@ def estimate_contact_angle(
         if R < 1 or R > max(image.shape):
             return dict(fit_success=False)
 
-        # Contact angle
-        a   = base_width / 2
-        sin_theta = min(1.0, a / max(R, 1e-6))
-        theta = float(np.degrees(np.arcsin(sin_theta)))
+        # Full contact angle from the circle geometry. With image rows increasing downward and the
+        # droplet arc above the base, base_row = cy - R*cos(theta), so cos(theta) = (cy - base_row)/R.
+        # arccos spans 0-180, so a hydrophobic droplet (theta>90, whose fitted centre sits ABOVE the
+        # contact line, cy < base_row) is reported correctly instead of being folded to its acute
+        # supplement -- the old arcsin(a/R) could never exceed 90 despite the docstring claiming it could.
+        cos_theta = (cy - base_row) / max(R, 1e-6)
+        theta = float(np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0))))
 
         return dict(
             contact_angle_deg=theta,

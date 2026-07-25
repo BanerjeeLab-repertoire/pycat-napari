@@ -1,3 +1,20 @@
+## [1.6.356] - 2026-07-25
+### Fixed — **Contact angle was capped at 90° — every hydrophobic droplet was reported as its acute supplement (Outstanding-Work spec B3).**
+`estimate_contact_angle` (`toolbox/invitro/analysis.py`) computed `θ = arcsin(a/R)`, which can never exceed 90°,
+so a droplet with a true contact angle of 130° (a case the docstring explicitly claimed reachable) came back as
+~50°. Two compounding causes: `arcsin` is bounded at 90°, **and** the base line was taken as the *widest*
+boundary row — which for θ>90° is the equator, not the contact line, so `a/R` saturated at 1.
+
+- The contact line is now the **bottom-most boundary row** (where the droplet meets the glass), not the widest
+  row. For θ≤90° these coincide, so hydrophilic results are unchanged; for θ>90° this finds the true (narrower)
+  contact line instead of the equator.
+- The angle is computed from the circle geometry directly: `θ = arccos((cy − base_row)/R)`, which spans the
+  full **0–180°**. A hydrophobic droplet (fitted centre above the contact line, `cy < base_row`) now reports
+  its true obtuse angle. Docstring corrected. (While verifying, the sign convention in the original spec sketch
+  was found to be inverted — confirmed empirically against rasterized known-angle droplets before shipping.)
+- **Golden-master test** (`tests/test_contact_angle.py`): spherical caps of known contact angle 40–135° are
+  recovered within 4°; the θ=130° smoking-gun is not folded to ~50°. The old code fails both.
+
 ## [1.6.355] - 2026-07-25
 ### Fixed — **The molecular-counting GUI reinstated the R² selection-effect bug the library had already fixed (Outstanding-Work spec B2).**
 `count_molecules_pooled` defaults to `r2_min=0.0` (keep all traces) with a documented danger note that a 0.999

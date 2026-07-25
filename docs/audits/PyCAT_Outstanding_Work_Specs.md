@@ -395,6 +395,13 @@ separate follow-up if you want the pooled path to match the single-trace correct
 
 ### B3. Contact angle capped at 90°
 
+> **✅ DONE — 1.6.356 (2026-07-25).** Fixed more deeply than the spec sketch: `arcsin(a/R)` → full-angle
+> `θ = arccos((cy − base_row)/R)` (0–180°), **and** the base line changed from the widest row (the equator
+> for θ>90, which capped the angle at 90 regardless of the sign fix) to the bottom-most row (the real contact
+> line). **The spec's sign convention was inverted** — verified empirically against rasterized known-angle
+> droplets: θ<90 has cy>base_row, θ>90 has cy<base_row. Golden-master `tests/test_contact_angle.py` recovers
+> 40–135° within 4°. Verified still-live (arcsin cap) against the 1.6.355 tree before fixing.
+
 **File:** `toolbox/invitro/analysis.py:292–294` (also re-exported via `invitro_tools.py`,
 `invitro_bf_ui.py`).
 
