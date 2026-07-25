@@ -215,7 +215,14 @@ _LONG_FUNCTION_LIMIT = 120
 # `_ts_cp_transfection_filter`) + two widget factories. Decomposing it removed BOTH the outer builder AND the
 # 311-line `_on_run` from the long-function set. Every function ≤120; pinned by test_ui_builder_split
 # (`_ts_cellpose_worker`) + a construction smoke. Count 117 → 115.
-_MAX_LONG_FUNCTIONS = 115
+# 113. (2026-07-25, ui_builder_split 5/5 — LAST builder) `_add_lazy_preprocess_stack` (timeseries/ui.py, 520
+# lines) — its 358-line `_on_build` (the longest handler of all, with two nested lazy-array classes + two
+# worker-chaining modes) decomposed into a dispatcher (`_run_lazy_preprocess`) + `_lazy_prepare_source` (keeps
+# its nested classes) + `_lazy_resolve_cache` + worker helpers (`_lazy_start_worker`/`_lazy_run_combined`/
+# `_lazy_start_bg`) threading a `ctx` namespace + the L1 handlers moved to module level. Removed BOTH the builder
+# and the 358-line `_on_build`. Every function ≤120. **ui_builder_split COMPLETE (all five builders done).**
+# Count 115 → 113.
+_MAX_LONG_FUNCTIONS = 113
 # It grew by 11 lines when the frame-interval sync was added to it (1.5.511) — a REAL addition,
 # not a cheat. **The ratchet caught it, which is the ratchet working**: the honest response is to
 # record that the function is now bigger, not to pretend it is not.
@@ -302,7 +309,7 @@ _FILE_LINE_CEILINGS = {
     "toolbox/timeseries_condensate_tools.py": 180,
     "toolbox/timeseries/analysis.py": 685,
     "toolbox/timeseries/execution.py": 581,
-    "toolbox/timeseries/ui.py": 1262,   # +30: ui_builder_split 5/5 decomposed _add_run_timeseries_condensate_analysis (adds helper defs/docstrings/unpacks; the giant function is gone)
+    "toolbox/timeseries/ui.py": 1288,   # ui_builder_split decomposed BOTH _add_run_timeseries_condensate_analysis and _add_lazy_preprocess_stack here (adds helper defs/docstrings/unpacks; the two giant functions + the 358-line _on_build are gone)
     # 2692 -> 2030 (leaf) -> 1239 (fz+cellpose) -> 566 (puncta) -> 148 (step 4, 1.6.243: subcellular). The
     # scientific core is fully split into toolbox/segmentation/ by family; segmentation_tools.py is now a
     # PURE re-export shim (no defs). Ceiling locked at the shim size.

@@ -1,5 +1,13 @@
 # Claude Code spec — Split the `_add_*` UI builders (the five longest functions in the project)
 
+> **✅ DONE — ALL FIVE builders decomposed (1.6.362 → 1.6.366).** `_add_advanced_analysis` (638),
+> `_add_condensate_physics` (595), `_add_run_timeseries_condensate_analysis` (492), `_add_run_ts_cellpose`
+> (549, 311-line `_on_run`) and `_add_lazy_preprocess_stack` (520, 358-line `_on_build`). Each split into
+> widget factories (returning a SimpleNamespace) + handlers/dispatchers that unpack the namespace and run
+> VERBATIM — construction order, parenting, signal wiring and worker ordering preserved. Every function ≤120;
+> `_MAX_LONG_FUNCTIONS` 120 → 113. Pinned by `test_ui_builder_split` (the attribute contract, unmodified) +
+> per-builder headless construction smokes (`tests/test_advanced_analysis_builder.py`).
+
 > **◐ IN PROGRESS — 3 of 5 DONE (1.6.362, 1.6.363, 1.6.364).** `_add_advanced_analysis` (638),
 > `_add_condensate_physics` (595) and `_add_run_timeseries_condensate_analysis` (492) fully decomposed into
 > widget factories (returning a SimpleNamespace of handles) + handlers (unpack the namespace, run VERBATIM).

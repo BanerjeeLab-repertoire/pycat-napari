@@ -174,26 +174,11 @@ def _add_ts_upscale_stack(ui_instance, layout=None, separate_widget=False):
     return grp
 
 
-def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
-    """
-    Widget that builds lazy preprocessed and background-removed stacks from
-    a raw image stack without processing any frames upfront.
-
-    Designed for use in the Time-Series Condensate Analysis pipeline as a
-    replacement for the standard Pre-process + Background Removal buttons,
-    which process only the active (single) layer.
-
-    The output dask layers are named consistently so the Time-Series
-    Condensate Analysis widget can find them automatically.
-    """
-    # GUI imported here, not at module scope — the analysis in this module needs none.
-    from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QWidget
+def _lazy_widgets(ui_instance, form):
+    """Build the lazy-preprocess panel widgets; return their handles."""
+    from PyQt5.QtWidgets import QCheckBox, QLabel, QPushButton, QSizePolicy
     import napari
-
-    grp = QGroupBox("Lazy Stack Pre-processing")
-    form = QFormLayout(grp)
-    form.setContentsMargins(9, 20, 9, 6)
-
+    import os as _os
     stack_dropdown = ui_instance.create_layer_dropdown(napari.layers.Image)
     form.addRow("Raw stack layer:", stack_dropdown)
 
@@ -236,41 +221,6 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         "Adds a whole-stack pass before and after the per-frame pipeline."
     )
     form.addRow(pseudo3d_temporal_cb)
-
-    def _on_check_correlation():
-        # `estimate_temporal_correlation` is already imported at module scope (from timeseries.correlation,
-        # which timeseries_condensate_tools re-exports — verified the same object), so no local re-import.
-        layer_name = stack_dropdown.currentText()
-        try:
-            layer = ui_instance.viewer.layers[layer_name]
-        except KeyError:
-            napari_show_warning(f"Layer '{layer_name}' not found.")
-            return
-        stack_data = layer.data
-        if stack_data.ndim != 3:
-            napari_show_warning("Correlation check requires a 3D (T,H,W) stack.")
-            return
-
-        result = estimate_temporal_correlation(stack_data)
-        regime_colors = {
-            'oversampled':  '#5cb85c',
-            'moderate':     '#f0a500',
-            'undersampled': '#d9534f',
-        }
-        color = regime_colors.get(result['regime'], '#aaa')
-        corr_label.setText(
-            f"<span style='color:{color};font-size:9pt;'>"
-            f"<b>{result['regime'].upper()}</b> \u2014 "
-            f"mean correlation {result.get('mean_correlation', float('nan')):.2f}. "
-            f"{result['recommendation']}</span>"
-        )
-        napari_show_info(
-            f"Temporal correlation: {result['regime']} "
-            f"(mean r={result.get('mean_correlation', float('nan')):.2f})"
-        )
-
-    check_corr_btn.clicked.connect(_on_check_correlation)
-
     import os as _os
     _n_workers = min(8, max(1, _os.cpu_count() - 1))
     build_btn = QPushButton(f"▶  Process Stack  ({_n_workers} parallel workers)")
@@ -280,413 +230,489 @@ def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
         "Results are cached next to the source file and reloaded\n"
         "automatically on next open — no reprocessing needed."
     )
-    # Worker references kept alive on ui_instance so GC doesn't kill them
-    ui_instance._ts_workers = getattr(ui_instance, '_ts_workers', [])
-
-    def _load_from_cache(cache_paths, layer_name, existing,
-                         want_preproc, want_bgrem):
-        """Reload zarr stores from cache into napari layers."""
-        import zarr as _zarr
-        if want_preproc and existing.get('preproc'):
-            z = _zarr.open(str(cache_paths['preproc']), mode='r')
-            wrapper = _ZarrStack(z)
-            name = f"Pre-Processed {layer_name}"
-            ui_instance.viewer.add_image(wrapper, name=name, colormap='green')
-            ui_instance._ts_zarr_preproc = str(cache_paths['preproc'])
-            napari_show_info(f"Loaded '{name}' from cache.")
-        if want_bgrem and existing.get('bgrem'):
-            z = _zarr.open(str(cache_paths['bgrem']), mode='r')
-            wrapper = _ZarrStack(z)
-            name = f"Enhanced Background Removed {layer_name}"
-            ui_instance.viewer.add_image(wrapper, name=name, colormap='viridis')
-            ui_instance._ts_zarr_bgrem = str(cache_paths['bgrem'])
-            napari_show_info(f"Loaded '{name}' from cache.")
-
-    def _on_discard_cache():
-        # The IMS source path used to live on file_io._ims_file_path, but that attribute was removed
-        # when IMS reader retention moved to the layer-scoped ImageSource — it is no longer set, so
-        # the source file is simply the last-opened path on file_io.filePath (set for every loader).
-        source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
-        if not source_file:
-            napari_show_warning("No source file known — nothing to discard.")
-            return
-        data_instance = ui_instance.central_manager.active_data_class
-        ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
-        window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
-        discard_cache(source_file, ball_radius, window_size)
-        napari_show_info("Preprocessing cache discarded. Next run will reprocess.")
-
     discard_btn = QPushButton("🗑  Discard Cache")
     discard_btn.setToolTip(
         "Delete the cached preprocessed zarr stores for this file.\n"
         "Use this if you change processing parameters and want to\n"
         "force a full reprocess on the next run."
     )
-    discard_btn.clicked.connect(_on_discard_cache)
+    return SimpleNamespace(
+        stack_dropdown=stack_dropdown, preprocess_check=preprocess_check, bg_check=bg_check, corr_label=corr_label, check_corr_btn=check_corr_btn, pseudo3d_temporal_cb=pseudo3d_temporal_cb, build_btn=build_btn, discard_btn=discard_btn)
 
-    def _on_build():
-        layer_name = stack_dropdown.currentText()
-        try:
-            layer = ui_instance.viewer.layers[layer_name]
-        except KeyError:
-            napari_show_warning(f"Layer '{layer_name}' not found.")
-            return
 
-        stack_data = layer.data
-        if stack_data.ndim != 3:
-            napari_show_warning("Lazy preprocessing requires a 3D (T, H, W) stack layer.")
-            return
+def _lazy_on_check_correlation(ui_instance, w):
+    """Estimate and display the frame-to-frame temporal correlation regime."""
+    stack_dropdown = w.stack_dropdown; corr_label = w.corr_label
+    # `estimate_temporal_correlation` is already imported at module scope (from timeseries.correlation,
+    # which timeseries_condensate_tools re-exports — verified the same object), so no local re-import.
+    layer_name = stack_dropdown.currentText()
+    try:
+        layer = ui_instance.viewer.layers[layer_name]
+    except KeyError:
+        napari_show_warning(f"Layer '{layer_name}' not found.")
+        return
+    stack_data = layer.data
+    if stack_data.ndim != 3:
+        napari_show_warning("Correlation check requires a 3D (T,H,W) stack.")
+        return
 
-        data_instance = ui_instance.central_manager.active_data_class
-        ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
-        window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
+    result = estimate_temporal_correlation(stack_data)
+    regime_colors = {
+        'oversampled':  '#5cb85c',
+        'moderate':     '#f0a500',
+        'undersampled': '#d9534f',
+    }
+    color = regime_colors.get(result['regime'], '#aaa')
+    corr_label.setText(
+        f"<span style='color:{color};font-size:9pt;'>"
+        f"<b>{result['regime'].upper()}</b> \u2014 "
+        f"mean correlation {result.get('mean_correlation', float('nan')):.2f}. "
+        f"{result['recommendation']}</span>"
+    )
+    napari_show_info(
+        f"Temporal correlation: {result['regime']} "
+        f"(mean r={result.get('mean_correlation', float('nan')):.2f})"
+    )
 
-        H = stack_data.shape[1]
-        max_radius = max(4, int(H * 0.05))
-        ball_radius  = min(ball_radius, max_radius)
-        window_size  = min(window_size, max_radius * 2)
 
-        full_n_t = stack_data.shape[0]
-        W        = stack_data.shape[2]
+def _lazy_load_from_cache(ui_instance, cache_paths, layer_name, existing, want_preproc, want_bgrem):
+    """Reload zarr stores from cache into napari layers."""
+    import zarr as _zarr
+    if want_preproc and existing.get('preproc'):
+        z = _zarr.open(str(cache_paths['preproc']), mode='r')
+        wrapper = _ZarrStack(z)
+        name = f"Pre-Processed {layer_name}"
+        ui_instance.viewer.add_image(wrapper, name=name, colormap='green')
+        ui_instance._ts_zarr_preproc = str(cache_paths['preproc'])
+        napari_show_info(f"Loaded '{name}' from cache.")
+    if want_bgrem and existing.get('bgrem'):
+        z = _zarr.open(str(cache_paths['bgrem']), mode='r')
+        wrapper = _ZarrStack(z)
+        name = f"Enhanced Background Removed {layer_name}"
+        ui_instance.viewer.add_image(wrapper, name=name, colormap='viridis')
+        ui_instance._ts_zarr_bgrem = str(cache_paths['bgrem'])
+        napari_show_info(f"Loaded '{name}' from cache.")
 
-        # Respect user-defined frame range if set
-        dr      = ui_instance.central_manager.active_data_class.data_repository
-        t_start = int(dr.get('timeseries_frame_start', 0))
-        t_end   = int(dr.get('timeseries_frame_end', full_n_t - 1))
-        t_start = max(0, min(t_start, full_n_t - 1))
-        t_end   = max(t_start, min(t_end, full_n_t - 1))
-        n_t     = t_end - t_start + 1
 
-        # Wrap the source so index 0..n_t-1 maps to t_start..t_end
-        class _SlicedStack:
-            def __init__(self, src, start, end):
-                self._src   = src
-                self._start = start
-                n           = end - start + 1
-                if hasattr(src, 'shape'):
-                    self.shape = (n,) + src.shape[1:]
-                else:
-                    self.shape = (n, H, W)
-                self.ndim = 3
+def _lazy_on_discard_cache(ui_instance):
+    """Delete the cached preprocessed zarr stores for the current source file."""
+    # The IMS source path used to live on file_io._ims_file_path, but that attribute was removed
+    # when IMS reader retention moved to the layer-scoped ImageSource — it is no longer set, so
+    # the source file is simply the last-opened path on file_io.filePath (set for every loader).
+    source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
+    if not source_file:
+        napari_show_warning("No source file known — nothing to discard.")
+        return
+    data_instance = ui_instance.central_manager.active_data_class
+    ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
+    window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
+    discard_cache(source_file, ball_radius, window_size)
+    napari_show_info("Preprocessing cache discarded. Next run will reprocess.")
+
+
+def _lazy_prepare_source(ui_instance, stack_data, H, W, full_n_t):
+    """Apply the Step-2 frame range and XY ROI to the source stack (lazily). Returns (src, H, W, n_t)."""
+    # Respect user-defined frame range if set
+    dr      = ui_instance.central_manager.active_data_class.data_repository
+    t_start = int(dr.get('timeseries_frame_start', 0))
+    t_end   = int(dr.get('timeseries_frame_end', full_n_t - 1))
+    t_start = max(0, min(t_start, full_n_t - 1))
+    t_end   = max(t_start, min(t_end, full_n_t - 1))
+    n_t     = t_end - t_start + 1
+
+    # Wrap the source so index 0..n_t-1 maps to t_start..t_end
+    class _SlicedStack:
+        def __init__(self, src, start, end):
+            self._src   = src
+            self._start = start
+            n           = end - start + 1
+            if hasattr(src, 'shape'):
+                self.shape = (n,) + src.shape[1:]
+            else:
+                self.shape = (n, H, W)
+            self.ndim = 3
+        def __getitem__(self, idx):
+            if isinstance(idx, (int, np.integer)):
+                return self._src[self._start + int(idx)]
+            return self._src[self._start + idx]
+
+    if t_start > 0 or t_end < full_n_t - 1:
+        stack_data = _SlicedStack(stack_data, t_start, t_end)
+        napari_show_info(
+            f"Processing frame range {t_start}–{t_end} "
+            f"({n_t} of {full_n_t} frames)."
+        )
+
+    # ── XY ROI crop ───────────────────────────────────────────────────
+    roi_active = dr.get('timeseries_roi_active', False)
+    y0 = int(dr.get('timeseries_roi_y0', 0))
+    y1 = int(dr.get('timeseries_roi_y1', H))
+    x0 = int(dr.get('timeseries_roi_x0', 0))
+    x1 = int(dr.get('timeseries_roi_x1', W))
+
+    # Clamp to actual frame dimensions
+    y0, y1 = max(0, y0), min(H, y1)
+    x0, x1 = max(0, x0), min(W, x1)
+
+    if roi_active and (y0 > 0 or y1 < H or x0 > 0 or x1 < W):
+        class _CroppedStack:
+            """Wraps any stack and spatially crops every frame on read."""
+            def __init__(self, src, _y0, _y1, _x0, _x1):
+                self._src = src
+                self._y0, self._y1 = _y0, _y1
+                self._x0, self._x1 = _x0, _x1
+                nh = _y1 - _y0
+                nw = _x1 - _x0
+                nt = src.shape[0] if hasattr(src, 'shape') else len(src)
+                self.shape = (nt, nh, nw)
+                self.ndim  = 3
             def __getitem__(self, idx):
-                if isinstance(idx, (int, np.integer)):
-                    return self._src[self._start + int(idx)]
-                return self._src[self._start + idx]
+                frame = self._src[idx]
+                arr   = np.asarray(frame)
+                if arr.ndim == 2:
+                    return arr[self._y0:self._y1, self._x0:self._x1]
+                return arr[:, self._y0:self._y1, self._x0:self._x1]
 
-        if t_start > 0 or t_end < full_n_t - 1:
-            stack_data = _SlicedStack(stack_data, t_start, t_end)
-            napari_show_info(
-                f"Processing frame range {t_start}–{t_end} "
-                f"({n_t} of {full_n_t} frames)."
+        stack_data = _CroppedStack(stack_data, y0, y1, x0, x1)
+        H = y1 - y0
+        W = x1 - x0
+        napari_show_info(
+            f"XY crop active: y[{y0}:{y1}] x[{x0}:{x1}] "
+            f"→ {H}×{W}px per frame."
+        )
+    return stack_data, H, W, n_t
+
+
+def _lazy_resolve_cache(ui_instance, w, layer_name, ball_radius, window_size):
+    """Resolve the zarr cache directory + paths (or reload from cache and return None)."""
+    # Determine cache paths — use source file path if available. (file_io._ims_file_path was
+    # removed with the IMS→ImageSource retention migration; filePath is the source path now.)
+    source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
+
+    cache_paths = None
+    if source_file:
+        cache_paths = get_cache_paths(source_file, ball_radius, window_size)
+        existing    = cache_exists(source_file, ball_radius, window_size)
+
+        # If both caches exist, offer to reload instead of reprocessing
+        if existing.get('preproc') or existing.get('bgrem'):
+            sz = cache_size_mb(source_file)
+            from PyQt5.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                None, "Preprocessing Cache Found",
+                f"A cached preprocessed stack was found for this file\n"
+                f"(ball_radius={ball_radius}, window_size={window_size})\n"
+                f"Cache size: {sz:.0f} MB\n\n"
+                f"Reload from cache?\n"
+                f"(Choose No to reprocess and overwrite the cache)",
+                QMessageBox.Yes | QMessageBox.No
             )
+            if reply == QMessageBox.Yes:
+                _lazy_load_from_cache(ui_instance, cache_paths, layer_name,
+                                 existing, w.preprocess_check.isChecked(),
+                                 w.bg_check.isChecked())
+                return
 
-        # ── XY ROI crop ───────────────────────────────────────────────────
-        roi_active = dr.get('timeseries_roi_active', False)
-        y0 = int(dr.get('timeseries_roi_y0', 0))
-        y1 = int(dr.get('timeseries_roi_y1', H))
-        x0 = int(dr.get('timeseries_roi_x0', 0))
-        x1 = int(dr.get('timeseries_roi_x1', W))
-
-        # Clamp to actual frame dimensions
-        y0, y1 = max(0, y0), min(H, y1)
-        x0, x1 = max(0, x0), min(W, x1)
-
-        if roi_active and (y0 > 0 or y1 < H or x0 > 0 or x1 < W):
-            class _CroppedStack:
-                """Wraps any stack and spatially crops every frame on read."""
-                def __init__(self, src, _y0, _y1, _x0, _x1):
-                    self._src = src
-                    self._y0, self._y1 = _y0, _y1
-                    self._x0, self._x1 = _x0, _x1
-                    nh = _y1 - _y0
-                    nw = _x1 - _x0
-                    nt = src.shape[0] if hasattr(src, 'shape') else len(src)
-                    self.shape = (nt, nh, nw)
-                    self.ndim  = 3
-                def __getitem__(self, idx):
-                    frame = self._src[idx]
-                    arr   = np.asarray(frame)
-                    if arr.ndim == 2:
-                        return arr[self._y0:self._y1, self._x0:self._x1]
-                    return arr[:, self._y0:self._y1, self._x0:self._x1]
-
-            stack_data = _CroppedStack(stack_data, y0, y1, x0, x1)
-            H = y1 - y0
-            W = x1 - x0
-            napari_show_info(
-                f"XY crop active: y[{y0}:{y1}] x[{x0}:{x1}] "
-                f"→ {H}×{W}px per frame."
-            )
-
-        # Determine cache paths — use source file path if available. (file_io._ims_file_path was
-        # removed with the IMS→ImageSource retention migration; filePath is the source path now.)
-        source_file = getattr(ui_instance.central_manager.file_io, 'filePath', None)
-
+        # Use cache directory as zarr destination
+        cache_paths['preproc'].parent.mkdir(parents=True, exist_ok=True)
+        zarr_dir = str(cache_paths['preproc'].parent)
+    else:
+        zarr_dir = _session_zarr_dir()
         cache_paths = None
-        if source_file:
-            cache_paths = get_cache_paths(source_file, ball_radius, window_size)
-            existing    = cache_exists(source_file, ball_radius, window_size)
+    return zarr_dir, cache_paths, source_file
 
-            # If both caches exist, offer to reload instead of reprocessing
-            if existing.get('preproc') or existing.get('bgrem'):
-                sz = cache_size_mb(source_file)
-                from PyQt5.QtWidgets import QMessageBox
-                reply = QMessageBox.question(
-                    None, "Preprocessing Cache Found",
-                    f"A cached preprocessed stack was found for this file\n"
-                    f"(ball_radius={ball_radius}, window_size={window_size})\n"
-                    f"Cache size: {sz:.0f} MB\n\n"
-                    f"Reload from cache?\n"
-                    f"(Choose No to reprocess and overwrite the cache)",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if reply == QMessageBox.Yes:
-                    _load_from_cache(cache_paths, layer_name,
-                                     existing, preprocess_check.isChecked(),
-                                     bg_check.isChecked())
-                    return
 
-            # Use cache directory as zarr destination
-            cache_paths['preproc'].parent.mkdir(parents=True, exist_ok=True)
-            zarr_dir = str(cache_paths['preproc'].parent)
+def _lazy_start_worker(ctx, source, fn_name, fn_kwargs, zarr_name, display_name, colormap, on_done_cb=None):
+    """Launch a background stack-processing worker writing to a zarr store; wire its progress."""
+    (ui_instance, zarr_dir, n_t, H, W, prog_bar, prog_label, build_btn, pseudo3d_temporal_cb) = (
+        ctx.ui_instance, ctx.zarr_dir, ctx.n_t, ctx.H, ctx.W, ctx.prog_bar, ctx.prog_label, ctx.build_btn, ctx.pseudo3d_temporal_cb)
+    import zarr as _zarr
+    import os
+    zarr_path = os.path.join(zarr_dir, zarr_name)
+    _zarr.open(zarr_path, mode='w',
+               shape=(n_t, H, W), chunks=(1, H, W), dtype=np.float32)
+    z_arr   = _zarr.open(zarr_path, mode='r')
+    wrapper = _ZarrStack(z_arr)
+    ui_instance.viewer.add_image(wrapper, name=display_name,
+                                 colormap=colormap)
+    setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
+
+    # Honor an applied Temporal Enhancement Optimizer choice: a
+    # tri-planar / windowed winner maps onto the existing pseudo-3D
+    # temporal path (temporally-coupled pre-smoothing). Per-frame /
+    # pooled_stats winners leave the standard per-frame path in place.
+    _te = {}
+    try:
+        _te = ui_instance.central_manager.active_data_class.data_repository.get(
+            'temporal_enhancement', {}) or {}
+    except Exception:
+        _te = {}
+    _te_triplanar = _te.get('method') in ('triplanar', 'windowed_mean')
+    _use_pseudo3d = pseudo3d_temporal_cb.isChecked() or _te_triplanar
+
+    worker = _make__stackprocessworker()(
+        source, zarr_path, fn_name, fn_kwargs, n_t, H, W,
+        pseudo3d_temporal=_use_pseudo3d)
+    ui_instance._ts_workers.append(worker)
+
+    _n_stages = 3 if _use_pseudo3d else 2
+    prog_bar.setValue(0)
+    prog_bar.setMaximum(n_t * _n_stages)
+    prog_bar.setVisible(True)
+    prog_label.setText(f"Preparing frames…")
+    prog_label.setVisible(True)
+
+    def _on_progress(done, total):
+        prog_bar.setValue(done)
+        if done <= n_t:
+            prog_label.setText(
+                f"{display_name}: copying frame {done}/{n_t}…")
+        elif done <= n_t * 2:
+            prog_label.setText(
+                f"{display_name}: processing frame {done - n_t}/{n_t}…")
         else:
-            zarr_dir = _session_zarr_dir()
-            cache_paths = None
+            prog_label.setText(
+                f"{display_name}: pseudo-3D temporal blend pass…")
+        try:
+            ui_instance.viewer.layers[display_name].refresh()
+        except Exception:
+            pass
 
-        build_btn.setEnabled(False)
-
-
-        # Single shared progress bar and label for all workers —
-        # avoids leaving multiple stuck bars on screen.
-        prog_bar = QProgressBar()
-        prog_bar.setMaximum(n_t * 2)
-        prog_bar.setValue(0)
-        prog_bar.setVisible(False)
-        prog_label = QLabel("")
-        prog_label.setWordWrap(True)
-        prog_label.setVisible(False)
-        build_btn.parent().layout().addWidget(prog_label)
-        build_btn.parent().layout().addWidget(prog_bar)
-
-        def _start_worker(source, fn_name, fn_kwargs, zarr_name, display_name,
-                          colormap, on_done_cb=None):
-            import zarr as _zarr
-            import os
-            zarr_path = os.path.join(zarr_dir, zarr_name)
-            _zarr.open(zarr_path, mode='w',
-                       shape=(n_t, H, W), chunks=(1, H, W), dtype=np.float32)
-            z_arr   = _zarr.open(zarr_path, mode='r')
-            wrapper = _ZarrStack(z_arr)
-            ui_instance.viewer.add_image(wrapper, name=display_name,
-                                         colormap=colormap)
-            setattr(ui_instance, f'_ts_zarr_{zarr_name}', zarr_path)
-
-            # Honor an applied Temporal Enhancement Optimizer choice: a
-            # tri-planar / windowed winner maps onto the existing pseudo-3D
-            # temporal path (temporally-coupled pre-smoothing). Per-frame /
-            # pooled_stats winners leave the standard per-frame path in place.
-            _te = {}
-            try:
-                _te = ui_instance.central_manager.active_data_class.data_repository.get(
-                    'temporal_enhancement', {}) or {}
-            except Exception:
-                _te = {}
-            _te_triplanar = _te.get('method') in ('triplanar', 'windowed_mean')
-            _use_pseudo3d = pseudo3d_temporal_cb.isChecked() or _te_triplanar
-
-            worker = _make__stackprocessworker()(
-                source, zarr_path, fn_name, fn_kwargs, n_t, H, W,
-                pseudo3d_temporal=_use_pseudo3d)
-            ui_instance._ts_workers.append(worker)
-
-            _n_stages = 3 if _use_pseudo3d else 2
+    def _on_finished(path, _dn=display_name, _cb=on_done_cb):
+        prog_bar.setValue(n_t * 2)
+        napari_show_info(
+            f"'{_dn}' — all {n_t} frames processed.")
+        if _cb:
+            # More work coming — keep bar visible, reset for next stage
             prog_bar.setValue(0)
-            prog_bar.setMaximum(n_t * _n_stages)
-            prog_bar.setVisible(True)
-            prog_label.setText(f"Preparing frames…")
-            prog_label.setVisible(True)
+            prog_label.setText("Starting next stage…")
+            _cb(path)
+        else:
+            # Final step — hide bar
+            prog_bar.setVisible(False)
+            prog_label.setVisible(False)
+            build_btn.setEnabled(True)
 
-            def _on_progress(done, total):
-                prog_bar.setValue(done)
-                if done <= n_t:
-                    prog_label.setText(
-                        f"{display_name}: copying frame {done}/{n_t}…")
-                elif done <= n_t * 2:
-                    prog_label.setText(
-                        f"{display_name}: processing frame {done - n_t}/{n_t}…")
-                else:
-                    prog_label.setText(
-                        f"{display_name}: pseudo-3D temporal blend pass…")
-                try:
-                    ui_instance.viewer.layers[display_name].refresh()
-                except Exception:
-                    pass
+    def _on_error(msg):
+        prog_bar.setVisible(False)
+        prog_label.setVisible(False)
+        napari_show_warning("Processing error — see terminal.")
+        print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
+        build_btn.setEnabled(True)
 
-            def _on_finished(path, _dn=display_name, _cb=on_done_cb):
-                prog_bar.setValue(n_t * 2)
-                napari_show_info(
-                    f"'{_dn}' — all {n_t} frames processed.")
-                if _cb:
-                    # More work coming — keep bar visible, reset for next stage
-                    prog_bar.setValue(0)
-                    prog_label.setText("Starting next stage…")
-                    _cb(path)
-                else:
-                    # Final step — hide bar
-                    prog_bar.setVisible(False)
-                    prog_label.setVisible(False)
-                    build_btn.setEnabled(True)
-
-            def _on_error(msg):
-                prog_bar.setVisible(False)
-                prog_label.setVisible(False)
-                napari_show_warning("Processing error — see terminal.")
-                print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
-                build_btn.setEnabled(True)
-
-            worker.progress.connect(_on_progress)
-            worker.finished.connect(_on_finished)
-            worker.error.connect(_on_error)
-            worker.start()
-            return worker, z_arr
+    worker.progress.connect(_on_progress)
+    worker.finished.connect(_on_finished)
+    worker.error.connect(_on_error)
+    worker.start()
+    return worker, z_arr
 
 
-        proc_source   = stack_data
-        proc_zarr_ref = None
+def _lazy_run_combined(ctx):
+    """Combined single-pass preprocess + background-removal worker path."""
+    (ui_instance, layer_name, cache_paths, source_file, ball_radius, window_size, zarr_dir, n_t, H, W, prog_bar, prog_label, build_btn, stack_data, pseudo3d_temporal_cb) = (
+        ctx.ui_instance, ctx.layer_name, ctx.cache_paths, ctx.source_file, ctx.ball_radius, ctx.window_size, ctx.zarr_dir, ctx.n_t, ctx.H, ctx.W, ctx.prog_bar, ctx.prog_label, ctx.build_btn, ctx.stack_data, ctx.pseudo3d_temporal_cb)
+    import zarr as _zarr, os as _os_
 
-        def _start_bg(source):
-            bg_name   = f"Enhanced Background Removed {layer_name}"
-            zarr_name = (str(cache_paths['bgrem'].name)
+    preproc_name = f"Pre-Processed {layer_name}"
+    bgrem_name   = f"Enhanced Background Removed {layer_name}"
+    preproc_zarr_name = (str(cache_paths['preproc'].name)
+                         if cache_paths else f"preproc_{id(layer_name)}")
+    bgrem_zarr_name   = (str(cache_paths['bgrem'].name)
                          if cache_paths else f"bgrem_{id(layer_name)}")
 
-            def _after_bg(zarr_path):
-                if cache_paths and source_file:
-                    write_meta(source_file, ball_radius, window_size,
-                               n_t, H, W)
+    preproc_path = _os_.path.join(zarr_dir, preproc_zarr_name)
+    bgrem_path   = _os_.path.join(zarr_dir, bgrem_zarr_name)
 
-            _start_worker(source, 'bg_remove',
-                          {'ball_radius': ball_radius},
-                          zarr_name, bg_name, 'viridis',
-                          on_done_cb=_after_bg)
+    _zarr.open(preproc_path, mode='w', shape=(n_t, H, W),
+              chunks=(1, H, W), dtype=np.float32)
+    _zarr.open(bgrem_path, mode='w', shape=(n_t, H, W),
+              chunks=(1, H, W), dtype=np.float32)
 
-        if preprocess_check.isChecked() and bg_check.isChecked():
-            # ── Combined single-pass mode ────────────────────────────────
-            # Both stages are computed from one read of each source frame
-            # inside a single ProcessPoolExecutor pass, instead of running
-            # preprocessing to completion, writing it to disk, then reading
-            # it all back for a second full background-removal pass. This
-            # roughly halves wall-clock time and I/O for the default case
-            # where both checkboxes are on.
-            import zarr as _zarr, os as _os_
+    preproc_wrapper = _ZarrStack(_zarr.open(preproc_path, mode='r'))
+    bgrem_wrapper   = _ZarrStack(_zarr.open(bgrem_path, mode='r'))
+    ui_instance.viewer.add_image(preproc_wrapper, name=preproc_name,
+                                 colormap='green')
+    ui_instance.viewer.add_image(bgrem_wrapper, name=bgrem_name,
+                                 colormap='viridis')
+    ui_instance._ts_zarr_preproc = preproc_path
+    ui_instance._ts_zarr_bgrem   = bgrem_path
 
-            preproc_name = f"Pre-Processed {layer_name}"
-            bgrem_name   = f"Enhanced Background Removed {layer_name}"
-            preproc_zarr_name = (str(cache_paths['preproc'].name)
-                                 if cache_paths else f"preproc_{id(layer_name)}")
-            bgrem_zarr_name   = (str(cache_paths['bgrem'].name)
-                                 if cache_paths else f"bgrem_{id(layer_name)}")
+    worker = _make__stackprocessworker()(
+        stack_data, preproc_path, 'preprocess_and_bg_remove',
+        {'ball_radius': ball_radius, 'window_size': window_size},
+        n_t, H, W, zarr_path2=bgrem_path,
+        pseudo3d_temporal=pseudo3d_temporal_cb.isChecked(),
+    )
+    ui_instance._ts_workers.append(worker)
 
-            preproc_path = _os_.path.join(zarr_dir, preproc_zarr_name)
-            bgrem_path   = _os_.path.join(zarr_dir, bgrem_zarr_name)
+    _n_stages = 3 if pseudo3d_temporal_cb.isChecked() else 2
+    prog_bar.setValue(0); prog_bar.setMaximum(n_t * _n_stages)
+    prog_bar.setVisible(True)
+    prog_label.setText("Preparing frames…"); prog_label.setVisible(True)
 
-            _zarr.open(preproc_path, mode='w', shape=(n_t, H, W),
-                      chunks=(1, H, W), dtype=np.float32)
-            _zarr.open(bgrem_path, mode='w', shape=(n_t, H, W),
-                      chunks=(1, H, W), dtype=np.float32)
+    def _on_progress(done, total):
+        prog_bar.setValue(done)
+        if done <= n_t:
+            prog_label.setText(f"Copying frame {done}/{n_t}…")
+        elif done <= n_t * 2:
+            prog_label.setText(
+                f"Preprocessing + BG removal: frame {done - n_t}/{n_t}…")
+        else:
+            prog_label.setText("Pseudo-3D temporal blend pass…")
+        for _name in (preproc_name, bgrem_name):
+            try:
+                ui_instance.viewer.layers[_name].refresh()
+            except Exception:
+                pass
 
-            preproc_wrapper = _ZarrStack(_zarr.open(preproc_path, mode='r'))
-            bgrem_wrapper   = _ZarrStack(_zarr.open(bgrem_path, mode='r'))
-            ui_instance.viewer.add_image(preproc_wrapper, name=preproc_name,
-                                         colormap='green')
-            ui_instance.viewer.add_image(bgrem_wrapper, name=bgrem_name,
-                                         colormap='viridis')
-            ui_instance._ts_zarr_preproc = preproc_path
-            ui_instance._ts_zarr_bgrem   = bgrem_path
+    def _on_finished(_path):
+        if cache_paths and source_file:
+            write_meta(source_file, ball_radius, window_size, n_t, H, W)
+        prog_bar.setVisible(False)
+        prog_label.setVisible(False)
+        build_btn.setEnabled(True)
+        napari_show_info(
+            f"'{preproc_name}' and '{bgrem_name}' — "
+            f"all {n_t} frames processed in a single combined pass."
+        )
 
-            worker = _make__stackprocessworker()(
-                stack_data, preproc_path, 'preprocess_and_bg_remove',
-                {'ball_radius': ball_radius, 'window_size': window_size},
-                n_t, H, W, zarr_path2=bgrem_path,
-                pseudo3d_temporal=pseudo3d_temporal_cb.isChecked(),
-            )
-            ui_instance._ts_workers.append(worker)
+    def _on_error(msg):
+        prog_bar.setVisible(False)
+        prog_label.setVisible(False)
+        napari_show_warning("Processing error — see terminal.")
+        print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
+        build_btn.setEnabled(True)
 
-            _n_stages = 3 if pseudo3d_temporal_cb.isChecked() else 2
-            prog_bar.setValue(0); prog_bar.setMaximum(n_t * _n_stages)
-            prog_bar.setVisible(True)
-            prog_label.setText("Preparing frames…"); prog_label.setVisible(True)
+    worker.progress.connect(_on_progress)
+    worker.finished.connect(_on_finished)   # fires once, after finished2
+    worker.error.connect(_on_error)
+    worker.start()
 
-            def _on_progress(done, total):
-                prog_bar.setValue(done)
-                if done <= n_t:
-                    prog_label.setText(f"Copying frame {done}/{n_t}…")
-                elif done <= n_t * 2:
-                    prog_label.setText(
-                        f"Preprocessing + BG removal: frame {done - n_t}/{n_t}…")
-                else:
-                    prog_label.setText("Pseudo-3D temporal blend pass…")
-                for _name in (preproc_name, bgrem_name):
-                    try:
-                        ui_instance.viewer.layers[_name].refresh()
-                    except Exception:
-                        pass
 
-            def _on_finished(_path):
-                if cache_paths and source_file:
-                    write_meta(source_file, ball_radius, window_size, n_t, H, W)
-                prog_bar.setVisible(False)
-                prog_label.setVisible(False)
-                build_btn.setEnabled(True)
-                napari_show_info(
-                    f"'{preproc_name}' and '{bgrem_name}' — "
-                    f"all {n_t} frames processed in a single combined pass."
-                )
+def _lazy_start_bg(ctx, source):
+    """Background-removal-only worker path."""
+    (ui_instance, layer_name, cache_paths, source_file, ball_radius, window_size, n_t, H, W) = (
+        ctx.ui_instance, ctx.layer_name, ctx.cache_paths, ctx.source_file, ctx.ball_radius, ctx.window_size, ctx.n_t, ctx.H, ctx.W)
+    bg_name   = f"Enhanced Background Removed {layer_name}"
+    zarr_name = (str(cache_paths['bgrem'].name)
+                 if cache_paths else f"bgrem_{id(layer_name)}")
 
-            def _on_error(msg):
-                prog_bar.setVisible(False)
-                prog_label.setVisible(False)
-                napari_show_warning("Processing error — see terminal.")
-                print(f"[PyCAT TS Preprocess] ERROR:\n{msg}")
-                build_btn.setEnabled(True)
+    def _after_bg(zarr_path):
+        if cache_paths and source_file:
+            write_meta(source_file, ball_radius, window_size,
+                       n_t, H, W)
 
-            worker.progress.connect(_on_progress)
-            worker.finished.connect(_on_finished)   # fires once, after finished2
-            worker.error.connect(_on_error)
-            worker.start()
+    _lazy_start_worker(ctx, source, 'bg_remove',
+                  {'ball_radius': ball_radius},
+                  zarr_name, bg_name, 'viridis',
+                  on_done_cb=_after_bg)
 
-        elif preprocess_check.isChecked():
-            br, ws = ball_radius, window_size
-            proc_name  = f"Pre-Processed {layer_name}"
-            zarr_name  = (str(cache_paths['preproc'].name)
-                          if cache_paths else f"preproc_{id(layer_name)}")
 
-            def _after_preproc(zarr_path):
-                if cache_paths and source_file:
-                    write_meta(source_file, ball_radius, window_size,
-                               n_t, H, W)
+def _run_lazy_preprocess(ui_instance, w):
+    """Validate, prepare the source, resolve cache, then dispatch to the chosen worker path."""
+    from PyQt5.QtWidgets import QLabel, QProgressBar
+    stack_dropdown = w.stack_dropdown
+    layer_name = stack_dropdown.currentText()
+    try:
+        layer = ui_instance.viewer.layers[layer_name]
+    except KeyError:
+        napari_show_warning(f"Layer '{layer_name}' not found.")
+        return
 
-            _start_worker(stack_data, 'preprocess',
-                          {'ball_radius': br, 'window_size': ws},
-                          zarr_name, proc_name, 'green',
-                          on_done_cb=_after_preproc)
+    stack_data = layer.data
+    if stack_data.ndim != 3:
+        napari_show_warning("Lazy preprocessing requires a 3D (T, H, W) stack layer.")
+        return
+    data_instance = ui_instance.central_manager.active_data_class
+    ball_radius   = int(data_instance.data_repository.get('ball_radius', 50))
+    window_size   = int(data_instance.data_repository.get('cell_diameter', 100)) // 2
 
-        elif bg_check.isChecked():
-            _start_bg(stack_data)
+    H = stack_data.shape[1]
+    max_radius = max(4, int(H * 0.05))
+    ball_radius  = min(ball_radius, max_radius)
+    window_size  = min(window_size, max_radius * 2)
 
-        # Record for batch — note: slider interactions are NOT recorded
-        ui_instance._record('lazy_preprocess_stack', {
-            'stack_layer': layer_name,
-            'ball_radius': ball_radius,
-            'window_size': window_size,
-            'preprocess': preprocess_check.isChecked(),
-            'bg_removal': bg_check.isChecked(),
-            'pseudo3d_temporal': pseudo3d_temporal_cb.isChecked(),
-        })
+    full_n_t = stack_data.shape[0]
+    W        = stack_data.shape[2]
+    stack_data, H, W, n_t = _lazy_prepare_source(ui_instance, stack_data, H, W, full_n_t)
+    _cache = _lazy_resolve_cache(ui_instance, w, layer_name, ball_radius, window_size)
+    if _cache is None:
+        return
+    zarr_dir, cache_paths, source_file = _cache
+    build_btn = w.build_btn
+    preprocess_check = w.preprocess_check
+    bg_check = w.bg_check
+    pseudo3d_temporal_cb = w.pseudo3d_temporal_cb
+    build_btn.setEnabled(False)
 
-    build_btn.clicked.connect(_on_build)
-    form.addRow("", build_btn)
-    form.addRow("", discard_btn)
 
+    # Single shared progress bar and label for all workers —
+    # avoids leaving multiple stuck bars on screen.
+    prog_bar = QProgressBar()
+    prog_bar.setMaximum(n_t * 2)
+    prog_bar.setValue(0)
+    prog_bar.setVisible(False)
+    prog_label = QLabel("")
+    prog_label.setWordWrap(True)
+    prog_label.setVisible(False)
+    build_btn.parent().layout().addWidget(prog_label)
+    build_btn.parent().layout().addWidget(prog_bar)
+    ctx = SimpleNamespace(ui_instance=ui_instance, layer_name=layer_name, n_t=n_t, H=H, W=W, zarr_dir=zarr_dir, cache_paths=cache_paths, source_file=source_file, ball_radius=ball_radius, window_size=window_size, prog_bar=prog_bar, prog_label=prog_label, build_btn=build_btn, stack_data=stack_data, pseudo3d_temporal_cb=pseudo3d_temporal_cb)
+    if preprocess_check.isChecked() and bg_check.isChecked():
+        _lazy_run_combined(ctx)
+    elif preprocess_check.isChecked():
+        br, ws = ball_radius, window_size
+        proc_name  = f"Pre-Processed {layer_name}"
+        zarr_name  = (str(cache_paths['preproc'].name)
+                      if cache_paths else f"preproc_{id(layer_name)}")
+
+        def _after_preproc(zarr_path):
+            if cache_paths and source_file:
+                write_meta(source_file, ball_radius, window_size,
+                           n_t, H, W)
+
+        _lazy_start_worker(ctx, stack_data, 'preprocess',
+                      {'ball_radius': br, 'window_size': ws},
+                      zarr_name, proc_name, 'green',
+                      on_done_cb=_after_preproc)
+    elif bg_check.isChecked():
+        _lazy_start_bg(ctx, stack_data)
+    ui_instance._record('lazy_preprocess_stack', {
+        'stack_layer': layer_name,
+        'ball_radius': ball_radius,
+        'window_size': window_size,
+        'preprocess': preprocess_check.isChecked(),
+        'bg_removal': bg_check.isChecked(),
+        'pseudo3d_temporal': pseudo3d_temporal_cb.isChecked(),
+    })
+
+
+def _add_lazy_preprocess_stack(ui_instance, layout=None, separate_widget=False):
+    """
+    Widget that builds lazy preprocessed and background-removed stacks from
+    a raw image stack without processing any frames upfront.
+
+    Designed for use in the Time-Series Condensate Analysis pipeline as a
+    replacement for the standard Pre-process + Background Removal buttons,
+    which process only the active (single) layer.
+
+    The output dask layers are named consistently so the Time-Series
+    Condensate Analysis widget can find them automatically.
+    """
+    # GUI imported here, not at module scope — the analysis in this module needs none.
+    from PyQt5.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QLabel, QProgressBar, QPushButton, QSizePolicy, QWidget
+    import napari
+
+    grp = QGroupBox("Lazy Stack Pre-processing")
+    form = QFormLayout(grp)
+    form.setContentsMargins(9, 20, 9, 6)
+    w = _lazy_widgets(ui_instance, form)
+    ui_instance._ts_workers = getattr(ui_instance, '_ts_workers', [])
+    w.check_corr_btn.clicked.connect(lambda: _lazy_on_check_correlation(ui_instance, w))
+    w.build_btn.clicked.connect(lambda: _run_lazy_preprocess(ui_instance, w))
+    w.discard_btn.clicked.connect(lambda: _lazy_on_discard_cache(ui_instance))
+    form.addRow("", w.build_btn)
+    form.addRow("", w.discard_btn)
     grp_widget = QWidget()
     from PyQt5.QtWidgets import QVBoxLayout as _QVB
     _l = _QVB(grp_widget)

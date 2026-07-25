@@ -1,3 +1,22 @@
+## [1.6.366] - 2026-07-25
+### Changed — **Decomposed the 520-line `_add_lazy_preprocess_stack` — its 358-line `_on_build` was the longest handler in the project (ui_builder_split 5 of 5 — COMPLETE).**
+Lazy zarr-backed stack preprocessing / background removal with a caching layer and parallel workers. Pure Qt +
+worker orchestration, no numerics changed.
+
+- **Widget factory** `_lazy_widgets` builds the panel widgets **verbatim** → `SimpleNamespace`; the three L1
+  handlers (`_lazy_on_check_correlation`, `_lazy_load_from_cache`, `_lazy_on_discard_cache`) moved to module level.
+- **`_on_build` (358 lines) decomposed**: a dispatcher `_run_lazy_preprocess` (validate → prepare source →
+  resolve cache → dispatch) delegating to `_lazy_prepare_source` (frame-range + XY-ROI, **keeping its two nested
+  lazy-array adapter classes**), `_lazy_resolve_cache` (cache dir/paths + reload dialog), and the worker helpers
+  `_lazy_start_worker` / `_lazy_run_combined` / `_lazy_start_bg`, which thread a `ctx` namespace and run the
+  original worker-setup + callback bodies **verbatim** — so worker ordering and progress wiring are unchanged.
+- `_add_lazy_preprocess_stack` is now a 33-line orchestrator; every resulting function is ≤120 lines. Pinned by
+  `test_ui_builder_split` (the `_ts_workers` / `_ts_zarr_preproc` / `_ts_zarr_bgrem` contract, unmodified) + a
+  headless construction smoke. Removed **both** the builder and the 358-line `_on_build`; **`_MAX_LONG_FUNCTIONS`
+  lowered 115 → 113.**
+- **ui_builder_split is COMPLETE** — all five of the project's longest functions (the UI builders) are
+  decomposed; the ratchet went **120 → 113** across the five releases.
+
 ## [1.6.365] - 2026-07-25
 ### Changed — **Decomposed the 549-line `_add_run_ts_cellpose` UI builder — its 311-line `_on_run` was the deepest handler (ui_builder_split, 4 of 5).**
 Time-series keyframe cell segmentation (Cellpose / StarDist / Random-Forest / Multi-Otsu). Pure Qt + dispatch, no science changed.

@@ -82,3 +82,11 @@ def test_ts_cellpose_widget_constructs(qtbot):
     ui = _stub_ui()
     m._add_run_ts_cellpose(ui)
     assert getattr(ui, "_built", None) is not None
+
+
+@pytest.mark.integration
+def test_lazy_preprocess_widget_constructs(qtbot):
+    import pycat.toolbox.timeseries.ui as m
+    ui = _stub_ui()
+    m._add_lazy_preprocess_stack(ui)
+    assert getattr(ui, "_built", None) is not None
