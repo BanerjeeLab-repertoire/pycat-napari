@@ -1,8 +1,14 @@
 # Claude Code spec — Decompose the colocalization science files
 
-> **◐ STATUS — `pixel_wise_corr_analysis_tools.py` FULLY DECOMPOSED into `coloc/` (steps 1–5 @1.6.341–345):
-> metrics, thresholding, nulls, temporal, analysis. 2,029 → a 33-line re-export shim. Remaining: the sibling
-> `obj_based_coloc_analysis_tools.py` (object_based, step 6).**
+> **● STATUS — COMPLETE (steps 1–6 @1.6.341–346). Both colocalization files are now thin re-export shims over
+> a by-domain `coloc/` package: `pixel_wise_corr_analysis_tools.py` (2,029 → 33 lines) → metrics /
+> thresholding / nulls / temporal / analysis; `obj_based_coloc_analysis_tools.py` (1,216 → 21 lines) →
+> object_based. Every move verbatim, characterization-verified through the coloc test net, guard-recorded.**
+>
+> **Step 6 — object_based.py — DONE, 1.6.346.** The sibling `obj_based_coloc_analysis_tools.py` (one cohesive,
+> self-contained domain: per-object Manders/Jaccard/Dice/centroid-distance + its Qt method-picker) moved WHOLE
+> to `coloc/object_based.py`; the original is a 21-line shim re-exporting its 15 public functions. Imports
+> headless; every caller unchanged.
 >
 > **Step 5 — analysis.py — DONE, 1.6.345.** The orchestration (`pixel_wise_correlation_analysis`,
 > `process_pwcca_methods`, `run_pwcca`), the visualizers (`li_ica_histogram`/`li_ica_plot`/

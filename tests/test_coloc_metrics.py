@@ -179,7 +179,9 @@ def test_manders_warns_when_the_threshold_is_below_the_background():
     and it is detectable: a mask covering most of the frame means the threshold is below the
     background.
     """
-    from pycat.toolbox import obj_based_coloc_analysis_tools as coloc
+    # Patch the notifier where manders_m1_calculation actually runs — it moved to coloc/object_based.py
+    # (coloc_decomposition step 6); obj_based_coloc_analysis_tools is now a re-export shim.
+    from pycat.toolbox.coloc import object_based as coloc
 
     h = w = 128
     yy, xx = np.mgrid[0:h, 0:w]

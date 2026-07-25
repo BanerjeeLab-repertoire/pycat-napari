@@ -1,3 +1,17 @@
+## [1.6.346] - 2026-07-24
+### Changed — **Object-based colocalization moved into the `coloc/` package; the colocalization decomposition is complete (coloc_decomposition, step 6 — object_based).**
+The sibling `obj_based_coloc_analysis_tools.py` (per-object Manders/Jaccard/Dice/centroid-distance
+colocalization and its Qt method-picker dialog) moved **VERBATIM** to `toolbox/coloc/object_based.py`.
+
+- The file is one cohesive domain and self-contained (no pixel_wise/coloc dependency), so it moved whole.
+  `obj_based_coloc_analysis_tools.py` is now a **pure re-export shim (1,216 → 21 lines)** — its 15 public
+  functions (`run_obca`, `object_based_colocalization_analysis`, `run_manders_coloc`, …) resolve through it, so
+  every caller (the navigator, `two_channel_coloc_tools`, `ui_analysis_mixin`, `ui_modules`) is unchanged.
+- No number changed — pinned by the coloc test net; imports headless (`test_headless_science` passes).
+  Recorded in `_DELIBERATE`. Full `pytest -m "core or base"` green. **The colocalization science is now fully
+  decomposed into `coloc/` (metrics, thresholding, nulls, temporal, analysis, object_based); both old files
+  are thin shims.** coloc_decomposition spec complete.
+
 ## [1.6.345] - 2026-07-24
 ### Changed — **Colocalization orchestration split out; `pixel_wise_corr_analysis_tools.py` is now a 33-line re-export shim (coloc_decomposition, step 5 — analysis).**
 The final split for this file. The orchestration (`pixel_wise_correlation_analysis`, `process_pwcca_methods`,

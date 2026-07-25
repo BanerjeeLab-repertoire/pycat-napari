@@ -1179,6 +1179,32 @@ _DELIBERATE = {
     'pixel_wise_corr_analysis_tools.py::select_all',
     'pixel_wise_corr_analysis_tools.py::deselect_all',
     'pixel_wise_corr_analysis_tools.py::get_selected_methods',
+
+    # coloc_decomposition step 6 (2026-07-24): the sibling object-based coloc file moved VERBATIM into
+    # `coloc/object_based.py` (per-object Manders/Jaccard/Dice/centroid-distance + its Qt method-picker);
+    # `obj_based_coloc_analysis_tools` is now a pure re-export shim. Every public name resolves through it.
+    'obj_based_coloc_analysis_tools.py::manders_coloc',
+    'obj_based_coloc_analysis_tools.py::run_manders_coloc',
+    'obj_based_coloc_analysis_tools.py::manders_m1_calculation',
+    'obj_based_coloc_analysis_tools.py::manders_m2_calculation',
+    'obj_based_coloc_analysis_tools.py::jaccard_index_calculation',
+    'obj_based_coloc_analysis_tools.py::sorensen_dice_coefficient_calculation',
+    'obj_based_coloc_analysis_tools.py::calculate_centroid_distance',
+    'obj_based_coloc_analysis_tools.py::process_single_pairs',
+    'obj_based_coloc_analysis_tools.py::process_multiple_pairs',
+    'obj_based_coloc_analysis_tools.py::categorize_pairings',
+    'obj_based_coloc_analysis_tools.py::object_based_distance_analysis',
+    'obj_based_coloc_analysis_tools.py::object_based_colocalization_analysis',
+    'obj_based_coloc_analysis_tools.py::process_obca_methods',
+    'obj_based_coloc_analysis_tools.py::run_obca',
+    'obj_based_coloc_analysis_tools.py::coloc_significance',
+    'obj_based_coloc_analysis_tools.py::_make_obca_dialog_class',
+    'obj_based_coloc_analysis_tools.py::_create_action_buttons',
+    'obj_based_coloc_analysis_tools.py::_create_section_layout',
+    'obj_based_coloc_analysis_tools.py::_create_selection_buttons',
+    'obj_based_coloc_analysis_tools.py::select_all',
+    'obj_based_coloc_analysis_tools.py::deselect_all',
+    'obj_based_coloc_analysis_tools.py::get_selected_methods',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
