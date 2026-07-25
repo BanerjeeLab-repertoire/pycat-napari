@@ -1,3 +1,20 @@
+## [1.6.336] - 2026-07-24
+### Changed — **Condensate wetting physics moved out of the masking module to its rightful home (label_mask_split, step 1 — the physics relocation).**
+`neck_geometry` and `fit_elastocapillary_length` are fusion/coalescence measurements — neck radius, dihedral
+angle, elastocapillary length, the lobe-residual elasticity signature, and the size-transition fit — that could
+reach a Methods section. They lived in `label_and_mask_tools.py`, where nobody looking for the fusion physics
+(or writing it up) would find them.
+
+- Moved **VERBATIM** to new `toolbox/condensate_physics/wetting.py`, beside the rest of the material-state work
+  (moduli, MSD, relaxation, survival, coarsening…). No number changed — pinned identical by
+  `tests/test_group_c_geometry.py` (the neck-geometry sphere relation and the elastocapillary fit), which
+  passes unmodified through the re-export.
+- `label_and_mask_tools.py` re-exports both public names, so every existing caller (`lm.neck_geometry`,
+  `lm.fit_elastocapillary_length`) is unchanged; the masking module drops ~290 lines of unrelated physics.
+- The `_DELIBERATE` move is recorded in `test_no_FUNCTION_has_vanished` with its reason. Full
+  `pytest -m "core or base"` green. Remaining label_mask_split steps: split the masking half into
+  `masks/morphology.py` · `splitting.py` · `measurement.py` (separate commits).
+
 ## [1.6.335] - 2026-07-24
 ### Added — **Navigator execution-adapter layer, Phase 3 (cont.): cell analysis — the step that measures what segmentation produced, chained.**
 The real cell chain a guided run computes is *segment, then measure*. 1.6.334 shipped the segmentation adapter;

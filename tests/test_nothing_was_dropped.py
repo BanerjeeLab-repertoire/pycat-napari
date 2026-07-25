@@ -1091,6 +1091,15 @@ _DELIBERATE = {
     # failure. Pinned by test_metadata_merge (the dispatcher routes through the merge; precedence preserved;
     # all 134 metadata/pixel-size tests pass unmodified).
     'metadata_extract.py::extract_metadata',
+
+    # label_mask_split (2026-07-24): condensate WETTING physics does not belong in a masking module.
+    # `neck_geometry` + `fit_elastocapillary_length` (and its nested `_sigmoid`) are fusion/coalescence
+    # measurements — they MOVED VERBATIM to `toolbox/condensate_physics/wetting.py`, beside the rest of the
+    # material-state work, and `label_and_mask_tools` re-exports the two public names (the old import still
+    # resolves). No number changed — pinned identical by `tests/test_group_c_geometry.py`.
+    'label_and_mask_tools.py::neck_geometry',
+    'label_and_mask_tools.py::fit_elastocapillary_length',
+    'label_and_mask_tools.py::_sigmoid',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
