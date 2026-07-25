@@ -1,3 +1,19 @@
+## [1.6.337] - 2026-07-24
+### Changed — **The file loader's busy/progress plumbing moved to its own module (file_io_decomposition, step: progress).**
+`_run_with_busy_progress` (the modal off-thread busy dialog the one-time CZI/IMS frame-index parse runs behind)
+was 113 lines of Qt plumbing inside the 1,662-line `file_io.py`.
+
+- Extracted **VERBATIM** to new `file_io/progress.py` as a `_ProgressMixin`; `FileIOClass` now inherits it, so
+  every `self._run_with_busy_progress(...)` call site (in the stack openers) is unchanged. The one class-level
+  reference (`FileIOClass._orphan_load_threads`, the cancel-orphan list) became `type(self)._orphan_load_threads`
+  — the same concrete class, mixin-safe, avoiding a circular import. All Qt imports stay function-local, so the
+  new module imports headless.
+- Load path unchanged: the CZI/IMS streaming tests (which drive this path) pass. `file_io.py` drops to 1,548
+  lines. Full `pytest -m "core or base"` green.
+- **PyQt5-import status (the step's question):** file_io.py still imports PyQt5 at module scope (lines 52–53) —
+  the dialog-building methods use it — so the architectural "no GUI import" win needs the `dialogs.py`
+  extraction (the next step), not this one. Recorded, not claimed.
+
 ## [1.6.336] - 2026-07-24
 ### Changed — **Condensate wetting physics moved out of the masking module to its rightful home (label_mask_split, step 1 — the physics relocation).**
 `neck_geometry` and `fit_elastocapillary_length` are fusion/coalescence measurements — neck radius, dihedral

@@ -53,6 +53,7 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QCheckBox, QRadioButto
 from PyQt5.QtGui import QFont
 from pycat.file_io.dialogs import ChannelAssignmentDialog, LayerDataframeSelectionDialog  # moved from here, 1.6.146
 from pycat.file_io.stack_openers import _StackOpenersMixin  # format openers moved out, 1.6.146
+from pycat.file_io.progress import _ProgressMixin  # busy/progress plumbing moved out (file_io_decomposition)
 from pycat.file_io.lazy_sources import _ZarrTYX  # moved out 1.6.146; re-exported  # noqa: F401
 from pycat.file_io.naming import (_lazy_contrast_limits, _tiff_pixel_size_um,  # moved out 1.6.146; re-exported
                                  _ome_pixel_size_um, _lazy_backing_label)  # noqa: F401
@@ -248,7 +249,7 @@ from pycat.file_io.napari_adapter import EAGER_DIAMETER_LAYERS  # noqa: F401
 
 
 
-class FileIOClass(_StackOpenersMixin):
+class FileIOClass(_ProgressMixin, _StackOpenersMixin):
     """
     A class for handling file input/output operations related to image analysis, including
     opening images and masks, assigning channels to opened images, and saving analysis results.
@@ -1030,120 +1031,6 @@ class FileIOClass(_StackOpenersMixin):
             _si(info_msg)
         return _layer
 
-
-    def _run_with_busy_progress(self, fn, title, text, cancellable=True):
-        """Run blocking ``fn()`` OFF the Qt thread behind a modal busy dialog; return its result (or
-        re-raise). Raises :class:`StackLoadCancelled` on "Give up". Headless → plain sync call.
-
-        Two things the naive version got wrong (both seen opening a streaming CZI): the dialog must
-        CLOSE when the work finishes — the finish handler is a main-thread ``QObject`` slot ending a
-        ``QEventLoop``, not a worker-thread plain function whose ``dlg.reset()`` never returns the
-        modal loop; and "Give up" must FREE the UI — the JVM call can't be interrupted, so cancel
-        detaches (drops the orphan's result) rather than ``thread.wait()`` blocking (the X-out hang).
-        """
-        try:
-            from PyQt5.QtCore import (QThread, QObject, pyqtSignal, pyqtSlot, Qt,
-                                      QTimer, QEventLoop)
-            from PyQt5.QtWidgets import QProgressDialog
-        except Exception:
-            return fn()
-
-        box = {}
-
-        class _Worker(QObject):
-            finished = pyqtSignal()
-
-            def run(self):
-                try:
-                    box['value'] = fn()
-                except BaseException as e:   # reported back to the caller's thread
-                    box['error'] = e
-                finally:
-                    self.finished.emit()
-
-        thread = QThread()
-        worker = _Worker()
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-
-        parent = None
-        try:
-            _win = getattr(self.viewer, 'window', None)
-            parent = getattr(_win, '_qt_window', None)
-        except Exception:
-            parent = None
-
-        # (min, max) = (0, 0) → indeterminate/busy bar. A "Give up" button lets the user abandon a
-        # long parse; label None removes it.
-        dlg = QProgressDialog(text, "Give up" if cancellable else None, 0, 0, parent)
-        dlg.setWindowTitle(title)
-        dlg.setWindowModality(Qt.WindowModal)
-        dlg.setMinimumDuration(0)
-        dlg.setAutoClose(False)
-        dlg.setAutoReset(False)
-
-        loop = QEventLoop()
-        _secs = [0]
-        _state = {'cancelled': False}
-
-        # Elapsed-seconds counter (main thread): the work is opaque (no percentage), so a counting-up
-        # "…Ns" is what tells the user it is working, not hung.
-        def _tick():
-            _secs[0] += 1
-            try:
-                dlg.setLabelText(f"{text}\n\n… {_secs[0]}s elapsed")
-            except Exception:
-                pass
-        _timer = QTimer()
-        _timer.setInterval(1000)
-        _timer.timeout.connect(_tick)
-
-        class _Bridge(QObject):
-            @pyqtSlot()
-            def on_finished(self):          # runs on the MAIN thread (queued) — closes the dialog
-                _state['done'] = True
-                _timer.stop()
-                thread.quit()
-                if loop.isRunning():
-                    loop.quit()
-        bridge = _Bridge()
-        worker.finished.connect(bridge.on_finished)
-
-        def _on_cancel():
-            # `QProgressDialog.close()` (below, on NORMAL completion) also emits `canceled` — ignore
-            # that, or every successful open would report itself cancelled. Only a real Give-up click,
-            # before the work finishes, counts.
-            if _state.get('done'):
-                return
-            _state['cancelled'] = True
-            _timer.stop()
-            if loop.isRunning():
-                loop.quit()
-        if cancellable:
-            dlg.canceled.connect(_on_cancel)
-
-        _timer.start()
-        thread.start()
-        dlg.show()
-        loop.exec_()                 # nested loop; the window keeps painting until quit()
-        dlg.close()
-
-        if _state['cancelled']:
-            # Detach: keep the thread + its main-thread bridge alive (a QThread GC'd mid-run crashes)
-            # until the blocking call returns. bridge.on_finished then quits the thread; thread.finished
-            # drops the references. The result is discarded, the UI is free NOW.
-            orphans = getattr(FileIOClass, '_orphan_load_threads', None)
-            if orphans is None:
-                orphans = FileIOClass._orphan_load_threads = []
-            entry = (thread, worker, bridge)
-            orphans.append(entry)
-            thread.finished.connect(lambda e=entry: e in orphans and orphans.remove(e))
-            raise StackLoadCancelled()
-
-        thread.wait()
-        if 'error' in box:
-            raise box['error']
-        return box.get('value')
 
     # ── Shared post-load logic ───────────────────────────────────────────────
 
