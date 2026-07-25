@@ -18,9 +18,15 @@
 > Qt-bound load controller, so the "no GUI import" win needs ALL the Qt dialogs/pickers extracted, not just
 > these two.** Recorded, not claimed.
 >
-> **Remaining:** `session_actions.py` (save_and_clear_all), `loading.py` (per-file helpers), each preserving
-> the load contract exactly. The PyQt5 drop is a larger, separate effort (the file's file-pickers and
-> message-boxes are the bulk of its Qt use).
+> **Step (session_actions.py) — DONE, 1.6.339.** `save_and_clear_all` (182 lines — Save-and-Clear dialog +
+> session write + repository clear) moved VERBATIM to a `_SessionActionsMixin` in `file_io/session_actions.py`
+> (Qt-bound, so its own module, not the Qt-free session.py); `FileIOClass` inherits it, so
+> `file_io.save_and_clear_all(viewer)` is unchanged. Save-path tests pass; file_io.py → 1,231 lines (from
+> 1,662 across the three steps). Recorded in `_DELIBERATE`.
+>
+> **Remaining:** `loading.py` (per-file helpers — the load-contract-critical step: preserve the exact fire
+> order of the pixel-size gate / provenance / tags / sidecar / channel identity). The PyQt5 drop remains a
+> larger, separate effort (the file-pickers and message-boxes are the bulk of file_io's Qt use).
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. **1,662 lines, 44
 functions**, and — notably — **82 test files** reference it. That is the strongest characterization net

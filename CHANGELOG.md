@@ -1,3 +1,16 @@
+## [1.6.339] - 2026-07-24
+### Changed — **Save-and-Clear moved out of the file loader to its own session-action module (file_io_decomposition, step: session_actions).**
+`save_and_clear_all` (182 lines — the Save-and-Clear dialog, the session write, and the repository/viewer
+clear) is a session action, not file I/O.
+
+- Moved **VERBATIM** to a `_SessionActionsMixin` in new `file_io/session_actions.py`; `FileIOClass` inherits it,
+  so `file_io.save_and_clear_all(viewer)` (called from the menu and `ui_modules`) is unchanged. It is Qt-bound
+  (a save dialog), so it lives in its own module rather than the Qt-free `session.py`.
+- Save path unchanged: the session-write / manifest / no-silent-swallow tests pass. `file_io.py` drops 1,412 →
+  1,231 lines (down from 1,662 across the three extraction steps). The move is recorded in `_DELIBERATE`.
+- Full `pytest -m "core or base"` green. Remaining file_io step: `loading.py` (per-file helpers), preserving
+  the load contract exactly.
+
 ## [1.6.338] - 2026-07-24
 ### Changed — **The channel-naming dialog flow moved out of the file loader (file_io_decomposition, step: dialogs).**
 `assign_channels_in_dialog` (120 lines — the confidence gate, the naming dialog, and the recall/remember of

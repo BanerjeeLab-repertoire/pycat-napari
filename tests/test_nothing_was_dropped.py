@@ -1105,6 +1105,12 @@ _DELIBERATE = {
     # `_DialogsMixin` in `file_io/dialogs.py`, co-located with the `ChannelAssignmentDialog` it drives.
     # `FileIOClass` inherits the mixin, so `self.assign_channels_in_dialog(...)` is unchanged. Verbatim move.
     'file_io.py::assign_channels_in_dialog',
+
+    # file_io_decomposition (2026-07-24): `save_and_clear_all` (the Save-and-Clear dialog + session write +
+    # repository clear) is a session action, not file I/O — moved VERBATIM into a `_SessionActionsMixin` in
+    # `file_io/session_actions.py` (Qt-bound, so not in the Qt-free session.py). `FileIOClass` inherits it, so
+    # `file_io.save_and_clear_all(viewer)` (the menu + ui_modules call sites) is unchanged.
+    'file_io.py::save_and_clear_all',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom
