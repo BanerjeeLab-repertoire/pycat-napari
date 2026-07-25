@@ -1366,6 +1366,39 @@ _DELIBERATE = {
     'ui_modules.py::section',
     'ui_modules.py::set_expanded',
     'ui_modules.py::setup_ui',
+
+    # ui_decomposition increment 3 (2026-07-25): ToolboxFunctionsUI moved VERBATIM to toolbox_functions_ui.py
+    # (ui_modules.py is now a thin re-export shim, 3,266 -> 133 lines); ui_modules re-exports it. These are its
+    # methods, now living in toolbox_functions_ui.py.
+    'ui_modules.py::_add_measure_line',
+    'ui_modules.py::_add_open_2d_image',
+    'ui_modules.py::_add_plotting_widget',
+    'ui_modules.py::_add_pre_process',
+    'ui_modules.py::_add_run_calibration_correction',
+    'ui_modules.py::_add_save_and_clear',
+    'ui_modules.py::_arm_line_drawing',
+    'ui_modules.py::_confirm_clear',
+    'ui_modules.py::_count_real_lines',
+    'ui_modules.py::_diameter_layers',
+    'ui_modules.py::_do_clear',
+    'ui_modules.py::_do_draw',
+    'ui_modules.py::_do_measure',
+    'ui_modules.py::_has_clearable',
+    'ui_modules.py::_make_dock_wrapper',
+    'ui_modules.py::_measure_state',
+    'ui_modules.py::_mk_slider',
+    'ui_modules.py::_on_apply',
+    'ui_modules.py::_on_load',
+    'ui_modules.py::_on_measure_line',
+    'ui_modules.py::_on_persist_toggled',
+    'ui_modules.py::_on_preprocess',
+    'ui_modules.py::_on_save_and_clear',
+    'ui_modules.py::_on_slider',
+    'ui_modules.py::_on_toggle',
+    'ui_modules.py::_relabel',
+    'ui_modules.py::_row',
+    'ui_modules.py::_store_params',
+    'ui_modules.py::_wrapper',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

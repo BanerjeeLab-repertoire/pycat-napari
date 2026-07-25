@@ -1,3 +1,18 @@
+## [1.6.369] - 2026-07-25
+### Changed — **`ui_modules.py` is now a thin re-export shim — ui_decomposition Part 1 COMPLETE.**
+The last class in the file, the 686-line `ToolboxFunctionsUI` (the main toolbox panel), moves **verbatim** to
+`ui/toolbox_functions_ui.py`.
+
+- `ui_modules.py` drops **816 → 133 lines** — from the **3,266-line** file that was the largest in the project
+  (before increment 1) to a thin shim that just re-exports `BaseUIClass`, the `AnalysisMethodsUI` hierarchy,
+  `ToolboxFunctionsUI`, and `MenuManager`. Every `from pycat.ui.ui_modules import …` keeps working; no behaviour
+  changed.
+- `ToolboxFunctionsUI` references nothing else in `ui_modules` (clean move, no cycle) — it inherits `BaseUIClass`
+  from the `base_ui.py` leaf plus its six widget mixins, all imported directly in the new module.
+- Contract tests updated (`test_ui_structure` now checks each of the three UI class groups in its new home +
+  re-export; 29 more methods in `_DELIBERATE`). Full `pytest -m "core or base"` green (1991 passed).
+  **Part 1 done; remaining: Part 2 (`menu_manager.py`, 2,344 lines).**
+
 ## [1.6.368] - 2026-07-25
 ### Changed — **Extracted the `AnalysisMethodsUI` hierarchy to its own module (ui_decomposition, increment 2).**
 The condensate / colocalization / general / time-series / fibril analysis panels — `AnalysisMethodsUI` and all

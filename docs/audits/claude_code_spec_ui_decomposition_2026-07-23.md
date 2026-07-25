@@ -16,6 +16,10 @@
 > AnalysisMethodsUI AND AnalysisMethodsUI references TimeSeriesCondensateUI (the analysis switcher) — a mutual
 > dep; one module is cycle-free. `ui_modules.py` 2,410 → **816 lines** (from 3,266). **Remaining: ToolboxFunctionsUI
 > → toolbox_functions_ui.py (Part 1 final), then Part 2 (menu_manager.py).**
+>
+> **✅ Part 1 COMPLETE — increment 3, 1.6.369.** `ToolboxFunctionsUI` (686 lines) → `toolbox_functions_ui.py`
+> (verbatim, clean move — references nothing else in ui_modules). **`ui_modules.py` is now a 133-line thin
+> re-export shim** (from 3,266). Only Part 2 (`menu_manager.py`, 2,344 lines) remains.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. All six big science
 files are now thin shims. These two are what remain of the decomposition programme — and `ui_modules.py`

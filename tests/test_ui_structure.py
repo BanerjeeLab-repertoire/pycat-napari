@@ -132,11 +132,6 @@ def test_core_ui_classes_present():
     preserve these public class names (or this test is the reminder to update
     the contract deliberately)."""
     ui_src = _read_ui_source()
-    classes = {n.name for n in ast.walk(ast.parse(ui_src)) if isinstance(n, ast.ClassDef)}
-    for required in ("ToolboxFunctionsUI",):
-        assert required in classes, (
-            f"Class '{required}' missing from ui_modules.py — if this move was "
-            f"intentional, update this test to reflect the new structure.")
     import pathlib as _pl
     _ui_dir = _pl.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
 
@@ -154,6 +149,8 @@ def test_core_ui_classes_present():
     # The AnalysisMethodsUI hierarchy -> analysis_methods_ui.py (increment 2).
     for _c in ('AnalysisMethodsUI', 'CondensateAnalysisUI'):
         _moved_and_reexported(_c, 'analysis_methods_ui.py', 'pycat.ui.analysis_methods_ui')
+    # ToolboxFunctionsUI -> toolbox_functions_ui.py (increment 3; ui_modules is now a thin re-export shim).
+    _moved_and_reexported('ToolboxFunctionsUI', 'toolbox_functions_ui.py', 'pycat.ui.toolbox_functions_ui')
     # MenuManager was EXTRACTED to menu_manager.py (1.6.149 decomposition, Phase 2). The public name
     # must stay reachable via ui_modules — CentralManager and the smoke tests import it from there — so
     # this pins both halves: defined in its new home AND re-exported from the old one.
