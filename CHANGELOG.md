@@ -1,3 +1,20 @@
+## [1.6.340] - 2026-07-24
+### Changed — **The per-file load helpers moved to their own module; the file_io.py decomposition's four concerns are now extracted (file_io_decomposition, step: loading).**
+`_add_image_or_mask_single` (image-or-mask? load it) and `_open_image_auto_single` (2D-or-stack? route it) —
+the per-file workhorses the public `add_image_or_mask` / `open_image_auto` entry points call once per file.
+
+- Moved **VERBATIM** to a `_LoadingMixin` in new `file_io/loading.py`; `FileIOClass` inherits it, so the public
+  entry points (which stay in file_io as orchestration) call `self._..._single(...)` unchanged. No Qt — these
+  route to `open_image` and delegate the pixel/metadata work to the format openers and `open_2d_image`, whose
+  fire order (pixel-size gate → provenance → tags → sidecar → channel identity) is untouched.
+- Load path verified: the scene / session-threading / CZI / one-plane / axis / naming tests pass. `file_io.py`
+  drops **1,231 → 1,061 lines — 601 fewer than the 1,662 it started at**, across the four extraction steps
+  (progress, dialogs, session_actions, loading). Recorded in `_DELIBERATE`.
+- Full `pytest -m "core or base"` green. file_io.py now holds the public entry points + orchestration + the
+  module-level naming helpers; the four Qt/progress/session/loading concerns each live in a focused module.
+  (The PyQt5-import drop remains a separate, larger effort — the file's file-pickers/message-boxes are the bulk
+  of its remaining Qt use.)
+
 ## [1.6.339] - 2026-07-24
 ### Changed — **Save-and-Clear moved out of the file loader to its own session-action module (file_io_decomposition, step: session_actions).**
 `save_and_clear_all` (182 lines — the Save-and-Clear dialog, the session write, and the repository/viewer

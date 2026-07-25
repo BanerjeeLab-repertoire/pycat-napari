@@ -24,9 +24,19 @@
 > `file_io.save_and_clear_all(viewer)` is unchanged. Save-path tests pass; file_io.py → 1,231 lines (from
 > 1,662 across the three steps). Recorded in `_DELIBERATE`.
 >
-> **Remaining:** `loading.py` (per-file helpers — the load-contract-critical step: preserve the exact fire
-> order of the pixel-size gate / provenance / tags / sidecar / channel identity). The PyQt5 drop remains a
-> larger, separate effort (the file-pickers and message-boxes are the bulk of file_io's Qt use).
+> **Step (loading.py) — DONE, 1.6.340.** The per-file load helpers `_add_image_or_mask_single` +
+> `_open_image_auto_single` moved VERBATIM to a `_LoadingMixin` in `file_io/loading.py`; the public entry
+> points stay in file_io as orchestration and call `self._..._single(...)` unchanged. No Qt; the load
+> fire-order (pixel-size gate → provenance → tags → sidecar → channel identity, in `open_2d_image` / the
+> openers, which are untouched) is preserved by construction. Load-path tests pass.
+>
+> **● The four concerns are extracted.** file_io.py: **1,662 → 1,061 lines** across progress / dialogs /
+> session_actions / loading, each a focused module, each move verbatim + guard-checked + load/save-path
+> verified. file_io.py now holds the public entry points + orchestration + the module-level naming helpers
+> (`derive_layer_name`, `_clean_filename_token` — deliberately kept, tests AST-parse them there).
+> **Remaining (separate, larger effort, NOT this spec's core):** dropping file_io.py's module-scope PyQt5 —
+> its `QFileDialog` (file pickers) and `QMessageBox` (load prompts) are pervasive and would each need
+> extracting; the decomposition made the file smaller and better-factored but it stays a Qt-bound controller.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. **1,662 lines, 44
 functions**, and — notably — **82 test files** reference it. That is the strongest characterization net
