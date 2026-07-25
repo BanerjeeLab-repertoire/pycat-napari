@@ -1232,6 +1232,23 @@ _DELIBERATE = {
     'data_qc_tools.py::qc_snr',               # -> noise.py
     'data_qc_tools.py::qc_nyquist',           # -> sampling.py
     'data_qc_tools.py::qc_time_sampling',
+
+    # data_qc_decomposition finish (2026-07-25): the coupled optical/stability checks + biological check +
+    # runner moved VERBATIM to their family modules; `_shift_normalise` (shared by drift/vibration/chromatic)
+    # went to `_base`. data_qc_tools.py is now a thin re-export shim.
+    'data_qc_tools.py::_shift_normalise',       # -> _base.py
+    'data_qc_tools.py::qc_vignetting',          # -> illumination.py
+    'data_qc_tools.py::qc_ghosting',
+    'data_qc_tools.py::qc_spherical_aberration',  # -> aberration.py
+    'data_qc_tools.py::_axial_sharp',             # nested in qc_spherical_aberration
+    'data_qc_tools.py::qc_chromatic',
+    'data_qc_tools.py::qc_photobleaching',      # -> stability.py
+    'data_qc_tools.py::qc_drift',
+    'data_qc_tools.py::_feature_scale',           # nested in qc_drift
+    'data_qc_tools.py::qc_vibration',
+    'data_qc_tools.py::_conc',                    # nested in qc_vibration
+    'data_qc_tools.py::qc_biological_objects',  # -> biological.py
+    'data_qc_tools.py::run_full_qc',            # -> runner.py
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

@@ -1,8 +1,15 @@
 # Claude Code spec — Decompose `data_qc_tools.py` by check family
 
-> **◐ STATUS — report @1.6.347, shared `_base` @1.6.348, and the four self-contained families
-> (exposure/focus/noise/sampling) @1.6.349 DONE; module 1,949 → 1,125 lines. Remaining: illumination,
-> aberration, stability (the coupled optical/stability checks) + the runner.**
+> **✅ DONE — 1.6.347 (report) → 1.6.348 (`_base`) → 1.6.349 (exposure/focus/noise/sampling) → 1.6.350
+> (illumination/aberration/stability/biological + runner). `data_qc_tools.py` is a 25-line thin re-export
+> shim; every check lives by family in `toolbox/data_qc/`, with presentation (`report.py`) and orchestration
+> (`runner.py`) separated from the science. Every function moved VERBATIM; cry-wolf holds; every verdict and
+> did-it-run flag pinned by the QC net; the full public surface is re-exported (all consumers unchanged).**
+>
+> **Finish — illumination/aberration/stability/biological + runner — DONE, 1.6.350.** The coupled checks moved
+> VERBATIM; `_shift_normalise` (the one cross-family primitive, shared by drift/vibration/chromatic) went to
+> `_base`. `qc_ghosting` grouped with vignetting in `illumination.py` (both are `_mean_frame` field artifacts);
+> `qc_biological_objects` got its own `biological.py` (it is not one of the seven acquisition families).
 >
 > **Step 2b — exposure/focus/noise/sampling — DONE, 1.6.349.** The four metric families are self-contained
 > (no cross-family calls; each uses only its `_base` helpers), so they moved VERBATIM to `data_qc/<family>.py`

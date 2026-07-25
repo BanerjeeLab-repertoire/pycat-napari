@@ -123,3 +123,29 @@ def _not_applicable(name, why):
     """
     return dict(name=name, tier='core', status='na', value=None, unit='',
                 headline='not applicable to this data', how=why, good='', diag=None)
+
+
+# ── shared registration-shift normaliser (used by drift / vibration / chromatic checks) ──
+def _shift_normalise(frame):
+    """Strip the intensity scale before a phase correlation, so BRIGHTNESS cannot look like MOTION.
+
+    ``phase_cross_correlation`` is supposed to be intensity-robust — it works on the normalised
+    cross-power spectrum. **It is not robust enough when the frame is globally scaled**, because
+    the DC term and the noise floor move together and the sub-pixel peak fit is biased.
+
+    Measured: a **photobleaching** stack (which gets dimmer every frame and **does not move at
+    all**) drove ``qc_vibration`` to **p = 0.010, status "bad"** — a confident report of a
+    periodic vibration source. The shift trace was tracking the exponential intensity decay,
+    which is smooth and monotonic, and therefore highly concentrated in the low-frequency bins:
+    exactly the signature the permutation test looks for.
+
+    **The user is sent to check their pumps and fans, and the stage is fine.**
+
+    Z-scoring each frame removes the global scale and offset, leaving only the structure that a
+    registration should key on.
+    """
+    f = np.asarray(frame, dtype=float)
+    sd = float(f.std())
+    if not np.isfinite(sd) or sd <= 0:
+        return f - float(f.mean())
+    return (f - float(f.mean())) / sd

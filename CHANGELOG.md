@@ -1,3 +1,20 @@
+## [1.6.350] - 2026-07-25
+### Changed — **`data_qc_tools.py` is now a thin shim — the decomposition is complete (data_qc_decomposition, DONE).**
+The coupled optical/stability checks, the biological check, and the orchestrator move out; the 1,949-line module
+becomes a 25-line re-export shim. Checks now live by family in `toolbox/data_qc/`.
+
+- **`data_qc/illumination.py`** — `qc_vignetting`, `qc_ghosting` (flat-field + stray-light field artifacts).
+- **`data_qc/aberration.py`** — `qc_spherical_aberration` (+ nested `_axial_sharp`), `qc_chromatic`.
+- **`data_qc/stability.py`** — `qc_photobleaching`, `qc_drift` (+ `_feature_scale`), `qc_vibration` (+ `_conc`).
+- **`data_qc/biological.py`** — `qc_biological_objects` (surfaced separately from the acquisition checks).
+- **`data_qc/runner.py`** — `run_full_qc`, importing each check from its family module.
+- `_shift_normalise` (the registration-shift normaliser shared by drift / vibration / chromatic) went to
+  `data_qc/_base.py` — the one genuine cross-family primitive.
+- Every function moved **VERBATIM** — no re-tuned thresholds. `data_qc_tools.py` re-exports the full historical
+  surface (`1,125 → 25 lines`), so the QC dashboard, gallery, navigator quality-gate and reliability index are
+  unchanged. Cry-wolf holds; every verdict **and** did-it-run flag pinned by the QC net; full
+  `pytest -m "core or base"` green. **`data_qc_tools` decomposition complete.**
+
 ## [1.6.349] - 2026-07-25
 ### Changed — **Four self-contained QC check families split out (data_qc_decomposition, step 2b).**
 The metric checks are genuinely independent, so each family moves to its own module — the low-risk part of the split.
