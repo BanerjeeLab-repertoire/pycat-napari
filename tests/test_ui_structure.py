@@ -133,11 +133,22 @@ def test_core_ui_classes_present():
     the contract deliberately)."""
     ui_src = _read_ui_source()
     classes = {n.name for n in ast.walk(ast.parse(ui_src)) if isinstance(n, ast.ClassDef)}
-    for required in ("BaseUIClass", "ToolboxFunctionsUI", "AnalysisMethodsUI",
-                     "CondensateAnalysisUI"):
+    for required in ("ToolboxFunctionsUI", "AnalysisMethodsUI", "CondensateAnalysisUI"):
         assert required in classes, (
             f"Class '{required}' missing from ui_modules.py — if this move was "
             f"intentional, update this test to reflect the new structure.")
+    # BaseUIClass was EXTRACTED to base_ui.py (ui_decomposition) as a leaf module so the subclass modules
+    # can import it without a cycle. Like MenuManager below, pin both halves: defined in its new home AND
+    # re-exported from ui_modules (CentralManager and every UI subclass reach it via ui_modules).
+    import pathlib as _pl
+    base_src = (_pl.Path(__file__).resolve().parents[1] / 'src' / 'pycat' / 'ui'
+                / 'base_ui.py').read_text(encoding='utf-8')
+    assert 'class BaseUIClass' in base_src, "BaseUIClass missing from base_ui.py"
+    _base_imports = {a.name for n in ast.walk(ast.parse(ui_src))
+                     if isinstance(n, ast.ImportFrom) and n.module == 'pycat.ui.base_ui'
+                     for a in n.names}
+    assert 'BaseUIClass' in _base_imports, (
+        "ui_modules.py must re-export BaseUIClass so `from pycat.ui.ui_modules import BaseUIClass` works")
     # MenuManager was EXTRACTED to menu_manager.py (1.6.149 decomposition, Phase 2). The public name
     # must stay reachable via ui_modules — CentralManager and the smoke tests import it from there — so
     # this pins both halves: defined in its new home AND re-exported from the old one.

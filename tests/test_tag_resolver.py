@@ -440,8 +440,10 @@ def test_the_dropdown_builder_accepts_a_binding():
     import ast
     import pathlib as _pathlib
 
+    # create_layer_dropdown is a BaseUIClass method, which moved to ui/base_ui.py (ui_decomposition);
+    # ui_modules re-exports BaseUIClass. Read the base_ui source where the method now lives.
     source = (_pathlib.Path(__file__).resolve().parents[1]
-              / "src" / "pycat" / "ui" / "ui_modules.py").read_text(encoding='utf-8')
+              / "src" / "pycat" / "ui" / "base_ui.py").read_text(encoding='utf-8')
     tree = ast.parse(source)
 
     builder = None

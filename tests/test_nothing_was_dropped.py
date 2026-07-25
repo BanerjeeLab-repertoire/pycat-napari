@@ -1293,6 +1293,36 @@ _DELIBERATE = {
     # VERBATIM (test_ui_builder_split's _ts_cellpose_worker contract + a construction smoke pin it).
     'ts_cellpose_tools.py::_add_run_ts_cellpose',   # decomposed into widget factories + dispatcher + helpers
     'ts_cellpose_tools.py::_on_run',                # -> _ts_cp_run + the segmentation-path functions
+
+    # ui_decomposition increment 1 (2026-07-25): BaseUIClass + the scroll-guard helpers moved VERBATIM to
+    # ui/base_ui.py (a leaf module, so subclass modules import it without a cycle); ui_modules re-exports them.
+    # These are BaseUIClass's methods + the moved module-level helpers, now living in base_ui.py.
+    'ui_modules.py::_add_widget_to_layout_or_dock',
+    'ui_modules.py::_add_workflow_header',
+    'ui_modules.py::_apply_scroll_guard',
+    'ui_modules.py::_consume_step_label',
+    'ui_modules.py::_disconnect',
+    'ui_modules.py::_disconnect_on_destroy',
+    'ui_modules.py::_hint_matches',
+    'ui_modules.py::_layer_row',
+    'ui_modules.py::_mark_user_picked',
+    'ui_modules.py::_on_inserted',
+    'ui_modules.py::_on_inserted_with_circle_refresh',
+    'ui_modules.py::_on_px',
+    'ui_modules.py::_record',
+    'ui_modules.py::_relax_min_widths',
+    'ui_modules.py::_stage_step',
+    'ui_modules.py::_update_circle',
+    'ui_modules.py::_wheel_guard',
+    'ui_modules.py::add_text_label',
+    'ui_modules.py::bind_dropdown',
+    'ui_modules.py::clear_dock',
+    'ui_modules.py::create_layer_dropdown',
+    'ui_modules.py::eventFilter',
+    'ui_modules.py::guard_wheel',
+    'ui_modules.py::on_general_button_clicked',
+    'ui_modules.py::update_dropdown_items',
+    'ui_modules.py::update_tool',
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

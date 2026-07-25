@@ -1,3 +1,22 @@
+## [1.6.367] - 2026-07-25
+### Changed — **Extracted `BaseUIClass` to its own leaf module (ui_decomposition, increment 1).**
+`ui/ui_modules.py` was the largest file in the project (3,266 lines). This moves its foundation — the
+761-line `BaseUIClass` that every PyCAT UI class inherits — plus the scroll-guard helper cluster
+(`_WheelScrollGuard`, `_wheel_guard`, `guard_wheel`, `_relax_min_widths`, `_apply_scroll_guard`) to a new
+`ui/base_ui.py`, **verbatim**.
+
+- **`base_ui.py` is a leaf module** (imports only Qt / napari / `debug_log`), so the subclass modules can
+  import `BaseUIClass` without an import cycle back through `ui_modules`. That is why the base moved **first**,
+  deviating from the spec's "move the base last" ordering (documented in the module docstring).
+- `ui_modules.py` drops **3,266 → 2,410 lines**; it re-imports `BaseUIClass` (+ the helpers) right before the
+  classes that inherit it and re-exports them, so `from pycat.ui.ui_modules import BaseUIClass` / `guard_wheel`
+  (used by several mixins and toolbox UIs) keep working unchanged. No behaviour changed.
+- Contract tests updated to the new structure: `test_ui_structure` pins `BaseUIClass` in `base_ui.py` + its
+  re-export (mirroring the MenuManager precedent); `test_tag_resolver`'s dropdown-binding check reads
+  `base_ui.py` where `create_layer_dropdown` now lives. Full `pytest -m "core or base"` green (1991 passed).
+  Remaining: `ToolboxFunctionsUI`, the `AnalysisMethodsUI` family, and `TimeSeriesCondensateUI` → their own
+  modules; then `menu_manager.py` (Part 2).
+
 ## [1.6.366] - 2026-07-25
 ### Changed — **Decomposed the 520-line `_add_lazy_preprocess_stack` — its 358-line `_on_build` was the longest handler in the project (ui_builder_split 5 of 5 — COMPLETE).**
 Lazy zarr-backed stack preprocessing / background removal with a caching layer and parallel workers. Pure Qt +
