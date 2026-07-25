@@ -313,3 +313,67 @@ def weighted_tau_calculation(image1, image2, roi_mask):
     weighted_tau, weighted_p = scipy.stats.weightedtau(image1.flatten(), image2.flatten())
 
     return np.round(weighted_tau, 4), np.round(weighted_p, 4)
+
+
+def li_intensity_correlation(image1, image2, roi_mask):
+    """
+    Calculates Li's Intensity Correlation Analysis (ICA) coefficient [li_ica_1]_, which quantifies the pixel intensity relationship between two images,
+    particularly useful for co-localization studies in bioimaging, optionally within a region of interest (ROI).
+
+    Parameters
+    ----------
+    image1 : numpy.ndarray
+        The first image array.
+    image2 : numpy.ndarray
+        The second image array.
+    roi_mask : numpy.ndarray, optional
+        A boolean mask indicating the region of interest. If None, the entire image is considered.
+
+    Returns
+    -------
+    icq : float
+        The Intensity Correlation Quotient (ICQ) rounded to four decimal places.
+    p_val : float
+        The p-value associated with the ICQ, calculated using the z-score for a two-tailed test rounded to four decimal places.
+    tuple
+        The Intensity Correlation Quotient (ICQ) and its associated p-value, both rounded to four decimal places.
+
+    Notes
+    -----
+    Li's ICA is particularly effective in bioimaging for assessing the degree of co-localization between different fluorescent markers.
+    The ICQ provides a normalized measure of correlation, with values above zero indicating positive correlation.
+
+    References
+    ----------
+    .. [li_ica_1] Li, Q., Lau, A., Morris, T. J., Guo, L., Fordyce, C. B., & Stanley, E. F. (2004). 
+        A syntaxin 1, Galpha(o), and N-type calcium channel complex at a presynaptic nerve terminal: analysis by quantitative immunocolocalization. 
+        Journal of Neuroscience, 24(16), 4070-4081. doi: 10.1523/JNEUROSCI.0346-04.2004
+        https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6729428/
+    """
+    if roi_mask is not None:
+        # Apply the ROI mask to both images if provided.
+        image1 = image1[roi_mask]
+        image2 = image2[roi_mask]
+    
+    # Calculate the product of differences from mean, which is a key step in Li's ICA.
+    ica_product = (image1 - np.mean(image1)) * (image2 - np.mean(image2))
+    
+    # Perform a non-parametric sign test on the product to determine positive and negative correlations.
+    ica_nps_test = np.sign(ica_product)
+    
+    # Count the number of positive and negative products for the ICQ calculation.
+    N_pos_px = np.sum(ica_nps_test > 0)
+    N_neg_px = np.sum(ica_nps_test < 0)
+    
+    # Calculate the Intensity Correlation Quotient (ICQ) which is the ratio of postive ica product pixels on the total, 
+    #centered on the range (-0.5, 0.5)
+    icq = (N_pos_px / np.size(ica_product)) - 0.5
+
+    # Calculate the total number of pixels considered and compute the z-score for the p-value calculation.
+    N_px = N_pos_px + N_neg_px
+    z = (N_pos_px - N_px / 2) / np.sqrt(N_px / 4)
+
+    # Calculate the p-value using the z-score for a two-tailed test.
+    p_value = 2 * scipy.stats.norm.sf(abs(z)) # sf is the survival function (1 - cdf)
+
+    return np.round(icq, 4), np.round(p_value, 4)

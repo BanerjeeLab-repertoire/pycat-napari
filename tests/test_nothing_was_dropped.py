@@ -1150,6 +1150,15 @@ _DELIBERATE = {
     'pixel_wise_corr_analysis_tools.py::scramble_pixels',
     'pixel_wise_corr_analysis_tools.py::scramble_pixels_within_mask',
     'pixel_wise_corr_analysis_tools.py::perform_costes_test',
+
+    # coloc_decomposition step 4 (2026-07-24): `li_intensity_correlation` (a standalone raw measure) joined
+    # `coloc/metrics.py`; the temporal trace `coloc_time_trace` + its plots (`plot_per_cell_coloc_time_trace`,
+    # `plot_coloc_time_trace`, each with a nested `_on_pick`) moved VERBATIM to `coloc/temporal.py`. Re-exported.
+    'pixel_wise_corr_analysis_tools.py::li_intensity_correlation',
+    'pixel_wise_corr_analysis_tools.py::coloc_time_trace',
+    'pixel_wise_corr_analysis_tools.py::plot_per_cell_coloc_time_trace',
+    'pixel_wise_corr_analysis_tools.py::plot_coloc_time_trace',
+    'pixel_wise_corr_analysis_tools.py::_on_pick',  # nested in the temporal plots; moved with them
 }
 
 # Qt widget plumbing. A `__init__` losing `parent`, or a callback losing an index, is a Qt idiom

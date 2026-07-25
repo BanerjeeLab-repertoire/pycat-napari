@@ -1,7 +1,14 @@
 # Claude Code spec — Decompose the colocalization science files
 
-> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) + 3 (nulls @1.6.343) DONE; module
-> 2,029 → 1,192 lines. Remaining: temporal, analysis, object_based.**
+> **◐ STATUS — steps 1 (metrics @1.6.341) + 2 (thresholding @1.6.342) + 3 (nulls @1.6.343) + 4 (temporal
+> @1.6.344) DONE; module 2,029 → 907 lines. Remaining: analysis (orchestration), object_based.**
+>
+> **Step 4 — temporal.py — DONE, 1.6.344.** `coloc_time_trace` + its plots (`plot_per_cell_coloc_time_trace`,
+> `plot_coloc_time_trace`, nested `_on_pick`) moved VERBATIM to `coloc/temporal.py`, which imports the
+> coefficients from `coloc.metrics` (a clean layered dep). `li_intensity_correlation` (a standalone raw measure
+> deferred in step 1) was moved into `coloc/metrics.py` to enable that without a shim cycle. Pinned by the
+> coloc net; module → 907 lines. (The `li_ica_histogram` / `li_ica_plot` / `cytofluorogram_plot` visualizers
+> remain in the shim — they go with the analysis step.)
 >
 > **Step 3 — nulls.py — DONE, 1.6.343.** `spatial_null_test` (+ nested `_coef`), `spatial_correlation_length`,
 > `_block_shuffle`, `perform_costes_test`, and the `scramble_*` randomisers moved VERBATIM to `coloc/nulls.py`.

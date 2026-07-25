@@ -1,3 +1,16 @@
+## [1.6.344] - 2026-07-24
+### Changed — **Colocalization-over-time split into `coloc/temporal.py` (coloc_decomposition, step 4).**
+- `coloc_time_trace` (per-frame coefficient trace over a two-channel stack → tidy DataFrame) and its two
+  renderers (`plot_per_cell_coloc_time_trace`, `plot_coloc_time_trace`, each with a nested `_on_pick` brush
+  handler) moved **VERBATIM** to `toolbox/coloc/temporal.py`.
+- `coloc_time_trace` runs every coloc coefficient per frame, so temporal now imports them from `coloc.metrics`
+  — a clean layered dependency. To enable that, `li_intensity_correlation` (a standalone raw measure that was
+  deferred in step 1) was moved into `coloc/metrics.py` where it belongs, so temporal imports it there rather
+  than through the shim (which would cycle).
+- No number changed — pinned by the coloc test net through the re-exports. `pixel_wise_corr_analysis_tools.py`
+  drops 1,192 → 907 lines (from 2,029 across the four steps). Recorded in `_DELIBERATE`. Full
+  `pytest -m "core or base"` green. Remaining coloc steps: analysis (orchestration), object_based.
+
 ## [1.6.343] - 2026-07-24
 ### Changed — **Colocalization spatial-null machinery split into `coloc/nulls.py` (coloc_decomposition, step 3).**
 The significance layer — `spatial_null_test` (does the coefficient beat a **structure-preserving** null, so two
