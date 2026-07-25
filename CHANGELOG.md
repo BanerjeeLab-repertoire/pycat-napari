@@ -1,3 +1,16 @@
+## [1.6.352] - 2026-07-25
+### Fixed — **Nematic order parameter measured x-axis alignment, not the director — a perfectly aligned bundle read as isotropic (Outstanding-Work spec A2).**
+`orientation_order_parameter` (`toolbox/morphological_complexity_tools.py`) returned `S = |⟨cos2θ⟩|`, which is
+referenced to the image x-axis. A bundle of objects all oriented at 45° gives `cos(90°) = 0`, so it reported
+**S = 0 (isotropic)** for a perfectly aligned bundle.
+
+- `S` is now the director-invariant resultant magnitude `S = |⟨exp(2iθ)⟩| = √(⟨cos2θ⟩² + ⟨sin2θ⟩²)` — the
+  magnitude of `mean_resultant`, which the code already computed one line below but discarded. `circular_variance`
+  is now exactly `1 − S`; `preferred_angle_deg` unchanged. Docstring corrected. The per-object bbox/brushing
+  contract and the empty-df guard are untouched.
+- **Golden-master test** (`tests/test_nematic_order.py`): elongated ellipses all at 45° → `S > 0.95` (old code
+  ~0); crossed 0°/90° → `S < 0.2`; uniform-random orientations → `S < 0.25`; `circular_variance == 1 − S`.
+
 ## [1.6.351] - 2026-07-25
 ### Fixed — **Autocorrelation used the wrong transform — every ACF-derived object size was distorted (Outstanding-Work spec A1).**
 `calculate_autocorrelation` (`toolbox/correlation_func_analysis_tools.py`) claimed the Wiener–Khinchin identity

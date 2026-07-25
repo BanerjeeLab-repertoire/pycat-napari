@@ -322,8 +322,9 @@ def orientation_order_parameter(
       - anisotropy      : 1 − (minor_axis / major_axis)
 
     Ensemble:
-      - S (nematic order parameter): S = <cos²θ − 1/2> × 2, range [0,1]
-        S=0 → isotropic, S=1 → perfectly aligned.
+      - S (nematic order parameter): S = |⟨exp(2iθ)⟩| = √(⟨cos2θ⟩² + ⟨sin2θ⟩²), range [0,1]
+        S=0 → isotropic, S=1 → perfectly aligned. Director-invariant: measures alignment
+        about whatever the preferred axis is, not alignment with the image x-axis.
       - circular_variance : 1 − |mean resultant length|, range [0,1]
         0 → all same orientation, 1 → uniformly dispersed orientations.
       - preferred_angle_deg : mean orientation angle in degrees.
@@ -361,16 +362,18 @@ def orientation_order_parameter(
                     mean_eccentricity=np.nan, mean_anisotropy=np.nan)
 
     angles = df['orientation_rad'].values
-    # Nematic order parameter S (headless vectors → use 2θ)
-    S = float(np.mean(np.cos(2 * angles)))   # ranges −1 to 1; abs for clarity
-    # Circular mean and variance
+    # Nematic order parameter S = |<exp(2iθ)>| = sqrt(<cos2θ>² + <sin2θ>²), the director-invariant
+    # resultant magnitude. The previous code used |<cos2θ>| alone, which is x-axis-referenced: a bundle
+    # of fibrils all at 45° gives cos(90°)=0 and was reported as S=0 (isotropic) despite being perfectly
+    # aligned. The correct value is literally the magnitude of the mean resultant computed just below.
     mean_resultant = np.mean(np.exp(2j * angles))   # complex mean of doubled angles
-    circ_var = 1 - abs(mean_resultant)
-    preferred_angle = float(np.angle(mean_resultant) / 2 * 180 / np.pi)
+    S = float(abs(mean_resultant))                  # nematic order parameter, director-invariant
+    circ_var = 1.0 - S                              # exactly 1 − S when defined this way
+    preferred_angle = float(np.degrees(np.angle(mean_resultant)) / 2.0)
 
     return dict(
         per_object_df=df,
-        S=abs(S),
+        S=S,
         circular_variance=float(circ_var),
         preferred_angle_deg=preferred_angle,
         mean_eccentricity=float(df['eccentricity'].mean()),

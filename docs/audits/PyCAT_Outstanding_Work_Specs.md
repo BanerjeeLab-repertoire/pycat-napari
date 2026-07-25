@@ -94,6 +94,11 @@ acf = np.fft.fftshift(np.real(np.fft.ifft2(F * np.conj(F))))   # |F|² via Wiene
 
 ### A2. `orientation_order_parameter` — nematic S measures x-axis alignment, not the director
 
+> **✅ DONE — 1.6.352 (2026-07-25).** `S = |⟨exp(2iθ)⟩|` (the resultant magnitude already computed as
+> `mean_resultant`); `circular_variance = 1 − S`; docstring fixed; bbox/brushing contract untouched.
+> Golden-master `tests/test_nematic_order.py`: 45° bundle → S>0.95 (old ~0), crossed → S<0.2, random → S<0.25.
+> Verified still-live against the 1.6.351 tree before fixing.
+
 **File:** `toolbox/morphological_complexity_tools.py:313`, ensemble block at :363–378.
 
 **Current (buggy), lines 364–378:**
