@@ -339,9 +339,12 @@ _FILE_LINE_CEILINGS = {
     # 5573 -> 3268 (-41%): MenuManager (2164 lines) extracted to ui/menu_manager.py in the 1.6.149
     # decomposition. The ratchet moves DOWN — it cannot grow back.
     "ui/ui_modules.py": 3268,
-    # MenuManager's new home, ratcheted at its post-extraction size. Phase-2's internal splits
-    # (napari_menus / grid_view / metadata_dialogs) would lower it further — a later increment.
-    "ui/menu_manager.py": 2344,
+    # 2344 -> 1105 (-53%): the ui_decomposition Part 2 feature extraction (1.6.370-1.6.378) moved every
+    # policy/feature/dialog method to its own module (command_palette, tag_inspector, metadata_dialogs,
+    # napari_menus, session_loader, grid_view, recorded_steps_dialog, viewer_actions). What remains is menu
+    # DECLARATION + wiring (_setup_menu_bar, _add_toolbox_to_menu, the _add_*_to_menu builders) + thin
+    # forwarding wrappers. The ratchet moves DOWN — it cannot grow back.
+    "ui/menu_manager.py": 1105,
     # 2805 -> 1670 (-40.5%) as StackLoadCancelled (errors.py), the two dialogs (dialogs.py), the pure
     # naming/pixel helpers (naming.py) and the three format openers (stack_openers.py) moved to their
     # homes (decomposition, 1.6.146). The ratchet moves DOWN — it cannot grow back.
