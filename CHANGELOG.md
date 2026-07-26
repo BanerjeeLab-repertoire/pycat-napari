@@ -1,3 +1,15 @@
+## [1.6.373] - 2026-07-25
+### Changed — **Extracted native-menu manipulation from MenuManager (ui_decomposition Part 2, feature 4).**
+`_hide_napari_native_menus` (88) and `_disable_napari_open_actions` (146) — which hide/reorder napari's built-in
+menus and disable its file-open actions (PyCAT owns loading) — move **verbatim** to `ui/napari_menus.py`.
+
+- Both keep their original signatures (bodies byte-for-byte identical); `MenuManager` keeps thin generic
+  `*args, **kwargs` forwarding wrappers, so every call site works unchanged — `_setup_menu_bar` → `_hide_…` →
+  `_disable_…` still resolves through the wrappers. The menu structure is unchanged — **menu-contract snapshot
+  passes unmodified**. `menu_manager.py` drops 1,946 → 1,720 lines (from 2,344 at the start of Part 2).
+- Full `pytest -m "core or base"` green (1991 passed). Remaining features: metadata comparison, grid view,
+  session-loading orchestration.
+
 ## [1.6.372] - 2026-07-25
 ### Changed — **Extracted the metadata dialog from MenuManager (ui_decomposition Part 2, feature 3).**
 The 157-line `_show_metadata_dialog` (the "Show Metadata" dialog — per-file acquisition metadata, the
