@@ -1,3 +1,19 @@
+## [1.6.376] - 2026-07-25
+### Changed — **Extracted metadata comparison from MenuManager (ui_decomposition Part 2, feature 7).**
+`_show_metadata_comparison` (62), `_gather_compared_metadata` (20) and `_maybe_warn_metadata_diff` (16) — the
+cross-file acquisition-metadata comparison that warns when a newly loaded file's metadata contradicts what is
+already loaded — move **verbatim** into the **existing** `ui/metadata_dialogs.py`, joining the metadata dialog
+already there (the spec wants dialog + comparison + contradiction listing co-located).
+
+- All three keep their original signatures (bodies byte-for-byte identical); `MenuManager` keeps thin generic
+  `*args, **kwargs` forwarding wrappers, so every call site resolves unchanged — including the
+  `self._maybe_warn_metadata_diff()` call reached from the load flow. `metadata_dialogs.py` already imports the
+  one dependency (`napari`), so no new imports. The menu structure is unchanged — **menu-contract snapshot
+  passes unmodified**.
+- `menu_manager.py` drops 1,359 → 1,273 lines (from 2,344 at the start of Part 2). Full `pytest -m "core or
+  base"` green. This completes the feature list in the spec; the remaining large methods in `menu_manager.py`
+  are menu **declaration** (`_setup_menu_bar`, `_add_toolbox_to_menu`), which the spec keeps in place.
+
 ## [1.6.375] - 2026-07-25
 ### Changed — **Extracted the managed grid view from MenuManager (ui_decomposition Part 2, feature 6).**
 `_toggle_grid_view` (83) and `_apply_managed_grid` (84, with its nested `_anchor_key` helper) — the napari
