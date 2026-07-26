@@ -160,9 +160,9 @@ _UNCATEGORIZED_BUDGET = {
     'file_io': 64,
     'toolbox': 46,
     'utils': 45,
-    'batch': 4,
-    'navigator': 3,
-    'batch_processor.py': 2,
+    'batch': 0,       # batch/steps fully categorized (Part 1: optional_probe model/metadata probes, batch_step, write)
+    'navigator': 0,   # navigator fully categorized (Part 1: optional-dependency import probes → optional_probe)
+    'batch_processor.py': 0,  # fully categorized (Part 1: write sidecar, ui_cleanup brushable dock)
     'ui': 0,          # ui package fully categorized (exception_context_classification Part 1, first package)
 }
 

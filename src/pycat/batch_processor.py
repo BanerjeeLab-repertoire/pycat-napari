@@ -357,7 +357,7 @@ class BatchWorker(QThread):
             _sidecar = _consolidated.write_provenance_sidecar()
             if _sidecar:
                 print(f"[PyCAT Batch] Provenance sidecar -> {_sidecar}")
-        except Exception as _pexc:  # broad-ok: the sidecar is an additive extra; never fail the batch over it
+        except Exception as _pexc:  # broad-ok: write — the sidecar is an additive extra; never fail the batch over it
             print(f"[PyCAT Batch] provenance sidecar skipped: {_pexc}")
 
         # A sheet row that matched no image is a likely filename typo — warn once, don't crash.
@@ -695,7 +695,7 @@ class BatchDialog(QDialog):
                 add_results_dock(window, workspace, name='Batch Results (brushable)')
                 cm._batch_results_workspace = workspace     # keep alive
                 self._log.append("Brushable batch results opened — plots + tables + offline object crops.")
-        except Exception as _bwe:   # broad-ok: a brushing failure must never taint a completed batch
+        except Exception as _bwe:   # broad-ok: ui_cleanup — a brushing failure must never taint a completed batch
             from pycat.utils.general_utils import debug_log
             debug_log('batch: could not open the brushable results workspace', _bwe)
 

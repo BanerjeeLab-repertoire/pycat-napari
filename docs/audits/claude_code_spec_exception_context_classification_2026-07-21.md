@@ -1,8 +1,17 @@
 # Claude Code spec — Exception handler classification by context category
 
 > **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). Part 1 categorization sweep UNDERWAY —
-> a ratchet + the `ui` package done (2026-07-24, git-only). Remaining: file_io / toolbox / utils / batch /
-> navigator.**
+> a ratchet + the `ui`, `navigator`, `batch`, and `batch_processor.py` packages done (git-only). Remaining:
+> file_io / toolbox / utils.**
+>
+> **Part 1 (cont.) — navigator / batch / batch_processor.py DONE (comment/test-only, git-only, no bump).** The
+> three small packages categorized to 0: `navigator` (3) — the `operation_spec` optional-dependency import
+> probes (re-raise typed, or return not-importable / the missing dep name) → `optional_probe`. `batch` (4) —
+> the brightfield cellpose-model fallback + the pixel-size/ball-radius metadata probes → `optional_probe`, the
+> skipped BF-segmentation replay step → `batch_step`. `batch_processor.py` (2) — the additive provenance-sidecar
+> write → `write`, the brushable-results dock open → `ui_cleanup`. Swallow guards + budget test green.
+> Uncategorized total 164 → 155; budgets: file_io 64, toolbox 46, utils 45, **batch / navigator /
+> batch_processor.py / ui all 0**.
 >
 > **Part 1 — categorization ratchet + `ui` package DONE (test/comment-only, git-only, no bump).** Added
 > `test_exception_budget.py::test_no_package_GROWS_its_UNCATEGORIZED_broad_ok_count` — a per-package ratchet on

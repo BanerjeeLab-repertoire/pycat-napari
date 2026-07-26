@@ -272,7 +272,7 @@ def resolve_operation(spec: "OperationSpec"):
             f"(module={spec.module!r}, function={spec.function!r})")
     try:
         module = importlib.import_module(spec.module)
-    except Exception as exc:                          # broad-ok: optional-dependency import probe — re-raised typed and named
+    except Exception as exc:                          # broad-ok: optional_probe — optional-dependency import probe, re-raised typed and named
         dep = getattr(exc, "name", None) or spec.module
         raise OptionalDependencyError(
             f"operation '{spec.id}' is unavailable: needs '{dep}' "
@@ -295,7 +295,7 @@ def module_importable(spec: "OperationSpec") -> bool:
     try:
         resolve_operation(spec)
         return True
-    except Exception:                                # broad-ok: any import failure ⇒ not importable
+    except Exception:                                # broad-ok: optional_probe — any import failure ⇒ not importable
         return False
 
 
@@ -326,5 +326,5 @@ def _missing_dependency(spec: "OperationSpec"):
     try:
         importlib.import_module(spec.module)
         return None
-    except Exception as exc:                          # broad-ok: reading the failing import's name
+    except Exception as exc:                          # broad-ok: optional_probe — reading the failing import's name
         return getattr(exc, "name", None) or spec.module

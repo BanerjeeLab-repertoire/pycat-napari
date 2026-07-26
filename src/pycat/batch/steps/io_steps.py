@@ -102,7 +102,7 @@ def replay_open_image(state: dict, image_path: Path, params: dict, output_dir: P
                 print(f"[PyCAT Batch]   Auto ball_radius = {_ball_radius} "
                       f"(object_size {_est['object_size_px']:.1f}px from "
                       f"{_est['n_objects']} objects) for {image_path.name}.")
-        except Exception as _e:  # broad-ok: batch replay robustness — logged, this step is skipped, the batch continues
+        except Exception as _e:  # broad-ok: optional_probe — auto ball_radius estimation is best-effort; on failure the grounded default is used
             print(f"[PyCAT Batch]   Auto ball_radius estimation failed "
                   f"({_e}); using default.")
     if _ball_radius is None:

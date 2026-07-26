@@ -94,14 +94,14 @@ def replay_bf_cell_segmentation(state: dict, image_path: Path, params: dict, out
         from cellpose import models
         try:
             model = models.CellposeModel(pretrained_model='brightfield')
-        except Exception:  # broad-ok: batch replay best-effort probe → fallback; a per-step failure must not abort the whole batch
+        except Exception:  # broad-ok: optional_probe — batch replay best-effort model probe → fallback; a per-step failure must not abort the whole batch
             model = models.CellposeModel(pretrained_model='cyto2')
         masks, _, _ = model.eval(image, diameter=diameter, channels=[0, 0])
         state['bf_cell_mask'] = masks.astype(np.int32)
         _save_array(masks.astype(np.uint16),
                     output_dir / f"{image_path.stem}_bf_cell_mask.tiff")
         print(f"[PyCAT Batch]   BF cell segmentation: {int(masks.max())} cells.")
-    except Exception as e:  # broad-ok: batch replay robustness — logged, this step is skipped, the batch continues
+    except Exception as e:  # broad-ok: batch_step — batch replay robustness: logged, this step is skipped, the batch continues
         print(f"[PyCAT Batch]   BF cell segmentation failed: {e} — skipping.")
 
 

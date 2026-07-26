@@ -90,7 +90,7 @@ def _load_image(image_path: Path, channel: int = 0):
         try:
             px_size = img.physical_pixel_sizes
             microns_per_pixel = float(px_size.Y) if px_size.Y else 1.0
-        except Exception:  # broad-ok: batch replay best-effort probe → fallback; a per-step failure must not abort the whole batch
+        except Exception:  # broad-ok: optional_probe — pixel-size metadata probe → fallback (1.0 micron/px)
             pass
         return data, microns_per_pixel
 
