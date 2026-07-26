@@ -1,3 +1,17 @@
+## [1.6.375] - 2026-07-25
+### Changed — **Extracted the managed grid view from MenuManager (ui_decomposition Part 2, feature 6).**
+`_toggle_grid_view` (83) and `_apply_managed_grid` (84, with its nested `_anchor_key` helper) — the napari
+grid-view manager that arranges visible layers in a grid while keeping an anchor layer fixed, and keeps the
+grid in sync as layer visibility/membership changes — move **verbatim** to `ui/grid_view.py`.
+
+- Both methods keep their original signatures (bodies byte-for-byte identical); `MenuManager` keeps thin
+  generic `*args, **kwargs` forwarding wrappers, so every call site resolves unchanged — the grid menu action,
+  the internal `_toggle_grid_view → _apply_managed_grid` call, and the `_on_grid_layer_vis_changed` /
+  `_on_grid_layers_changed` layer-event handlers (which stay in MenuManager) all still reach it. The menu
+  structure is unchanged — **menu-contract snapshot passes unmodified**.
+- `menu_manager.py` drops 1,518 → 1,359 lines (from 2,344 at the start of Part 2). Full `pytest -m "core or
+  base"` green. Remaining Part 2 feature: metadata comparison.
+
 ## [1.6.374] - 2026-07-25
 ### Changed — **Extracted the session loader from MenuManager (ui_decomposition Part 2, feature 5).**
 `_open_session_loader` (154) and `_load_discovered_session` (37) — the "Load Session" discovery dialog that

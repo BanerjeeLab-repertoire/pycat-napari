@@ -21,15 +21,16 @@
 > (verbatim, clean move — references nothing else in ui_modules). **`ui_modules.py` is now a 133-line thin
 > re-export shim** (from 3,266). Only Part 2 (`menu_manager.py`, 2,344 lines) remains.
 >
-> **◐ Part 2 IN PROGRESS — features 1–5 done, 1.6.370 → 1.6.374.** Each feature moved VERBATIM behind its
+> **◐ Part 2 IN PROGRESS — features 1–6 done, 1.6.370 → 1.6.375.** Each feature moved VERBATIM behind its
 > existing action (menu-contract snapshot passes UNMODIFIED throughout); MenuManager keeps thin forwarding
 > wrappers so every call site resolves. (1) `command_palette.py` — `open_command_palette` (1.6.370). (2)
 > `tag_inspector.py` — `open_tag_inspector` (1.6.371). (3) `metadata_dialogs.py` — `_show_metadata_dialog`
 > (1.6.372). (4) `napari_menus.py` — `_hide_napari_native_menus` + `_disable_napari_open_actions` (1.6.373).
 > (5) `session_loader.py` — `_open_session_loader` + `_load_discovered_session` + their `_SESSION_METHOD_*`
-> maps (1.6.374); ui_modules re-exports the maps from their new home. **`menu_manager.py` 2,344 → 1,518 lines.**
-> **Remaining Part 2 features: grid view (`_toggle_grid_view` + `_apply_managed_grid`), metadata comparison
-> (`_show_metadata_comparison` + helpers), possibly `_show_recorded_steps_dialog`.** Target ≤ ~900.
+> maps (1.6.374); ui_modules re-exports the maps from their new home. (6) `grid_view.py` — `_toggle_grid_view`
+> + `_apply_managed_grid` (1.6.375). **`menu_manager.py` 2,344 → 1,359 lines.**
+> **Remaining Part 2 feature: metadata comparison (`_show_metadata_comparison` + `_gather_compared_metadata`
+> + `_maybe_warn_metadata_diff`), possibly `_show_recorded_steps_dialog`.** Target ≤ ~900.
 
 **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. All six big science
 files are now thin shims. These two are what remain of the decomposition programme — and `ui_modules.py`
