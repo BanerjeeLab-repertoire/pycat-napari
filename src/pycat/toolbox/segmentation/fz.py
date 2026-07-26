@@ -80,28 +80,32 @@ def merge_mean_color(graph, src, dst):
 
 @tags_layer('felzenszwalb', role='labels', inputs=('image',),
             summary='Felzenszwalb graph segmentation with merging')
-def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=2):
+def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=2, merge_tol=0.05):
     """
     Performs image segmentation using Felzenszwalb's method followed by merging based on color similarity.
 
     This function applies an initial segmentation to the input image using Felzenszwalb's efficient graph-based
     segmentation algorithm. It then constructs a Region Adjacency Graph (RAG) from the initial segments and
-    merges segments based on the similarity of their mean color (intensity for grayscale). The merging process is controlled by comparing
-    the color distance between segments against a threshold derived from the image's standard deviation.
+    merges adjacent segments whose mean-colour (intensity for grayscale) DISTANCE is below a threshold, so
+    that over-segmented pieces of one uniform region are folded back together.
 
     Parameters
     ----------
     image : numpy.ndarray
         The input image to segment. Can be a grayscale or RGB image.
     scale : float, optional
-        The scale parameter influences the size of the clusters in the initial segmentation. Higher values result in larger clusters. 
+        The scale parameter influences the size of the clusters in the initial segmentation. Higher values result in larger clusters.
         This controls how aggressively pixels are merged together in the initial segmentation. Defaults to 7.0.
     sigma : float, optional
-        The standard deviation for the Gaussian kernel used in smoothing the image before segmenting. This preprocessing step can help 
+        The standard deviation for the Gaussian kernel used in smoothing the image before segmenting. This preprocessing step can help
         reduce noise and improve the quality of segmentation. Defaults to 0.5.
     min_size : int, optional
-        The minimum size of final segments. Smaller segments are merged during post-processing to ensure that every segment is at least 
+        The minimum size of final segments. Smaller segments are merged during post-processing to ensure that every segment is at least
         this size. Defaults to 2.
+    merge_tol : float, optional
+        Region-merge tolerance, as a fraction of the image's intensity dynamic range. Adjacent segments whose
+        mean-intensity difference is below ``merge_tol * (img.max() - img.min())`` are merged. Larger values
+        merge more aggressively (fewer final regions); 0 disables merging. Defaults to 0.05.
 
     Returns
     -------
@@ -124,16 +128,22 @@ def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=
     # This step segments the image into regions based on pixel similarity and the specified parameters
     segments_fz = sk.segmentation.felzenszwalb(img, scale=scale, sigma=sigma, min_size=min_size)
 
-    # Construct a Region Adjacency Graph (RAG) from the initial segmentation
-    # The RAG represents how segments are connected and allows for merging based on further criteria
-    g = sk.graph.rag_mean_color(img, segments_fz, mode='similarity')
-    
-    # Define a threshold for merging segments based on color similarity
-    # This threshold is set dynamically based on the square of the normalized float image's standard deviation (so it will be a sub 1 value)
-    threshold = (np.std(img)**2)/2
+    # Construct a Region Adjacency Graph (RAG) from the initial segmentation, weighting each edge by the
+    # DISTANCE between its two segments' mean colours (small = alike). This must match the units of both the
+    # threshold below and `_weight_mean_color` (the recompute callback), which also returns a distance:
+    # `merge_hierarchical` merges edges whose weight is BELOW `thresh`, which is only correct for a distance
+    # graph. (A previous version built a 'similarity' graph here -- large = alike -- so essentially nothing
+    # merged and the advertised merge step was a silent no-op.)
+    g = sk.graph.rag_mean_color(img, segments_fz, mode='distance')
 
-    # Merge segments hierarchically based on their mean color similarity
-    # `merge_func` determines how the color information is combined when segments are merged
+    # Merge threshold in the SAME mean-intensity-difference units as the edge weights: a fraction (`merge_tol`)
+    # of the image's dynamic range. img is float32-normalised, so this is a small sub-1 value; adjacent
+    # segments whose mean intensities differ by less than this are merged. (The old `std(img)**2 / 2` was a
+    # VARIANCE -- wrong units -- and on a similarity graph pointed the comparison the wrong way entirely.)
+    threshold = float(merge_tol) * float(img.max() - img.min())
+
+    # Merge segments hierarchically: edges below `threshold` (mean-colour distance) collapse.
+    # `merge_func` determines how the color information is combined when segments are merged.
     labels = sk.graph.merge_hierarchical(segments_fz, g, thresh=threshold, rag_copy=False,
                                          in_place_merge=True,
                                          merge_func=merge_mean_color,
@@ -150,7 +160,7 @@ def felzenszwalb_segmentation_and_merging(image, scale=7.0, sigma=0.5, min_size=
     return segmented_img
 
 
-def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, viewer):
+def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, merge_tol_input, viewer):
     """
     Applies Felzenszwalb's segmentation and merging to an active image layer in a Napari viewer based on user-provided settings.
     This function allows for dynamic interaction, enabling users to adjust segmentation parameters in real-time.
@@ -163,6 +173,8 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
         Input field for the sigma parameter, controlling the degree of Gaussian smoothing prior to segmentation.
     min_size_input : QLineEdit
         Input field for the minimum size of the segments to be considered in the final output.
+    merge_tol_input : QLineEdit
+        Input field for the region-merge tolerance (fraction of the image's dynamic range); larger merges more.
     viewer : napari.viewer.Viewer
         Viewer instance where the segmented image will be displayed.
 
@@ -180,13 +192,15 @@ def run_fz_segmentation_and_merging(scale_input, sigma_input, min_size_input, vi
 
     image = active_layer.data  # Extract the image data from the active layer
 
-    # Read scale, sigma, and min_size from inputs, defaulting to preset values if empty
+    # Read scale, sigma, min_size, and merge_tol from inputs, defaulting to preset values if empty
     scale = float(scale_input.text()) if scale_input.text() else 7.0
     sigma = float(sigma_input.text()) if sigma_input.text() else 0.5
     min_size = int(min_size_input.text()) if min_size_input.text() else 2
+    merge_tol = float(merge_tol_input.text()) if merge_tol_input.text() else 0.05
 
     # Apply the segmentation and merging process to the selected image layer
-    segmented_img = felzenszwalb_segmentation_and_merging(image, scale=scale, sigma=sigma, min_size=min_size)
+    segmented_img = felzenszwalb_segmentation_and_merging(image, scale=scale, sigma=sigma, min_size=min_size,
+                                                          merge_tol=merge_tol)
 
     # Display the segmented image in the viewer
     from pycat.ui.ui_utils import add_image_with_default_colormap

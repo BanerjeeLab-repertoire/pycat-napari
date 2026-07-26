@@ -301,6 +301,13 @@ assert abs(tortuosity_per_object(bent)['tortuosity'].iloc[0]
 
 ## S4 — Felzenszwalb RAG merge: similarity graph merged as if it were a distance graph (no-op)
 
+> **✅ FIXED, shipped 1.6.396.** The RAG is now built in `mode='distance'` (small = alike) so its edge weights
+> match `_weight_mean_color` and `merge_hierarchical`'s below-threshold merge direction, and the threshold is
+> `merge_tol * (img.max() - img.min())` — the same mean-intensity-difference units — replacing the wrong-unit
+> `std²/2` variance. New `merge_tol` parameter (default 0.05) is threaded through `run_fz_segmentation_and_merging`
+> and surfaced as a "Merge Tolerance" UI field. Golden-master `tests/test_fz_merge.py`: merge now reduces the
+> region count below the initial over-segmentation (old code: equal) and is monotonic in `merge_tol`.
+
 **File:** `toolbox/segmentation/fz.py:129–140`
 **Severity:** medium; the advertised merge step silently doesn't run.
 

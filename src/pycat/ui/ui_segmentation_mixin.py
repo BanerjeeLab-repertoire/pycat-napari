@@ -44,10 +44,15 @@ class _SegmentationWidgetsMixin:
         fz_min_size_input = QLineEdit() # Create a text input
         fz_min_size_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_layout.addWidget(fz_min_size_input) # Add the text input to the layout
+        self.add_text_label(fz_layout, 'Merge Tolerance (fraction of dynamic range; larger merges more, default 0.05)')
+        fz_merge_tol_input = QLineEdit() # Create a text input
+        fz_merge_tol_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        fz_layout.addWidget(fz_merge_tol_input) # Add the text input to the layout
         fz_button = QPushButton("Run Felsenszwalb Segmentation") # Create a button widget
         fz_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         fz_button.clicked.connect(lambda: self.on_general_button_clicked(
-            run_fz_segmentation_and_merging, None, fz_scale_input, fz_sigma_input, fz_min_size_input, self.viewer))
+            run_fz_segmentation_and_merging, None, fz_scale_input, fz_sigma_input, fz_min_size_input,
+            fz_merge_tol_input, self.viewer))
         fz_layout.addWidget(fz_button) # Add the button to the layout
         fz_widget = QWidget()
         fz_widget.setLayout(fz_layout)

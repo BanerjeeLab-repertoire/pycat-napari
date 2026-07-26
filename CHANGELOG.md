@@ -1,3 +1,15 @@
+## [1.6.396] - 2026-07-26
+### Fixed — **Felzenszwalb region merging now actually runs (distance graph, not similarity graph) (1.6.376 audit S4).**
+`segmentation.fz.felzenszwalb_segmentation_and_merging` built its region-adjacency graph in `mode='similarity'`
+(edge weight large = alike) but thresholded with `merge_hierarchical`, which merges edges BELOW the threshold —
+correct only for a distance graph — using `std(img)**2 / 2`, a variance in the wrong units. The two mistakes
+cancelled into a silent no-op: the advertised merge step essentially never fired. It now builds the graph in
+`mode='distance'` and sets the threshold to `merge_tol * (img.max() - img.min())`, in the same mean-intensity-
+difference units as the edge weights and `_weight_mean_color`. New `merge_tol` parameter (default 0.05, exposed
+as a "Merge Tolerance" UI field) controls merge aggressiveness. Golden-master `tests/test_fz_merge.py` pins that
+the merge reduces the region count below the initial over-segmentation (old code: equal) and is monotonic in
+`merge_tol`.
+
 ## [1.6.395] - 2026-07-26
 ### Fixed — **`tortuosity_per_object` measures the main-axis geodesic, not the spanning-tree edge-sum (1.6.376 audit S3).**
 `morphological_complexity_tools.tortuosity_per_object` computed path length as the SUM of every edge in the

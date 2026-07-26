@@ -51,8 +51,12 @@ def test_the_analysis_output_is_byte_identical_on_a_fixed_scene():
     assert list(df['frame']) == [0, 0, 1, 1, 2, 2]
     assert list(df['cell_label']) == [1, 2, 1, 2, 1, 2]
 
-    # the segmentation-derived integers — the numbers a silent regression would move
-    assert list(df['total_condensate_area_px']) == [54, 39, 56, 39, 52, 37]
+    # the segmentation-derived integers — the numbers a silent regression would move.
+    # Re-pinned at 1.6.396: the 1.6.376-S4 fix made the Felzenszwalb region merge actually run (it had been a
+    # silent no-op), so these condensate areas shifted by a few px each — still one condensate per cell, cell
+    # areas unchanged. Was [54, 39, 56, 39, 52, 37] / mask-sum 277 under the buggy no-op merge.
+    _AREA = [52, 39, 52, 37, 49, 39]
+    assert list(df['total_condensate_area_px']) == _AREA
     assert list(df['cell_area_px']) == [392, 400, 392, 400, 392, 400]
     assert list(df['n_condensates']) == [1, 1, 1, 1, 1, 1]
     assert list(df['drift_row_px']) == [0, 0, 0, 0, 0, 0]
@@ -60,17 +64,17 @@ def test_the_analysis_output_is_byte_identical_on_a_fixed_scene():
 
     # derived quantities, exact
     np.testing.assert_allclose(
-        df['total_condensate_area_um2'], np.array([54, 39, 56, 39, 52, 37]) * 0.01, rtol=0, atol=1e-12)
+        df['total_condensate_area_um2'], np.array(_AREA) * 0.01, rtol=0, atol=1e-12)
     # condensate_fraction is area/cell_area rounded to 6 decimals (the function's own rounding, pinned).
     np.testing.assert_allclose(
         df['condensate_fraction'],
-        np.round(np.array([54, 39, 56, 39, 52, 37]) / np.array([392, 400, 392, 400, 392, 400]), 6),
+        np.round(np.array(_AREA) / np.array([392, 400, 392, 400, 392, 400]), 6),
         rtol=0, atol=1e-9)
 
-    # the returned condensate mask stack
+    # the returned condensate mask stack (sum == total condensate area across all frames)
     assert cstack.shape == (3, 64, 64)
     assert cstack.dtype == np.uint8
-    assert int(cstack.sum()) == 277
+    assert int(cstack.sum()) == sum(_AREA)          # 268
 
 
 def test_the_analysis_is_deterministic():
