@@ -157,41 +157,42 @@ def radial_localization_profile(
     DataFrame with columns: r_norm_centre, r_norm_edge, count, area_um2,
                              density_per_um2
     """
-    # Cell centre (centroid of mask)
-    cy, cx = np.array(np.where(cell_mask)).mean(axis=1)
-    cy_um, cx_um = cy * microns_per_pixel, cx * microns_per_pixel
-
-    # Distance transform from cell boundary → each pixel's distance to edge (px)
-    from scipy.ndimage import distance_transform_edt
-    dist_to_edge = distance_transform_edt(cell_mask)
-    max_dist     = dist_to_edge.max()
-    if max_dist == 0:
-        return pd.DataFrame()
-
-    # Condensate distances from cell centre in normalised coords
     if len(coords) == 0:
         return pd.DataFrame()
 
-    dy = coords[:, 0] - cy_um
-    dx = coords[:, 1] - cx_um
-    r_abs = np.sqrt(dy**2 + dx**2)  # µm from cell centre
+    # Cell centre (centroid of mask), in pixels.
+    cy, cx = np.array(np.where(cell_mask)).mean(axis=1)
 
-    # Convert pixel coords back to get normalised radius
-    # r_norm: distance from centre / max possible distance in that direction
-    # Approximate as distance from centre / (max dist to edge in px × mpx)
-    r_norm = r_abs / (max_dist * microns_per_pixel + 1e-8)
-    r_norm = np.clip(r_norm, 0, 1)
+    # ── One centre-referenced normalised radius for BOTH the points and the ring area ──────────
+    #
+    # The bug this fixes: the point radius ran 0 = centre → 1 = edge, while the ring AREA was binned on a
+    # distance-transform field that runs 0 = EDGE → 1 = centre — opposite orientations. So bin [lo, hi]
+    # counted the points near the CENTRE but measured the ring area near the EDGE: all-central condensates
+    # landed in bin [0, 0.2] paired with the OUTER-annulus area, ~9× understating central density and
+    # inverting the whole profile. A secondary error: the point radius normalised by the inradius
+    # (max distance-to-edge), a different length from the centroid→boundary distance.
+    #
+    # Both are now read from the SAME field ``r_field`` (0 = centroid, 1 = outermost mask pixel), so a point
+    # in the central disk and the central-disk area land in the same bin.
+    yy, xx = np.mgrid[0:cell_mask.shape[0], 0:cell_mask.shape[1]]
+    r_centre_px = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    r_max = float(r_centre_px[cell_mask].max())
+    if r_max <= 0:
+        return pd.DataFrame()
+    r_field = np.clip(r_centre_px / r_max, 0.0, 1.0)      # 0 = centroid, 1 = outermost mask pixel
+
+    # Points arrive in µm (as for ``local_object_density`` and the caller); convert to px to index r_field.
+    pr = np.clip((coords[:, 0] / microns_per_pixel).astype(int), 0, cell_mask.shape[0] - 1)
+    pc = np.clip((coords[:, 1] / microns_per_pixel).astype(int), 0, cell_mask.shape[1] - 1)
+    pt_r = r_field[pr, pc]                                # each point's normalised centre radius, 0..1
 
     bins = np.linspace(0, 1, n_bins + 1)
     rows = []
     for i in range(n_bins):
         lo, hi = bins[i], bins[i + 1]
-        mask_bin = (r_norm >= lo) & (r_norm < hi)
-        count = int(mask_bin.sum())
-        # Area of the annular ring for this cell (pixels in that ring)
-        norm_dist = dist_to_edge / (max_dist + 1e-8)
-        ring_px = ((norm_dist >= lo) & (norm_dist < hi) & cell_mask).sum()
-        area_um2 = float(ring_px) * microns_per_pixel**2
+        count = int(((pt_r >= lo) & (pt_r < hi)).sum())
+        ring_px = int(((r_field >= lo) & (r_field < hi) & cell_mask).sum())   # SAME field → same region
+        area_um2 = float(ring_px) * microns_per_pixel ** 2
         rows.append({
             'r_norm_centre': lo,
             'r_norm_edge':   hi,

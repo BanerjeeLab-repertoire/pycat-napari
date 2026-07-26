@@ -1,3 +1,20 @@
+## [1.6.393] - 2026-07-26
+### Fixed — **Radial-localization profile: each bin's count is now paired with its OWN area (1.6.376 audit S1, conclusion-inverting).**
+`spatial_metrology_tools.radial_localization_profile` binned the condensate **count** on a radius running
+0 = centre → 1 = edge, but the ring **area** on a distance-to-edge field running 0 = edge → 1 = centre — opposite
+orientations. So each bin counted the points near the centre yet measured the outer-annulus area: all-central
+condensates landed in the `[0, 0.2]` bin paired with the ~9× larger edge area, understating central density and
+**inverting the whole radial profile** (a wrong scientific conclusion). A secondary error normalised the point
+radius by the inradius, a different length from the centroid→boundary distance.
+
+- Both the points and the ring area are now read from **one** centre-referenced field (0 = centroid, 1 = outermost
+  mask pixel), so a point in the central disk and the central-disk area fall in the same bin. Points (in µm) are
+  converted to px before indexing the field.
+- `tests/test_radial_profile.py` (`base`, 4) — the golden-master test that was missing: central points give a
+  count in the first bin *with the small central area* (high density), edge points bin at the outer shell, the
+  annulus area increases monotonically centre→edge, and micron/px scales area by mpx² without moving the binning.
+  The old inversion fails the count-and-area pairing. Full `pytest -m "core or base"` green.
+
 ## [1.6.392] - 2026-07-26
 ### Changed — **The planner's quality gate now covers MSD/diffusion measurements (navigator quality-gate, op-by-op extension).**
 The navigator quality gate (which blocks a measurement the data can't support and says why) is extended to the
