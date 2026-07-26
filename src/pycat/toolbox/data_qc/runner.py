@@ -140,7 +140,7 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
             scan_frame = a[0] if is_stack else a
             results += run_scan_qc(scan_frame, labels=labels, modality=modality,
                                    line_time_s=line_time_s, pixel_um=pixel_um)
-        except Exception as _exc:  # broad-ok: an optional add-on QC family must never break the core QC report
+        except Exception as _exc:  # broad-ok: scientific_result — an optional add-on QC family must never break the core QC report
             debug_log('run_full_qc: scan-QC checks failed', _exc)
 
     # ── Object-level biological QC (second QC layer; appended when an object table is given) ─────
@@ -150,7 +150,7 @@ def run_full_qc(data, pixel_um=None, na=None, wavelength_nm=None, channels=None,
         try:
             results += qc_biological_objects(object_table, labels=labels,
                                              parent_labels=parent_labels)
-        except Exception as _bexc:  # broad-ok: the object-QC add-on must never break the core report
+        except Exception as _bexc:  # broad-ok: scientific_result — the object-QC add-on must never break the core report
             debug_log('run_full_qc: biological object-QC failed', _bexc)
 
     # ── Be honest when QC assessed a SAMPLE, not the whole movie ────────────────

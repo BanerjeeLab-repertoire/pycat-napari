@@ -71,7 +71,7 @@ class _VptTableMixin:
             if callable(page_to):
                 try:
                     page_to(tid)
-                except Exception:                   # broad-ok: paging-to-selection is a convenience, never gating
+                except Exception:                   # broad-ok: ui_cleanup — paging-to-selection is a convenience, never gating
                     pass
 
     def _highlight_track_in_table(self, track_id):

@@ -584,7 +584,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
             return False
         try:
             ln.set(**_CENTERED_BASE)
-        except Exception:                            # broad-ok: a restyle failure must not wedge selection
+        except Exception:                            # broad-ok: ui_cleanup — a restyle failure must not wedge selection
             pass
         return True
 
@@ -596,7 +596,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
         registry.setdefault('state', {'prev': None})
         try:
             registry['canvas'] = ax.figure.canvas
-        except Exception:                            # broad-ok: no canvas yet (Agg/headless) → None
+        except Exception:                            # broad-ok: optional_probe — no canvas yet (Agg/headless) → None
             registry['canvas'] = None
 
     if on_pick_track is not None and coords:
@@ -615,12 +615,12 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
                 if ln is not None:
                     try:
                         ln.set(**_CENTERED_HL)
-                    except Exception:                # broad-ok: restyle is best-effort
+                    except Exception:                # broad-ok: ui_cleanup — restyle is best-effort
                         pass
                 _state['prev'] = tid
                 try:
                     ax.figure.canvas.draw_idle()
-                except Exception:                    # broad-ok: draw is best-effort
+                except Exception:                    # broad-ok: ui_cleanup — draw is best-effort
                     pass
             on_pick_track(tid)
 
@@ -629,7 +629,7 @@ def _draw_centered_tracks(ax, tracks_df, max_tracks=400, only_tids=None,
                 ax.figure, ax, coords, _state, _apply, notify=_default_notify)
             if registry is not None:
                 registry['click_cid'] = _cid
-        except Exception:                            # broad-ok: click wiring is best-effort (no canvas headless)
+        except Exception:                            # broad-ok: optional_probe — click wiring is best-effort (no canvas headless)
             pass
 
 

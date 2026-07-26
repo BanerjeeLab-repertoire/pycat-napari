@@ -313,7 +313,7 @@ def estimate_contact_angle(
             boundary_y=y_b,
             boundary_x=x_b,
         )
-    except Exception:  # broad-ok: reports fit_success=False — an honest failure flag, no fabricated boundary/fit values
+    except Exception:  # broad-ok: scientific_result — reports fit_success=False — an honest failure flag, no fabricated boundary/fit values
         return dict(fit_success=False)
 
 

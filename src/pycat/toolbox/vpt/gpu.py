@@ -91,5 +91,5 @@ def _gpu_build_id() -> str:
         import cupy
         return (f"{getattr(cupy, '__version__', '?')}/"
                 f"{cupy.cuda.runtime.runtimeGetVersion()}")
-    except Exception:  # broad-ok: optional-backend version probe — 'no-cupy' when CuPy is absent, not a scientific result
+    except Exception:  # broad-ok: optional_probe — optional-backend version probe — 'no-cupy' when CuPy is absent, not a scientific result
         return 'no-cupy'

@@ -40,7 +40,7 @@ def _pc_check_input(image_layer):
                                                      check_measurement_input)
         return check_measurement_input(
             image_layer, IntensitySemantics.ABSOLUTE, 'the partition coefficient')
-    except Exception as _exc:  # broad-ok: the intensity-semantics check is OPTIONAL — if that module is unavailable, proceed (logged) rather than block the measurement; this is the check missing, not the data failing it
+    except Exception as _exc:  # broad-ok: optional_probe — the intensity-semantics check is OPTIONAL — if that module is unavailable, proceed (logged) rather than block the measurement; this is the check missing, not the data failing it
         debug_log("intensity-semantics check unavailable", _exc)
         return True, ''
 
@@ -651,7 +651,7 @@ def estimate_phase_boundary(concentrations, fractions, n_boot=400,
                 _resid, x0=[cb0, s0], args=(cc, pp),
                 bounds=([-np.inf, 1e-12], [np.inf, np.inf]), max_nfev=5000)
             return float(r.x[0]), float(r.x[1])
-        except Exception:  # broad-ok: returns (NaN, NaN) on fit failure — an honest missing value, not a fabricated fit
+        except Exception:  # broad-ok: scientific_result — returns (NaN, NaN) on fit failure — an honest missing value, not a fabricated fit
             return np.nan, np.nan
 
     cb, s = _fit(c, phi)

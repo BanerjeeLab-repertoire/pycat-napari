@@ -58,7 +58,7 @@ def _qc_object_table(ui_instance):
     """
     try:
         repo = ui_instance.central_manager.active_data_class.data_repository
-    except Exception as exc:      # broad-ok: object QC is optional — no repository simply means no section
+    except Exception as exc:      # broad-ok: ui_cleanup — object QC is optional — no repository simply means no section
         debug_log('QC: no data repository for object-level QC', exc)
         return None
     for key in ('cell_df', 'puncta_df'):

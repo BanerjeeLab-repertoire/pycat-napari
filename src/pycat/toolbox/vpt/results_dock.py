@@ -58,7 +58,7 @@ class _VptResultsDockMixin:
             return
         try:
             self._highlight_track_in_centered(tid)
-        except Exception as e:                       # broad-ok: one dead view must not take the others down
+        except Exception as e:                       # broad-ok: ui_cleanup — one dead view must not take the others down
             print(f"[PyCAT VPT] link→centered failed: {e}")
 
     def _highlight_track_in_centered(self, track_id):
@@ -86,13 +86,13 @@ class _VptResultsDockMixin:
             from pycat.toolbox.analysis_plots import _CENTERED_HL
             try:
                 ln.set(**_CENTERED_HL)
-            except Exception:                        # broad-ok: a restyle failure must not wedge selection
+            except Exception:                        # broad-ok: ui_cleanup — a restyle failure must not wedge selection
                 pass
         state['prev'] = tid
         try:
             if canvas is not None:
                 canvas.draw_idle()
-        except Exception:                            # broad-ok: draw is best-effort
+        except Exception:                            # broad-ok: ui_cleanup — draw is best-effort
             pass
 
     # ── The per-track table (embedded, not a standalone dialog) ──────────────────
@@ -117,7 +117,7 @@ class _VptResultsDockMixin:
                 table.setItem(r, c, QTableWidgetItem('' if val is None else str(val)))
             try:
                 row_for_id[int(per_track_metrics.iloc[r]['track_id'])] = r
-            except Exception:                        # broad-ok: a non-int id just isn't row-mapped
+            except Exception:                        # broad-ok: ui_cleanup — a non-int id just isn't row-mapped
                 pass
         table.resizeColumnsToContents()
         self._track_table_registry = {'table': table, 'row_for_id': row_for_id,
@@ -132,7 +132,7 @@ class _VptResultsDockMixin:
             try:
                 # Cell text can be float-formatted ("48.0"); int("48.0") throws, so via float.
                 tid = int(float(table.item(items[0].row(), id_col).text()))
-            except Exception:                        # broad-ok: unparsable id cell → no selection
+            except Exception:                        # broad-ok: ui_cleanup — unparsable id cell → no selection
                 return
             self._select_track(tid, source='table')
         table.itemSelectionChanged.connect(_on_row)
@@ -156,7 +156,7 @@ class _VptResultsDockMixin:
         try:
             if tracks is not None and 'track_id' in tracks:
                 all_tids = sorted(int(t) for t in tracks['track_id'].unique() if t >= 0)
-        except Exception:                            # broad-ok: no usable track ids → empty pager
+        except Exception:                            # broad-ok: ui_cleanup — no usable track ids → empty pager
             all_tids = []
 
         # ── left: pager row + the 2×2 figure canvas ──
@@ -199,7 +199,7 @@ class _VptResultsDockMixin:
         try:
             if getattr(self, '_vpt_results_dock', None) is not None:
                 self.viewer.window.remove_dock_widget(self._vpt_results_dock)
-        except Exception:                            # broad-ok: stale dock ref → just add a fresh one
+        except Exception:                            # broad-ok: ui_cleanup — stale dock ref → just add a fresh one
             pass
         from pycat.utils.dock_space import add_results_dock
         self._vpt_results_dock = add_results_dock(
@@ -246,7 +246,7 @@ class _VptResultsDockMixin:
                 self._show_vpt_results(*_payload, restore_page=_st.get('page', 0),
                                        restore_bucket=_st.get('bucket_size'))
             retain_results('vpt', _rebuild, label='VPT microrheology')
-        except Exception:                            # broad-ok: results retention is a convenience, never gating
+        except Exception:                            # broad-ok: ui_cleanup — results retention is a convenience, never gating
             pass
 
     def _vpt_nbuckets(self, st):
@@ -344,7 +344,7 @@ class _VptResultsDockMixin:
             if _cv is not None and _old and _old.get('click_cid') is not None:
                 try:
                     _cv.mpl_disconnect(_old['click_cid'])
-                except Exception:                    # broad-ok: disconnecting a dead cid is harmless
+                except Exception:                    # broad-ok: ui_cleanup — disconnecting a dead cid is harmless
                     pass
 
         for ax in np.asarray(axes).ravel():
@@ -381,12 +381,12 @@ class _VptResultsDockMixin:
                                self._msd_line_registry.get('coords', {}),
                                lambda tid: self._select_track(tid, source='plot'),
                                self._msd_line_registry)
-        except Exception as e:                       # broad-ok: brushing wiring is best-effort
+        except Exception as e:                       # broad-ok: ui_cleanup — brushing wiring is best-effort
             print(f"[PyCAT VPT] MSD brushing wiring failed: {e}")
 
         try:
             st['canvas'].draw_idle()
-        except Exception:                            # broad-ok: draw is best-effort
+        except Exception:                            # broad-ok: ui_cleanup — draw is best-effort
             pass
         self._vpt_update_pager_label()
 
@@ -396,9 +396,9 @@ class _VptResultsDockMixin:
         if sel is not None:
             try:
                 self._highlight_track_in_plot(sel)
-            except Exception:                        # broad-ok: re-highlight is best-effort
+            except Exception:                        # broad-ok: ui_cleanup — re-highlight is best-effort
                 pass
             try:
                 self._highlight_track_in_centered(sel)
-            except Exception:                        # broad-ok: re-highlight is best-effort
+            except Exception:                        # broad-ok: ui_cleanup — re-highlight is best-effort
                 pass

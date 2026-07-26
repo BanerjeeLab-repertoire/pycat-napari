@@ -290,5 +290,5 @@ def _fit_clipped_radius(reg: np.ndarray) -> float:
             return eqrad
         # Never return smaller than what we already see
         return max(r, eqrad)
-    except Exception:  # broad-ok: falls back to the already-measured equivalent radius (eqrad) when the ellipse fit fails — a real prior measurement, not a fabricated default
+    except Exception:  # broad-ok: scientific_result — falls back to the already-measured equivalent radius (eqrad) when the ellipse fit fails — a real prior measurement, not a fabricated default
         return eqrad

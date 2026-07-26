@@ -421,7 +421,7 @@ def test_confinement(tau, msd):
             tau, msd, p0=[max(msd[0] / (4 * tau[0]), 1e-6), 1.0, 0.0], maxfev=30000)
         pl_fit = 4.0 * p_pl[0] * tau ** p_pl[1] + 4.0 * p_pl[2]
         a_pl = _aicc(msd, pl_fit, 3)
-    except Exception:  # broad-ok: reports the failure explicitly (assessable=False + a verdict that says the fit failed), not a fabricated confinement result
+    except Exception:  # broad-ok: scientific_result — reports the failure explicitly (assessable=False + a verdict that says the fit failed), not a fabricated confinement result
         return dict(confined=False, assessable=False,
                     verdict="Power-law fit failed; confinement not assessed.")
 
@@ -432,7 +432,7 @@ def test_confinement(tau, msd):
             maxfev=30000)
         cf_fit = _confined_msd(tau, *p_cf)
         a_cf = _aicc(msd, cf_fit, 3)
-    except Exception:  # broad-ok: the confined-model fit failed, so the already-fit power law is retained — a reported fallback (the verdict states it), not a fabricated default
+    except Exception:  # broad-ok: scientific_result — the confined-model fit failed, so the already-fit power law is retained — a reported fallback (the verdict states it), not a fabricated default
         return dict(confined=False, assessable=True,
                     verdict="Confined-model fit failed; power law retained.")
 

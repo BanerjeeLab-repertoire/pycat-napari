@@ -102,7 +102,7 @@ def estimate_linking_distance_um(bead_stack, coords_by_frame=None,
             popt, _ = curve_fit(g, (xx, yy), p.ravel(),
                                 p0=[p.max(), h, h, 1.5, 0.0], maxfev=4000)
             return abs(float(popt[3]))
-        except Exception:  # broad-ok: returns NaN on Gaussian-fit failure — an honest missing width, not a fabricated value
+        except Exception:  # broad-ok: scientific_result — returns NaN on Gaussian-fit failure — an honest missing width, not a fabricated value
             return np.nan
 
     # Materialise only the projection window (small), not the whole movie.

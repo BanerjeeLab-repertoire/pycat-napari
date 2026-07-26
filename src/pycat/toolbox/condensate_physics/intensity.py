@@ -110,7 +110,7 @@ def fit_bimodal_intensity(
             fit_y1=y1,
             fit_y2=y2,
         )
-    except Exception:  # broad-ok: reports fit_success=False — an honest failure flag with no fabricated fit values
+    except Exception:  # broad-ok: scientific_result — reports fit_success=False — an honest failure flag with no fabricated fit values
         return dict(fit_success=False)
 
 

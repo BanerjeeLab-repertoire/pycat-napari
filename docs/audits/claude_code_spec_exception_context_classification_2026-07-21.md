@@ -1,8 +1,17 @@
 # Claude Code spec — Exception handler classification by context category
 
 > **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). Part 1 categorization sweep UNDERWAY —
-> a ratchet + the `ui`, `navigator`, `batch`, `batch_processor.py`, and `utils` packages done (git-only).
-> Remaining: file_io / toolbox.**
+> a ratchet + the `ui`, `navigator`, `batch`, `batch_processor.py`, `utils`, and `toolbox` packages done
+> (git-only). Remaining: file_io only.**
+>
+> **Part 1 (cont.) — `toolbox` DONE (comment/test-only, git-only, no bump).** All 46 categorized to 0: the
+> fit/QC/gate computations that report an honest failure (`fit_success=False`, all-NaN + a user warning, an
+> assessable=False verdict, N/A, or a documented degraded fallback) — condensate-physics fits (intensity, msd,
+> photobleaching, relaxation), FRAP fits, in-vitro boundary/partition fits, VPT Gaussian/ellipse fits,
+> biological + reliability QC add-ons, the scan-QC drift check — → `scientific_result`; the headless-canvas /
+> headless-viewer probes, the optional intensity-semantics module, and the CuPy backend version probe →
+> `optional_probe`; matplotlib/dock/selection teardown + the data-QC UI gating-fail-open → `ui_cleanup`. Budget
+> test + the three swallow guards green. Uncategorized total 110 → 64; **only `file_io` (64) remains.**
 >
 > **Part 1 (cont.) — `utils` DONE (comment/test-only, git-only, no bump).** All 45 categorized to 0:
 > matplotlib/overlay teardown, subscriber-dispatch robustness, and cosmetic figure styling → `ui_cleanup`;

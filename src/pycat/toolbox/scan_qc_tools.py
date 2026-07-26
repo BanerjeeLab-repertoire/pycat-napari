@@ -217,7 +217,7 @@ def qc_bidirectional_phase(image):
         from skimage.registration import phase_cross_correlation
         shift = phase_cross_correlation(even, odd, upsample_factor=20)[0]
         dx = float(shift[1])                       # lateral offset along the fast axis
-    except Exception as exc:  # broad-ok: phase_cross_correlation can fail on degenerate input; report na rather than crash QC
+    except Exception as exc:  # broad-ok: scientific_result — phase_cross_correlation can fail on degenerate input; report na rather than crash QC
         debug_log('scan_qc: bidirectional phase correlation failed', exc)
         return dict(name='Bidirectional scan phase', tier='advisory', status='na', value=None,
                     unit='px', headline='could not be assessed', how='', good='', diag=None)

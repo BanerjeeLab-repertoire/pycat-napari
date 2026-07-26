@@ -142,7 +142,7 @@ def fit_aspect_ratio_relaxation(
                     fit_adequate=bool(quality['adequate']),
                     characteristic_length_um=R,
                     eta_over_gamma_s_per_um=eta_over_gamma)
-    except Exception:  # broad-ok: returns NaN fit values + fit_success=False (an honest failure); characteristic_length_um echoes the input R, not a fabricated fit result
+    except Exception:  # broad-ok: scientific_result — returns NaN fit values + fit_success=False (an honest failure); characteristic_length_um echoes the input R, not a fabricated fit result
         return dict(tau_s=np.nan, AR_0=np.nan, r_squared=np.nan,
                     fit_ar=np.array([]), fit_success=False,
                     characteristic_length_um=R,

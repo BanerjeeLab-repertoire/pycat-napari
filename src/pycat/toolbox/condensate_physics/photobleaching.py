@@ -167,7 +167,7 @@ def fit_photobleaching(
                     fit_success=r2 > 0.7,
                     fit_intensities=I_fit,
                     correction_factors=correction.astype(np.float32))
-    except Exception:  # broad-ok: fit_success=False + identity correction_factors (no bleach correction applied) — the safe honest fallback when the bleach fit fails, flagged for the caller
+    except Exception:  # broad-ok: scientific_result — fit_success=False + identity correction_factors (no bleach correction applied) — the safe honest fallback when the bleach fit fails, flagged for the caller
         return dict(fit_success=False,
                     correction_factors=np.ones(len(I), dtype=np.float32))
 

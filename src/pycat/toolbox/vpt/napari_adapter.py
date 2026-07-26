@@ -147,7 +147,7 @@ class _VptNapariMixin:
         try:
             self.viewer.mouse_drag_callbacks.append(_on_viewer_click)
             self._viewer_pick_installed = True
-        except Exception:                            # broad-ok: viewer teardown / missing callback list
+        except Exception:                            # broad-ok: ui_cleanup — viewer teardown / missing callback list
             pass
 
     def _nearest_bead_tid(self, layer, event, radius_px=25.0):
@@ -169,7 +169,7 @@ class _VptNapariMixin:
             return None
         try:
             pos = _np.asarray(layer.world_to_data(event.position), float)
-        except Exception:                            # broad-ok: fall back to the raw world position
+        except Exception:                            # broad-ok: ui_cleanup — fall back to the raw world position
             pos = _np.asarray(event.position, float)
         if data.shape[1] >= 3:                       # (T, Y, X) — restrict to the click's frame
             mask = data[:, 0].astype(int) == int(round(pos[0]))
@@ -185,7 +185,7 @@ class _VptNapariMixin:
             return None                              # nearest bead is too far — not a bead click
         try:
             return int(cand[j])
-        except Exception:                            # broad-ok: non-int tid → no selection
+        except Exception:                            # broad-ok: ui_cleanup — non-int tid → no selection
             return None
 
     def _rebuild_track_layers(self, tracks, name="Bead Trajectories"):

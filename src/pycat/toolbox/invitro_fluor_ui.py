@@ -707,7 +707,7 @@ def _mount_droplet_workspace(ui, part_df, summ_df, mask_layer, source_path):
         from pycat.utils.dock_space import add_results_dock
         dock = add_results_dock(ui.viewer.window, ws, name='IVF Droplet Results')
         ui._ivf_results_dock = (dock, ws)              # keep alive; detach the views if it closes
-    except Exception as exc:                           # broad-ok: no viewer window headless — the workspace is still returned
+    except Exception as exc:                           # broad-ok: optional_probe — no viewer window headless — the workspace is still returned
         debug_log('invitro_fluor: could not dock the droplet workspace', exc)
     return ws
 

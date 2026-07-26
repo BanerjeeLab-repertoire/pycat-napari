@@ -397,7 +397,7 @@ class FDCurveUI:
                 else:
                     show_dataframes_dialog("FD Rip Analysis",
                                            [('Result', pd.DataFrame([{'message': 'No rips detected above threshold.'}]))])
-            except Exception:  # broad-ok: the dialog is a convenience; a display glitch must not lose the result
+            except Exception:  # broad-ok: ui_cleanup — the dialog is a convenience; a display glitch must not lose the result
                 pass
             napari_show_info(
                 f"Detected {len(rips)} rips across all stretches."

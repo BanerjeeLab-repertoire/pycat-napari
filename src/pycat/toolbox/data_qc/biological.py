@@ -25,7 +25,7 @@ def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=3.
     try:
         import pandas as pd
         from pycat.toolbox.biological_qc_tools import biological_qc, _FLAG_WORDS
-    except Exception as exc:      # broad-ok: the object-QC add-on must never break the imaging report
+    except Exception as exc:      # broad-ok: scientific_result — the object-QC add-on must never break the imaging report
         debug_log('qc_biological_objects: import failed', exc)
         return []
 
@@ -36,7 +36,7 @@ def qc_biological_objects(object_table, labels=None, *, parent_labels=None, k=3.
 
     try:
         result = biological_qc(table, labels=labels, parent_labels=parent_labels, k=k)
-    except Exception as exc:      # broad-ok: object-level QC degrades to an N/A note, never a crash
+    except Exception as exc:      # broad-ok: scientific_result — object-level QC degrades to an N/A note, never a crash
         debug_log('qc_biological_objects: biological_qc failed', exc)
         return [_not_applicable('Object QC (biological)',
                                 f"Object-level QC could not run on this table ({exc}).")]
