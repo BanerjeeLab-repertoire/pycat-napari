@@ -1,8 +1,17 @@
 # Claude Code spec — Exception handler classification by context category
 
 > **◐ INCREMENTS 1–2 DONE + the batch_step guard DONE (test-only guard). Part 1 categorization sweep UNDERWAY —
-> a ratchet + the `ui`, `navigator`, `batch`, and `batch_processor.py` packages done (git-only). Remaining:
-> file_io / toolbox / utils.**
+> a ratchet + the `ui`, `navigator`, `batch`, `batch_processor.py`, and `utils` packages done (git-only).
+> Remaining: file_io / toolbox.**
+>
+> **Part 1 (cont.) — `utils` DONE (comment/test-only, git-only, no bump).** All 45 categorized to 0:
+> matplotlib/overlay teardown, subscriber-dispatch robustness, and cosmetic figure styling → `ui_cleanup`;
+> headless-canvas / can't-subscribe / font-enumeration / version-metadata / registry+identity enrichment
+> fallbacks → `optional_probe`; the additive biological-QC + reliability table columns, the calibration /
+> reliability quality gates, and the operation-runner failure transport (surfaced to `on_error`) →
+> `scientific_result`; the identity-store persist and the corrupt-settings quarantine → `write`. Budget test +
+> the three swallow guards green. Uncategorized total 155 → 110; budgets: file_io 64, toolbox 46, **utils /
+> batch / navigator / batch_processor.py / ui all 0**.
 >
 > **Part 1 (cont.) — navigator / batch / batch_processor.py DONE (comment/test-only, git-only, no bump).** The
 > three small packages categorized to 0: `navigator` (3) — the `operation_spec` optional-dependency import

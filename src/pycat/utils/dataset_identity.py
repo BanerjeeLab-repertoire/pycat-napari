@@ -119,7 +119,7 @@ class DatasetRegistry:
                 self._by_uuid[u] = DatasetIdentity(
                     uuid=u, original_path=rec['original_path'],
                     fingerprint=DatasetFingerprint.from_dict(rec['fingerprint']))
-        except Exception:      # broad-ok: a corrupt registry must not block opening a dataset
+        except Exception:      # broad-ok: optional_probe — a corrupt registry must not block opening a dataset
             self._by_uuid = {}
 
     def _save(self):
@@ -131,7 +131,7 @@ class DatasetRegistry:
                                  for u, ident in self._by_uuid.items()}}
             with open(self.store_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-        except Exception:      # broad-ok: failing to persist identity must not cost the user their data
+        except Exception:      # broad-ok: write — failing to persist identity must not cost the user their data
             pass
 
     def _store(self, ident: DatasetIdentity):
@@ -181,7 +181,7 @@ def default_registry() -> "DatasetRegistry":
             d = os.path.join(os.path.expanduser('~'), '.pycat')
             os.makedirs(d, exist_ok=True)
             store = os.path.join(d, 'dataset_registry.json')
-        except Exception:      # broad-ok: no writable config dir → fall back to an in-memory registry
+        except Exception:      # broad-ok: optional_probe — no writable config dir → fall back to an in-memory registry
             store = None
         _DEFAULT_REGISTRY = DatasetRegistry(store_path=store)
     return _DEFAULT_REGISTRY
@@ -194,6 +194,6 @@ def uuid_for_path(path):
     try:
         if path and os.path.isfile(str(path)):
             return default_registry().mint_or_recognise(str(path)).uuid
-    except Exception:      # broad-ok: a durable id is optional — an unreadable file falls back to its path
+    except Exception:      # broad-ok: optional_probe — a durable id is optional — an unreadable file falls back to its path
         return None
     return None

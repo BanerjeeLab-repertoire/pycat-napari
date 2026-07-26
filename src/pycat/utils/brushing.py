@@ -293,7 +293,7 @@ def _wire_pickable(figure, on_pick, on_key, state, refs) -> None:
         figure._pycat_object_refs = refs
         figure._pycat_brush_cids = cids
         figure._pycat_brush_state = state
-    except Exception:      # broad-ok: a figure that rejects attributes just loses auto-teardown, not brushing
+    except Exception:      # broad-ok: ui_cleanup — a figure that rejects attributes just loses auto-teardown, not brushing
         pass
 
     # Wire teardown to the figure's OWN close so a closed window cleans up without the caller remembering
@@ -302,7 +302,7 @@ def _wire_pickable(figure, on_pick, on_key, state, refs) -> None:
     try:
         cids.append(figure.canvas.mpl_connect(
             'close_event', lambda event: _teardown_pickable(event.canvas.figure)))
-    except Exception:      # broad-ok: no canvas to wire the auto-teardown onto (headless) — dispose still works
+    except Exception:      # broad-ok: optional_probe — no canvas to wire the auto-teardown onto (headless) — dispose still works
         pass
 
 
@@ -318,11 +318,11 @@ def _teardown_pickable(figure) -> None:
     for cid in list(cids):
         try:
             figure.canvas.mpl_disconnect(cid)
-        except Exception:      # broad-ok: a stale/twice-disconnected cid must not break teardown
+        except Exception:      # broad-ok: ui_cleanup — a stale/twice-disconnected cid must not break teardown
             pass
     try:
         figure._pycat_brush_cids = []
-    except Exception:          # broad-ok: teardown is best-effort; never raise while cleaning up
+    except Exception:          # broad-ok: ui_cleanup — teardown is best-effort; never raise while cleaning up
         pass
 
     state = getattr(figure, '_pycat_brush_state', None)
@@ -330,16 +330,16 @@ def _teardown_pickable(figure) -> None:
     if overlay is not None:
         try:
             overlay.remove()
-        except Exception:      # broad-ok: an already-removed overlay must not break teardown
+        except Exception:      # broad-ok: ui_cleanup — an already-removed overlay must not break teardown
             pass
         try:
             state['overlay'] = None
-        except Exception:      # broad-ok: best-effort
+        except Exception:      # broad-ok: ui_cleanup — best-effort
             pass
 
     try:
         figure._pycat_object_refs = None       # release the LazyRef sequence the plot held
-    except Exception:          # broad-ok: best-effort
+    except Exception:          # broad-ok: ui_cleanup — best-effort
         pass
 
 
@@ -360,7 +360,7 @@ def dispose_pickable(figure, *, close_figure=True) -> None:
         try:
             import matplotlib.pyplot as plt
             plt.close(figure)
-        except Exception:      # broad-ok: closing is best-effort; a non-pyplot figure just stays as-is
+        except Exception:      # broad-ok: ui_cleanup — closing is best-effort; a non-pyplot figure just stays as-is
             pass
 
 

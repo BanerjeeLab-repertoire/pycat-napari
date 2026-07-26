@@ -215,7 +215,7 @@ def dataset_id_for(source_path) -> str:
         u = uuid_for_path(source_path)
         if u:
             return u
-    except Exception:                # broad-ok: a durable id is a convenience; never cost the caller their table
+    except Exception:                # broad-ok: optional_probe — a durable id is a convenience; never cost the caller their table
         pass
     return str(source_path)
 
@@ -270,7 +270,7 @@ def migrate_entity_id_dataset(df, old_dataset_id, new_dataset_id, *, column=ENTI
 
         df[column] = df[column].map(_swap)
         return n
-    except Exception as exc:      # broad-ok: a migration is best-effort; a failure must never break a session load
+    except Exception as exc:      # broad-ok: optional_probe — a migration is best-effort; a failure must never break a session load
         debug_log("entity_ref: entity-id migration failed", exc)
         return 0
 
@@ -416,7 +416,7 @@ def populate_registry(table, *, registry=None, source_path=None, operation_id=No
                 location=EntityLocation(bbox=ref.bbox, layer_id=row.get(LAYER_ID_COLUMN),
                                         frame=ref.frame, source=src),
                 provenance=operation_id, dataset=dataset))
-    except Exception as exc:  # broad-ok: registry population is additive; it must never break the analysis result
+    except Exception as exc:  # broad-ok: optional_probe — registry population is additive; it must never break the analysis result
         debug_log('entity_ref: could not populate the entity registry', exc)
     return reg
 

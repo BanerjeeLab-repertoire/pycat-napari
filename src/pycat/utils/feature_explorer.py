@@ -109,7 +109,7 @@ def build_feature_card(table, key, *, context=None, bins=20) -> FeatureCard:
         try:
             from pycat.utils.feature_provenance import describe_provenance
             provenance_summary = describe_provenance(prov)
-        except Exception:      # broad-ok: provenance is an optional card field — never break the card
+        except Exception:      # broad-ok: ui_cleanup — provenance is an optional card field — never break the card
             provenance_summary = None
 
     return FeatureCard(

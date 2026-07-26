@@ -45,7 +45,7 @@ class FieldRegistryHub:
             try:
                 reg.reset_all()
                 reset += 1
-            except Exception as exc:  # broad-ok: one widget's reset must not block clearing the rest of the workspace
+            except Exception as exc:  # broad-ok: ui_cleanup — one widget's reset must not block clearing the rest of the workspace
                 debug_log('FieldRegistryHub: a registry reset failed', exc)
         self._prune()
         return reset

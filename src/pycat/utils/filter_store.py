@@ -63,7 +63,7 @@ class FilterStore:
         for cb in list(self._subscribers.values()):
             try:
                 cb(self._filter)
-            except Exception:      # broad-ok: one bad filter subscriber must not break the others
+            except Exception:      # broad-ok: ui_cleanup — one bad filter subscriber must not break the others
                 pass
 
     # ── the population API ───────────────────────────────────────────────────────────────────────

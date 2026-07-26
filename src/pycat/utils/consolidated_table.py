@@ -134,7 +134,7 @@ def _object_qc_flags(wide, object_type, id_col, *, labels=None, parent_labels=No
                                 id_col=id_col, k=k)
             flags = res['qc_flags'].fillna('').astype(str)
         return {oid: fl for oid, fl in zip(ids.to_numpy(), flags.to_numpy()) if fl}
-    except Exception as exc:      # broad-ok: additive QC must never break the keystone table build
+    except Exception as exc:      # broad-ok: scientific_result — additive QC must never break the keystone table build
         _warn(f"Consolidated table: biological QC flags skipped for {object_type}: {exc}")
         return {}
 
@@ -178,7 +178,7 @@ def _row_reliability_factory(reliability_context):
                                     object_flags=(0.5 if flagged else 1.0),
                                     sensitivity=sens, benchmark=benchmark)
                 cache[key] = (score.grade, "; ".join(score.reasons))
-            except Exception as exc:      # broad-ok: additive reliability must never break the table build
+            except Exception as exc:      # broad-ok: scientific_result — additive reliability must never break the table build
                 _warn(f"Consolidated table: reliability skipped for {measurement}: {exc}")
                 cache[key] = ('', '')
         return cache[key]

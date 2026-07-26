@@ -32,7 +32,7 @@ def _finalize_entities(result, operation_id):
     try:
         from pycat.utils.entity_ref import finalize_entity_table
         return finalize_entity_table(result, operation_id)
-    except Exception as exc:  # broad-ok: identity finalization must never break the operation's result transport
+    except Exception as exc:  # broad-ok: optional_probe — identity finalization must never break the operation's result transport
         from pycat.utils.general_utils import debug_log
         debug_log('operation_runner: entity finalization failed', exc)
         return result
@@ -119,7 +119,7 @@ class OperationRunner:
             result = run_with_progress(_work, title=title, text=text, parent=parent)
         except _Cancelled:
             return None                          # cancelled — no result, no error
-        except Exception as exc:                 # broad-ok: the runner's job IS to transport ANY failure to on_error (typed if fn raised one)
+        except Exception as exc:                 # broad-ok: scientific_result — the runner's job IS to transport ANY failure to on_error (typed if fn raised one)
             if on_error is not None:
                 on_error(exc)
                 return None

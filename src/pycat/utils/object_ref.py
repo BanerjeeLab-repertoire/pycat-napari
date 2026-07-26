@@ -365,7 +365,7 @@ def location_from_registry(ref: ObjectRef) -> ObjectRef:
     try:
         from pycat.utils.entity_registry import default_registry
         rec = default_registry().resolve(eid)
-    except Exception as exc:                 # broad-ok: a registry miss must never break resolution
+    except Exception as exc:                 # broad-ok: optional_probe — a registry miss must never break resolution
         debug_log('object_ref: entity-registry lookup failed', exc)
         return ref
     if rec is None:

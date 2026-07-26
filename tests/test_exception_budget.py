@@ -159,7 +159,7 @@ def test_a_categorized_broad_ok_names_a_VALID_category():
 _UNCATEGORIZED_BUDGET = {
     'file_io': 64,
     'toolbox': 46,
-    'utils': 45,
+    'utils': 0,       # utils fully categorized (Part 1: teardown/dispatch → ui_cleanup, capability/identity → optional_probe, QC/reliability/gates → scientific_result, persist/quarantine → write)
     'batch': 0,       # batch/steps fully categorized (Part 1: optional_probe model/metadata probes, batch_step, write)
     'navigator': 0,   # navigator fully categorized (Part 1: optional-dependency import probes → optional_probe)
     'batch_processor.py': 0,  # fully categorized (Part 1: write sidecar, ui_cleanup brushable dock)

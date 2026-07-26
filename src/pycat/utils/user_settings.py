@@ -30,7 +30,7 @@ def _default_store_path() -> str:
     try:
         import platformdirs
         base = platformdirs.user_config_dir('pycat')
-    except Exception:      # broad-ok: no platformdirs / odd platform → a home-dir fallback, never crash
+    except Exception:      # broad-ok: optional_probe — no platformdirs / odd platform → a home-dir fallback, never crash
         base = os.path.join(os.path.expanduser('~'), '.pycat')
     return os.path.join(base, 'settings.json')
 
@@ -126,7 +126,7 @@ class UserSettings:
             for cb in list(self._subscribers.get(key, ())):
                 try:
                     cb(value)
-                except Exception:      # broad-ok: a bad subscriber must not corrupt the store or block others
+                except Exception:      # broad-ok: ui_cleanup — a bad subscriber must not corrupt the store or block others
                     pass
 
     def reset(self, key):
@@ -141,7 +141,7 @@ class UserSettings:
                 for cb in list(self._subscribers.get(key, ())):
                     try:
                         cb(new)
-                    except Exception:      # broad-ok: a bad subscriber must not block reset
+                    except Exception:      # broad-ok: ui_cleanup — a bad subscriber must not block reset
                         pass
 
     def subscribe(self, key, callback):
@@ -166,7 +166,7 @@ class UserSettings:
                 if not isinstance(data, dict):
                     raise ValueError('settings file is not a JSON object')
                 self._values = data
-        except Exception:      # broad-ok: a corrupt/unreadable settings file must NEVER crash startup
+        except Exception:      # broad-ok: optional_probe — a corrupt/unreadable settings file must NEVER crash startup
             self._values = {}
             self._quarantine_corrupt()
 
@@ -176,7 +176,7 @@ class UserSettings:
         try:
             if os.path.isfile(self._path):
                 os.replace(self._path, self._path + '.corrupt')
-        except Exception:      # broad-ok: best-effort quarantine; failing it still leaves us on defaults
+        except Exception:      # broad-ok: write — best-effort quarantine; failing it still leaves us on defaults
             pass
 
     def _save(self):

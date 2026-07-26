@@ -212,7 +212,7 @@ def resolve_font_family(family):
     try:
         from matplotlib import font_manager
         installed = {f.name for f in font_manager.fontManager.ttflist}
-    except Exception:      # broad-ok: font enumeration unavailable → fall back to the default, never crash
+    except Exception:      # broad-ok: optional_probe — font enumeration unavailable → fall back to the default, never crash
         return None, None
     if family in installed:
         return family, None
@@ -544,7 +544,7 @@ def _recolor_series(ax, palette):
     for i, coll in enumerate(ax.collections):
         try:
             coll.set_color(palette[i % len(palette)])
-        except Exception:      # broad-ok: a collection that rejects a colour keeps its own — cosmetic only
+        except Exception:      # broad-ok: ui_cleanup — a collection that rejects a colour keeps its own — cosmetic only
             pass
 
 

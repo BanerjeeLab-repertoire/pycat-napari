@@ -44,7 +44,7 @@ def software_versions() -> dict:
                       ('scikit-image', 'scikit-image'), ('pandas', 'pandas')):
         try:
             out[key] = _md.version(dist)
-        except Exception:  # broad-ok: an absent dist just means that version is not recorded — never fabricate one
+        except Exception:  # broad-ok: optional_probe — an absent dist just means that version is not recorded — never fabricate one
             pass
     return out
 

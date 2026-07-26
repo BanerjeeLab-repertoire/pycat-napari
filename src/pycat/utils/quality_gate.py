@@ -92,7 +92,7 @@ def _calibration_signal(context) -> SignalOutcome:
             from pycat.utils.calibration import check_calibration_validity
             verdict = check_calibration_validity(context['calibration_curve'],
                                                  context.get('image_metadata') or {})
-        except Exception:      # broad-ok: an unusable calibration input → treat as not-assessed, never crash
+        except Exception:      # broad-ok: scientific_result — an unusable calibration input → treat as not-assessed, never crash
             verdict = None
     if verdict is None:
         return SignalOutcome('calibration', GateVerdict.WARN,
@@ -116,7 +116,7 @@ def _reliability_signal(context, requirement) -> SignalOutcome:
                 image_qc=context.get('image_qc'), object_flags=context.get('object_flags'),
                 calibration=context.get('calibration'), sensitivity=context.get('sensitivity'),
                 benchmark=context.get('benchmark'))
-        except Exception:      # broad-ok: no assessable reliability signal → not-assessed, never crash
+        except Exception:      # broad-ok: scientific_result — no assessable reliability signal → not-assessed, never crash
             score = None
     grade = getattr(score, 'grade', None)
     value = getattr(score, 'value', float('nan'))

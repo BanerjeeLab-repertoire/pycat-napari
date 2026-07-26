@@ -40,7 +40,7 @@ class FigureRefineController:
         print size) and restyle. Presentation only — the plotted data is untouched."""
         try:
             self.fig.set_size_inches(self.spec.figure_size_in)
-        except Exception:      # broad-ok: a detached/odd figure can't be resized — style it anyway
+        except Exception:      # broad-ok: ui_cleanup — a detached/odd figure can't be resized — style it anyway
             pass
         return refine(self.fig, self.spec)
 

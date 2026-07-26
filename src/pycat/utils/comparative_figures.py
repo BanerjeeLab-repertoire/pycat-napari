@@ -205,7 +205,7 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
         if state['ring'] is not None:
             try:
                 state['ring'].remove()
-            except Exception:                        # broad-ok: artist already gone
+            except Exception:                        # broad-ok: ui_cleanup — artist already gone
                 pass
             state['ring'] = None
         sel = [(x, y) for e, x, y in pts if e in eids]
@@ -215,7 +215,7 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
                                        ms=12, zorder=5)
         try:
             fig.canvas.draw_idle()
-        except Exception:                            # broad-ok: no live canvas (headless) — nothing to redraw
+        except Exception:                            # broad-ok: optional_probe — no live canvas (headless) — nothing to redraw
             pass
 
     def apply_selection(state_obj):
@@ -251,7 +251,7 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
 
     try:
         selection_service.subscribe(view_id, apply_selection)
-    except Exception:                                # broad-ok: service without subscribe → no receive wiring
+    except Exception:                                # broad-ok: optional_probe — service without subscribe → no receive wiring
         pass
     _cid = None
     try:
@@ -259,7 +259,7 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
             'button_press_event',
             lambda ev: (getattr(ev, 'inaxes', None) is ax and getattr(ev, 'x', None) is not None
                         and emit_nearest(ev.x, ev.y)))
-    except Exception:                                # broad-ok: no canvas to connect (headless)
+    except Exception:                                # broad-ok: optional_probe — no canvas to connect (headless)
         pass
 
     def dispose():
@@ -268,12 +268,12 @@ def _attach_object_brushing(fig, ax, object_points, selection_service, *, view_i
         what keeps the subscriber list from growing; it also disconnects the canvas cid."""
         try:
             selection_service.unsubscribe(view_id)
-        except Exception:                            # broad-ok: teardown is best-effort; never raise on close
+        except Exception:                            # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             pass
         if _cid is not None:
             try:
                 fig.canvas.mpl_disconnect(_cid)
-            except Exception:                        # broad-ok: a stale/twice-disconnected cid is harmless
+            except Exception:                        # broad-ok: ui_cleanup — a stale/twice-disconnected cid is harmless
                 pass
 
     return {'emit_nearest': emit_nearest, 'apply_selection': apply_selection, 'dispose': dispose}

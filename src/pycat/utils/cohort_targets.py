@@ -111,7 +111,7 @@ def attach_histogram_brushing(fig, ax, values, entity_ids, *, bin_edges, selecti
                 patches[i].set_linewidth(2.0)
                 state['hi_bar'] = i
             fig.canvas.draw_idle()
-        except Exception:                    # broad-ok: no live canvas / no bars → nothing to redraw
+        except Exception:                    # broad-ok: optional_probe — no live canvas / no bars → nothing to redraw
             pass
 
     def emit_bin(x_data):
@@ -133,7 +133,7 @@ def attach_histogram_brushing(fig, ax, values, entity_ids, *, bin_edges, selecti
 
     try:
         selection_service.subscribe(view_id, apply_selection)
-    except Exception:                                # broad-ok: a service without subscribe → no receive wiring
+    except Exception:                                # broad-ok: optional_probe — a service without subscribe → no receive wiring
         pass
     _cid = None
     try:
@@ -141,7 +141,7 @@ def attach_histogram_brushing(fig, ax, values, entity_ids, *, bin_edges, selecti
             'button_press_event',
             lambda ev: (getattr(ev, 'inaxes', None) is ax and getattr(ev, 'xdata', None) is not None
                         and emit_bin(ev.xdata)))
-    except Exception:                                # broad-ok: no canvas to connect (headless)
+    except Exception:                                # broad-ok: optional_probe — no canvas to connect (headless)
         pass
 
     def dispose():
@@ -150,12 +150,12 @@ def attach_histogram_brushing(fig, ax, values, entity_ids, *, bin_edges, selecti
         keeps the subscriber list from growing across a session, plus the canvas cid disconnect."""
         try:
             selection_service.unsubscribe(view_id)
-        except Exception:                            # broad-ok: teardown is best-effort; never raise on close
+        except Exception:                            # broad-ok: ui_cleanup — teardown is best-effort; never raise on close
             pass
         if _cid is not None:
             try:
                 fig.canvas.mpl_disconnect(_cid)
-            except Exception:                        # broad-ok: a stale/twice-disconnected cid is harmless
+            except Exception:                        # broad-ok: ui_cleanup — a stale/twice-disconnected cid is harmless
                 pass
 
     return {'emit_bin': emit_bin, 'apply_selection': apply_selection, 'dispose': dispose}
