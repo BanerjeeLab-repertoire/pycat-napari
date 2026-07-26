@@ -1,3 +1,24 @@
+## [1.6.387] - 2026-07-26
+### Added — **Headless calibrated concentration in the batch (reliability_index roadmap).**
+`replay_client_enrichment` replaces the interactive-only `client_enrichment` batch skip-stub with a real
+headless step: when a calibration curve is configured for the run, it converts a droplet field's partition to
+real concentrations + K_p + ΔG **through the validity gate** (`check_calibration_validity` — a refused
+calibration writes the verdict and **no** concentration, never a plausible fabricated number), writes the
+calibrated columns to a per-image `<stem>_client_enrichment.csv`, and stashes the verdict into
+`state['_calibration_validity']` for the reliability index to thread.
+
+- Runs **only** the calibrated path — the uncalibrated intensity-ratio `partition_coefficient`
+  (`replay_ivf_field_summary`) stands on its own and is never given a calibration verdict. The curve comes from
+  `state['calibration_curve']` or a `calibration_curve_path` in params/state (`load_curve`). **Non-breaking:**
+  with no curve configured the step is a documented no-op, so an ordinary uncalibrated batch behaves exactly as
+  it did when this was a skip-stub. *(Activation wiring — recording a curve path in the batch config UI, and
+  threading the stashed verdict into `_reliability_context_for` — is the follow-up; the capability + its safety
+  gate are built and tested here.)*
+- `tests/test_batch_client_enrichment.py` (`base`, 4): a matching curve writes finite concentrations
+  (dense > dilute) + stashes a valid verdict; a mismatched-channel curve is refused with the verdict recorded
+  and **no** concentration fabricated; no curve is a non-breaking no-op; a missing droplet mask skips
+  gracefully. Full `pytest -m "core or base"` green.
+
 ## [1.6.386] - 2026-07-26
 ### Changed — **Manuscript Fig 1 (QC pipeline) is now wired (manuscript_toolbox).**
 The Fig 1 QC panel — previously greyed for want of a composer at the path the spec named — is re-pointed to

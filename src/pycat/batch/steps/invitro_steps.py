@@ -249,3 +249,94 @@ def replay_ivf_segmentation(state: dict, image_path: Path, params: dict, output_
                 output_dir / f"{image_path.stem}_ivf_droplet_mask.tiff")
     print(f"[PyCAT Batch]   In vitro fluorescence segmentation ({method}): "
           f"{int(labeled.max())} droplets.")
+
+
+# ---------------------------------------------------------------------------
+# Headless calibrated concentration (reliability_index roadmap)
+# ---------------------------------------------------------------------------
+
+def _resolve_calibration_curve(state: dict, params: dict):
+    """The calibration curve for this run, or ``None`` (the run has no calibration configured). Accepts a
+    pre-loaded ``CalibrationCurve`` in ``state['calibration_curve']``, or a path in
+    ``params['calibration_curve_path']`` / ``state['calibration_curve_path']`` to load via ``load_curve``."""
+    curve = state.get('calibration_curve')
+    if curve is not None:
+        return curve
+    path = params.get('calibration_curve_path') or state.get('calibration_curve_path')
+    if not path:
+        return None
+    try:
+        from pycat.utils.calibration import load_curve
+        return load_curve(path)
+    except Exception as exc:      # broad-ok: optional_probe — an unreadable/absent curve → the run stays uncalibrated
+        print(f"[PyCAT Batch]   client_enrichment: could not load calibration curve '{path}': {exc}")
+        return None
+
+
+def _flatten_enrichment(result: dict) -> dict:
+    """A flat CSV row from ``client_enrichment``'s result — ``Parameter`` values/units unpacked, and the
+    calibration-verdict columns always present (so a REFUSED calibration records *why*, with no fabricated
+    concentration left behind)."""
+    row = {'dense_mean': result.get('dense_mean'), 'dilute_mean': result.get('dilute_mean'),
+           'enrichment_ratio': result.get('enrichment'),
+           'n_dense_px': result.get('n_dense_px'), 'n_dilute_px': result.get('n_dilute_px')}
+    val = result.get('calibration_validity') or {}
+    row['calibration_valid'] = val.get('valid')
+    row['calibration_level'] = val.get('level')
+    row['calibration_reason'] = val.get('reason')
+    for key in ('dense_concentration', 'dilute_concentration'):
+        p = result.get(key)
+        if p is not None:
+            row[key] = getattr(p, 'value', p)
+            row[key + '_units'] = getattr(p, 'units', None)
+    if 'Kp_calibrated' in result:
+        row['Kp_calibrated'] = result.get('Kp_calibrated')
+    dg = result.get('delta_g_transfer')
+    if dg is not None:
+        row['delta_g_transfer'] = getattr(dg, 'value', dg)
+        row['delta_g_units'] = getattr(dg, 'units', None)
+    return row
+
+
+def replay_client_enrichment(state: dict, image_path: Path, params: dict, output_dir: Path):
+    """Headless CALIBRATED concentration for a droplet field (reliability_index roadmap).
+
+    Replaces the interactive-only ``client_enrichment`` stub with a real batch step: when a calibration curve
+    is configured for the run, convert the droplet partition to real concentrations + K_p + ΔG **through the
+    validity gate** (``check_calibration_validity`` — a refused calibration writes the verdict and NO
+    concentration, never a plausible fabricated number), write the calibrated columns to a per-image CSV, and
+    stash the verdict into ``state['_calibration_validity']`` so ``BatchProcessor._reliability_context_for``
+    can thread it.
+
+    Runs ONLY the calibrated path: the uncalibrated intensity-ratio ``partition_coefficient``
+    (``replay_ivf_field_summary``) stands on its own and must not be given a calibration verdict. No curve
+    configured → a documented no-op (the interactive session that recorded this step may not have used one), so
+    an ordinary uncalibrated batch behaves exactly as it did when this step was a skip-stub.
+    """
+    import pandas as pd
+
+    curve = _resolve_calibration_curve(state, params)
+    if curve is None:
+        print('[PyCAT Batch]   client_enrichment skipped (no calibration curve configured for this run).')
+        return
+
+    mask, img = _ivf_droplet_mask_and_image(state)
+    if mask is None or img is None:
+        print('[PyCAT Batch]   client_enrichment skipped (no droplet mask/image in state — segment first).')
+        return
+
+    from pycat.toolbox.partition_enrichment_tools import client_enrichment
+    di = state.get('data_instance')
+    image_metadata = dict(di.data_repository) if di is not None and hasattr(di, 'data_repository') else {}
+    temperature_K = params.get('temperature_K')
+
+    result = client_enrichment(np.asarray(img, dtype=float), np.asarray(mask) > 0,
+                               calibration_curve=curve, image_metadata=image_metadata,
+                               temperature_K=temperature_K)
+
+    state['_calibration_validity'] = result.get('calibration_validity')
+    pd.DataFrame([_flatten_enrichment(result)]).to_csv(
+        output_dir / f"{image_path.stem}_client_enrichment.csv", index=False)
+    _v = result.get('calibration_validity') or {}
+    print(f"[PyCAT Batch]   client_enrichment: calibration level={_v.get('level', '?')} "
+          f"(valid={_v.get('valid')}); enrichment ratio {result.get('enrichment')}.")

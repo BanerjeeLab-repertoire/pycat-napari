@@ -14,6 +14,17 @@
 
 ## Roadmap (deferred): calibration in the batch — headless calibrated concentration
 
+> **◐ THE STEP IS BUILT, 1.6.387.** `replay_client_enrichment` (`batch/steps/invitro_steps.py`) replaces the
+> `client_enrichment` skip-stub: given a calibration curve (`state['calibration_curve']` or a
+> `calibration_curve_path`), it runs `client_enrichment` on the droplet mask + raw image, converts the partition
+> to concentrations + K_p + ΔG through `check_calibration_validity` (refused → verdict only, no fabricated
+> number), writes `<stem>_client_enrichment.csv`, and stashes the verdict into `state['_calibration_validity']`.
+> Non-breaking (no curve → no-op). `tests/test_batch_client_enrichment.py` (`base`, 4). **STILL OPEN (activation
+> wiring):** (1) record a calibration-curve path in the batch config UI so a run actually configures a curve;
+> (2) thread the stashed verdict — `_process_file` stash into `self._last_calibration`, `_reliability_context_for`
+> add `calibration=self._last_calibration` (the consolidated-table `_row_reliability_factory` already consumes
+> `reliability_context['calibration']`, so no table change). Both are wiring over the now-existing capability.
+
 **Why deferred, captured so it is not re-investigated.** The reliability `calibration` factor
 (`check_calibration_validity` → valid/level/reason) only has a source when a *calibrated* measurement runs.
 That path does not run in the batch today, so there is nothing to thread. To close it, add headless

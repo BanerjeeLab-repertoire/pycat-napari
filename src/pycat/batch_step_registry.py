@@ -126,7 +126,7 @@ from pycat.batch.steps.io_steps import (replay_open_image, replay_open_stack, re
 from pycat.batch.steps.preprocessing_steps import (replay_preprocessing, replay_upscaling, replay_calibration_correction)
 from pycat.batch.steps.segmentation_steps import (replay_cellpose_segmentation, replay_ts_cellpose_keyframe)
 from pycat.batch.steps.brightfield_steps import (replay_bf_preprocess, replay_bf_condensate_segmentation, replay_bf_cell_segmentation, replay_ivbf_preprocess, replay_ivbf_segmentation)
-from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation)
+from pycat.batch.steps.invitro_steps import (replay_ivf_preprocess, replay_ivf_field_summary, replay_ivf_size_distribution, replay_ivf_spatial_metrology, replay_ivf_segmentation, replay_client_enrichment)
 from pycat.batch.steps.analysis_steps import (replay_condensate_analysis, replay_measure_line, replay_cell_analysis, replay_sacf_analysis, replay_condensate_segmentation)
 
 from pycat.batch.steps._common import _get_data, _save_array, _raw_counts, _normalize_to_float  # for replay_background_removal (kept here: a source-level test pins it)
@@ -332,9 +332,7 @@ _STEP_MAP = {
     'gaussian_localization':    lambda s,p,pa,o: print(
         '[PyCAT Batch]   Gaussian localization skipped in headless mode '
         '(interactive image/points selection).'),
-    'client_enrichment':        lambda s,p,pa,o: print(
-        '[PyCAT Batch]   Client enrichment skipped in headless mode '
-        '(interactive layer selection).'),
+    'client_enrichment':        replay_client_enrichment,   # headless calibrated concentration (reliability_index roadmap)
     'intensity_profile':        lambda s,p,pa,o: print(
         '[PyCAT Batch]   Intensity profile skipped in headless mode '
         '(interactive shapes/points selection).'),
