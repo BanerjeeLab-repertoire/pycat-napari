@@ -292,7 +292,7 @@ class _SegmentationWidgetsMixin:
 
         # window_size slider
         def_window_size = math.ceil(self.central_manager.active_data_class.data_repository['ball_radius']) # Calculate the default window size  
-        window_label = QLabel(f"Window Size:") # Add a text label
+        window_label = QLabel("Window Size:") # Add a text label
         window_label.setWordWrap(True)
 
         window_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)

@@ -57,7 +57,7 @@ def replay_condensate_analysis(state: dict, image_path: Path, params: dict, outp
     if puncta_df is not None:
         puncta_df.to_csv(output_dir / f"{image_path.stem}_puncta_df.csv", index=False)
 
-    print(f"[PyCAT Batch]   Condensate analysis done.")
+    print("[PyCAT Batch]   Condensate analysis done.")
 
 
 def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -89,8 +89,8 @@ def replay_measure_line(state: dict, image_path: Path, params: dict, output_dir:
         print(f"[PyCAT Batch]   Measure Line applied recorded measurements: "
               f"{', '.join(applied)}.")
     else:
-        print(f"[PyCAT Batch]   Measure Line: no recorded measurements to apply "
-              f"(using open_image values).")
+        print("[PyCAT Batch]   Measure Line: no recorded measurements to apply "
+              "(using open_image values).")
 
 
 def replay_cell_analysis(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -318,4 +318,4 @@ def replay_condensate_segmentation(state: dict, image_path: Path, params: dict, 
                 output_dir / f"{image_path.stem}_total_puncta_mask.tiff")
     _save_array(total_refined_puncta_mask.astype(np.uint8),
                 output_dir / f"{image_path.stem}_total_refined_puncta_mask.tiff")
-    print(f"[PyCAT Batch]   Condensate segmentation done.")
+    print("[PyCAT Batch]   Condensate segmentation done.")

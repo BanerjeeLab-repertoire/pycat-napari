@@ -768,7 +768,7 @@ def _ts_cp_seg_rf(ui_instance, w, stack_np, layer_name, dr, interval):
     n_kf = len(kf_indices_preview)
     progress_bar.setMaximum(n_kf); progress_bar.setValue(0)
     progress_bar.setVisible(True)
-    progress_label.setText(f"Training RF on annotation layer…")
+    progress_label.setText("Training RF on annotation layer…")
     progress_label.setVisible(True)
     run_btn.setEnabled(False)
     try:

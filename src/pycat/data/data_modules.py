@@ -456,7 +456,7 @@ class BaseDataClass:
         if cell_coords is not None:
             self.data_repository['cell_diameter'] = euclidean(cell_coords[0], cell_coords[1])
         else: 
-            napari_show_warning(f"No cell diameter found, using default value. Please draw a line to measure the cell diameter.")
+            napari_show_warning("No cell diameter found, using default value. Please draw a line to measure the cell diameter.")
         if object_coords is not None:
             self.data_repository['object_size'] = euclidean(object_coords[0], object_coords[1])
             object_radius = self.data_repository['object_size'] / 2

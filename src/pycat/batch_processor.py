@@ -471,7 +471,7 @@ class BatchWorker(QThread):
                 import traceback
                 print(f"[PyCAT Batch] ERROR in step '{step_name}' for "
                       f"{image_path.name}:\n{traceback.format_exc()}")
-                print(f"[PyCAT Batch] Skipping remaining steps for this file.")
+                print("[PyCAT Batch] Skipping remaining steps for this file.")
                 # Wrap into a typed PyCATError so the BatchStepResult invariant holds (error ⇔ status 'error').
                 _err = (_step_exc if isinstance(_step_exc, PyCATError)
                         else PyCATError(f"{type(_step_exc).__name__}: {_step_exc}"))

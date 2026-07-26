@@ -99,7 +99,7 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
         state.setdefault('preprocessed', np.asarray(state['image']).copy())
         _save_array(state['preprocessed_fluorescence'],
                     output_dir / f"{image_path.stem}_preprocessed.tiff")
-        print(f"[PyCAT Batch]   Preprocessing done (active layer: fluorescence).")
+        print("[PyCAT Batch]   Preprocessing done (active layer: fluorescence).")
     else:
         state['preprocessed'] = _proc(state['image'])
         # Fluorescence channel was NOT the active layer -> pass through raw so
@@ -110,7 +110,7 @@ def replay_preprocessing(state: dict, image_path: Path, params: dict, output_dir
             np.asarray(fluor).copy() if fluor is not None else state['preprocessed'])
         _save_array(state['preprocessed'],
                     output_dir / f"{image_path.stem}_preprocessed.tiff")
-        print(f"[PyCAT Batch]   Preprocessing done (active layer: segmentation).")
+        print("[PyCAT Batch]   Preprocessing done (active layer: segmentation).")
 
 
 def replay_upscaling(state: dict, image_path: Path, params: dict, output_dir: Path):

@@ -619,7 +619,6 @@ def bf_condensate_metrics(
         # Restrict background to within cells
         bg_mask = bg_mask & (labeled_cells > 0)
     bg_od     = float(np.median(od_image[bg_mask])) if bg_mask.sum() > 0 else 0.0
-    bg_std    = float(od_image[bg_mask].std()) if bg_mask.sum() > 0 else 0.01
 
     # Raw image background stats for CNR
     raw_bg_mean = float(image[bg_mask].mean()) if bg_mask.sum() > 0 else 0.85
@@ -639,7 +638,7 @@ def bf_condensate_metrics(
         perim = prop.perimeter
         circ  = float(4 * np.pi * prop.area / (perim**2 + 1e-9))
 
-        # CNR: (bg_intensity − spot_intensity) / bg_std
+        # CNR in raw-intensity space: (raw background mean − spot mean) / raw background std
         spot_raw = float(image[labeled_condensates == prop.label].mean())
         cnr = (raw_bg_mean - spot_raw) / max(raw_bg_std, 1e-9)
 

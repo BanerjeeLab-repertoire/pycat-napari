@@ -166,7 +166,7 @@ def _open_session_loader(self):
                                'current_analysis_ui', None)
                 if _cur is not None and hasattr(_cur, 'restore_session_view') \
                         and _cur.restore_session_view():
-                    napari_show_info(f"Session restored — the analysis view was rebuilt.")
+                    napari_show_info("Session restored — the analysis view was rebuilt.")
                 else:
                     napari_show_info("Session data restored; reopen the analysis "
                                      "method to rebuild its view.")

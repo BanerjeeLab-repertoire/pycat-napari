@@ -676,7 +676,7 @@ def plot_1d_results(results):
     # Labeling the axes and setting the title with R-squared value
     plt.xlabel('Shift')
     plt.ylabel('CCF Value')
-    plt.title(f'1D CCF with Fitted Gaussian')
+    plt.title('1D CCF with Fitted Gaussian')
     # Display legend and show the plot
     plt.legend()
     plt.show()

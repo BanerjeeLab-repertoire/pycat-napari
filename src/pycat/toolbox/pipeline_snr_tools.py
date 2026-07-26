@@ -218,11 +218,6 @@ def _add_pipeline_snr_analysis(ui_instance, layout=None, separate_widget=False):
                          'Diagnostics widget first, then click Refresh.')
             return
 
-        # Find the best SNR to baseline colour scale
-        valid_snrs = [r['snr'] for r in rows if not np.isnan(r['snr'])]
-        best = max(valid_snrs) if valid_snrs else 1.0
-        first_snr = rows[0]['snr'] if rows else np.nan
-
         for r in rows:
             row_idx = table.rowCount()
             table.insertRow(row_idx)

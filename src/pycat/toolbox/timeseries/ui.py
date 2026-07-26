@@ -458,7 +458,7 @@ def _lazy_start_worker(ctx, source, fn_name, fn_kwargs, zarr_name, display_name,
     prog_bar.setValue(0)
     prog_bar.setMaximum(n_t * _n_stages)
     prog_bar.setVisible(True)
-    prog_label.setText(f"Preparing frames…")
+    prog_label.setText("Preparing frames…")
     prog_label.setVisible(True)
 
     def _on_progress(done, total):
@@ -1052,7 +1052,7 @@ def _ts_cond_on_finished(ui_instance, ns, results_df, condensate_stack, stack_na
     if condensate_stack.size > 0:
         ui_instance.viewer.add_labels(
             condensate_stack.astype(int),
-            name=f"TimeSeries Condensate Masks"
+            name="TimeSeries Condensate Masks"
         )
 
     # Build summary: condensate fraction vs frame per cell
@@ -1198,7 +1198,7 @@ def _ts_cond_run(ui_instance, ns):
         progress_bar.setVisible(False)
         run_btn.setEnabled(True)
         cancel_btn.setVisible(False)
-        napari_show_warning(f"Time-Series analysis error — see terminal for details.")
+        napari_show_warning("Time-Series analysis error — see terminal for details.")
         print(f"[PyCAT TimeSeries] ERROR:\n{msg}")
     worker.progress.connect(lambda f, t: progress_bar.setValue(f))
     worker.finished.connect(lambda df, cs: _ts_cond_on_finished(ui_instance, ns, df, cs, stack_name))

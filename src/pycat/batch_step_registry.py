@@ -202,12 +202,12 @@ def replay_background_removal(state: dict, image_path: Path, params: dict, outpu
         state['preprocessed_fluorescence'] = _enhance(fluor_proc)
         _save_array(state['preprocessed_fluorescence'],
                     output_dir / f"{image_path.stem}_bg_removed.tiff")
-        print(f"[PyCAT Batch]   Background removal done (active layer: fluorescence).")
+        print("[PyCAT Batch]   Background removal done (active layer: fluorescence).")
     else:
         state['preprocessed'] = _enhance(preprocessed)
         _save_array(state['preprocessed'],
                     output_dir / f"{image_path.stem}_bg_removed.tiff")
-        print(f"[PyCAT Batch]   Background removal done (active layer: segmentation).")
+        print("[PyCAT Batch]   Background removal done (active layer: segmentation).")
 
 
 _STEP_MAP = {

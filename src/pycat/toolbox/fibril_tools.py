@@ -451,7 +451,7 @@ def run_fibril_morphometry(mask_layer, px_size_um, viewer):
         f"Mean persistence : {summary['mean_persistence_length_um']:.2f} µm\n"
         f"Mean mesh size   : {summary['mesh_size_um2']:.1f} µm²"
         if np.isfinite(summary['mesh_size_um2'])
-        else f"Mean mesh size   : (no loops detected)")
+        else "Mean mesh size   : (no loops detected)")
 
 
 # ---------------------------------------------------------------------------

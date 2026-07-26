@@ -114,7 +114,7 @@ def _lir_crop(image, binary_mask):
     x, y, w, h = int(rect[0]), int(rect[1]), int(rect[2]), int(rect[3])
     print(f"[PyCAT SACF]     LIR result: x={x} y={y} w={w} h={h} (mask area={binary_mask.sum()}px)")
     if w < 2 or h < 2:
-        print(f"[PyCAT SACF]     LIR rectangle degenerate — cell mask may be too thin or curved.")
+        print("[PyCAT SACF]     LIR rectangle degenerate — cell mask may be too thin or curved.")
         return None, None
     return image[y:y + h, x:x + w].copy().astype(float), (x, y, w, h)
 

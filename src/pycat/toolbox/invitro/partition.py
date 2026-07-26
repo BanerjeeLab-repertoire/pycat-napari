@@ -437,9 +437,9 @@ def _partition_background_assumption(dark_reference, background_subtracted, floo
     return True, bool(background_subtracted), (
         'the caller states the background was subtracted'
         if background_subtracted else
-        f'the caller states the background was NOT subtracted. Kp is '
-        f'compressed toward 1 by the pedestal — it appears in both the '
-        f'numerator and the denominator. This value is not interpretable.')
+        'the caller states the background was NOT subtracted. Kp is '
+        'compressed toward 1 by the pedestal — it appears in both the '
+        'numerator and the denominator. This value is not interpretable.')
 
 
 def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
@@ -485,7 +485,6 @@ def partition_measurement(image, labeled_droplets, percentile_bulk=10.0,
     #
     # If a camera pedestal is still present, the image's low percentile sits well above
     # zero. A properly background-subtracted image has its floor at (or near) zero.
-    dense = float(res.get('c_dense_proxy', np.nan))
     dilute = float(res.get('c_sat_proxy', np.nan))
     finite = img[np.isfinite(img)]
     floor = float(np.percentile(finite, 1)) if finite.size else 0.0

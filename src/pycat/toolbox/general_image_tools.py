@@ -444,7 +444,7 @@ def _add_bleach_correction(ui_instance, layout=None, separate_widget=False):
             print(f"[PyCAT Bleach] plot failed: {e}")
 
         status.setText(
-            f"<span style='color:#8f8;'>Corrected stack added"
+            "<span style='color:#8f8;'>Corrected stack added"
             + (f" · τ = {float(tau):.3g} s" if tau is not None and np.isfinite(tau) else "")
             + ".</span>")
         napari_show_info("Bleach correction applied — corrected stack added.")

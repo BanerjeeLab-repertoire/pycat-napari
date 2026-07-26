@@ -368,6 +368,16 @@ The first assertion fails on the current code (merge is a no-op, so counts are e
 
 ## S5 — Low-severity cleanups (fold into the next relevant code change; no standalone commit)
 
+> **✅ DONE (git-only, behavior-neutral), 2026-07-26.** S5b: all 27 placeholder-less f-strings were confirmed
+> (read each) to be stray `f` prefixes — no dropped interpolation — and stripped (`ruff --select F541 --fix`).
+> S5a: the four flagged dead locals were investigated. Three are genuinely dead and were deleted
+> (`cell_bg_std` ×2 in `puncta_refinement.py`, the `valid_snrs`/`best`/`first_snr` abandoned colour-scaling
+> block in `pipeline_snr_tools.py`, `dense` in `invitro/partition.py`). The fourth, `bg_std` in
+> `brightfield_tools.py`, was NOT a lost output: the `# … / bg_std` CNR comment showed it was the old
+> OD-space CNR denominator, orphaned when CNR was reworked to raw-intensity space (`raw_bg_std`). There is no
+> `dilute_od_std` column pattern to restore — inventing one would be speculation — so `bg_std` was deleted and
+> the stale comment corrected. No version bump (all changes runtime-byte-identical).
+
 These are not failures; group them into whichever nearby code change you're already making.
 
 **S5a — Verify the ~13 dropped locals are truly dead, not lost outputs.** Most are harmless

@@ -56,7 +56,7 @@ def replay_bf_preprocess(state: dict, image_path: Path, params: dict, output_dir
 
     _save_array(result['enhanced'].astype(np.float32),
                 output_dir / f"{image_path.stem}_bf_enhanced.tiff")
-    print(f"[PyCAT Batch]   BF preprocessing done.")
+    print("[PyCAT Batch]   BF preprocessing done.")
 
 
 def replay_bf_condensate_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):
@@ -125,7 +125,7 @@ def replay_ivbf_preprocess(state: dict, image_path: Path, params: dict, output_d
 
     _save_array(result['enhanced'].astype(np.float32),
                 output_dir / f"{image_path.stem}_ivbf_enhanced.tiff")
-    print(f"[PyCAT Batch]   In vitro BF preprocessing done.")
+    print("[PyCAT Batch]   In vitro BF preprocessing done.")
 
 
 def replay_ivbf_segmentation(state: dict, image_path: Path, params: dict, output_dir: Path):

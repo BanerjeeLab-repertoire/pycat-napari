@@ -298,7 +298,6 @@ def puncta_refinement_filtering_func(original_img, processed_img, puncta_mask, c
     # Refine background analysis by removing outliers for accurate mean and std dev calculation
     cell_bg_iqr = remove_outliers_iqr(cell_bg)
     cell_bg_mean = np.mean(cell_bg_iqr)
-    cell_bg_std = np.std(cell_bg_iqr)
 
     # Measure properties of each object in the labeled mask
 
@@ -518,7 +517,6 @@ def puncta_refinement_filtering_func_fast(original_img, processed_img, puncta_ma
     cell_bg = original_img[cell_xor_puncta_mask]
     cell_bg_iqr = remove_outliers_iqr(cell_bg)
     cell_bg_mean = np.mean(cell_bg_iqr)
-    cell_bg_std = np.std(cell_bg_iqr)
 
     # Batched regionprops with slices so we get each object's bounding box once.
     props = sk.measure.regionprops(labeled_puncta_mask, intensity_image=original_img)
