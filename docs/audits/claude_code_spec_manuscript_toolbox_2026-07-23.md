@@ -27,6 +27,15 @@
 > timed panels; and the Qt gallery that renders the registry (greyed tooltips + generate-on-click) — the
 > Qt-gated pieces.**
 >
+> **Report generator — DONE, 1.6.389.** `toolbox/manuscript/report.py`
+> `generate_manuscript_report(context, output_dir)` — the headless counterpart of the Qt gallery: generates
+> every panel the data supports (figures → PNG, tables → CSV/text), returns a manifest (generated / greyed +
+> requirement / error + reason), non-gating (one panel's failure never aborts the rest). So the panels are now
+> **usable end-to-end headlessly** (a script or CI figure-build can produce them) without waiting on the Qt
+> gallery. `tests/test_manuscript_report.py` (`base`, 4). **Remaining (Qt-gated): the interactive gallery that
+> renders this registry with greyed tooltips + generate-on-click, the export-widget GIF option, and Part C
+> timed panels (need real runtime data).**
+>
 > **Date:** 2026-07-23 · **Target tree:** 1.6.324 · Verified against the 1.6.324 tree. The highest-value
 remaining item if the manuscript is the goal: a grouped set of **panel generators** that turn the
 rigor/measurement work into publication figures, each stating what data it needs. Everything it composes

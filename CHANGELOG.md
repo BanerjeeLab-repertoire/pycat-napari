@@ -1,3 +1,17 @@
+## [1.6.389] - 2026-07-26
+### Added — **Headless manuscript report generator (manuscript_toolbox).**
+`toolbox/manuscript/report.py` — `generate_manuscript_report(context, output_dir)`, the headless counterpart of
+the (deferred) Qt gallery: it iterates the `FigurePanel` registry, generates every panel the data supports, and
+saves each to a folder (figures → PNG, tables → CSV, text sections → `.txt`), returning a **manifest** — one
+entry per panel with `status` `'generated'` (+ path), `'greyed'` (+ the `data_requirement` to satisfy, never a
+dead entry), or `'error'` (+ reason). Non-gating: one panel's generation failure is recorded and skipped, never
+aborting the rest of the report. `report_summary(manifest)` renders a one-line-per-panel summary.
+
+- `tests/test_manuscript_report.py` (`base`, 4): a partial context generates exactly the panels it can (Fig 3
+  PNG + Fig 1 QC CSV land on disk) and greys the rest with their requirement; an empty context greys everything
+  and writes nothing; a panel forced to raise is recorded `'error'` while the rest of the report still
+  completes. Full `pytest -m "core or base"` green.
+
 ## [1.6.388] - 2026-07-26
 ### Changed — **The batch calibration verdict now feeds the reliability index (reliability_index roadmap).**
 Threads the calibration verdict the `client_enrichment` step stashes (1.6.387) into the per-image reliability
