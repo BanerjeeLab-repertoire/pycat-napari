@@ -314,7 +314,7 @@ class BatchWorker(QThread):
             file_output.mkdir(exist_ok=True)
 
             try:
-                self._process_file(image_path, file_output)
+                _step_results = self._process_file(image_path, file_output)
                 # Attach this image's condition (WT/rep2/10µM…) beside its results. No-op when no
                 # metadata source is configured (resolver is None).
                 write_image_sample_metadata(_sample_resolver, image_path, file_output)
@@ -338,7 +338,11 @@ class BatchWorker(QThread):
                     _consolidated_ok = False
                     print(f"[PyCAT Batch] consolidated-table append failed for "
                           f"{image_path.name}: {_cexc}")
-                if _consolidated_ok:
+                # A step that failed mid-file → a visible partial, not a misleading clean ✓ (run continues).
+                _fail = next((r for _, r in (_step_results or []) if r.status == 'error'), None)
+                if _fail is not None:
+                    results.append(self._partial_step_line(image_path, _step_results))
+                elif _consolidated_ok:
                     results.append(f"✓ {image_path.name}")
                 else:
                     results.append(
@@ -398,6 +402,13 @@ class BatchWorker(QThread):
             print(f"[PyCAT Batch] reliability QC skipped for {image_name}: {_qexc}")
             return None
 
+    def _partial_step_line(self, image_path, step_results):
+        """The batch-summary line for a file whose replay step failed mid-way — names the failing step and its
+        typed error, so the partial per-image output is actionable, not a silent clean success."""
+        nm, res = next((x for x in step_results if x[1].status == 'error'))
+        return (f"⚠ {image_path.name}: step '{nm}' failed ({res.error}); remaining steps skipped — "
+                f"the per-image output folder has PARTIAL results only.")
+
     def _process_file(self, image_path: Path, output_dir: Path):
         """
         Replay each recorded step for a single image file in headless mode.
@@ -433,20 +444,31 @@ class BatchWorker(QThread):
             _primary_file = (_open_steps[0].get("params", {}) or {}).get('file_path')
             if _primary_file:
                 state['_primary_open_image_stem'] = Path(_primary_file).stem
+        # Each step's outcome as a typed BatchStepResult (typed-result-models / exception_context_classification
+        # Part 3), so a failed step is a structured 'error' status the caller can surface — not just a print.
+        from pycat.utils.result_models import BatchStepResult
+        from pycat.utils.errors import PyCATError
+        step_results = []
         for step_entry in self.config.get("steps", []):
             step_name = step_entry.get("step", "")
             params = step_entry.get("params", {})
             fn = self.step_registry.get(step_name)
             if fn is None:
                 print(f"[PyCAT Batch] Step '{step_name}' not registered – skipping.")
+                step_results.append((step_name, BatchStepResult(status='skipped')))
                 continue
             try:
                 fn(state, image_path, params, output_dir)
+                step_results.append((step_name, BatchStepResult(status='ok')))
             except Exception as _step_exc:
                 import traceback
                 print(f"[PyCAT Batch] ERROR in step '{step_name}' for "
                       f"{image_path.name}:\n{traceback.format_exc()}")
                 print(f"[PyCAT Batch] Skipping remaining steps for this file.")
+                # Wrap into a typed PyCATError so the BatchStepResult invariant holds (error ⇔ status 'error').
+                _err = (_step_exc if isinstance(_step_exc, PyCATError)
+                        else PyCATError(f"{type(_step_exc).__name__}: {_step_exc}"))
+                step_results.append((step_name, BatchStepResult(status='error', error=_err)))
                 break
         # Stash the raw image (set by the open_image step) so the consolidation step can compute this
         # image's reliability imaging-QC factor without re-loading it — used only for scored-family images.
@@ -454,6 +476,7 @@ class BatchWorker(QThread):
         # And the calibration verdict the client_enrichment step stashed (when a curve was configured), so the
         # reliability index can score the `calibration` factor instead of leaving it in `missing`.
         self._last_calibration = state.get('_calibration_validity')
+        return step_results
 
 
 # ---------------------------------------------------------------------------

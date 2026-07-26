@@ -1,3 +1,20 @@
+## [1.6.390] - 2026-07-26
+### Changed — **Batch steps now carry a typed BatchStepResult status; a failed step is a visible partial, not a clean ✓ (exception_context_classification Part 3 / typed-result-models).**
+`BatchWorker._process_file` records each replay step's outcome as a typed `BatchStepResult` — `'ok'`,
+`'skipped'` (an unregistered step), or `'error'` (with a typed `PyCATError`, remaining steps skipped) — and
+returns the list.
+
+- The file loop uses it to **fix a misleading success**: previously a step that failed mid-file was printed to
+  the terminal but the file was still recorded `✓` in the batch summary (its per-image folder is actually
+  partial). Now a failed step marks the file `⚠ … step '<name>' failed (<error>); remaining steps skipped — the
+  per-image output folder has PARTIAL results only`. The run still continues to the next file, exactly as
+  before; only the summary status is made honest. The `_consolidated_ok`-gated ✓/⚠ (batch_step visibility guard)
+  is preserved (now an `elif`).
+- `tests/test_batch_step_results.py` (`base`, 4): all-ok → all `'ok'`; a failing step → `'error'` with the
+  message-preserving typed `PyCATError` and the remaining steps not attempted; an unregistered step →
+  `'skipped'`; and the `BatchStepResult` envelope invariant (status `'error'` iff a typed error is attached).
+  Full `pytest -m "core or base"` green.
+
 ## [1.6.389] - 2026-07-26
 ### Added — **Headless manuscript report generator (manuscript_toolbox).**
 `toolbox/manuscript/report.py` — `generate_manuscript_report(context, output_dir)`, the headless counterpart of

@@ -5,6 +5,12 @@
 > 27, `write` 13, `batch_step` 5. All per-package budgets are 0 (and unlisted packages have implicit 0), so a new
 > *plain* broad-ok anywhere now fails the ratchet — the category is effectively mandatory. Increments 1–2 + the
 > three swallow guards (scientific_result / write / batch_step) remain in force. **Remaining (separate):
+> **◐ Part 3 batch half — BatchStepResult ADOPTED, 1.6.390.** `BatchWorker._process_file` now records each
+> replay step's outcome as a typed `BatchStepResult` (`ok` / `skipped` / `error` with a typed `PyCATError`) and
+> returns them; the file loop uses that to mark a failed-step file `⚠ … PARTIAL` instead of the previously
+> misleading clean `✓` (the run still continues; the `_consolidated_ok` visibility guard is preserved as an
+> `elif`). `tests/test_batch_step_results.py` (`base`, 4). The step-level swallow is now typed, not just printed.
+>
 > `BatchStepResult` adoption for the broader batch-step sweep (Part 3 batch half; the concrete `BatchWorker.run`
 > offender is already guarded by `test_batch_step_visibility.py`).**
 >
